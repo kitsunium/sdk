@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-04T04:30:00Z -->
+<!-- updated: 2026-10-04T08:50:00Z -->
 # docs/
 
 ## Purpose
@@ -168,7 +168,7 @@ and had lost 23 entries, every ADR from 0061 on among them.
 
 The dotted-quad allocation table in `adr/0005-…` + the extension in `adr/0006-…` is the **documentary source of truth**; the hand-maintained `codeRangeOwners` table in `internal/kernel/errs/registry_ownership_external_test.go` is the **executable source of truth** (ADR 0035). Keep the two in sync manually on every change — the ownership audit fails on a range absent from that table, and `registry_external_test.go` catches drift on uniqueness and `reason = screamingSnake(varName)` OR `screamingSnake(CodeConst − "Code")` (ADR 0006/0020) over every package in `//:audit_sources`.
 
-`docs/error-codes.yaml` is the **generated human-readable mirror** of every `errs.Code` constant in the tree (one entry per code: dotted-quad, const name, hex, package). Regenerate with `make error-codes` (`scripts/gen-error-codes.sh`); the `scripts/pre-commit/check-error-codes-drift.sh` guard fails `make lint` and CI when it is stale. It is a convenience index, not authoritative — the AST audit remains the executable gate. The generator greps `errs.Code = 0x…` lines, skipping comments — a doc comment's example once put two codes no package declares in it —, so it leaves out by construction the errs package's own ten `Code` constants (six meta-codes, four masks). `api/` records every code from the code, those ten included; tools/genindex's `Test_apiCodes` holds the two equal on everything else.
+`docs/error-codes.yaml` is the **generated human-readable list** of every error code a package of the workspace declares (one entry per code: dotted-quad, const name, hex, package). It is written from `api/` — the code's API, read with go/types and held to the code by `make api-check` — by `make error-codes` (`scripts/gen-error-codes.sh`, `tools/genindex -write-error-codes`), which `make api` runs after writing `api/`: every `errs.Code` constant whose name starts with `Code` and that re-exports no other constant, whatever spelling declares it — a hex literal, an `iota` row —, the errs package's six meta-codes `0.0.0.1`–`0.0.0.6` included and its four masks, of the code type and no code, left out. The `scripts/pre-commit/check-error-codes-drift.sh` guard (`tools/genindex -check-error-codes`) fails `make lint` and CI when the file is not what `api/` writes, naming each entry. It replaced a grep over the sources that listed what a regular expression matched: two codes a doc comment's example wrote, which no package declares, and none of the six meta-codes, which `iota` declares. It is a convenience index, not authoritative — the AST audit remains the executable gate; tools/genindex's `Test_errorCodesCensus` holds the file to the sources read with go/parser alone, and `Test_apiCodes` to `api/`.
 
 ## Do NOT
 
@@ -181,7 +181,7 @@ The dotted-quad allocation table in `adr/0005-…` + the extension in `adr/0006-
 
 - `adr/` — Architecture Decision Records (see the table above; it is the count, so no separate number goes stale here)
 - `site/` — the documentation website (Astro) — see `site/CLAUDE.md`
-- `error-codes.yaml` — generated mirror of every `errs.Code` (see §Registry coupling)
+- `error-codes.yaml` — every error code a package declares, written from `api/` by `make error-codes` (see §Registry coupling)
 - `api/` — the exported API of every module of `go.work`, one `<module>.json` each (`sdk.json`, `sdk/third-party/aws.json`, …): every exported symbol, internal packages included, with its go: id, kind, signature as its file spells it and canonically, owner, doc, cells, file, codes, layer and family, read from the code with go/types on the twelve cells of `scripts/ci/platforms.sh`. Written by `make api` (`tools/genindex -write-api`) and checked byte for byte by `make api-check`, in `make lint-check`: a doc edit is followed by `make api`, nothing else. `api/schema.json` is the format, with the id and canonical-signature vectors kit's side tests too. The docs portal renders it — the ⌘K index and the API section of every package page, an alias's members included (`site/CLAUDE.md`). Never edited by hand
 - `getting-started.md` — the consumer quickstart (logger, codec, errs)
 - `BENCHMARK-TEMPLATE.md` — the shape every kernel `*_bench_test.go` follows

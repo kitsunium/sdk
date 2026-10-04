@@ -32,8 +32,9 @@ every code of the token domain is declared since ADR 0160 — and `0.3.42.*` by
 `internal/core/crypto/key/jwk`, and the ADR 0035
 ownership audit skips a cross-package selector for exactly this case ("pkg/v1
 aliasing an internal sentinel does not make it an owner"). For the same reason
-`scripts/gen-error-codes.sh` never lists them: it matches literal `= 0x…`
-declarations only, so `docs/error-codes.yaml` keeps one entry per code, under
+`docs/error-codes.yaml` never lists them: `make error-codes` lists the
+constants that declare a code, read from `docs/api`, where a re-export names
+the constant it repeats (`init`), so the file keeps one entry per code, under
 its owner.
 
 They exist because matching on a code is a stronger contract than matching on a

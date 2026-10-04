@@ -1,6 +1,8 @@
-// Package main — docs/api against two independent sources: a census of the
-// repository with go/parser and go/build alone, and docs/error-codes.yaml.
-// Neither shares code with the writer: they read what it read another way.
+// Package main — docs/api against a census of the repository with go/parser
+// and go/build alone, which shares no code with the writer: it reads what the
+// writer read another way. And docs/api's codes against docs/error-codes.yaml,
+// which -write-error-codes writes from them: errcodes_test.go holds that file
+// to the sources read with go/parser, independently.
 package main
 
 import (
@@ -24,10 +26,9 @@ import (
 const (
 	// repoRoot is the repository's root, relative to this package.
 	repoRoot string = "../.."
-	// errsOwnCodes counts the errs package's own Code constants: the six
-	// meta-codes 0.0.0.1 to 0.0.0.6 and the four masks MaskByMajor to
-	// MaskExact.
-	errsOwnCodes int = 10
+	// errsMasks counts the errs package's masks, MaskByMajor to MaskExact:
+	// constants of the code type that are no code.
+	errsMasks int = 4
 )
 
 // needRepository skips a test that reads the whole repository where it is
@@ -534,14 +535,14 @@ func stripTypeParams(sig string) string {
 }
 
 // Test_apiCodes holds the codes docs/api records to docs/error-codes.yaml,
-// which scripts/gen-error-codes.sh writes from the sources with grep. The
-// YAML lists every constant written `errs.Code = 0x…` outside a comment: so
-// every errs.Code constant a package other than errs declares with its own
-// value — not one it re-exports — is the same set of (package, name, dotted
-// quad) in both. The errs package writes its own constants `Code`, so the
-// YAML leaves them out by construction: docs/api records them, the six
-// meta-codes and the four masks, and the test names them. Every sentinel
-// docs/api records carries a reason, a public text and a code the YAML lists.
+// which tools/genindex -write-error-codes writes from docs/api: every errs.Code
+// constant a package declares under a name starting with Code — not one it
+// re-exports — is the same set of (package, name, dotted quad) in both, the
+// errs package's six meta-codes included; its four masks, of the code type and
+// no code, are the only declared constants of it the file leaves out, and the
+// test names them. Every sentinel docs/api records carries a reason, a public
+// text and a code the YAML lists. Test_errorCodesCensus holds the same file
+// to the sources, read with go/parser alone.
 func Test_apiCodes(t *testing.T) {
 	t.Parallel()
 	needRepository(t)
@@ -552,14 +553,14 @@ func Test_apiCodes(t *testing.T) {
 		listed[entry[strings.LastIndexByte(entry, ' ')+1:]] = true
 	}
 	sentinels := 0
-	var own []string
+	var masks []string
 	for _, doc := range readAllDocuments(t) {
 		for _, s := range doc.Symbols {
 			if s.Code == nil {
 				continue
 			}
-			if s.Kind == kindConst && s.Init == "" && s.Package == errsPath {
-				own = append(own, s.Name+" "+s.Code.Value)
+			if s.Kind == kindConst && s.Init == "" && !strings.HasPrefix(s.Name, "Code") {
+				masks = append(masks, s.ID+" "+s.Code.Value)
 				continue
 			}
 			if s.Kind == kindConst && s.Init == "" {
@@ -583,11 +584,11 @@ func Test_apiCodes(t *testing.T) {
 			t.Errorf("docs/api declares %s; docs/error-codes.yaml does not list it", entry)
 		}
 	}
-	slices.Sort(own)
-	if len(own) != errsOwnCodes {
-		t.Errorf("the errs package's own Code constants = %q, want the %d meta-codes and masks", own, errsOwnCodes)
+	slices.Sort(masks)
+	if len(masks) != errsMasks || slices.ContainsFunc(masks, func(m string) bool { return !strings.HasPrefix(m, "go:"+errsPath+".Mask") }) {
+		t.Errorf("the constants of the code type that are no code = %q, want the errs package's %d masks", masks, errsMasks)
 	}
-	t.Logf("%d codes in both; %d sentinel records; the errs package's own, outside the YAML: %s", len(yaml), sentinels, strings.Join(own, ", "))
+	t.Logf("%d codes in both; %d sentinel records; the errs package's masks, outside the YAML: %s", len(yaml), sentinels, strings.Join(masks, ", "))
 }
 
 // readErrorCodes reads docs/error-codes.yaml as "package.Name dotted-quad".

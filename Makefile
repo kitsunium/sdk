@@ -35,7 +35,7 @@ help: ## Print this help (default goal).
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "cover"  "bazel coverage --combined_report=lcov //..."
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "release-dry-run"  "$(DIM)compute-bumps + cut-tags in dry-run (see ADR 0007)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "docs-readme"  "$(DIM)regenerate every pkg/v1/*/README.md from its doc comment (see ADR 0008)$(RST)"
-	@printf "  $(GREEN)%-7s$(RST)  %s\n" "api"          "$(DIM)write docs/api — every exported symbol, read from the code on the 12 cells$(RST)"
+	@printf "  $(GREEN)%-7s$(RST)  %s\n" "api"          "$(DIM)write docs/api — every exported symbol, read from the code on the 12 cells — then error-codes$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "profile"      "$(DIM)capture cpu+mem+block+mutex pprof for codec bench (WAVE=<slug>)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "benchstat-diff" "$(DIM)compare two captured waves with mannwhitney p-values (BEFORE / AFTER)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "sdk-bench"        "$(DIM)run every internal/kernel/**/*_bench_test.go → .bench.out (COUNT=N)$(RST)"
@@ -208,8 +208,11 @@ doclinks:
 # nothing else — and after any change to the exported surface. Deterministic:
 # the same tree writes the same bytes on every machine. It needs the
 # workspace's modules in the module cache, so its first run may download them.
+# It then writes docs/error-codes.yaml from the documents it wrote
+# (`error-codes`).
 api:
 	cd tools/genindex && GOWORK=off go run . -write-api -repo-root $(CURDIR) -platforms $(CURDIR)/scripts/ci/platforms.sh
+	$(MAKE) --no-print-directory error-codes
 
 # `api-check` regenerates docs/api in memory and fails on any byte that
 # differs from what is committed, naming each record added, changed or
@@ -473,11 +476,15 @@ docs-readme:
 	cd framework && go generate ./...
 	@echo "→ every pkg/v1 and framework package declaring //go:generate gomarkdoc regenerated"
 
-# `error-codes` regenerates docs/error-codes.yaml — the human-readable mirror of
-# the dotted-quad error-code registry (ADR 0005/0006), extracted from every
-# errs.Code constant in the tree. The executable source of truth stays the AST
-# audit (internal/kernel/errs:errs_test); this YAML is for humans. The
-# check-error-codes-drift guard fails CI and `make lint` when it is stale.
+# `error-codes` writes docs/error-codes.yaml — the human-readable list of the
+# dotted-quad error codes (ADR 0005/0006) — from docs/api: every errs.Code
+# constant a package declares under a name starting with Code, re-exports and
+# the errs masks left out (tools/genindex -write-error-codes, through
+# scripts/gen-error-codes.sh). docs/api is the code's (`make api-check`), so
+# the file is too; `make api` runs this target after writing docs/api. The
+# executable source of truth stays the AST audit
+# (internal/kernel/errs:errs_test). The check-error-codes-drift guard fails CI
+# and `make lint` when the file is not what this writes.
 error-codes:
 	bash scripts/gen-error-codes.sh
 

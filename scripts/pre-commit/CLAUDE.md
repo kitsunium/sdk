@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-04T05:30:00Z -->
+<!-- updated: 2026-10-04T08:50:00Z -->
 # scripts/pre-commit/
 
 ## Purpose
@@ -22,7 +22,7 @@ BSD tools, nothing installed) is in `scripts/CLAUDE.md`.
 | `check-bench-md.sh` | a directory holding a `*_bench_test.go` has no sibling `BENCH.md` (rule 9) — presence only, never freshness | `make lint` and a `bazel` job step |
 | `check-core-symmetry.sh` | a production file under `internal/service` declares a code, a service domain has no core package at its path, or a core package declares a code with no engine at its path — a sub-contract beneath a domain whose ranges are all the core's own (layer 2) excepted (ADR 0160) | `make lint` and a `bazel` job step |
 | `check-domain-docs.sh` | the root `CLAUDE.md`'s `core/` block stops naming exactly the Go packages under `internal/core`, a domain is described twice in its Purpose table, or one of the three ADR indexes stops naming exactly the ADRs on disk (rule 11) | `make lint` and a `bazel` job step |
-| `check-error-codes-drift.sh` | `docs/error-codes.yaml` differs from what `scripts/gen-error-codes.sh` regenerates now (`make error-codes`) | `make lint` and a `bazel` job step |
+| `check-error-codes-drift.sh` | `docs/error-codes.yaml` is not what `make error-codes` writes from `docs/api` now (`tools/genindex -check-error-codes`, which names each entry listed and not declared, or declared and not listed; it writes nothing). With `make api-check` holding `docs/api` to the code, the file is the code's | `make lint` and a `bazel` job step |
 | `check-pkg-docs.sh` | a directory under `internal/`, `pkg/` or `framework/` holding production Go has neither `CLAUDE.md` nor `README.md`, or a `pkg/v*/**` or `framework/**` package lacks either one (rule 8) | `make lint` and a `bazel` job step |
 | `check-platforms.sh` | `scripts/ci/platforms.sh` — the table tools/genindex judges doc links and writes `docs/api` on, and the local cross-platform audit loops over — stops naming exactly the cells of `bazel-ci.yml`'s `cross-build` matrix, in its order; a table that prints nothing, or a matrix it cannot find, fails too | `make lint` and a `bazel` job step |
 | `check-readme-drift.sh` | a generated `README.md` under `pkg/v1` or `framework` differs from what gomarkdoc emits from the doc comments now (rule 10, ADR 0008) | a `bazel` job step only |

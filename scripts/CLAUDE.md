@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-04T05:30:00Z -->
+<!-- updated: 2026-10-04T08:50:00Z -->
 # scripts/
 
 ## Purpose
@@ -19,7 +19,7 @@ here is a Go package.
 | `ci-gates-check.sh` | a listed gate must have a `make` target, be `.PHONY`, and be invoked by `bazel-ci.yml` — by a step of its own, or by the recipe of a listed gate CI runs (`lint-check` runs `api-check`); a listed guard (`GUARDS`: the `bash` checks `make lint` runs) must exist, be a `run:` step of the `bazel` job and a line of the `lint` recipe (ADR 0088); its BATS cases are in `ci/test-ci-scripts.bats` |
 | `ci-scripts-test.sh`, `pre-commit-test.sh` | run the BATS suites of `ci/` and `pre-commit/` |
 | `cross-platform-audit.sh` | the local twin of `bazel-ci.yml`'s `cross-build`: every module of the census built and vetted (tests included) for every cell of `ci/platforms.sh`, printed as a matrix; needs bash 4 |
-| `gen-error-codes.sh` | regenerates `docs/error-codes.yaml` (`make error-codes`) |
+| `gen-error-codes.sh` | writes `docs/error-codes.yaml` from `docs/api` (`make error-codes`, which `make api` runs): `tools/genindex -write-error-codes`, every errs.Code constant a package declares |
 
 ## The cells are one table
 
@@ -44,7 +44,9 @@ empty is not expanded under `set -u`, which bash 3.2 reports as unbound; and a
 `wc -l` count loses the spaces BSD pads it with before it is printed. CI only
 has bash 5 and GNU find, so `test-pre-commit-guards.bats` reads the sources for
 the constructs that broke the guards before, rather than trusting a run there.
-`gen-error-codes.sh` is held to the same rule, because a guard runs it.
+`gen-error-codes.sh` is held to the same rule. One guard needs more than a Mac
+ships: `check-error-codes-drift.sh` runs tools/genindex, so it needs the Go
+toolchain every `make lint` needs anyway.
 
 ## Rules from ADR 0088
 
