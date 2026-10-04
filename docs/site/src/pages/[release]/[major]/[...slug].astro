@@ -5,9 +5,11 @@
 // Every page is fed by a markdown file the prebuild script
 // materialised from the real source repository (no hand-authored
 // prose in this Astro tree).
-import { getCollection, render } from "astro:content";
+import { getCollection, getEntry, render } from "astro:content";
 import Default from "../../../layouts/Default.astro";
 import WhatsNew from "../../../components/WhatsNew.astro";
+import ApiSection from "../../../components/ApiSection.astro";
+import { blobBase, sourceRef } from "../../../../scripts/lib/api.mjs";
 import { pagePath } from "../../../../scripts/lib/page-catalog.mjs";
 
 export async function getStaticPaths() {
@@ -51,10 +53,55 @@ const description = entry.data?.description;
 //: (e.g. pkg/v1/data/codec/README.md). Default.astro feeds it to the
 //: EditLink component so readers can deep-link to GitHub.
 const source = (entry.data as { source?: string | null } | undefined)?.source ?? null;
+//: A package page of a release with docs/api has an API section (its
+//: frontmatter says `api: true`), from the model sync-versions wrote at the
+//: page's own id, and — when the package has a BENCH.md — its benchmarks
+//: apart, so they render after the API. A page that promises an API and
+//: has none fails the build rather than ship without its reference.
+const promisesApi = (entry.data as { api?: boolean } | undefined)?.api === true;
+const api = promisesApi ? ((await getEntry("api", entry.id))?.data ?? null) : null;
+if (promisesApi && !api) {
+  throw new Error(`${entry.id}: the page has api: true and no entry in the api collection`);
+}
+//: getCollection, not getEntry: most packages have no benchmarks, and
+//: getEntry warns on every id it does not find.
+const benchEntry = api ? (await getCollection("bench", e => e.id === entry.id))[0] : undefined;
+const bench = benchEntry ? await render(benchEntry) : null;
+const BenchContent = bench?.Content ?? null;
+
+//: Source links of the API point at the release's own tree: its tag, or for
+//: the working tree the branch (else the commit) build-info names.
+interface BuildInfo {
+  repoUrl?: string | null;
+  branch?: string | null;
+  commitFull?: string | null;
+}
+interface Release {
+  version: string;
+  tag?: string | null;
+}
+let sourceBase: string | null = null;
+if (api) {
+  let build: BuildInfo = {};
+  let versions: { releases: Release[] }[] = [];
+  try {
+    build = ((await import("../../../data/build-info.json")).default as BuildInfo) ?? {};
+    versions = (await import("../../../data/versions.json")).default ?? [];
+  } catch { /* prebuild not run */ }
+  const tag = versions.flatMap(v => v.releases).find(r => r.version === entry.id.split("/")[0])?.tag ?? null;
+  sourceBase = blobBase(build.repoUrl, sourceRef(build, tag));
+}
+
 //: TOC shows H2 only by default. For dense gomarkdoc pages (logger
 //: with 18 H2 + 12 H3) showing every H3 would flood the rail. H3+
 //: are reachable via in-page scroll / fragment links from the body.
-const tocHeadings = (headings ?? []).filter(h => h.depth === 2);
+//: The API section and the benchmarks after it are rendered apart from the
+//: body, so their H2s join in the order the page shows them.
+const tocHeadings = [
+  ...(headings ?? []),
+  ...(api ? [{ depth: 2, slug: "api", text: "API" }] : []),
+  ...(bench?.headings ?? []),
+].filter(h => h.depth === 2);
 
 //: Home page detection — the landing page's id is "<release>/<major>/index"
 //: (content.config.ts keeps the file path), served at "<release>/<major>".
@@ -73,5 +120,7 @@ const changelogHref = `/${release}/${major}/changelog/`;
   {isHome && <WhatsNew release={release} major={major} changelogHref={changelogHref} />}
   <article class="md-body md-body--strip-first-h1">
     <Content />
+    {api && <ApiSection model={api as any} sourceBase={sourceBase} />}
+    {BenchContent && <BenchContent />}
   </article>
 </Default>

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-04T05:30:00Z -->
+<!-- updated: 2026-10-04T04:30:00Z -->
 # .github/workflows/
 
 ## Purpose
@@ -16,14 +16,15 @@ CI/CD automation. The SDK lanes are `bazel-ci.yml` (gate), `post-commit.yml` (th
 | `release-size.yml` | pull request opened, reopened, synchronised, labelled or unlabelled | `scripts/release/check-pr-size.sh`: the question `cut-tags.sh` asks a merge, asked of the pull request before it — fails when a branch commit asks for more than a patch and no `release:*` label decides it, naming the label that settles it (ADR 0135). Read-only token, no secret, `pull_request` never `pull_request_target`. Not required: requiring it is a repository setting. |
 | `e2e-cross.yml` | push to any branch, manual `workflow_dispatch` | The runtime bar on real kernels (ADR 0018): the platform-sensitive packages on Linux, macOS, Windows, the three BSDs, and — in the `solarish` job, one OmniOS r151054 and one Oracle Solaris 11.4 guest booted by `vmactions`, with `pkg`'s `./v1/proc` beside them (ADR 0144) — illumos and Solaris, then — on macOS and Windows — every package (`go test -short ./...` per module of the census, ADR 0094). The platform-sensitive list is per layer directory of the SDK module: `KERNEL_PKGS`, `CORE_PKGS`, `SERVICE_PKGS` and, since ADR 0158 moved `entitlement` there, `FRAMEWORK_PKGS`, run from `framework/`. Both runs gate: Windows was an inventory (`continue-on-error`) under ADR 0094 until its first clean run, and ADR 0095 records how its 19 failing packages were resolved and made it a gate. |
 | `e2e-vm.yml` | manual `workflow_dispatch` only | The platform-sensitive suites and the conformance binary on persistent Proxmox VMs of the lab (Debian and Fedora with systemd, Alpine with OpenRC, the three BSDs, Windows 11), over SSH from the `kitsunium-runner` scale set. Needs the lab and its four secrets, so nothing triggers it automatically. Every suite binary runs with `-test.timeout=3m` and every conformance check under `harness.CheckTimeout`, so a hang prints stacks instead of eating the 25-minute job; a failed SSH wait says whether port 22 is open (sshd refuses us) or closed (no sshd) — #118. |
-| `docs-deploy.yml` | `workflow_run` after `SDK Release`, push to `main` on docs paths, manual `workflow_dispatch` | Build + deploy the versioned docs portal (`docs/site`) to GitHub Pages. Separate from release (deploy is a consequence, not a release step). |
+| `docs-deploy.yml` | `workflow_run` after `SDK Release`, push to `main` on docs paths, manual `workflow_dispatch` | Build + deploy the versioned docs portal (`docs/site`) to GitHub Pages. Separate from release (deploy is a consequence, not a release step). Before it deploys, `npm run check` holds the build to the code: the ⌘K index and API sections of the working tree equal `docs/api`, and every link of every release resolves under the deploy base (`docs/site/CLAUDE.md` §Checks). |
 | `bazel-bench.yml` | manual `workflow_dispatch` (`count` input), weekly schedule (Sunday 06:00 UTC), PRs labelled `run-bench` | Kernel benchmarks — not part of the PR gate: the bench targets are `manual` in Bazel, so the job runs `go test -bench` in `internal/kernel` directly, as `make sdk-bench` does locally |
 
 ## bazel-ci.yml (the SDK lane)
 
-Four jobs: `bazel` (the gate), `shell-gates` (the checks that need neither Bazel
-nor Go), `cross-build` (every module COMPILES, tests included, on every supported GOOS/GOARCH)
-and `test-386` (the 32-bit RUNTIME). The last two run raw `go` rather than
+Five jobs: `bazel` (the gate), `shell-gates` (the checks that need neither Bazel
+nor Go), `cross-build` (every module COMPILES, tests included, on every supported GOOS/GOARCH),
+`test-386` (the 32-bit RUNTIME) and `docs-site` (the docs portal, held to
+`docs/api`). The last two run raw `go` rather than
 Bazel, for the reason stated under Do NOT below: Bazel here builds for the host
 only, so a platform it cannot reach is covered by the toolchain that can, or by
 nothing.
@@ -87,8 +88,8 @@ behind the 120-minute Bazel lane.
 5. **Pre-commit guard regression** — `make pre-commit-check`.
 
 These four, plus `make test-framework`, `make lint-check`, `make vuln-install`,
-`make vuln-check` and `make lint-ktn-check` in the `bazel` job, are the only `make` invocations in
-this workflow, and that is deliberate:
+`make vuln-check` and `make lint-ktn-check` in the `bazel` job and `make docs-check` in the
+`docs-site` job, are the only `make` invocations in this workflow, and that is deliberate:
 `ci-gates-check` asserts the Makefile↔CI link by target NAME, which only works
 if CI goes through the target. The two lint targets are not in THIS job because
 they need a Go toolchain and a downloaded binary — the two things `shell-gates`
@@ -137,6 +138,23 @@ synthesising a slice longer than a 32-bit `len` can hold.
 Linux/amd64 runners execute 386 binaries natively, so there is no emulation. It
 runs without `-race`, which has no 386 support at all — which also makes it the
 SECOND lane to compile the `//go:build !race` files, after the alloc lane.
+
+### docs-site (the docs portal, held to the code)
+
+`ubuntu-latest`, timeout 15 min, checkout with full history (the Home page's
+feature catalogue dates each feature by `git log --follow`), Node 24, then
+`make docs-check` — named in `scripts/ci-gates-check.sh`'s GATES: `npm ci`,
+`npm test`, a build of the working tree's release alone (`DOCS_RELEASES=local`:
+no release snapshot, no `gh`, no network — no go command either: the portal
+reads `docs/api`), then `npm run check`. That check fails unless the ⌘K index
+and the anchors of every package page's API section equal `docs/api` — every
+exported symbol of `pkg/v1`, and every method an alias reaches at its owner —,
+counted by `docs/site/scripts/check-api-counts.mjs`, which shares no code with
+the writer, and every link and ⌘K entry of the build resolves under the deploy
+base, fragments included (`check-links.mjs`). `make api-check`, in the `bazel`
+job, holds `docs/api` to the code; this job holds the portal to `docs/api`. A
+sibling of the required jobs, so it reports without blocking; the deploy runs
+the same check over every release before it publishes.
 
 ## sdk-release.yml (the SDK release lane)
 

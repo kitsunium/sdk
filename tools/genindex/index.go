@@ -3,18 +3,20 @@ package main
 
 // schemaVersion bumps when the JSON shape changes incompatibly.
 //
-// Search.astro pins to a known schema so an upgrade skew surfaces at build time
-// instead of silently breaking the search UI — which would otherwise degrade to
-// an empty result set that looks exactly like "nothing matched".
+// A reader pins to a known schema so an upgrade skew surfaces at build time
+// instead of silently breaking a search UI — which would otherwise degrade to
+// an empty result set that looks exactly like "nothing matched". The docs
+// site's search read this index until it read docs/api; the index it loads now
+// is another document, which it pins at schema 2.
 const schemaVersion int = 1
 
-// index is the top-level JSON document the docs site loads.
+// index is the top-level JSON document of the symbol index.
 //
 // GeneratedAt is stamped rather than derived so a stale index is identifiable
 // from the file alone, without having to diff it against the tree it was built
 // from.
 type index struct {
-	// Schema is the shape version Search.astro pins to.
+	// Schema is the shape version a reader pins to.
 	Schema int `json:"schema"`
 	// GeneratedAt is the RFC 3339 build timestamp, in UTC.
 	GeneratedAt string `json:"generatedAt"`

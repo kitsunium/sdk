@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T13:06:04Z -->
+<!-- updated: 2026-10-04T04:30:00Z -->
 # docs/site/src/data/
 
 ## Purpose
@@ -13,7 +13,7 @@ written by the prebuild (`../../scripts/sync-versions.mjs`) and is gitignored.
 | File | Origin | Holds |
 |---|---|---|
 | `features.mjs` | tracked, hand-written | the default export: one entry per consumer-facing capability — `id` (a stable kebab-case slug), `domain` (one of `DOMAIN_ORDER` in `../../scripts/lib/features.mjs`), `title`, `blurb` (one sentence), `anchor` (one file under `pkg/v1/**` whose first commit dates the feature), optional `links` (`adr`, `pr`) and `breaking` |
-| `versions.json` | generated, ignored | the two-axis release list: per major, its releases (`local` first), which is the default, which is end-of-life |
+| `versions.json` | generated, ignored | the two-axis release list: per major, its releases (`local` first), which is the default, which is end-of-life, and `api` on a release whose tree has `docs/api` — its package pages carry API sections and it has a ⌘K symbol index. Only the releases `DOCS_RELEASES` names, when it is set |
 | `build-info.json` | generated, ignored | the build's commit, date, branch, dirty flag and `repoUrl`, from which the layout derives the project name, the site URL and the footer links |
 | `features-<release>-<major>.json` | generated, ignored | the banner and catalogue payload for one release and major, each feature dated from its anchor |
 

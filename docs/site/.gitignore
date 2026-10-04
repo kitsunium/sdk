@@ -9,3 +9,7 @@ src/data/versions.json
 src/data/build-info.json
 public/_search/
 src/content/docs/*/
+# The API section's page models and the benchmarks of those pages, written
+# beside the pages by scripts/sync-versions.mjs from each release's docs/api.
+src/content/api/
+src/content/bench/

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-04T05:30:00Z -->
+<!-- updated: 2026-10-04T04:30:00Z -->
 # tools/genindex/
 
 ## Purpose
@@ -7,9 +7,12 @@ One Go program that reads the SDK's Go code for the documentation, in four
 modes:
 
 - **the symbol index** (the default) — every exported declaration of a
-  module's packages, over `go/parser` and `go/doc`, as one JSON document the
-  docs site's search modal loads (`docs/site/scripts/gen-symbols.mjs` runs it
-  at `npm run prebuild` and writes `public/_search/symbols-<major>.json`);
+  module's packages, over `go/parser` and `go/doc`, as one JSON document. It
+  was the docs site's ⌘K index until the site built that index from
+  `docs/api` (`docs/site/scripts/gen-symbols.mjs`, no go command): go/doc does
+  not follow an alias to the methods and fields of the type it names, and
+  `docs/api` records them at their owner. No build step runs this mode now;
+  it is kept, with its tests, until it is retired;
 - **the doc-link check** (`-check-doclinks <dir>…`, ADR 0138) — no index; it
   fails on every same-package doc link a comment writes that names no symbol
   its package declares, which go/doc renders as literal bracketed text on
@@ -55,7 +58,7 @@ fixture repository. The `tools/` conventions are in `tools/CLAUDE.md`.
 | `collect.go` | `collect` (the index's walk under the module root), `skipDir` (dot directories, `vendor`, `testdata`, `node_modules`), `loadDir` / `packageSymbols`, `importPathOf`, `relPath`; `_test.go` files parsed so `Example` functions attach, their declarations never indexed |
 | `emit.go` | `emit` — one documented package projected into index rows: funcs, types, methods, consts and vars; `typeRows` — a type, the functions go/doc files under it, its methods, its consts and vars; `packageLabel`, `packageURL` |
 | `render.go` | a declaration rendered into an index row's fields: `renderDecl` / `signatureOf` (one line), `synopsis` (the first sentence), `isDeprecated`, `exampleNames`, `sourceURL` / `sourceLinkOf` |
-| `index.go` | the index document: `schemaVersion` (1 — the docs site pins it), `index` (`schema`, `generatedAt`, `module`, `symbols`), `symbol` (short field names: the file ships gzipped on every page view) |
+| `index.go` | the index document: `schemaVersion` (1; the docs site's own index, from `docs/api`, is schema 2), `index` (`schema`, `generatedAt`, `module`, `symbols`), `symbol` (short field names: the file shipped gzipped on every page view) |
 | `doclinks.go` | the check: `runDocLinkCheck` (exit 0, or 1 on a dead link, an unreadable package or no directory given), `checkDocLinks` / `deadLinksInDir` / `deadLinksInPackage`, judged on the cells given, `sameScopeLinks`, `docComments`, `docLinkAdvice` (write `[Type].Member` for a member of an aliased type) |
 | `api.go` | the API modes: `apiOptions`, `realRoot` (symbolic links resolved, as go list reports directories), `buildAPI` (modules, every cell listed at once, one cell checked at a time), `apiBuilder` (`readCell`, `readPackage`, `noteDirs`, `result`), `packageRecord`, `runWriteAPI` / `writeDocument` / `removeStale` (a module that is gone takes its document with it), `existingDocuments` |
 | `apicheck.go` | `runCheckAPI`, `documentFindings` / `documentDrift` (missing, differing or stale documents), `symbolDrift` (each record added, changed or removed, by id and cells, bounded), `surfaceFindings` (the markers and the digests, when asked) |
@@ -158,8 +161,12 @@ fixture repository. The `tools/` conventions are in `tools/CLAUDE.md`.
   run downloads the vendor modules' dependencies. It costs about 11 s warm on
   an M1 Pro (`make lint-check` 4 s before, 15 s after; peak 1.3 GB, the vendor
   dependencies' per-platform files dropped once no cell left needs them).
-- The usage example in `main.go`'s package comment names an `-output` under
-  `src/data/`; the docs build writes `public/_search/symbols-<major>.json`.
+- The docs site reads `docs/api` — the API section of every package page and
+  the ⌘K index, with the members of `pkg/v1`'s aliases this program's index
+  could not see (1,967 entries from go/doc, 2,777 from `docs/api` at
+  `79e3ba7d`). A change to `docs/api/schema.json` changes the site's reader,
+  `docs/site/scripts/lib/api.mjs`, in the same commit: it reads `sdk.api/v1`
+  and refuses any other format by name.
 
 ## Verify
 

@@ -6,7 +6,10 @@
 // of the corresponding tag (or HEAD in bootstrap mode). The docs site
 // never carries hand-authored prose — every page in the versioned
 // tree is a copy of a markdown file that lives in pkg/<major>/**,
-// docs/adr/*.md, or a section of /workspace/CLAUDE.md.
+// docs/adr/*.md, or a section of /workspace/CLAUDE.md; and when the
+// tree has docs/api (the exported API tools/genindex reads from the
+// code), each package page's API section is the page model
+// lib/api.mjs projects from it, in src/content/api/.
 //
 // Single source of truth = the real code repository. The docs site is
 // a renderer.
@@ -29,6 +32,7 @@ import {
   isValidTag,
   buildVersionsJson,
   localOnlyVersions,
+  selectReleases,
   stitchVersions,
   LOCAL_RELEASE,
 } from "./lib/tag-format.mjs";
@@ -38,6 +42,7 @@ import {
   rewritePackageDocLinks,
   rewriteReadmeLinks,
 } from "./lib/packages.mjs";
+import { apiPages, readApi } from "./lib/api.mjs";
 import { rewriteAdrLinks } from "./lib/adr.mjs";
 import {
   deriveProvenance,
@@ -52,6 +57,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const SITE_ROOT = resolve(__dirname, "..");
 const REPO_ROOT = resolve(SITE_ROOT, "..", "..");
 const CONTENT_ROOT = join(SITE_ROOT, "src", "content", "docs");
+//: The API section of a package page (one JSON model per page, from the
+//: release's docs/api) and, on such a page, its benchmarks — two collections
+//: beside the pages, at the same ids (src/content.config.ts).
+const API_ROOT = join(SITE_ROOT, "src", "content", "api");
+const BENCH_ROOT = join(SITE_ROOT, "src", "content", "bench");
 const VERSIONS_JSON = join(SITE_ROOT, "src", "data", "versions.json");
 const BUILD_INFO_JSON = join(SITE_ROOT, "src", "data", "build-info.json");
 
@@ -236,16 +246,18 @@ async function materialiseChangelog(
  * `source` is the repo-relative path to the original file the page
  * was materialised from. The site's EditLink component uses it to
  * deep-link readers back to the source for an "Edit this page on
- * GitHub" affordance.
+ * GitHub" affordance. `api` marks a package page whose API section the
+ * route renders from the `api` collection, at the page's own id.
  *
- * @param {{title?: string|null, description?: string|null, source?: string|null}} opts
+ * @param {{title?: string|null, description?: string|null, source?: string|null, api?: boolean}} opts
  * @returns {string}
  */
-function frontmatter({ title, description, source } = {}) {
+function frontmatter({ title, description, source, api } = {}) {
   const parts = [];
   if (title) parts.push(`title: ${JSON.stringify(title)}`);
   if (description) parts.push(`description: ${JSON.stringify(description)}`);
   if (source) parts.push(`source: ${JSON.stringify(source)}`);
+  if (api) parts.push("api: true");
   if (parts.length === 0) return "";
   return `---\n${parts.join("\n")}\n---\n\n`;
 }
@@ -281,6 +293,14 @@ async function materialiseRelease(major, release, sourceRoot, tag) {
   //: where a relative link to a file the portal does not publish points: the
   //: file on GitHub, in the release's own tree.
   const blob = `https://github.com/kitsunium/sdk/blob/${tag ?? "HEAD"}`;
+  //: The release's API, read from the code by tools/genindex: docs/api, one
+  //: page model per package of pkg/<major>/ (lib/api.mjs). A release cut
+  //: before docs/api existed has none, and keeps its README pages as they
+  //: were — the gomarkdoc reference included.
+  const apiDocuments = await readApi(sourceRoot);
+  const models = apiDocuments ? apiPages(apiDocuments, major) : null;
+  const apiDest = join(API_ROOT, release, major);
+  const benchDest = join(BENCH_ROOT, release, major);
 
   // 1. Landing page (index.md): the repo README is now the
   // authoritative "what is this SDK" doc — same vocabulary on
@@ -378,7 +398,15 @@ async function materialiseRelease(major, release, sourceRoot, tag) {
           rewritePackageDocLinks(uses, major, rel, packages, blob) +
           "\n";
       }
-      if (symbols.length > 0) {
+      //: With docs/api, the page's reference is its API section, rendered
+      //: from the model (ApiSection.astro): gomarkdoc's dump is go/doc's view,
+      //: which shows an alias and none of its members, and is left out.
+      const model = models?.get(rel) ?? null;
+      if (model) {
+        const modelPath = join(apiDest, `${rel}.json`);
+        await mkdir(dirname(modelPath), { recursive: true });
+        await writeFile(modelPath, JSON.stringify(model) + "\n");
+      } else if (symbols.length > 0) {
         body +=
           `\n<details class="api-reference">\n` +
           `<summary><strong>API reference</strong> — full constants, variables, functions, types</summary>\n\n` +
@@ -387,7 +415,10 @@ async function materialiseRelease(major, release, sourceRoot, tag) {
       }
 
       //: Append the package's BENCH.md (if any) under a "## Benchmarks"
-      //: H2 — same pattern across codec / errs / logger.
+      //: H2 — same pattern across codec / errs / logger. A page with an API
+      //: section gets it as an entry of the bench collection instead, which
+      //: the route renders after the API: the order the README's reference
+      //: and the benchmarks had.
       const benchPath = join(pkgDir, "BENCH.md");
       if (existsSync(benchPath)) {
         const benchRaw = await readFile(benchPath, "utf8");
@@ -400,7 +431,13 @@ async function materialiseRelease(major, release, sourceRoot, tag) {
           packages,
           blob,
         );
-        body += `\n\n## Benchmarks\n\n${benchBody}`;
+        if (model) {
+          const benchFile = join(benchDest, `${rel}.md`);
+          await mkdir(dirname(benchFile), { recursive: true });
+          await writeFile(benchFile, `## Benchmarks\n\n${benchBody}`);
+        } else {
+          body += `\n\n## Benchmarks\n\n${benchBody}`;
+        }
       }
 
       //: A package under a family directory lands in a subdirectory of
@@ -409,7 +446,10 @@ async function materialiseRelease(major, release, sourceRoot, tag) {
       await mkdir(dirname(pagePath), { recursive: true });
       await writeFile(
         pagePath,
-        frontmatter({ source: `pkg/${major}/${rel}/README.md` }) + body,
+        frontmatter({
+          source: `pkg/${major}/${rel}/README.md`,
+          api: model !== null,
+        }) + body,
       );
     }
     //: Standalone /benchmarks/ page intentionally NOT materialised
@@ -570,11 +610,15 @@ async function materialiseRelease(major, release, sourceRoot, tag) {
   // the <WhatsNew /> banner injected at the top of the Home page.
   const repoUrl = "https://github.com/kitsunium/sdk";
   await materialiseChangelog(major, release, sourceRoot, dest, repoUrl, tag);
+
+  //: Whether the release has an API: versions.json records it, so
+  //: gen-symbols.mjs writes its ⌘K index and Search.astro loads it.
+  return models !== null;
 }
 
 async function materialiseLocal(major) {
   console.log(`[sync-versions] ${major}/local <- HEAD`);
-  await materialiseRelease(major, LOCAL_RELEASE, REPO_ROOT, null);
+  return materialiseRelease(major, LOCAL_RELEASE, REPO_ROOT, null);
 }
 
 async function materialiseTag(major, version, tag) {
@@ -605,10 +649,10 @@ async function materialiseTag(major, version, tag) {
       console.warn(
         `[sync-versions] worktree add failed for ${tag} (tag not found even after fetch); skipping`,
       );
-      return;
+      return false;
     }
     console.log(`[sync-versions] ${major}/${version} <- ${tag}`);
-    await materialiseRelease(major, version, wt, tag);
+    return await materialiseRelease(major, version, wt, tag);
   } finally {
     await shellSafe("git", ["worktree", "remove", "--force", wt]);
   }
@@ -631,16 +675,32 @@ async function main() {
   // content-collection STORE (the source of phantom duplicate ids)
   // lives in node_modules/.astro/data-store.json — wipe both.
   await rm(CONTENT_ROOT, { recursive: true, force: true });
+  await rm(API_ROOT, { recursive: true, force: true });
+  await rm(BENCH_ROOT, { recursive: true, force: true });
   await rm(join(SITE_ROOT, ".astro"), { recursive: true, force: true });
   await rm(join(SITE_ROOT, "node_modules", ".astro"), {
     recursive: true,
     force: true,
   });
   await mkdir(CONTENT_ROOT, { recursive: true });
+  await mkdir(API_ROOT, { recursive: true });
+  await mkdir(BENCH_ROOT, { recursive: true });
 
   // 1. Pick up all real release tags via gh, fallback to git tag -l.
-  let releases = await listReleasesViaGh();
-  if (!releases) releases = await listReleasesViaGitTags();
+  // DOCS_RELEASES=local[,<version>…] builds the releases it names alone —
+  // the working tree for CI's docs-site job and a fast local loop; every
+  // release when unset, as the deploy builds. Asking for local alone lists
+  // no release at all: no gh, no network.
+  const only = (process.env.DOCS_RELEASES ?? "")
+    .split(",")
+    .map((r) => r.trim())
+    .filter(Boolean);
+  const localOnly = only.length > 0 && only.every((r) => r === LOCAL_RELEASE);
+  let releases = [];
+  if (!localOnly) {
+    releases = await listReleasesViaGh();
+    if (!releases) releases = await listReleasesViaGitTags();
+  }
 
   const realByMajor =
     releases && releases.length > 0 ? buildVersionsJson(releases) : [];
@@ -650,16 +710,28 @@ async function main() {
   // with real tags also gets those tags; "local" stops being default the
   // moment a real release exists, and the newest non-EOL major wins the site
   // default. Pure logic extracted to lib/tag-format.mjs (unit-tested).
-  const versions = stitchVersions({ majorsOnDisk, realByMajor });
+  const versions = selectReleases(
+    stitchVersions({ majorsOnDisk, realByMajor }),
+    only,
+  );
+  if (only.length > 0) {
+    console.log(
+      `[sync-versions] DOCS_RELEASES=${only.join(",")}: those releases alone`,
+    );
+  }
 
-  // 3. Materialise content for every (major, release) combo.
+  // 3. Materialise content for every (major, release) combo. A release whose
+  // tree has docs/api is flagged `api` — its package pages carry an API
+  // section, and gen-symbols.mjs writes its ⌘K index.
   for (const v of versions) {
     for (const r of v.releases) {
+      let api = false;
       if (r.version === LOCAL_RELEASE) {
-        await materialiseLocal(v.major);
+        api = await materialiseLocal(v.major);
       } else if (r.tag) {
-        await materialiseTag(v.major, r.version, r.tag);
+        api = await materialiseTag(v.major, r.version, r.tag);
       }
+      if (api) r.api = true;
     }
   }
 
