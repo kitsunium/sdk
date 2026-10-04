@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-04T01:25:00Z -->
+<!-- updated: 2026-10-04T05:30:00Z -->
 # docs/
 
 ## Purpose
@@ -168,7 +168,7 @@ and had lost 23 entries, every ADR from 0061 on among them.
 
 The dotted-quad allocation table in `adr/0005-…` + the extension in `adr/0006-…` is the **documentary source of truth**; the hand-maintained `codeRangeOwners` table in `internal/kernel/errs/registry_ownership_external_test.go` is the **executable source of truth** (ADR 0035). Keep the two in sync manually on every change — the ownership audit fails on a range absent from that table, and `registry_external_test.go` catches drift on uniqueness and `reason = screamingSnake(varName)` OR `screamingSnake(CodeConst − "Code")` (ADR 0006/0020) over every package in `//:audit_sources`.
 
-`docs/error-codes.yaml` is the **generated human-readable mirror** of every `errs.Code` constant in the tree (one entry per code: dotted-quad, const name, hex, package). Regenerate with `make error-codes` (`scripts/gen-error-codes.sh`); the `scripts/pre-commit/check-error-codes-drift.sh` guard fails `make lint` and CI when it is stale. It is a convenience index, not authoritative — the AST audit remains the executable gate.
+`docs/error-codes.yaml` is the **generated human-readable mirror** of every `errs.Code` constant in the tree (one entry per code: dotted-quad, const name, hex, package). Regenerate with `make error-codes` (`scripts/gen-error-codes.sh`); the `scripts/pre-commit/check-error-codes-drift.sh` guard fails `make lint` and CI when it is stale. It is a convenience index, not authoritative — the AST audit remains the executable gate. The generator greps `errs.Code = 0x…` lines, skipping comments — a doc comment's example once put two codes no package declares in it —, so it leaves out by construction the errs package's own ten `Code` constants (six meta-codes, four masks).
 
 ## Do NOT
 

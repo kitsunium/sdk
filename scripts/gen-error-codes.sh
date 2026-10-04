@@ -25,10 +25,15 @@ cd "$root"
 	echo "# internal/kernel/errs/registry_external_test.go."
 	echo "codes:"
 	# Match: <ConstName> errs.Code = 0x.. // <dotted-quad>. Keep the file path
-	# (no -h) so we can attribute each code to its package, then drop tests.
+	# (no -h) so we can attribute each code to its package, then drop tests and
+	# every line that is a comment: pkg/v1/errs's doc comment shows a consumer
+	# declaring two codes, and listing them here claimed 64.1.1.1 and 64.1.2.1
+	# for the SDK, which declares neither (found when docs/api's codes were
+	# held to this file).
 	grep -rnE '[A-Za-z0-9_]+ +errs\.Code = 0x[0-9A-Fa-f_]+ +// +[0-9]+\.[0-9]+\.[0-9]+' \
 		--include='*.go' internal pkg third-party framework |
 		grep -v '_test.go:' |
+		grep -vE '^[^:]+:[0-9]+:[[:space:]]*//' |
 		sed -E 's#^([^:]+):[0-9]+:.*[[:space:]]([A-Za-z0-9_]+) +errs\.Code = (0x[0-9A-Fa-f_]+) +// +([0-9.]+).*#\4|\2|\3|\1#' |
 		sort -t'|' -k1V |
 		while IFS='|' read -r dotted name hex file; do
