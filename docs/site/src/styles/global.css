@@ -928,6 +928,139 @@ main:focus-visible {
   color: var(--color-muted);
 }
 
+/* ── API section (docs/api) ──────────────────────────────────────── */
+/* ApiSection.astro: a package page's API, rendered from the release's
+   docs/api — every exported symbol, and an alias's members under its
+   name. Each symbol and member is a heading with an id (its ⌘K anchor);
+   the kind chip and the source link sit beside it, outside the heading. */
+.md-body .api-lede {
+  color: var(--color-muted);
+  font-size: 0.9rem;
+}
+.md-body .api-empty {
+  color: var(--color-muted);
+  font-style: italic;
+}
+.md-body .api-sym {
+  border-top: 1px solid var(--color-border);
+  padding: 0.9rem 0 0.4rem;
+}
+.md-body .api-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3rem 0.6rem;
+}
+.md-body .api-name,
+.md-body .api-member-name {
+  margin: 0;
+  font-family: var(--font-mono);
+  scroll-margin-top: 1rem;
+}
+.md-body .api-name {
+  font-size: 1rem;
+}
+.md-body .api-member-name {
+  font-size: 0.88rem;
+}
+.md-body .api-name a,
+.md-body .api-member-name a {
+  color: var(--color-text);
+}
+.md-body .api-name a:hover,
+.md-body .api-member-name a:hover {
+  color: var(--color-accent);
+}
+.md-body .api-name:target,
+.md-body .api-member-name:target {
+  background: rgba(88, 166, 255, 0.14);
+  border-radius: 4px;
+  padding: 0 0.3rem;
+}
+.md-body .api-kind {
+  padding: 0.05rem 0.4rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border-radius: 3px;
+  background: var(--color-bg-elev);
+  color: var(--color-muted);
+}
+.md-body .api-source {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--color-muted);
+}
+.md-body .api-decl,
+.md-body .api-doc-code {
+  tab-size: 4;
+}
+.md-body .api-decl {
+  margin: 0.5rem 0;
+  font-size: 0.85rem;
+}
+.md-body .api-cells {
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+  color: var(--color-baseline);
+}
+.md-body .api-code {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.5rem;
+  margin: 0.4rem 0;
+  font-size: 0.85rem;
+}
+.md-body .api-code div {
+  display: flex;
+  gap: 0.4rem;
+}
+.md-body .api-code dt {
+  color: var(--color-muted);
+}
+.md-body .api-code dd {
+  margin: 0;
+}
+.md-body .api-init,
+.md-body .api-owner p {
+  margin: 0.4rem 0;
+  font-size: 0.85rem;
+  color: var(--color-muted);
+}
+.md-body .api-doc p,
+.md-body .api-doc ul,
+.md-body .api-doc ol {
+  margin: 0.45rem 0;
+}
+.md-body .api-doc-heading {
+  font-weight: 600;
+}
+.md-body .api-doc-code {
+  font-size: 0.82rem;
+}
+.md-body .api-members {
+  margin: 0.6rem 0 0.4rem 0.4rem;
+  padding-left: 0.9rem;
+  border-left: 2px solid var(--color-border);
+}
+.md-body .api-members-title {
+  margin: 0.4rem 0 0.2rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--color-muted);
+}
+.md-body .api-member {
+  padding: 0.4rem 0;
+}
+.md-body .api-field-type,
+.md-body .api-field-tag {
+  font-size: 0.78rem;
+}
+
 /* ── Mermaid ─────────────────────────────────────────────────────── */
 .mermaid-svg {
   margin: 1rem 0;
@@ -953,7 +1086,6 @@ main:focus-visible {
   color: #ff8b85;
 }
 .sym-source {
-  grid-column: 2;
   margin-top: 0.2rem;
   color: rgba(255, 255, 255, 0.4);
   font-size: 0.72rem;

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T13:06:04Z -->
+<!-- updated: 2026-10-04T04:30:00Z -->
 # docs/site/src/styles/
 
 ## Purpose
@@ -18,7 +18,7 @@ what the materialised Markdown renders into.
 | Markdown body, Home hero, Provenance fact-strip | the rendered READMEs and ADRs, the Home page's head, the build-provenance band |
 | Responsive, Light theme palette, Reduced motion, Skip-to-content | the breakpoints; `:root[data-theme="light"]` redefining the tokens; `prefers-reduced-motion`; the keyboard skip link |
 | Breadcrumbs, Prev / Next, Edit-this-page, Scrollspy, Theme toggle | the chrome components' shared rules |
-| Benchmark tables, GitHub-style alerts, Tabs, API reference, Mermaid, Deprecation chips | what the content renders into: `BENCH.md` tables with their green/red markers, `> [!NOTE]` callouts, tab sets (`[data-tabs]`), gomarkdoc's collapsed symbol dump, Mermaid diagrams, obsolete symbols in search |
+| Benchmark tables, GitHub-style alerts, Tabs, API reference, API section (docs/api), Mermaid, Deprecation chips | what the content renders into: `BENCH.md` tables with their green/red markers, `> [!NOTE]` callouts, tab sets (`[data-tabs]`), gomarkdoc's collapsed symbol dump (a release without `docs/api`), `ApiSection.astro`'s symbols, members, codes and platform notes — a symbol's heading highlighted when it is the `:target` —, Mermaid diagrams, obsolete symbols in search |
 
 ## Rules
 

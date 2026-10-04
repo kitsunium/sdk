@@ -74,6 +74,10 @@ GATES=(
   # byte. CI runs it through `make lint-check`, whose recipe runs
   # `$(MAKE) api-check` — enforced through a listed gate's recipe, below.
   api-check
+  # The docs portal built from docs/api: its ⌘K index and API sections equal
+  # docs/api, and every link resolves — the `docs-site` job, a sibling of the
+  # required ones.
+  docs-check
 )
 
 # Guards that `make lint` runs AND the `bazel` job invokes as a direct

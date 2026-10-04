@@ -2,15 +2,16 @@
 // four modes.
 //
 // The symbol index (the default) extracts a search index from a module's
-// public packages and emits it as JSON for the static docs site to consume
-// client-side: docs/site/src/components/Search.astro feeds it to MiniSearch
-// for the "Symbols" tab of the search modal, and docs/site/package.json's
-// `prebuild` step runs it.
+// public packages, over go/doc, and emits it as JSON. It was the docs site's
+// ⌘K index until the site built that index from docs/api
+// (docs/site/scripts/gen-symbols.mjs): go/doc does not follow an alias to the
+// methods and fields of the type it names, and docs/api does. No build step
+// runs this mode any more.
 //
 //	go run github.com/kitsunium/sdk/tools/genindex \
-//	    -input ../pkg/v1 \
-//	    -output ../docs/site/src/data/symbols.json \
-//	    -url-base /v1/local
+//	    -input ../../pkg/v1 \
+//	    -output symbols.json \
+//	    -url-base /local/v1
 //
 // With -check-doclinks it emits no index: it walks the directories given as
 // arguments and fails on every same-package doc link — a name, or a type and a

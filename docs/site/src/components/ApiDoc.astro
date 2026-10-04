@@ -1,0 +1,34 @@
+---
+// ApiDoc — one doc comment of the API section, as text. docBlocks splits it
+// the way go/doc reads a comment (paragraphs, `# ` headings, code, lists) and
+// inlineSegments cuts each run of text into text and links: a doc link the
+// page anchors, an http(s) URL. Every string lands in an Astro expression, so
+// it is escaped text — a `<` in a comment is a `<` on the page, never markup.
+import { docBlocks, inlineSegments } from "../../scripts/lib/api.mjs";
+
+interface Props {
+  text?: string;
+  /** The anchors of the page: a doc link to one of them becomes a link. */
+  anchors: Set<string>;
+}
+const { text, anchors } = Astro.props;
+const resolve = (target: string) => (anchors.has(target) ? target : null);
+const blocks = docBlocks(text);
+const segments = (s: string) => inlineSegments(s, resolve);
+---
+
+{blocks.length > 0 && (
+  <div class="api-doc">
+    {blocks.map((b) => {
+      if (b.type === "code") return <pre class="api-doc-code"><code>{b.text}</code></pre>;
+      if (b.type === "h") return <p class="api-doc-heading">{b.text}</p>;
+      if (b.type === "list") {
+        const items = b.items.map((item: string) => (
+          <li>{segments(item).map((seg) => (seg.href ? <a href={seg.href}>{seg.text}</a> : seg.text))}</li>
+        ));
+        return b.ordered ? <ol>{items}</ol> : <ul>{items}</ul>;
+      }
+      return <p>{segments(b.text).map((seg) => (seg.href ? <a href={seg.href}>{seg.text}</a> : seg.text))}</p>;
+    })}
+  </div>
+)}

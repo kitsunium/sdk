@@ -1,4 +1,4 @@
-.PHONY: help build test test-framework lint guard bench cover docs docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare ci-gates-check release-scripts-check pre-commit-check lint-check lint-ktn-check ci-scripts-check vuln-install vuln-check doclinks api api-check
+.PHONY: help build test test-framework lint guard bench cover docs docs-check docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare ci-gates-check release-scripts-check pre-commit-check lint-check lint-ktn-check ci-scripts-check vuln-install vuln-check doclinks api api-check
 
 # `make` with no args prints the help. No aliases — every target on its own.
 .DEFAULT_GOAL := help
@@ -29,6 +29,7 @@ help: ## Print this help (default goal).
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "lint"   "$(DIM)mod tidy + gazelle diff + drift assert + gofumpt -l + ktn-linter$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "bench"  "Regenerate every BENCH.md $(DIM)(CPU/RAM/OS/Go/git SHA envelope)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "docs"   "Build the SDK documentation portal $(DIM)(→ docs/site/dist/, 15 pages)$(RST)"
+	@printf "  $(GREEN)%-7s$(RST)  %s\n" "docs-check" "$(DIM)build the working tree's portal, hold its ⌘K and API sections to docs/api, check every link$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "serve"  "kill / rebuild / re-serve docs on http://localhost:$(DIM)\$${PORT:-4321}$(RST)$(DIM)/$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "docs-dev" "$(DIM)hot-reloading docs dev server (astro dev, no full rebuild — fast iteration)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "cover"  "bazel coverage --combined_report=lcov //..."
@@ -362,6 +363,17 @@ cover:
 docs:
 	cd docs/site && npm install --silent && npm run build
 	@echo "→ docs/site/dist/ ready ($$(find docs/site/dist -name '*.html' | wc -l) pages). Serve with: make serve"
+
+# `docs-check` is the docs portal's gate, run by CI's `docs-site` job. It
+# builds the working tree's release alone (DOCS_RELEASES=local: no release
+# snapshot, no network, about 30 s) and checks what it built against the code:
+# `npm test` (scripts/lib), then `npm run check` — the ⌘K index and every API
+# section equal docs/api, counted apart from the code that wrote them
+# (scripts/check-api-counts.mjs), and every link and ⌘K entry resolves under
+# the deploy base, fragments included (scripts/check-links.mjs). The deploy
+# (docs-deploy.yml) runs the same check over every release it builds.
+docs-check:
+	cd docs/site && npm ci --silent && npm test && DOCS_RELEASES=local npm run build && npm run check
 
 # `serve` is the kill → rebuild → re-serve loop for the docs portal.
 # Useful while iterating on src/pages/*.astro or src/styles/global.css:

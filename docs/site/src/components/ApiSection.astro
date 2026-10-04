@@ -1,0 +1,214 @@
+---
+// ApiSection — a package page's API, rendered from the page model
+// sync-versions.mjs materialised from the release's docs/api
+// (scripts/lib/api.mjs apiPages). It shows what go/doc cannot: an alias
+// carries the declaration, the fields and the methods of the type it names,
+// each anchored under the alias's name (`Locker.Acquire`), beside every
+// other exported symbol of the package with its forms per platform, its
+// code and its doc text.
+//
+// Every anchor here is one ⌘K entry's (scripts/gen-symbols.mjs reads the same
+// models), and scripts/check-api-counts.mjs holds both to docs/api. Text is
+// rendered as text: signatures, values and docs are Astro expressions, and
+// ApiDoc renders a comment's blocks and links without building HTML from a
+// string.
+import ApiDoc from "./ApiDoc.astro";
+import { pageAnchors } from "../../scripts/lib/api.mjs";
+
+interface Form {
+  decl: string;
+  file: string;
+  doc?: string;
+  platforms?: string[];
+  value?: string;
+  code?: { value: string; reason?: string; public?: string };
+  init?: string;
+}
+interface Field {
+  anchor: string;
+  name: string;
+  type: string;
+  tag?: string;
+  doc?: string;
+  embedded?: boolean;
+  platforms?: string[];
+}
+interface Sym {
+  anchor: string;
+  id: string;
+  kind: string;
+  name: string;
+  recv?: string;
+  forms: Form[];
+  fields?: Field[];
+  methods?: Sym[];
+  owner?: { id: string; path: string; name: string; external?: boolean; forms?: Form[] };
+}
+interface Model {
+  module: string;
+  cells: string[];
+  package: { path: string; name: string; rel: string; dir: string };
+  sections: { kind: string; title: string; symbols: Sym[] }[];
+}
+interface Props {
+  model: Model;
+  /** "https://github.com/<owner>/<repo>/blob/<ref>", or null. */
+  sourceBase: string | null;
+}
+const { model, sourceBase } = Astro.props;
+const anchors = pageAnchors(model);
+const cells = model.cells;
+const total = model.sections.reduce((n, s) => n + s.symbols.length, 0);
+
+//: a path of the SDK reads relative to its module; any other in full.
+const short = (path: string) =>
+  path.startsWith(`${model.module}/`) ? path.slice(model.module.length + 1) : path;
+//: "go:<path>.<Name>" → "<short path>.<Name>", for a re-export's origin.
+const idLabel = (id: string) => {
+  const body = id.replace(/^go:/, "");
+  const slash = body.lastIndexOf("/");
+  const dot = body.indexOf(".", slash + 1);
+  return dot < 0 ? short(body) : `${short(body.slice(0, dot).replaceAll("%2e", "."))}${body.slice(dot)}`;
+};
+const sourceHref = (file: string) => (sourceBase ? `${sourceBase}/${file}` : null);
+const fileName = (file: string) => file.slice(file.lastIndexOf("/") + 1);
+const cellsLabel = (on?: string[]) =>
+  on ? `${on.length} of ${cells.length} platforms: ${on.join(", ")}` : null;
+//: the docs of a symbol's forms, each once, in form order.
+const docsOf = (forms: Form[]) => [...new Set(forms.map((f) => f.doc).filter(Boolean))] as string[];
+const pkgDevHref = (path: string, name: string) => `https://pkg.go.dev/${path}#${name}`;
+//: the source of the type an alias names, when the page has a source base.
+const ownerHref = (sym: Sym) => (sym.owner?.forms?.[0] ? sourceHref(sym.owner.forms[0].file) : null);
+---
+
+<section class="api" aria-labelledby="api">
+  <h2 id="api">API</h2>
+  <p class="api-lede">
+    Every exported symbol of <code>{model.package.path}</code>, read from the code on the {cells.length} platforms
+    the SDK is built for (<code>docs/api</code>, written by <code>make api</code>). An alias shows the fields and
+    methods of the type it names.
+  </p>
+  {total === 0 && <p class="api-empty">This package exports no symbol.</p>}
+  {
+    model.sections
+      .filter((s) => s.symbols.length > 0)
+      .map((s) => (
+        <section class="api-group" aria-labelledby={`api-${s.kind}`}>
+          <h3 id={`api-${s.kind}`}>{s.title}</h3>
+          {s.symbols.map((sym) => (
+            <article class="api-sym" data-kind={sym.kind}>
+              <div class="api-head">
+                <h4 class="api-name" id={sym.anchor}>
+                  <a href={`#${sym.anchor}`}>{sym.name}</a>
+                </h4>
+                <span class="api-kind">{sym.kind}</span>
+                {sourceHref(sym.forms[0].file) && (
+                  <a class="api-source" href={sourceHref(sym.forms[0].file)} rel="noopener">
+                    {fileName(sym.forms[0].file)}
+                  </a>
+                )}
+              </div>
+              {sym.forms.map((f) => (
+                <div class="api-form">
+                  {cellsLabel(f.platforms) && <p class="api-cells">{cellsLabel(f.platforms)}</p>}
+                  <pre class="api-decl"><code>{f.decl}</code></pre>
+                  {f.code && (
+                    <dl class="api-code">
+                      <div>
+                        <dt>Code</dt>
+                        <dd>
+                          <code>{f.code.value}</code>
+                        </dd>
+                      </div>
+                      {f.code.reason && (
+                        <div>
+                          <dt>Reason</dt>
+                          <dd>
+                            <code>{f.code.reason}</code>
+                          </dd>
+                        </div>
+                      )}
+                      {f.code.public && (
+                        <div>
+                          <dt>Public</dt>
+                          <dd>{f.code.public}</dd>
+                        </div>
+                      )}
+                    </dl>
+                  )}
+                  {f.init && (
+                    <p class="api-init">
+                      Re-exports <code>{idLabel(f.init)}</code>
+                    </p>
+                  )}
+                </div>
+              ))}
+              {docsOf(sym.forms).map((d) => (
+                <ApiDoc text={d} anchors={anchors} />
+              ))}
+              {sym.owner &&
+                (sym.owner.external ? (
+                  <p class="api-owner">Alias of <a href={pkgDevHref(sym.owner.path, sym.owner.name)} rel="noopener"><code>{`${sym.owner.path}.${sym.owner.name}`}</code></a>, outside the SDK.</p>
+                ) : (
+                  <div class="api-owner">
+                    <p>Alias of <code>{idLabel(sym.owner.id)}</code>{ownerHref(sym) && <>, declared in <a href={ownerHref(sym)} rel="noopener">{sym.owner.forms![0].file}</a></>}:</p>
+                    {(sym.owner.forms ?? []).map((f) => (
+                      <div class="api-form">
+                        {cellsLabel(f.platforms) && <p class="api-cells">{cellsLabel(f.platforms)}</p>}
+                        <pre class="api-decl"><code>{f.decl}</code></pre>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              {sym.fields && sym.fields.length > 0 && (
+                <div class="api-members">
+                  <p class="api-members-title">Fields</p>
+                  {sym.fields.map((f) => (
+                    <div class="api-member">
+                      <div class="api-head">
+                        <h5 class="api-member-name" id={f.anchor}>
+                          <a href={`#${f.anchor}`}>{f.anchor}</a>
+                        </h5>
+                        <code class="api-field-type">{f.embedded ? `${f.type} (embedded)` : f.type}</code>
+                        {f.tag && <code class="api-field-tag">{f.tag}</code>}
+                      </div>
+                      {cellsLabel(f.platforms) && <p class="api-cells">{cellsLabel(f.platforms)}</p>}
+                      <ApiDoc text={f.doc} anchors={anchors} />
+                    </div>
+                  ))}
+                </div>
+              )}
+              {sym.methods && sym.methods.length > 0 && (
+                <div class="api-members">
+                  <p class="api-members-title">Methods</p>
+                  {sym.methods.map((m) => (
+                    <div class="api-member">
+                      <div class="api-head">
+                        <h5 class="api-member-name" id={m.anchor}>
+                          <a href={`#${m.anchor}`}>{m.anchor}</a>
+                        </h5>
+                        {sourceHref(m.forms[0].file) && (
+                          <a class="api-source" href={sourceHref(m.forms[0].file)} rel="noopener">
+                            {fileName(m.forms[0].file)}
+                          </a>
+                        )}
+                      </div>
+                      {m.forms.map((f) => (
+                        <div class="api-form">
+                          {cellsLabel(f.platforms) && <p class="api-cells">{cellsLabel(f.platforms)}</p>}
+                          <pre class="api-decl"><code>{f.decl}</code></pre>
+                        </div>
+                      ))}
+                      {docsOf(m.forms).map((d) => (
+                        <ApiDoc text={d} anchors={anchors} />
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </article>
+          ))}
+        </section>
+      ))
+  }
+</section>
