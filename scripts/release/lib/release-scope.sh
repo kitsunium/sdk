@@ -85,25 +85,30 @@ function rs_maintainer_only(p,   n) {
 }
 
 # 1 when <p> could cut a release at all: inside a released module, and not
-# maintainer-only. `pkg/` is the public module; `internal/` reaches it through
-# the rdeps rule and is tagged in the same lockstep chain (ADR 0009);
-# `framework/` and `third-party/` cut that chain through their own tokens in
-# compute-bumps.sh — rules 1b and 1c (ADR 0147, ADR 0157). A path that can cut
-# a release can size it (ADR 0089): before both were listed here, range_size in
-# cut-tags.sh walked past a framework-only merge, so a release:minor label on it
-# shipped as a patch and an unlabelled Release-bump request on it was never
-# refused. (No apostrophe in this comment: it sits inside a single-quoted
-# string.)
+# maintainer-only. The SDK is one module at the root (ADR 0162): its packages
+# under `pkg/`, `framework/` and `internal/` — which reaches them through the
+# rdeps rule —, and the three root files a consumer of the module sees: go.mod,
+# whose go line every consumer inherits, and the LICENSE and README.md
+# pkg.go.dev shows. Nothing else at the root is: docs/, scripts/, go.work or
+# MODULE.bazel ship in the module zip and no consumer compiles or reads them.
+# `third-party/` and `framework/connectors/` are the modules that require a
+# vendor (ADR 0157, ADR 0147), released with the SDK. A path that can cut a
+# release can size it (ADR 0089): before framework/ and third-party/ were
+# listed here, range_size in cut-tags.sh walked past such a merge, so a
+# release:minor label on it shipped as a patch and an unlabelled Release-bump
+# request on it was never refused. (No apostrophe in this comment: it sits
+# inside a single-quoted string.)
 function rs_releasable(p) {
   if (rs_maintainer_only(p)) return 0
+  if (p == "go.mod" || p == "LICENSE" || p == "README.md") return 1
   return (p ~ /^pkg\//) || (p ~ /^internal\//) || (p ~ /^framework\//) || (p ~ /^third-party\//)
 }
 '
 
 # release_scope_filter — stdin: paths, one per line. stdout: the ones that are
 # NOT maintainer-only, unchanged and in order. The INCLUSION test stays with the
-# caller (rule 1 wants `pkg/v*/*|pkg/go.mod`, rule 2 wants the module dir), so
-# only the exclusion — the duplicated half — lives here.
+# caller (rule 1 wants the SDK module's paths, rule 2 the internal/ layer dir),
+# so only the exclusion — the duplicated half — lives here.
 release_scope_filter() {
   awk "$RELEASE_SCOPE_AWK"'
     $0 == ""                  { next }

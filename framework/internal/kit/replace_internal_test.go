@@ -43,7 +43,7 @@ func TestReplaceIsRefusedOutsideATest(t *testing.T) {
 	}
 	d := de.Diagnostics[0]
 	if !strings.Contains(d.Message, "kit.Replace replaces replaced/endpoint/GET /count, but this program is not a test") ||
-		d.Source == nil || d.Source.File != "internal/kit/replace_internal_test.go" {
+		d.Source == nil || d.Source.File != "framework/internal/kit/replace_internal_test.go" {
 		t.Errorf("the refusal: %+v", d)
 	}
 }

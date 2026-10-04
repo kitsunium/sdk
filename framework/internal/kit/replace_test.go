@@ -169,7 +169,7 @@ func TestReplaceProblemsRefuseTheStart(t *testing.T) {
 			t.Errorf("no problem says %q:\n%v", said, err)
 			continue
 		}
-		if line := lineIn(t, "replace_test.go", where); d.Source == nil || d.Source.File != "internal/kit/replace_test.go" || d.Source.Line != line {
+		if line := lineIn(t, "replace_test.go", where); d.Source == nil || d.Source.File != "framework/internal/kit/replace_test.go" || d.Source.Line != line {
 			t.Errorf("%q is said at %+v, want kit/replace_test.go:%d", said, d.Source, line)
 		}
 	}

@@ -1,10 +1,16 @@
 #!/usr/bin/env bats
-# BATS tests for cut-tags.sh. Stays in dry-run / pre-push so no real tag is
-# ever pushed. Covers: the publishable chain rewrite (drop replace + pin
-# intra-repo deps + chain tags), the bootstrap auto-cut guard (ADR 0009), how
-# the size is read from the merged pull requests' labels across the release
-# range (ADR 0085, ADR 0135) — through a gh stub, see test-helpers.bash — and
-# the tag-format and release-size libraries.
+# BATS tests for cut-tags.sh. Covers: the release ADR 0162 defines — one tag on
+# the SDK module, plus the tag of each vendor module that changed since its own
+# last tag, whose go.mod is rewritten to require the SDK at the release with no
+# replace, and, with the first root tag alone, the tombstones of …/pkg and
+# …/framework in the same push —, the version that continues pkg's history, the
+# bootstrap guard (ADR 0009), how the size is read from the merged pull
+# requests' labels across the release range (ADR 0085, ADR 0135) — through a gh
+# stub, see test-helpers.bash — and the tag-format and release-size libraries.
+#
+# Most cases stay in dry-run. The publish path itself — the release commit, the
+# tags on it, the atomic push — runs against a bare repository in the test's
+# temporary directory (publish_remote), so no real remote is ever reached.
 
 load test-helpers
 
@@ -38,74 +44,22 @@ setup() {
   g config user.email "ci@example.invalid"
   g config user.name "ci"
 
-  # Full publish chain with the real kitsunium module paths — cut-tags pins
-  # `github.com/kitsunium/sdk/internal/*` requires, so the fixture must use
-  # those paths for the rewrite to act. The public module is the bare `pkg`
-  # (go.mod at pkg/go.mod, module …/pkg); consumer code lives under pkg/v1/.
-  mkdir -p internal/kernel internal/core internal/service pkg/v1
+  # The SDK is one module at the root (ADR 0162): internal/, pkg/ and
+  # framework/ are its packages, and its go.mod requires nothing of this
+  # repository. The modules that require a vendor are added by add_vendors.
+  mkdir -p pkg/v1 internal/service
+  cat >go.mod <<'EOF'
+module github.com/kitsunium/sdk
 
-  cat >internal/kernel/go.mod <<'EOF'
-module github.com/kitsunium/sdk/internal/kernel
-
-go 1.26
+go 1.27
 EOF
 
-  cat >internal/core/go.mod <<'EOF'
-module github.com/kitsunium/sdk/internal/core
-
-go 1.26
-
-require github.com/kitsunium/sdk/internal/kernel v0.0.0-00010101000000-000000000000
-
-replace github.com/kitsunium/sdk/internal/kernel => ../kernel
-EOF
-
-  cat >internal/service/go.mod <<'EOF'
-module github.com/kitsunium/sdk/internal/service
-
-go 1.26
-
-require (
-	github.com/kitsunium/sdk/internal/core v0.0.0-00010101000000-000000000000
-	github.com/kitsunium/sdk/internal/kernel v0.0.0-00010101000000-000000000000
-)
-
-replace (
-	github.com/kitsunium/sdk/internal/core => ../core
-	github.com/kitsunium/sdk/internal/kernel => ../kernel
-)
-EOF
-
-  cat >pkg/go.mod <<'EOF'
-module github.com/kitsunium/sdk/pkg
-
-go 1.26
-
-require (
-	github.com/kitsunium/sdk/internal/core v0.0.0-00010101000000-000000000000
-	github.com/kitsunium/sdk/internal/kernel v0.0.0-00010101000000-000000000000
-	github.com/kitsunium/sdk/internal/service v0.0.0-00010101000000-000000000000
-)
-
-replace (
-	github.com/kitsunium/sdk/internal/core => ../internal/core
-	github.com/kitsunium/sdk/internal/kernel => ../internal/kernel
-	github.com/kitsunium/sdk/internal/service => ../internal/service
-)
-EOF
-
-  # The chain is read from go.work (ADR 0147 §9): every module it uses but the
-  # root is released.
+  # What a release may tag beside the SDK is read from go.work (ADR 0147 §9):
+  # every module it uses but the SDK's own `.`.
   cat >go.work <<'EOF'
-go 1.26
+go 1.27
 
-use (
-	.
-	./internal/core
-	./internal/kernel
-	./internal/service
-	./pkg
-)
+use .
 EOF
 
   : >pkg/v1/doc.go
@@ -120,14 +74,20 @@ EOF
 
 teardown() { rm -rf "$REPO"; }
 
-# tag_release <tag> — tag a DETACHED child of HEAD, exactly how cut-tags.sh
-# publishes a release (ADR 0009). Both halves of the release baseline on the
-# tag's FIRST PARENT, so a fixture that tags HEAD directly would exercise a
-# range that never occurs in production.
+# tag_release <tag…> — tag a DETACHED child of HEAD with every <tag>, exactly
+# how cut-tags.sh publishes a release (ADR 0009). Both halves of the release
+# baseline on the tag's FIRST PARENT, and so does every vendor module's own
+# measurement, so a fixture that tags HEAD directly would exercise a range that
+# never occurs in production.
 tag_release() {
-  local rel
+  local rel t
   rel="$(g commit-tree "HEAD^{tree}" -p "$(g rev-parse HEAD)" -m "release $1")"
-  g tag "$1" "$rel"
+  for t in "$@"; do g tag "$t" "$rel"; done
+}
+
+# would_tag — the tags a dry run announces, from its `would tag:` line.
+would_tag() {
+  awk -F'would tag: ' '/would tag: / { print $2 }' <<<"$output"
 }
 
 # commit_pkg <message> — a commit that touches pkg/, so the size its pull
@@ -137,8 +97,8 @@ commit_pkg() {
   g commit -aq --no-verify -F - <<<"$1"
 }
 
-# commit_other <message> — a commit that touches nothing under pkg/ or
-# internal/. Nothing about it may size the release (ADR 0089).
+# commit_other <message> — a commit that touches nothing a release counts.
+# Nothing about it may size the release (ADR 0089).
 commit_other() {
   mkdir -p docs
   echo "$RANDOM" >>docs/notes.md
@@ -154,32 +114,674 @@ merge_branch() {
   g merge --no-ff --no-edit --no-verify -m "$2" "$1" >/dev/null
 }
 
-# The dry-run rewrites every chain go.mod, so it needs the Go + jq toolchain.
+# The dry-run checks every go.mod it publishes, so it needs the Go + jq
+# toolchain.
 need_toolchain() {
   if ! command -v go >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then skip "go/jq absent"; fi
 }
 
-@test "bootstrap dry-run prints the publishable chain (replace dropped, deps pinned, chain tags)" {
-  if ! command -v go >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then skip "go/jq absent"; fi
-  run bash -c "echo pkg | $SCRIPT --dry-run"
+# add_vendors — the shape of the real tree: two vendor modules under
+# third-party/ and one connector under framework/connectors/, each requiring the
+# SDK through a local replace, all used by go.work beside the SDK.
+add_vendors() {
+  mkdir -p third-party/aws/writer/s3 third-party/x-crypto/argon2id framework/connectors/postgres
+  local d rel
+  for d in third-party/aws third-party/x-crypto framework/connectors/postgres; do
+    rel="$(sed -E 's#[^/]+#..#g' <<<"$d")"
+    cat >"$d/go.mod" <<GOMOD
+module github.com/kitsunium/sdk/$d
+
+go 1.27
+
+require github.com/kitsunium/sdk v0.0.0-00010101000000-000000000000
+
+replace github.com/kitsunium/sdk => $rel
+GOMOD
+  done
+  echo "package s3" >third-party/aws/writer/s3/s3.go
+  echo "package argon2id" >third-party/x-crypto/argon2id/argon2id.go
+  echo "package postgres" >framework/connectors/postgres/postgres.go
+  cat >go.work <<'GOWORK'
+go 1.27
+
+use (
+	.
+	./framework/connectors/postgres // one driver
+	./third-party/x-crypto
+	./third-party/aws
+)
+GOWORK
+  g add -A
+  g commit -q --no-verify -m "feat: the vendor modules"
+}
+
+# change_vendor <dir> — a commit touching the vendor module in <dir>'s code.
+change_vendor() {
+  echo "// $RANDOM" >>"$(find "$1" -name '*.go' | head -n1)"
+  g commit -aq --no-verify -m "feat($1): a change"
+}
+
+# publish_remote — a bare repository as `origin`, so a run that is not a dry run
+# pushes somewhere this test owns.
+publish_remote() {
+  g init -q --bare "$BATS_TEST_TMPDIR/origin.git"
+  g remote add origin "$BATS_TEST_TMPDIR/origin.git"
+}
+
+# remote_tags — the tags on origin, sorted, on one line.
+remote_tags() {
+  g ls-remote --tags --refs origin | awk '{ sub(/^refs\/tags\//, "", $2); print $2 }' |
+    LC_ALL=C sort | paste -sd' ' -
+}
+
+# log_pushes — a `git` in front of the real one that appends every `git push`
+# it runs to $PUSHES, one line per invocation, so a case can count the pushes a
+# release made and read what each carried.
+log_pushes() {
+  local real
+  real="$(command -v git)"
+  PUSHES="$BATS_TEST_TMPDIR/pushes.log"
+  : >"$PUSHES"
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  cat >"$BATS_TEST_TMPDIR/bin/git" <<SHIM
+#!/usr/bin/env bash
+for a in "\$@"; do
+  if [ "\$a" = push ]; then
+    printf '%s\n' "\$*" >>"$PUSHES"
+    break
+  fi
+done
+exec "$real" "\$@"
+SHIM
+  chmod +x "$BATS_TEST_TMPDIR/bin/git"
+  export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
+}
+
+# The thirteen modules of the real tree that require a vendor, in the order
+# vendor_modules sorts them.
+ALL_VENDORS=(
+  framework/connectors/mysql framework/connectors/postgres
+  framework/connectors/sqlite framework/connectors/ssh
+  third-party/aws third-party/codec/hcl third-party/codec/protobuf
+  third-party/codec/yaml third-party/db/writer/clickhouse
+  third-party/db/writer/mysql third-party/db/writer/redis
+  third-party/transform third-party/x-crypto
+)
+
+# add_all_vendors — the tree the first root tag is cut from: the thirteen vendor
+# modules, each requiring the SDK through a local replace and used by go.work;
+# the framework's own packages, and a file of its own beside the connectors;
+# the public packages under pkg/.
+add_all_vendors() {
+  local d rel
+  for d in "${ALL_VENDORS[@]}"; do
+    mkdir -p "$d"
+    rel="$(sed -E 's#[^/]+#..#g' <<<"$d")"
+    printf 'module github.com/kitsunium/sdk/%s\n\ngo 1.27\n\nrequire github.com/kitsunium/sdk v0.0.0-00010101000000-000000000000\n\nreplace github.com/kitsunium/sdk => %s\n' \
+      "$d" "$rel" >"$d/go.mod"
+    echo "package p" >"$d/p.go"
+  done
+  mkdir -p framework/kit pkg/v1/data/codec
+  echo "package kit" >framework/kit/kit.go
+  echo "# framework/connectors" >framework/connectors/CLAUDE.md
+  echo "package codec" >pkg/v1/data/codec/codec.go
+  {
+    printf 'go 1.27\n\nuse (\n\t.\n'
+    for d in "${ALL_VENDORS[@]}"; do printf '\t./%s\n' "$d"; done
+    printf ')\n'
+  } >go.work
+  g add -A
+  g commit -q --no-verify -m "feat: the thirteen vendor modules"
+}
+
+# tombstone_notice <version> — the deprecation a tombstone's go.mod carries:
+# where the module went, and the command that migrates to it (ADR 0162). Spelled
+# out here, not read from cut-tags.sh, so the notice a consumer is shown changes
+# only when this suite does.
+tombstone_notice() {
+  echo "moved into github.com/kitsunium/sdk at $1, import paths unchanged; migrate with: go get github.com/kitsunium/sdk@$1 github.com/kitsunium/sdk/internal/kernel@none && go mod tidy"
+}
+
+# check_tombstone <dir> <version> — the tag <dir>/<version> names a child of the
+# release commit <version>, and of it alone; under <dir>, the connectors nested
+# in framework/ aside, its tree holds one file, <dir>/go.mod, whose bytes are
+# the deprecation notice on the line above the module directive, then module
+# github.com/kitsunium/sdk/<dir>, the SDK's go directive and one requirement,
+# the SDK at <version> — and which Go reads as that module, deprecated with
+# that notice; and nothing else differs from the release.
+check_tombstone() {
+  local dir="$1" v="$2" t="$1/$2" json goline
+  [ "$(g rev-list --parents -n1 "$t^{commit}")" = "$(g rev-parse "$t^{commit}") $(g rev-parse "$v^{commit}")" ]
+  [ "$(g ls-tree -r --name-only "$t^{commit}" -- "$dir/" | awk '!/^framework\/connectors\/[a-z]+\//')" = "$dir/go.mod" ]
+  [ -z "$(g diff --name-only "$v^{commit}" "$t^{commit}" | awk -v d="$dir/" 'index($0, d) != 1 || /^framework\/connectors\/[a-z]+\//')" ]
+  g show "$t:$dir/go.mod" >"$BATS_TEST_TMPDIR/tombstone.mod"
+  goline="$(go mod edit -json go.mod | jq -r '.Go')"
+  # Byte for byte. The notice is one line, the comment right above `module`:
+  # `go get` prints a deprecation's first line alone.
+  printf '// Deprecated: %s\nmodule github.com/kitsunium/sdk/%s\n\ngo %s\n\nrequire github.com/kitsunium/sdk %s\n' \
+    "$(tombstone_notice "$v")" "$dir" "$goline" "$v" >"$BATS_TEST_TMPDIR/want.mod"
+  diff -u "$BATS_TEST_TMPDIR/want.mod" "$BATS_TEST_TMPDIR/tombstone.mod"
+  # And as Go reads it: the module, deprecated with the notice.
+  json="$(go mod edit -json "$BATS_TEST_TMPDIR/tombstone.mod")"
+  [ "$(jq -r '.Module.Path' <<<"$json")" = "github.com/kitsunium/sdk/$dir" ]
+  [ "$(jq -r '.Module.Deprecated' <<<"$json")" = "$(tombstone_notice "$v")" ]
+  [ "$(jq -r '.Go' <<<"$json")" = "$goline" ]
+  [ "$(jq -c '[.Require[] | [.Path, .Version]]' <<<"$json")" = "[[\"github.com/kitsunium/sdk\",\"$v\"]]" ]
+  [ "$(jq '[.Replace, .Exclude, .Retract] | map((. // []) | length) | add' <<<"$json")" = "0" ]
+}
+
+# ── ADR 0162: one tag on the SDK module, and the vendor modules that changed ─
+
+@test "bootstrap dry-run with no vendor module tags the SDK alone" {
+  need_toolchain
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"would tag chain: internal/core/v0.1.0 internal/kernel/v0.1.0 internal/service/v0.1.0 pkg/v0.1.0"* ]]
-  # pkg pins its intra-repo deps to the release version …
-  [[ "$output" == *"internal/service v0.1.0"* ]]
+  [ "$(would_tag)" = "v0.1.0" ]
+  [[ "$output" == *"no vendor module changed"* ]]
+}
+
+@test "bootstrap dry-run tags every vendor module, none having a tag, pinned with no replace left" {
+  need_toolchain
+  add_vendors
+  run bash -c "echo sdk | $SCRIPT --dry-run"
+  [ "$status" -eq 0 ]
+  [ "$(would_tag)" = "v0.1.0 framework/connectors/postgres/v0.1.0 third-party/aws/v0.1.0 third-party/x-crypto/v0.1.0" ]
+  [[ "$output" == *"third-party/aws has never been tagged"* ]]
+  # Each module pins the SDK at the release …
+  [[ "$output" == *"--- third-party/aws/go.mod ---"* ]]
+  [[ "$output" == *"require github.com/kitsunium/sdk v0.1.0"* ]]
   # … and the local replace is gone.
   [[ "$output" != *"=> ../"* ]]
 }
 
 @test "bootstrap auto-cut is refused without --allow-bootstrap (ADR 0009, exit 3)" {
-  run bash -c "echo pkg | $SCRIPT"
+  run bash -c "echo sdk | $SCRIPT"
   [ "$status" -eq 3 ]
-  [[ "$output" == *"refusing to auto-cut the FIRST release"* ]]
+  [[ "$output" == *"refusing to auto-cut the FIRST release (v0.1.0)"* ]]
 }
 
-@test "legacy 'vN' bump token still maps to the single public module" {
-  run bash -c "echo v1 | $SCRIPT"
+# The decision's first release: the root module has never been tagged, and the
+# chain before it was released as pkg/vX.Y.Z. The version continues pkg's, and
+# the two retired modules a consumer imported get their tombstone beside it.
+@test "the first root tag continues pkg's history: pkg/v0.17.0 and a minor make v0.18.0, with its tombstones" {
+  need_toolchain
+  tag_release pkg/v0.17.0 internal/core/v0.17.0 framework/v0.17.0
+  commit_pkg 'refactor: the SDK is one module'
+  label_pr 162 release:minor
+  run bash -c "echo sdk | $SCRIPT --dry-run"
+  [ "$status" -eq 0 ]
+  [ "$(would_tag)" = "v0.18.0 pkg/v0.18.0 framework/v0.18.0" ]
+  [[ "$output" == *"v0.18.0 is the SDK module's first tag; it continues pkg/v0.17.0 (ADR 0162)"* ]]
+  # The dry run shows each tombstone's go.mod as it will be published, its
+  # deprecation notice included.
+  [[ "$output" == *"--- pkg/go.mod (pkg/v0.18.0) ---"* ]]
+  [[ "$output" == *"module github.com/kitsunium/sdk/framework"* ]]
+  [[ "$output" == *"require github.com/kitsunium/sdk v0.18.0"* ]]
+  [ "$(grep -cF "// Deprecated: $(tombstone_notice v0.18.0)" <<<"$output")" -eq 2 ]
+}
+
+# …and it is the first release of the SDK module's content, which the proxy and
+# the checksum database keep for good, so it is held like the very first
+# release: an automatic run publishes nothing (exit 3, which the workflow
+# reports as held, never as a failure).
+@test "the first root tag is held without --allow-bootstrap (ADR 0009, ADR 0162)" {
+  publish_remote
+  tag_release pkg/v0.17.0
+  commit_pkg 'refactor: the SDK is one module'
+  run bash -c "echo sdk | $SCRIPT --bump=minor"
   [ "$status" -eq 3 ]
-  [[ "$output" == *"refusing to auto-cut the FIRST release (pkg/v0.1.0)"* ]]
+  [[ "$output" == *"refusing to auto-cut the FIRST release of the SDK module (v0.18.0, after pkg/v0.17.0"* ]]
+  [ -z "$(g ls-remote --tags origin)" ]
+}
+
+# A stray stable root tag below the pkg history — the v0.0.0 the proxy already
+# knows for this path — must not lift the hold. Red against the first draft,
+# which held only while no vX.Y.Z existed: it pushed v0.18.0 from an automatic
+# run.
+@test "a stray root tag below pkg's history does not lift the hold" {
+  need_toolchain
+  publish_remote
+  tag_release pkg/v0.17.0 v0.0.0
+  commit_pkg 'refactor: the SDK is one module'
+  run bash -c "echo sdk | $SCRIPT --bump=minor"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"refusing to auto-cut the FIRST release of the SDK module (v0.18.0, after pkg/v0.17.0"* ]]
+  [ -z "$(g ls-remote --tags origin)" ]
+}
+
+# The first root tag moves every consumer to another module: a patch would cut
+# a v0.17.1 the proxy keeps for good. Refused like an undecided size, with the
+# two ways to state it — even when a maintainer authorised the bootstrap.
+@test "the first root tag is refused as a patch, even with --allow-bootstrap" {
+  need_toolchain
+  publish_remote
+  tag_release pkg/v0.17.0
+  commit_pkg 'refactor: the SDK is one module'
+  run bash -c "echo sdk | $SCRIPT --allow-bootstrap"
+  [ "$status" -eq 65 ]
+  [[ "$output" == *"refusing v0.17.1 as the SDK module's first tag"* ]]
+  [[ "$output" == *"release:minor"* ]]
+  [[ "$output" == *"bump=minor"* ]]
+  [ -z "$(g ls-remote --tags origin)" ]
+  # …and an automatic run says it at once, rather than holding a v0.17.1.
+  run bash -c "echo sdk | $SCRIPT --bump=patch"
+  [ "$status" -eq 65 ]
+  [[ "$output" != *"refusing to auto-cut"* ]]
+}
+
+@test "--allow-bootstrap cuts the first root tag on a detached release commit" {
+  need_toolchain
+  publish_remote
+  tag_release pkg/v0.17.0
+  commit_pkg 'refactor: the SDK is one module'
+  head="$(g rev-parse HEAD)"
+  run bash -c "echo sdk | $SCRIPT --bump=minor --allow-bootstrap 2>/dev/null"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'v0.18.0\npkg/v0.18.0\nframework/v0.18.0' ]
+  # On origin, on a release commit whose first parent is the main commit it was
+  # cut from — where the next range and every vendor measurement start.
+  [ "$(remote_tags)" = "framework/v0.18.0 pkg/v0.18.0 v0.18.0" ]
+  [ "$(g rev-parse 'v0.18.0^{commit}^1')" = "$head" ]
+  [ "$(g rev-parse HEAD)" = "$head" ]
+}
+
+# The usual release: nothing under third-party/ or framework/connectors/
+# changed, so ONE tag — not the eighteen of a lockstep chain.
+@test "a release with no vendor change cuts one tag" {
+  need_toolchain
+  add_vendors
+  tag_release v0.4.0 framework/connectors/postgres/v0.4.0 third-party/aws/v0.4.0 third-party/x-crypto/v0.4.0
+  commit_pkg 'fix(codec): one'
+  run bash -c "echo sdk | $SCRIPT --dry-run"
+  [ "$status" -eq 0 ]
+  [ "$(would_tag)" = "v0.4.1" ]
+  [[ "$output" == *"third-party/aws unchanged since third-party/aws/v0.4.0 — keeps it"* ]]
+  [[ "$output" == *"framework/connectors/postgres unchanged since framework/connectors/postgres/v0.4.0 — keeps it"* ]]
+}
+
+# The same, published: the release commit rewrites nothing — the SDK's go.mod
+# requires nothing of this repository — and is still a detached child of HEAD.
+@test "a release with no vendor change pushes one tag on an empty release commit" {
+  need_toolchain
+  add_vendors
+  publish_remote
+  tag_release v0.4.0 framework/connectors/postgres/v0.4.0 third-party/aws/v0.4.0 third-party/x-crypto/v0.4.0
+  commit_pkg 'fix(codec): one'
+  head="$(g rev-parse HEAD)"
+  run bash -c "echo sdk | $SCRIPT 2>/dev/null"
+  [ "$status" -eq 0 ]
+  [ "$output" = "v0.4.1" ]
+  [ "$(g ls-remote --tags --refs origin | awk '{print $2}')" = "refs/tags/v0.4.1" ]
+  [ "$(g rev-parse 'v0.4.1^{commit}^1')" = "$head" ]
+  [ -z "$(g diff --name-only "$head" 'v0.4.1^{commit}')" ]
+}
+
+@test "a vendor change cuts the SDK tag and that vendor's, and only those" {
+  need_toolchain
+  add_vendors
+  tag_release v0.4.0 framework/connectors/postgres/v0.4.0 third-party/aws/v0.4.0 third-party/x-crypto/v0.4.0
+  change_vendor third-party/aws
+  run bash -c "echo sdk | $SCRIPT --dry-run"
+  [ "$status" -eq 0 ]
+  [ "$(would_tag)" = "v0.4.1 third-party/aws/v0.4.1" ]
+  [[ "$output" == *"third-party/aws changed since third-party/aws/v0.4.0 — tagged at v0.4.1"* ]]
+  [[ "$output" == *"--- third-party/aws/go.mod ---"* ]]
+  [[ "$output" == *"require github.com/kitsunium/sdk v0.4.1"* ]]
+  [[ "$output" != *"--- third-party/x-crypto/go.mod ---"* ]]
+  [[ "$output" != *"=> ../"* ]]
+}
+
+# The same, published: the vendor's tag carries its rewritten go.mod, the
+# unchanged ones are not rewritten, and stdout names the SDK's tag first — the
+# one the workflow makes a GitHub release of.
+@test "a vendor change pushes the two tags, the vendor's go.mod pinned to the release" {
+  need_toolchain
+  add_vendors
+  publish_remote
+  tag_release v0.4.0 framework/connectors/postgres/v0.4.0 third-party/aws/v0.4.0 third-party/x-crypto/v0.4.0
+  change_vendor framework/connectors/postgres
+  head="$(g rev-parse HEAD)"
+  run bash -c "echo sdk | $SCRIPT 2>/dev/null"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'v0.4.1\nframework/connectors/postgres/v0.4.1' ]
+  [ "$(g rev-parse 'v0.4.1^{commit}')" = "$(g rev-parse 'framework/connectors/postgres/v0.4.1^{commit}')" ]
+  [ "$(g rev-parse 'v0.4.1^{commit}^1')" = "$head" ]
+  [ "$(g diff --name-only "$head" 'v0.4.1^{commit}')" = "framework/connectors/postgres/go.mod" ]
+  published="$(g show 'v0.4.1:framework/connectors/postgres/go.mod')"
+  [[ "$published" == *"require github.com/kitsunium/sdk v0.4.1"* ]]
+  [[ "$published" != *"replace"* ]]
+  # The dev branch is untouched.
+  [[ "$(g show HEAD:framework/connectors/postgres/go.mod)" == *"replace github.com/kitsunium/sdk => ../../.."* ]]
+}
+
+@test "a vendor module that was never tagged is tagged" {
+  need_toolchain
+  add_vendors
+  tag_release v0.4.0 framework/connectors/postgres/v0.4.0 third-party/aws/v0.4.0
+  commit_pkg 'fix(codec): one'
+  run bash -c "echo sdk | $SCRIPT --dry-run"
+  [ "$status" -eq 0 ]
+  [ "$(would_tag)" = "v0.4.1 third-party/x-crypto/v0.4.1" ]
+  [[ "$output" == *"third-party/x-crypto has never been tagged — tagged at v0.4.1"* ]]
+}
+
+# A file that cannot cut a release cannot tag a module either (ADR 0089).
+@test "a vendor module whose only change is maintainer-only keeps its tag" {
+  need_toolchain
+  add_vendors
+  tag_release v0.4.0 framework/connectors/postgres/v0.4.0 third-party/aws/v0.4.0 third-party/x-crypto/v0.4.0
+  echo "# notes" >third-party/aws/CLAUDE.md
+  echo "# gazelle:prefix github.com/kitsunium/sdk/third-party/aws" >third-party/aws/BUILD.bazel
+  g add -A
+  g commit -q --no-verify -m "docs(aws): notes"
+  commit_pkg 'fix(codec): one'
+  run bash -c "echo sdk | $SCRIPT --dry-run"
+  [ "$status" -eq 0 ]
+  [ "$(would_tag)" = "v0.4.1" ]
+}
+
+# A module's change is measured from the commit its OWN last tag was cut from:
+# a vendor module tagged by an older release and unchanged since stays at that
+# tag, whatever the SDK released in between.
+@test "a vendor module is measured from its own last tag, not from the release range" {
+  need_toolchain
+  add_vendors
+  tag_release v0.4.0 framework/connectors/postgres/v0.4.0 third-party/aws/v0.4.0 third-party/x-crypto/v0.4.0
+  change_vendor third-party/aws
+  tag_release v0.5.0 third-party/aws/v0.5.0
+  commit_pkg 'fix(codec): one'
+  run bash -c "echo sdk | $SCRIPT --dry-run"
+  [ "$status" -eq 0 ]
+  [ "$(would_tag)" = "v0.5.1" ]
+  [[ "$output" == *"third-party/x-crypto unchanged since third-party/x-crypto/v0.4.0 — keeps it"* ]]
+  [[ "$output" == *"third-party/aws unchanged since third-party/aws/v0.5.0 — keeps it"* ]]
+}
+
+# The hyphen of x-crypto is in the module's path, not a pre-release in its
+# version. Red against the first draft of this lib, which looked for a hyphen
+# anywhere in the tag and re-tagged x-crypto every release as never tagged.
+@test "a vendor module whose path carries a hyphen keeps its tag" {
+  need_toolchain
+  add_vendors
+  tag_release v0.4.0 framework/connectors/postgres/v0.4.0 third-party/aws/v0.4.0 third-party/x-crypto/v0.4.0
+  commit_pkg 'fix(codec): one'
+  run bash -c ". '$LIB'; latest_vendor_tag third-party/x-crypto"
+  [ "$output" = "third-party/x-crypto/v0.4.0" ]
+}
+
+# A module that requires another module of this repository pins it at the
+# release when this release tags it too, and at its own last tag otherwise:
+# never at the pseudo-version of a local replace, which names nothing.
+@test "a vendor module requiring another pins it at the release, or at its last tag" {
+  need_toolchain
+  add_vendors
+  (cd framework/connectors/postgres &&
+    go mod edit -require=github.com/kitsunium/sdk/third-party/aws@v0.0.0-00010101000000-000000000000 \
+      -replace=github.com/kitsunium/sdk/third-party/aws=../../../third-party/aws)
+  g commit -aq --no-verify -m "feat(postgres): uses the aws writer"
+  tag_release v0.4.0 framework/connectors/postgres/v0.4.0 third-party/aws/v0.4.0 third-party/x-crypto/v0.4.0
+  change_vendor framework/connectors/postgres
+  run bash -c "echo sdk | $SCRIPT --dry-run"
+  [ "$status" -eq 0 ]
+  [ "$(would_tag)" = "v0.4.1 framework/connectors/postgres/v0.4.1" ]
+  [[ "$output" == *"github.com/kitsunium/sdk/third-party/aws v0.4.0"* ]]
+  change_vendor third-party/aws
+  run bash -c "echo sdk | $SCRIPT --dry-run"
+  [ "$status" -eq 0 ]
+  [ "$(would_tag)" = "v0.4.1 framework/connectors/postgres/v0.4.1 third-party/aws/v0.4.1" ]
+  [[ "$output" == *"github.com/kitsunium/sdk/third-party/aws v0.4.1"* ]]
+  [[ "$output" != *"=> ../"* ]]
+}
+
+# ADR 0162's guard on itself: a go.mod that still requires a retired module
+# would put two modules providing the same packages in a consumer's build.
+@test "a vendor module that requires a retired module is refused" {
+  need_toolchain
+  add_vendors
+  tag_release v0.4.0 framework/connectors/postgres/v0.4.0 third-party/aws/v0.4.0 third-party/x-crypto/v0.4.0
+  (cd third-party/aws && go mod edit -require=github.com/kitsunium/sdk/pkg@v0.17.0)
+  g commit -aq --no-verify -m "chore(aws): an old requirement"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"requires github.com/kitsunium/sdk/pkg, a module ADR 0162 retired"* ]]
+  [[ "$output" != *"would tag"* ]]
+}
+
+@test "the SDK's go.mod requiring a retired module is refused" {
+  need_toolchain
+  tag_release v0.4.0
+  go mod edit -require=github.com/kitsunium/sdk/internal/core@v0.17.0 go.mod
+  g commit -aq --no-verify -m "chore: an old requirement"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"requires github.com/kitsunium/sdk/internal/core, a module ADR 0162 retired"* ]]
+}
+
+# A go.work that names a merged module again is the split coming back: its tag
+# would be pkg/vX.Y.Z, and its packages the SDK module's too.
+@test "a go.work that uses ./pkg again is refused, naming it" {
+  printf 'go 1.27\n\nuse (\n\t.\n\t./pkg\n)\n' >go.work
+  g commit -aq --no-verify -m "chore: split again"
+  run bash -c "echo sdk | $SCRIPT --dry-run --bump=patch"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"uses pkg, which is no vendor module"* ]]
+}
+
+# A stray low root tag must not restart the numbering below the history.
+@test "the version continues the higher of the SDK and pkg tags" {
+  need_toolchain
+  tag_release pkg/v0.17.0
+  g tag v0.1.0 "$(g rev-parse 'pkg/v0.17.0^{commit}')"
+  commit_pkg 'fix(codec): one'
+  run bash -c "echo sdk | $SCRIPT --dry-run --bump=minor"
+  [ "$status" -eq 0 ]
+  [ "$(would_tag)" = "v0.18.0 pkg/v0.18.0 framework/v0.18.0" ]
+  [[ "$output" == *"v0.18.0 is the SDK module's first tag; it continues pkg/v0.17.0"* ]]
+}
+
+# The tokens compute-bumps.sh emitted before ADR 0162 each released the whole
+# chain; they still mean the one release.
+@test "the tokens of before ADR 0162 still mean the one release" {
+  for token in pkg framework third-party v1; do
+    run bash -c "echo $token | $SCRIPT"
+    [ "$status" -eq 3 ]
+    [[ "$output" == *"refusing to auto-cut the FIRST release (v0.1.0)"* ]]
+  done
+}
+
+@test "an unknown token is still refused" {
+  run bash -c "echo tools | $SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"expected 'sdk'"* ]]
+}
+
+@test "several tokens cut one release" {
+  need_toolchain
+  tag_release v0.4.0
+  commit_pkg 'fix(codec): one'
+  run bash -c "printf 'sdk\nsdk\npkg\n' | $SCRIPT --dry-run"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'would tag' <<<"$output")" -eq 1 ]
+  [ "$(would_tag)" = "v0.4.1" ]
+}
+
+# ── ADR 0162: the tombstones of …/pkg and …/framework, once ─────────────────
+#
+# Go resolves an import nothing in a go.mod provides to the longest module path
+# whose LATEST version provides the package. Without a last version of …/pkg
+# and …/framework that provides none, that is those modules at v0.17.0 for
+# good, and a new consumer's bare `go mod tidy` lands there. The first root tag
+# cuts that last version of each — a go.mod alone on a child of the release
+# commit —, in the push that publishes it, and no other release ever does. That
+# go.mod deprecates its module with the migration command: Go reads a module's
+# deprecation from its latest go.mod, so `go get` and `go list -m -u` tell a
+# consumer still on it where it went.
+
+# The release v0.18.0 is: the SDK, the thirteen vendor modules whose go.mod the
+# merge rewrote, and the two tombstones — sixteen tags, one atomic push.
+@test "the first root tag cuts, in one push, the SDK, the thirteen vendor modules and the two tombstones" {
+  need_toolchain
+  add_all_vendors
+  publish_remote
+  # v0.17.0 put every module of the chain on one release commit…
+  olds=(pkg/v0.17.0 internal/core/v0.17.0 internal/kernel/v0.17.0 internal/service/v0.17.0 framework/v0.17.0)
+  for d in "${ALL_VENDORS[@]}"; do olds+=("$d/v0.17.0"); done
+  tag_release "${olds[@]}"
+  # …and the merge into one module rewrote every vendor go.mod since.
+  for d in "${ALL_VENDORS[@]}"; do echo "// requires the SDK module (ADR 0162)" >>"$d/go.mod"; done
+  commit_pkg 'refactor!: the SDK is one module'
+  head="$(g rev-parse HEAD)"
+  log_pushes
+  run bash -c "echo sdk | $SCRIPT --bump=minor --allow-bootstrap 2>/dev/null"
+  [ "$status" -eq 0 ]
+  # stdout: the SDK's tag, the vendor modules', then the tombstones.
+  want="v0.18.0"
+  for d in "${ALL_VENDORS[@]}"; do want+=$'\n'"$d/v0.18.0"; done
+  want+=$'\npkg/v0.18.0\nframework/v0.18.0'
+  [ "$output" = "$want" ]
+  # One push, atomic, carrying the sixteen: no moment where v0.18.0 is
+  # published and a tombstone is not.
+  [ "$(awk 'END { print NR }' "$PUSHES")" -eq 1 ]
+  [[ "$(cat "$PUSHES")" == "push --atomic origin "* ]]
+  [ "$(awk '{ print NF - 3 }' "$PUSHES")" -eq 16 ]
+  [ "$(g ls-remote --tags --refs origin | awk 'END { print NR }')" -eq 16 ]
+  # The SDK and the vendor modules share the release commit, a child of main…
+  [ "$(g rev-parse 'v0.18.0^{commit}^1')" = "$head" ]
+  [ "$(g rev-parse 'third-party/x-crypto/v0.18.0^{commit}')" = "$(g rev-parse 'v0.18.0^{commit}')" ]
+  # …whose tree still holds the packages; each tombstone is a child of it.
+  [ -n "$(g ls-tree --name-only 'v0.18.0^{commit}' -- pkg/v1)" ]
+  check_tombstone pkg v0.18.0
+  check_tombstone framework v0.18.0
+  # The connectors nested in framework/ keep their files, pinned as released;
+  # a file of framework/ beside them goes with the rest of the framework.
+  [ "$(g rev-parse 'framework/v0.18.0^{commit}:framework/connectors/postgres')" = "$(g rev-parse 'v0.18.0^{commit}:framework/connectors/postgres')" ]
+  [[ "$(g show 'framework/v0.18.0:framework/connectors/postgres/go.mod')" == *"require github.com/kitsunium/sdk v0.18.0"* ]]
+  [ -z "$(g ls-tree --name-only 'framework/v0.18.0^{commit}' -- framework/connectors/CLAUDE.md framework/kit)" ]
+  # main is untouched.
+  [ "$(g rev-parse HEAD)" = "$head" ]
+}
+
+# Never again: the next release continues the root tag, and neither holds nor
+# cuts a tombstone — even though pkg/v0.18.0 now exists beside v0.18.0.
+@test "a later release cuts no tombstone, and a tombstone is never its base" {
+  need_toolchain
+  publish_remote
+  tag_release pkg/v0.17.0
+  commit_pkg 'refactor!: the SDK is one module'
+  run bash -c "echo sdk | $SCRIPT --bump=minor --allow-bootstrap 2>/dev/null"
+  [ "$status" -eq 0 ]
+  commit_pkg 'fix(codec): one'
+  # An automatic run: no --allow-bootstrap, no label.
+  run bash -c "echo sdk | $SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"tombstone"* ]]
+  [[ "$output" != *"first tag"* ]]
+  [ "$(tail -n1 <<<"$output")" = "v0.18.1" ]
+  [ "$(remote_tags)" = "framework/v0.18.0 pkg/v0.18.0 v0.18.0 v0.18.1" ]
+}
+
+# A re-run of the release that published v0.18.0 — SDK Release dispatched
+# again, same commit, same inputs — finds nothing to release and moves nothing.
+@test "the bootstrap run again publishes nothing, and moves no tag" {
+  need_toolchain
+  publish_remote
+  tag_release pkg/v0.17.0
+  commit_pkg 'refactor!: the SDK is one module'
+  run bash -c "echo sdk | $SCRIPT --bump=minor --allow-bootstrap 2>/dev/null"
+  [ "$status" -eq 0 ]
+  before="$(g ls-remote --tags origin)"
+  [ -n "$before" ]
+  run bash -c "bash '$BATS_TEST_DIRNAME/compute-bumps.sh' --explain | $SCRIPT --bump=minor --allow-bootstrap"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"verdict: NO RELEASE"* ]]
+  [[ "$output" != *"tombstone"* ]]
+  [ "$(g ls-remote --tags origin)" = "$before" ]
+}
+
+# A tombstone tag that already exists names another commit: refused before
+# anything is tagged — by the held automatic run already — and nothing is
+# pushed.
+@test "a tombstone tag already present at another commit is refused, and nothing is pushed" {
+  need_toolchain
+  publish_remote
+  tag_release pkg/v0.17.0 framework/v0.17.0
+  commit_pkg 'refactor!: the SDK is one module'
+  g tag framework/v0.18.0 HEAD
+  g push -q origin framework/v0.18.0
+  run bash -c "echo sdk | $SCRIPT --bump=minor --allow-bootstrap"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"framework/v0.18.0 already exists, at $(g rev-parse --short HEAD)"* ]]
+  [[ "$output" == *"nothing was published"* ]]
+  [ "$(remote_tags)" = "framework/v0.18.0" ]
+  [ -z "$(g tag -l v0.18.0 pkg/v0.18.0)" ]
+  # The automatic run, which holds the first root tag, says it as well.
+  run bash -c "echo sdk | $SCRIPT --bump=minor"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"framework/v0.18.0 already exists"* ]]
+}
+
+# A pkg/vX.Y.Z whose pkg/ holds a go.mod alone is a tombstone, not a release of
+# pkg's packages: one cut by hand must not become the history the first root
+# tag continues (v0.19.0 on top of it), but a tag that already exists.
+@test "a pkg tombstone cut by hand is no pkg release: refused, not continued" {
+  need_toolchain
+  publish_remote
+  tag_release pkg/v0.17.0
+  commit_pkg 'refactor!: the SDK is one module'
+  g checkout -q --detach
+  g rm -rq pkg
+  mkdir -p pkg
+  printf 'module github.com/kitsunium/sdk/pkg\n' >pkg/go.mod
+  g add pkg/go.mod
+  g commit -q --no-verify -m "a tombstone by hand"
+  g tag pkg/v0.18.0
+  g checkout -q main
+  run bash -c "echo sdk | $SCRIPT --bump=minor --allow-bootstrap"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"pkg/v0.18.0 already exists"* ]]
+  [[ "$output" != *"v0.19.0"* ]]
+  [ -z "$(remote_tags)" ]
+}
+
+@test "lib: is_valid_tombstone_tag accepts pkg and framework, and nothing else" {
+  source "$LIB"
+  for t in pkg/v0.18.0 framework/v0.18.0 framework/v1.0.0; do
+    run is_valid_tombstone_tag "$t"
+    [ "$status" -eq 0 ]
+  done
+  for t in v0.18.0 internal/core/v0.18.0 framework/connectors/postgres/v0.18.0 pkg/v0.18.0-rc.1 pkg/v2.0.0 third-party/aws/v0.18.0; do
+    run is_valid_tombstone_tag "$t"
+    [ "$status" -ne 0 ]
+  done
+}
+
+# Red against the lib before the tombstones: it read pkg/v0.18.0 as the newest
+# pkg release.
+@test "lib: latest_pkg_tag leaves a tombstone out" {
+  tag_release pkg/v0.17.0
+  g checkout -q --detach
+  g rm -rq pkg
+  mkdir -p pkg
+  printf 'module github.com/kitsunium/sdk/pkg\n' >pkg/go.mod
+  g add pkg/go.mod
+  g commit -q --no-verify -m "tombstone"
+  g tag pkg/v0.18.0
+  g checkout -q main
+  run bash -c ". '$LIB'; latest_pkg_tag"
+  [ "$output" = "pkg/v0.17.0" ]
+  run bash -c ". '$LIB'; is_pkg_tombstone pkg/v0.18.0 && ! is_pkg_tombstone pkg/v0.17.0"
+  [ "$status" -eq 0 ]
+}
+
+# At one version the root tag is the release, whatever the pkg tag beside it
+# holds and however a sort breaks the tie.
+@test "lib: latest_release_tag takes the root tag at a version a pkg tag shares" {
+  tag_release v0.18.0 pkg/v0.18.0
+  run bash -c ". '$LIB'; latest_release_tag"
+  [ "$output" = "v0.18.0" ]
+  g tag pkg/v0.18.1 "$(g rev-parse 'v0.18.0^{commit}')"
+  run bash -c ". '$LIB'; latest_release_tag"
+  [ "$output" = "pkg/v0.18.1" ]
 }
 
 # ── ADR 0135: a release is sized by a maintainer's label on the merged PR ────
@@ -210,13 +812,13 @@ need_toolchain() {
 # minor's worth of API as a patch.
 @test "a label behind HEAD still sizes the release (ADR 0085)" {
   need_toolchain
-  tag_release pkg/v0.1.0
+  tag_release v0.1.0
   commit_pkg 'refactor: fifty new public symbols'
   label_pr 101 release:minor
   commit_other 'docs: a second merge twelve seconds later'
-  run bash -c "echo pkg | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"would tag chain: internal/core/v0.2.0 internal/kernel/v0.2.0 internal/service/v0.2.0 pkg/v0.2.0"* ]]
+  [ "$(would_tag)" = "v0.2.0" ]
   # …and it says which merge sized it, since HEAD no longer shows it.
   [[ "$output" == *"label release:minor on #101"* ]]
   [[ "$output" == *"not HEAD"* ]]
@@ -228,29 +830,29 @@ need_toolchain() {
 # paths are read from git first — so exactly one lookup happens.
 @test "a label on a merge that touched nothing releasable does not count" {
   need_toolchain
-  tag_release pkg/v0.1.0
+  tag_release v0.1.0
   commit_pkg 'fix(codec): a real pkg change, unlabelled'
   commit_other 'docs: unrelated'
   label_pr 102 release:minor
-  run bash -c "echo pkg | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"pkg/v0.1.1"* ]]
+  [ "$(would_tag)" = "v0.1.1" ]
   [ "$(gh_calls)" -eq 1 ]
 }
 
 # Largest wins: a later merge that says nothing cannot shrink one that did.
 @test "the largest label in the range wins" {
   need_toolchain
-  tag_release pkg/v0.1.0
+  tag_release v0.1.0
   commit_pkg 'feat(codec): a'
   label_pr 103 release:minor
   commit_pkg 'feat(codec): b'
   label_pr 104 release:major
   commit_other 'docs: tail'
-  run bash -c "echo pkg | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
   # v0 -> v1 is the stabilisation step on the same bare module path (ADR 0009).
-  [[ "$output" == *"pkg/v1.0.0"* ]]
+  [ "$(would_tag)" = "v1.0.0" ]
 }
 
 # The range opens AFTER the commit the last release was cut from, so a label the
@@ -259,50 +861,67 @@ need_toolchain() {
   need_toolchain
   commit_pkg 'feat(codec): symbols'
   label_pr 105 release:minor
-  tag_release pkg/v0.2.0
+  tag_release v0.2.0
   commit_pkg 'fix(codec): follow-up'
-  run bash -c "echo pkg | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"pkg/v0.2.1"* ]]
+  [ "$(would_tag)" = "v0.2.1" ]
+}
+
+# The same across ADR 0162: the label the last pkg release honoured stays
+# consumed for the first root tag, whose range opens after pkg's base. Read
+# again, it would size a v0.18.0; left out, the size is a patch, which the
+# first root tag refuses — so the refusal is the proof it was left out.
+@test "a label consumed by the last pkg release is not applied to the first root tag" {
+  need_toolchain
+  commit_pkg 'feat(codec): symbols'
+  label_pr 160 release:minor
+  tag_release pkg/v0.17.0
+  commit_pkg 'fix(codec): follow-up'
+  run bash -c "echo sdk | $SCRIPT --dry-run"
+  [ "$status" -eq 65 ]
+  [[ "$output" == *"no merge in the range is labelled above patch"* ]]
+  [[ "$output" == *"refusing v0.17.1 as the SDK module's first tag"* ]]
+  [[ "$output" != *"would tag"* ]]
 }
 
 @test "several merges, none labelled and none asking, is still a patch" {
   need_toolchain
-  tag_release pkg/v0.1.0
+  tag_release v0.1.0
   commit_pkg 'fix(codec): one'
   commit_pkg 'fix(codec): two'
   commit_other 'docs: three'
-  run bash -c "echo pkg | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"pkg/v0.1.1"* ]]
+  [ "$(would_tag)" = "v0.1.1" ]
   [[ "$output" == *"no merge in the range is labelled above patch"* ]]
   [[ "$output" != *"not HEAD"* ]]
 }
 
 @test "a label on HEAD sizes the release, and says nothing about provenance" {
   need_toolchain
-  tag_release pkg/v0.1.0
+  tag_release v0.1.0
   commit_pkg 'feat(codec): labelled on the last merge'
   label_pr 106 release:minor
-  run bash -c "echo pkg | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"pkg/v0.2.0"* ]]
+  [ "$(would_tag)" = "v0.2.0" ]
   [[ "$output" != *"not HEAD"* ]]
 }
 
 # A major from a v1 base is refused BY NAME (ADR 0009): a breaking v2 needs a
-# real …/pkg/v2 module path. It must stay refused when the label sits behind
-# HEAD, which is where reading HEAD alone used to make the refusal unreachable.
+# real …/v2 module path. It must stay refused when the label sits behind HEAD,
+# which is where reading HEAD alone used to make the refusal unreachable.
 @test "a major label from a v1 base is refused even from behind HEAD" {
   need_toolchain
-  tag_release pkg/v1.2.3
+  tag_release v1.2.3
   commit_pkg 'feat(codec): breaking'
   label_pr 107 release:major
   commit_other 'docs: tail'
-  run bash -c "echo pkg | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -ne 0 ]
   [[ "$output" == *"needs a real"* ]]
-  [[ "$output" != *"would tag chain"* ]]
+  [[ "$output" != *"would tag"* ]]
 }
 
 # The first-parent walk: the commits a TRUE merge brought in are the
@@ -311,16 +930,16 @@ need_toolchain() {
 # must never ask about it.
 @test "a commit a merge brought in is never looked up" {
   need_toolchain
-  tag_release pkg/v0.1.0
+  tag_release v0.1.0
   g checkout -q -b side
   commit_pkg $'feat(codec): contributor work\n\nRelease-bump: minor'
   label_pr 108 release:minor
   side_sha="$(g rev-parse HEAD)"
   g checkout -q main
   merge_branch side 'Merge the contributor branch'
-  run bash -c "echo pkg | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"pkg/v0.1.1"* ]]
+  [ "$(would_tag)" = "v0.1.1" ]
   run grep -c "$side_sha" "$GH_FIXTURES/calls.log"
   [ "$output" = "0" ]
 }
@@ -330,31 +949,31 @@ need_toolchain() {
 # The path check asks for the diff against parent 1 instead.
 @test "a label on a merge commit is scoped by what the merge brought in" {
   need_toolchain
-  tag_release pkg/v0.1.0
+  tag_release v0.1.0
   g checkout -q -b side
   commit_pkg 'feat(codec): work, unlabelled on the branch'
   g checkout -q main
   merge_branch side 'Merge pull request #109'
   label_pr 109 release:minor
-  run bash -c "echo pkg | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"pkg/v0.2.0"* ]]
+  [ "$(would_tag)" = "v0.2.0" ]
 }
 
-# …and that scoping still bites: a merge that brought in nothing under pkg/ or
-# internal/ cannot be sized by its own label either.
+# …and that scoping still bites: a merge that brought in nothing a release
+# counts cannot be sized by its own label either.
 @test "a label on a merge that brought in nothing releasable does not count" {
   need_toolchain
-  tag_release pkg/v0.1.0
+  tag_release v0.1.0
   commit_pkg 'fix(codec): a real pkg change on main, unlabelled'
   g checkout -q -b side
   commit_other 'docs: branch work'
   g checkout -q main
   merge_branch side 'Merge pull request #110'
   label_pr 110 release:minor
-  run bash -c "echo pkg | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"pkg/v0.1.1"* ]]
+  [ "$(would_tag)" = "v0.1.1" ]
 }
 
 # The per-commit path check was `git log --name-only … | grep -qE '^pkg/'` with
@@ -365,7 +984,7 @@ need_toolchain() {
 # paths of ~210 bytes is ~340 KB, the regime where the old shape failed 10 in 10.
 @test "a label survives a merge whose file list exceeds the pipe buffer" {
   need_toolchain
-  tag_release pkg/v0.1.0
+  tag_release v0.1.0
   mkdir -p tools
   pad="$(printf 'y%.0s' $(seq 1 200))"
   for i in $(seq 1 1600); do : >"tools/${pad}${i}.go"; done
@@ -373,9 +992,9 @@ need_toolchain() {
   g add -A
   g commit -q --no-verify -m 'feat(codec): wide merge'
   label_pr 111 release:minor
-  run bash -c "echo pkg | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"pkg/v0.2.0"* ]]
+  [ "$(would_tag)" = "v0.2.0" ]
 }
 
 # ── The message asks; only a label decides ──────────────────────────────────
@@ -386,14 +1005,14 @@ need_toolchain() {
 # (#217); it stops the release and names the ways out.
 @test "a trailer alone no longer sizes a release: unlabelled, it is refused (ADR 0135)" {
   need_toolchain
-  tag_release pkg/v0.1.0
+  tag_release v0.1.0
   commit_pkg $'feat(codec): symbols\n\nRelease-bump: minor'
-  run bash -c "echo pkg | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 65 ]
   [[ "$output" == *"asks for 'Release-bump: minor'"* ]]
   [[ "$output" == *"no merged pull request introduced it"* ]]
   [[ "$output" == *"bump=<patch|minor|major>"* ]]
-  [[ "$output" != *"would tag chain"* ]]
+  [[ "$output" != *"would tag"* ]]
 }
 
 # #224, closed: a contributor's `Release-bump: minor` in the last paragraph was
@@ -401,36 +1020,38 @@ need_toolchain() {
 # declines it without editing anybody's commits.
 @test "a contributor's request is declined by release:patch (#224)" {
   need_toolchain
-  tag_release pkg/v0.1.0
+  tag_release v0.1.0
   commit_pkg $'feat(codec): a contributor proposal\n\n* feat(codec): first branch commit\n\nContributor prose.\n\nRelease-bump: minor'
   label_pr 112 release:patch
-  run bash -c "echo pkg | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"pkg/v0.1.1"* ]]
+  [ "$(would_tag)" = "v0.1.1" ]
   [[ "$output" == *"the label decides"* ]]
 }
 
 @test "a label sizes a merge whose message says nothing about size" {
   need_toolchain
-  tag_release pkg/v0.1.0
+  tag_release v0.1.0
   commit_pkg 'feat(codec): symbols'
   label_pr 113 release:minor
-  run bash -c "echo pkg | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"pkg/v0.2.0"* ]]
+  [ "$(would_tag)" = "v0.2.0" ]
 }
 
 # The #207 shape — trailer at column 0, then a folded branch commit with a prose
 # body — is what shipped pkg/v0.3.4 instead of pkg/v0.4.0. Labelled, it cuts the
-# minor it asked for: where the line sits no longer matters.
+# minor it asked for: where the line sits no longer matters. Its base is the pkg
+# tag it was cut after, which is also the base the first root tag reads — so
+# the release it cuts now is that first root tag, tombstones included.
 @test "the shape that shipped pkg/v0.3.4 instead of pkg/v0.4.0 now cuts the minor" {
   need_toolchain
   tag_release pkg/v0.3.3
   commit_pkg $'fix(vcs): six of ADR 0076\'s seven deferred entries\n\nADR 0087 records all of it.\n\nRelease-bump: minor\n\n* fix(vcs): the child prefix of a filesystem root is not root plus a separator\n\nQodo found it on #207 and it is real.'
   label_pr 207 release:minor
-  run bash -c "echo pkg | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"pkg/v0.4.0"* ]]
+  [ "$(would_tag)" = "v0.4.0 pkg/v0.4.0 framework/v0.4.0" ]
 }
 
 # The #248 shape: the squash message carried a branch commit's trailer mid-body,
@@ -442,7 +1063,7 @@ need_toolchain() {
   tag_release pkg/v0.5.0
   commit_pkg $'feat: framework wave 2\n\n* feat(vcs): git.Head\n\nRelease-bump: minor\n\n* feat(redact): a secret shown is a secret replaced\n\nProse that followed.'
   label_pr 248
-  run bash -c "echo pkg | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 65 ]
   [[ "$output" == *"#248 carries no release label"* ]]
   [[ "$output" == *"label #248 release:minor"* ]]
@@ -452,10 +1073,10 @@ need_toolchain() {
 
 @test "two different release labels on one pull request are refused" {
   need_toolchain
-  tag_release pkg/v0.1.0
+  tag_release v0.1.0
   commit_pkg 'feat(codec): symbols'
   label_pr 114 release:minor release:patch
-  run bash -c "echo pkg | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 65 ]
   [[ "$output" == *"two release labels"* ]]
 }
@@ -464,10 +1085,10 @@ need_toolchain() {
 # patch — the #217 outcome through a new door.
 @test "a release label that names no size is refused" {
   need_toolchain
-  tag_release pkg/v0.1.0
+  tag_release v0.1.0
   commit_pkg 'feat(codec): symbols'
   label_pr 115 release:minr
-  run bash -c "echo pkg | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 65 ]
   [[ "$output" == *"is not a release size"* ]]
 }
@@ -476,46 +1097,46 @@ need_toolchain() {
 # this script's business.
 @test "labels that are not release labels size nothing" {
   need_toolchain
-  tag_release pkg/v0.1.0
+  tag_release v0.1.0
   commit_pkg 'fix(codec): one'
   label_pr 116 bug documentation
-  run bash -c "echo pkg | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"pkg/v0.1.1"* ]]
+  [ "$(would_tag)" = "v0.1.1" ]
 }
 
 # A pull request that was closed without merging introduced nothing.
 @test "an unmerged pull request's label does not size the release" {
   need_toolchain
-  tag_release pkg/v0.1.0
+  tag_release v0.1.0
   commit_pkg 'feat(codec): symbols'
   sha="$(g rev-parse HEAD)"
   printf '[{"number":117,"merged_at":null,"labels":[{"name":"release:minor"}]}]\n' \
     >"$GH_FIXTURES/commits_${sha}_pulls.json"
-  run bash -c "echo pkg | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"pkg/v0.1.1"* ]]
+  [ "$(would_tag)" = "v0.1.1" ]
 }
 
 # The absence-of-measurement class (#226, #227) in its newest form: a lookup
 # that failed must not read as a merge without a label, i.e. as a patch.
 @test "a lookup GitHub could not answer is refused, never read as a patch" {
   need_toolchain
-  tag_release pkg/v0.1.0
+  tag_release v0.1.0
   commit_pkg 'feat(codec): symbols'
   : >"$GH_FIXTURES/commits_$(g rev-parse HEAD)_pulls.fail"
-  run bash -c "echo pkg | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 65 ]
   [[ "$output" == *"could not be read"* ]]
   [[ "$output" == *"HTTP 502"* ]]
-  [[ "$output" != *"would tag chain"* ]]
+  [[ "$output" != *"would tag"* ]]
 }
 
 @test "a missing gh is refused, never read as a patch" {
   need_toolchain
-  tag_release pkg/v0.1.0
+  tag_release v0.1.0
   commit_pkg 'feat(codec): symbols'
-  RELEASE_GH="$BATS_TEST_TMPDIR/no-such-gh" run bash -c "echo pkg | $SCRIPT --dry-run"
+  RELEASE_GH="$BATS_TEST_TMPDIR/no-such-gh" run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 65 ]
   [[ "$output" == *"is not on PATH"* ]]
 }
@@ -524,31 +1145,31 @@ need_toolchain() {
 # %x1F separator to keep `mi` and `nor` apart; the line scan never joins lines.
 @test "halves of a word in two lines do not spell a size" {
   need_toolchain
-  tag_release pkg/v0.1.0
+  tag_release v0.1.0
   commit_pkg $'feat(codec): halves that spell a bump\n\nRelease-bump: mi\nRelease-bump: nor'
-  run bash -c "echo pkg | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"pkg/v0.1.1"* ]]
+  [ "$(would_tag)" = "v0.1.1" ]
 }
 
 # Asking for the default is not asking for anything a label must grant.
 @test "a message asking for a patch needs no label" {
   need_toolchain
-  tag_release pkg/v0.1.0
+  tag_release v0.1.0
   commit_pkg $'fix(codec): one\n\nRelease-bump: patch'
-  run bash -c "echo pkg | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"pkg/v0.1.1"* ]]
+  [ "$(would_tag)" = "v0.1.1" ]
 }
 
 # A commit that never mentions a size is not suspicious, at any shape.
 @test "a multi-paragraph message with no request and no label is a patch" {
   need_toolchain
-  tag_release pkg/v0.1.0
+  tag_release v0.1.0
   commit_pkg $'fix(codec): one\n\n* fix: a folded branch commit\n\nProse body.\n\n* fix: another'
-  run bash -c "echo pkg | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"pkg/v0.1.1"* ]]
+  [ "$(would_tag)" = "v0.1.1" ]
 }
 
 # ── --bump: the maintainer states the size, and GitHub is not asked ─────────
@@ -559,38 +1180,38 @@ need_toolchain() {
 # and an outage must not be able to block the way out of an outage.
 @test "--bump sizes the whole range and asks GitHub nothing" {
   need_toolchain
-  tag_release pkg/v0.1.0
+  tag_release v0.1.0
   commit_pkg 'feat(codec): symbols'
   label_pr 118 release:major
-  run bash -c "echo pkg | $SCRIPT --dry-run --bump=minor"
+  run bash -c "echo sdk | $SCRIPT --dry-run --bump=minor"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"pkg/v0.2.0"* ]]
+  [ "$(would_tag)" = "v0.2.0" ]
   [[ "$output" == *"stated with --bump"* ]]
   [ "$(gh_calls)" -eq 0 ]
 }
 
 @test "--bump is the way past a refusal" {
   need_toolchain
-  tag_release pkg/v0.1.0
+  tag_release v0.1.0
   commit_pkg $'feat(codec): symbols\n\nRelease-bump: minor'
-  run bash -c "echo pkg | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 65 ]
-  run bash -c "echo pkg | $SCRIPT --dry-run --bump=patch"
+  run bash -c "echo sdk | $SCRIPT --dry-run --bump=patch"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"pkg/v0.1.1"* ]]
+  [ "$(would_tag)" = "v0.1.1" ]
 }
 
 @test "a --bump that is not a size is refused before anything runs" {
-  run bash -c "echo pkg | $SCRIPT --dry-run --bump=huge"
+  run bash -c "echo sdk | $SCRIPT --dry-run --bump=huge"
   [ "$status" -eq 64 ]
   [[ "$output" == *"is not a size"* ]]
 }
 
 @test "--bump=major from a v1 base is still refused" {
   need_toolchain
-  tag_release pkg/v1.2.3
+  tag_release v1.2.3
   commit_pkg 'feat(codec): breaking'
-  run bash -c "echo pkg | $SCRIPT --dry-run --bump=major"
+  run bash -c "echo sdk | $SCRIPT --dry-run --bump=major"
   [ "$status" -ne 0 ]
   [[ "$output" == *"needs a real"* ]]
 }
@@ -623,35 +1244,34 @@ commit_pkg_doc() {
 
 @test "a label on an internal/-only merge sizes the release (ADR 0089)" {
   need_toolchain
-  tag_release pkg/v0.1.0
+  tag_release v0.1.0
   commit_internal 'feat(service): behaviour observable through pkg'
   label_pr 120 release:minor
-  run bash -c "echo pkg | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"pkg/v0.2.0"* ]]
+  [ "$(would_tag)" = "v0.2.0" ]
 }
 
 @test "a label on a pkg/ CLAUDE.md-only merge does NOT size the release (ADR 0089)" {
   need_toolchain
-  tag_release pkg/v0.1.0
+  tag_release v0.1.0
   commit_pkg_doc 'docs: one line under pkg/'
   label_pr 121 release:minor
-  run bash -c "echo pkg | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"pkg/v0.1.1"* ]]
-  [[ "$output" != *"pkg/v0.2.0"* ]]
+  [ "$(would_tag)" = "v0.1.1" ]
 }
 
 # The control. A rule answering "no" to everything would pass the test above;
 # this is what stops that.
 @test "a label on pkg/ code still sizes the release (ADR 0089 control)" {
   need_toolchain
-  tag_release pkg/v0.1.0
+  tag_release v0.1.0
   commit_pkg 'feat(codec): public symbols'
   label_pr 122 release:minor
-  run bash -c "echo pkg | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"pkg/v0.2.0"* ]]
+  [ "$(would_tag)" = "v0.2.0" ]
 }
 
 # The refusal inherits the same scope: an internal/-only merge CAN size a
@@ -659,9 +1279,9 @@ commit_pkg_doc() {
 # the refusal exists to stop.
 @test "an unlabelled request on an internal/-only merge is refused (ADR 0089)" {
   need_toolchain
-  tag_release pkg/v0.1.0
+  tag_release v0.1.0
   commit_internal $'feat(service): behaviour\n\nRelease-bump: minor\n\nProse after the request.'
-  run bash -c "echo pkg | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 65 ]
   [[ "$output" == *"refusing to size this release"* ]]
 }
@@ -678,22 +1298,21 @@ commit_pkg_bench() {
 
 @test "a label on a pkg/ BENCH.md-only merge does NOT size the release (#238)" {
   need_toolchain
-  tag_release pkg/v0.1.0
+  tag_release v0.1.0
   commit_pkg_bench 'docs(bench): re-measure'
   label_pr 123 release:minor
-  run bash -c "echo pkg | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"pkg/v0.1.1"* ]]
-  [[ "$output" != *"pkg/v0.2.0"* ]]
+  [ "$(would_tag)" = "v0.1.1" ]
 }
 
 # And the refusal follows the same scope: a request on a merge that cannot size
 # a release is an alarm about nothing, so it is neither looked up nor refused.
 @test "an unlabelled request on a pkg/ BENCH.md-only merge is not an alarm (#238)" {
   need_toolchain
-  tag_release pkg/v0.1.0
+  tag_release v0.1.0
   commit_pkg_bench $'docs(bench): re-measure\n\nRelease-bump: minor\n\nProse after the request.'
-  run bash -c "echo pkg | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
   [[ "$output" != *"refusing"* ]]
   [ "$(gh_calls)" -eq 0 ]
@@ -701,7 +1320,7 @@ commit_pkg_bench() {
 
 # commit_under <dir> <message> — a commit touching a Go file under <dir> and
 # nothing else: framework/ (ADR 0147) or third-party/ (ADR 0157), whose changes
-# cut the chain through their own tokens, so must be able to size it.
+# cut a release, so must be able to size it.
 commit_under() {
   mkdir -p "$1"
   echo "// $RANDOM" >>"$1/x.go"
@@ -711,31 +1330,44 @@ commit_under() {
 
 @test "a label on a framework/-only merge sizes the release (ADR 0089, ADR 0147)" {
   need_toolchain
-  tag_release pkg/v0.1.0
+  tag_release v0.1.0
   commit_under framework/kit 'feat(kit): a declaration'
   label_pr 124 release:minor
-  run bash -c "echo framework | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"pkg/v0.2.0"* ]]
+  [ "$(would_tag)" = "v0.2.0" ]
 }
 
 @test "a label on a third-party/-only merge sizes the release (ADR 0089, ADR 0157)" {
   need_toolchain
-  tag_release pkg/v0.1.0
+  tag_release v0.1.0
   commit_under third-party/aws/writer/s3 'feat(s3): a knob'
   label_pr 125 release:minor
-  run bash -c "echo third-party | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"pkg/v0.2.0"* ]]
+  [ "$(would_tag)" = "v0.2.0" ]
+}
+
+# The SDK module's go.mod is the go line every consumer inherits: a merge that
+# moves it can cut a release (ADR 0162), so it can size one.
+@test "a label on a merge of the SDK's go.mod alone sizes the release (ADR 0162)" {
+  need_toolchain
+  tag_release v0.1.0
+  printf '\n// the go line moves\n' >>go.mod
+  g commit -aq --no-verify -m 'chore: the go line'
+  label_pr 126 release:minor
+  run bash -c "echo sdk | $SCRIPT --dry-run"
+  [ "$status" -eq 0 ]
+  [ "$(would_tag)" = "v0.2.0" ]
 }
 
 # The refusal follows: a framework or vendor merge CAN size the release, so an
 # unlabelled request on one is the silent patch the refusal exists to stop.
 @test "an unlabelled request on a third-party/-only merge is refused (ADR 0089, ADR 0157)" {
   need_toolchain
-  tag_release pkg/v0.1.0
+  tag_release v0.1.0
   commit_under third-party/transform $'feat(transform): a level\n\nRelease-bump: minor'
-  run bash -c "echo third-party | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 65 ]
   [[ "$output" == *"refusing to size this release"* ]]
 }
@@ -743,20 +1375,19 @@ commit_under() {
 # And the maintainer-only filter still applies under both prefixes.
 @test "a label on a third-party/ CLAUDE.md-only merge does NOT size the release" {
   need_toolchain
-  tag_release pkg/v0.1.0
+  tag_release v0.1.0
   mkdir -p third-party/aws
   echo "# $RANDOM" >>third-party/aws/CLAUDE.md
   g add -A
   g commit -q --no-verify -m 'docs(aws): notes'
-  label_pr 126 release:minor
-  run bash -c "echo third-party | $SCRIPT --dry-run"
+  label_pr 127 release:minor
+  run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"pkg/v0.1.1"* ]]
-  [[ "$output" != *"pkg/v0.2.0"* ]]
+  [ "$(would_tag)" = "v0.1.1" ]
 }
 
 @test "an unwalkable --range is refused rather than read as no size" {
-  run bash -c "echo pkg | $SCRIPT --dry-run --range=nosuchrev..HEAD"
+  run bash -c "echo sdk | $SCRIPT --dry-run --range=nosuchrev..HEAD"
   [ "$status" -eq 64 ]
   [[ "$output" == *"cannot walk the release range"* ]]
 }
@@ -808,272 +1439,149 @@ commit_under() {
   [ "$output" = "patch" ]
 }
 
-@test "lib: is_valid_tag accepts the bare pkg shape (major 0|1)" {
+# ── lib/tag-format.sh ─────────────────────────────────────────────────────────
+
+@test "lib: is_valid_tag accepts the SDK module's shape (major 0|1)" {
   source "$LIB"
-  run is_valid_tag "pkg/v0.1.0"
+  run is_valid_tag "v0.18.0"
   [ "$status" -eq 0 ]
-  run is_valid_tag "pkg/v1.0.0-rc.1"
+  run is_valid_tag "v1.0.0-rc.1"
   [ "$status" -eq 0 ]
 }
 
-@test "lib: is_valid_tag rejects v2+ major and the legacy 3-component shape" {
+@test "lib: is_valid_tag rejects a v2+ major and every prefixed shape" {
   source "$LIB"
   # Bare module path => major must be 0 or 1; v2+ needs a /v2 module path.
-  run is_valid_tag "pkg/v2.0.0"
+  run is_valid_tag "v2.0.0"
   [ "$status" -ne 0 ]
-  # The old pkg/<major>/vX.Y.Z shape is no longer a valid pkg tag.
+  # The shapes of before ADR 0162 are not the SDK's tag.
+  run is_valid_tag "pkg/v0.17.0"
+  [ "$status" -ne 0 ]
   run is_valid_tag "pkg/v1/v1.0.0"
+  [ "$status" -ne 0 ]
+  run is_valid_tag "framework/v0.17.0"
   [ "$status" -ne 0 ]
 }
 
 @test "lib: is_valid_tag rejects shell-injection bait" {
   source "$LIB"
-  run is_valid_tag 'pkg/v0.1.0;rm -rf /'
+  run is_valid_tag 'v0.1.0;rm -rf /'
   [ "$status" -ne 0 ]
-  run is_valid_tag 'pkg/v0.1.0 --upload-pack=/evil'
+  run is_valid_tag 'v0.1.0 --upload-pack=/evil'
   [ "$status" -ne 0 ]
   run is_valid_tag '../etc/passwd'
   [ "$status" -ne 0 ]
 }
 
-@test "lib: is_valid_internal_tag accepts internal/<mod>/vX.Y.Z (major 0|1 only)" {
+@test "lib: is_valid_pkg_tag reads the history, major 0|1 only" {
   source "$LIB"
-  run is_valid_internal_tag "internal/core/v1.0.0"
+  run is_valid_pkg_tag "pkg/v0.17.0"
   [ "$status" -eq 0 ]
-  run is_valid_internal_tag "internal/kernel/v0.3.1"
-  [ "$status" -eq 0 ]
-  # v2+ needs /vN module paths — rejected (deferred per ADR 0009).
-  run is_valid_internal_tag "internal/core/v2.0.0"
+  run is_valid_pkg_tag "pkg/v2.0.0"
   [ "$status" -ne 0 ]
-  run is_valid_internal_tag "pkg/v0.1.0"
+  run is_valid_pkg_tag "v0.17.0"
   [ "$status" -ne 0 ]
 }
 
-@test "lib: next_patch increments PATCH only" {
+# Nothing cuts the retired shapes any more: a release tag is the SDK's or a
+# vendor module's.
+@test "lib: the shapes ADR 0162 retired are no release tag" {
   source "$LIB"
-  run next_patch "pkg/v0.1.0"
+  for t in pkg/v0.17.0 internal/core/v0.17.0 internal/kernel/v0.17.0 framework/v0.17.0; do
+    run is_valid_release_tag "$t"
+    [ "$status" -ne 0 ]
+  done
+  for t in v0.18.0 third-party/aws/v0.18.0 framework/connectors/postgres/v0.18.0; do
+    run is_valid_release_tag "$t"
+    [ "$status" -eq 0 ]
+  done
+}
+
+@test "lib: the connector and vendor shapes, and a stray shape that is neither" {
+  run bash -c ". '$LIB'; is_valid_vendor_tag framework/connectors/postgres/v0.12.0 && is_valid_vendor_tag third-party/x-crypto/v0.17.0 && is_valid_vendor_tag third-party/db/writer/mysql/v0.17.0 && is_valid_third_party_tag third-party/codec/hcl/v1.0.0"
   [ "$status" -eq 0 ]
-  [ "$output" = "pkg/v0.1.1" ]
+  # No module component, an upper-case one, a v2+ major, a version without its
+  # patch, a tool: none of them is a vendor module's tag.
+  for t in third-party/v0.17.0 third-party/AWS/v0.17.0 third-party/aws/v2.0.0 third-party/aws/v0.17 framework/connectors/Postgres/v0.12.0 tools/sdkguard/v0.1.0; do
+    run bash -c ". '$LIB'; is_valid_vendor_tag $t"
+    [ "$status" -ne 0 ]
+  done
+}
+
+@test "lib: next_patch increments PATCH only, from an SDK or a pkg base" {
+  source "$LIB"
+  run next_patch "v0.1.0"
+  [ "$status" -eq 0 ]
+  [ "$output" = "v0.1.1" ]
+  run next_patch "pkg/v0.17.0"
+  [ "$output" = "v0.17.1" ]
 }
 
 @test "lib: next_patch refuses pre-release base" {
   source "$LIB"
-  run next_patch "pkg/v0.1.0-rc.1"
+  run next_patch "v0.1.0-rc.1"
   [ "$status" -ne 0 ]
   [[ "$output" == *"pre-release"* ]]
 }
 
-@test "lib: next_minor resets PATCH to 0" {
+@test "lib: next_minor resets PATCH to 0, and continues pkg's numbering" {
   source "$LIB"
-  run next_minor "pkg/v0.1.5"
+  run next_minor "v0.1.5"
   [ "$status" -eq 0 ]
-  [ "$output" = "pkg/v0.2.0" ]
+  [ "$output" = "v0.2.0" ]
+  run next_minor "pkg/v0.17.0"
+  [ "$output" = "v0.18.0" ]
 }
 
-@test "lib: version_sort orders patches correctly cross-platform" {
-  source "$LIB"
-  run bash -c 'printf "pkg/v0.1.10\npkg/v0.1.2\npkg/v0.1.9\n" | { source "'"$LIB"'"; version_sort; } | tail -n1'
-  [ "$output" = "pkg/v0.1.10" ]
+@test "lib: version_sort orders by version whatever the prefix" {
+  run bash -c 'printf "pkg/v0.1.10\nv0.1.2\nthird-party/aws/v0.1.9\nv0.1.11\n" | { source "'"$LIB"'"; version_sort; }'
+  [ "$output" = $'v0.1.2\nthird-party/aws/v0.1.9\npkg/v0.1.10\nv0.1.11' ]
 }
 
-# ── ADR 0147: the framework joins the chain, read from go.work ──────────────
-
-# add_framework — a framework module requiring pkg and replacing what pkg needs,
-# and one connector requiring the framework, both used by go.work: the shape of
-# the real tree, where the framework replaces internal/core without requiring it.
-add_framework() {
-  mkdir -p framework/model framework/connectors/postgres
-  cat >framework/go.mod <<'EOF'
-module github.com/kitsunium/sdk/framework
-
-go 1.26
-
-require (
-	github.com/kitsunium/sdk/internal/kernel v0.0.0-00010101000000-000000000000
-	github.com/kitsunium/sdk/pkg v0.0.0-00010101000000-000000000000
-)
-
-replace github.com/kitsunium/sdk/internal/core => ../internal/core
-
-replace github.com/kitsunium/sdk/internal/kernel => ../internal/kernel
-
-replace github.com/kitsunium/sdk/internal/service => ../internal/service
-
-replace github.com/kitsunium/sdk/pkg => ../pkg
-EOF
-  cat >framework/connectors/postgres/go.mod <<'EOF'
-module github.com/kitsunium/sdk/framework/connectors/postgres
-
-go 1.26
-
-require github.com/kitsunium/sdk/framework v0.0.0-00010101000000-000000000000
-
-replace github.com/kitsunium/sdk/framework => ../..
-EOF
-  echo "package model" >framework/model/model.go
-  cat >go.work <<'EOF'
-go 1.26
-
-use (
-	.
-	./framework
-	./framework/connectors/postgres // one driver
-	./internal/core
-	./internal/kernel
-	./internal/service
-	./pkg
-)
-EOF
-  g add -A
-  g commit -q --no-verify -m "feat(framework): the module"
+# A tag of a module nested deeper is not the module's.
+@test "lib: latest_vendor_tag reads the module's own tags only" {
+  g tag third-party/db/writer/mysql/v0.9.0
+  g tag third-party/db/v0.3.0
+  g tag third-party/db/writer/mysql/v0.10.0-rc.1
+  run bash -c ". '$LIB'; latest_vendor_tag third-party/db/writer/mysql"
+  [ "$output" = "third-party/db/writer/mysql/v0.9.0" ]
+  run bash -c ". '$LIB'; latest_vendor_tag third-party/db"
+  [ "$output" = "third-party/db/v0.3.0" ]
 }
 
-@test "chain_modules reads go.work, leaves the root out, and orders the chain" {
-  add_framework
-  run bash -c ". '$LIB'; chain_modules go.work"
+# ── go.work names the modules a release may tag (ADR 0147 §9) ───────────────
+
+@test "vendor_modules reads go.work, leaves the SDK out, and sorts" {
+  add_vendors
+  run bash -c ". '$LIB'; vendor_modules go.work"
   [ "$status" -eq 0 ]
-  [ "$output" = $'internal/core\ninternal/kernel\ninternal/service\npkg\nframework\nframework/connectors/postgres' ]
+  [ "$output" = $'framework/connectors/postgres\nthird-party/aws\nthird-party/x-crypto' ]
 }
 
-@test "chain_modules refuses a missing go.work rather than guessing a chain" {
+@test "vendor_modules answers nothing for a go.work naming the SDK alone" {
+  run bash -c ". '$LIB'; vendor_modules go.work"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "vendor_modules refuses a missing go.work rather than guessing" {
   g rm -q go.work
   g commit -q --no-verify -m "chore: no workspace"
-  run bash -c ". '$LIB'; chain_modules go.work"
+  run bash -c ". '$LIB'; vendor_modules go.work"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"refusing to guess the release chain"* ]]
+  [[ "$output" == *"refusing to guess the release's modules"* ]]
 }
 
-@test "the framework tag shapes are valid chain tags, and a stray shape is not" {
-  run bash -c ". '$LIB'; is_valid_chain_tag framework/v0.12.0 && is_valid_chain_tag framework/connectors/postgres/v0.12.0 && is_valid_chain_tag internal/core/v0.12.0 && is_valid_chain_tag pkg/v0.12.0"
-  [ "$status" -eq 0 ]
-  run bash -c ". '$LIB'; is_valid_chain_tag framework/connectors/Postgres/v0.12.0"
+@test "vendor_modules refuses a go.work without the SDK module" {
+  printf 'go 1.27\n\nuse ./third-party/aws\n' >go.work
+  run bash -c ". '$LIB'; vendor_modules go.work"
   [ "$status" -ne 0 ]
-  run bash -c ". '$LIB'; is_valid_chain_tag framework/v2.0.0"
+  [[ "$output" == *"does not use ."* ]]
+}
+
+@test "vendor_modules refuses the merged modules back in go.work, naming them" {
+  printf 'go 1.27\n\nuse (\n\t.\n\t./framework\n\t./internal/core\n\t./third-party/aws\n)\n' >go.work
+  run bash -c ". '$LIB'; vendor_modules go.work"
   [ "$status" -ne 0 ]
-  run bash -c ". '$LIB'; is_valid_chain_tag tools/sdkguard/v0.1.0"
-  [ "$status" -ne 0 ]
-}
-
-@test "a framework release tags the whole chain once, pinned, with no replace left" {
-  need_toolchain
-  add_framework
-  run bash -c "printf 'pkg\nframework\n' | $SCRIPT --dry-run"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"would tag chain: internal/core/v0.1.0 internal/kernel/v0.1.0 internal/service/v0.1.0 pkg/v0.1.0 framework/v0.1.0 framework/connectors/postgres/v0.1.0"* ]]
-  # One chain for two tokens: a second pass would cut the next patch on top.
-  [ "$(grep -c 'would tag chain' <<<"$output")" -eq 1 ]
-  # The framework pins pkg and the connector pins the framework …
-  [[ "$output" == *"github.com/kitsunium/sdk/pkg v0.1.0"* ]]
-  [[ "$output" == *"github.com/kitsunium/sdk/framework v0.1.0"* ]]
-  # … and every intra-repo replace is gone, the ones nothing requires included.
-  [[ "$output" != *"=> ../"* ]]
-}
-
-@test "the framework token alone is accepted and cuts the chain" {
-  add_framework
-  run bash -c "echo framework | $SCRIPT"
-  [ "$status" -eq 3 ]
-  [[ "$output" == *"refusing to auto-cut the FIRST release (pkg/v0.1.0)"* ]]
-}
-
-@test "an unknown token is still refused" {
-  run bash -c "echo tools | $SCRIPT"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"expected 'pkg', 'framework' or 'third-party'"* ]]
-}
-
-# ── ADR 0157: the vendor modules join the chain, read from go.work ──────────
-
-# add_third_party — two vendor modules under third-party/, each requiring and
-# replacing internal/*, used by go.work after the framework: the shape of the
-# real tree, where a vendor module requires internal/* exactly.
-add_third_party() {
-  add_framework
-  mkdir -p third-party/aws/writer/s3 third-party/x-crypto/argon2id
-  cat >third-party/aws/go.mod <<'GOMOD'
-module github.com/kitsunium/sdk/third-party/aws
-
-go 1.26
-
-require (
-	github.com/kitsunium/sdk/internal/core v0.0.0-00010101000000-000000000000
-	github.com/kitsunium/sdk/internal/kernel v0.0.0-00010101000000-000000000000
-)
-
-replace github.com/kitsunium/sdk/internal/core => ../../internal/core
-
-replace github.com/kitsunium/sdk/internal/kernel => ../../internal/kernel
-GOMOD
-  cat >third-party/x-crypto/go.mod <<'GOMOD'
-module github.com/kitsunium/sdk/third-party/x-crypto
-
-go 1.26
-
-require github.com/kitsunium/sdk/internal/kernel v0.0.0-00010101000000-000000000000
-
-replace github.com/kitsunium/sdk/internal/kernel => ../../internal/kernel
-GOMOD
-  echo "package s3" >third-party/aws/writer/s3/s3.go
-  echo "package argon2id" >third-party/x-crypto/argon2id/argon2id.go
-  cat >go.work <<'GOWORK'
-go 1.26
-
-use (
-	.
-	./framework
-	./framework/connectors/postgres // one driver
-	./internal/core
-	./internal/kernel
-	./internal/service
-	./pkg
-	./third-party/x-crypto
-	./third-party/aws
-)
-GOWORK
-  g add -A
-  g commit -q --no-verify -m "feat(third-party): one module per vendor"
-}
-
-@test "chain_modules puts the vendor modules last, by name" {
-  add_third_party
-  run bash -c ". '$LIB'; chain_modules go.work"
-  [ "$status" -eq 0 ]
-  [ "$output" = $'internal/core\ninternal/kernel\ninternal/service\npkg\nframework\nframework/connectors/postgres\nthird-party/aws\nthird-party/x-crypto' ]
-}
-
-@test "the vendor tag shapes are valid chain tags, and a stray shape is not" {
-  run bash -c ". '$LIB'; is_valid_chain_tag third-party/aws/v0.17.0 && is_valid_chain_tag third-party/x-crypto/v0.17.0 && is_valid_chain_tag third-party/db/writer/mysql/v0.17.0 && is_valid_third_party_tag third-party/codec/hcl/v1.0.0"
-  [ "$status" -eq 0 ]
-  # No module component, an upper-case one, a v2+ major, a version without its
-  # patch: none of them is a vendor module's tag.
-  run bash -c ". '$LIB'; is_valid_chain_tag third-party/v0.17.0"
-  [ "$status" -ne 0 ]
-  run bash -c ". '$LIB'; is_valid_chain_tag third-party/AWS/v0.17.0"
-  [ "$status" -ne 0 ]
-  run bash -c ". '$LIB'; is_valid_chain_tag third-party/aws/v2.0.0"
-  [ "$status" -ne 0 ]
-  run bash -c ". '$LIB'; is_valid_chain_tag third-party/aws/v0.17"
-  [ "$status" -ne 0 ]
-}
-
-@test "a vendor release tags the whole chain once, pinned, with no replace left" {
-  need_toolchain
-  add_third_party
-  run bash -c "printf 'pkg\nthird-party\n' | $SCRIPT --dry-run"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"would tag chain: internal/core/v0.1.0 internal/kernel/v0.1.0 internal/service/v0.1.0 pkg/v0.1.0 framework/v0.1.0 framework/connectors/postgres/v0.1.0 third-party/aws/v0.1.0 third-party/x-crypto/v0.1.0"* ]]
-  # One chain for two tokens: a second pass would cut the next patch on top.
-  [ "$(grep -c 'would tag chain' <<<"$output")" -eq 1 ]
-  # Each vendor module pins internal/* at the release …
-  [[ "$output" == *"--- third-party/aws/go.mod ---"* ]]
-  [[ "$output" == *"github.com/kitsunium/sdk/internal/core v0.1.0"* ]]
-  # … and every intra-repo replace is gone.
-  [[ "$output" != *"=> ../"* ]]
-}
-
-@test "the third-party token alone is accepted and cuts the chain" {
-  add_third_party
-  run bash -c "echo third-party | $SCRIPT"
-  [ "$status" -eq 3 ]
-  [[ "$output" == *"refusing to auto-cut the FIRST release (pkg/v0.1.0)"* ]]
+  [[ "$output" == *"uses framework internal/core, which is no vendor module"* ]]
 }

@@ -44,7 +44,7 @@ func TestDatabaseDeclarationsAreCheckedAllAtOnce(t *testing.T) {
 			t.Errorf("no problem says %q", want)
 			continue
 		}
-		if s := de.Diagnostics[i].Source; s == nil || s.File != "internal/kit/database_decl_test.go" || s.Line < line || s.Line > line+12 {
+		if s := de.Diagnostics[i].Source; s == nil || s.File != "framework/internal/kit/database_decl_test.go" || s.Line < line || s.Line > line+12 {
 			t.Errorf("%q is said at %+v", want, s)
 		}
 	}

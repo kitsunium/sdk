@@ -4,7 +4,7 @@
 # tests compile, on every target platform we support?" YES/NO, and prints a
 # matrix.
 #
-# It cross-compiles every package in every SDK module against the full GOOS
+# It cross-compiles every package of every module of the census against the full GOOS
 # matrix (no cgo, pure build — the proc syscalls are stdlib `syscall`, so a
 # clean `go build` is a faithful portability signal), then `go vet`s it, which
 # type-checks the _test.go files `go build` never compiles (ADR 0094). A

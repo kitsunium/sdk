@@ -69,7 +69,7 @@ type ModuleValue struct {
 	// stamp, or the timestamp a pseudo-version carries. Zero otherwise.
 	Time time.Time
 	// Path is the module path the build required, e.g.
-	// "github.com/kitsunium/sdk/pkg".
+	// "github.com/kitsunium/sdk".
 	Path string
 	// Version is the released version the code came from, e.g. "v0.4.6", or
 	// "" when there is none to tell: a pseudo-version (a commit, in Revision),

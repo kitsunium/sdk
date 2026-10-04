@@ -21,8 +21,8 @@ package, `go get` names the module.
 
 Entitlement's ssh `Identity` (ADR 0079), `third-party/entitlement` until ADR
 0158, is not here any more: it is the framework's connector module
-`framework/connectors/ssh`, beside the database engines. The root module holds
-no package (ADR 0157 §5).
+`framework/connectors/ssh`, beside the database engines. The root module is the
+SDK itself — `internal/`, `pkg/`, `framework/` — since ADR 0162.
 
 ## Rules
 
@@ -34,21 +34,27 @@ no package (ADR 0157 §5).
   of one the other's graph, which is the defect ADR 0157 removes.
 - **The import paths did not change.** `github.com/kitsunium/sdk/third-party/aws/writer/s3`
   is still the package; what changed is the module that hosts it.
-- **Each module requires `internal/*` exactly, and replaces it in development.**
-  Its `go.mod` replaces `internal/{kernel,core,service}` with this tree, as
-  `framework/connectors/*` do; the release commit drops every intra-SDK
-  `replace` and pins the requires at the version being cut.
+- **Each module requires the SDK module, and replaces it in development.**
+  Its `go.mod` requires `github.com/kitsunium/sdk` — whose `internal/` packages
+  it imports, which Go allows from a path under `github.com/kitsunium/sdk/` —
+  and replaces it with this tree, as `framework/connectors/*` do; the release
+  commit that tags the module drops the `replace` and pins the SDK at the
+  version being cut (ADR 0162).
 - **Each module is in `go.work`**, so Bazel's `go_deps` resolves its vendor and
-  the release chain tags it; git tracks its `go.mod`, so every census lane
+  a release may tag it; git tracks its `go.mod`, so every census lane
   (ADR 0137) builds, vets, tests and scans it like any other module. Its root
   directory carries a `BUILD.bazel` with its `gazelle:prefix` —
   `third-party/aws` and `third-party/x-crypto` hold no package, and their
   `BUILD.bazel` exists only so `//third-party/aws:go.mod` and
   `//third-party/x-crypto:go.mod` load.
-- **Released in lockstep** with the chain (ADR 0147 §9): the tag carries the
-  module's directory, `third-party/aws/vX.Y.Z`, at the same version as
-  `pkg/vX.Y.Z`. `compute-bumps.sh` emits the token `third-party` for a change
-  here; any token cuts the whole chain once.
+- **Tagged when it changes** (ADR 0162): a release tags a module here only
+  when one of its files that a consumer sees changed since the module's own
+  last tag — or when it has none —, at the version of the SDK release that
+  carries the change: `third-party/aws/vX.Y.Z` beside the SDK's `vX.Y.Z`. A
+  module that did not change keeps its last tag, whose go.mod requires the SDK
+  release it was cut with. No GitHub release is made for it; the SDK release's
+  notes list the vendor tags it cut. Up to v0.17.0 every module was tagged in
+  lockstep with `pkg/vX.Y.Z` (ADR 0157 §3).
 - **The layer rule is unchanged:** `third-party/` sits above `internal/` and
   `pkg/` and beside the framework — nothing in `internal/`, `pkg/` or
   `framework/` imports it, and it imports nothing of the framework
@@ -65,9 +71,11 @@ bazel test //third-party/...                            # every vendor module un
 ```
 
 A pattern never crosses a module boundary: from the root, `./third-party/...`
-reaches nothing, because the root module holds no package, and with `GOWORK=off`
-`./third-party/aws/...` reaches nothing either. Loop over
-`bash scripts/ci/go-modules.sh` to reach every module (ADR 0137).
+reaches nothing, in workspace mode or not — every directory there belongs to a
+vendor module and none to the SDK module the root is —, and
+`./third-party/aws/...` reaches that module's packages in workspace mode and
+nothing with `GOWORK=off`. Loop over `bash scripts/ci/go-modules.sh` to reach
+every module (ADR 0137).
 
 The opt-in suites behind a build tag keep the run procedure their package
 `CLAUDE.md` gives (rule 12). The AWS writers' `localstack` suites stay in
@@ -86,5 +94,5 @@ consumer of that writer (ADR 0157). The SQL mechanisms' suite on real engines,
 - Add a test that imports testcontainers, moby or a driver the module does not
   ship to a module here: tests count in a module's `go.mod`. It goes to
   `e2e/integration/`.
-- Write a `third-party/<path>/v…` tag by hand: the release chain cuts every
-  module of `go.work` at one version (`scripts/release/cut-tags.sh`).
+- Write a `third-party/<path>/v…` tag by hand: a release tags the modules that
+  changed, at its own version (`scripts/release/cut-tags.sh`, ADR 0162).

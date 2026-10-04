@@ -808,7 +808,7 @@ Version 3 adds the secret kind \([SecretSpec](<#SecretSpec>)\), the uses edge, t
 
 Version 4 is the one bump the decisions of issue \#17 share. It adds the port kind \([PortSpec](<#PortSpec>)\) and its binding, a declared edge from the port to what it calls; the endpoint that implements a port \([EndpointSpec.Implements](<#EndpointSpec>)\), which has no method and no path; and the replace mock mode \([MockReplace](<#MockReplace>)\). ADR 0004 adds the databases: the store's database \([StoreSpec.Database](<#StoreSpec>)\), the database container, the database connector and its adapters, [RuntimeMessage.Databases](<#RuntimeMessage>) and [SettingMessage.Database](<#SettingMessage>). ADR 0008 adds the modules the app mounts \([GraphMessage.Modules](<#GraphMessage>)\), the module of a node \([NodeEntity.Module](<#NodeEntity>)\) and the Go module of a position outside the product's \([SourceMessage.GoModule](<#SourceMessage>)\); and the watch, a subscription fed by stores: its mark and the stores that feed it \([SubscriptionSpec.Mark](<#SubscriptionSpec>), [SubscriptionSpec.Stores](<#SubscriptionSpec>)\), each drawing a declared delivers edge to it. ADR 0005 adds the command and query kinds \([CommandSpec](<#CommandSpec>), [QuerySpec](<#QuerySpec>)\), the dispatches and asks edges, the endpoint that exposes one \([EndpointSpec.Exposes](<#EndpointSpec>)\), the read model \([StoreSpec.ReadModel](<#StoreSpec>)\), the dispatch, ask and handle span operations and the dispatch and ask controls.
 
-Version 5 is the first the SDK's framework module publishes \(ADR 0147\). It adds what a product is made of beyond its services: the binary \([KindBinary](<#KindService>)\) and its process roles \([KindRole](<#KindService>)\), the short CLI command \([KindCLI](<#KindService>)\), the listener that is not HTTP \([KindListener](<#KindService>)\), the library shared between components \([KindLibrary](<#KindService>)\) and the presentation \([KindPresentation](<#KindService>)\); the edge between two roles of a product, which carries a versioned contract \([EdgeContracts](<#EdgeCalls>), [EdgeMessage.Contract](<#EdgeMessage>)\); and the grammar every ID follows, written once \([IDValue](<#IDValue>), [ParseID](<#ParseID>)\). It removes what the Studio no longer does \(D13\): the respond, fail and delay mock modes, the control event and its payload — a [MockMessage](<#MockMessage>) is a test's replacement only.
+Version 5 is the first the SDK's framework publishes \(ADR 0147\). It adds what a product is made of beyond its services: the binary \([KindBinary](<#KindService>)\) and its process roles \([KindRole](<#KindService>)\), the short CLI command \([KindCLI](<#KindService>)\), the listener that is not HTTP \([KindListener](<#KindService>)\), the library shared between components \([KindLibrary](<#KindService>)\) and the presentation \([KindPresentation](<#KindService>)\); the edge between two roles of a product, which carries a versioned contract \([EdgeContracts](<#EdgeCalls>), [EdgeMessage.Contract](<#EdgeMessage>)\); and the grammar every ID follows, written once \([IDValue](<#IDValue>), [ParseID](<#ParseID>)\). It removes what the Studio no longer does \(D13\): the respond, fail and delay mock modes, the control event and its payload — a [MockMessage](<#MockMessage>) is a test's replacement only.
 
 ```go
 const Version int = 5
@@ -1025,7 +1025,7 @@ type AdapterMessage struct {
 ```
 
 <a name="AnalysisResult"></a>
-## type [AnalysisResult](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/model.go#L225-L236>)
+## type [AnalysisResult](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/model.go#L227-L238>)
 
 AnalysisResult reports the status of static analysis. It says whether the analyzer ran, how long it took, and the error that stopped it.
 
@@ -1153,7 +1153,7 @@ type BootStepMessage struct {
 ```
 
 <a name="BuildMessage"></a>
-## type [BuildMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/model.go#L118-L125>)
+## type [BuildMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/model.go#L118-L127>)
 
 BuildMessage is what a binary was built from, at its three levels. Its three levels are the Go toolchain, the main module and the modules it depends on.
 
@@ -1161,9 +1161,11 @@ BuildMessage is what a binary was built from, at its three levels. Its three lev
 type BuildMessage struct {
     // Product is the product's own module.
     Product ModuleVersionMessage `json:"product"`
-    // Kit is the framework.
+    // Kit is the framework: since ADR 0162 the SDK module,
+    // github.com/kitsunium/sdk, which holds it.
     Kit ModuleVersionMessage `json:"kit"`
-    // SDK is the SDK the framework depends on.
+    // SDK is the SDK the framework is built on — the same module as Kit
+    // since ADR 0162, so the two say the same version.
     SDK ModuleVersionMessage `json:"sdk"`
 }
 ```
@@ -1587,7 +1589,7 @@ type DevBuildMessage struct {
 ```
 
 <a name="DiagnosticMessage"></a>
-## type [DiagnosticMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/model.go#L208-L220>)
+## type [DiagnosticMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/model.go#L210-L222>)
 
 DiagnosticMessage is a problem found while building the graph. It names the node or the file it is about, and how serious it is.
 
@@ -1666,7 +1668,7 @@ const (
 ```
 
 <a name="EdgeMessage"></a>
-## type [EdgeMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/model.go#L168-L189>)
+## type [EdgeMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/model.go#L170-L191>)
 
 EdgeMessage is one relation, with the evidence for it. Declared, Static and Observed say whether construction, the code or the runtime knows it.
 
@@ -2654,7 +2656,7 @@ type ModuleMessage struct {
 ```
 
 <a name="ModuleVersionMessage"></a>
-## type [ModuleVersionMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/model.go#L129-L144>)
+## type [ModuleVersionMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/model.go#L131-L146>)
 
 ModuleVersionMessage identifies one module of a build. Local and Modified say when the code that ran is not the published version.
 
@@ -3510,7 +3512,7 @@ type SnippetMessage struct {
 ```
 
 <a name="SourceMessage"></a>
-## type [SourceMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/model.go#L149-L163>)
+## type [SourceMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/model.go#L151-L165>)
 
 SourceMessage locates code. File is relative to its module's root; Line and EndLine bound the declaration.
 
@@ -3598,7 +3600,7 @@ type StateSpec struct {
 ```
 
 <a name="StatsMessage"></a>
-## type [StatsMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/model.go#L193-L204>)
+## type [StatsMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/model.go#L195-L206>)
 
 StatsMessage are observed counters for a node or an edge. They are counters: they never move a graph's revision.
 

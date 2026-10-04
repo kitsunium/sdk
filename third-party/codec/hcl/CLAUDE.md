@@ -9,7 +9,7 @@ heavier dep graph that, added to `internal/service`, would **introduce**
 `golang.org/x/sys` there (measured: `v0.20.0`, pulled by `x/tools`) — a module
 that is **banned SDK-wide**, which is exactly why `proc`'s syscall code is
 written against raw stdlib `syscall`. Quarantining it in a module of its own keeps
-the dep-light service module untouched, and a consumer of HCL inherits no other
+the SDK module — its service layer included (ADR 0162) — dep-light, and a consumer of HCL inherits no other
 vendor (ADR 0022, with its mechanism corrected
 by ADR 0034 — nothing is *downgraded*; mirrors the ADR 0012 writer-quarantine
 policy). **Opt-in**: blank-import this package to

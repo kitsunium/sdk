@@ -63,7 +63,7 @@ Each package owns a sibling `CLAUDE.md` documenting its surface and contract.
 
 ## Module
 
-Single module `github.com/kitsunium/sdk/internal/kernel` — one `go.mod`, one `go.sum`, shared test harness. Every package directory — at the root or under a family directory — is a Go package of this one module (not a sub-module); a family directory (`concur/`, `collections/`, `fs/`) holds no Go code. Build with `cd internal/kernel && GOWORK=off go build ./...`; CI uses Bazel (`bazel test --config=race //internal/kernel/...`).
+A directory of the one SDK module, `github.com/kitsunium/sdk` (ADR 0162), whose `go.mod` is at the repository root — a module of its own until then — with a shared test harness. Every package directory — at the root or under a family directory — is a Go package of that module (not a sub-module); a family directory (`concur/`, `collections/`, `fs/`) holds no Go code. Build with `cd internal/kernel && GOWORK=off go build ./...`; CI uses Bazel (`bazel test --config=race //internal/kernel/...`).
 
 ## Why NO `level/` here?
 

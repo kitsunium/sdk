@@ -12,9 +12,10 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 # gomarkdoc must be on PATH — installed with `go install`, pinned to the
-# same v1.1.0 as the Makefile and bazel-ci.yml. Avoiding the
-# `tool` directive in pkg/go.mod keeps the consumer dep graph
-# clean (was 54 indirect deps, now 9).
+# same v1.1.0 as the Makefile and bazel-ci.yml. Avoiding a `tool`
+# directive in the SDK module's go.mod keeps the consumer dep graph
+# clean (it was 54 indirect deps; the module requires nothing now —
+# ADR 0156).
 if ! command -v gomarkdoc >/dev/null 2>&1; then
     echo "✗ gomarkdoc not on PATH. Install via:" >&2
     echo "    go install github.com/princjef/gomarkdoc/cmd/gomarkdoc@v1.1.0" >&2
@@ -31,9 +32,10 @@ fi
 # (check-readme-determinism.sh keeps a small fixed sample on purpose: it tests
 # gomarkdoc's own reproducibility, not per-package coverage.)
 #
-# Two roots publish generated READMEs: pkg/v1 and the framework module above it
-# (ADR 0147). Each package is recorded as "<root> <dir>", so the check runs from
-# the root its go:generate line is relative to.
+# Two roots publish generated READMEs: pkg/v1 and the framework above it (ADR
+# 0147), both directories of the SDK module (ADR 0162). Each package is
+# recorded as "<root> <dir>", so the check runs from the root its go:generate
+# line is relative to.
 #
 # A read loop, not `readarray`: readarray is bash 4, and the guard runs under
 # macOS's /bin/bash 3.2 as well (#260).

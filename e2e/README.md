@@ -25,8 +25,9 @@ summary: 58 pass · 0 fail · 1 unsupported · 0 skip
 ```
 
 `GOWORK=off` is required because the module is intentionally **outside** the root
-`go.work` (so the Bazel `go_deps` graph ignores it); it resolves `pkg`/`internal`
-via its own `replace` directives.
+`go.work` (so the Bazel `go_deps` graph ignores it); it resolves the SDK module,
+`github.com/kitsunium/sdk` (ADR 0162), and the database writers it tests via
+its own `replace` directives.
 
 ## Statuses
 

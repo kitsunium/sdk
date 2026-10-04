@@ -21,9 +21,10 @@ Rules:
   failure half-way leaves the first applied (the SDK's ADR 0055, D8).
 - The driver's logger says nothing (`quiet`): its lines would name the
   server, and a product logs through the SDK alone.
-- `go.mod` requires the framework at the last release and replaces it — and
-  the SDK modules below it — with this tree; the release commit pins them
-  (ADR 0147 §9). It is a module of the SDK's `go.work`.
+- `go.mod` requires the SDK module, `github.com/kitsunium/sdk` — kit and the
+  packages below it — and replaces it with this tree; a release that changes
+  this module tags it and pins the SDK at that release (ADR 0162). It is a
+  module of the SDK's `go.work`.
 
 ## Test
 

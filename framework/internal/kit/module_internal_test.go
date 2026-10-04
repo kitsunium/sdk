@@ -19,11 +19,17 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/clock"
 )
 
-// toolsPos is a position in another Go module of the test binary —
-// github.com/kitsunium/sdk/pkg, which the framework links —: the test binary is one Go
-// module, so a module here says it is that one's.
+// toolsModule is the Go module toolsPos says its positions belong to.
+const toolsModule = "github.com/kitsunium/sdk/pkg"
+
+// toolsPos is a position in another Go module of the build. The framework and
+// the SDK are one Go module (ADR 0162), so the test binary links no second
+// one: for the test, the directory pkg/ is a Go module of its own,
+// github.com/kitsunium/sdk/pkg — as it was before ADR 0162 —, and the position
+// is clock.NewManualClock's, in a file under that directory.
 func toolsPos(t *testing.T) pos {
 	t.Helper()
+	anotherGoModule(t, toolsModule)
 	fn := runtime.FuncForPC(reflect.ValueOf(clock.NewManualClock).Pointer())
 	file, line := fn.FileLine(fn.Entry())
 	if !filepath.IsAbs(file) {
@@ -31,6 +37,19 @@ func toolsPos(t *testing.T) pos {
 	}
 	pkg, _ := packageOf(fn.Name())
 	return posAt(file, line, "", pkg)
+}
+
+// anotherGoModule makes path a Go module of the build until the test ends, as
+// a module of another Go module is one in a product's build: buildModules
+// names it beside the binary's own. No test of this package runs in parallel,
+// so the swap reaches no other test.
+func anotherGoModule(t *testing.T, path string) {
+	t.Helper()
+	built := buildModules
+	buildModules = func() []goModule {
+		return append(slices.Clone(built()), goModule{path: path, id: path})
+	}
+	t.Cleanup(func() { buildModules = built })
 }
 
 func TestPackageOf(t *testing.T) {
@@ -72,9 +91,8 @@ func TestAModuleRefusesAForeignDeclaration(t *testing.T) {
 	}
 }
 
-// toolsAccounts is a module of another Go module — github.com/kitsunium/sdk/pkg, as
-// its declarations say — whose store keeps accounts and their passwords'
-// hashes.
+// toolsAccounts is a module of another Go module — toolsModule, as its
+// declarations say — whose store keeps accounts and their passwords' hashes.
 func toolsAccounts(t *testing.T) (*Module, *StoreService[lockAccount]) {
 	t.Helper()
 	home := toolsPos(t)
@@ -102,7 +120,7 @@ func TestAModuleRefusesAForeignPasswordPolicy(t *testing.T) {
 	if len(de.Diagnostics) != 1 || !strings.HasPrefix(de.Diagnostics[0].Message, want) {
 		t.Fatalf("the start said %+v, want only %q", de.Diagnostics, want)
 	}
-	if src := de.Diagnostics[0].Source; src == nil || src.File != "internal/kit/module_internal_test.go" || src.Line != policy.decl.line() {
+	if src := de.Diagnostics[0].Source; src == nil || src.File != "framework/internal/kit/module_internal_test.go" || src.Line != policy.decl.line() {
 		t.Errorf("the refusal is at %+v, want the policy's line, %d", src, policy.decl.line())
 	}
 }

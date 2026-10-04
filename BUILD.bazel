@@ -1,8 +1,9 @@
 load("@gazelle//:def.bzl", "gazelle")
 
 # ── Gazelle directives ─────────────────────────────────────────────────
-# Repo-wide Go import prefix; each layer root re-declares its own prefix
-# so multi-module detection works correctly.
+# Repo-wide Go import prefix: the SDK is the one module at the root (ADR
+# 0162). Each module that requires a vendor — under third-party/ and
+# framework/connectors/ — re-declares its own prefix at its module root.
 # gazelle:prefix github.com/kitsunium/sdk
 # gazelle:go_naming_convention import_alias
 

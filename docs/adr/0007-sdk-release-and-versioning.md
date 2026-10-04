@@ -1,6 +1,7 @@
 # ADR 0007 — SDK release workflow and versioning policy
 
 **Status**: Accepted. **Tag shape amended by ADR 0017** — the public module is the bare `…/pkg`, so its tag is `pkg/vX.Y.Z` (major 0|1), not `pkg/<major>/vX.Y.Z` (the latter is reserved for a future `…/pkg/v2`). **§2 amended by ADR 0085** — the `Release-bump` trailer is read over the whole range since the last release, not from the merge commit only; **by [ADR 0089](0089-a-file-that-cannot-cut-a-release-cannot-size-one.md)** — row 4's scope is the paths that can CUT a release (`pkg/` or `internal/`, minus maintainer-only files), not `pkg/` alone, which makes row 3 expressible; **and by [ADR 0135](0135-a-release-is-sized-by-a-label-a-maintainer-set.md)** — the size is a `release:*` label a maintainer set on the merged pull request, and a `Release-bump:` line in a message only asks. The guarantee under the table ("an attacker cannot smuggle through a PR body") held for a true merge and never for the squash merges this repository makes; it now rests on who can apply a label.
+**Amended by**: [ADR 0162](0162-the-sdk-is-one-module-and-a-release-is-one-tag.md) — a release is one tag, `vX.Y.Z`, on the SDK module at the repository root, plus `<dir>/vX.Y.Z` for each vendor module that changed since its own tag, and one GitHub release; §5's docs sync reads the root tags beside the `pkg/vX.Y.Z` history
 **Date**: 2026-05-22
 **Deciders**: kitsunium maintainers
 **Supersedes**: —

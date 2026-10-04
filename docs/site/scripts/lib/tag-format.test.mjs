@@ -137,3 +137,64 @@ test("parseTag accepts the bare pkg/vX.Y.Z shape (ADR 0017)", () => {
   //: garbage after the semver is still rejected (anchored regex).
   assert.equal(parseTag("pkg/v0.1.0;rm -rf /"), null);
 });
+
+test("parseTag accepts the SDK module's root vX.Y.Z shape (ADR 0162)", () => {
+  //: one tag per release on github.com/kitsunium/sdk, at the repository root.
+  //: It groups under the same on-disk "v1" axis the pkg/vX.Y.Z history does.
+  const first = parseTag("v0.18.0");
+  assert.equal(first?.major, "v1");
+  assert.deepEqual(first?.parts, [0, 18, 0]);
+  assert.equal(first?.semver, "0.18.0");
+  assert.equal(first?.prerelease, null);
+
+  const pre = parseTag("v1.0.0-rc.1");
+  assert.equal(pre?.major, "v1");
+  assert.equal(pre?.prerelease, "rc.1");
+
+  //: a bare v2+ root tag needs a …/v2 module path; the vendor modules' tags
+  //: are no release of their own; garbage is rejected by the anchored regex.
+  assert.equal(parseTag("v2.0.0"), null);
+  assert.equal(parseTag("third-party/aws/v0.18.0"), null);
+  assert.equal(parseTag("framework/connectors/postgres/v0.18.0"), null);
+  assert.equal(parseTag("framework/v0.17.0"), null);
+  assert.equal(parseTag("v0.18.0;rm -rf /"), null);
+});
+
+test("the root tags continue the pkg history in one list, newest default", () => {
+  //: the first root tag continues pkg's numbering: pkg/v0.17.0 then v0.18.0
+  //: are two releases of the same "v1" axis, ordered by semver.
+  const realByMajor = buildVersionsJson([
+    ghRelease("pkg/v0.17.0", "2026-10-01T00:00:00Z"),
+    ghRelease("v0.18.0", "2026-10-04T00:00:00Z"),
+    ghRelease("third-party/aws/v0.17.0", "2026-10-01T00:00:00Z"),
+  ]);
+  const versions = stitchVersions({ majorsOnDisk: ["v1"], realByMajor });
+  const v1 = versions.find((v) => v.major === "v1");
+  assert.deepEqual(
+    v1.releases.map((r) => r.version),
+    [LOCAL_RELEASE, "0.18.0", "0.17.0"],
+  );
+  assert.equal(rel(versions, "v1", "0.18.0").default, true);
+  assert.equal(rel(versions, "v1", "0.18.0").tag, "v0.18.0");
+  assert.equal(rel(versions, "v1", "0.17.0").default, false);
+});
+
+test("a pkg/vX.Y.Z beside the root vX.Y.Z is its tombstone, not a release (ADR 0162)", () => {
+  //: the `git tag -l` fallback lists pkg/v0.18.0, the tombstone the first
+  //: root tag cut: a go.mod and no package, so no version of its own.
+  const realByMajor = buildVersionsJson([
+    ghRelease("pkg/v0.17.0", "2026-10-01T00:00:00Z"),
+    ghRelease("v0.18.0"),
+    ghRelease("pkg/v0.18.0"),
+  ]);
+  const v1 = realByMajor.find((v) => v.major === "v1");
+  assert.deepEqual(
+    v1.releases.map((r) => r.tag),
+    ["v0.18.0", "pkg/v0.17.0"],
+  );
+  //: a pkg tag with no root tag at its version is history, kept.
+  assert.deepEqual(
+    buildVersionsJson([ghRelease("pkg/v0.17.0")])[0].releases.map((r) => r.tag),
+    ["pkg/v0.17.0"],
+  );
+});

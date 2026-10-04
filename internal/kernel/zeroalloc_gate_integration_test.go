@@ -1,7 +1,7 @@
 //go:build !race
 
 // Package kernel_zeroalloc_test is the SDK-wide zero-allocation invariant gate.
-// It lives at the kernel module root (importing the gated packages, embedding
+// It lives at the kernel layer's root (importing the gated packages, embedding
 // none) and asserts that every documented zero-alloc hot path actually reports
 // AllocsPerOp == 0. A regression — someone adds an allocation to a hot path —
 // fails this test and the build.

@@ -258,7 +258,7 @@ func TestADatabaseIsDrawn(t *testing.T) {
 		!slices.Equal(c.Nodes, []string{"audit/store/trail", "books/store/entries"}) {
 		t.Errorf("container %+v", c)
 	}
-	if want := (model.Source{File: "internal/kit/database_test.go", Line: o.line}); c.Source == nil || *c.Source != want || !slices.Contains(o.g.Files(), model.File{File: want.File}) {
+	if want := (model.Source{File: "framework/internal/kit/database_test.go", Line: o.line}); c.Source == nil || *c.Source != want || !slices.Contains(o.g.Files(), model.File{File: want.File}) {
 		t.Errorf("the container points at %+v, want %+v", c.Source, want)
 	}
 	if want := []string{

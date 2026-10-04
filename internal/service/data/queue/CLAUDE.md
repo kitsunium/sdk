@@ -455,7 +455,7 @@ delivery count incremented. That is a contract now: a broker that answered
   clock. Spell no marker, quote or row lock by hand there either: they are
   `core/data/sql.Dialect`'s, which this file used to copy.
 - Parse a driver's error, or let its text into a rendering — join it through
-  `service/data/sql`'s `Withheld`. The service module imports no driver (ADR 0055
+  `service/data/sql`'s `Withheld`. The service layer imports no driver (ADR 0055
   §D2).
 - Fire the SQL broker's wake before the transaction a publication joined has
   committed: `announce` goes through `Defer`, and a wake for a rolled-back

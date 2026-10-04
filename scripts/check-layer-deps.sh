@@ -15,6 +15,13 @@
 # wired into `make lint` and CI rather than into the per-commit hook, whose
 # guards run without it.
 #
+# The tests are in it too. A pattern such as //internal/kernel/... takes in the
+# layer's go_test targets — `manual` ones included — and deps() walks theirs,
+# so a test that imports a layer above is reached like a library is. Since ADR
+# 0162 this is the only check of that: the module boundaries that used to
+# refuse it in a GOWORK=off build are gone. Measured: a kernel test given a
+# dependency on //internal/core/crypto failed "kernel depends on kernel only".
+#
 # It fails CLOSED: a query that cannot be answered stops it, because a
 # firewall check that passes on an unreadable graph checks nothing.
 set -euo pipefail
@@ -48,7 +55,7 @@ check "service depends on no pkg or third-party code" \
 	'kind("go_library", deps(//internal/service/...)) intersect (//pkg/... + //third-party/...)'
 check "pkg depends on no third-party code" \
 	'kind("go_library", deps(//pkg/...)) intersect //third-party/...'
-# The framework module sits above pkg/v1 (ADR 0147): nothing below reaches it,
+# The framework sits above pkg/v1 (ADR 0147): nothing below reaches it,
 # it reaches no third-party code, and its only DIRECT edge into internal/ is the
 # meta package errs, which is how a sentinel is defined — every other mechanism
 # it uses comes through pkg/v1, as it would for any product.

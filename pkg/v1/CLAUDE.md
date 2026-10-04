@@ -156,7 +156,7 @@ The legacy byte-level `codec/baseenc` package — an `Encoding` enum over raw by
 
 ## Module
 
-Single Go module `github.com/kitsunium/sdk/pkg` — one `go.mod` (at `pkg/go.mod`), one `go.sum`. The consumer packages live under this `v1/` directory, so import paths stay `github.com/kitsunium/sdk/pkg/v1/*`; only the module declaration sits one level up. Go forbids a `/v1` module-path suffix, so the module itself is the bare `…/pkg` (ADR 0017). Built and tested under Bazel via `//pkg/v1/...`; `cd pkg && GOWORK=off go test ./...` works for local iteration.
+A directory of the one SDK module, `github.com/kitsunium/sdk`, whose `go.mod` is at the repository root (ADR 0162): import paths are `github.com/kitsunium/sdk/pkg/v1/*`, and a consumer requires the SDK module. Until ADR 0162 the packages here were the bare module `…/pkg` (ADR 0017), tagged `pkg/vX.Y.Z`. Built and tested under Bazel via `//pkg/v1/...`; `cd pkg && GOWORK=off go test ./...` works for local iteration.
 
 ## Public surface contract
 
@@ -174,7 +174,7 @@ Single Go module `github.com/kitsunium/sdk/pkg` — one `go.mod` (at `pkg/go.mod
   3. PR #27 deleted the byte-level `codec/baseenc/` package itself (and `EncodingUnknown` with it) in favour of `codec.Marshal` dispatch — see Contents above.
   4. ADR 0044 re-shaped the published `metrics` types onto the OpenTelemetry data model, citing ADR 0040.
 - All of them shipped before `v1.0.0`. **After v1.0.0 the policy hardens: no breaking changes in `pkg/v1`** — any further migrations go to `pkg/v2`. The pre-1.0 precedent does not authorise post-1.0 breakage.
-- Security fixes in `internal/*` propagate via minor bumps on the affected module without touching `pkg/v1` — the facade re-exports, it does not duplicate.
+- Security fixes in `internal/*` ship in the SDK module's next release without touching `pkg/v1` — the facade re-exports, it does not duplicate.
 
 ## Conventions
 
@@ -211,9 +211,8 @@ Superseded by ADR 0154 (the charter); ADR 0138 stays as the incident's record, a
 # Primary (Bazel)
 bazel test --config=race //pkg/v1/...
 
-# Fallback (per-module; go.mod is at pkg/, code under v1/)
-cd pkg
-GOWORK=off go test -race -cover ./v1/...
+# Fallback (go test; the go.mod is the SDK module's, at the repository root)
+GOWORK=off go test -race -cover ./pkg/v1/...
 ```
 
 ## Subtree

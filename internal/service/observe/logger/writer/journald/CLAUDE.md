@@ -83,7 +83,7 @@ at one 14-byte payload.
 A third: nothing reachable can call this. `pkg/v1/observe/logger/writer` blank-imports
 `console`, `file` and `rotfile` only, no in-tree file imports this package
 outside its own tests and the `errs` ownership table, and Go's `internal/`
-firewall stops a consumer of the published `pkg` module importing it directly.
+firewall stops a consumer of the published SDK module importing it directly.
 The writer is registered by nobody.
 
 ### Four findings the reconnaissance produced instead of numbers

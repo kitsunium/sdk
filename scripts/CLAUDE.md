@@ -68,10 +68,11 @@ Superseded by ADR 0154 (the charter); ADR 0137 stays as the incident's record, a
   module whose `go.mod` git tracks (`testdata` excluded; an empty or unreadable
   census is an error), and every lane that loops over modules reads it.
 - **A lane that must skip a module names it where it loops**, with the lane
-  that covers it instead (rule 12); none does today.
+  that covers it instead (rule 12); none does today — the root is the SDK
+  module since ADR 0162, no longer the empty anchor every loop skipped.
 - **The census and its use are tested**: `ci/test-ci-scripts.bats`
   (`make ci-scripts-check`) pins it and asserts `cross-build` and `test-386`
-  read it.
+  read it, and that no census loop skips the root.
 - *Lesson*: four hand-written module lists had drifted apart, and
   `tools/genindex` and `tools/sdkguard` — 477 tests — never ran on 32 bits.
 

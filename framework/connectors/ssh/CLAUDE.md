@@ -44,7 +44,7 @@ has recorded for this package since ADR 0078.
 | `key.go` / `key_unix.go` / `key_windows.go` | load, fingerprint, prove possession, permission checks |
 | `enroll.go` | `NewSubjectID`, `GenerateKeyPair`, `IssueURL` |
 | `codes.go` / `errors.go` | `CodeEnrolmentFailed` and its sentinel |
-| `go.mod` | the module: the framework, `internal/kernel` (for `errs`) and `golang.org/x/crypto` |
+| `go.mod` | the module: the SDK module `github.com/kitsunium/sdk` — the framework and `internal/kernel/errs` — and `golang.org/x/crypto` |
 | `wrap.go` | `refuse` / `classify` / `classifyForeign` / `annotate` |
 
 ## What it is NOT
@@ -124,8 +124,8 @@ otherwise.
   implementation that silently stopped satisfying it would fall back to the
   unbound proof and nothing would say so. That line is what makes it a compile
   error instead.
-- Move this into the framework module, or anywhere a module without ssh would
-  require it. The measurement above is why, and it is reproducible in one
+- Move this into the SDK module (the framework's packages are its own since ADR
+  0162), or anywhere a module without ssh would require it. The measurement above is why, and it is reproducible in one
   `go mod tidy`.
 - Import the engine's internal packages from production code. The public
   `framework/entitlement` package is the contract this connector implements;

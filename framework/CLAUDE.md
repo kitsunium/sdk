@@ -1,9 +1,11 @@
 <!-- updated: 2026-10-03T11:00:00Z -->
-# framework/ — the SDK's framework module
+# framework/ — the SDK's framework
 
 ## Purpose
 
-`github.com/kitsunium/sdk/framework` (ADR 0147): the layer above `pkg/v1`.
+`github.com/kitsunium/sdk/framework/...` (ADR 0147): the layer above `pkg/v1`,
+packages of the one SDK module `github.com/kitsunium/sdk` since ADR 0162 — it
+was a module of its own, tagged `framework/vX.Y.Z` up to v0.17.0.
 A product imports the framework and nothing from `kitsunium/platform` (D2);
 the platform keeps the tools a product runs but does not link — the Studio,
 the analyzer, the generator, `kit check`.
@@ -51,20 +53,19 @@ the analyzer, the generator, `kit check`.
    the product: no mocks, no faults, no `jobs/run`, `workflows/fire`,
    `commands/dispatch`, `queries/ask`, `loops/wake`, `privacy/*`,
    `profile/cpu`. A person's rights are CLI commands of the product.
-5. **Release.** Lockstep with the rest of the chain: `framework/vX` at the
-   same `X` as `pkg/vX` (ADR 0147 §9). `go.mod` requires `pkg` and
-   `internal/kernel` at the last release and replaces them with the tree;
-   the release commit pins and drops the replaces. It requires no vendor: the
-   entitlement and self-update engines compare versions with `pkg/v1/data/semver`,
-   the SDK's standard-library semver (ADR 0156 §4, ADR 0158 §2), which
-   replaced `golang.org/x/mod`; a connector carries its own vendor in its own
-   module.
+5. **Release.** The framework is released with the SDK module, in its one
+   tag `vX.Y.Z` (ADR 0162). It requires no vendor: the entitlement and
+   self-update engines compare versions with `pkg/v1/data/semver`, the SDK's
+   standard-library semver (ADR 0156 §4, ADR 0158 §2), which replaced
+   `golang.org/x/mod`; a connector carries its own vendor in its own module,
+   tagged `framework/connectors/<engine>/vX.Y.Z` only by a release that
+   changes it.
 
 ## Verification
 
 ```
-GOWORK=off go -C framework build ./... && GOWORK=off go -C framework test ./...
-make test-framework        # every framework module, connectors/ssh included, -race
+GOWORK=off go build ./framework/... && GOWORK=off go test ./framework/...
+make test-framework        # ./framework/..., then each connector module, connectors/ssh included, -race
 bash scripts/check-layer-deps.sh
 bazel test //framework/...
 ```

@@ -3,17 +3,13 @@ module github.com/kitsunium/sdk/framework/connectors/sqlite
 go 1.27.1
 
 require (
-	github.com/kitsunium/sdk/framework v0.11.0
-	github.com/kitsunium/sdk/pkg v0.11.0
+	github.com/kitsunium/sdk v0.0.0-00010101000000-000000000000
 	modernc.org/sqlite v1.59.0
 )
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/kitsunium/sdk/internal/core v0.1.16 // indirect
-	github.com/kitsunium/sdk/internal/kernel v0.11.0 // indirect
-	github.com/kitsunium/sdk/internal/service v0.1.16 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
@@ -24,12 +20,4 @@ require (
 	modernc.org/memory v1.12.1 // indirect
 )
 
-replace github.com/kitsunium/sdk/framework => ../..
-
-replace github.com/kitsunium/sdk/pkg => ../../../pkg
-
-replace github.com/kitsunium/sdk/internal/core => ../../../internal/core
-
-replace github.com/kitsunium/sdk/internal/kernel => ../../../internal/kernel
-
-replace github.com/kitsunium/sdk/internal/service => ../../../internal/service
+replace github.com/kitsunium/sdk => ../../..

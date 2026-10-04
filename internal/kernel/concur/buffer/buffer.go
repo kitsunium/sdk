@@ -1,6 +1,7 @@
 // Package buffer provides a pooled *[]byte for zero-alloc formatting in hot
 // paths. Consumers acquire a reusable buffer via Get and return it via Put so
-// steady-state allocations tend toward zero. It is a thin byte-slice
+// steady-state allocations tend toward zero. A buffer is its caller's from
+// [Get] until [Put] and must not be touched after Put. It is a thin byte-slice
 // specialisation over internal/kernel/concur/recycler.CappedPool (ADR 0010): the
 // recycling mechanism lives in recycler, the 64-KiB capacity threshold and the
 // *[]byte type live here.
@@ -39,6 +40,11 @@ func Get() *[]byte {
 // and drops it when cap exceeds maxRetain. A nil argument is a safe no-op so
 // call sites can always defer Put — the generic CappedPool cannot nil-check
 // a pointer-like T, so the guard lives here.
+//
+// Put ends the caller's ownership of b. Once it returns, neither *b nor the
+// bytes it points at may be read or written — not even len(*b) — and b must
+// not be Put again: the pool may already have handed b to another goroutine,
+// which writes both as its own. Copy out whatever is still needed before Put.
 func Put(b *[]byte) {
 	//: nil-safe no-op so callers can defer Put unconditionally.
 	if b == nil {

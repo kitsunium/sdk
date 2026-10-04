@@ -61,9 +61,8 @@ move.
   compile testcontainers and the drivers on every platform cell, and run the
   suites wherever Docker happens to answer.
 - Import any of this from the conformance binary (`e2e/main.go`, `checks/`).
-- Move a suite back into a module of the `go.work` chain: its test imports
-  would put testcontainers in that module's `go.mod`, and so in its consumers'
-  graph.
+- Move a suite back into a module of `go.work`: its test imports would put
+  testcontainers in that module's `go.mod`, and so in its consumers' graph.
 
 ## Subtree
 

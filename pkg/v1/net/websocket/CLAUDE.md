@@ -89,7 +89,7 @@ package stands alone for a consumer using plain `net/http`.
   the package doc comment says so.
 - **The sentinels are the engine's own values, not copies.**
   `TestSentinelsAreMatchableThroughTheFacade` pins that `errors.Is` still
-  answers across the module boundary; re-declared sentinels would quietly answer
+  answers across the facade boundary; re-declared sentinels would quietly answer
   false.
 - **`TestEveryOptionForwarderReachesTheEngine` exists because the forwarders
   cannot be wrong in a way the service tests would catch.** A copy-paste that

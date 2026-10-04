@@ -413,8 +413,8 @@ func TestSourcesPointAtTheDeclarations(t *testing.T) {
 			t.Errorf("%s has no source", id)
 			continue
 		}
-		if n.Source.File != "internal/kit/product_test.go" || n.Source.Line != lineOf(prefix) {
-			t.Errorf("%s declared at %s:%d, want internal/kit/product_test.go:%d", id, n.Source.File, n.Source.Line, lineOf(prefix))
+		if n.Source.File != "framework/internal/kit/product_test.go" || n.Source.Line != lineOf(prefix) {
+			t.Errorf("%s declared at %s:%d, want framework/internal/kit/product_test.go:%d", id, n.Source.File, n.Source.Line, lineOf(prefix))
 		}
 	}
 	for id, fn := range map[string]string{
@@ -445,8 +445,8 @@ func TestSourcesPointAtTheDeclarations(t *testing.T) {
 	app = kit.NewApp("sources", kit.NewService("sources", "Declares nothing.")).With(
 		kit.InMemory(), db, kit.Listen("127.0.0.1:0"), kit.Env(kit.EnvDev), kit.Analyze(false), kit.Logs(io.Discard))
 	run(t, app)
-	if c := containerByID(app.Graph(), "container:database:sources"); c == nil || c.Source == nil || c.Source.File != "internal/kit/runtime_test.go" || c.Source.Line != line {
-		t.Errorf("the database's container points at %+v, want kit/runtime_test.go:%d", c, line)
+	if c := containerByID(app.Graph(), "container:database:sources"); c == nil || c.Source == nil || c.Source.File != "framework/internal/kit/runtime_test.go" || c.Source.Line != line {
+		t.Errorf("the database's container points at %+v, want framework/internal/kit/runtime_test.go:%d", c, line)
 	}
 	// A password policy is no node either: its store's history points at
 	// its Store.Passwords (ADR 0007).
@@ -460,8 +460,8 @@ func TestSourcesPointAtTheDeclarations(t *testing.T) {
 	app = kit.NewApp("keys", keys).With(kit.InMemory(), kit.Listen("127.0.0.1:0"), kit.Env(kit.EnvDev), kit.Analyze(false), kit.Logs(io.Discard))
 	run(t, app)
 	h := app.Graph().Node("sources-keys/store/keys").Store.History
-	if h == nil || len(h.Passwords) != 1 || h.Passwords[0].Source == nil || h.Passwords[0].Source.File != "internal/kit/runtime_test.go" || h.Passwords[0].Source.Line != line {
-		t.Errorf("the password policy points at %+v, want kit/runtime_test.go:%d", h, line)
+	if h == nil || len(h.Passwords) != 1 || h.Passwords[0].Source == nil || h.Passwords[0].Source.File != "framework/internal/kit/runtime_test.go" || h.Passwords[0].Source.Line != line {
+		t.Errorf("the password policy points at %+v, want framework/internal/kit/runtime_test.go:%d", h, line)
 	}
 	t.Run("commands and queries", commandSourcesPointAtTheirDeclarations)
 }
@@ -473,20 +473,20 @@ func TestSourcesPointAtTheDeclarations(t *testing.T) {
 func moduleSourcesPoint(t *testing.T, g *model.Graph) {
 	t.Helper()
 	m := g.ModuleOf("reviews")
-	if want := (model.Source{File: "internal/kit/module_test.go", Line: lineIn(t, "module_test.go", "var ReviewsModule = kit.NewModule")}); m == nil || m.Source == nil || *m.Source != want {
+	if want := (model.Source{File: "framework/internal/kit/module_test.go", Line: lineIn(t, "module_test.go", "var ReviewsModule = kit.NewModule")}); m == nil || m.Source == nil || *m.Source != want {
 		t.Errorf("the module is declared at %+v, want %+v", m, want)
 	}
-	if want := (model.Source{File: "internal/kit/runtime_test.go", Line: lineIn(t, "runtime_test.go", "app := start(t, kit.Mount(ReviewsModule")}); m == nil || m.Mount == nil || *m.Mount != want {
+	if want := (model.Source{File: "framework/internal/kit/runtime_test.go", Line: lineIn(t, "runtime_test.go", "app := start(t, kit.Mount(ReviewsModule")}); m == nil || m.Mount == nil || *m.Mount != want {
 		t.Errorf("the module is mounted at %+v, want %+v", m, want)
 	}
 	if n := g.Node("reviews.screening/port/screen"); n == nil || n.Source == nil || n.Source.Line != lineIn(t, "module_test.go", "var Screen = Screening.Port") {
 		t.Errorf("a module's node is declared at %+v", n)
 	}
 	w := g.Node("reviews.screening/subscription/moderation")
-	if w == nil || w.Source == nil || w.Source.File != "internal/kit/module_test.go" || w.Source.Line != lineIn(t, "module_test.go", "var Moderation = Screening.Watch") {
+	if w == nil || w.Source == nil || w.Source.File != "framework/internal/kit/module_test.go" || w.Source.Line != lineIn(t, "module_test.go", "var Moderation = Screening.Watch") {
 		t.Errorf("the watch is declared at %+v", w)
 	}
-	if w == nil || w.Handler == nil || w.Handler.File != "internal/kit/watch_test.go" || w.Handler.Line != lineIn(t, "watch_test.go", "func Hear(") {
+	if w == nil || w.Handler == nil || w.Handler.File != "framework/internal/kit/watch_test.go" || w.Handler.Line != lineIn(t, "watch_test.go", "func Hear(") {
 		t.Errorf("the watch's handler is at %+v", w)
 	}
 }
@@ -831,8 +831,8 @@ func TestASpanKnowsTheLineThatMadeItsCall(t *testing.T) {
 		if s.Node != "shop/store/items" {
 			continue
 		}
-		if s.Attrs["code.filepath"] != "internal/kit/product_test.go" || s.Attrs["code.lineno"] != strconv.Itoa(want) {
-			t.Fatalf("the store span says %s:%s, want internal/kit/product_test.go:%d", s.Attrs["code.filepath"], s.Attrs["code.lineno"], want)
+		if s.Attrs["code.filepath"] != "framework/internal/kit/product_test.go" || s.Attrs["code.lineno"] != strconv.Itoa(want) {
+			t.Fatalf("the store span says %s:%s, want framework/internal/kit/product_test.go:%d", s.Attrs["code.filepath"], s.Attrs["code.lineno"], want)
 		}
 		return
 	}

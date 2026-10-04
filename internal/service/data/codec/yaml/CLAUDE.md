@@ -6,8 +6,8 @@
 The SDK's `"yaml"` Format: a **native, standard-library-only** reader and
 writer of a **named subset of YAML 1.2.2**, sized for configuration. It
 replaced the `gopkg.in/yaml.v3` wrapper (decision D6 of the tree
-reorganisation), so neither `internal/service` nor the public `pkg` module
-links a third-party YAML library. The whole of YAML — every construct this
+reorganisation), so the SDK module — `internal/service` and the public
+packages alike — links no third-party YAML library. The whole of YAML — every construct this
 package refuses — stays available through the opt-in
 `third-party/codec/yaml`, registered as `"yaml-full"` and claiming no MIME
 type and no extension.

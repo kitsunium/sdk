@@ -1,31 +1,36 @@
 #!/usr/bin/env bash
-# scripts/release/compute-bumps.sh — decide whether the public modules need a
-# release since the previous release tag: emit the token `pkg` when the public
-# module `pkg` (github.com/kitsunium/sdk/pkg) changed, `framework` when the
-# framework module or one of its connectors did (ADR 0147), and `third-party`
-# when one of the vendor modules under third-party/ did (ADR 0157). The chain is
-# cut in lockstep, so any token releases every module once (cut-tags.sh).
+# scripts/release/compute-bumps.sh — decide whether the SDK needs a release since
+# the previous one: emit the token `sdk` when a path that can carry a
+# consumer-visible change changed, in the SDK module — github.com/kitsunium/sdk,
+# the repository root (ADR 0162) — or in one of the modules that require a
+# vendor, under third-party/ (ADR 0157) and framework/connectors/ (ADR 0147,
+# ADR 0158). A release is ONE tag on the SDK module, plus one tag for each
+# vendor module that changed since its own last tag; which ones is cut-tags.sh's
+# question, asked per module, not this script's.
 #
-# Decision matrix (ADR 0007, updated for the bare-`pkg` module — ADR 0009):
-#   change under pkg/v*/** or pkg/go.mod  -> bump pkg
-#   change under framework/**             -> bump framework (ADR 0147)
-#   change under third-party/**           -> bump third-party (ADR 0157)
-#   change under internal/**              -> bump pkg iff its bazel rdeps
-#                                            reach //pkg/...
-#   no relevant change                    -> emit nothing (exit 0)
+# Decision matrix (ADR 0007, ADR 0162):
+#   change under pkg/**, or framework/** outside a connector,
+#     or to the root go.mod, LICENSE or README.md       -> sdk (rule 1)
+#   change under third-party/** or framework/connectors/** -> sdk (rule 1c)
+#   change under internal/**                              -> sdk iff its bazel
+#                                                            rdeps reach //pkg/...,
+#                                                            //framework/... or
+#                                                            //third-party/... (rule 2)
+#   no relevant change                                    -> emit nothing (exit 0)
 #
-# Maintainer-only metadata is dropped from the changed-path list BEFORE either
-# rule sees it, by the one predicate in lib/release-scope.sh (ADR 0089). Both
-# rules used to be blind to it in different ways: rule 1 carried its own
-# two-name list and let `pkg/v1/errs/BENCH.md` cut pkg/v0.4.4 from a wholly
-# documentary diff (#238), and rule 2 never applied any exclusion at all —
-# it reduces a path to its module dir first, at which point the file's identity
-# is gone (#220). Filtering once, up front, is what makes the two agree.
+# Maintainer-only metadata is dropped from the changed-path list BEFORE any rule
+# sees it, by the one predicate in lib/release-scope.sh (ADR 0089). The rules
+# used to be blind to it in different ways: rule 1 carried its own two-name list
+# and let `pkg/v1/errs/BENCH.md` cut pkg/v0.4.4 from a wholly documentary diff
+# (#238), and rule 2 never applied any exclusion at all — it reduces a path to
+# its layer dir first, at which point the file's identity is gone (#220).
+# Filtering once, up front, is what makes them agree.
 #
-# Output: the literal token "pkg", then "framework", then "third-party", each on
-# its own line and each only when due — so any ordered subset of the three, or
-# nothing. (Before the bare-`pkg` migration this emitted one "vN" major per
-# line.) Stable contract — consumed by cut-tags.sh and CI.
+# Output: the literal token "sdk" on its own line when a release is due, or
+# nothing. Stable contract — consumed by cut-tags.sh and CI. (Before ADR 0162
+# it emitted "pkg", "framework" and "third-party", one per module family, each
+# of which released the whole lockstep chain; cut-tags.sh still reads those as
+# "sdk".)
 
 set -euo pipefail
 shopt -s nullglob
@@ -48,22 +53,22 @@ for arg in "$@"; do
     --range=*) RANGE="${arg#--range=}" ;;
     --help|-h)
       cat <<EOF
-compute-bumps.sh — emit "pkg", "framework" and/or "third-party" when a public module needs a release.
+compute-bumps.sh — emit "sdk" when the SDK needs a release.
 
 Usage: $0 [--dry-run] [--explain] [--require-bazel] [--range=<rev>..HEAD]
 
-Without --range, infers from the last tag or, on a bootstrap repo,
-falls back to the root commit. Shallow-clone safe.
+Without --range, infers from the last release tag — the newest vX.Y.Z, or
+before the first one the newest pkg/vX.Y.Z — or, on a bootstrap repo, falls
+back to the root commit. Shallow-clone safe.
 
 --explain writes the verdict and the reason for it to stderr. stdout stays
-the stable contract ("pkg", "framework", "third-party", in that order, each
-only when due), so a caller that parses it is unaffected. It is opt-in
-rather than always-on because the BATS suite merges the two streams into one
-assertion.
+the stable contract ("sdk", or nothing), so a caller that parses it is
+unaffected. It is opt-in rather than always-on because the BATS suite merges
+the two streams into one assertion.
 
 --require-bazel refuses, instead of skipping rule 2, when bazel is absent
-and internal/ module dirs changed. The release lane passes it; a developer
-without bazel does not, and still gets rule 1.
+and internal/ dirs changed. The release lane passes it; a developer without
+bazel does not, and still gets rules 1 and 1c.
 EOF
       exit 0 ;;
     *) echo "unknown argument: $arg" >&2; exit 64 ;;
@@ -88,9 +93,7 @@ if [ -z "$RANGE" ]; then
   fi
 fi
 
-need_bump=0
-need_framework=0
-need_third_party=0
+need_release=0
 
 # explain <line…> — the reason, on stderr, only when asked. #226 is that an
 # internal/-only change publishes nothing and "the log cannot say why": every
@@ -153,59 +156,50 @@ counting_count="${#counting[@]}"
 explain "range: $RANGE"
 explain "changed paths: ${changed_count} (${counting_count} could carry a consumer-visible change)"
 if [ "$changed_count" -gt 0 ] && [ "$counting_count" -eq 0 ]; then
-  explain "every changed path is maintainer-only metadata (*.md except README.md, BUILD.bazel)"
+  explain "every changed path is maintainer-only metadata (*.md except README.md, BUILD.bazel) or outside the published modules"
 fi
 
-# 1. Direct public-module changes: source under pkg/v*/ or the module file
-# pkg/go.mod. The list is already free of maintainer-only metadata.
-for path in ${counting[@]+"${counting[@]}"}; do
-  case "$path" in
-    pkg/v*/*|pkg/go.mod) need_bump=1; explain "rule 1: $path is a public-module change -> bump"; break ;;
-  esac
-done
-
-# 1b. Framework changes (ADR 0147): anything under framework/ that can carry a
-# consumer-visible change — its packages, its go.mod, a connector module. The
-# same maintainer-only filter applies, so a framework CLAUDE.md alone releases
-# nothing.
-for path in ${counting[@]+"${counting[@]}"}; do
-  case "$path" in
-    framework/*) need_framework=1; explain "rule 1b: $path is a framework-module change -> bump framework"; break ;;
-  esac
-done
-
-# 1c. Vendor-module changes (ADR 0157): anything under third-party/ that can
-# carry a consumer-visible change. Each vendor integration is a module of the
-# chain — third-party/aws, third-party/codec/*, third-party/db/writer/*,
-# third-party/transform, third-party/x-crypto — so its change has to be
-# published, and the token cuts the whole chain once, as `framework` does. The
-# same maintainer-only filter applies, so a CLAUDE.md or a BUILD.bazel alone
-# releases nothing.
+# 1c. The modules that require a vendor (ADR 0157, ADR 0147 §7): anything under
+# third-party/ or framework/connectors/ that can carry a consumer-visible change
+# — its packages, its go.mod. The release that carries it tags the SDK and,
+# because the module changed since its own last tag, the module too
+# (cut-tags.sh). Checked BEFORE rule 1, because a connector lies under
+# framework/ and is not the SDK module's.
 #
 # A glob and not the list go.work names, on purpose: lib/release-scope.sh's
-# rs_releasable sizes a release with the same `third-party/` prefix, and the
-# half that decides WHETHER and the half that decides HOW BIG must read one
-# notion of a path that counts (ADR 0089). Every package under third-party/ is
-# in a chain module: entitlement's ssh Identity, the last one the untagged root
-# module held, is the framework's connector framework/connectors/ssh since ADR
-# 0158, so rule 1b's `framework` token releases it.
+# rs_releasable sizes a release with the same prefixes, and the half that
+# decides WHETHER and the half that decides HOW BIG must read one notion of a
+# path that counts (ADR 0089).
+#
+# 1. The SDK module (ADR 0162): its packages under pkg/ and framework/, and the
+# root files a consumer of the module sees — go.mod (the go line every consumer
+# inherits), LICENSE and README.md, which pkg.go.dev shows. The list is already
+# free of maintainer-only metadata, and of everything else at the root (docs/,
+# scripts/, go.work, MODULE.bazel…), which no consumer compiles or reads.
 for path in ${counting[@]+"${counting[@]}"}; do
   case "$path" in
-    third-party/*) need_third_party=1; explain "rule 1c: $path is a vendor-module change -> bump third-party"; break ;;
+    third-party/*)
+      need_release=1; explain "rule 1c: $path is a vendor-module change -> release"; break ;;
+    framework/connectors/*/*)
+      need_release=1; explain "rule 1c: $path is a connector-module change -> release"; break ;;
+    pkg/*|framework/*|go.mod|LICENSE|README.md)
+      need_release=1; explain "rule 1: $path is an SDK-module change -> release"; break ;;
   esac
 done
 
-# 2. internal/* changes — rdeps at the MODULE root. A changed file is reduced to
-# its module dir (internal/<mod>), so a go.mod / go.sum change maps to a valid
-# Bazel subtree //internal/<mod>/... rather than a bogus //internal/<mod>/go.mod/...
-# label (which fails the query and would silently drop the bump). If any reaches
-# //pkg/..., the public module must re-release.
-if [ "$need_bump" -eq 0 ]; then
+# 2. internal/* changes — rdeps at the LAYER root. A changed file is reduced to
+# its layer dir (internal/<layer>), a valid Bazel subtree //internal/<layer>/...
+# rather than a bogus label built from a file name (which fails the query and
+# would silently drop the release). If any reaches a published package — the
+# SDK's under //pkg/... or //framework/..., or a vendor module's under
+# //third-party/..., which imports internal/ directly —, the SDK must
+# re-release. A connector lies under //framework/..., so it is in the set too.
+if [ "$need_release" -eq 0 ]; then
   # Reduced from the FILTERED list, not from a second `git diff`. Rule 2 had no
   # exclusion of its own and could not have had one usefully: it reduces a path
-  # to `internal/<mod>` before asking anything, and after that reduction a
-  # BENCH.md and a .go file are the same module dir. #237's eight internal
-  # BENCH.md files reached the query for exactly this reason.
+  # to `internal/<layer>` before asking anything, and after that reduction a
+  # BENCH.md and a .go file are the same dir. #237's eight internal BENCH.md
+  # files reached the query for exactly this reason.
   internal_raw=""
   internal_rc=0
   internal_raw="$(
@@ -214,7 +208,7 @@ if [ "$need_bump" -eq 0 ]; then
       | sort -u
   )" || internal_rc=$?
   if [ "$internal_rc" -ne 0 ]; then
-    echo "compute-bumps.sh: reducing the changed paths to module dirs failed (exit ${internal_rc})" >&2
+    echo "compute-bumps.sh: reducing the changed paths to layer dirs failed (exit ${internal_rc})" >&2
     echo "compute-bumps.sh: refusing to skip the rdeps rule for a list that could not be built" >&2
     exit 1
   fi
@@ -223,22 +217,22 @@ if [ "$need_bump" -eq 0 ]; then
     mapfile -t changed_internal < <(printf '%s\n' "$internal_raw")
   fi
   if [ "${#changed_internal[@]}" -eq 0 ]; then
-    explain "rule 2: no internal/ module dir in the filtered path list — nothing to query"
+    explain "rule 2: no internal/ dir in the filtered path list — nothing to query"
   elif ! command -v bazel >/dev/null 2>&1; then
     # The `command -v bazel` guard below is #227 defect 1 wearing a different
     # hat: a missing bazel and an rdeps set that reaches nothing produce the
     # same empty stdout and the same verdict, "no release". d625975's 0 s step 6
     # in #227 is what that looks like from the outside, and it is green.
     #
-    # A developer without bazel should still get rule 1, so the default stays a
-    # skip — but it is now announced, and a caller for whom rule 2 is
+    # A developer without bazel should still get rules 1 and 1c, so the default
+    # stays a skip — but it is now announced, and a caller for whom rule 2 is
     # load-bearing (the release lane) passes --require-bazel and gets a refusal.
     if [ "$REQUIRE_BAZEL" -eq 1 ]; then
       echo "compute-bumps.sh: bazel is not on PATH and --require-bazel was given" >&2
-      echo "compute-bumps.sh: ${#changed_internal[@]} internal module dir(s) would go unmeasured; refusing to report 'no release'" >&2
+      echo "compute-bumps.sh: ${#changed_internal[@]} internal dir(s) would go unmeasured; refusing to report 'no release'" >&2
       exit 1
     fi
-    explain "rule 2: bazel is not on PATH — ${#changed_internal[@]} internal module dir(s) went UNMEASURED"
+    explain "rule 2: bazel is not on PATH — ${#changed_internal[@]} internal dir(s) went UNMEASURED"
   fi
   if [ "${#changed_internal[@]}" -gt 0 ] && command -v bazel >/dev/null 2>&1; then
     # stderr of the query, kept out of the caller's stream until we know whether
@@ -253,7 +247,7 @@ if [ "$need_bump" -eq 0 ]; then
       #
       # This case is REAL, not defensive: the awk above reduces a changed file to
       # `internal/<second-component>`, which is the right reduction for
-      # `internal/<mod>/go.mod` but leaves a file that is ALREADY at depth two
+      # `internal/<layer>/x.go` but leaves a file that is ALREADY at depth two
       # intact. `internal/CLAUDE.md` is such a file and appears in ordinary
       # commits, so the bogus label `//internal/CLAUDE.md/...` reaches the query.
       # Measured on this repository:
@@ -286,7 +280,7 @@ if [ "$need_bump" -eq 0 ]; then
       # exit code it never chose.
       rdeps_out=""
       rdeps_rc=0
-      rdeps_out="$(bazel query "rdeps(//pkg/... + //framework/..., //${modpath}/...)" 2>"$rdeps_err")" || rdeps_rc=$?
+      rdeps_out="$(bazel query "rdeps(//pkg/... + //framework/... + //third-party/..., //${modpath}/...)" 2>"$rdeps_err")" || rdeps_rc=$?
       # LOUD. A release that cannot be computed must not be rendered as a release
       # that is not needed. The workflow step runs this with no `|| true`
       # precisely so a non-zero exit fails the job instead of becoming a silent
@@ -299,18 +293,18 @@ if [ "$need_bump" -eq 0 ]; then
         cat "$rdeps_err" >&2
         exit 1
       fi
-      # Query ran. Empty means this module genuinely does not reach //pkg/... —
+      # Query ran. Empty means this dir genuinely reaches no published package —
       # a measured absence, which is a different thing from the two above.
       # `case` on the variable, never `grep -c` (which prints 0 AND exits 1, a
       # combination that has inverted verdicts in this repository before).
       case "$rdeps_out" in
         "")
-          explain "rule 2: rdeps(//pkg/..., //${modpath}/...) ran and reached nothing — a measured absence"
+          explain "rule 2: rdeps(published packages, //${modpath}/...) ran and reached nothing — a measured absence"
           continue
           ;;
         *)
-          explain "rule 2: rdeps(//pkg/..., //${modpath}/...) reaches //pkg/... -> bump"
-          need_bump=1
+          explain "rule 2: rdeps(published packages, //${modpath}/...) reaches a published package -> release"
+          need_release=1
           break
           ;;
       esac
@@ -318,21 +312,13 @@ if [ "$need_bump" -eq 0 ]; then
   fi
 fi
 
-# 3. Emit the tokens. Dry-run echoes the same payload, no side effects.
-tokens=()
-[ "$need_bump" -eq 1 ] && tokens+=("pkg")
-[ "$need_framework" -eq 1 ] && tokens+=("framework")
-[ "$need_third_party" -eq 1 ] && tokens+=("third-party")
-case "${#tokens[@]}" in
-  0)
-    explain "verdict: NO RELEASE (nothing consumer-visible changed in this range)"
-    exit 0
-    ;;
-  1) explain "verdict: RELEASE (token '${tokens[0]}')" ;;
-  2) explain "verdict: RELEASE (tokens '${tokens[0]}' and '${tokens[1]}')" ;;
-  *) explain "verdict: RELEASE (tokens '${tokens[0]}', '${tokens[1]}' and '${tokens[2]}')" ;;
-esac
-printf '%s\n' "${tokens[@]}"
+# 3. Emit the token. Dry-run echoes the same payload, no side effects.
+if [ "$need_release" -eq 0 ]; then
+  explain "verdict: NO RELEASE (nothing consumer-visible changed in this range)"
+  exit 0
+fi
+explain "verdict: RELEASE (token 'sdk')"
+echo "sdk"
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "(dry-run: $RANGE)" >&2
 fi

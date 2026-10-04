@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-03T23:13:39Z -->
 # internal/kernel/concur/buffer/
 
 ## Purpose
@@ -29,8 +29,12 @@ here. The generic `Pool[T]` that used to share this package moved to
 
 ## Do NOT
 
-- Keep a reference to a buffer after `Put`. The pool may hand it to another
-  goroutine immediately.
+- Touch a buffer after `Put` — not even to read `len(*b)` — or `Put` it twice.
+  `Put` ends the caller's ownership, and the pool may hand the buffer to
+  another goroutine immediately, which writes `*b` and its bytes as its own.
+  Copy out what is still needed first. A test reading `len(*b)` after `Put`
+  raced a parallel `TestGet`'s cleanup `Put` (seen once in CI, reproduced
+  under load); a test observes the reset on the buffer `Get` hands back.
 - Reach for a typed object pool here — that is `recycler.Pool[T]` /
   `recycler.CappedPool[T]`.
 - Add `Sleep`, timer helpers, or anything time-shaped here — that's `clock/`.
@@ -44,10 +48,12 @@ cd internal/kernel && GOWORK=off go test -race -cover ./concur/buffer
 # coverage target: 90%+
 ```
 
-Tests: `buffer_external_test.go` (public contract: fresh length, oversize drop,
-nil-safety), `buffer_internal_test.go` (constants, fresh-buffer capacity via the
-package recycler), `buffer_bench_test.go` (warm `Get`, the `Get`/write/`Put`
-round trip, and the round trip under `RunParallel` — the numbers are in
-`BENCH.md`; there is no isolated `Put` benchmark, because a `Put` without its
-`Get` measures pool growth). The zero-alloc steady-state of `Get`/`Put` is
-gated by `recycler`'s `TestZeroAllocInvariant` (race-off).
+Tests: `buffer_external_test.go` (public contract: fresh length; the reset,
+checked on the dirtied buffer once `Get` hands it back, never by reading it
+after `Put`; oversize drop; nil-safety), `buffer_internal_test.go` (constants,
+fresh-buffer capacity via the package recycler), `buffer_bench_test.go` (warm
+`Get`, the `Get`/write/`Put` round trip, and the round trip under
+`RunParallel` — the numbers are in `BENCH.md`; there is no isolated `Put`
+benchmark, because a `Put` without its `Get` measures pool growth). The
+zero-alloc steady-state of `Get`/`Put` is gated by `recycler`'s
+`TestZeroAllocInvariant` (race-off).

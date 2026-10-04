@@ -9,8 +9,9 @@ binary. Consumers import this package; the service and `core/git` stay internal.
 
 It was `pkg/v1/git` until ADR 0158 made the distribution mechanisms the
 framework's: the surface is unchanged, the import path is
-`github.com/kitsunium/sdk/framework/git`, and a consumer requires the framework
-module rather than `pkg`. Every code keeps its value (ADR 0160).
+`github.com/kitsunium/sdk/framework/git`, and a consumer required the
+framework module rather than `pkg` — one module, the SDK's, since ADR 0162.
+Every code keeps its value (ADR 0160).
 
 What a running program was BUILT from stays in the SDK: `pkg/v1/proc/process`'s
 `Build` and `Self` (ADR 0100) read the program itself; only `Head`, which asks git

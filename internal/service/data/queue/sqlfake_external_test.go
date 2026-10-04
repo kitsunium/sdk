@@ -3,7 +3,7 @@
 //
 // # Why an engine and not a live database
 //
-// The SDK ships no driver and its service module imports none (ADR 0055 §D2),
+// The SDK ships no driver and its service layer imports none (ADR 0055 §D2),
 // so the default suite cannot open PostgreSQL, MySQL or SQLite. database/sql is
 // a registry, though: this file registers a driver.Driver whose connections
 // keep the queue's one table in a map, and everything above it — the pool,

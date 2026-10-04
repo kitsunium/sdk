@@ -21,7 +21,7 @@ module is the one no consumer requires — see `integration/CLAUDE.md`.
 
 ```
 e2e/
-├── go.mod              own module (github.com/kitsunium/sdk/e2e); replace → ../pkg + ../internal/*
+├── go.mod              own module (github.com/kitsunium/sdk/e2e); replace → .. (the SDK module) + ../third-party/db/writer/*
 │                       + ../third-party/db/writer/* (the writer suites)
 ├── main.go            orchestrator: conformanceGroups() lists every domain, exit 1 when any check fails
 ├── harness/           the runner

@@ -858,7 +858,7 @@ const (
     // dispatch, ask and handle span operations and the dispatch and ask
     // controls.
     //
-    // Version 5 is the first the SDK's framework module publishes (ADR 0147). It
+    // Version 5 is the first the SDK's framework publishes (ADR 0147). It
     // adds what a product is made of beyond its services: the binary
     // ([KindBinary]) and its process roles ([KindRole]), the short CLI command
     // ([KindCLI]), the listener that is not HTTP ([KindListener]), the library

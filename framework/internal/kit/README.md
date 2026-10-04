@@ -625,7 +625,7 @@ const (
 )
 ```
 
-<a name="CodeStoreDecode"></a>The framework's own failures carry SDK error codes in 0.4.2.\* — layer 4 is the framework module, PP 2 this package \(ADR 0147 §3\) — so a product keeps the whole application range 0x40–0x7F for its own codes. Match them with errs.HasCode. Their Public text is the only part that may reach a caller; none of them is a 4xx, so a caller only ever reads "internal error".
+<a name="CodeStoreDecode"></a>The framework's own failures carry SDK error codes in 0.4.2.\* — layer 4 is the framework's, PP 2 this package \(ADR 0147 §3\) — so a product keeps the whole application range 0x40–0x7F for its own codes. Match them with errs.HasCode. Their Public text is the only part that may reach a caller; none of them is a 4xx, so a caller only ever reads "internal error".
 
 ```go
 const (

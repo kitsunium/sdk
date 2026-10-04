@@ -1,22 +1,27 @@
 #!/usr/bin/env bash
-# scripts/release/cut-tags.sh — read the bump tokens on stdin (from
-# compute-bumps.sh: `pkg`, `framework`, `third-party`), compute the next tag,
-# then publish a `go get`-able tag chain (ADR 0009): rewrite every chain module's
-# go.mod to drop `replace` and pin its intra-repo deps to the release version,
-# commit that on a detached release commit, and tag every chain module —
-# internal/{kernel,core,service}, pkg, the framework and its connectors, the
-# vendor modules under third-party/ — at the same version so a consumer resolves
-# the whole graph from the proxy with no local context.
+# scripts/release/cut-tags.sh — read the release token on stdin (from
+# compute-bumps.sh: `sdk`), compute the next SDK version, and publish ONE
+# release (ADR 0162):
 #
-# The public module is the bare `github.com/kitsunium/sdk/pkg` (no /vN suffix —
-# Go forbids it; the consumer packages live under the pkg/v1/ directory). Its
-# tag is `pkg/vX.Y.Z` (major 0|1). See lib/tag-format.sh + ADR 0009.
+#   - the tag vX.Y.Z on the SDK module, github.com/kitsunium/sdk — the
+#     repository root, which holds internal/, pkg/ and framework/;
+#   - at the same X.Y.Z, the tag <dir>/vX.Y.Z of each module that requires a
+#     vendor — third-party/* (ADR 0157), framework/connectors/* (ADR 0147,
+#     ADR 0158) — whose files changed since its own last tag, or that has none.
 #
-# The dev branch is untouched — only the published tags carry the replace-free,
-# cross-pinned go.mods. go.work + `replace` keep local dev working as before.
+# Each module tagged beside the SDK gets a go.mod that requires the SDK at
+# vX.Y.Z and replaces nothing, on a detached release commit, so a consumer
+# resolves it from the proxy with no local context (ADR 0009). A module that
+# did not change keeps its last tag, whose go.mod requires the SDK release it
+# was cut with; Go's minimum version selection takes the newer SDK when a
+# consumer requires one. stdout is the list of tags pushed, the SDK's first:
+# the workflow makes ONE GitHub release of it and lists the others in its notes.
 #
-# Race-protected (plan B3): re-reads the latest tag immediately before the push
-# and aborts on drift.
+# The dev branch is untouched — only the published tags carry the replace-free
+# go.mods. go.work + `replace` keep local dev working as before.
+#
+# Race-protected (plan B3): re-reads the latest release tag immediately before
+# the push and aborts on drift.
 #
 # The size comes from the `release:*` label a maintainer set on the merged pull
 # requests of the range compute-bumps.sh diffs (ADR 0135) — or from --bump,
@@ -26,10 +31,29 @@
 # could be buried by it or set by it, and lib/release-size.sh says why neither
 # is survivable.
 #
-# go.sum + clean-room proxy resolution are finalised at the FIRST real release
-# (ADR 0009): pushed-tag checksums cannot be computed before the tags exist, so
-# this script produces the correct go.mod FORM and tags the chain; the first
-# release validates `go get` from a clean machine and back-fills go.sum.
+# The version continues the SDK's: the newest vX.Y.Z or, until the first one
+# exists, the newest pkg/vX.Y.Z the chain before ADR 0162 was released as — so
+# pkg/v0.17.0 and a minor make v0.18.0. That first root tag is the first
+# release of the SDK module's content — the proxy knows the path only at
+# v0.0.0, a 2024 tag of an earlier history —, so it is held like the very first
+# release (ADR 0009) whenever its base is a pkg/vX.Y.Z tag, whatever root tag
+# sits below it: refused without --allow-bootstrap, which a maintainer's
+# dispatch passes once the module zip and a clean-room `go get` are validated.
+# From that base a patch is refused outright (exit 65): the module change every
+# consumer makes is a minor at least.
+#
+# That release, and no other, also cuts two tombstones (ADR 0162): pkg/vX.Y.Z
+# and framework/vX.Y.Z at its version, each on a child of the release commit
+# whose module directory holds a go.mod alone — a `// Deprecated:` notice that
+# names the SDK module and the command that migrates to it, the module's own
+# path, the SDK's go directive, and a requirement of the SDK at vX.Y.Z. Go
+# resolves an import that nothing in a go.mod provides to the longest module
+# path whose LATEST version provides the package; with the tombstones that is
+# the SDK module, without them …/pkg and …/framework at v0.17.0, for good. Go
+# reads a module's deprecation from its latest go.mod as well, so `go get` and
+# `go list -m -u` tell a consumer still on either module where it went. They
+# go out in the same atomic push as the root tag, and a tombstone tag that
+# already exists is refused before anything is tagged.
 
 set -euo pipefail
 shopt -s nullglob
@@ -41,13 +65,6 @@ here="$(cd "$(dirname "$0")" && pwd)"
 . "$here/lib/release-scope.sh"
 # shellcheck source=lib/release-size.sh
 . "$here/lib/release-size.sh"
-
-# The release chain is every workspace module but the root, read from go.work
-# by chain_modules (lib/tag-format.sh — ADR 0147 §9): internal/* (tagged only
-# so pkg resolves without `replace`; Go's internal/ rule still blocks a direct
-# consumer import), pkg, the framework and its connectors, and the vendor
-# modules under third-party/ (ADR 0157). All are tagged at one version and
-# cross-pinned, so the published graph resolves from the proxy.
 
 DRY_RUN=0
 ALLOW_BOOTSTRAP=0
@@ -61,8 +78,9 @@ for arg in "$@"; do
     --bump=*) BUMP="${arg#--bump=}" ;;
     --help | -h)
       cat <<EOF
-cut-tags.sh — read the bump tokens ('pkg', 'framework', 'third-party') on stdin,
-publish the next tag chain.
+cut-tags.sh — read the release token ('sdk') on stdin, publish the next release:
+one tag vX.Y.Z on the SDK module, and <dir>/vX.Y.Z for each vendor module that
+changed since its own last tag (ADR 0162).
 
 Usage: $0 [--dry-run] [--allow-bootstrap] [--range=<rev>..HEAD]
           [--bump=patch|minor|major] < bump.txt
@@ -76,6 +94,14 @@ Without --range, infers the same range compute-bumps.sh does.
 --bump states the size of the whole range and asks GitHub nothing. It is the
 recovery path for a refused release: SDK Release's workflow_dispatch input
 'bump' passes it.
+
+--allow-bootstrap authorises the first release of the SDK module — the very
+first release, or the first root tag after the pkg/vX.Y.Z history. Without it
+that release is refused with exit 3 (held), never cut by an automatic run.
+The first root tag after the pkg history also cuts pkg/vX.Y.Z and
+framework/vX.Y.Z at its version: tombstones, a go.mod that requires it and
+deprecates its module with the migration command, and no package, in the same
+push (ADR 0162).
 EOF
       exit 0
       ;;
@@ -93,6 +119,32 @@ if [ -n "$BUMP" ] && ! size_rank "$BUMP" >/dev/null; then
   exit 64
 fi
 
+# The tokens are read in full first, and before anything asks GitHub: a token
+# this script does not know is a caller's mistake, refused for what it is.
+# Every valid token means "the SDK changed", and a release is cut ONCE whatever
+# their number — a second pass would find the tag it just pushed and cut the
+# next patch on top of it. The tokens compute-bumps.sh emitted before ADR 0162
+# (`pkg`, `framework`, `third-party`, and the older `vN`) each released the
+# whole chain; they still mean the one release, so a dispatch typed from habit
+# is not refused.
+tokens=()
+while IFS= read -r token; do
+  [ -z "$token" ] && continue
+  case "$token" in
+    sdk) ;;
+    pkg | framework | third-party | v[0-9]*) token="sdk" ;;
+    *)
+      echo "cut-tags: unexpected bump token '$token' (expected 'sdk')" >&2
+      exit 1
+      ;;
+  esac
+  tokens+=("$token")
+done
+
+if [ "${#tokens[@]}" -eq 0 ]; then
+  exit 0
+fi
+
 # The range whose merged pull requests size the release — the SAME range
 # compute-bumps.sh diffs, via the same release_base() (ADR 0085).
 #
@@ -100,7 +152,7 @@ fi
 # release only fires on a SUCCESSFUL CI run, and a run cancelled by the next
 # push (the concurrency group) produces none at all. So the commit that asks for
 # a size is routinely NOT the commit this script sees as HEAD — while
-# compute-bumps.sh still saw its pkg/ changes inside the range and asked for a
+# compute-bumps.sh still saw its changes inside the range and asked for a
 # release. Reading HEAD alone then answered "patch" for a change the maintainer
 # had signed as minor, silently. Labels do not change that: the label sits on
 # the pull request of whichever commit it was, and the walk still has to reach
@@ -127,13 +179,12 @@ fi
 # scope (ADR 0089). One notion of "a file that counts", shared with
 # compute-bumps.sh.
 #
-# Why `internal/` and not `pkg/` alone: ADR 0007 §2 requires a behavioural
-# change in internal/** observable through pkg to be a MINOR, while its own next
-# row gated the only way to ask for one on touching pkg/. There was no way to
-# say what the table demanded. compute-bumps.sh already cuts a release for an
-# internal/-only change whose rdeps reach //pkg/..., and that release tags the
-# whole graph, so the change ships either way — this only lets its size be
-# stated.
+# Why `internal/` and not the public packages alone: ADR 0007 §2 requires a
+# behavioural change in internal/** observable through pkg to be a MINOR, while
+# its own next row gated the only way to ask for one on touching pkg/. There was
+# no way to say what the table demanded. compute-bumps.sh already cuts a release
+# for an internal/-only change whose rdeps reach a published package, so the
+# change ships either way — this only lets its size be stated.
 #
 # Why maintainer-only metadata is excluded: compute-bumps.sh already drops it
 # when deciding WHETHER to release ("its churn alone must not cut a release").
@@ -276,20 +327,21 @@ else
   size="$(range_size "$RANGE")" || exit 65
 fi
 
-# bump_for_pkg <last-tag> — echo the next full tag. Pre-release tags refuse to
-# bump (the shared lib rejects them in next_patch/minor).
-bump_for_pkg() {
+# bump_for <last-tag> — echo the next SDK tag from an SDK or a pkg base.
+# Pre-release tags refuse to bump (the shared lib rejects them in
+# next_patch/minor).
+bump_for() {
   local last="$1"
   case "$size" in
     minor) next_minor "$last" ;;
     major)
       # v0.x → v1.0.0 is the normal stabilization step on the SAME bare module
-      # (both majors are bare-module-path-legal). Only a breaking v2+ needs a
-      # real …/pkg/v2 module path (deferred — ADR 0009).
-      case "$last" in
-        pkg/v0.*) echo "pkg/v1.0.0" ;;
+      # path (both majors are legal without a suffix). Only a breaking v2+ needs
+      # a real …/v2 module path (deferred — ADR 0009).
+      case "$(version_from_tag "$last")" in
+        0.*) echo "v1.0.0" ;;
         *)
-          echo "cut-tags: a major release from $last was refused — a breaking v2 needs a real …/pkg/v2 module path (deferred — ADR 0009)" >&2
+          echo "cut-tags: a major release from $last was refused — a breaking v2 needs a real …/v2 module path (deferred — ADR 0009)" >&2
           return 1
           ;;
       esac
@@ -298,39 +350,74 @@ bump_for_pkg() {
   esac
 }
 
-# SDK_PREFIX is every module of the chain: `…/internal/*`, `…/pkg`,
-# `…/framework`, `…/framework/connectors/*`, `…/third-party/*`. The root module
-# is the bare `github.com/kitsunium/sdk` — without the slash — and nothing
-# requires it.
-SDK_PREFIX="github.com/kitsunium/sdk/"
+# SDK_MODULE is the SDK, the repository root (ADR 0162). Every module of this
+# repository is SDK_MODULE or a path beneath it.
+SDK_MODULE="github.com/kitsunium/sdk"
 
-# sdk_deps_of <go.mod> — echo the intra-repo module paths this go.mod
-# requires, so we re-pin exactly those (never add a spurious require).
-sdk_deps_of() {
-  go mod edit -json "$1" |
-    jq -r --arg p "$SDK_PREFIX" '.Require[]?.Path | select(startswith($p))'
+# The module paths ADR 0162 retired: their packages are the SDK module's now,
+# so a go.mod that still requires one would put two modules providing the same
+# packages in a consumer's build — an ambiguous import.
+is_retired_module() {
+  case "$1" in
+    "$SDK_MODULE/pkg" | "$SDK_MODULE/framework" | "$SDK_MODULE/internal/"*) return 0 ;;
+  esac
+  return 1
 }
 
-# sdk_replaces_of <go.mod> — echo the intra-repo module paths this go.mod
-# replaces. A module may replace one it does not require directly — the
-# framework replaces internal/core so `GOWORK=off` resolves what pkg needs —
-# and such a replace must go too, or the published go.mod points at a
-# directory no consumer has.
+# sdk_requires_of <go.mod> — the SDK-repository module paths this go.mod
+# requires, the SDK itself included, so exactly those are re-pinned and no
+# spurious require is added.
+sdk_requires_of() {
+  go mod edit -json "$1" |
+    jq -r --arg m "$SDK_MODULE" '.Require[]?.Path | select(. == $m or startswith($m + "/"))'
+}
+
+# sdk_replaces_of <go.mod> — the SDK-repository module paths this go.mod
+# replaces. Every one goes: the published go.mod must not point at a directory
+# no consumer has.
 sdk_replaces_of() {
   go mod edit -json "$1" |
-    jq -r --arg p "$SDK_PREFIX" '.Replace // [] | .[].Old.Path | select(startswith($p))'
+    jq -r --arg m "$SDK_MODULE" '.Replace // [] | .[].Old.Path | select(. == $m or startswith($m + "/"))'
 }
 
-# rewrite_publishable <go.mod> <sem> — drop every intra-repo `replace` and pin
-# every intra-repo `require` to <sem> (e.g. v0.1.0). After this the module
-# resolves from the proxy with no local `replace`.
+# in_list <word> <list…> — 0 when <word> is one of <list>.
+in_list() {
+  local w="$1" x
+  shift
+  for x in "$@"; do
+    if [ "$x" = "$w" ]; then return 0; fi
+  done
+  return 1
+}
+
+# rewrite_publishable <go.mod> <sem> <tagged-dir…> — drop every SDK-repository
+# `replace` and pin every SDK-repository `require`: the SDK at <sem>; a vendor
+# module this release tags at <sem> too; any other vendor module at its own
+# last tag. A requirement of a module ADR 0162 retired, or of a module that has
+# no tag and gets none, is refused: there is no version to pin it to.
 rewrite_publishable() {
-  local gomod="$1" sem="$2" dep
+  local gomod="$1" sem="$2" dep dir lt
+  shift 2
   local -a edits=()
   while IFS= read -r dep; do
     [ -z "$dep" ] && continue
-    edits+=(-require="$dep@$sem")
-  done < <(sdk_deps_of "$gomod")
+    if [ "$dep" = "$SDK_MODULE" ]; then
+      edits+=(-require="$dep@$sem")
+    elif is_retired_module "$dep"; then
+      echo "cut-tags: $gomod requires $dep, a module ADR 0162 retired — require $SDK_MODULE instead" >&2
+      return 1
+    else
+      dir="${dep#"$SDK_MODULE"/}"
+      if in_list "$dir" "$@"; then
+        edits+=(-require="$dep@$sem")
+      elif lt="$(latest_vendor_tag "$dir")" && [ -n "$lt" ]; then
+        edits+=(-require="$dep@v$(version_from_tag "$lt")")
+      else
+        echo "cut-tags: $gomod requires $dep, which has no tag and is not tagged by this release" >&2
+        return 1
+      fi
+    fi
+  done < <(sdk_requires_of "$gomod")
   while IFS= read -r dep; do
     [ -z "$dep" ] && continue
     edits+=(-dropreplace="$dep")
@@ -340,52 +427,279 @@ rewrite_publishable() {
   fi
 }
 
-# assert_publishable <go.mod> — fail if any intra-repo `replace` survives or the
-# file no longer parses. This is the gate we CAN run pre-push (the proxy-side
-# `go mod download` proof needs the tags to exist — see header / ADR 0009).
+# assert_publishable <go.mod> — fail if the file no longer parses, if an
+# SDK-repository `replace` survives, if it requires a module ADR 0162 retired,
+# or if an SDK-repository requirement is left at a pseudo-version — the
+# v0.0.0-00010101000000-000000000000 of a local replace, which resolves to
+# nothing once the replace is gone. This is the gate we CAN run pre-push (the
+# proxy-side `go mod download` proof needs the tags to exist — see header / ADR
+# 0009). The SDK's own go.mod goes through it too: it requires no
+# SDK-repository module at all.
 assert_publishable() {
-  local gomod="$1"
-  go mod edit -json "$gomod" >/dev/null || {
+  local gomod="$1" json="" path="" version=""
+  json="$(go mod edit -json "$gomod")" || {
     echo "cut-tags: $gomod does not parse after rewrite" >&2
     return 1
   }
-  if go mod edit -json "$gomod" | jq -e --arg p "$SDK_PREFIX" \
-    '.Replace // [] | map(select(.Old.Path | startswith($p))) | length > 0' >/dev/null; then
-    echo "cut-tags: $gomod still has an intra-repo replace after rewrite" >&2
+  if jq -e --arg m "$SDK_MODULE" \
+    '.Replace // [] | map(select(.Old.Path == $m or (.Old.Path | startswith($m + "/")))) | length > 0' \
+    >/dev/null <<<"$json"; then
+    echo "cut-tags: $gomod still has an SDK-repository replace after rewrite" >&2
+    return 1
+  fi
+  while read -r path version; do
+    [ -z "$path" ] && continue
+    if is_retired_module "$path"; then
+      echo "cut-tags: $gomod requires $path, a module ADR 0162 retired" >&2
+      return 1
+    fi
+    # Every pseudo-version form ends in a 14-digit timestamp and a 12-hex
+    # revision, whatever precedes them.
+    if { [ "$path" = "$SDK_MODULE" ] || [ "${path#"$SDK_MODULE"/}" != "$path" ]; } &&
+      [[ "$version" =~ [0-9]{14}-[0-9a-f]{12}$ ]]; then
+      echo "cut-tags: $gomod requires $path at the pseudo-version $version, which names no release" >&2
+      return 1
+    fi
+  done < <(jq -r '.Require[]? | "\(.Path) \(.Version)"' <<<"$json")
+}
+
+# vendor_changed <dir> <last-tag> — 0 when a file of the module in <dir> that
+# could carry a consumer-visible change (lib/release-scope.sh) differs between
+# the commit <last-tag> was cut from and HEAD; 1 when none does; 2, with the
+# reason on stderr, when that cannot be told — never read as "unchanged".
+#
+# From the tag's FIRST PARENT, not the tag: the release commit rewrote the
+# module's go.mod, so measured from the tag every module would always look
+# changed. A module nested inside <dir> is another module, and its files are
+# left out of <dir>'s question.
+vendor_changed() {
+  local dir="$1" tag="$2" base="" paths="" rc=0 other
+  local -a spec=("$dir/")
+  base="$(tag_base "$tag")" || {
+    echo "cut-tags: $tag names no commit with a parent — cannot tell whether $dir changed since it" >&2
+    return 2
+  }
+  for other in ${vendors[@]+"${vendors[@]}"}; do
+    case "$other" in "$dir"/*) spec+=(":(exclude)$other/") ;; esac
+  done
+  paths="$(git diff --name-only "$base" HEAD -- "${spec[@]}")" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "cut-tags: git diff for $dir since $tag failed (exit $rc) — refusing to guess whether it changed" >&2
+    return 2
+  fi
+  release_scope_any <<<"$paths"
+}
+
+# TOMBSTONES are the module directories whose tombstone the first root tag cuts
+# (ADR 0162): the two retired modules a consumer imported. Not internal/*: Go's
+# internal/ rule kept every importer outside the repository out of them.
+TOMBSTONES=(pkg framework)
+
+# nested_modules <dir> — the vendor modules go.work names beneath <dir>, one per
+# line: modules of their own, released by their own tags, whose files a
+# tombstone of <dir> keeps.
+nested_modules() {
+  local dir="$1" v
+  for v in ${vendors[@]+"${vendors[@]}"}; do
+    case "$v" in "$dir"/*) echo "$v" ;; esac
+  done
+}
+
+# sdk_go_directive — the go directive of the SDK's go.mod, which a tombstone
+# carries too.
+sdk_go_directive() {
+  go mod edit -json go.mod | jq -r '.Go // empty'
+}
+
+# tombstone_deprecation <sem> — the notice a tombstone's go.mod carries on its
+# module directive (ADR 0162): where the module's packages went, and the
+# command ADR 0162 §Consumer migration documents to move a go.mod there. Go
+# reads a module's deprecation from its latest go.mod — the tombstone's, for
+# good —: `go list -m -u` marks the module "(deprecated)" and `go get` prints
+# the notice. One line: `go get` prints the first line of a deprecation alone,
+# and none of it past 500 bytes (ShortMessage, cmd/go/internal/modload, Go
+# 1.27.1); assert_tombstone holds both.
+tombstone_deprecation() {
+  printf 'moved into %s at %s, import paths unchanged; migrate with: go get %s@%s %s/internal/kernel@none && go mod tidy' \
+    "$SDK_MODULE" "$1" "$SDK_MODULE" "$1" "$SDK_MODULE"
+}
+
+# tombstone_gomod <dir> <sem> <out> — write to <out> the go.mod of the tombstone
+# of the module in <dir>: the deprecation notice on the line right above the
+# module directive, where Go reads it, its own module path, the SDK's go
+# directive and one requirement, the SDK at <sem>; formatted by `go mod edit`,
+# as Go writes it, which keeps the comment where it stands.
+tombstone_gomod() {
+  local dir="$1" sem="$2" out="$3" goline=""
+  goline="$(sdk_go_directive)" || return 1
+  if [ -z "$goline" ]; then
+    echo "cut-tags: the SDK's go.mod has no go directive for the tombstone of $dir to carry" >&2
+    return 1
+  fi
+  printf '// Deprecated: %s\nmodule %s\n' "$(tombstone_deprecation "$sem")" "$SDK_MODULE/$dir" >"$out" || return 1
+  go mod edit -go="$goline" -require="$SDK_MODULE@$sem" "$out"
+}
+
+# assert_tombstone <go.mod> <dir> <sem> — fail unless <go.mod> is the
+# tombstone's and nothing more: module $SDK_MODULE/<dir>, deprecated — as Go
+# reads it — with the notice tombstone_deprecation writes, which `go get`
+# prints whole; the SDK's go directive; one requirement, the SDK at <sem>; and
+# no other directive.
+assert_tombstone() {
+  local gomod="$1" dir="$2" sem="$3" json="" goline="" notice="" bytes=0
+  goline="$(sdk_go_directive)" || return 1
+  notice="$(tombstone_deprecation "$sem")"
+  bytes="$(printf '%s' "$notice" | wc -c)"
+  if [[ "$notice" == *$'\n'* ]] || [ "$((bytes))" -gt 500 ]; then
+    echo "cut-tags: the deprecation notice of the tombstone of $dir is not one line of at most 500 bytes — go get would not print it whole" >&2
+    return 1
+  fi
+  json="$(go mod edit -json "$gomod")" || {
+    echo "cut-tags: the tombstone go.mod of $dir does not parse" >&2
+    return 1
+  }
+  if ! jq -e --arg n "$notice" '.Module.Deprecated == $n' >/dev/null <<<"$json"; then
+    echo "cut-tags: the tombstone go.mod of $dir does not deprecate $SDK_MODULE/$dir with the migration notice, as Go reads it: '$(jq -r '.Module.Deprecated // ""' <<<"$json")'" >&2
+    return 1
+  fi
+  if ! jq -e --arg m "$SDK_MODULE/$dir" --arg sdk "$SDK_MODULE" --arg v "$sem" --arg go "$goline" '
+      .Module.Path == $m and .Go == $go and .Toolchain == null
+      and ((.Require // []) | length == 1 and .[0].Path == $sdk and .[0].Version == $v)
+      and ([.Replace, .Exclude, .Retract, .Tool, .Ignore, .Godebug] | map((. // []) | length) | add == 0)' \
+    >/dev/null <<<"$json"; then
+    echo "cut-tags: the tombstone go.mod of $dir is not 'module $SDK_MODULE/$dir; go $goline; require $SDK_MODULE $sem' alone" >&2
     return 1
   fi
 }
 
-# publish_chain <sem> — on a detached worktree, rewrite every chain go.mod to
-# the publishable form, then either (DRY_RUN) print the form + planned tags, or
-# commit the rewrite on a detached release commit, tag the whole chain at <sem>,
-# and atomic-push. The dev branch is never modified.
-publish_chain() {
+# tombstone_commit <release-commit> <dir> <sem> — create, and echo, the commit
+# the tag <dir>/<sem> names: a child of <release-commit> whose tree is the
+# release's with <dir> reduced to its tombstone go.mod. A module nested under
+# <dir> keeps its files (framework/connectors/*): it is a module of its own,
+# released by its own tags, and Go leaves it out of <dir>'s module anyway; a
+# file of <dir> beside it goes. Plumbing only — a temporary index, write-tree,
+# commit-tree —, so no hook runs and the worktree is not touched. It runs in a
+# command substitution, which errexit does not reach, so every step is checked.
+tombstone_commit() {
+  local relc="$1" dir="$2" sem="$3" tmp="" blob="" tree="" rec="" path="" n="" keep=0
+  local -a nested=()
+  tmp="$(mktemp -d)" || return 1
+  tombstone_gomod "$dir" "$sem" "$tmp/go.mod" || return 1
+  assert_tombstone "$tmp/go.mod" "$dir" "$sem" || return 1
+  blob="$(git hash-object -w "$tmp/go.mod")" || return 1
+  mapfile -t nested < <(nested_modules "$dir")
+  git ls-tree -r -z --full-tree "$relc" >"$tmp/tree" || return 1
+  while IFS= read -r -d '' rec; do
+    path="${rec#*$'\t'}"
+    case "$path" in
+      "$dir"/*)
+        keep=0
+        for n in ${nested[@]+"${nested[@]}"}; do
+          case "$path" in "$n"/*)
+            keep=1
+            break
+            ;;
+          esac
+        done
+        if [ "$keep" -eq 0 ]; then continue; fi
+        ;;
+    esac
+    printf '%s\0' "$rec"
+  done <"$tmp/tree" >"$tmp/entries" || return 1
+  GIT_INDEX_FILE="$tmp/index" git update-index -z --index-info <"$tmp/entries" || return 1
+  GIT_INDEX_FILE="$tmp/index" git update-index --add --cacheinfo "100644,$blob,$dir/go.mod" || return 1
+  tree="$(GIT_INDEX_FILE="$tmp/index" git write-tree)" || return 1
+  git commit-tree "$tree" -p "$relc" \
+    -m "release $dir/$sem — tombstone of $SDK_MODULE/$dir: a go.mod that requires $SDK_MODULE $sem, and no package (ADR 0162)" || return 1
+  rm -rf "${tmp:?}"
+}
+
+# assert_tombstone_tree <commit> <release-commit> <dir> — fail unless <commit>
+# is the tombstone it must be: one parent, <release-commit>; under <dir>, the
+# modules nested in it aside, one file, <dir>/go.mod; and no change outside
+# <dir> nor inside a nested module.
+assert_tombstone_tree() {
+  local tc="$1" relc="$2" dir="$3" parents="" own="" changed="" p="" n="" hit=0
+  local -a nested=()
+  mapfile -t nested < <(nested_modules "$dir")
+  parents="$(git rev-list --parents -n1 "$tc")"
+  if [ "$parents" != "$tc $relc" ]; then
+    echo "cut-tags: the tombstone of $dir is not a child of the release commit alone" >&2
+    return 1
+  fi
+  while IFS= read -r p; do
+    [ -z "$p" ] && continue
+    hit=0
+    for n in ${nested[@]+"${nested[@]}"}; do
+      case "$p" in "$n"/*)
+        hit=1
+        break
+        ;;
+      esac
+    done
+    if [ "$hit" -eq 0 ]; then own="${own:+$own }$p"; fi
+  done < <(git ls-tree -r --name-only "$tc" -- "$dir/")
+  if [ "$own" != "$dir/go.mod" ]; then
+    echo "cut-tags: the tombstone of $dir holds '$own' under $dir/, not its go.mod alone" >&2
+    return 1
+  fi
+  changed="$(git diff --name-only "$relc" "$tc")"
+  while IFS= read -r p; do
+    [ -z "$p" ] && continue
+    case "$p" in
+      "$dir"/*) ;;
+      *)
+        echo "cut-tags: the tombstone of $dir changed $p, outside $dir/" >&2
+        return 1
+        ;;
+    esac
+    for n in ${nested[@]+"${nested[@]}"}; do
+      case "$p" in "$n"/*)
+        echo "cut-tags: the tombstone of $dir changed $p, in the module $n nested in it" >&2
+        return 1
+        ;;
+      esac
+    done
+  done <<<"$changed"
+}
+
+# publish_release <sem> <tagged-dir…> — on a detached worktree, rewrite the
+# go.mod of every vendor module tagged at <sem> to the publishable form, check
+# the SDK's own, then either (DRY_RUN) print the form + planned tags, or commit
+# on a detached release commit, tag the SDK and those modules at <sem>, and
+# atomic-push. The dev branch is never modified.
+publish_release() {
   local sem="$1"
-  # Lockstep: every chain module is tagged at the same semver. internal/* + pkg
-  # use bare module paths (major 0/1); a v2+ release would need /vN module paths
-  # — deferred (ADR 0009). Fail loud rather than mint an invalid tag.
+  shift
+  # Bare module paths carry major 0/1 only; a v2+ release would need /vN module
+  # paths — deferred (ADR 0009). Fail loud rather than mint an invalid tag.
   case "$sem" in
     v0.* | v1.*) ;;
     *)
-      echo "cut-tags: chain lockstep at $sem needs /vN module paths (deferred — ADR 0009)" >&2
+      echo "cut-tags: a release at $sem needs /vN module paths (deferred — ADR 0009)" >&2
       return 1
       ;;
   esac
 
-  local -a chain_dirs=()
-  local chain="" d t
-  chain="$(chain_modules go.work)" || return 1
-  mapfile -t chain_dirs <<<"$chain"
-  local -a tags=()
-  for d in "${chain_dirs[@]}"; do tags+=("$d/$sem"); done
+  local d t
+  local -a tags=("$sem") tombs=()
+  for d in "$@"; do tags+=("$d/$sem"); done
+  # The tombstones go last: on the first root tag after the pkg history alone.
+  if [ "$tombstone" -eq 1 ]; then
+    for d in "${TOMBSTONES[@]}"; do tombs+=("$d/$sem"); done
+  fi
 
   # Validate every tag before touching the repo, each against the shape of its
-  # family: pkg, internal/*, framework(/connectors/*), third-party/* —
-  # lib/tag-format.sh.
+  # family: the SDK's, third-party/*, framework/connectors/* — lib/tag-format.sh.
   for t in "${tags[@]}"; do
-    is_valid_chain_tag "$t" || {
-      echo "cut-tags: refusing to push malformed chain tag '$t'" >&2
+    is_valid_release_tag "$t" || {
+      echo "cut-tags: refusing to push malformed release tag '$t'" >&2
+      return 1
+    }
+  done
+  for t in ${tombs[@]+"${tombs[@]}"}; do
+    is_valid_tombstone_tag "$t" || {
+      echo "cut-tags: refusing to push malformed tombstone tag '$t'" >&2
       return 1
     }
   done
@@ -393,127 +707,253 @@ publish_chain() {
   local wt rc=0
   wt="$(mktemp -d)/rel"
   git worktree add --quiet --detach "$wt" HEAD
+  # The subshell runs under its OWN `set -e`, and its status is read after it
+  # rather than by `( … ) || rc=$?`. Bash ignores errexit inside a subshell
+  # whose status a `||` tests, so in that shape a failed rewrite or a refused
+  # go.mod (assert_publishable returning 1) went on to the next line, and the
+  # release was committed, tagged and pushed anyway. Measured: a vendor go.mod
+  # still requiring github.com/kitsunium/sdk/pkg printed its refusal and
+  # `would tag` both, exit 0. The `set +e` is the caller's errexit, held off
+  # just long enough to clean the worktree up before the status is returned.
+  set +e
   (
+    set -e
     cd "$wt"
-    for d in "${chain_dirs[@]}"; do
-      rewrite_publishable "$d/go.mod" "$sem"
+    assert_publishable go.mod
+    for d in "$@"; do
+      rewrite_publishable "$d/go.mod" "$sem" "$@"
       assert_publishable "$d/go.mod"
     done
     if [ "$DRY_RUN" -eq 1 ]; then
-      echo "DRY-RUN: publishable module graph for $sem (replace dropped, intra-repo deps pinned):"
-      for d in "${chain_dirs[@]}"; do
+      echo "DRY-RUN: publishable go.mod files for $sem (replace dropped, the SDK pinned):"
+      if [ "$#" -eq 0 ]; then
+        echo "  (no vendor module changed: the SDK's go.mod is published as it is)"
+      fi
+      for d in "$@"; do
         echo "  --- $d/go.mod ---"
-        grep -nE 'replace|kitsunium/sdk/' "$d/go.mod" | sed 's/^/    /' || true
+        grep -nE 'replace|kitsunium/sdk' "$d/go.mod" | sed 's/^/    /' || true
       done
-      echo "DRY-RUN: would tag chain: ${tags[*]}"
+      if [ "$tombstone" -eq 1 ]; then
+        local dry
+        dry="$(mktemp -d)"
+        echo "DRY-RUN: tombstones of the retired modules for $sem (ADR 0162), each a go.mod alone on a child of the release commit:"
+        for d in "${TOMBSTONES[@]}"; do
+          tombstone_gomod "$d" "$sem" "$dry/$d.mod"
+          assert_tombstone "$dry/$d.mod" "$d" "$sem"
+          echo "  --- $d/go.mod ($d/$sem) ---"
+          sed '/./s/^/    /' "$dry/$d.mod"
+          kept="$(nested_modules "$d" | tr '\n' ' ')"
+          if [ -n "$kept" ]; then
+            echo "    (the modules nested in $d/ keep their files: ${kept% })"
+          fi
+        done
+        rm -rf "${dry:?}"
+      fi
+      would="${tags[*]}"
+      if [ "${#tombs[@]}" -gt 0 ]; then would="$would ${tombs[*]}"; fi
+      echo "DRY-RUN: would tag: $would"
     else
-      # `core.hooksPath=` (empty) rather than any hooks the clone sets: this commit
-      # is the ONE tree in the repository that the pre-commit gates cannot pass,
-      # by construction. They run `make build` / `make test`, and the rewrite
-      # above has just dropped every intra-repo `replace` — so Go and Bazel can
-      # no longer resolve the sibling modules from disk, and the build fails on
-      # a tree that is CORRECT for publication. Measured: the hook reports
-      # "Couldn't start the build. Unable to run tests", make exits 48, and the
-      # commit never happens.
+      # `core.hooksPath=` (empty) rather than any hooks the clone sets: this
+      # commit is the ONE tree in the repository that the pre-commit gates
+      # cannot pass, by construction. They run `make build` / `make test`, and
+      # the rewrite above has just dropped the vendor modules' `replace` of the
+      # SDK — so Go and Bazel can no longer resolve it from disk, and the build
+      # fails on a tree that is CORRECT for publication. Measured: the hook
+      # reports "Couldn't start the build. Unable to run tests", make exits 48,
+      # and the commit never happens.
       #
       # This never fired in CI, which checks out without `core.hooksPath` and so
       # runs no project hook at all — the defect existed for a maintainer whose
       # clone pointed `core.hooksPath` at the in-repo hooks, which every clone
       # was told to do until ADR 0153 removed them; a clone may still carry a
       # hooks path of its own. What the gates would have checked is already
-      # checked: this commit changes nothing but the chain's go.mod files, and
+      # checked: this commit changes nothing but go.mod files, and
       # `assert_publishable` verifies each of them above.
+      #
+      # `--allow-empty`: a release in which no vendor module changed rewrites
+      # nothing — the SDK's go.mod requires nothing of this repository — and its
+      # tag must still sit on a release commit whose FIRST PARENT is the main
+      # commit it was cut from, because that is where release_base() and every
+      # vendor module's next measurement start. A tag on the main commit itself
+      # would make the next range reopen it.
       local before
       before="$(git rev-parse HEAD)"
-      git -c core.hooksPath= commit --quiet -am "release $sem — publishable module graph (no replace)"
+      git -c core.hooksPath= commit --quiet --allow-empty -am "release $sem — publishable module graph (no replace)"
       local relc
       relc="$(git rev-parse HEAD)"
       # A commit that did not happen must never be tagged. Without this the
-      # chain is tagged at the UNREWRITTEN tree: `pkg/go.mod` keeps its local
-      # `replace` lines and pins the previous release's internals, which is the
-      # exact `go get`-resolvability ADR 0009 exists to guarantee — published,
-      # and wrong. Observed on a real run before this guard existed.
+      # release is tagged at the UNREWRITTEN tree: a vendor go.mod keeps its
+      # local `replace` and pins nothing, which is the exact `go get`
+      # unresolvability ADR 0009 exists to prevent — published, and wrong.
+      # Observed on a real run before this guard existed.
       if [ "$relc" = "$before" ]; then
         echo "cut-tags: the release commit did not happen — refusing to tag $sem at the unrewritten tree" >&2
         return 1
       fi
       for t in "${tags[@]}"; do git tag -a "$t" -m "release $t" "$relc"; done
-      git push --atomic origin "${tags[@]}"
+      # Each tombstone on its own child of the release commit, checked before
+      # it is tagged; then ONE atomic push, so no moment exists where the root
+      # tag is published and a tombstone is not (ADR 0162).
+      if [ "$tombstone" -eq 1 ]; then
+        local tc
+        for d in "${TOMBSTONES[@]}"; do
+          tc="$(tombstone_commit "$relc" "$d" "$sem")"
+          assert_tombstone_tree "$tc" "$relc" "$d"
+          git tag -a "$d/$sem" -m "release $d/$sem — tombstone of $SDK_MODULE/$d (ADR 0162)" "$tc"
+        done
+      fi
+      git push --atomic origin "${tags[@]}" ${tombs[@]+"${tombs[@]}"}
     fi
-  ) || rc=$?
+  )
+  rc=$?
+  set -e
   git worktree remove --force "$wt" 2>/dev/null || true
   return "$rc"
 }
 
-# The tokens are read in full first. `pkg`, `framework` and `third-party` all
-# mean "the chain changed" and the chain is released in lockstep (ADR 0147 §9,
-# ADR 0157), so any number of valid tokens publishes it ONCE — a second pass
-# would find the tag it just pushed and cut the next patch on top of it.
-tokens=()
-while IFS= read -r token; do
-  [ -z "$token" ] && continue
-  case "$token" in
-    pkg | framework | third-party) ;;
-    # Backward-compat: a legacy "vN" major token (pre bare-`pkg` migration)
-    # now maps to the single public module.
-    v[0-9]*) token="pkg" ;;
-    *)
-      echo "cut-tags: unexpected bump token '$token' (expected 'pkg', 'framework' or 'third-party')" >&2
+# The version: the next one after the last release — the newest SDK tag, or,
+# until the first one exists, the newest pkg tag (ADR 0162). latest_release_tag
+# takes the higher of the two.
+last="$(latest_release_tag || true)"
+first=0
+if [ -z "$last" ]; then
+  # First release ever: seed the alpha v0.1.0 directly. The bare module path
+  # carries major 0, so v0 is the correct (and only Go-legal) starting major.
+  next="v0.1.0"
+  first=1
+else
+  if ! is_valid_base "$last"; then
+    echo "cut-tags: refusing pre-release or malformed: $last" >&2
+    exit 1
+  fi
+  next="$(bump_for "$last")"
+  # A pkg/ base IS the first root tag, whatever root tag the repository holds
+  # below it. Asking "is there no vX.Y.Z yet?" instead let any stray stable
+  # root tag — the v0.0.0 the proxy already knows for this path, say — lift
+  # the hold, and an automatic run cut the module's first release unvalidated.
+  # Measured: pkg/v0.17.0 plus a v0.0.0, no --allow-bootstrap, pushed v0.18.0.
+  if is_valid_pkg_tag "$last"; then
+    first=1
+  fi
+fi
+if ! is_valid_tag "$next"; then
+  echo "cut-tags: computed invalid tag '$next'" >&2
+  exit 1
+fi
+
+# The tombstones (ADR 0162) come with the first root tag after the pkg history,
+# and with no other release: from then on the base is a root tag, and
+# latest_pkg_tag never reads a tombstone as pkg's history. The very first
+# release of a repository with no pkg history has no retired module to bury.
+tombstone=0
+if [ -n "$last" ] && is_valid_pkg_tag "$last"; then
+  tombstone=1
+fi
+
+# The first root tag moves every consumer from …/pkg to the SDK module (ADR
+# 0162): a change a consumer must act on, which v0 says with a minor at least,
+# and the proxy keeps whatever version is cut for good. From a pkg/ base a patch
+# is therefore refused, like a size nobody decided (ADR 0135, exit 65), naming
+# the two ways to state it. It is checked before the hold, so an automatic run
+# says so as soon as the merge lands, instead of holding a v0.17.1.
+if [ "$first" -eq 1 ] && [ -n "$last" ] && [ "$size" = "patch" ]; then
+  echo "cut-tags: refusing $next as the SDK module's first tag — after $last a patch would hide the module change every consumer makes (ADR 0162)" >&2
+  echo "cut-tags:   label the pull request release:minor and re-run this job, or dispatch SDK Release with bump=minor." >&2
+  exit 65
+fi
+
+# A tombstone tag that already exists names another commit than this release's:
+# the tombstone is cut as a new child of a new release commit. It is refused
+# before anything is tagged, rather than left to the atomic push, and before the
+# hold, so the automatic run that holds the first root tag reports it already.
+# A tag the module proxy has fetched is that version for good, so nothing here
+# moves or replaces one: a person decides what it is.
+if [ "$tombstone" -eq 1 ]; then
+  for d in "${TOMBSTONES[@]}"; do
+    if git rev-parse -q --verify "refs/tags/$d/$next" >/dev/null; then
+      at="$(git rev-parse --short "refs/tags/$d/$next^{}" 2>/dev/null || echo '?')"
+      echo "cut-tags: $d/$next already exists, at $at — the tombstone of $SDK_MODULE/$d is cut on this release's own commit, so that tag names another; refusing to publish $next (ADR 0162)" >&2
+      echo "cut-tags:   find out who cut it and whether the module proxy has fetched it before anything else is tagged; nothing was published." >&2
       exit 1
+    fi
+  done
+fi
+
+# Bootstrap guard (ADR 0009): the first release of the SDK module publishes its
+# go.mod and zip to the proxy and the checksum database PERMANENTLY — the very
+# first release, and the first root tag after the pkg history, the first
+# release of the module's content (ADR 0162). Its zip and a clean-room `go get`
+# must be validated by hand first — so refuse to auto-cut it. A maintainer re-runs with --allow-bootstrap once
+# verified. Dry-run is always allowed.
+if [ "$first" -eq 1 ] && [ "$DRY_RUN" -eq 0 ] && [ "$ALLOW_BOOTSTRAP" -eq 0 ]; then
+  if [ -z "$last" ]; then
+    echo "cut-tags: refusing to auto-cut the FIRST release ($next). Validate its go.sum + a clean-room 'go get' first (ADR 0009), then re-run with --allow-bootstrap." >&2
+  else
+    echo "cut-tags: refusing to auto-cut the FIRST release of the SDK module ($next, after $last — ADR 0162). Validate its module zip + a clean-room 'go get' first (ADR 0009), then re-run with --allow-bootstrap." >&2
+  fi
+  exit 3
+fi
+if [ "$first" -eq 1 ] && [ -n "$last" ]; then
+  echo "cut-tags: $next is the SDK module's first tag; it continues $last (ADR 0162)" >&2
+fi
+if [ "$tombstone" -eq 1 ]; then
+  echo "cut-tags: pkg/$next and framework/$next are tombstones: the last version of $SDK_MODULE/pkg and $SDK_MODULE/framework, which requires $next, provides no package and deprecates its module with the migration command, so an import of either path resolves to the SDK module and go get names the move (ADR 0162)" >&2
+fi
+
+# Semver of the release (e.g. "v0.18.0"): the SDK's tag, and every vendor tag's
+# version.
+sem="$next"
+
+# The vendor modules: every one tagged at <sem> when it changed since its own
+# last tag or has none, and named on stderr either way — the only trace a run
+# leaves of why a module was, or was not, released.
+vendors=()
+vendor_list="$(vendor_modules go.work)" || exit 1
+if [ -n "$vendor_list" ]; then
+  mapfile -t vendors <<<"$vendor_list"
+fi
+tagged=()
+for d in ${vendors[@]+"${vendors[@]}"}; do
+  lt="$(latest_vendor_tag "$d")"
+  if [ -z "$lt" ]; then
+    echo "cut-tags: $d has never been tagged — tagged at $sem" >&2
+    tagged+=("$d")
+    continue
+  fi
+  vrc=0
+  vendor_changed "$d" "$lt" || vrc=$?
+  case "$vrc" in
+    0)
+      echo "cut-tags: $d changed since $lt — tagged at $sem" >&2
+      tagged+=("$d")
       ;;
+    1) echo "cut-tags: $d unchanged since $lt — keeps it" >&2 ;;
+    *) exit 1 ;;
   esac
-  tokens+=("$token")
 done
 
-if [ "${#tokens[@]}" -gt 0 ]; then
+# Race window close (plan B3): re-read the last release tag immediately before
+# the push and abort if another job tagged in between.
+latest_now="$(latest_release_tag || true)"
+if [ -n "$latest_now" ] && [ "$latest_now" != "$last" ]; then
+  echo "cut-tags: race detected — the last release moved from ${last:-(none)} to $latest_now during prep; aborting" >&2
+  exit 2
+fi
 
-  last="$(latest_pkg_tag || true)"
-  if [ -z "$last" ]; then
-    # First release: seed the alpha v0.1.0 directly. The bare `pkg` module path
-    # carries major 0, so v0 is the correct (and only Go-legal) starting major.
-    next="pkg/v0.1.0"
-    if ! is_valid_tag "$next"; then
-      echo "cut-tags: computed invalid first tag '$next'" >&2
-      exit 1
-    fi
-    # Bootstrap guard (ADR 0009): the very first release publishes the chain's
-    # go.mods to the proxy/sumdb PERMANENTLY. Its go.sum + clean-room `go get`
-    # must be validated by hand first — so refuse to auto-cut it. A maintainer
-    # re-runs with --allow-bootstrap once verified. Dry-run is always allowed.
-    if [ "$DRY_RUN" -eq 0 ] && [ "$ALLOW_BOOTSTRAP" -eq 0 ]; then
-      echo "cut-tags: refusing to auto-cut the FIRST release ($next). Validate the chain's go.sum + a clean-room 'go get' first (ADR 0009), then re-run with --allow-bootstrap." >&2
-      exit 3
-    fi
-  else
-    if ! is_valid_tag "$last"; then
-      echo "cut-tags: refusing pre-release or malformed: $last" >&2
-      exit 1
-    fi
-    next="$(bump_for_pkg "$last")"
-  fi
+publish_release "$sem" ${tagged[@]+"${tagged[@]}"}
 
-  # Semver of the release (e.g. "v0.1.0"), shared by the whole chain.
-  sem="v$(version_from_tag "$next")"
-
-  # Race window close (plan B3): re-read latest tag immediately before the push
-  # and abort if another job tagged in between.
-  latest_now="$(latest_pkg_tag || true)"
-  if [ -n "$latest_now" ] && [ "$latest_now" != "$last" ]; then
-    echo "cut-tags: race detected — pkg moved from $last to $latest_now during prep; aborting" >&2
-    exit 2
-  fi
-
-  publish_chain "$sem"
-
-  # stdout is the list of consumer-facing tags the workflow turns into GitHub
-  # releases: pkg's first — the one its verification step counts —, then the
-  # framework's and its connectors', then the vendor modules' (ADR 0157), each
-  # a module a consumer requires by name. The internal/* tags are
-  # resolution-only and get no GitHub Release.
-  if [ "$DRY_RUN" -eq 0 ]; then
-    echo "$next"
-    while IFS= read -r d; do
-      case "$d" in framework | framework/* | third-party/*) echo "$d/$sem" ;; esac
-    done < <(chain_modules go.work)
+# stdout is the list of tags pushed: the SDK's first — the one the workflow
+# makes a GitHub release of and its verification step counts — then the vendor
+# modules', which that release's notes list, then the tombstones, which the
+# notes list apart.
+if [ "$DRY_RUN" -eq 0 ]; then
+  echo "$sem"
+  for d in ${tagged[@]+"${tagged[@]}"}; do
+    echo "$d/$sem"
+  done
+  if [ "$tombstone" -eq 1 ]; then
+    for d in "${TOMBSTONES[@]}"; do
+      echo "$d/$sem"
+    done
   fi
 fi

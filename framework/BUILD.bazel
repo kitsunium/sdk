@@ -1,9 +1,8 @@
-# gazelle:prefix github.com/kitsunium/sdk/framework
 # gazelle:go_visibility //visibility:public
 # gazelle:default_visibility //visibility:public
 
-# framework/ is the root of the SDK's framework module
-# (github.com/kitsunium/sdk/framework) — the layer above pkg/v1 (ADR 0147).
+# framework/ holds the framework — the layer above pkg/v1 (ADR 0147), packages
+# of the one SDK module github.com/kitsunium/sdk (ADR 0162).
 # Its packages are public: a product imports them. What sits under a
 # framework/**/internal directory is visible to framework_packages only, which
 # Go's internal/ rule already enforces for `go build`; the group states it for

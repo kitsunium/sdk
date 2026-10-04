@@ -80,7 +80,7 @@ their values there (ADR 0160).
 
 ## Module
 
-Single Go module `github.com/kitsunium/sdk/internal/core` — one `go.mod`, one `go.sum`. `replace` resolves `internal/kernel` to `../kernel`.
+A directory of the one SDK module, `github.com/kitsunium/sdk` (ADR 0162), whose `go.mod` is at the repository root; it was a module of its own until then. `cd internal/core && GOWORK=off go build ./...` builds this layer's packages.
 
 ## Conventions
 

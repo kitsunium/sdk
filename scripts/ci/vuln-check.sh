@@ -20,12 +20,12 @@
 #      module that does not load) — FAILS too, under its own name, because a
 #      scan that did not run is not a clean scan.
 #
-# One exception, by name: the ROOT module is the workspace's anchor and holds no
-# package (ADR 0157 §5), and govulncheck answers a module with nothing to load
-# with exit 2 and "no packages matched the provided patterns". For `.`, and
-# for that answer only, the module is reported as holding no package rather
-# than as an incomplete scan. Any other module saying the same still FAILS: a
-# member of the chain that lost its packages is a defect, not a clean tree.
+# No module is excused. The root used to be: it held no package while it was
+# the workspace's anchor (ADR 0157 §5), and govulncheck answers a module with
+# nothing to load with exit 2 and "no packages matched the provided patterns".
+# Since ADR 0162 the root is the SDK module — internal/, pkg/, framework/ — so
+# that answer from it, as from any other module, is a module that lost its
+# packages, and FAILS as a scan that did not complete.
 #
 # Every module is scanned even after one fails, so one run reports them all.
 # The standard library is part of the scan: its version is the toolchain's, and
@@ -79,12 +79,8 @@ else
   done <<<"$census"
 fi
 
-# The one answer that, for the root module alone, is not an incomplete scan.
-nothing_to_scan="no packages matched the provided patterns"
-
 vulnerable=()
 incomplete=()
-empty=()
 for mod in "${modules[@]}"; do
   echo "::group::govulncheck $mod"
   rc=0
@@ -95,14 +91,7 @@ for mod in "${modules[@]}"; do
   case "$rc" in
     0) echo "vuln-check: $mod — no reachable vulnerability" ;;
     3) vulnerable+=("$mod") ;;
-    *)
-      if [ "$mod" = "." ] && [[ "$out" == *"$nothing_to_scan"* ]]; then
-        empty+=("$mod")
-        echo "vuln-check: $mod holds no package — nothing to scan (ADR 0157 §5)"
-      else
-        incomplete+=("$mod (exit $rc)")
-      fi
-      ;;
+    *) incomplete+=("$mod (exit $rc)") ;;
   esac
 done
 
@@ -122,4 +111,4 @@ fi
 if [ "$fail" -ne 0 ]; then
   exit 1
 fi
-echo "vuln-check: $((${#modules[@]} - ${#empty[@]})) module(s) scanned, no reachable vulnerability"
+echo "vuln-check: ${#modules[@]} module(s) scanned, no reachable vulnerability"

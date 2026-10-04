@@ -3,10 +3,21 @@
 // A consumer pinned to an old SDK is the quiet cousin of the defects the rules
 // catch: nothing fails, and the fix that shipped upstream simply never arrives.
 // It matters more here than in most libraries because of how this SDK versions
-// (ADR 0007): a patch release is cut whenever an `internal/*` package that
-// `pkg` depends on changes, so patches carry fixes that never touch the public
-// API. A consumer reading only the changelog of exported symbols sees nothing
-// and concludes there is nothing to take.
+// (ADR 0007): a patch release is cut whenever an `internal/*` package that the
+// public packages depend on changes, so patches carry fixes that never touch
+// the public API. A consumer reading only the changelog of exported symbols
+// sees nothing and concludes there is nothing to take.
+//
+// The SDK is one module, github.com/kitsunium/sdk, since ADR 0162. A consumer
+// whose go.mod still requires github.com/kitsunium/sdk/pkg — the public module
+// before it — is not behind by a version but by a module: once the SDK module
+// has a release, the notice is the one command that migrates. So is a build
+// that requires the SDK module AND one of the modules it merged, whose every
+// package the build then finds twice — unless that is …/pkg or …/framework at
+// its tombstone, the last version the SDK module's first release cut of each,
+// which holds no package. The SDK module's releases start at v0.18.0: the
+// proxy also lists its path at v0.0.0, a tag of an earlier history that holds
+// no package, and that version is never advice.
 //
 // This is a WARNING and never an error by default. Being behind is not a
 // violation — it is a fact the maintainer may already know and may have
@@ -25,9 +36,43 @@ import (
 	"time"
 )
 
-// sdkModule is the SDK's only consumer-facing module (ADR 0017: the bare
-// `…/pkg`, because Go forbids a `/v1` module-path suffix).
-const sdkModule string = "github.com/kitsunium/sdk/pkg"
+// sdkModule is the SDK's consumer-facing module: the repository root, which
+// holds pkg/v1 and the framework (ADR 0162).
+const sdkModule string = "github.com/kitsunium/sdk"
+
+// legacyModule is the public module before ADR 0162, the bare `…/pkg` (ADR
+// 0017). A go.mod that still requires it has a migration to make.
+const legacyModule string = "github.com/kitsunium/sdk/pkg"
+
+// firstSDKModuleRelease is the SDK module's first release (ADR 0162). The proxy
+// also lists the module's path at v0.0.0, a tag of an earlier history
+// whose zip holds a LICENSE and no package: advice to move to it would put a
+// go.mod on an empty module, so no version below this one is ever a candidate.
+const firstSDKModuleRelease string = "v0.18.0"
+
+// mergedModules lists the module paths ADR 0162 merged into the SDK module, in
+// the order a reader checks them against a go.mod. A build that requires one
+// of them beside the SDK module finds each of its packages in two modules.
+const mergedModules string = legacyModule + " " +
+	sdkModule + "/framework " +
+	sdkModule + "/internal/kernel " +
+	sdkModule + "/internal/core " +
+	sdkModule + "/internal/service"
+
+// tombstoneModules lists the merged modules the SDK module's first release
+// gave a tombstone (ADR 0162): …/pkg and …/framework at firstSDKModuleRelease,
+// a go.mod that requires it and holds no package. Required at that version or
+// above, either is found beside the SDK module harmlessly — no package of it
+// is found twice — so it is no half-migration.
+const tombstoneModules string = legacyModule + " " + sdkModule + "/framework"
+
+// retiredRoot is the merged module whose removal removes them all: every
+// version of …/pkg, …/framework, …/internal/core and …/internal/service up to
+// v0.17.0 requires it, and `go get <module>@none` takes out every module whose
+// version requires the one it removes. Measured over the 240 versions the
+// proxy holds (ADR 0162); published versions never change. The tombstones do
+// not require it, and hold no package to remove.
+const retiredRoot string = sdkModule + "/internal/kernel"
 
 // defaultProxy is what the go command uses when GOPROXY is unset.
 const defaultProxy string = "https://proxy.golang.org"
@@ -92,6 +137,9 @@ type gomodSection int
 type moduleRef struct {
 	// Version is the required version, e.g. "v0.1.24".
 	Version string
+	// module is the module path the requirement is read for: sdkModule, or
+	// legacyModule for a go.mod from before ADR 0162.
+	module string
 	// replaceVersions holds the LEFT-SIDE version of every replace directive
 	// naming the SDK, with the empty string standing for an unversioned one.
 	//
@@ -125,31 +173,139 @@ func (r moduleRef) Replaced() bool {
 }
 
 // checkVersion returns the warning text for an outdated SDK, and whether the
-// SDK was found to be outdated at all.
+// SDK was found to be outdated at all. A build that requires the SDK module
+// and still a module it merged is reported too, from the go.mod alone: that
+// build fails already, and the notice is the command that repairs it.
 //
 // Every failure path returns silently: no go.mod, no SDK requirement, a
 // replace directive, GOPROXY=off, no network, a malformed response. A
 // freshness nudge that breaks a build has failed at being a nudge.
 func checkVersion(dir string, p probe) (string, bool) {
-	ref, ok := sdkRequirement(dir)
-	//: a workspace root has no go.mod of its own, so the documented
-	//: `sdkguard ./...` form from there would scan every module and warn about
-	//: none of them.
-	if !ok {
-		//: fall back to the modules go.work lists.
-		ref, ok = workspaceRequirement(dir)
+	ref, ok := requirementOf(dir, sdkModule)
+	//: a go.mod on the SDK module is measured against its releases.
+	if ok {
+		merged, half := mergedRequirement(dir)
+		//: half migrated: the SDK module beside one it merged is an ambiguous
+		//: import on every package of that one, whatever the versions say.
+		if half {
+			//: no network needed — the go.mod alone says it cannot build.
+			return halfMigrationNotice(ref, merged), true
+		}
+		//: the probe this file has always made, on the one module.
+		return freshness(ref, p)
 	}
+	legacy, ok := requirementOf(dir, legacyModule)
 	//: no requirement, or one the build replaces locally — say nothing either
 	//: way: a replace means someone is working against a checkout.
-	if !ok || ref.Replaced() {
+	if !ok || legacy.Replaced() {
 		//: silence, which is the documented behaviour of every failure path.
 		return "", false
 	}
-	versions, err := p.versions(sdkModule)
+	listed, err := p.versions(sdkModule)
+	releases := sdkModuleReleases(listed)
+	//: until the SDK module has a release — the proxy's v0.0.0 is none —
+	//: the split modules are still the SDK's newest, and the old probe still
+	//: answers for them.
+	if err != nil || len(releases) == 0 {
+		//: measured against the module the go.mod requires.
+		return freshness(legacy, p)
+	}
+	sortVersions(releases)
+	//: behind by a module, not a version: the notice is the migration.
+	return migrationNotice(legacy.Version, releases[len(releases)-1]), true
+}
+
+// mergedRequirement finds a requirement of a module ADR 0162 merged into the
+// SDK module, read the way requirementOf reads the SDK's — the nearest go.mod,
+// then the modules go.work lists, whose requirements share one build list in
+// workspace mode — and reports whether there is one. A merged module the build
+// replaces locally is someone's checkout, and does not count; neither does a
+// tombstone, which provides no package to find twice.
+func mergedRequirement(dir string) (moduleRef, bool) {
+	//: in the order a reader checks them against a go.mod, so the notice
+	//: names the first one a reader finds there.
+	for module := range strings.FieldsSeq(mergedModules) {
+		ref, ok := requirementOf(dir, module)
+		//: required, not redirected to a directory and not a tombstone: the
+		//: build resolves it from the proxy, packages and all, beside the SDK
+		//: module.
+		if ok && !ref.Replaced() && !isTombstone(ref) {
+			//: one is enough to make the build ambiguous.
+			return ref, true
+		}
+	}
+	//: fully migrated, or never split.
+	return moduleRef{}, false
+}
+
+// isTombstone reports whether ref requires …/pkg or …/framework at its
+// tombstone or above: firstSDKModuleRelease, the version that holds a go.mod
+// and no package (ADR 0162). A pseudo-version is no tombstone — semverLess
+// sorts it first —, so a build on one is still told.
+func isTombstone(ref moduleRef) bool {
+	//: two modules have a tombstone; the internal ones never got one.
+	for module := range strings.FieldsSeq(tombstoneModules) {
+		//: the requirement is of a module that has one.
+		if ref.module == module {
+			//: at the tombstone or above, no package of it is in the build.
+			return !semverLess(ref.Version, firstSDKModuleRelease)
+		}
+	}
+	//: an internal module: every version of it holds packages.
+	return false
+}
+
+// sdkModuleReleases keeps the SDK module's releases among versions:
+// firstSDKModuleRelease and above. What it drops is the proxy's v0.0.0 of the
+// path, which holds no package.
+func sdkModuleReleases(versions []string) []string {
+	var kept []string
+	//: one comparison per listed version; the list is a handful of tags.
+	for _, v := range versions {
+		//: below the first release is no release of this module's content.
+		if !semverLess(v, firstSDKModuleRelease) {
+			kept = append(kept, v)
+		}
+	}
+	//: possibly empty, which every caller reads as "no release yet".
+	return kept
+}
+
+// requirementOf finds the go.mod's requirement of module by walking up from
+// dir, then — for a workspace root, which has no go.mod of its own — through
+// the modules go.work lists, so the documented `sdkguard ./...` form from
+// there does not scan every module and warn about none of them.
+func requirementOf(dir, module string) (moduleRef, bool) {
+	ref, ok := sdkRequirement(dir, module)
+	//: the nearest go.mod answered.
+	if ok {
+		//: a module's own requirement wins over its workspace's.
+		return ref, true
+	}
+	//: fall back to the modules go.work lists.
+	return workspaceRequirement(dir, module)
+}
+
+// freshness is the warning for ref's module being behind its newest release,
+// and whether it is. Every failure path is silent.
+func freshness(ref moduleRef, p probe) (string, bool) {
+	//: a replace means someone is working against a checkout.
+	if ref.Replaced() {
+		//: nothing to say about a version the build does not use.
+		return "", false
+	}
+	versions, err := p.versions(ref.module)
 	//: no proxy, no network, a bad response — none of them is worth a warning.
 	if err != nil {
 		//: a nudge that breaks a build has failed at being a nudge.
 		return "", false
+	}
+	//: the SDK module's list starts at its first release, whatever older
+	//: version the proxy keeps for its path.
+	if ref.module == sdkModule {
+		//: a pseudo-version sorts below every release, and must not be told
+		//: to move to the empty v0.0.0.
+		versions = sdkModuleReleases(versions)
 	}
 	newer := newerThan(ref.Version, versions)
 	//: up to date, or ahead of the proxy on an unreleased tag.
@@ -158,17 +314,17 @@ func checkVersion(dir string, p probe) (string, bool) {
 		return "", false
 	}
 	//: behind, with the gap counted so the notice can name its size.
-	return versionNotice(ref.Version, newer), true
+	return versionNotice(ref.module, ref.Version, newer), true
 }
 
-// sdkRequirement finds the SDK requirement by walking up from dir to the
-// nearest go.mod.
+// sdkRequirement finds the requirement of module by walking up from dir to
+// the nearest go.mod.
 //
 // go.mod is parsed by hand rather than with golang.org/x/mod/modfile: this
 // module is stdlib-only by a build constraint, not a preference (see
 // tools/CLAUDE.md). The require/replace grammar needed here is a handful of
 // line shapes, and a parse that fails simply yields no warning.
-func sdkRequirement(dir string) (moduleRef, bool) {
+func sdkRequirement(dir, module string) (moduleRef, bool) {
 	path, ok := findGoMod(dir)
 	//: no go.mod above this directory; the caller may still try go.work.
 	if !ok {
@@ -183,18 +339,18 @@ func sdkRequirement(dir string) (moduleRef, bool) {
 	}
 
 	//: the grammar lives in parseGoMod; this function only located the file.
-	return parseGoMod(string(data))
+	return parseGoMod(string(data), module)
 }
 
-// parseGoMod extracts the SDK requirement from go.mod's text.
+// parseGoMod extracts the requirement of module from go.mod's text.
 //
 // Both the single-line and the parenthesised block forms are handled, and they
 // must be told apart: a naive reader that treats every line as a require turns
-// the block line "github.com/kitsunium/sdk/pkg => ../sdk/pkg" into a
-// requirement on the version "=>", which then compares older than every real
-// tag and produces a confident, wrong "you are 25 releases behind".
-func parseGoMod(text string) (moduleRef, bool) {
-	var ref moduleRef
+// the block line "github.com/kitsunium/sdk => ../sdk" into a requirement on
+// the version "=>", which then compares older than every real tag and produces
+// a confident, wrong "you are 25 releases behind".
+func parseGoMod(text, module string) (moduleRef, bool) {
+	ref := moduleRef{module: module}
 	section := sectionNone
 	//: SplitSeq walks the lines without materialising the whole slice.
 	for raw := range strings.SplitSeq(text, "\n") {
@@ -268,7 +424,8 @@ func readGoModLine(ref *moduleRef, section gomodSection, line string) gomodSecti
 	return section
 }
 
-// readRequire records the SDK version from a "<path> <version>" entry.
+// readRequire records the version of ref's module from a "<path> <version>"
+// entry.
 func readRequire(ref *moduleRef, entry string) {
 	fields := strings.Fields(entry)
 	//: three conditions, one effect — the entry is not an SDK requirement this
@@ -276,7 +433,7 @@ func readRequire(ref *moduleRef, entry string) {
 	//: carries something that is not a version. Reading a malformed line as a
 	//: version is what would make the comparison silently absurd.
 	if len(fields) < requireFields ||
-		fields[requirePath] != sdkModule ||
+		fields[requirePath] != ref.module ||
 		!strings.HasPrefix(fields[requireVersion], "v") {
 		//: nothing to record.
 		return
@@ -285,10 +442,10 @@ func readRequire(ref *moduleRef, entry string) {
 	ref.Version = fields[requireVersion]
 }
 
-// readReplace records that the SDK is redirected, but only when it is the
-// LEFT side of the arrow.
+// readReplace records that ref's module is redirected, but only when it is
+// the LEFT side of the arrow.
 //
-// The direction matters: "replace example.com/fork => github.com/kitsunium/sdk/pkg"
+// The direction matters: "replace example.com/fork => github.com/kitsunium/sdk"
 // mentions the SDK without replacing it, and reading that as a replacement
 // would silently suppress the freshness warning for a consumer who is genuinely
 // behind.
@@ -302,7 +459,7 @@ func readReplace(ref *moduleRef, entry string) {
 	fields := strings.Fields(lhs)
 	//: only the LEFT side names what is being replaced; the SDK appearing on
 	//: the right means some other module was redirected TO it.
-	if len(fields) == 0 || fields[0] != sdkModule {
+	if len(fields) == 0 || fields[0] != ref.module {
 		//: this directive names another module.
 		return
 	}
@@ -317,12 +474,13 @@ func readReplace(ref *moduleRef, entry string) {
 	ref.replaceVersions = append(ref.replaceVersions, at)
 }
 
-// workspaceRequirement resolves the SDK requirement through a go.work file.
+// workspaceRequirement resolves the requirement of module through a go.work
+// file.
 //
 // It reports the OLDEST requirement across the workspace's modules: that is
 // the one a reader must act on, and warning about the newest would let a stale
 // module hide behind an up-to-date sibling.
-func workspaceRequirement(dir string) (moduleRef, bool) {
+func workspaceRequirement(dir, module string) (moduleRef, bool) {
 	work, found := findUp(dir, "go.work")
 	//: no workspace either; there is nothing left to resolve through.
 	if !found {
@@ -337,10 +495,10 @@ func workspaceRequirement(dir string) (moduleRef, bool) {
 	}
 
 	root := filepath.Dir(work)
-	var oldest moduleRef
+	oldest := moduleRef{module: module}
 	//: use paths are relative to the workspace root, not the scan root.
 	for _, rel := range workspaceUses(string(data)) {
-		ref, ok := sdkRequirement(filepath.Join(root, rel))
+		ref, ok := sdkRequirement(filepath.Join(root, rel), module)
 		//: a module that does not depend on the SDK has nothing to say.
 		if !ok {
 			//: skip it and keep looking.
@@ -661,10 +819,10 @@ func semverLess(a, b string) bool {
 	return apatch < bpatch
 }
 
-// versionNotice renders the warning. It names the gap's kind because that is
-// what tells a reader how urgent this is, and it names the exact go get line
-// because a nudge without a next step is just noise.
-func versionNotice(cur string, newer []string) string {
+// versionNotice renders the warning for module. It names the gap's kind
+// because that is what tells a reader how urgent this is, and it names the
+// exact go get line because a nudge without a next step is just noise.
+func versionNotice(module, cur string, newer []string) string {
 	//: newerThan sorted ascending, so the last entry is the newest release.
 	latest := newer[len(newer)-1]
 	var b strings.Builder
@@ -673,9 +831,74 @@ func versionNotice(cur string, newer []string) string {
 	//: the reason a patch matters here is specific to this SDK's release
 	//: policy, and it is the part a consumer cannot infer from a changelog of
 	//: exported symbols.
-	b.WriteString("  A patch is cut whenever an internal package pkg depends on changes (ADR 0007),\n")
-	b.WriteString("  so releases carry fixes that never alter the public API.\n")
-	b.WriteString("  Update:  go get " + sdkModule + "@" + latest + "\n")
+	b.WriteString("  A patch is cut whenever an internal package the public packages depend on\n")
+	b.WriteString("  changes (ADR 0007), so releases carry fixes that never alter the public API.\n")
+	b.WriteString("  Update:  go get " + module + "@" + latest + "\n")
+	b.WriteString("  Silence: -version-check=off")
+	//: one block of text, printed verbatim by the caller.
+	return b.String()
+}
+
+// dropMerged is the half of the migration command that drops every module ADR
+// 0162 merged into the SDK module, so no package is provided by two modules of
+// the build: one argument, retiredRoot@none, which takes the other four out
+// with it. Upgrading …/pkg and …/framework to their tombstones instead leaves
+// the three internal modules in the build, measured: an ambiguous import.
+func dropMerged() string {
+	//: one removal is all five: every version of the other four up to
+	//: v0.17.0 requires it.
+	return retiredRoot + "@none"
+}
+
+// migrateCommand is the one command a go.mod still on the split modules
+// migrates with: the SDK module at latest, and every module it replaced
+// dropped. A vendor or connector module the go.mod requires is upgraded in the
+// same command (vendorHint).
+func migrateCommand(latest string) string {
+	//: the requirement and the removal, together or the build is ambiguous.
+	return "go get " + sdkModule + "@" + latest + " " + dropMerged()
+}
+
+// vendorHint is the line both migration notices end on. A vendor or connector
+// module is named at @latest, never at the SDK's version: since ADR 0162 it is
+// tagged only by a release that changes it, so the SDK's newest version need
+// not exist for it.
+func vendorHint() string {
+	//: the module directory is the reader's to fill in from their go.mod.
+	return "           (plus " + sdkModule + "/<vendor module>@latest for each one go.mod requires)\n"
+}
+
+// migrationNotice renders the warning for a go.mod still on the public module
+// of before ADR 0162: the module it requires, the SDK release that replaced it,
+// and the one command that migrates.
+func migrationNotice(cur, latest string) string {
+	var b strings.Builder
+	b.WriteString("warning: go.mod requires " + legacyModule + " " + cur + ", and the SDK is one module\n")
+	b.WriteString("  since ADR 0162: " + sdkModule + ", latest is " + latest + ". Import paths do not change;\n")
+	b.WriteString("  the requirement does, and the old modules must leave go.mod with it, or every\n")
+	b.WriteString("  package is found in two modules and the build fails on an ambiguous import.\n")
+	b.WriteString("  Removing " + retiredRoot + " removes all five: the others, up to v0.17.0, require it.\n")
+	b.WriteString("  Migrate: " + migrateCommand(latest) + "\n")
+	b.WriteString(vendorHint())
+	b.WriteString("  Silence: -version-check=off")
+	//: one block of text, printed verbatim by the caller.
+	return b.String()
+}
+
+// halfMigrationNotice renders the warning for a build that requires the SDK
+// module and still merged, one of the modules it replaced — what a migration
+// that dropped `…/pkg` but not the `…/internal/*` modules leaves behind, or one
+// that upgraded `…/pkg` and `…/framework` to their tombstones. The SDK
+// requirement stays as it is; only the removal is left to make.
+func halfMigrationNotice(ref, merged moduleRef) string {
+	var b strings.Builder
+	b.WriteString("warning: the build requires " + sdkModule + " " + ref.Version + " and still\n")
+	b.WriteString("  " + merged.module + " " + merged.Version + ", a module the SDK module replaced (ADR 0162):\n")
+	b.WriteString("  each of its packages is found in two modules, and the build fails on an\n")
+	b.WriteString("  ambiguous import. Every replaced module leaves with " + retiredRoot + ",\n")
+	b.WriteString("  which the others, up to v0.17.0, require:\n")
+	b.WriteString("  Migrate: go get " + dropMerged() + "\n")
+	b.WriteString(vendorHint())
 	b.WriteString("  Silence: -version-check=off")
 	//: one block of text, printed verbatim by the caller.
 	return b.String()

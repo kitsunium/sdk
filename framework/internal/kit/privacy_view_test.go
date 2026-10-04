@@ -245,7 +245,7 @@ func TestPrivacyDeclarationProblemsAreReportedTogether(t *testing.T) {
 		}
 	}
 	for _, d := range de.Diagnostics {
-		if d.Source == nil || d.Source.File != "internal/kit/privacy_view_test.go" {
+		if d.Source == nil || d.Source.File != "framework/internal/kit/privacy_view_test.go" {
 			t.Errorf("a problem without its position: %+v", d)
 		}
 	}

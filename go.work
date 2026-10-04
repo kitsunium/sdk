@@ -2,15 +2,10 @@ go 1.27.1
 
 use (
 	.
-	./framework
 	./framework/connectors/mysql
 	./framework/connectors/postgres
 	./framework/connectors/ssh
 	./framework/connectors/sqlite
-	./internal/core
-	./internal/kernel
-	./internal/service
-	./pkg
 	./third-party/aws
 	./third-party/codec/hcl
 	./third-party/codec/protobuf

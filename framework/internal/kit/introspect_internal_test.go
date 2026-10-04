@@ -80,8 +80,8 @@ func TestASourceIsNeverALink(t *testing.T) {
 // The endpoint serves the file the graph names while it is a regular file,
 // and refuses it once a link takes its name, saying nothing of what the
 // link leads to. The module and its service are declared in the root
-// package of github.com/kitsunium/sdk/pkg, as they say, from a file of the test's
-// directory: that directory is the Go module's root, and .env lies there.
+// package of toolsModule, as they say, from a file of the test's directory:
+// that directory is the Go module's root, and .env lies there.
 func TestTheSourceEndpointServesNoLink(t *testing.T) {
 	tools, _ := goModuleOf(toolsPos(t).pkg())
 	dir := t.TempDir()

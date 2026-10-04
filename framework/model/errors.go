@@ -1,5 +1,5 @@
 // The codes and sentinels of framework/model: range 0.4.1.* (ADR 0147 —
-// layer 4 is the framework module). Each var's name equals its errs.Define
+// layer 4 is the framework's). Each var's name equals its errs.Define
 // Reason in SCREAMING_SNAKE form.
 
 package model

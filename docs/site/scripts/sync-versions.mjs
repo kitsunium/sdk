@@ -78,7 +78,9 @@ async function listReleasesViaGh() {
 }
 
 async function listReleasesViaGitTags() {
-  const out = await shellSafe("git", ["tag", "-l", "pkg/v*/v*"]);
+  //: the SDK module's root tags (ADR 0162) and the pkg/… tags before them;
+  //: isValidTag drops every other shape, the vendor modules' included.
+  const out = await shellSafe("git", ["tag", "-l", "v*", "pkg/v*"]);
   if (typeof out !== "string") return [];
   return out
     .split("\n")
@@ -540,7 +542,7 @@ async function materialiseRelease(major, release, sourceRoot, tag) {
 
   // 6. Changelog (auto-generated from git log between tags).
   // For "local" we window over the last 30 commits — until the first
-  // pkg/<major>/vX.Y.Z tag lands, that's the most honest signal.
+  // release tag lands, that's the most honest signal.
   // Also emits src/data/whats-new-<release>-<major>.json consumed by
   // the <WhatsNew /> banner injected at the top of the Home page.
   const repoUrl = "https://github.com/kitsunium/sdk";

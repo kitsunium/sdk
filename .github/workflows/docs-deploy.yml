@@ -56,7 +56,7 @@ jobs:
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
-          # Full history + all tags so sync-versions' `git tag -l 'pkg/v*/v*'`
+          # Full history + all tags so sync-versions' `git tag -l 'v*' 'pkg/v*'`
           # and `git worktree add --detach <tag>` resolve every release
           # snapshot — a shallow clone would silently produce an empty dropdown.
           fetch-depth: 0

@@ -158,11 +158,11 @@ func TestTheModelSaysWhatAStoreRemembers(t *testing.T) {
 	must(t, err)
 	after := app.Graph()
 	got := rememberedAs(after.Node("keeper/store/holders").Store.History)
-	want := "/email,/nick,/password | /password: 15 characters, 2 refused, declared in internal/kit/history_test.go | kept 1, weighs true"
+	want := "/email,/nick,/password | /password: 15 characters, 2 refused, declared in framework/internal/kit/history_test.go | kept 1, weighs true"
 	if got != want {
 		t.Errorf("the model says %q, want %q", got, want)
 	}
-	if !slices.Contains(after.Files(), model.File{File: "internal/kit/history_test.go"}) {
+	if !slices.Contains(after.Files(), model.File{File: "framework/internal/kit/history_test.go"}) {
 		t.Error("the policy's file is not one the Studio may open")
 	}
 	if before.Revision != after.Revision {

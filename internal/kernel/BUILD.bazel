@@ -1,6 +1,5 @@
 load("@rules_go//go:def.bzl", "go_test")
 
-# gazelle:prefix github.com/kitsunium/sdk/internal/kernel
 # gazelle:go_visibility //internal/kernel:kernel_consumers
 # gazelle:default_visibility //internal/kernel:kernel_consumers
 

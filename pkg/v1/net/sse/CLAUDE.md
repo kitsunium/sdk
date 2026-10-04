@@ -62,7 +62,7 @@ shape change, ADR 0040). `Validate` stayed with the value.
   public edge.
 - **The sentinels are the engine's own values, not copies.**
   `TestSentinelsAreMatchable` pins that `errors.Is` still answers across the
-  module boundary; re-declared sentinels would quietly answer false.
+  facade boundary; re-declared sentinels would quietly answer false.
 
 ## The client side is NOT here, and that is a decision
 

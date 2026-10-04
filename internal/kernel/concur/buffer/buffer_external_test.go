@@ -6,6 +6,13 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/concur/buffer"
 )
 
+// roundTrips bounds the Put-then-Get round trips assertResetOnReuse makes
+// before it concludes the pool never hands back a buffer it was just given.
+// One usually suffices. A round trip misses only when the race detector's
+// sync.Pool dropped the Put (one in four, at random) or another goroutine took
+// the buffer first, so a thousand misses in a row do not happen by chance.
+const roundTrips int = 1000
+
 func TestGet(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -33,6 +40,10 @@ func TestGet(t *testing.T) {
 	}
 }
 
+// TestPut never touches a buffer after handing it back. Put ends the caller's
+// ownership, and the pool may give the buffer at once to a parallel test whose
+// own Put rewrites *b: reading len(*b) after Put raced TestGet's cleanup in
+// exactly that way. The reset is observed on the buffer Get hands back.
 func TestPut(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -40,15 +51,8 @@ func TestPut(t *testing.T) {
 		runner func(t *testing.T)
 	}{
 		{
-			name: "resets length after use",
-			runner: func(t *testing.T) {
-				b := buffer.Get()
-				*b = append(*b, "hello"...)
-				buffer.Put(b)
-				if len(*b) != 0 {
-					t.Errorf("after Put, len = %d, want 0", len(*b))
-				}
-			},
+			name:   "resets length after use",
+			runner: assertResetOnReuse,
 		},
 		{
 			name: "nil pointer is safe",
@@ -69,4 +73,27 @@ func TestPut(t *testing.T) {
 			tc.runner(t)
 		})
 	}
+}
+
+// assertResetOnReuse dirties a buffer, Puts it, and Gets until the pool hands
+// that same buffer back, then checks its length is zero. Comparing the two
+// pointers reads neither buffer; the only buffer read is the one Get returned,
+// which the test owns again.
+func assertResetOnReuse(t *testing.T) {
+	t.Helper()
+	for range roundTrips {
+		b := buffer.Get()
+		*b = append(*b, "hello"...)
+		buffer.Put(b)
+		got := buffer.Get()
+		if got == b {
+			if len(*got) != 0 {
+				t.Errorf("reused buffer len = %d, want 0", len(*got))
+			}
+			buffer.Put(got)
+			return
+		}
+		buffer.Put(got)
+	}
+	t.Fatalf("the pool never handed back the buffer just Put, in %d round trips", roundTrips)
 }

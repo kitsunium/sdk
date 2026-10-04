@@ -6,10 +6,18 @@ name: SDK Release
 # sizes anything: the squash message is composed from contributor text, so it
 # could both bury a maintainer's request (#217) and set the size itself (#224).
 #
-# WHAT is released is the chain go.work declares — internal/*, pkg, the
-# framework and its connectors, the vendor modules under third-party/ — tagged
-# in lockstep at one version, so the tokens "pkg", "framework" and
-# "third-party" each release all of it, once (ADR 0147 §9, ADR 0157).
+# WHAT is released is ONE tag on the SDK module, vX.Y.Z — the repository root,
+# which holds internal/, pkg/ and framework/ (ADR 0162) — and, at the same
+# X.Y.Z, the tag of each module that requires a vendor (third-party/*,
+# framework/connectors/*, read from go.work) whose files changed since its own
+# last tag. One GitHub release is made, for the SDK's tag; its notes list the
+# vendor tags the release cut. compute-bumps.sh emits the one token "sdk".
+# The SDK module's first release — v0.18.0, after pkg/v0.17.0 — also cuts, in
+# the same atomic push and never again, the tombstones pkg/v0.18.0 and
+# framework/v0.18.0: the last version of each retired module, a go.mod that
+# requires the release and holds no package, so an import of …/pkg/v1/… or
+# …/framework/… resolves to the SDK module (ADR 0162). The notes list them
+# apart.
 #
 # Triggered AFTER bazel-ci.yml succeeds (no race, no double-build).
 # workflow_dispatch input force_bumps overrides the impact analysis when
@@ -62,7 +70,7 @@ on:
   workflow_dispatch:
     inputs:
       force_bumps:
-        description: 'Force a bump token, "pkg", "framework" or "third-party" — any of them releases the whole chain in lockstep, ADR 0147 and ADR 0157 (empty = use compute-bumps.sh output).'
+        description: 'Force the release token "sdk": one tag on the SDK module, and each vendor module that changed since its own tag — ADR 0162. "pkg", "framework" and "third-party" mean the same (empty = use compute-bumps.sh output).'
         required: false
         default: ""
       bump:
@@ -173,7 +181,7 @@ jobs:
           git config user.email "133899878+kodflow@users.noreply.github.com"
           git config user.name "kitsunium-bot"
 
-      - name: Compute majors to bump
+      - name: Compute the release token
         id: compute
         env:
           # Route the workflow_dispatch input through an env var rather than
@@ -194,7 +202,7 @@ jobs:
             # No `|| true` on the filter either: a force input that matches
             # nothing is a typo, and publishing nothing because of a typo is
             # the outcome this whole file now refuses to call a success.
-            printf '%s\n' "$FORCE_BUMPS" | tr ' ' '\n' | grep -E '^(pkg|framework|third-party|v[0-9]+)$' > "$majors"
+            printf '%s\n' "$FORCE_BUMPS" | tr ' ' '\n' | grep -E '^(sdk|pkg|framework|third-party|v[0-9]+)$' > "$majors"
             reason="forced by workflow_dispatch: $(tr '\n' ' ' < "$majors")"
           else
             # No `|| true`: compute-bumps.sh exits 0 on a legitimate no-op
@@ -244,9 +252,11 @@ jobs:
           # failure) and errexit would abort before the rc==3 handler runs.
           # Real failures still fail the job via the explicit `exit "$rc"` below.
           set +e
-          # A manual workflow_dispatch authorises the bootstrap (very first)
-          # release; automatic runs must NOT blind-cut it — cut-tags exits 3 to
-          # signal a held bootstrap (ADR 0009: validate go.sum + clean-room
+          # A manual workflow_dispatch authorises the bootstrap release — the
+          # very first one, and the SDK module's first root tag after the
+          # pkg/vX.Y.Z history (ADR 0162), the first release of its content;
+          # automatic runs must NOT blind-cut it — cut-tags exits 3 to signal a
+          # held bootstrap (ADR 0009: validate the module zip + a clean-room
           # go-get first).
           # An ARRAY, each element one argument. The `bump` input is free text
           # typed into a dispatch form, and expanding it unquoted inside a flags
@@ -281,7 +291,7 @@ jobs:
             # an output rather than inferred from an empty cut.log, which is
             # also what a silent failure looks like.
             echo "held=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::First release held for manual validation (ADR 0009). Dispatch this workflow manually once go.sum + a clean-room 'go get' are verified."
+            echo "::notice::First release of the SDK module held for manual validation (ADR 0009, ADR 0162). Dispatch this workflow manually, with bump=minor for v0.18.0, once the module zip + a clean-room 'go get' are verified."
             exit 0
           fi
           echo "held=false" >> "$GITHUB_OUTPUT"
@@ -294,8 +304,8 @@ jobs:
         #
         # Reads the tag list cut-tags.sh wrote rather than re-deriving it: the
         # question is "did the publication happen", and only its own output can
-        # answer that. Missing file, empty file and a file with no pkg/ tag are
-        # all failures; none of them is a release.
+        # answer that. Missing file, empty file and a file whose first line is
+        # not the SDK's vX.Y.Z are all failures; none of them is a release.
         if: steps.compute.outputs.majors != '' && steps.cut.outputs.held != 'true'
         env:
           MAJORS: ${{ steps.compute.outputs.majors }}
@@ -305,31 +315,68 @@ jobs:
             echo "::error::cut-tags.sh produced no output file for bump '$MAJORS' — nothing was published"
             exit 1
           fi
+          sdk_tag="$(awk 'NF { print; exit }' /tmp/cut.log)"
           published=0
           while IFS= read -r tag; do
             [ -z "$tag" ] && continue
             case "$tag" in
-              pkg/v[01].*) published=$((published + 1)) ;;
+              v[01].*) published=$((published + 1)) ;;
             esac
           done < /tmp/cut.log
-          if [ "$published" -eq 0 ]; then
-            echo "::error::bump '$MAJORS' was computed but no pkg/ tag was published"
+          case "$sdk_tag" in
+            v[01].*) ;;
+            *) published=0 ;;
+          esac
+          if [ "$published" -ne 1 ]; then
+            echo "::error::bump '$MAJORS' was computed but the SDK's tag was not published as the first and only vX.Y.Z (found $published)"
             echo "cut-tags.sh output was:" >&2
             cat /tmp/cut.log >&2
             exit 1
           fi
-          echo "::notice::published $published pkg tag(s)"
+          # The tombstones of the first release are no vendor module: counted apart.
+          vendors="$(awk 'NF && NR > 1 && !/^(pkg|framework)\/v/ { n++ } END { print n + 0 }' /tmp/cut.log)"
+          tombstones="$(awk 'NF && NR > 1 && /^(pkg|framework)\/v/ { n++ } END { print n + 0 }' /tmp/cut.log)"
+          echo "::notice::published $sdk_tag, $vendors vendor tag(s) and $tombstones tombstone(s)"
 
-      - name: Create GitHub releases
-        if: steps.compute.outputs.majors != ''
+      - name: Create the GitHub release
+        # ONE release, for the SDK's tag (ADR 0162) — not one per module, which
+        # made eighteen for a lockstep release. The vendor tags the release cut
+        # are listed in its notes, ahead of the notes GitHub generates; a vendor
+        # module that did not change is said to keep its last tag. The
+        # tombstones of the first release (pkg/vX.Y.Z, framework/vX.Y.Z — the
+        # only lines of the tag list that start with either and a `/v`) are
+        # listed apart: they are no vendor module, and no release of their own.
+        if: steps.compute.outputs.majors != '' && steps.cut.outputs.held != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          while IFS= read -r tag; do
-            [ -z "$tag" ] && continue
-            gh release create "$tag" --generate-notes --verify-tag --title "$tag"
-          done < /tmp/cut.log
+          sdk_tag="$(awk 'NF { print; exit }' /tmp/cut.log)"
+          vendor_tags="$(awk 'NF && NR > 1 && !/^(pkg|framework)\/v/' /tmp/cut.log)"
+          tombstone_tags="$(awk 'NF && NR > 1 && /^(pkg|framework)\/v/' /tmp/cut.log)"
+          {
+            echo "The SDK module \`github.com/kitsunium/sdk\` at \`$sdk_tag\`."
+            echo
+            if [ -n "$vendor_tags" ]; then
+              echo "Modules that require a vendor, tagged by this release because they changed:"
+              echo
+              while IFS= read -r t; do
+                [ -n "$t" ] && echo "- \`$t\` — \`github.com/kitsunium/sdk/${t%/v*}\`"
+              done <<<"$vendor_tags"
+            else
+              echo "No module that requires a vendor changed: each keeps its last tag."
+            fi
+            if [ -n "$tombstone_tags" ]; then
+              echo
+              echo "The modules the SDK module replaced get their last version, a go.mod that requires \`github.com/kitsunium/sdk\` \`$sdk_tag\` and holds no package, so an import of their paths resolves to the SDK module (ADR 0162):"
+              echo
+              while IFS= read -r t; do
+                [ -n "$t" ] && echo "- \`$t\` — \`github.com/kitsunium/sdk/${t%/v*}\`"
+              done <<<"$tombstone_tags"
+            fi
+          } > /tmp/release-notes.md
+          # --notes, which gh documents as PREPENDED to the generated notes.
+          gh release create "$sdk_tag" --generate-notes --verify-tag --title "$sdk_tag" --notes "$(cat /tmp/release-notes.md)"
 
       - name: Emit release summary artifact
         # No longer gated on a bump having been computed. A run that published
@@ -375,14 +422,17 @@ jobs:
               echo "No bump token was computed for this range, so no tag was cut."
               echo "This is a legitimate outcome for a change that carries nothing"
               echo "consumer-visible. The reason above is the calculator's own; the"
-              echo "full reasoning is in the \`Compute majors to bump\` step log."
+              echo "full reasoning is in the \`Compute the release token\` step log."
             elif [ "${HELD:-}" = "true" ]; then
               echo "### Held (bootstrap)"
               echo
-              echo "Bump \`${MAJORS}\` computed; the FIRST release is held for manual"
-              echo "validation (ADR 0009). Nothing was published, on purpose."
+              echo "Bump \`${MAJORS}\` computed; the first release of the SDK module is"
+              echo "held for manual validation (ADR 0009, ADR 0162). Nothing was"
+              echo "published, on purpose. Dispatch SDK Release with \`bump=minor\` —"
+              echo "v0.18.0, after pkg/v0.17.0 — once the module zip and a clean-room"
+              echo "\`go get\` are verified."
             else
-              echo "### Majors bumped"
+              echo "### Release token"
               echo
               echo "\`\`\`"
               echo "${MAJORS}"
