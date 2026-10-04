@@ -1,11 +1,12 @@
 ---
-// Search — Pagefind-powered full-text search over the static site.
-// Pagefind indexes the built HTML (post-Astro-build), so the entire
-// versioned tree (every /<major>/<release>/...) is searchable without
-// any server. The UI script is fetched lazily on first keystroke.
+// Search — ⌘K over two indexes behind one input: Pagefind's full text of the
+// built site (every release's pages), and the symbol index of the page's own
+// release, which gen-symbols.mjs wrote from that release's docs/api — every
+// exported symbol of pkg/<major>/, and every method an alias reaches at its
+// owner. Both are fetched on first use, under the deploy base.
 //
 // Trigger: click the input OR press ⌘K / Ctrl+K anywhere on the page.
-// The popover opens, fetches /_pagefind/pagefind-ui.{js,css} on demand,
+// The popover opens, fetches <base>/_pagefind/pagefind-ui.{js,css} on demand,
 // and renders results inline. Closes on Escape or click-outside.
 //
 // Empty-state suggestions: when the search input is empty, the modal
@@ -13,9 +14,13 @@
 // landing, services, ADR index, etc. As soon as the user types, the
 // quick-links panel hides and Pagefind results take over.
 //
-// On `npm run dev` Pagefind has not indexed yet, so the input shows a
-// "search available in production build" hint and the popover stays
-// disabled — no console errors, just a graceful degradation.
+// A release with no docs/api (cut before it existed) has no symbol index:
+// its pages are found through Pagefind alone. On `npm run dev` Pagefind has
+// not indexed yet, so the panel says the full-text index is missing — no
+// console error, just a graceful degradation.
+//
+// A result is rendered as text: every field of a symbol lands in a text
+// node, built element by element — no HTML is parsed from a string.
 import { getCollection } from "astro:content";
 import { findDefaults } from "../../scripts/lib/tag-format.mjs";
 import { buildCatalog } from "../../scripts/lib/page-catalog.mjs";
@@ -24,7 +29,7 @@ import { DEPLOY_BASE } from "../../scripts/lib/base.mjs";
 interface VersionEntry {
   major: string;
   default: boolean;
-  releases: { version: string; default: boolean }[];
+  releases: { version: string; default: boolean; api?: boolean }[];
 }
 
 let versions: VersionEntry[] = [];
@@ -48,9 +53,21 @@ try {
 //: slugs into Overview / Reference and routes everything else into
 //: "services" (the gomarkdoc-generated pkg/<m>/<sub>/README.md set).
 const quickLinks = buildCatalog(entries as any, root, base);
+
+//: The "<release>/<major>" pairs gen-symbols wrote a symbol index for:
+//: those sync-versions flagged `api` (their tree has docs/api). The client
+//: loads the one of the page it is on, and never asks for one that is not.
+const symbolIndexes = versions.flatMap(v =>
+  v.releases.filter(r => r.api).map(r => `${r.version}/${v.major}`),
+);
 ---
 
-<div class="search" data-search>
+<div
+  class="search"
+  data-search
+  data-symbol-indexes={JSON.stringify(symbolIndexes)}
+  data-symbol-default={root}
+>
   <button type="button" class="search-trigger" aria-label="Open search (⌘K / Ctrl+K)">
     <svg
       aria-hidden="true"
@@ -108,16 +125,25 @@ const quickLinks = buildCatalog(entries as any, root, base);
   // injected via <script type="module"> / <link> so the search payload
   // (~50KB JS + the index chunks) only loads when the user actually
   // triggers the search — no cost on cold page loads.
-  const PAGEFIND_JS = "/_pagefind/pagefind-ui.js";
-  const PAGEFIND_CSS = "/_pagefind/pagefind-ui.css";
-  let pagefindReady = false;
-  let pagefindFailed = false;
+  //
+  // Every URL carries the deploy base (the site is a project page served
+  // under /<repo>/), and the page position is read with the base stripped.
+  //
+  // The view-transition router swaps the page body on navigation, so the
+  // search root is re-bound on every astro:page-load, and the global keys act
+  // on the root of the page currently shown.
+  const BASE = (import.meta.env.BASE_URL || "/").replace(/\/+$/, "");
+  const PAGEFIND_JS = `${BASE}/_pagefind/pagefind-ui.js`;
+  const PAGEFIND_CSS = `${BASE}/_pagefind/pagefind-ui.css`;
+  //: the shape of a symbol index gen-symbols.mjs writes; any other is
+  //: refused, so a skew reads as "no symbols", loudly, not as no match.
+  const INDEX_SCHEMA = 2;
 
   //: Symbol search runs in parallel with Pagefind, sharing the same
   //: input element. MiniSearch is bundled (6 KB) so the index is
-  //: ready as soon as symbols-<major>.json downloads (~one HTTP req).
+  //: ready as soon as symbols-<release>-<major>.json downloads.
   type SymbolEntry = {
-    kind: "func" | "type" | "method" | "const" | "var";
+    kind: "func" | "type" | "alias" | "method" | "const" | "var";
     name: string;
     qualified: string;
     package: string;
@@ -125,41 +151,61 @@ const quickLinks = buildCatalog(entries as any, root, base);
     signature: string;
     doc?: string;
     url: string;
+    id: string;
+    via?: string;
     receiver?: string;
     deprecated?: boolean;
     sourceUrl?: string;
   };
-  let symbolSearch: any = null;     // MiniSearch instance
-  let symbolEntries: Map<string, SymbolEntry> | null = null;
-  let symbolLoadPromise: Promise<boolean> | null = null;
+  type SymbolIndex = { search: any; entries: Map<string, SymbolEntry> };
+  //: one load per index URL for the whole session: a navigation to another
+  //: release loads that release's index, and coming back reuses the first.
+  const symbolIndexes = new Map<string, Promise<SymbolIndex | null>>();
+  let pagefindLoad: Promise<boolean> | null = null;
 
-  //: Pull the active major from the URL so we load the right index.
-  //: URL shape is /<release>/<major>/... — second segment is v1/v2/…
-  function activeMajor(): string {
-    const m = window.location.pathname.match(/^\/[^/]+\/(v\d+)\//);
-    return m?.[1] ?? "v1";
+  //: The page's "<release>/<major>", from the path with the base stripped —
+  //: /<base>/<release>/<major>/… — or null on a page outside the tree.
+  function pagePosition(): string | null {
+    let path = window.location.pathname;
+    if (BASE && path.startsWith(BASE)) path = path.slice(BASE.length);
+    const m = path.match(/^\/([^/]+)\/(v\d+)(?:\/|$)/);
+    return m ? `${m[1]}/${m[2]}` : null;
   }
 
-  async function ensureSymbolIndex(): Promise<boolean> {
-    if (symbolSearch) return true;
-    if (symbolLoadPromise) return symbolLoadPromise;
-    symbolLoadPromise = (async () => {
+  //: The URL of the symbol index of the page's release, or null when that
+  //: release has none (no docs/api in its tree).
+  function symbolIndexURL(root: HTMLElement): string | null {
+    let available: string[] = [];
+    try {
+      available = JSON.parse(root.dataset.symbolIndexes ?? "[]");
+    } catch { /* no list: no index */ }
+    const here = pagePosition() ?? root.dataset.symbolDefault ?? "";
+    if (!available.includes(here)) return null;
+    const [release, major] = here.split("/");
+    return `${BASE}/_search/symbols-${release}-${major}.json`;
+  }
+
+  function loadSymbolIndex(url: string): Promise<SymbolIndex | null> {
+    let pending = symbolIndexes.get(url);
+    if (pending) return pending;
+    pending = (async () => {
       try {
         const [{ default: MiniSearch }, payload] = await Promise.all([
           import("minisearch"),
-          fetch(`/_search/symbols-${activeMajor()}.json`).then(r => {
+          fetch(url).then(r => {
             if (!r.ok) throw new Error(`symbols ${r.status}`);
-            return r.json() as Promise<{ symbols: SymbolEntry[] }>;
+            return r.json() as Promise<{ schema: number; symbols: SymbolEntry[] }>;
           }),
         ]);
+        if (payload.schema !== INDEX_SCHEMA) {
+          throw new Error(`symbol index schema ${payload.schema}, want ${INDEX_SCHEMA}`);
+        }
         const ms = new MiniSearch({
-          //: id field MUST be unique; package+qualified guards against
-          //: duplicate basenames across packages.
-          idField: "id",
+          //: the url is unique per entry: one anchor per record the page
+          //: renders, an alias's members under the alias's name.
+          idField: "url",
           fields: ["name", "qualified", "doc", "signature", "packageShort"],
-          storeFields: ["kind", "name", "qualified", "package", "packageShort",
-                        "signature", "doc", "url", "receiver",
-                        "deprecated", "sourceUrl"],
+          storeFields: ["url"],
           searchOptions: {
             //: heavy boost on name + qualified — what users type most.
             boost: { name: 6, qualified: 4, packageShort: 2, signature: 1, doc: 1 },
@@ -168,193 +214,237 @@ const quickLinks = buildCatalog(entries as any, root, base);
             combineWith: "AND",
           },
         });
-        const docs = (payload.symbols ?? []).map((s, i) => ({
-          ...s,
-          id: `${s.package}#${s.kind}#${s.name}#${i}`,
-        }));
-        ms.addAll(docs);
-        symbolSearch = ms;
-        symbolEntries = new Map(docs.map(d => [d.id, d]));
-        return true;
+        const symbols = payload.symbols ?? [];
+        ms.addAll(symbols);
+        return { search: ms, entries: new Map(symbols.map(s => [s.url, s])) };
       } catch (err) {
         console.warn("[search] symbol index unavailable:", err);
-        return false;
-      } finally {
-        symbolLoadPromise = null;
+        symbolIndexes.delete(url);
+        return null;
       }
     })();
-    return symbolLoadPromise;
+    symbolIndexes.set(url, pending);
+    return pending;
   }
 
   const KIND_LABELS: Record<string, string> = {
-    func: "func", type: "type", method: "fn", const: "const", var: "var",
+    func: "func", type: "type", alias: "alias", method: "fn", const: "const", var: "var",
   };
 
-  function renderSymbols(root: HTMLElement, query: string) {
-    const wrap = root.querySelector<HTMLElement>("[data-symbol-results]");
-    const list = root.querySelector<HTMLElement>("[data-symbol-list]");
-    const count = root.querySelector<HTMLElement>("[data-symbol-count]");
-    if (!wrap || !list || !count || !symbolSearch || !symbolEntries) return;
+  //: an element holding text, never parsed markup.
+  function textEl<K extends keyof HTMLElementTagNameMap>(
+    tag: K, className: string, text: string,
+  ): HTMLElementTagNameMap[K] {
+    const el = document.createElement(tag);
+    el.className = className;
+    el.textContent = text;
+    return el;
+  }
+
+  function symbolRow(e: SymbolEntry): HTMLLIElement {
+    const li = document.createElement("li");
+    const a = document.createElement("a");
+    a.href = `${BASE}${e.url}`;
+    a.dataset.symbolLink = "";
+    const kind = textEl("span", `sym-kind sym-kind--${e.kind}`, KIND_LABELS[e.kind] ?? e.kind);
+    const name = textEl("span", "sym-name", e.qualified);
+    if (e.deprecated) name.append(textEl("span", "sym-chip sym-chip--deprecated", "Deprecated"));
+    a.append(kind, name, textEl("span", "sym-sig", e.signature));
+    if (e.doc) a.append(textEl("span", "sym-doc", e.doc));
+    li.append(a);
+    //: the source link is the row's sibling, so a click on the row is not
+    //: hijacked, and no anchor nests in another.
+    if (e.sourceUrl) {
+      const src = textEl("a", "sym-source", "Source ↗");
+      src.href = e.sourceUrl;
+      src.target = "_blank";
+      src.rel = "noopener";
+      li.append(src);
+    }
+    return li;
+  }
+
+  function renderSymbols(panel: HTMLElement, query: string, index: SymbolIndex | null) {
+    const wrap = panel.querySelector<HTMLElement>("[data-symbol-results]");
+    const list = panel.querySelector<HTMLElement>("[data-symbol-list]");
+    const count = panel.querySelector<HTMLElement>("[data-symbol-count]");
+    if (!wrap || !list || !count) return;
     const q = query.trim();
-    if (q.length === 0) { wrap.hidden = true; list.innerHTML = ""; return; }
-    const hits = symbolSearch.search(q, { fuzzy: 0.2, prefix: true }).slice(0, 8);
-    if (hits.length === 0) { wrap.hidden = true; list.innerHTML = ""; return; }
-    list.innerHTML = hits.map((h: any) => {
-      const e = symbolEntries!.get(h.id);
-      if (!e) return "";
-      const docLine = e.doc ? `<span class="sym-doc">${escapeHtml(e.doc)}</span>` : "";
-      const deprecatedChip = e.deprecated
-        ? `<span class="sym-chip sym-chip--deprecated">Deprecated</span>`
-        : "";
-      //: Source link sits outside the anchor (separate <a>) so it
-      //: doesn't hijack a click on the row itself; CSS clicks
-      //: through with target=_blank.
-      const sourceLine = e.sourceUrl
-        ? `<a class="sym-source" href="${escapeHtml(e.sourceUrl)}" target="_blank" rel="noopener">Source ↗</a>`
-        : "";
-      return `
-        <li>
-          <a href="${escapeHtml(e.url)}" data-symbol-link>
-            <span class="sym-kind sym-kind--${e.kind}">${KIND_LABELS[e.kind] ?? e.kind}</span>
-            <span class="sym-name">${escapeHtml(e.qualified)}${deprecatedChip}</span>
-            <span class="sym-sig">${escapeHtml(e.signature)}</span>
-            ${docLine}
-            ${sourceLine}
-          </a>
-        </li>`;
-    }).join("");
-    count.textContent = `(${hits.length})`;
-    wrap.hidden = false;
+    const hits = q && index ? index.search.search(q, { fuzzy: 0.2, prefix: true }).slice(0, 8) : [];
+    const rows = hits
+      .map((h: { id: string }) => index!.entries.get(h.id))
+      .filter((e: SymbolEntry | undefined): e is SymbolEntry => e !== undefined)
+      .map(symbolRow);
+    list.replaceChildren(...rows);
+    count.textContent = rows.length > 0 ? `(${rows.length})` : "";
+    wrap.hidden = rows.length === 0;
   }
 
-  function escapeHtml(s: string): string {
-    return s.replace(/[&<>"']/g, c =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[c]!);
+  function loadPagefind(): Promise<boolean> {
+    pagefindLoad ??= (async () => {
+      try {
+        // Probe the script URL first so a 404 (dev mode) is a clean reject.
+        const head = await fetch(PAGEFIND_JS, { method: "HEAD" });
+        if (!head.ok) throw new Error("pagefind-ui.js not found");
+        const link = document.createElement("link");
+        link.rel = "stylesheet";
+        link.href = PAGEFIND_CSS;
+        document.head.appendChild(link);
+        await import(/* @vite-ignore */ PAGEFIND_JS);
+        return true;
+      } catch {
+        return false;
+      }
+    })();
+    return pagefindLoad;
   }
 
+  //: Mounts Pagefind's UI into this page's panel, once per page: a swapped
+  //: body brings an empty panel of its own.
   async function ensurePagefind(panel: HTMLElement): Promise<boolean> {
-    if (pagefindReady) return true;
-    if (pagefindFailed) return false;
-    try {
-      // Probe the script URL first so a 404 (dev mode) is a clean reject.
-      const head = await fetch(PAGEFIND_JS, { method: "HEAD" });
-      if (!head.ok) throw new Error("pagefind-ui.js not found");
-      const link = document.createElement("link");
-      link.rel = "stylesheet";
-      link.href = PAGEFIND_CSS;
-      document.head.appendChild(link);
-      await import(/* @vite-ignore */ PAGEFIND_JS);
-      // PagefindUI is exposed on window when the module evaluates.
-      // @ts-ignore — module assigns globally per Pagefind convention.
-      new window.PagefindUI({
-        element: "#pagefind-search",
-        bundlePath: "/_pagefind/",
-        showSubResults: true,
-        showImages: false,
-        resetStyles: false,
-        excerptLength: 22,
-      });
-      pagefindReady = true;
-      return true;
-    } catch {
-      pagefindFailed = true;
+    if (panel.dataset.pagefindMounted === "1") return true;
+    const host = panel.querySelector<HTMLElement>("#pagefind-search");
+    if (!host || !(await loadPagefind())) {
       const fb = panel.querySelector<HTMLElement>(".search-fallback");
       if (fb) fb.hidden = false;
       return false;
     }
+    // PagefindUI is exposed on window when the module evaluates.
+    // @ts-ignore — module assigns globally per Pagefind convention.
+    new window.PagefindUI({
+      element: host,
+      bundlePath: `${BASE}/_pagefind/`,
+      showSubResults: true,
+      showImages: false,
+      resetStyles: false,
+      excerptLength: 22,
+    });
+    panel.dataset.pagefindMounted = "1";
+    return true;
+  }
+
+  //: The search root of the page currently shown.
+  function currentRoot(): HTMLElement | null {
+    return document.querySelector<HTMLElement>("[data-search]");
   }
 
   function initSearch(root: HTMLElement) {
+    if (root.dataset.searchInit === "1") return;
+    root.dataset.searchInit = "1";
     const trigger = root.querySelector<HTMLButtonElement>(".search-trigger");
     const overlay = root.querySelector<HTMLElement>(".search-overlay");
-    const panel = root.querySelector<HTMLElement>(".search-panel");
-    if (!trigger || !overlay || !panel) return;
-
-    const suggestions = panel.querySelector<HTMLElement>("[data-suggestions]");
-    //: hide quick-links the moment the user starts typing; bring
-    //: them back when the input goes empty again (no extra fetch).
-    //: ALSO route the same query into the MiniSearch symbol panel so
-    //: both indexes update together from a single keystroke.
-    const watchInput = () => {
-      const input = panel.querySelector<HTMLInputElement>(".pagefind-ui__search-input");
-      if (!input || !suggestions) return;
-      let symbolBootstrapped = false;
-      const sync = async () => {
-        const q = input.value.trim();
-        suggestions.hidden = q.length > 0;
-        if (q.length > 0 && !symbolBootstrapped) {
-          symbolBootstrapped = true;
-          await ensureSymbolIndex();
-        }
-        renderSymbols(panel, q);
-      };
-      input.addEventListener("input", sync);
-      sync();
-    };
-    const open = async () => {
-      overlay.hidden = false;
-      document.body.style.overflow = "hidden";
-      await ensurePagefind(panel);
-      // Focus the Pagefind UI input once the script has rendered it.
-      requestAnimationFrame(() => {
-        const input = panel.querySelector<HTMLInputElement>(".pagefind-ui__search-input");
-        input?.focus();
-        watchInput();
-      });
-    };
-    const close = () => {
-      overlay.hidden = true;
-      document.body.style.overflow = "";
-      if (suggestions) suggestions.hidden = false;
-      trigger.focus();
-    };
-
-    //: Focus-trap — keep Tab/Shift+Tab cycling INSIDE the modal until
-    //: it closes. WAI-ARIA dialog pattern (developer.mozilla.org →
-    //: Web/Accessibility/ARIA/Roles/dialog_role). Without this, Tab
-    //: leaks focus to the underlying page and the user can't see
-    //: where it went (overlay hides the scroll).
-    const focusableSelector =
-      'a[href], button:not([disabled]), input:not([disabled]), ' +
-      'select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-    function trapTab(e: KeyboardEvent) {
-      if (e.key !== "Tab" || overlay.hidden) return;
-      const focusables = Array.from(
-        panel.querySelectorAll<HTMLElement>(focusableSelector),
-      ).filter(el => !el.hasAttribute("hidden") && el.offsetParent !== null);
-      if (focusables.length === 0) return;
-      const first = focusables[0];
-      const last = focusables[focusables.length - 1];
-      const active = document.activeElement as HTMLElement | null;
-      if (e.shiftKey && active === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && active === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    }
-
-    trigger.addEventListener("click", open);
+    if (!trigger || !overlay) return;
+    trigger.addEventListener("click", () => openSearch(root));
     overlay.addEventListener("click", e => {
-      if (e.target === overlay) close();
-    });
-    document.addEventListener("keydown", e => {
-      const cmd = e.metaKey || e.ctrlKey;
-      if (cmd && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        overlay.hidden ? open() : close();
+      if (e.target === overlay) {
+        closeSearch(root);
         return;
       }
-      if (e.key === "Escape" && !overlay.hidden) {
-        e.preventDefault();
-        close();
-        return;
-      }
-      trapTab(e);
+      //: a result followed in this tab closes the modal: an anchor of the
+      //: page shown (a symbol of this package) is scrolled to under it
+      //: otherwise. A link opening another tab leaves it open.
+      const link = (e.target as Element | null)?.closest?.("a[href]");
+      if (link && link.getAttribute("target") !== "_blank") closeSearch(root, false);
     });
   }
-  document.querySelectorAll<HTMLElement>("[data-search]").forEach(initSearch);
+
+  //: hide quick-links the moment the user starts typing; bring them back
+  //: when the input goes empty again (no extra fetch). ALSO route the same
+  //: query into the symbol panel so both indexes update together from a
+  //: single keystroke. Bound once per input.
+  function watchInput(root: HTMLElement, panel: HTMLElement) {
+    const input = panel.querySelector<HTMLInputElement>(".pagefind-ui__search-input");
+    const suggestions = panel.querySelector<HTMLElement>("[data-suggestions]");
+    if (!input || !suggestions || input.dataset.symbolsBound === "1") return;
+    input.dataset.symbolsBound = "1";
+    const url = symbolIndexURL(root);
+    const sync = async () => {
+      const q = input.value.trim();
+      suggestions.hidden = q.length > 0;
+      const index = q.length > 0 && url ? await loadSymbolIndex(url) : null;
+      //: the input may have moved on while the index loaded.
+      if (input.value.trim() === q) renderSymbols(panel, q, index);
+    };
+    input.addEventListener("input", sync);
+    sync();
+  }
+
+  async function openSearch(root: HTMLElement) {
+    const overlay = root.querySelector<HTMLElement>(".search-overlay");
+    const panel = root.querySelector<HTMLElement>(".search-panel");
+    if (!overlay || !panel) return;
+    overlay.hidden = false;
+    document.body.style.overflow = "hidden";
+    await ensurePagefind(panel);
+    // Focus the Pagefind UI input once the script has rendered it.
+    requestAnimationFrame(() => {
+      const input = panel.querySelector<HTMLInputElement>(".pagefind-ui__search-input");
+      input?.focus();
+      watchInput(root, panel);
+    });
+  }
+
+  function closeSearch(root: HTMLElement, refocus = true) {
+    const overlay = root.querySelector<HTMLElement>(".search-overlay");
+    const suggestions = root.querySelector<HTMLElement>("[data-suggestions]");
+    if (!overlay) return;
+    overlay.hidden = true;
+    document.body.style.overflow = "";
+    if (suggestions) suggestions.hidden = false;
+    if (refocus) root.querySelector<HTMLButtonElement>(".search-trigger")?.focus();
+  }
+
+  //: Focus-trap — keep Tab/Shift+Tab cycling INSIDE the modal until
+  //: it closes. WAI-ARIA dialog pattern (developer.mozilla.org →
+  //: Web/Accessibility/ARIA/Roles/dialog_role). Without this, Tab
+  //: leaks focus to the underlying page and the user can't see
+  //: where it went (overlay hides the scroll).
+  const focusableSelector =
+    'a[href], button:not([disabled]), input:not([disabled]), ' +
+    'select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  function trapTab(e: KeyboardEvent, overlay: HTMLElement, panel: HTMLElement) {
+    if (e.key !== "Tab" || overlay.hidden) return;
+    const focusables = Array.from(
+      panel.querySelectorAll<HTMLElement>(focusableSelector),
+    ).filter(el => !el.hasAttribute("hidden") && el.offsetParent !== null);
+    if (focusables.length === 0) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    const active = document.activeElement as HTMLElement | null;
+    if (e.shiftKey && active === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && active === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+
+  //: One listener for the whole session, acting on the page shown.
+  document.addEventListener("keydown", e => {
+    const root = currentRoot();
+    const overlay = root?.querySelector<HTMLElement>(".search-overlay");
+    const panel = root?.querySelector<HTMLElement>(".search-panel");
+    if (!root || !overlay || !panel) return;
+    const cmd = e.metaKey || e.ctrlKey;
+    if (cmd && e.key.toLowerCase() === "k") {
+      e.preventDefault();
+      overlay.hidden ? openSearch(root) : closeSearch(root);
+      return;
+    }
+    if (e.key === "Escape" && !overlay.hidden) {
+      e.preventDefault();
+      closeSearch(root);
+      return;
+    }
+    trapTab(e, overlay, panel);
+  });
+
+  function bindAll() {
+    document.querySelectorAll<HTMLElement>("[data-search]").forEach(initSearch);
+  }
+  bindAll();
+  document.addEventListener("astro:page-load", bindAll);
 </script>
 
 <style>
@@ -441,9 +531,12 @@ const quickLinks = buildCatalog(entries as any, root, base);
   }
 
   /* Symbol results — the rustdoc-style top-of-modal panel that lists
-     matching exported funcs / types / consts / methods straight from
-     the Go AST (tools/genindex → symbols-<major>.json). Hidden when
-     the query is empty so the empty-state suggestions show instead. */
+     matching exported symbols from the page release's docs/api
+     (gen-symbols.mjs → symbols-<release>-<major>.json). Hidden when
+     the query is empty so the empty-state suggestions show instead.
+     The rows are built by the client script, so they carry no scope
+     attribute: every selector below the list reaches them through
+     :global(), or the rows would render unstyled. */
   .symbol-results {
     padding: 0.25rem 0.5rem 0.75rem;
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
@@ -468,8 +561,8 @@ const quickLinks = buildCatalog(entries as any, root, base);
     padding: 0;
     margin: 0;
   }
-  .symbol-results li { margin: 0; }
-  .symbol-results a {
+  .symbol-results ul :global(li) { margin: 0; }
+  .symbol-results ul :global(a[data-symbol-link]) {
     display: grid;
     grid-template-columns: max-content 1fr;
     column-gap: 0.6rem;
@@ -482,12 +575,12 @@ const quickLinks = buildCatalog(entries as any, root, base);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 0.83rem;
   }
-  .symbol-results a:hover,
-  .symbol-results a:focus-visible {
+  .symbol-results ul :global(a[data-symbol-link]:hover),
+  .symbol-results ul :global(a[data-symbol-link]:focus-visible) {
     background: rgba(46, 160, 67, 0.12);
     outline: none;
   }
-  .sym-kind {
+  .symbol-results ul :global(.sym-kind) {
     grid-row: span 1;
     grid-column: 1;
     padding: 0.05rem 0.4rem;
@@ -500,17 +593,18 @@ const quickLinks = buildCatalog(entries as any, root, base);
     color: rgba(255, 255, 255, 0.85);
     align-self: center;
   }
-  .sym-kind--func   { background: rgba(46, 160, 67, 0.22);   color: #c5f6c5; }
-  .sym-kind--method { background: rgba(46, 160, 67, 0.18);   color: #b9e5b9; }
-  .sym-kind--type   { background: rgba(88, 128, 220, 0.22);  color: #cfdcff; }
-  .sym-kind--const  { background: rgba(220, 160, 60, 0.20);  color: #ffdfa8; }
-  .sym-kind--var    { background: rgba(180, 120, 200, 0.20); color: #e8c8ff; }
-  .sym-name {
+  .symbol-results ul :global(.sym-kind--func)   { background: rgba(46, 160, 67, 0.22);   color: #c5f6c5; }
+  .symbol-results ul :global(.sym-kind--method) { background: rgba(46, 160, 67, 0.18);   color: #b9e5b9; }
+  .symbol-results ul :global(.sym-kind--type),
+  .symbol-results ul :global(.sym-kind--alias)  { background: rgba(88, 128, 220, 0.22);  color: #cfdcff; }
+  .symbol-results ul :global(.sym-kind--const)  { background: rgba(220, 160, 60, 0.20);  color: #ffdfa8; }
+  .symbol-results ul :global(.sym-kind--var)    { background: rgba(180, 120, 200, 0.20); color: #e8c8ff; }
+  .symbol-results ul :global(.sym-name) {
     grid-column: 2;
     font-weight: 600;
     color: #e2ffe2;
   }
-  .sym-sig {
+  .symbol-results ul :global(.sym-sig) {
     grid-column: 2;
     color: rgba(255, 255, 255, 0.6);
     font-size: 0.78rem;
@@ -518,12 +612,17 @@ const quickLinks = buildCatalog(entries as any, root, base);
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .sym-doc {
+  .symbol-results ul :global(.sym-doc) {
     grid-column: 2;
     color: rgba(255, 255, 255, 0.5);
     font-family: inherit;
     font-size: 0.78rem;
     font-style: italic;
+  }
+  /* The source link sits beside the row, under its name column. */
+  .symbol-results ul :global(.sym-source) {
+    display: inline-block;
+    margin: 0 0 0.35rem 0.6rem;
   }
 
   /* Empty-state suggestions — visible until the user types in the

@@ -9,8 +9,12 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { listPackageDirs, rewriteReadmeLinks } from "./packages.mjs";
-import { buildCatalog } from "./page-catalog.mjs";
+import {
+  listPackageDirs,
+  rewritePackageDocLinks,
+  rewriteReadmeLinks,
+} from "./packages.mjs";
+import { buildCatalog, pagePath } from "./page-catalog.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..", "..", "..", "..");
@@ -144,4 +148,59 @@ test("the catalog lists a package under a family and skips a reserved section's 
     !everyHref.includes("/local/v1/adr/0001-foo/"),
     "a reserved section's page reached the catalog",
   );
+});
+
+test("a package doc's relative links reach the portal page, or GitHub", () => {
+  const pages = ["crypto", "crypto/agree", "errs"];
+  const blob = "https://github.com/kitsunium/sdk/blob/HEAD";
+  assert.equal(
+    rewritePackageDocLinks(
+      "[family](../BENCH.md) [errs](../../errs/) [readme](../../errs/README.md#codes) [own](BENCH.md)",
+      "v1",
+      "crypto/agree",
+      pages,
+      blob,
+    ),
+    "[family](../#benchmarks) [errs](../../errs/) [readme](../../errs/#codes) [own](#benchmarks)",
+  );
+  assert.equal(
+    rewritePackageDocLinks(
+      "[test](agree_bench_test.go) [out](../../../../../x.md) [abs](https://go.dev) [here](#numbers)",
+      "v1",
+      "crypto/agree",
+      pages,
+      blob,
+    ),
+    `[test](${blob}/pkg/v1/crypto/agree/agree_bench_test.go) [out](../../../../../x.md) [abs](https://go.dev) [here](#numbers)`,
+  );
+  const fenced = "```\n[x](../BENCH.md)\n```";
+  assert.equal(
+    rewritePackageDocLinks(fenced, "v1", "crypto/agree", pages, blob),
+    fenced,
+  );
+});
+
+test("the catalog serves the ids the collection gives: an index at its directory", () => {
+  //: content.config.ts keeps a file's path as its id, so the landing page
+  //: is "<root>/index" and the ADR index "<root>/adr/index" — linking them
+  //: as /index/ broke the Home link of every page.
+  assert.equal(pagePath("local/v1/index"), "local/v1");
+  assert.equal(pagePath("local/v1/adr/index"), "local/v1/adr");
+  assert.equal(pagePath("local/v1/data/codec"), "local/v1/data/codec");
+  assert.equal(pagePath("local/v1/data/indexer"), "local/v1/data/indexer");
+  const catalog = buildCatalog(
+    [
+      "local/v1/index",
+      "local/v1/errs",
+      "local/v1/adr/index",
+      "local/v1/adr/0001-foo",
+    ].map((id) => ({ id })),
+    "local/v1",
+    "/local/v1",
+  );
+  const hrefs = catalog.flatMap((g) => g.items.map((i) => [i.label, i.href]));
+  assert.deepEqual(hrefs, [
+    ["Home", "/local/v1/"],
+    ["errs", "/local/v1/errs/"],
+  ]);
 });

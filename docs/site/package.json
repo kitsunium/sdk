@@ -7,9 +7,10 @@
   "scripts": {
     "dev": "node scripts/sync-versions.mjs && node scripts/gen-symbols.mjs && astro dev",
     "prebuild": "node scripts/sync-versions.mjs && node scripts/gen-symbols.mjs",
-    "build": "astro build && pagefind --site dist --output-subdir _pagefind",
+    "build": "node scripts/sync-content.mjs && astro build && pagefind --site dist --output-subdir _pagefind",
     "preview": "astro preview",
-    "test": "node --test scripts/lib/*.test.mjs"
+    "test": "node --test scripts/lib/*.test.mjs",
+    "check": "node scripts/check-api-counts.mjs && node scripts/check-links.mjs"
   },
   "dependencies": {
     "@astrojs/rss": "^4.0.18",

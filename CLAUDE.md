@@ -388,7 +388,7 @@ sdk/
 ├── tools/sdkguard/        consumer-facing rule enforcement (stdlib-only CLI — ADR 0033)
 ├── tools/workspace_status.sh  prints STABLE_VERSION (consumed by --stamp + x_defs)
 ├── tools/alloc-lane-targets.txt  target list for the race-off alloc lane (rule 12)
-├── tools/genindex/        docs-site symbol index — auxiliary module, OUTSIDE go.work (GOWORK=off)
+├── tools/genindex/        docs/api (written and checked) + the doc-link check — auxiliary module, OUTSIDE go.work (GOWORK=off)
 ├── .golangci.yml          code-quality second-opinion linters (the layer firewall is scripts/check-layer-deps.sh — ADR 0068)
 ├── AGENTS.md, agent.toml  agent specs (not SDK)
 └── README.md              the SDK quickstart (packages, install, verification)
@@ -421,6 +421,7 @@ sdk/
 | `make doclinks` | every same-package doc link in the repository names a symbol its package declares — a member of an aliased type is written `[Type].Member` (ADR 0138); part of `make lint-check`, so CI runs it |
 | `make api-check` | exit 0 — `docs/api` regenerated from the code in memory, on every cell of `scripts/ci/platforms.sh`, equals what is committed byte for byte; a difference names each record added, changed or removed. Part of `make lint-check`, so CI runs it, and named in `scripts/ci-gates-check.sh`'s GATES |
 | `make api` twice, then `git diff --exit-code docs/api` | no difference — the writer is deterministic: no timestamp, no absolute path, records sorted, the go command's environment pinned |
+| `make docs-check` | exit 0 — the docs portal built for the working tree alone (`DOCS_RELEASES=local`, no network): its ⌘K index and the anchors of its API sections equal `docs/api` — every exported symbol of `pkg/v1`, and every method an alias reaches at its owner — counted by `docs/site/scripts/check-api-counts.mjs`, and every link and ⌘K entry resolves under the deploy base, fragments included (`check-links.mjs`). CI's `docs-site` job runs it, and `scripts/ci-gates-check.sh`'s GATES names it; the deploy runs the same checks over every release |
 | `bash scripts/pre-commit/check-platforms.sh` | exit 0 — `scripts/ci/platforms.sh`, the table genindex judges doc links and writes docs/api on, names the cells of `bazel-ci.yml`'s cross-build matrix, in its order |
 
 ## Reference

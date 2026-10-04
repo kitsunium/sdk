@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	// modeIndex writes the docs site's symbol index.
+	// modeIndex writes the go/doc symbol index, the docs site's before docs/api.
 	modeIndex string = "index"
 	// modeDocLinks checks every same-package doc link (ADR 0138).
 	modeDocLinks string = "check-doclinks"

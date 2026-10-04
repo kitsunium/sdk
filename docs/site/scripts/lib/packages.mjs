@@ -15,7 +15,7 @@
 
 import { readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 
 /**
  * Directory names the walk never enters, whatever their depth: `internal`
@@ -88,4 +88,61 @@ export function rewriteReadmeLinks(body, major, packages, blobBase) {
     }
     return `](${blobBase}/${target})`;
   });
+}
+
+/**
+ * Points the relative links of a package's BENCH.md or USES.md where they
+ * resolve once the file is part of the package's page: a link to another
+ * package's BENCH.md — `crypto/agree/BENCH.md` names the family's as
+ * `../BENCH.md` — becomes a link to that page's Benchmarks section, one to a
+ * package's README.md or directory a link to its page, and any other
+ * relative file of the repository a link to it under `blobBase`. Absolute
+ * links, in-page anchors and links leaving the repository are left as
+ * written; so is every line of a fenced code block.
+ *
+ * @param {string} body — the file's markdown
+ * @param {string} major — "v1"
+ * @param {string} from — the package's path under pkg/<major>/, "crypto/agree"
+ * @param {Iterable<string>} packages — listPackageDirs' answer
+ * @param {string} blobBase — "https://github.com/<owner>/<repo>/blob/<ref>"
+ * @returns {string}
+ */
+export function rewritePackageDocLinks(body, major, from, packages, blobBase) {
+  const pages = new Set(packages);
+  const prefix = `pkg/${major}/`;
+  const pageLink = (rel, fragment) => {
+    const up = posix.relative(from, rel);
+    return up === "" ? fragment || "./" : `${up}/${fragment}`;
+  };
+  const rewrite = (line) =>
+    line.replace(/\]\(([^)\s<>]+)\)/g, (whole, target) => {
+      if (/^(?:[a-z][a-z0-9+.-]*:|\/|#)/i.test(target)) return whole;
+      if (!/^(?:\.{1,2}\/)*[\w.-]+(?:\/[\w.-]+)*\/?(?:#[\w.-]*)?$/.test(target))
+        return whole;
+      const hash = target.indexOf("#");
+      const path = hash < 0 ? target : target.slice(0, hash);
+      const fragment = hash < 0 ? "" : target.slice(hash);
+      const resolved = posix.normalize(posix.join(prefix + from, path));
+      if (resolved.startsWith("../")) return whole;
+      if (resolved.startsWith(prefix)) {
+        const inPkg = resolved.slice(prefix.length).replace(/\/$/, "");
+        const bench = inPkg.match(/^(.+)\/BENCH\.md$/);
+        if (bench && pages.has(bench[1]))
+          return `](${pageLink(bench[1], fragment || "#benchmarks")})`;
+        const readme = inPkg.replace(/\/README\.md$/, "");
+        if (pages.has(readme)) return `](${pageLink(readme, fragment)})`;
+      }
+      return `](${blobBase}/${resolved}${fragment})`;
+    });
+  let fenced = false;
+  return body
+    .split("\n")
+    .map((line) => {
+      if (/^\s*(```|~~~)/.test(line)) {
+        fenced = !fenced;
+        return line;
+      }
+      return fenced ? line : rewrite(line);
+    })
+    .join("\n");
 }

@@ -9,6 +9,7 @@ import {
   buildVersionsJson,
   parseTag,
   stitchVersions,
+  selectReleases,
   changelogRefSpec,
   LOCAL_RELEASE,
 } from "./tag-format.mjs";
@@ -197,4 +198,38 @@ test("a pkg/vX.Y.Z beside the root vX.Y.Z is its tombstone, not a release (ADR 0
     buildVersionsJson([ghRelease("pkg/v0.17.0")])[0].releases.map((r) => r.tag),
     ["pkg/v0.17.0"],
   );
+});
+
+test("selectReleases keeps the releases named, and a default for each major", () => {
+  const realByMajor = buildVersionsJson([
+    ghRelease("v0.18.0", "2026-10-05T00:00:00Z"),
+    ghRelease("pkg/v0.17.0", "2026-10-03T00:00:00Z"),
+  ]);
+  const versions = stitchVersions({ majorsOnDisk: ["v1"], realByMajor });
+  assert.equal(selectReleases(versions, undefined), versions);
+  assert.equal(selectReleases(versions, []), versions);
+
+  //: the working tree alone: local becomes the default it was not.
+  const local = selectReleases(versions, [LOCAL_RELEASE]);
+  assert.deepEqual(
+    local.map((v) => [
+      v.major,
+      v.default,
+      v.releases.map((r) => [r.version, r.default]),
+    ]),
+    [["v1", true, [[LOCAL_RELEASE, true]]]],
+  );
+  //: the input is left as it was.
+  assert.equal(rel(versions, "v1", LOCAL_RELEASE).default, false);
+
+  //: a kept default stays the default.
+  const two = selectReleases(versions, [LOCAL_RELEASE, "0.18.0"]);
+  assert.deepEqual(
+    two[0].releases.map((r) => [r.version, r.default]),
+    [
+      [LOCAL_RELEASE, false],
+      ["0.18.0", true],
+    ],
+  );
+  assert.deepEqual(selectReleases(versions, ["9.9.9"]), []);
 });

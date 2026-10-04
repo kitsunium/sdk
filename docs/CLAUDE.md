@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-04T05:30:00Z -->
+<!-- updated: 2026-10-04T04:30:00Z -->
 # docs/
 
 ## Purpose
@@ -182,7 +182,7 @@ The dotted-quad allocation table in `adr/0005-…` + the extension in `adr/0006-
 - `adr/` — Architecture Decision Records (see the table above; it is the count, so no separate number goes stale here)
 - `site/` — the documentation website (Astro) — see `site/CLAUDE.md`
 - `error-codes.yaml` — generated mirror of every `errs.Code` (see §Registry coupling)
-- `api/` — the exported API of every module of `go.work`, one `<module>.json` each (`sdk.json`, `sdk/third-party/aws.json`, …): every exported symbol, internal packages included, with its go: id, kind, signature as its file spells it and canonically, owner, doc, cells, file, codes, layer and family, read from the code with go/types on the twelve cells of `scripts/ci/platforms.sh`. Written by `make api` (`tools/genindex -write-api`) and checked byte for byte by `make api-check`, in `make lint-check`: a doc edit is followed by `make api`, nothing else. `api/schema.json` is the format, with the id and canonical-signature vectors kit's side tests too. Never edited by hand
+- `api/` — the exported API of every module of `go.work`, one `<module>.json` each (`sdk.json`, `sdk/third-party/aws.json`, …): every exported symbol, internal packages included, with its go: id, kind, signature as its file spells it and canonically, owner, doc, cells, file, codes, layer and family, read from the code with go/types on the twelve cells of `scripts/ci/platforms.sh`. Written by `make api` (`tools/genindex -write-api`) and checked byte for byte by `make api-check`, in `make lint-check`: a doc edit is followed by `make api`, nothing else. `api/schema.json` is the format, with the id and canonical-signature vectors kit's side tests too. The docs portal renders it — the ⌘K index and the API section of every package page, an alias's members included (`site/CLAUDE.md`). Never edited by hand
 - `getting-started.md` — the consumer quickstart (logger, codec, errs)
 - `BENCHMARK-TEMPLATE.md` — the shape every kernel `*_bench_test.go` follows
 - `PROFILING.md` — driving the pprof + benchstat pipeline over the codec bench matrix

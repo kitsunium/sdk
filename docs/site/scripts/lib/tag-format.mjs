@@ -265,3 +265,34 @@ export function findDefaults(versions) {
   const r = m.releases.find((x) => x?.default) ?? m.releases[0];
   return { major: m.major, release: r?.version ?? LOCAL_RELEASE };
 }
+
+// selectReleases keeps, in a stitched versions list, the releases `only`
+// names (by version: "local", "0.17.0") and drops a major left with none —
+// what DOCS_RELEASES asks sync-versions for. The dropdowns then list exactly
+// the releases built, so no page links to a release that has no page. A
+// major whose default release was dropped defaults to the first one kept;
+// the site default moves to the newest major left when its own was dropped.
+// An empty or absent `only` keeps everything. Pure, like stitchVersions.
+export function selectReleases(versions, only) {
+  if (!only || only.length === 0) return versions;
+  const keep = new Set(only);
+  const kept = versions
+    .map((v) => ({
+      ...v,
+      releases: v.releases.filter((r) => keep.has(r.version)),
+    }))
+    .filter((v) => v.releases.length > 0)
+    .map((v) => ({
+      ...v,
+      releases: v.releases.some((r) => r.default)
+        ? v.releases
+        : v.releases.map((r, i) => ({ ...r, default: i === 0 })),
+    }));
+  if (kept.length > 0 && !kept.some((v) => v.default)) {
+    kept.forEach((v) => {
+      v.default = false;
+    });
+    (kept.filter((v) => !v.eol).at(-1) ?? kept.at(-1)).default = true;
+  }
+  return kept;
+}

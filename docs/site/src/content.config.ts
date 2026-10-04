@@ -41,8 +41,36 @@ const docs = defineCollection({
       description: z.string().optional(),
       updated: z.string().datetime().optional(),
       source: z.string().optional(),
+      api: z.boolean().optional(),
     })
     .passthrough(),
 });
 
-export const collections = { docs };
+//: A package page's API, materialised by sync-versions from the release's
+//: docs/api (scripts/lib/api.mjs apiPages): one JSON model per package page,
+//: at the page's own id ("<release>/<major>/<path>"), so the route finds it
+//: with getEntry("api", entry.id). A release cut before docs/api existed has
+//: none, and its pages keep the README's own reference. The model's shape is
+//: lib/api.mjs's, versioned by its `format`; the schema only names it.
+const api = defineCollection({
+  loader: glob({
+    pattern: "**/*.json",
+    base: "./src/content/api",
+    generateId: ({ entry }) => entry.replace(/\.json$/, ""),
+  }),
+  schema: z.object({ format: z.literal(1) }).passthrough(),
+});
+
+//: A package page's benchmarks (its BENCH.md), apart from the page body when
+//: the page has an API section, so the API renders before them — the order
+//: the README's own reference and the benchmarks had. Same ids as the page.
+const bench = defineCollection({
+  loader: glob({
+    pattern: "**/*.md",
+    base: "./src/content/bench",
+    generateId: ({ entry }) => entry.replace(/\.md$/, ""),
+  }),
+  schema: z.object({}).passthrough(),
+});
+
+export const collections = { docs, api, bench };
