@@ -1,0 +1,103 @@
+{
+  "format": "sdk.api/v1",
+  "module": "github.com/kitsunium/sdk/third-party/db/writer/clickhouse",
+  "dir": "third-party/db/writer/clickhouse",
+  "cells": [
+    "linux/amd64",
+    "linux/arm64",
+    "linux/386",
+    "linux/arm",
+    "darwin/arm64",
+    "windows/amd64",
+    "freebsd/amd64",
+    "openbsd/amd64",
+    "netbsd/amd64",
+    "dragonfly/amd64",
+    "illumos/amd64",
+    "solaris/amd64"
+  ],
+  "packages": [
+    {
+      "path": "github.com/kitsunium/sdk/third-party/db/writer/clickhouse",
+      "name": "clickhouse",
+      "dir": ".",
+      "layer": "thirdparty",
+      "doc": "Package clickhouse registers the \"clickhouse\" writer factory (ADR 0015): a\ndatabase log sink that batches records into multi-row INSERTs over the\nClickHouse native protocol. Importing the package self-registers the factory\n(no init()), so writer.Open(\"clickhouse\", writer.ClickHouseConfig{…}) resolves.\nIt is a dep-light third-party integration: the clickhouse-go/v2 import is\nconfined to client.go, in a module of its own (ADR 0157), so pkg/v1 consumers\nnever pull the driver into their graph and a consumer of this writer pulls no\nother vendor.\n\nCredentials: ClickHouseConfig.Credentials is OPTIONAL (empty falls back to the\ndefault user) and supplied programmatically; like the AWS writers, there is no\nconfig-file Decoder because a live credential cannot be expressed in YAML.\n\nTable schema: the destination table must have columns (ts DateTime, level\nString, message String). The table name is validated as a plain identifier and\ninterpolated into the INSERT; every value is bound via placeholders.\n\nPackage clickhouse — chSink, the thin wrapper that adds database-handle\ncleanup to the dbsink-composed chain. dbsink.Compose returns the\nlevelgate(async(dbSink)) chain whose Close flushes + joins the drainer, but it\ndoes not own the *sql.DB; this wrapper closes the handle after the chain drains.\n\nPackage clickhouse — the client seam: the ONLY file that imports the database\ndriver. newClient validates the config, optionally resolves credentials, and\nbuilds a lazy database/sql handle via clickhouse-go's OpenDB (no connection\nuntil the first INSERT). It returns the handle plus the execBatch closure that\ndelivers a coalesced batch as one multi-row INSERT, confining the driver here.\n\nPackage clickhouse — range 0.3.33.* (ADR 0015 service slot 0x21).\n\nPackage clickhouse — declares the sentinels returned by the ClickHouse\nwriter's constructor and INSERT path. Each var's name equals its errs.Define\nReason in SCREAMING_SNAKE form (short names per the AWS-writer convention; the\npackage qualifier gives context). No DSN, credential, or record value is ever\nechoed into these errors (secret gate).\n"
+    }
+  ],
+  "symbols": [
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/db/writer/clickhouse.ClientInitFailed",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/db/writer/clickhouse",
+      "name": "ClientInitFailed",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.33.1",
+        "reason": "CLIENT_INIT_FAILED",
+        "public": "ClickHouse writer could not initialise its client"
+      },
+      "doc": "ClientInitFailed wraps a failure to build the sql handle: an invalid table\nor an unresolvable credential provider.\n",
+      "file": "errors.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/db/writer/clickhouse.CodeCHClientInitFailed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/db/writer/clickhouse",
+      "name": "CodeCHClientInitFailed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "205057",
+      "code": {
+        "value": "0.3.33.1"
+      },
+      "doc": "CodeCHClientInitFailed identifies a failure to build the database/sql handle\nat Open time (nil/invalid table or an unresolvable credential provider).\nExitCode defaults to 74 (EX_IOERR).\n",
+      "file": "codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/db/writer/clickhouse.CodeCHInsertFailed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/db/writer/clickhouse",
+      "name": "CodeCHInsertFailed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "205058",
+      "code": {
+        "value": "0.3.33.2"
+      },
+      "doc": "CodeCHInsertFailed identifies a failed batch INSERT on the drainer goroutine.\nExitCode defaults to 74 (EX_IOERR).\n",
+      "file": "codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/db/writer/clickhouse.InsertFailed",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/db/writer/clickhouse",
+      "name": "InsertFailed",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.33.2",
+        "reason": "INSERT_FAILED",
+        "public": "ClickHouse writer failed to insert a log batch"
+      },
+      "doc": "InsertFailed wraps a failed batch INSERT.\n",
+      "file": "errors.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/db/writer/clickhouse.Writer",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/db/writer/clickhouse",
+      "name": "Writer",
+      "spelled": "writer.Factory",
+      "canonical": "github.com/kitsunium/sdk/internal/core/observe/logger/writer.Factory",
+      "doc": "Writer is the registered clickhouse factory singleton. The blank assignment\nruns writer.Register at package load (no init()), mirroring the codec convention.\n",
+      "file": "clickhouse.go",
+      "layer": "thirdparty"
+    }
+  ]
+}

@@ -1,0 +1,275 @@
+{
+  "format": "sdk.api/v1",
+  "module": "github.com/kitsunium/sdk/framework/connectors/ssh",
+  "dir": "framework/connectors/ssh",
+  "cells": [
+    "linux/amd64",
+    "linux/arm64",
+    "linux/386",
+    "linux/arm",
+    "darwin/arm64",
+    "windows/amd64",
+    "freebsd/amd64",
+    "openbsd/amd64",
+    "netbsd/amd64",
+    "dragonfly/amd64",
+    "illumos/amd64",
+    "solaris/amd64"
+  ],
+  "packages": [
+    {
+      "path": "github.com/kitsunium/sdk/framework/connectors/ssh",
+      "name": "ssh",
+      "dir": ".",
+      "layer": "framework",
+      "doc": "Package ssh — the one error-code range this package owns.\n\nEverything it says about VERIFICATION is said in the entitlement contract's\nvocabulary — framework/entitlement's sentinels, 0.2.35.*: a missing key, a\nmismatched fingerprint and an unproven possession are the contract's\nsituations, and an ssh implementation reporting them in its own dialect would\nmake every caller learn a second set for the same three answers.\n\nENROLMENT is not in that contract. Minting a pair is something this package\ndoes and the port does not describe, so its failures have nowhere to borrow a\ncode from, and they carried none at all until this range existed.\n\nHand-registered in codeRangeOwners (ADR 0035) and already listed in\n//:audit_sources.\n\nPackage ssh — discovering which subject this machine is enrolled as,\nfrom the layout ssh keys actually have on disk.\n\nThis is the half of the Identity port that depends on the ssh key FORMAT and\nthe ~/.ssh convention, which is why it lives here rather than with the\nmechanism (kitsunium/sdk ADR 0078).\n\nPackage ssh - enrolment: minting a subject identity locally and turning\nit into a request the vendor can act on. The private half never leaves the\nmachine; what travels is the public half and the UUID naming it.\n\nPackage ssh — the sentinel this package emits on its own account.\n\nIts Public names no path and no subject. A key directory is a location on\nsomebody's disk and a subject is an identifier the vendor's roster keys on;\nboth belong in Fields, which enrolFailed puts them in and which\nerrs.FieldsOf reads back.\n\nPackage ssh - local key material and the possession proof. The public\nhalves are published by design, so reading one proves nothing; only a\nfresh signature over a per-call nonce establishes ownership.\n\nPackage ssh - the unix half of the private-key permission gate. The\nmode bits mean what they say here, so they are worth refusing on.\n\nPackage ssh is the ssh implementation of the framework's entitlement\nIdentity port, plus enrolment: minting a subject identity locally and turning\nit into a request the vendor can act on.\n\nIt is a connector module of its own (ADR 0158), the shape the database\nengines have: the mechanism — roster, signature, offline cache, anti-rollback\nratchet, CI seat, version floor — is the framework's entitlement package,\nwhich reaches no ssh code, while golang.org/x/crypto/ssh, and the\ngolang.org/x/sys it brings, are required by this module and nothing else.\n\n\tidentity := ssh.NewSSHIdentity(\"\") // the user's ~/.ssh\n\tservice := entitlement.New(identity, vendorKey, &product)\n\tgrant, err := service.Verify(time.Now())\n\nPossession is proven against key material the user ALREADY has, and every\nrefusal is said in the entitlement contract's vocabulary (0.2.35.*); the one\nfailure that contract has no word for, a failed enrolment, is this package's\nown CodeEnrolmentFailed (0.3.65.1).\n\nPackage ssh — compile-time proof that the ssh implementation still\nsatisfies the port it is written against.\n\nPackage ssh — the three shapes every error here is built with, so the\nchoice at a call site is which sentinel rather than which spelling.\n\nThe split between the first two is whether this package DECIDED the failure\nor was TOLD about one. A decision has no cause to carry — nothing failed, a\nrule was applied to a filename or a mode — and the sentinel itself is the\nwhole of it. A report from outside has a cause that must survive, because\nerrors.Is(err, fs.ErrNotExist) and the text the operating system wrote are\nthe two things a wrapper most often destroys.\n\nThey are a copy of framework/internal/service/entitlement's, and deliberately not an\nimport: that package is a separate Go module, so its unexported helpers are\nunreachable from here, and exporting them would put three wrapping shapes on\nthe surface of a domain whose whole public API is a three-method port and a\nfacade. Thirty lines duplicated across a module boundary is the smaller cost,\nand the two copies are pinned to the same behaviour by having the same tests\non both sides.\n",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64",
+        "linux/386",
+        "linux/arm",
+        "darwin/arm64",
+        "freebsd/amd64",
+        "openbsd/amd64",
+        "netbsd/amd64",
+        "dragonfly/amd64",
+        "illumos/amd64",
+        "solaris/amd64"
+      ]
+    },
+    {
+      "path": "github.com/kitsunium/sdk/framework/connectors/ssh",
+      "name": "ssh",
+      "dir": ".",
+      "layer": "framework",
+      "doc": "Package ssh — the one error-code range this package owns.\n\nEverything it says about VERIFICATION is said in the entitlement contract's\nvocabulary — framework/entitlement's sentinels, 0.2.35.*: a missing key, a\nmismatched fingerprint and an unproven possession are the contract's\nsituations, and an ssh implementation reporting them in its own dialect would\nmake every caller learn a second set for the same three answers.\n\nENROLMENT is not in that contract. Minting a pair is something this package\ndoes and the port does not describe, so its failures have nowhere to borrow a\ncode from, and they carried none at all until this range existed.\n\nHand-registered in codeRangeOwners (ADR 0035) and already listed in\n//:audit_sources.\n\nPackage ssh — discovering which subject this machine is enrolled as,\nfrom the layout ssh keys actually have on disk.\n\nThis is the half of the Identity port that depends on the ssh key FORMAT and\nthe ~/.ssh convention, which is why it lives here rather than with the\nmechanism (kitsunium/sdk ADR 0078).\n\nPackage ssh - enrolment: minting a subject identity locally and turning\nit into a request the vendor can act on. The private half never leaves the\nmachine; what travels is the public half and the UUID naming it.\n\nPackage ssh — the sentinel this package emits on its own account.\n\nIts Public names no path and no subject. A key directory is a location on\nsomebody's disk and a subject is an identifier the vendor's roster keys on;\nboth belong in Fields, which enrolFailed puts them in and which\nerrs.FieldsOf reads back.\n\nPackage ssh - local key material and the possession proof. The public\nhalves are published by design, so reading one proves nothing; only a\nfresh signature over a per-call nonce establishes ownership.\n\nPackage ssh - the windows half of the private-key permission gate.\nThere are no POSIX mode bits to read here, so the gate is deliberately\nnot applied rather than applied to a value that means nothing.\n\nPackage ssh is the ssh implementation of the framework's entitlement\nIdentity port, plus enrolment: minting a subject identity locally and turning\nit into a request the vendor can act on.\n\nIt is a connector module of its own (ADR 0158), the shape the database\nengines have: the mechanism — roster, signature, offline cache, anti-rollback\nratchet, CI seat, version floor — is the framework's entitlement package,\nwhich reaches no ssh code, while golang.org/x/crypto/ssh, and the\ngolang.org/x/sys it brings, are required by this module and nothing else.\n\n\tidentity := ssh.NewSSHIdentity(\"\") // the user's ~/.ssh\n\tservice := entitlement.New(identity, vendorKey, &product)\n\tgrant, err := service.Verify(time.Now())\n\nPossession is proven against key material the user ALREADY has, and every\nrefusal is said in the entitlement contract's vocabulary (0.2.35.*); the one\nfailure that contract has no word for, a failed enrolment, is this package's\nown CodeEnrolmentFailed (0.3.65.1).\n\nPackage ssh — compile-time proof that the ssh implementation still\nsatisfies the port it is written against.\n\nPackage ssh — the three shapes every error here is built with, so the\nchoice at a call site is which sentinel rather than which spelling.\n\nThe split between the first two is whether this package DECIDED the failure\nor was TOLD about one. A decision has no cause to carry — nothing failed, a\nrule was applied to a filename or a mode — and the sentinel itself is the\nwhole of it. A report from outside has a cause that must survive, because\nerrors.Is(err, fs.ErrNotExist) and the text the operating system wrote are\nthe two things a wrapper most often destroys.\n\nThey are a copy of framework/internal/service/entitlement's, and deliberately not an\nimport: that package is a separate Go module, so its unexported helpers are\nunreachable from here, and exporting them would put three wrapping shapes on\nthe surface of a domain whose whole public API is a three-method port and a\nfacade. Thirty lines duplicated across a module boundary is the smaller cost,\nand the two copies are pinned to the same behaviour by having the same tests\non both sides.\n",
+      "platforms": [
+        "windows/amd64"
+      ]
+    }
+  ],
+  "symbols": [
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/connectors/ssh.CodeEnrolmentFailed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/connectors/ssh",
+      "name": "CodeEnrolmentFailed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "213249",
+      "code": {
+        "value": "0.3.65.1"
+      },
+      "doc": "CodeEnrolmentFailed identifies a key pair that could not be minted.\n\nIt covers every step of GenerateKeyPair after the subject has been\nvalidated: creating the key directory, generating the pair, serialising\neither half, and writing either half. The fields name which.\n\nIt is deliberately NOT CodeNoLicence. That one says \"this machine is not\nenrolled\", whose remedy is to enrol; this one says the attempt to enrol just\nfailed, whose remedy is whatever the filesystem reported. Reporting the\nsecond as the first sends an operator to run the command that has already\nfailed.\n",
+      "file": "codes.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/connectors/ssh.DefaultSSHDir",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/connectors/ssh",
+      "name": "DefaultSSHDir",
+      "spelled": "func() string",
+      "canonical": "func() string",
+      "doc": "DefaultSSHDir returns the conventional key location for the current user.\n",
+      "file": "discover.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/connectors/ssh.DiscoverSubject",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/connectors/ssh",
+      "name": "DiscoverSubject",
+      "spelled": "func(sshDir string) (uuid string, err error)",
+      "canonical": "func(sshDir string) (uuid string, err error)",
+      "doc": "DiscoverSubject finds the enrolled UUID by looking for a key named after\none. Naming the file after the identifier is what removes the need for any\nlocal state file: the filesystem holds the binding.\n\nIt refuses rather than guesses when several identities are present. Picking\none would decide which licence gets verified, which one a rotation\noverwrites, and which one `license status` reports — none of which this\nfunction is entitled to decide on the caller's behalf.\n",
+      "file": "discover.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/connectors/ssh.EnrolmentFailed",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/framework/connectors/ssh",
+      "name": "EnrolmentFailed",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.65.1",
+        "reason": "ENROLMENT_FAILED",
+        "public": "the entitlement key pair could not be created"
+      },
+      "doc": "EnrolmentFailed is returned when GenerateKeyPair cannot mint the pair.\n\nNothing partial is left behind that a later run cannot overwrite, but\nthe private half IS written before the public one, so a failure between\nthe two leaves a key with no published half — which the next\nDiscoverSubject reads as an unusable identity rather than as an\nenrolled one, and which re-running enrolment replaces.\n",
+      "file": "errors.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/connectors/ssh.Fingerprint",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/connectors/ssh",
+      "name": "Fingerprint",
+      "spelled": "func(pub ssh.PublicKey) string",
+      "canonical": "func(pub golang.org/x/crypto/ssh.PublicKey) string",
+      "doc": "Fingerprint renders the SHA256 fingerprint the roster records. Comparing\nfingerprints rather than raw bytes keeps the roster small and the check\nexact.\n",
+      "file": "key.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/connectors/ssh.GenerateKeyPair",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/connectors/ssh",
+      "name": "GenerateKeyPair",
+      "spelled": "func(product *entitlement.Product, sshDir string, subject string) (publicKey string, err error)",
+      "canonical": "func(product *github.com/kitsunium/sdk/framework/entitlement.Product, sshDir string, subject string) (publicKey string, err error)",
+      "doc": "GenerateKeyPair writes a fresh ed25519 pair named after subject. ed25519\nover RSA is deliberate: shorter, faster, the current default in .ssh, and\nthe same primitive the roster signature uses.\n\nThe parameter is named subject rather than uuid because the stdlib package\nof that name is imported here.\n",
+      "file": "enroll.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/connectors/ssh.IssueURL",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/connectors/ssh",
+      "name": "IssueURL",
+      "spelled": "func(product *entitlement.Product, subject string, publicKey string, rotation bool) string",
+      "canonical": "func(product *github.com/kitsunium/sdk/framework/entitlement.Product, subject string, publicKey string, rotation bool) string",
+      "doc": "IssueURL builds the prefilled enrolment request. The CLI never holds a\nGitHub token: it hands the user a link, and the account that opens the\nissue is the identity the workflow binds the UUID to.\n",
+      "file": "enroll.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/connectors/ssh.LoadPublicKey",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/connectors/ssh",
+      "name": "LoadPublicKey",
+      "spelled": "func(sshDir string, uuid string) (pub ssh.PublicKey, err error)",
+      "canonical": "func(sshDir string, uuid string) (pub golang.org/x/crypto/ssh.PublicKey, err error)",
+      "doc": "LoadPublicKey reads and parses the local public half for a subject.\n",
+      "file": "key.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/connectors/ssh.NewSSHIdentity",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/connectors/ssh",
+      "name": "NewSSHIdentity",
+      "spelled": "func(dir string) *SSHIdentity",
+      "canonical": "func(dir string) *github.com/kitsunium/sdk/framework/connectors/ssh.SSHIdentity",
+      "doc": "NewSSHIdentity returns an Identity reading from dir. An empty dir resolves to\nthe user's conventional key directory.\n",
+      "file": "sshidentity.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/connectors/ssh.NewSubjectID",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/connectors/ssh",
+      "name": "NewSubjectID",
+      "spelled": "func() string",
+      "canonical": "func() string",
+      "doc": "NewSubjectID mints a version 4 identifier. It is drawn locally because the\nvendor never needs to allocate it: collisions are not a practical concern\nat 122 bits of entropy, and self-allocation keeps enrolment offline until\nthe moment the user files the issue.\n\nThe hand-rolled version this replaces set the same bits over the same 16\nbytes of crypto/rand and rendered the same canonical dashed form, so the\nidentifiers are indistinguishable across the change. It returned an error\nonly because it checked crypto/rand.Read, which since Go 1.24 cannot fail —\nit panics instead. That branch was already unreachable, and the test that\nasserted err == nil could not have failed either. Dropping the result is\nthe visible half of the swap.\n",
+      "file": "enroll.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/connectors/ssh.PrivateKeyPath",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/connectors/ssh",
+      "name": "PrivateKeyPath",
+      "spelled": "func(sshDir string, uuid string) string",
+      "canonical": "func(sshDir string, uuid string) string",
+      "doc": "PrivateKeyPath returns where a subject's private half lives, alongside the\npublic one and under the same UUID name.\n",
+      "file": "key.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/connectors/ssh.ProvePossession",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/connectors/ssh",
+      "name": "ProvePossession",
+      "spelled": "func(signer ssh.Signer, pub ssh.PublicKey) error",
+      "canonical": "func(signer golang.org/x/crypto/ssh.Signer, pub golang.org/x/crypto/ssh.PublicKey) error",
+      "doc": "ProvePossession verifies that signer controls the private half matching pub.\n\nThis is the step that makes publishing the public keys safe. The roster is\nworld-readable by design, so anyone can copy a .pub and claim the matching\nUUID; only the holder of the private half can sign a fresh challenge. The\nnonce is generated per call, so a captured signature is worthless.\n",
+      "file": "key.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/connectors/ssh.PublicKeyPath",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/connectors/ssh",
+      "name": "PublicKeyPath",
+      "spelled": "func(sshDir string, uuid string) string",
+      "canonical": "func(sshDir string, uuid string) string",
+      "doc": "PublicKeyPath returns where a subject's public half lives. The file is named\nafter the UUID so the lookup needs no index: the identifier IS the address.\n",
+      "file": "key.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/connectors/ssh.SSHIdentity",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/connectors/ssh",
+      "name": "SSHIdentity",
+      "spelled": "struct{}",
+      "canonical": "struct{}",
+      "doc": "SSHIdentity proves a machine's identity from the ssh key material already in\na user's key directory.\n\nIt is a module of its own, framework/connectors/ssh, because\ngolang.org/x/crypto/ssh brings golang.org/x/term and through it\ngolang.org/x/sys, which the SDK and its framework ban (ADR 0078, ADR 0158). A\nconsumer that wants it requires this module and its dependency graph; one\nthat already handles its own key material implements the three-method port\ninstead and inherits nothing.\n\nWhy ssh key material rather than a keypair this package would mint: the whole\npoint is that possession is proven against something the user ALREADY has and\nalready protects. A file this package invented would need a lifecycle — where\nit lives, who may read it, what happens on rotation — that the user's own key\ndirectory already has.\n",
+      "file": "sshidentity.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/connectors/ssh.(*SSHIdentity).Discover",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/connectors/ssh",
+      "name": "Discover",
+      "recv": "SSHIdentity",
+      "spelled": "func() (subject string, err error)",
+      "canonical": "func() (subject string, err error)",
+      "doc": "Discover returns the subject this machine is enrolled as, refusing rather\nthan choosing when several identities are present.\n",
+      "file": "sshidentity.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/connectors/ssh.(*SSHIdentity).Fingerprint",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/connectors/ssh",
+      "name": "Fingerprint",
+      "recv": "SSHIdentity",
+      "spelled": "func(subject string) (fingerprint string, err error)",
+      "canonical": "func(subject string) (fingerprint string, err error)",
+      "doc": "Fingerprint returns the published fingerprint of the subject's public half,\nin the spelling the roster uses.\n",
+      "file": "sshidentity.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/connectors/ssh.(*SSHIdentity).ProvePossession",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/connectors/ssh",
+      "name": "ProvePossession",
+      "recv": "SSHIdentity",
+      "spelled": "func(subject string) error",
+      "canonical": "func(subject string) error",
+      "doc": "ProvePossession answers the challenge with the subject's private half.\n\nA nil error IS the proof. There is deliberately nothing to inspect: anything\nreturned here would be a second thing a caller had to verify.\n\nIt proves possession of whatever is in the key directory when it is called,\nwhich is the only claim the three-method port can carry.\nProvePossessionFor is the stronger one and is what the framework's engine\nreaches for; this method stays because the port is frozen at three methods\nand a caller holding a entitlement.Identity must keep working.\n",
+      "file": "sshidentity.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/connectors/ssh.(*SSHIdentity).ProvePossessionFor",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/connectors/ssh",
+      "name": "ProvePossessionFor",
+      "recv": "SSHIdentity",
+      "spelled": "func(subject string, authorised string) error",
+      "canonical": "func(subject string, authorised string) error",
+      "doc": "ProvePossessionFor answers the challenge with the subject's private half, and\nrefuses unless the published half is the one the roster AUTHORISED.\n\nThis is entitlement.BoundProver, and the binding is the whole of what it adds. The\nengine's own comparison happens between its Fingerprint call and its proof\ncall, so material replaced in that window was signed for and nothing noticed:\na rotation mid-verification, a volume remounted, a `<uuid>.pub` swapped by\nanything that can write the key directory. Re-reading the directory HERE and\ncomparing against the value the roster published closes it, because the\ncomparison and the signature now happen against one read.\n\nIt is not a second fingerprint POLICY. Fingerprint's contract is that the\nroster's spelling is compared by byte equality and never parsed, and this\ncompares the identical rendering to the identical value. A refusal is\nErrKeyMismatch — \"a local key that does not match the published fingerprint\",\nwhich is exactly what happened — so the taxonomy does not grow by one entry.\n",
+      "file": "sshidentity.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/connectors/ssh.SignerFromFile",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/connectors/ssh",
+      "name": "SignerFromFile",
+      "spelled": "func(sshDir string, uuid string) (signer ssh.Signer, err error)",
+      "canonical": "func(sshDir string, uuid string) (signer golang.org/x/crypto/ssh.Signer, err error)",
+      "doc": "SignerFromFile loads an unencrypted private key. Passphrase-protected keys\ndeliberately fail here: the linter never prompts for a passphrase, they are\nmeant to be exercised through ssh-agent instead.\n",
+      "file": "key.go",
+      "layer": "framework"
+    }
+  ]
+}

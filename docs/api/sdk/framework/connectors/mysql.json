@@ -1,0 +1,56 @@
+{
+  "format": "sdk.api/v1",
+  "module": "github.com/kitsunium/sdk/framework/connectors/mysql",
+  "dir": "framework/connectors/mysql",
+  "cells": [
+    "linux/amd64",
+    "linux/arm64",
+    "linux/386",
+    "linux/arm",
+    "darwin/arm64",
+    "windows/amd64",
+    "freebsd/amd64",
+    "openbsd/amd64",
+    "netbsd/amd64",
+    "dragonfly/amd64",
+    "illumos/amd64",
+    "solaris/amd64"
+  ],
+  "packages": [
+    {
+      "path": "github.com/kitsunium/sdk/framework/connectors/mysql",
+      "name": "mysql",
+      "dir": ".",
+      "layer": "framework",
+      "doc": "Package mysql — the credentials a new connection is opened with, read\nagain from the URL each time.\n\nPackage mysql is kit's MySQL and MariaDB engine (ADR 0004): the one module\na kit product imports to keep a database on MySQL, and the only code of the\nproduct that imports a MySQL driver — go-sql-driver/mysql, through\ndatabase/sql. The product's main declares the database with it:\n\n\timport \"github.com/kitsunium/sdk/framework/connectors/mysql\"\n\n\tvar App = kit.NewApp(\"vigie\", intake.Service, desk.Service).With(\n\t\tkit.Database(\"database\", mysql.Engine()),\n\t)\n\nThe database's URL, in the variable <APP>_<NAME>_URL, is either a URL —\nmysql://user:password@host:3306/database?tls=true, mariadb:// alike — or\nthe driver's own DSN, user:password@tcp(host:3306)/database?tls=true; its\nparameters are the driver's. Outside dev kit refuses one that does not\nwrite its tls: the driver's default is no TLS at all. tls=false is\naccepted when written, for a private network. The engine reads the URL\nagain before each new connection, so a password rotated where it lives is\nused by the next one.\n\nOn MySQL a DDL statement commits by itself: a migration of two DDL\nstatements whose second fails leaves the first applied. Write one per\nmigration (ADR 0055 D8 of the SDK).\n"
+    }
+  ],
+  "symbols": [
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/connectors/mysql.CodeURLMalformed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/connectors/mysql",
+      "name": "CodeURLMalformed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/errs.Code",
+      "value": "266497",
+      "code": {
+        "value": "0.4.17.1"
+      },
+      "doc": "CodeURLMalformed identifies a URL the driver cannot read (ADR 0147: layer 4,\none PP per connector).\n",
+      "file": "mysql.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/connectors/mysql.Engine",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/connectors/mysql",
+      "name": "Engine",
+      "spelled": "func() kit.Engine",
+      "canonical": "func() github.com/kitsunium/sdk/framework/kit.Engine",
+      "doc": "Engine is the MySQL engine, for kit.Database.\n",
+      "file": "mysql.go",
+      "layer": "framework"
+    }
+  ]
+}

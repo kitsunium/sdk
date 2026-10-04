@@ -23,15 +23,20 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 1
 
 # GOOS/GOARCH targets. linux+darwin are primary; the BSDs, windows, illumos and
-# solaris are the portability frontier the SDK must not silently drop. The list
-# is the cross-build job's in bazel-ci.yml.
-PLATFORMS=(
-  linux/amd64 linux/arm64 linux/386 linux/arm
-  darwin/arm64
-  windows/amd64
-  freebsd/amd64 openbsd/amd64 netbsd/amd64 dragonfly/amd64
-  illumos/amd64 solaris/amd64
-)
+# solaris are the portability frontier the SDK must not silently drop. They are
+# the platforms table, scripts/ci/platforms.sh — the cells of bazel-ci.yml's
+# cross-build job, which scripts/pre-commit/check-platforms.sh holds equal to
+# it. This list used to be written here, and nothing checked it against the
+# lane's. A table that cannot be read aborts the audit.
+table="$(bash "$ROOT/scripts/ci/platforms.sh")" || exit 1
+PLATFORMS=()
+while IFS= read -r cell; do
+  [[ -n "$cell" ]] && PLATFORMS+=("$cell")
+done <<<"$table"
+if [[ ${#PLATFORMS[@]} -eq 0 ]]; then
+  echo "cross-platform-audit: scripts/ci/platforms.sh printed no cell" >&2
+  exit 1
+fi
 
 # module dir -> import-path prefix is discovered via `go list`; each module is
 # built with GOWORK=off so its own go.mod + replace directives resolve.

@@ -5,7 +5,6 @@ package main
 import (
 	"fmt"
 	"go/ast"
-	"go/build"
 	"go/doc"
 	"go/doc/comment"
 	"go/parser"
@@ -23,40 +22,6 @@ import (
 // an aliased Broker resolves nothing there while a link to Broker itself does.
 const docLinkAdvice string = "a member of an ALIASED type cannot be a doc link in the package that aliases it — write [Type].Member, which links the alias and reads the same (ADR 0138)"
 
-// platforms are the twelve targets the cross-build lane compiles (ADR 0137,
-// ADR 0144), in the order bazel-ci.yml lists them; Test_platforms holds the two
-// tables equal. A package's symbols differ between them — a _windows.go file
-// declares what a _linux.go one does not — and pkg.go.dev renders a package per
-// build context, so a comment is judged against what its package declares on
-// each platform that compiles the file holding it. One table over the union of
-// every file would accept a link to a symbol no single platform has.
-//
-// illumos and solaris are two cells, not one: the go command selects a
-// _solaris.go file and the solaris build tag for both, and an _illumos.go file
-// for illumos alone, so each declares what the other may not.
-var platforms = []platform{
-	{goos: "linux", goarch: "amd64"},
-	{goos: "linux", goarch: "arm64"},
-	{goos: "linux", goarch: "386"},
-	{goos: "linux", goarch: "arm"},
-	{goos: "darwin", goarch: "arm64"},
-	{goos: "windows", goarch: "amd64"},
-	{goos: "freebsd", goarch: "amd64"},
-	{goos: "openbsd", goarch: "amd64"},
-	{goos: "netbsd", goarch: "amd64"},
-	{goos: "dragonfly", goarch: "amd64"},
-	{goos: "illumos", goarch: "amd64"},
-	{goos: "solaris", goarch: "amd64"},
-}
-
-// platform is one GOOS/GOARCH pair a doc comment is judged under.
-type platform struct {
-	// goos is the target operating system.
-	goos string
-	// goarch is the target architecture.
-	goarch string
-}
-
 // deadLink is one bracketed name go/doc renders as literal text because the
 // package declares no such symbol.
 type deadLink struct {
@@ -71,24 +36,6 @@ type deadLink struct {
 	// on names the platforms the link is dead on, when it resolves on others
 	// that compile the same file; empty when it is dead wherever the file builds.
 	on string
-}
-
-// String renders a platform the way GOOS/GOARCH is written.
-func (p platform) String() string {
-	//: the conventional spelling.
-	return p.goos + "/" + p.goarch
-}
-
-// matches reports whether the go command compiles the named file of dir for
-// this platform: its name suffix and its build constraints, with cgo off, as
-// every lane of this repository builds.
-func (p platform) matches(dir, name string) (bool, error) {
-	ctx := build.Default
-	ctx.GOOS = p.goos
-	ctx.GOARCH = p.goarch
-	ctx.CgoEnabled = false
-	//: the go command's own answer, not a re-implementation of it.
-	return ctx.MatchFile(dir, name)
 }
 
 // pos renders where a link is written in the file:line:col form editors jump to.
@@ -121,8 +68,9 @@ func compareDeadLinks(a, b deadLink) int {
 
 // runDocLinkCheck walks every root, prints each dead same-package doc link to
 // out, and returns the process exit status: 0 when every link resolves, 1 when
-// one does not or a package could not be read.
-func runDocLinkCheck(roots []string, out io.Writer) int {
+// one does not or a package could not be read. Each comment is judged on every
+// cell that compiles its file.
+func runDocLinkCheck(roots []string, cells []platform, out io.Writer) int {
 	//: without a root there is nothing to check, and "nothing checked" must not
 	//: read as "nothing wrong".
 	if len(roots) == 0 {
@@ -133,7 +81,7 @@ func runDocLinkCheck(roots []string, out io.Writer) int {
 	var dead []deadLink
 	//: every root contributes its findings; one unreadable root fails the run.
 	for _, root := range roots {
-		found, err := checkDocLinks(root)
+		found, err := checkDocLinks(root, cells)
 		//: a package that will not parse would hide every link it holds.
 		if err != nil {
 			fmt.Fprintf(out, "genindex: %v\n", err)
@@ -162,14 +110,14 @@ func runDocLinkCheck(roots []string, out io.Writer) int {
 	return 1
 }
 
-// checkDocLinks returns every dead same-package doc link under root, sorted by
-// position.
+// checkDocLinks returns every dead same-package doc link under root, judged on
+// the given cells, sorted by position.
 //
 // Same-package only: a link qualified by a package name resolves through the
 // file's imports to a package go/doc cannot see from here, so it can only be
 // judged by the package it names; and a lowercase name in brackets is never a
 // link at all.
-func checkDocLinks(root string) (dead []deadLink, err error) {
+func checkDocLinks(root string, cells []platform) (dead []deadLink, err error) {
 	abs, aerr := filepath.Abs(root)
 	//: positions are reported relative to this, so it has to resolve.
 	if aerr != nil {
@@ -193,7 +141,7 @@ func checkDocLinks(root string) (dead []deadLink, err error) {
 			//: prune the whole subtree.
 			return filepath.SkipDir
 		}
-		found, dirErr := deadLinksInDir(path, abs)
+		found, dirErr := deadLinksInDir(path, abs, cells)
 		//: a directory that will not parse would hide its links.
 		if dirErr != nil {
 			//: name the directory that failed.
@@ -214,8 +162,9 @@ func checkDocLinks(root string) (dead []deadLink, err error) {
 }
 
 // deadLinksInDir parses one directory's production files and checks each
-// package it holds. Test files are left out: go/doc does not render them.
-func deadLinksInDir(dir, root string) (dead []deadLink, err error) {
+// package it holds on the given cells. Test files are left out: go/doc does
+// not render them.
+func deadLinksInDir(dir, root string, cells []platform) (dead []deadLink, err error) {
 	entries, rerr := os.ReadDir(dir)
 	//: an unreadable directory would hide its links.
 	if rerr != nil {
@@ -241,7 +190,7 @@ func deadLinksInDir(dir, root string) (dead []deadLink, err error) {
 	var out []deadLink
 	//: one production package per directory, plus a stray generator file's.
 	for _, files := range byPackage {
-		found, derr := deadLinksInPackage(fset, files, dir, root)
+		found, derr := deadLinksInPackage(fset, files, dir, root, cells)
 		//: a file the go command could not classify, or a malformed file set.
 		if derr != nil {
 			//: surface it to the walk.
@@ -280,10 +229,10 @@ func isSourceFile(name string) bool {
 // dead links that way. AllDecls resolves exactly the same same-package links: a
 // link's name must be upper-case, so the unexported symbols it adds are ones no
 // link can name.
-func deadLinksInPackage(fset *token.FileSet, files []parsedFile, dir, root string) (dead []deadLink, err error) {
-	check := newPackageCheck(fset, files, dir, root)
+func deadLinksInPackage(fset *token.FileSet, files []parsedFile, dir, root string, cells []platform) (dead []deadLink, err error) {
+	check := newPackageCheck(fset, files, dir, root, cells)
 	//: one symbol table per platform, over the files that platform compiles.
-	for _, p := range platforms {
+	for _, p := range cells {
 		//: a file the go command cannot classify cannot be judged honestly.
 		if jerr := check.judgeOn(p); jerr != nil {
 			//: surface it to the caller.
@@ -306,6 +255,8 @@ type packageCheck struct {
 	dir string
 	// root is the checked root positions are relative to.
 	root string
+	// cells are the platforms the package is judged on.
+	cells []platform
 	// deadOn lists, per finding, the platforms it is dead on.
 	deadOn map[deadLink][]string
 	// builtOn counts, per finding, the platforms that compile its file.
@@ -316,7 +267,7 @@ type packageCheck struct {
 
 // newPackageCheck collects every doc comment of the package while its files
 // still hold every declaration.
-func newPackageCheck(fset *token.FileSet, files []parsedFile, dir, root string) *packageCheck {
+func newPackageCheck(fset *token.FileSet, files []parsedFile, dir, root string, cells []platform) *packageCheck {
 	comments := make(map[*ast.File][]*ast.CommentGroup, len(files))
 	//: each file's doc comments, once, whatever platform later reads them.
 	for _, f := range files {
@@ -324,7 +275,7 @@ func newPackageCheck(fset *token.FileSet, files []parsedFile, dir, root string) 
 	}
 	//: a check with nothing recorded yet.
 	return &packageCheck{
-		fset: fset, files: files, comments: comments, dir: dir, root: root,
+		fset: fset, files: files, comments: comments, dir: dir, root: root, cells: cells,
 		deadOn: map[deadLink][]string{}, builtOn: map[deadLink]int{},
 	}
 }
@@ -369,7 +320,7 @@ func (c *packageCheck) record(d deadLink, p platform, file parsedFile) {
 	//: first sighting: keep the order and count the file's platforms once.
 	if _, seen := c.deadOn[d]; !seen {
 		c.order = append(c.order, d)
-		c.builtOn[d] = platformsBuilding(file, c.dir)
+		c.builtOn[d] = platformsBuilding(file, c.dir, c.cells)
 	}
 	c.deadOn[d] = append(c.deadOn[d], p.String())
 }
@@ -428,13 +379,13 @@ func filesFor(p platform, files []parsedFile, dir string) (built []parsedFile, e
 	return out, nil
 }
 
-// platformsBuilding counts the platforms that compile a file. An error here was
+// platformsBuilding counts the cells that compile a file. An error here was
 // already reported by filesFor for the same file and platform, so it counts as
 // not building rather than failing twice.
-func platformsBuilding(file parsedFile, dir string) int {
+func platformsBuilding(file parsedFile, dir string, cells []platform) int {
 	n := 0
 	//: every platform the check judges.
-	for _, p := range platforms {
+	for _, p := range cells {
 		//: the same answer filesFor gave.
 		if ok, err := p.matches(dir, file.name); err == nil && ok {
 			n++
