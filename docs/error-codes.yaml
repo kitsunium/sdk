@@ -2938,11 +2938,3 @@ codes:
     const: CodePromoteFailed
     hex: "0x01_02_00_04"
     package: pkg/v1/data/codec
-  - code: "64.1.1.1"
-    const: CodeUserNotFound
-    hex: "0x40_01_01_01"
-    package: pkg/v1/errs
-  - code: "64.1.2.1"
-    const: CodeOrderExpired
-    hex: "0x40_01_02_01"
-    package: pkg/v1/errs
