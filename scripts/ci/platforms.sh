@@ -9,18 +9,18 @@
 #     order — the matrix stays written in the workflow, where a job's strategy
 #     has to be, and this guard keeps the two one table;
 #   - scripts/cross-platform-audit.sh, the local twin of cross-build, loops
-#     over it.
-#
-# A program reads the table from the here-document below without running this
-# script: the lines between `cat <<'CELLS'` and `CELLS`, each `goos/goarch`.
-# Keep the table in that one here-document.
+#     over it;
+#   - tools/genindex judges doc links (`make doclinks`) and writes docs/api
+#     (`make api`) on these cells. It reads the here-document below WITHOUT
+#     running this script: the lines between `cat <<'CELLS'` and `CELLS`, each
+#     `goos/goarch`. Keep the table in that one here-document.
 #
 # illumos and solaris are two cells (ADR 0144): the go command compiles a
 # _solaris.go file and the `solaris` build tag for both, an _illumos.go file
 # for illumos alone, and runtime.GOOS tells them apart.
 #
 # A cell added here is added to the matrix in the same change, or the guard
-# fails.
+# fails; the doc-link check and docs/api then judge it with no other edit.
 
 set -euo pipefail
 

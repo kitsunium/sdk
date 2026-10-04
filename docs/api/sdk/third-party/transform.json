@@ -1,0 +1,399 @@
+{
+  "format": "sdk.api/v1",
+  "module": "github.com/kitsunium/sdk/third-party/transform",
+  "dir": "third-party/transform",
+  "cells": [
+    "linux/amd64",
+    "linux/arm64",
+    "linux/386",
+    "linux/arm",
+    "darwin/arm64",
+    "windows/amd64",
+    "freebsd/amd64",
+    "openbsd/amd64",
+    "netbsd/amd64",
+    "dragonfly/amd64",
+    "illumos/amd64",
+    "solaris/amd64"
+  ],
+  "packages": [
+    {
+      "path": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "transform",
+      "dir": ".",
+      "layer": "thirdparty",
+      "doc": "Package transform — range 0.3.63.* (ADR 0066 third-party/transform block).\n\nPackage transform — declares the sentinel *errs.Error values returned by the\nvendor compressors. Each sentinel var's name equals its errs.Define Reason in\nSCREAMING_SNAKE form. The zstdWrap / s2Wrap WrapParams mirror their sentinels\nso a wrapped library cause carries the same Code/Reason/Public on the wire as\nthe bare sentinel (origin wins, root CLAUDE.md rule 6).\n\nPackage transform — the s2 scheme over github.com/klauspost/compress/s2, the\nsame module the zstd scheme uses, so it costs no second dependency.\n\nPackage transform wraps the vendor compressors zstd and s2 (both from\ngithub.com/klauspost/compress) as core/data/transform.Compressor implementations,\nbeside the stdlib gzip/flate/zlib schemes in internal/service/data/transform.\n\n# Why it lives under third-party/\n\nNot because the library drags a dependency graph — measured, it drags none:\ngithub.com/klauspost/compress requires no other module, is pure Go, needs no\ncgo, and cross-compiles on the whole ADR 0018 matrix. The reason is the OTHER\ncriterion ADR 0034 §Decision.3 names: it imposes a dependency on consumers who\nnever use the integration. internal/service and pkg are dep-light on purpose,\nand a consumer who only wants a logger should not resolve, download, verify\nand link a compression library to get one. third-party/ lives in the ROOT\nmodule, which nothing requires — so the cost is paid by the blank-import and\nby nobody else.\n\nThe downgrade narrative ADR 0022 once used is not cited here; ADR 0034\nretired it as a placement rule, and under minimal version selection it cannot\nhappen (a dependency requiring a LOWER version never lowers a higher\nrequirement that is still present).\n\n# Opt-in\n\nImporting this package registers \"zstd\" and \"s2\" with the core/data/transform\nregistry. Nothing in internal/* or pkg/v1/* imports it, so a consumer who\ndoes not name it never compiles it. That is the same contract\nthird-party/codec/hcl has for the \"hcl\" Format.\n\n# The output bound is a parameter, not an option\n\nEvery constructor here takes maxDecompressedBytes as a REQUIRED positional\nargument. A functional option can be omitted; a positional parameter cannot,\nand a security bound that can be omitted is not mandatory. A non-positive\nvalue is refused at construction rather than defaulted — see\nLimitMisconfigured and ADR 0066 D4.\n\nPackage transform — the zstd scheme (RFC 8878) over\ngithub.com/klauspost/compress/zstd.\n"
+    }
+  ],
+  "symbols": [
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.CodeDecompressionLimitExceeded",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "CodeDecompressionLimitExceeded",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "212739",
+      "code": {
+        "value": "0.3.63.3"
+      },
+      "doc": "CodeDecompressionLimitExceeded identifies a decompression refused because its\noutput would exceed the compressor's configured ceiling — a decompression\nbomb, or a legitimate payload larger than this compressor was built for.\n\nIt is a SEPARATE code from CodeZstdFailed / CodeS2Failed on purpose. \"Someone\nsent us bytes we could not parse\" and \"someone sent us bytes engineered to\nexhaust this process\" are different events for whoever reads the logs: the\nfirst is traffic, the second is an attack signature worth alerting on, and a\nshared code makes the second invisible inside the first.\n",
+      "file": "codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.CodeLimitMisconfigured",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "CodeLimitMisconfigured",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "212740",
+      "code": {
+        "value": "0.3.63.4"
+      },
+      "doc": "CodeLimitMisconfigured identifies a constructor call whose\nmaxDecompressedBytes argument is not a positive byte count. The value is\nREFUSED rather than defaulted because its two natural readings — \"no limit\"\nand \"refuse everything\" — are opposites, and picking either on the caller's\nbehalf silently grants or silently denies (ADR 0031 §refuse, ADR 0066 D4).\n",
+      "file": "codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.CodeS2Failed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "CodeS2Failed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "212738",
+      "code": {
+        "value": "0.3.63.2"
+      },
+      "doc": "CodeS2Failed identifies a failure inside the s2 codec during either a\nCompress or a Decompress operation — a corrupt block header, a length header\nthe payload does not honour, or an input larger than the block format can\naddress.\n",
+      "file": "codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.CodeZstdFailed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "CodeZstdFailed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "212737",
+      "code": {
+        "value": "0.3.63.1"
+      },
+      "doc": "CodeZstdFailed identifies a failure inside the zstd codec during either a\nCompress or a Decompress operation — a malformed frame, a truncated stream,\nor a checksum mismatch. It is deliberately NOT the code a tripped output\nbound produces: see CodeDecompressionLimitExceeded.\n",
+      "file": "codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.DecompressionLimitExceeded",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "DecompressionLimitExceeded",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.63.3",
+        "reason": "DECOMPRESSION_LIMIT_EXCEEDED",
+        "public": "Decompressed output would exceed the configured limit"
+      },
+      "doc": "DecompressionLimitExceeded is returned when a decompression would produce\nmore plaintext than the compressor's configured ceiling allows. No output\nis returned with it: the caller's dst is handed back at its original\nlength, so a refused bomb never leaves a partial payload behind.\n",
+      "file": "errors.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.DefaultMaxDecompressedBytes",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "DefaultMaxDecompressedBytes",
+      "spelled": "int64",
+      "canonical": "int64",
+      "value": "67108864",
+      "doc": "DefaultMaxDecompressedBytes is the ceiling the two registered singletons are\nbuilt with: 64 MiB.\n\nIt is deliberately TIGHTER than the 256 MiB backstop the stdlib schemes use\nin internal/service/data/transform, and the reason is arithmetic rather than\ntaste. DEFLATE's maximum expansion is roughly 1032:1, so reaching 256 MiB\nthrough gzip costs an attacker ~254 KiB of upload. Both schemes here expand\nfar harder — measured in this package's own tests, 13 KiB of zstd and 28\nBYTES of s2 each declare 64 MiB — so the same ceiling would be four orders of\nmagnitude cheaper to reach. The number that matters is what an attacker\nspends, not what the format is called.\n\nA caller who legitimately handles larger payloads passes its own ceiling to\nNewZstdCompressor / NewS2Compressor; the constant is only what the\nimport-time singletons use.\n",
+      "file": "transform.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.LimitMisconfigured",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "LimitMisconfigured",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.63.4",
+        "reason": "LIMIT_MISCONFIGURED",
+        "public": "maxDecompressedBytes must be a positive byte count"
+      },
+      "doc": "LimitMisconfigured is returned by NewZstdCompressor / NewS2Compressor for\na non-positive maxDecompressedBytes. It is a construction-time refusal, so\na compressor that would not bound its output never exists to be called.\n",
+      "file": "errors.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.NewS2Compressor",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "NewS2Compressor",
+      "spelled": "func(maxDecompressedBytes int64) (compressor *S2Compressor, err error)",
+      "canonical": "func(maxDecompressedBytes int64) (compressor *github.com/kitsunium/sdk/third-party/transform.S2Compressor, err error)",
+      "doc": "NewS2Compressor builds an s2 compressor refusing to decompress more than\nmaxDecompressedBytes of plaintext in one call. The argument is positional and\nmandatory; a non-positive value returns LimitMisconfigured and no compressor.\n\ns2 has no level knob here on purpose. Its reason for existing is throughput,\nand the levels that buy ratio (s2.EncodeBetter / EncodeBest) land in zstd's\nterritory at zstd's cost — a caller who wants that trade should name zstd\nrather than get it from a scheme chosen for speed.\n",
+      "file": "s2.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.NewZstdCompressor",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "NewZstdCompressor",
+      "spelled": "func(level ZstdLevel, maxDecompressedBytes int64) (compressor *ZstdCompressor, err error)",
+      "canonical": "func(level github.com/kitsunium/sdk/third-party/transform.ZstdLevel, maxDecompressedBytes int64) (compressor *github.com/kitsunium/sdk/third-party/transform.ZstdCompressor, err error)",
+      "doc": "NewZstdCompressor builds a zstd compressor at the given level, refusing to\ndecompress more than maxDecompressedBytes of plaintext in one call.\n\nmaxDecompressedBytes is positional and mandatory: see the package doc. A\nnon-positive value returns LimitMisconfigured and no compressor. An\nunrecognised level clamps to ZstdDefault.\n\nThe returned compressor owns a shared encoder and decoder. A caller that\nbuilds one per request must Close it; the package singleton is never closed\nbecause it lives as long as the process.\n",
+      "file": "zstd.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.S2",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "S2",
+      "spelled": "coretransform.Compressor",
+      "canonical": "github.com/kitsunium/sdk/internal/core/data/transform.Compressor",
+      "doc": "S2 is the registered s2 singleton, built at DefaultMaxDecompressedBytes.\n",
+      "file": "s2.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.S2Algorithm",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "S2Algorithm",
+      "spelled": "coretransform.Algorithm",
+      "canonical": "github.com/kitsunium/sdk/internal/core/data/transform.Algorithm",
+      "value": "\"s2\"",
+      "doc": "S2Algorithm is the canonical registry key for the s2 scheme.\n\ns2 is NOT registered under \"snappy\" and makes no Snappy-compatibility claim:\nthe block encoder here emits s2 extensions a Snappy decoder does not read, so\nnaming it \"snappy\" would promise interop the bytes do not honour. The same\nmistake HTTP made with \"deflate\", refused here before it can be made.\n",
+      "file": "s2.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.S2Compressor",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "S2Compressor",
+      "spelled": "struct{}",
+      "canonical": "struct{}",
+      "doc": "S2Compressor is the concrete core/data/transform.Compressor for the s2 block\nformat. Unlike the zstd scheme it holds no encoder or decoder — s2's block\nAPI is a pair of free functions — so the value is stateless apart from its\nceiling and needs no Close.\n",
+      "file": "s2.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.(*S2Compressor).Algorithm",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "Algorithm",
+      "recv": "S2Compressor",
+      "spelled": "func() coretransform.Algorithm",
+      "canonical": "func() github.com/kitsunium/sdk/internal/core/data/transform.Algorithm",
+      "doc": "Algorithm implements core/data/transform.Compressor and returns the registry key.\n",
+      "file": "s2.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.(*S2Compressor).Compress",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "Compress",
+      "recv": "S2Compressor",
+      "spelled": "func(dst []byte, src []byte) (encoded []byte, err error)",
+      "canonical": "func(dst []byte, src []byte) (encoded []byte, err error)",
+      "doc": "Compress s2-encodes src and appends the result to dst. dst and src must not\noverlap.\n\ns2.Encode treats its first argument as SCRATCH, not as a prefix — it\noverwrites from index zero and returns a sub-slice of it. Handing it the\ncaller's dst directly would silently destroy the bytes already there, so the\nencode targets the TAIL of a grown dst and the prefix is preserved by\nconstruction. TestCompressPreservesDstPrefix pins that, because the bug it\nprevents is invisible in every test that passes dst=nil.\n\nEncoding into the tail rather than into a fresh buffer is the one thing in\nthis package chosen on a profile rather than on taste: the obvious version\n(encode to nil, then append) spends its time in runtime.memmove copying the\nresult a second time. See BENCH.md §\"Why s2 encodes into the tail\".\n\nIt never fails: s2.Encode has no error return, and an input too large for the\nblock format is refused before the encode by MaxEncodedLen.\n",
+      "file": "s2.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.(*S2Compressor).Decompress",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "Decompress",
+      "recv": "S2Compressor",
+      "spelled": "func(dst []byte, src []byte) (decoded []byte, err error)",
+      "canonical": "func(dst []byte, src []byte) (decoded []byte, err error)",
+      "doc": "Decompress s2-decodes src and appends the result to dst, refusing any payload\nwhose declared plaintext length exceeds the configured ceiling.\n\nThe refusal happens BEFORE any decode and before any allocation: the s2 block\nformat carries its decoded length in a varint header, so DecodedLen answers\nthe bomb question by reading a handful of bytes. A refused payload costs the\nvarint read and nothing else.\n",
+      "file": "s2.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.S2Failed",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "S2Failed",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.63.2",
+        "reason": "S2_FAILED",
+        "public": "s2 transform failed"
+      },
+      "doc": "S2Failed wraps a failure from the s2 codec (Compress or Decompress).\n",
+      "file": "errors.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.Zstd",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "Zstd",
+      "spelled": "coretransform.Compressor",
+      "canonical": "github.com/kitsunium/sdk/internal/core/data/transform.Compressor",
+      "doc": "Zstd is the registered zstd singleton, built at DefaultMaxDecompressedBytes.\nBinding the registration result to a named var is the convention the sibling\nstdlib schemes use and keeps this package clear of init().\n\nConstruction acquires no goroutine, no file descriptor and no socket: it is\nmeasured at a few kilobytes of heap, and the window buffers are allocated\nlazily on first use. That is what makes registering from an import legitimate\nhere where ADR 0048 refuses it for an OTLP emitter — see ADR 0066 D3.\n",
+      "file": "zstd.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.ZstdAlgorithm",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "ZstdAlgorithm",
+      "spelled": "coretransform.Algorithm",
+      "canonical": "github.com/kitsunium/sdk/internal/core/data/transform.Algorithm",
+      "value": "\"zstd\"",
+      "doc": "ZstdAlgorithm is the canonical registry key for the zstd scheme. It matches\nthe IANA content coding name, so a caller that already speaks HTTP spells it\nthe same way here.\n",
+      "file": "zstd.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.ZstdBest",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "ZstdBest",
+      "spelled": "ZstdLevel",
+      "canonical": "github.com/kitsunium/sdk/third-party/transform.ZstdLevel",
+      "value": "11",
+      "doc": "ZstdBest is the ratio end of the scale (library level 11). BENCH.md stops\nat ZstdBetter, which already compresses SLOWER than stdlib gzip for a\nsub-one-percent ratio gain; measure your own corpus before going past it.\n",
+      "file": "zstd.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.ZstdBetter",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "ZstdBetter",
+      "spelled": "ZstdLevel",
+      "canonical": "github.com/kitsunium/sdk/third-party/transform.ZstdLevel",
+      "value": "7",
+      "doc": "ZstdBetter trades roughly half the throughput for a few points of ratio\n(library level 7).\n",
+      "file": "zstd.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.ZstdCompressor",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "ZstdCompressor",
+      "spelled": "struct{}",
+      "canonical": "struct{}",
+      "doc": "ZstdCompressor is the concrete core/data/transform.Compressor for the zstd wire\nformat. It holds a shared encoder and decoder because building either per\ncall would re-allocate the window buffers on every payload; both are\ndocumented safe for concurrent EncodeAll / DecodeAll, so one value serves the\nwhole process.\n\nIt is a POINTER type, unlike the stateless stdlib schemes. Registry\nre-registration therefore compares pointer identity, which keeps\ncore/data/transform.Register's idempotent-republish path working for the singleton\nand turns a second, distinct compressor claiming \"zstd\" into the boot-time\npanic it is meant to be.\n",
+      "file": "zstd.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.(*ZstdCompressor).Algorithm",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "Algorithm",
+      "recv": "ZstdCompressor",
+      "spelled": "func() coretransform.Algorithm",
+      "canonical": "func() github.com/kitsunium/sdk/internal/core/data/transform.Algorithm",
+      "doc": "Algorithm implements core/data/transform.Compressor and returns the registry key.\n",
+      "file": "zstd.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.(*ZstdCompressor).Close",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "Close",
+      "recv": "ZstdCompressor",
+      "spelled": "func() error",
+      "canonical": "func() error",
+      "doc": "Close releases the shared encoder and decoder. It is safe to call once; the\ncompressor must not be used afterwards. The package singleton is never\nclosed — it is owned by the process, not by any caller.\n",
+      "file": "zstd.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.(*ZstdCompressor).Compress",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "Compress",
+      "recv": "ZstdCompressor",
+      "spelled": "func(dst []byte, src []byte) (encoded []byte, err error)",
+      "canonical": "func(dst []byte, src []byte) (encoded []byte, err error)",
+      "doc": "Compress zstd-encodes src and appends the result to dst.\n\nIt never fails: EncodeAll has no error return because a buffer-backed encode\nhas nothing to fault on. The error result exists to satisfy the Compressor\ncontract and is always nil.\n",
+      "file": "zstd.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.(*ZstdCompressor).Decompress",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "Decompress",
+      "recv": "ZstdCompressor",
+      "spelled": "func(dst []byte, src []byte) (decoded []byte, err error)",
+      "canonical": "func(dst []byte, src []byte) (decoded []byte, err error)",
+      "doc": "Decompress zstd-decodes src and appends the result to dst, refusing any\npayload whose plaintext would exceed the configured ceiling.\n\nThe ceiling counts the DECODED payload only, never len(dst)+payload, so a\ncaller reusing a large dst does not silently shrink its own decompression\nbudget. That takes two paths: an empty dst is handed straight to DecodeAll\n(where the library's own budget already means exactly the payload), and a\nnon-empty one decodes into a fresh buffer that is then appended. The split is\nan allocation, not a semantic — both paths bound the same thing. See\nBENCH.md §\"Why decompression takes the empty-dst fast path\".\n\nA refusal returns dst at its original length — never a partial payload.\n",
+      "file": "zstd.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.ZstdDefault",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "ZstdDefault",
+      "spelled": "ZstdLevel",
+      "canonical": "github.com/kitsunium/sdk/third-party/transform.ZstdLevel",
+      "value": "3",
+      "doc": "ZstdDefault is the balanced level (library level 3) and the clamp target.\n",
+      "file": "zstd.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.ZstdFailed",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "ZstdFailed",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.63.1",
+        "reason": "ZSTD_FAILED",
+        "public": "zstd transform failed"
+      },
+      "doc": "ZstdFailed wraps a failure from the zstd codec (Compress or Decompress).\n",
+      "file": "errors.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.ZstdFastest",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "ZstdFastest",
+      "spelled": "ZstdLevel",
+      "canonical": "github.com/kitsunium/sdk/third-party/transform.ZstdLevel",
+      "value": "1",
+      "doc": "ZstdFastest is the throughput end of the scale (library level 1).\n",
+      "file": "zstd.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.ZstdLevel",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "ZstdLevel",
+      "spelled": "int",
+      "canonical": "int",
+      "doc": "ZstdLevel names a zstd compression level. The four values are the four the\nlibrary actually implements; an unrecognised value CLAMPS to ZstdDefault,\nbecause every level round-trips the caller's bytes identically and so trades\nratio against CPU rather than carrying the caller's intent (ADR 0031 §clamp,\nthe same call internal/service/data/transform makes for the zlib level).\n",
+      "file": "zstd.go",
+      "layer": "thirdparty"
+    }
+  ]
+}

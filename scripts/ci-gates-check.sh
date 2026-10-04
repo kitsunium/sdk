@@ -70,6 +70,10 @@ GATES=(
   # govulncheck over every module, in the required `bazel` job (#210, ADR
   # 0136). `vuln-install` is its installer, not a gate, and is not listed.
   vuln-check
+  # docs/api regenerated from the code on every cell and compared byte for
+  # byte. CI runs it through `make lint-check`, whose recipe runs
+  # `$(MAKE) api-check` — enforced through a listed gate's recipe, below.
+  api-check
 )
 
 # Guards that `make lint` runs AND the `bazel` job invokes as a direct
@@ -86,7 +90,7 @@ GUARDS=(
   scripts/pre-commit/check-pkg-docs.sh
   scripts/pre-commit/check-bench-md.sh
   scripts/pre-commit/check-error-codes-drift.sh
-  # The platforms table is the cross-build matrix CI compiles.
+  # The platforms table genindex reads is the cross-build matrix CI compiles.
   scripts/pre-commit/check-platforms.sh
   scripts/check-layer-deps.sh
 )
@@ -169,6 +173,44 @@ if [ -z "${ci_run_commands//[[:space:]]/}" ]; then
   exit 1
 fi
 
+# recipe <target> — the commands of one Makefile target's recipe: its
+# tab-indented lines up to the next rule, comment-only lines dropped, as for
+# `lint` below.
+recipe() {
+  awk -v target="$1:" '
+    index($0, target) == 1 { in_recipe = 1; next }
+    in_recipe && /^[^\t#[:space:]]/ { exit }
+    in_recipe && /^\t/ {
+      body = $0
+      sub(/^\t+/, "", body)
+      if (body !~ /^#/) { print body }
+    }
+  ' "$MAKEFILE"
+}
+
+# runs_directly <gate> — whether a run: command of the workflow is `make <gate>`
+# at a command position.
+runs_directly() {
+  grep -qE "(^|[;&|(][[:space:]]*)make ${1}([[:space:]]|$)" <<<"$ci_run_commands"
+}
+
+# runs_through <gate> — the listed gate the workflow runs whose recipe runs
+# `$(MAKE) <gate>` at a command position, or nothing. One level deep: a gate
+# CI reaches through a gate CI reaches is enforced; a target that only another
+# unlisted target calls is not.
+runs_through() {
+  local caller
+  for caller in "${GATES[@]}"; do
+    [ "$caller" = "$1" ] && continue
+    runs_directly "$caller" || continue
+    if grep -qE '(^|[;&|(][[:space:]]*)\$\(MAKE\)( --no-print-directory)? '"${1}"'([[:space:]]|$)' <<<"$(recipe "$caller")"; then
+      echo "$caller"
+      return 0
+    fi
+  done
+  return 0
+}
+
 for gate in "${GATES[@]}"; do
   if ! grep -qE "^${gate}:" "$MAKEFILE"; then
     echo "MISSING TARGET: '${gate}' is listed as a CI gate but no such target exists in $MAKEFILE"
@@ -212,10 +254,15 @@ for gate in "${GATES[@]}"; do
   # It must also be at a COMMAND position — start of the command, or after a
   # `;`/`&&`/`||`/`|`/`(`. Otherwise `run: echo "we used to run make <gate>"`
   # satisfies enforcement with an echo.
-  if ! grep -qE "(^|[;&|(][[:space:]]*)make ${gate}([[:space:]]|$)" <<<"$ci_run_commands"; then
-    echo "UNGATED: 'make ${gate}' exists but $WORKFLOW never runs it"
+  #
+  # A gate CI runs through another listed gate's recipe — `lint-check` runs
+  # `$(MAKE) api-check` — is run as surely as one with its own step, and a
+  # second step would run it twice. Deleting the recipe's line is then the
+  # silent deletion, and it is caught the same way: the gate is UNGATED.
+  if ! runs_directly "$gate" && [ -z "$(runs_through "$gate")" ]; then
+    echo "UNGATED: 'make ${gate}' exists but $WORKFLOW never runs it, directly or through a listed gate's recipe"
     note "a gate CI does not run is not a gate — add the step, or remove it from GATES in $0"
-    note "comments and echoed text do not count; it must be a run: command"
+    note "comments and echoed text do not count; it must be a run: command, or a \$(MAKE) line of a gate CI runs"
     fail=1
   fi
 done

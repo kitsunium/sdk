@@ -1,0 +1,664 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kitsunium/sdk/docs/api/schema.json",
+  "title": "docs/api: a module's exported API, read from the code",
+  "description": "One document per package-holding module of the SDK's workspace — the SDK module and every vendor module — written by `tools/genindex -write-api` (`make api`) from the CODE, never from a design, and checked by `make api-check`, which regenerates it in memory and fails on any byte that differs. The file of a module is docs/api/<name>.json, where <name> is the module's path below the root module's parent: `sdk` for github.com/kitsunium/sdk, `sdk/third-party/aws` for its vendor module. Every exported symbol of every package of the module is recorded — internal packages included —, read with go/types on every cell of scripts/ci/platforms.sh, function bodies ignored; a symbol whose record differs between cells (another signature, value, doc or file) has one record per form, each with the cells it holds on. Auxiliary modules (e2e, tools/*), unexported declarations, test files and main packages are out of it. The bytes are deterministic: no absolute path, no timestamp, records sorted, JSON indented by two spaces with HTML characters unescaped and one trailing newline, so the same tree writes the same bytes on every machine. x-vectors holds the vectors a reader of this format tests its own reading against: the go: id grammar, and the canonical signatures of a small universe of packages.",
+  "type": "object",
+  "required": [
+    "format",
+    "module",
+    "dir",
+    "cells",
+    "packages",
+    "symbols"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "format": {
+      "const": "sdk.api/v1",
+      "description": "The shape's name; it changes only with an incompatible change of the shape."
+    },
+    "module": {
+      "$ref": "#/$defs/importpath",
+      "description": "The module's path."
+    },
+    "dir": {
+      "type": "string",
+      "description": "The module's directory, relative to the repository's root, with forward slashes; . for the root module."
+    },
+    "cells": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/cell"
+      },
+      "description": "The cells the API was read on, in the order of scripts/ci/platforms.sh. A record without platforms holds on every one of them."
+    },
+    "packages": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/package"
+      },
+      "description": "The module's packages, sorted by path, then by the first cell a form holds on."
+    },
+    "symbols": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/symbol"
+      },
+      "description": "The module's exported symbols, sorted by package; then by the top-level name a symbol belongs to — a method by its type's —, the declaration before its methods; then by name, kind and id; then by the first cell a form holds on."
+    }
+  },
+  "$defs": {
+    "goid": {
+      "type": "string",
+      "pattern": "^go:(?:[A-Za-z0-9_~+-](?:[A-Za-z0-9._~+-]*[A-Za-z0-9_~+-])?/)*[A-Za-z0-9_~+-](?:(?:[A-Za-z0-9_~+-]|%2e)*[A-Za-z0-9_~+-])?\\.(?:\\(\\*[A-Z][A-Za-z0-9_]*(?:\\[\\.\\.\\.\\])?\\)\\.|[A-Z][A-Za-z0-9_]*(?:\\[\\.\\.\\.\\])?\\.)?[A-Z][A-Za-z0-9_]*(?:\\[\\.\\.\\.\\])?$",
+      "description": "A go: id, the Go runtime's name of the symbol (runtime.FuncForPC, a stack trace, the linker's symbol table) with go: before it: go:<import path>.<Name>; go:<import path>.<Type>.<Method> for a method of a value receiver or of an interface; go:<import path>.(*<Type>).<Method> for a method of a pointer receiver. [...] follows a generic function (F[...]), a generic method (M[...]) and the type of a generic receiver ((*T[...]).M); a generic type or alias is named without it. A dot of the import path's last element is written %2e, as the linker escapes it, so the path ends at the first dot after its last slash. The grammar and the vectors are platform's design.GoID and loader.ObjectID's, unchanged."
+    },
+    "importpath": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_~+-](?:[A-Za-z0-9._~+-]*[A-Za-z0-9_~+-])?(?:/[A-Za-z0-9_~+-](?:[A-Za-z0-9._~+-]*[A-Za-z0-9_~+-])?)*$",
+      "description": "A Go import path."
+    },
+    "cell": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+/[a-z0-9]+$",
+      "description": "A GOOS/GOARCH pair, as scripts/ci/platforms.sh and the go command write it."
+    },
+    "platforms": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/cell"
+      },
+      "description": "The cells a record holds on, in the document's cell order; absent when it holds on every cell."
+    },
+    "package": {
+      "type": "object",
+      "required": [
+        "path",
+        "name",
+        "dir"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/importpath"
+        },
+        "name": {
+          "type": "string",
+          "description": "The package's name."
+        },
+        "dir": {
+          "type": "string",
+          "description": "Its directory, relative to the module's root, with forward slashes; . for the module's root."
+        },
+        "layer": {
+          "enum": [
+            "kernel",
+            "core",
+            "service",
+            "public",
+            "thirdparty",
+            "framework"
+          ],
+          "description": "The SDK layer the directory sits in (ADR 0068, ADR 0147, ADR 0157): internal/kernel, internal/core, internal/service, pkg/v1, third-party, framework — the connectors under framework/ included."
+        },
+        "family": {
+          "type": "string",
+          "description": "Its family within a layer grouped by family (ADR 0155): the first directory below the layer's, or root for the kernel's and pkg/v1's root packages (kernel: backoff, clock, errs, plugin, semver; pkg/v1: clock, errs). Absent in third-party and framework."
+        },
+        "doc": {
+          "type": "string",
+          "description": "The package comment of every file the cell compiles, in file-name order, joined by a newline as go/doc joins them; each is ast.CommentGroup.Text()."
+        },
+        "platforms": {
+          "$ref": "#/$defs/platforms"
+        }
+      }
+    },
+    "symbol": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "package",
+        "name",
+        "spelled",
+        "canonical",
+        "file"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/goid"
+        },
+        "kind": {
+          "enum": [
+            "func",
+            "method",
+            "type",
+            "alias",
+            "const",
+            "var"
+          ],
+          "description": "func: a package-level function. method: a method declared on an exported named type, or an exported explicit method of an exported interface. type: a defined type. alias: an alias. const, var: a package-level constant, variable."
+        },
+        "package": {
+          "$ref": "#/$defs/importpath",
+          "description": "The declaring package."
+        },
+        "name": {
+          "type": "string",
+          "description": "The symbol's name; a method's own name."
+        },
+        "recv": {
+          "type": "string",
+          "description": "A method's type, its type parameters left out."
+        },
+        "spelled": {
+          "type": "string",
+          "description": "The signature as the declaring file writes its types: the canonical form with each package written by the name the file imports it under, by its package name when the file does not import it, and with nothing for the declaring package or a dot import."
+        },
+        "canonical": {
+          "type": "string",
+          "description": "The signature as go/types prints it (types.TypeString) with every package qualified by its import path, the declaring package's own included, aliases kept. func, method: the signature, type parameters included, the receiver left out — a method's receiver is in its id. type: the type parameter list as go/types writes it after the type's name, a space, then the underlying type; the underlying struct of a defined type keeps its exported fields only, with their tags, and an interface keeps every method, unexported ones included. alias: the type parameter list, a space, then the right-hand side. const, var: the type. These are the strings the `// go:<id> <kind> <canonical>` markers of the api_gen*_test.go pins carry."
+        },
+        "owner": {
+          "$ref": "#/$defs/goid",
+          "description": "An alias's owner: the origin of the named type the alias resolves to, through every alias; absent for an alias of an unnamed type."
+        },
+        "value": {
+          "type": "string",
+          "description": "A constant's exact value, go/constant's ExactString: a string is quoted."
+        },
+        "init": {
+          "$ref": "#/$defs/goid",
+          "description": "The id a variable or a constant is initialised with, when its initializer is that one name: a re-export."
+        },
+        "code": {
+          "$ref": "#/$defs/code"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/field"
+          },
+          "description": "A struct type's exported fields, in declaration order."
+        },
+        "doc": {
+          "type": "string",
+          "description": "The doc comment's text, ast.CommentGroup.Text(): a spec's own comment, or its group's when it has none; an interface method's comment, or its line comment."
+        },
+        "file": {
+          "type": "string",
+          "description": "The declaring file, relative to the module's root, with forward slashes, no line."
+        },
+        "layer": {
+          "$ref": "#/$defs/package/properties/layer"
+        },
+        "family": {
+          "$ref": "#/$defs/package/properties/family"
+        },
+        "platforms": {
+          "$ref": "#/$defs/platforms"
+        }
+      }
+    },
+    "code": {
+      "type": "object",
+      "required": [
+        "value"
+      ],
+      "additionalProperties": false,
+      "description": "An error code (ADR 0005): on a constant of type errs.Code, its value; on a variable initialised with errs.Define, or with a variable that is, the sentinel's code, reason and public text.",
+      "properties": {
+        "value": {
+          "type": "string",
+          "pattern": "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$",
+          "description": "MM.LL.PP.SS, each element in decimal."
+        },
+        "reason": {
+          "type": "string",
+          "description": "A sentinel's reason."
+        },
+        "public": {
+          "type": "string",
+          "description": "A sentinel's wire-safe public text."
+        }
+      }
+    },
+    "field": {
+      "type": "object",
+      "required": [
+        "name",
+        "type"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The field's name; an embedded field's type name."
+        },
+        "embedded": {
+          "type": "boolean"
+        },
+        "type": {
+          "type": "string",
+          "description": "Its type, spelled as the declaring file writes it."
+        },
+        "tag": {
+          "type": "string",
+          "description": "Its struct tag."
+        },
+        "doc": {
+          "type": "string",
+          "description": "Its doc comment, or its line comment when it has none."
+        }
+      }
+    }
+  },
+  "x-vectors": {
+    "goid": {
+      "about": "go: ids, the package-scoped id of an exported Go symbol, as the Go runtime names it (runtime.FuncForPC, a stack trace, a profile): go:<import path>.<Name>, go:<import path>.<Type>.<Method>, go:<import path>.(*<Type>).<Method>; [...] after a generic function, a generic method and a generic receiver's type; a dot of the import path's last element written %2e, as the linker escapes it. Each valid vector gives the id's parts; each invalid one is refused. kit's design (design.ParseGoID) and the SDK's docs/api read the same vectors.",
+      "valid": [
+        {
+          "id": "go:errors.New",
+          "path": "errors",
+          "name": "New"
+        },
+        {
+          "id": "go:net/http.(*Client).Do",
+          "path": "net/http",
+          "recv": "Client",
+          "pointer": true,
+          "name": "Do"
+        },
+        {
+          "id": "go:io.Reader.Read",
+          "path": "io",
+          "recv": "Reader",
+          "name": "Read"
+        },
+        {
+          "id": "go:github.com/kitsunium/sdk/internal/kernel/errs.Pack",
+          "path": "github.com/kitsunium/sdk/internal/kernel/errs",
+          "name": "Pack"
+        },
+        {
+          "id": "go:github.com/kitsunium/sdk/internal/kernel/errs.Code.String",
+          "path": "github.com/kitsunium/sdk/internal/kernel/errs",
+          "recv": "Code",
+          "name": "String"
+        },
+        {
+          "id": "go:github.com/kitsunium/sdk/internal/kernel/errs.(*Error).Code",
+          "path": "github.com/kitsunium/sdk/internal/kernel/errs",
+          "recv": "Error",
+          "pointer": true,
+          "name": "Code"
+        },
+        {
+          "id": "go:github.com/kitsunium/sdk/internal/core/app/lock.Locker.Acquire",
+          "path": "github.com/kitsunium/sdk/internal/core/app/lock",
+          "recv": "Locker",
+          "name": "Acquire"
+        },
+        {
+          "id": "go:github.com/kitsunium/sdk/internal/kernel/collections/cache.NewCache[...]",
+          "path": "github.com/kitsunium/sdk/internal/kernel/collections/cache",
+          "name": "NewCache",
+          "generic": true
+        },
+        {
+          "id": "go:github.com/kitsunium/sdk/internal/kernel/collections/cache.(*Cache[...]).Get",
+          "path": "github.com/kitsunium/sdk/internal/kernel/collections/cache",
+          "recv": "Cache",
+          "pointer": true,
+          "recvGeneric": true,
+          "name": "Get"
+        },
+        {
+          "id": "go:example.com/rt/lib%2ev2.F",
+          "path": "example.com/rt/lib.v2",
+          "name": "F"
+        },
+        {
+          "id": "go:example.com/rt/lib%2ev2.G[...]",
+          "path": "example.com/rt/lib.v2",
+          "name": "G",
+          "generic": true
+        },
+        {
+          "id": "go:example.com/rt/lib%2ev2.T.V",
+          "path": "example.com/rt/lib.v2",
+          "recv": "T",
+          "name": "V"
+        },
+        {
+          "id": "go:example.com/rt/lib%2ev2.(*T).P",
+          "path": "example.com/rt/lib.v2",
+          "recv": "T",
+          "pointer": true,
+          "name": "P"
+        },
+        {
+          "id": "go:example.com/rt/lib%2ev2.(*C[...]).Get",
+          "path": "example.com/rt/lib.v2",
+          "recv": "C",
+          "pointer": true,
+          "recvGeneric": true,
+          "name": "Get"
+        },
+        {
+          "id": "go:example.com/rt/lib%2ev2.C[...].Len",
+          "path": "example.com/rt/lib.v2",
+          "recv": "C",
+          "recvGeneric": true,
+          "name": "Len"
+        },
+        {
+          "id": "go:example.com/rt/lib%2ev2.L[...].Apply[...]",
+          "path": "example.com/rt/lib.v2",
+          "recv": "L",
+          "recvGeneric": true,
+          "name": "Apply",
+          "generic": true
+        },
+        {
+          "id": "go:example.com/rt/lib%2ev2.(*L[...]).PApply[...]",
+          "path": "example.com/rt/lib.v2",
+          "recv": "L",
+          "pointer": true,
+          "recvGeneric": true,
+          "name": "PApply",
+          "generic": true
+        },
+        {
+          "id": "go:example.com/rt/lib%2ev2.N.Gen[...]",
+          "path": "example.com/rt/lib.v2",
+          "recv": "N",
+          "name": "Gen",
+          "generic": true
+        },
+        {
+          "id": "go:example.com/rt/lib%2ev2.I.M",
+          "path": "example.com/rt/lib.v2",
+          "recv": "I",
+          "name": "M"
+        },
+        {
+          "id": "go:gopkg.in/yaml%2ev3.Marshal",
+          "path": "gopkg.in/yaml.v3",
+          "name": "Marshal"
+        },
+        {
+          "id": "go:gopkg.in/yaml%2ev3.(*Node).Decode",
+          "path": "gopkg.in/yaml.v3",
+          "recv": "Node",
+          "pointer": true,
+          "name": "Decode"
+        },
+        {
+          "id": "go:example.com/a-b/c~d/e+f_g.X_1",
+          "path": "example.com/a-b/c~d/e+f_g",
+          "name": "X_1"
+        },
+        {
+          "id": "go:x.T[...]",
+          "path": "x",
+          "name": "T",
+          "generic": true
+        }
+      ],
+      "invalid": [
+        "",
+        "errors.New",
+        "go:",
+        "go:errors",
+        "go:errors.",
+        "go:errors.new",
+        "go:.New",
+        "go:/errors.New",
+        "go:errors/.New",
+        "go:net//http.Get",
+        "go:gopkg.in/yaml.v3.Marshal",
+        "go:example.com/x%2E.F",
+        "go:x.(T).M",
+        "go:x.(*T.M",
+        "go:x.*T.M",
+        "go:x.(*T)M",
+        "go:x.T.m",
+        "go:x.t.M",
+        "go:x.T.M.N",
+        "go:x.T[..].M",
+        "go:x.T[int].M",
+        "go:x.T[...][...]",
+        "go:x.(*T)[...].M",
+        "go: x.T",
+        "go:x.T ",
+        "GO:x.T",
+        "go:x y.T",
+        "go:é.T"
+      ]
+    },
+    "canonical": [
+      {
+        "about": "A library with a dotted import path's last element, the package it imports, and a facade that aliases it. Every exported symbol of the three packages is listed, with its id, kind, spelled and canonical signatures and an alias's owner; nothing else is exported. Packages are listed dependencies first, and import nothing outside the vector.",
+        "packages": [
+          {
+            "path": "example.com/rt/dep",
+            "files": {
+              "dep.go": "// Package dep is what lib imports.\npackage dep\n\n// Context is done when its channel closes.\ntype Context interface{ Done() <-chan struct{} }\n\n// Option configures a Base.\ntype Option func(*Base)\n\n// Base is embedded by lib.Tagged.\ntype Base struct{ ID int }\n\n// Default is a Base.\nvar Default = Base{}\n"
+            }
+          },
+          {
+            "path": "example.com/rt/lib.v2",
+            "files": {
+              "lib.go": "// Package lib is a library whose import path's last element holds a dot,\n// which an id writes %2e.\npackage lib\n\nimport \"example.com/rt/dep\"\n\n// Pair is a generic struct; its unexported field is no part of its API.\ntype Pair[K comparable, V any] struct {\n\t// Key is the key.\n\tKey K `json:\"key\"`\n\tVal V // Val is the value.\n\thidden int\n}\n\n// Get reads through a pointer receiver.\nfunc (p *Pair[K, V]) Get(k K) (V, bool) {\n\tvar zero V\n\treturn zero, false\n}\n\n// Len reads through a value receiver.\nfunc (p Pair[K, V]) Len() int { return 0 }\n\n// New is a generic function with a variadic parameter.\nfunc New[K comparable, V any](k K, v V, opts ...dep.Option) *Pair[K, V] { return nil }\n\n// Both declares its type parameters grouped.\nfunc Both[A, B any](a A, b B) {}\n\n// Ordered is a constraint.\ntype Ordered interface{ ~int | ~string }\n\n// Max declares two type parameters with one named constraint.\nfunc Max[A Ordered, B Ordered](a A, b B) A { return a }\n\n// Sealed has an unexported method: only this package implements it.\ntype Sealed interface {\n\t// Do does.\n\tDo(ctx dep.Context) error\n\tseal()\n}\n\n// Reader embeds Sealed.\ntype Reader interface {\n\tSealed\n\tRead() []byte\n}\n\n// Tagged has a tag on grouped names, an embedded field and an unexported one.\ntype Tagged struct {\n\tdep.Base\n\tA, B string `json:\"ab,omitempty\"`\n\tc    int\n}\n\n// Code is a defined type with a method.\ntype Code uint32\n\n// String names a code.\nfunc (c Code) String() string { return \"\" }\n\n// The constants of the package.\nconst (\n\t// First is typed.\n\tFirst Code = 1\n\tUntyped = 2.5\n\tText = \"x\"\n)\n\n// Default is a variable whose type is inferred from another package's.\nvar Default = dep.Default\n\n// Hook is a function-typed variable.\nvar Hook func(error) bool\n\n// Handler is a func type naming a generic instance.\ntype Handler func(ctx dep.Context, p *Pair[string, int]) error\n\ntype hidden struct{}\n\n// Exported is a method of an unexported type: no API.\nfunc (hidden) Exported() {}\n"
+            }
+          },
+          {
+            "path": "example.com/rt/facade",
+            "files": {
+              "facade.go": "// Package facade re-exports lib under its own names, as pkg/v1 does.\npackage facade\n\nimport (\n\td \"example.com/rt/dep\"\n\tlib \"example.com/rt/lib.v2\"\n)\n\n// Pair aliases a generic type.\ntype Pair[K comparable, V any] = lib.Pair[K, V]\n\n// Code aliases a defined type.\ntype Code = lib.Code\n\n// Ctx aliases another package's interface, imported under another name.\ntype Ctx = d.Context\n\n// Bytes aliases an unnamed type: it has no owner.\ntype Bytes = []byte\n\n// First re-exports a constant.\nconst First = lib.First\n\n// New forwards to lib.New.\nfunc New(k string, v int) *Pair[string, int] { return lib.New(k, v) }\n"
+            }
+          }
+        ],
+        "symbols": [
+          {
+            "id": "go:example.com/rt/dep.Base",
+            "kind": "type",
+            "spelled": "struct{ID int}",
+            "canonical": "struct{ID int}"
+          },
+          {
+            "id": "go:example.com/rt/dep.Context",
+            "kind": "type",
+            "spelled": "interface{Done() <-chan struct{}}",
+            "canonical": "interface{Done() <-chan struct{}}"
+          },
+          {
+            "id": "go:example.com/rt/dep.Context.Done",
+            "kind": "method",
+            "spelled": "func() <-chan struct{}",
+            "canonical": "func() <-chan struct{}"
+          },
+          {
+            "id": "go:example.com/rt/dep.Default",
+            "kind": "var",
+            "spelled": "Base",
+            "canonical": "example.com/rt/dep.Base"
+          },
+          {
+            "id": "go:example.com/rt/dep.Option",
+            "kind": "type",
+            "spelled": "func(*Base)",
+            "canonical": "func(*example.com/rt/dep.Base)"
+          },
+          {
+            "id": "go:example.com/rt/facade.Bytes",
+            "kind": "alias",
+            "spelled": "[]byte",
+            "canonical": "[]byte"
+          },
+          {
+            "id": "go:example.com/rt/facade.Code",
+            "kind": "alias",
+            "spelled": "lib.Code",
+            "canonical": "example.com/rt/lib.v2.Code",
+            "owner": "go:example.com/rt/lib%2ev2.Code"
+          },
+          {
+            "id": "go:example.com/rt/facade.Ctx",
+            "kind": "alias",
+            "spelled": "d.Context",
+            "canonical": "example.com/rt/dep.Context",
+            "owner": "go:example.com/rt/dep.Context"
+          },
+          {
+            "id": "go:example.com/rt/facade.First",
+            "kind": "const",
+            "spelled": "lib.Code",
+            "canonical": "example.com/rt/lib.v2.Code"
+          },
+          {
+            "id": "go:example.com/rt/facade.New",
+            "kind": "func",
+            "spelled": "func(k string, v int) *Pair[string, int]",
+            "canonical": "func(k string, v int) *example.com/rt/facade.Pair[string, int]"
+          },
+          {
+            "id": "go:example.com/rt/facade.Pair",
+            "kind": "alias",
+            "spelled": "[K comparable, V any] lib.Pair[K, V]",
+            "canonical": "[K comparable, V any] example.com/rt/lib.v2.Pair[K, V]",
+            "owner": "go:example.com/rt/lib%2ev2.Pair"
+          },
+          {
+            "id": "go:example.com/rt/lib%2ev2.(*Pair[...]).Get",
+            "kind": "method",
+            "spelled": "func(k K) (V, bool)",
+            "canonical": "func(k K) (V, bool)"
+          },
+          {
+            "id": "go:example.com/rt/lib%2ev2.Both[...]",
+            "kind": "func",
+            "spelled": "func[A, B any](a A, b B)",
+            "canonical": "func[A, B any](a A, b B)"
+          },
+          {
+            "id": "go:example.com/rt/lib%2ev2.Code",
+            "kind": "type",
+            "spelled": "uint32",
+            "canonical": "uint32"
+          },
+          {
+            "id": "go:example.com/rt/lib%2ev2.Code.String",
+            "kind": "method",
+            "spelled": "func() string",
+            "canonical": "func() string"
+          },
+          {
+            "id": "go:example.com/rt/lib%2ev2.Default",
+            "kind": "var",
+            "spelled": "dep.Base",
+            "canonical": "example.com/rt/dep.Base"
+          },
+          {
+            "id": "go:example.com/rt/lib%2ev2.First",
+            "kind": "const",
+            "spelled": "Code",
+            "canonical": "example.com/rt/lib.v2.Code"
+          },
+          {
+            "id": "go:example.com/rt/lib%2ev2.Handler",
+            "kind": "type",
+            "spelled": "func(ctx dep.Context, p *Pair[string, int]) error",
+            "canonical": "func(ctx example.com/rt/dep.Context, p *example.com/rt/lib.v2.Pair[string, int]) error"
+          },
+          {
+            "id": "go:example.com/rt/lib%2ev2.Hook",
+            "kind": "var",
+            "spelled": "func(error) bool",
+            "canonical": "func(error) bool"
+          },
+          {
+            "id": "go:example.com/rt/lib%2ev2.Max[...]",
+            "kind": "func",
+            "spelled": "func[A, B Ordered](a A, b B) A",
+            "canonical": "func[A, B example.com/rt/lib.v2.Ordered](a A, b B) A"
+          },
+          {
+            "id": "go:example.com/rt/lib%2ev2.New[...]",
+            "kind": "func",
+            "spelled": "func[K comparable, V any](k K, v V, opts ...dep.Option) *Pair[K, V]",
+            "canonical": "func[K comparable, V any](k K, v V, opts ...example.com/rt/dep.Option) *example.com/rt/lib.v2.Pair[K, V]"
+          },
+          {
+            "id": "go:example.com/rt/lib%2ev2.Ordered",
+            "kind": "type",
+            "spelled": "interface{~int | ~string}",
+            "canonical": "interface{~int | ~string}"
+          },
+          {
+            "id": "go:example.com/rt/lib%2ev2.Pair",
+            "kind": "type",
+            "spelled": "[K comparable, V any] struct{Key K \"json:\\\"key\\\"\"; Val V}",
+            "canonical": "[K comparable, V any] struct{Key K \"json:\\\"key\\\"\"; Val V}"
+          },
+          {
+            "id": "go:example.com/rt/lib%2ev2.Pair[...].Len",
+            "kind": "method",
+            "spelled": "func() int",
+            "canonical": "func() int"
+          },
+          {
+            "id": "go:example.com/rt/lib%2ev2.Reader",
+            "kind": "type",
+            "spelled": "interface{Read() []byte; Sealed}",
+            "canonical": "interface{Read() []byte; example.com/rt/lib.v2.Sealed}"
+          },
+          {
+            "id": "go:example.com/rt/lib%2ev2.Reader.Read",
+            "kind": "method",
+            "spelled": "func() []byte",
+            "canonical": "func() []byte"
+          },
+          {
+            "id": "go:example.com/rt/lib%2ev2.Sealed",
+            "kind": "type",
+            "spelled": "interface{Do(ctx dep.Context) error; seal()}",
+            "canonical": "interface{Do(ctx example.com/rt/dep.Context) error; seal()}"
+          },
+          {
+            "id": "go:example.com/rt/lib%2ev2.Sealed.Do",
+            "kind": "method",
+            "spelled": "func(ctx dep.Context) error",
+            "canonical": "func(ctx example.com/rt/dep.Context) error"
+          },
+          {
+            "id": "go:example.com/rt/lib%2ev2.Tagged",
+            "kind": "type",
+            "spelled": "struct{dep.Base; A string \"json:\\\"ab,omitempty\\\"\"; B string \"json:\\\"ab,omitempty\\\"\"}",
+            "canonical": "struct{example.com/rt/dep.Base; A string \"json:\\\"ab,omitempty\\\"\"; B string \"json:\\\"ab,omitempty\\\"\"}"
+          },
+          {
+            "id": "go:example.com/rt/lib%2ev2.Text",
+            "kind": "const",
+            "spelled": "untyped string",
+            "canonical": "untyped string"
+          },
+          {
+            "id": "go:example.com/rt/lib%2ev2.Untyped",
+            "kind": "const",
+            "spelled": "untyped float",
+            "canonical": "untyped float"
+          }
+        ]
+      }
+    ]
+  }
+}

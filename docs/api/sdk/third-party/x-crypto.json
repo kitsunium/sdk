@@ -1,0 +1,59 @@
+{
+  "format": "sdk.api/v1",
+  "module": "github.com/kitsunium/sdk/third-party/x-crypto",
+  "dir": "third-party/x-crypto",
+  "cells": [
+    "linux/amd64",
+    "linux/arm64",
+    "linux/386",
+    "linux/arm",
+    "darwin/arm64",
+    "windows/amd64",
+    "freebsd/amd64",
+    "openbsd/amd64",
+    "netbsd/amd64",
+    "dragonfly/amd64",
+    "illumos/amd64",
+    "solaris/amd64"
+  ],
+  "packages": [
+    {
+      "path": "github.com/kitsunium/sdk/third-party/x-crypto/argon2id",
+      "name": "argon2id",
+      "dir": "argon2id",
+      "layer": "thirdparty",
+      "doc": "Package argon2id registers the \"argon2id\" password-hashing scheme (ADR 0013).\nIt is the memory-hard, OWASP-first-choice password hash — but it depends on\ngolang.org/x/crypto, so it lives under third-party/x-crypto as an OPT-IN\nscheme (mirroring xchacha vs the stdlib aesgcm default). Blank-import this\npackage to register it, then crypto.HashPassword(\"argon2id\", …) resolves;\ncrypto.VerifyPassword already verifies any registered scheme's stored hashes.\n\nStored hashes use the standard argon2 PHC string:\n\n\t$argon2id$v=19$m=19456,t=2,p=1$<b64-salt>$<b64-digest>\n"
+    },
+    {
+      "path": "github.com/kitsunium/sdk/third-party/x-crypto/xchacha",
+      "name": "xchacha",
+      "dir": "xchacha",
+      "layer": "thirdparty",
+      "doc": "Package xchacha registers the \"xchacha20poly1305\" AEAD scheme (ADR 0013).\nBlank-importing the package self-registers the scheme so\ncrypto.SealAs(\"xchacha20poly1305\", …) / crypto.Open resolve. It is the ONLY\nplace golang.org/x/crypto enters a build for this scheme — declared in the\ngo.mod of the third-party/x-crypto module (ADR 0157), which nothing in the\nSDK requires, so pkg/v1 consumers stay dep-light (zero x/crypto) unless they\nopt in with this blank import.\n\nXChaCha20-Poly1305 uses a 192-bit (24-byte) random nonce, eliminating the\nbirthday-bound message-count limit that AES-256-GCM's 96-bit random nonce\nimposes — preferred for high-volume random-nonce workloads.\n"
+    }
+  ],
+  "symbols": [
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/x-crypto/argon2id.PasswordHasher",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/x-crypto/argon2id",
+      "name": "PasswordHasher",
+      "spelled": "corecrypto.PasswordHasher",
+      "canonical": "github.com/kitsunium/sdk/internal/core/crypto.PasswordHasher",
+      "doc": "PasswordHasher is the registered argon2id scheme singleton (no init();\npackage-level var initialiser, mirroring the codec/AEAD convention).\n",
+      "file": "argon2id/argon2id.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/x-crypto/xchacha.AEAD",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/x-crypto/xchacha",
+      "name": "AEAD",
+      "spelled": "corecrypto.AEAD",
+      "canonical": "github.com/kitsunium/sdk/internal/core/crypto.AEAD",
+      "doc": "AEAD is the registered XChaCha20-Poly1305 scheme singleton (no init();\npackage-level var initialiser, mirroring the codec convention).\n",
+      "file": "xchacha/xchacha.go",
+      "layer": "thirdparty"
+    }
+  ]
+}

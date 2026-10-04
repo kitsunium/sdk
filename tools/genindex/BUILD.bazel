@@ -1,14 +1,31 @@
 load("@rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
 
+# testdata/apirepo is a repository of its own — its module example.com/fixture
+# is what -write-api and -check-api read end to end under `go test` — and no
+# package of this one: gazelle would generate targets it cannot resolve.
+# gazelle:exclude testdata
+
 go_library(
     name = "genindex_lib",
     srcs = [
+        "api.go",
+        "apicheck.go",
+        "apidoc.go",
+        "apiid.go",
+        "apiload.go",
+        "apisym.go",
+        "apisym_place.go",
+        "apisym_types.go",
+        "cli.go",
         "collect.go",
+        "digests.go",
         "doclinks.go",
         "emit.go",
         "index.go",
         "main.go",
+        "markers.go",
         "options.go",
+        "platforms.go",
         "render.go",
     ],
     importpath = "github.com/kitsunium/sdk/tools/genindex",
@@ -24,11 +41,25 @@ go_binary(
 go_test(
     name = "genindex_test",
     srcs = [
+        "api_census_test.go",
+        "api_e2e_test.go",
+        "apidoc_test.go",
+        "apisym_test.go",
+        "apivectors_test.go",
+        "digests_test.go",
         "doclinks_test.go",
         "main_test.go",
+        "markers_test.go",
+        "platforms_test.go",
     ],
-    # Test_platforms reads the cross-build matrix from the workflow itself, at
-    # the same path relative to this package as `go test` sees it.
-    data = ["//:.github/workflows/bazel-ci.yml"],
+    # The platforms table every judgement is made on, and the schema whose
+    # vectors the writer is held to, at the same paths relative to this
+    # package as `go test` sees them. The tests that run the go command or
+    # read the whole repository skip here, where neither exists, and run under
+    # `go test` (test-386, and any local run).
+    data = [
+        "//:docs/api/schema.json",
+        "//:scripts/ci/platforms.sh",
+    ],
     embed = [":genindex_lib"],
 )

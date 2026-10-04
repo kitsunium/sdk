@@ -175,8 +175,8 @@ jobs:
       - name: layer invariant — no layer depends on one above it
         run: bash scripts/check-layer-deps.sh
 
-      # scripts/ci/platforms.sh is the table of cells the local cross-build
-      # audit loops over, and the cross-build matrix below is what CI
+      # scripts/ci/platforms.sh is the table tools/genindex judges doc links
+      # and writes docs/api on, and the cross-build matrix below is what CI
       # compiles. A job's matrix has to be written here, so the table is
       # written twice and this holds the two equal, cells and order.
       - name: platforms invariant — the platforms table is the cross-build matrix
@@ -185,7 +185,9 @@ jobs:
       # The three checks of `make lint` that no lane ran (#236): `gofumpt -l`,
       # sdkguard and ktn-linter. The other five are the steps above — gazelle
       # drift, alloc-lane, audit-coverage, domain-docs, layer-deps — so this
-      # adds a class of analysis, it does not repeat one.
+      # adds a class of analysis, it does not repeat one. `make lint-check`
+      # also runs `make doclinks` (ADR 0138) and `make api-check`: docs/api
+      # regenerated from the code on every cell and compared byte for byte.
       #
       # These sit INSIDE the `bazel` job deliberately. `bazel` and `post-commit`
       # are the only required checks on main (the legacy branch protection and
@@ -200,7 +202,7 @@ jobs:
           GOFUMPT_VERSION: v0.12.0
         run: go install "mvdan.cc/gofumpt@${GOFUMPT_VERSION}"
 
-      - name: lint gate — gofumpt + sdkguard
+      - name: lint gate — gofumpt + sdkguard + doclinks + docs/api
         run: make lint-check
 
       # govulncheck, in source mode, over every module of the census (#210,

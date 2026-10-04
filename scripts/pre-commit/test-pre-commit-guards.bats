@@ -527,8 +527,8 @@ EOF
 
 # --- check-platforms.sh -----------------------------------------------------
 
-# The platforms table and the cross-build matrix CI compiles are written in two
-# files, so the guard holds them equal: the same cells, in the
+# The platforms table genindex reads and the cross-build matrix CI compiles are
+# written in two files, so the guard holds them equal: the same cells, in the
 # same order. mkplatroot copies the real table and workflow into the fixture,
 # so each case changes one thing.
 mkplatroot() {

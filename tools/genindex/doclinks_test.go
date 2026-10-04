@@ -7,11 +7,15 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
 )
+
+// sdkTable is the repository's platforms table, relative to this package: the
+// path make runs genindex from, and the one a Bazel test finds it at as a
+// data dependency.
+const sdkTable string = "../../scripts/ci/platforms.sh"
 
 // stagePackage writes the given files into a fresh directory and returns it.
 func stagePackage(t *testing.T, files map[string]string) string {
@@ -185,7 +189,7 @@ package a
 		t.Helper()
 		root := stagePackage(t, c.files)
 
-		dead, err := checkDocLinks(root)
+		dead, err := checkDocLinks(root, sdkCells(t))
 		if err != nil {
 			t.Fatalf("checkDocLinks = %v, want nil", err)
 		}
@@ -278,7 +282,7 @@ func Test_checkDocLinks_platforms(t *testing.T) {
 		t.Helper()
 		root := stagePackage(t, c.files)
 
-		dead, err := checkDocLinks(root)
+		dead, err := checkDocLinks(root, sdkCells(t))
 		if err != nil {
 			t.Fatalf("checkDocLinks = %v, want nil", err)
 		}
@@ -299,50 +303,51 @@ func Test_checkDocLinks_platforms(t *testing.T) {
 	}
 }
 
-// crossBuildCell matches one cell of bazel-ci.yml's cross-build matrix — `{
-// goos: linux, goarch: "386" }` — the only flow mappings in that file naming a
-// goos.
-var crossBuildCell = regexp.MustCompile(`\{\s*goos:\s*"?([a-z0-9]+)"?\s*,\s*goarch:\s*"?([a-z0-9]+)"?\s*\}`)
+// sdkCells reads the repository's platforms table, failing the test when it
+// cannot.
+func sdkCells(t *testing.T) []platform {
+	t.Helper()
+	cells, err := readPlatforms(filepath.FromSlash(sdkTable))
+	if err != nil {
+		t.Fatalf("reading the platforms table: %v", err)
+	}
+	return cells
+}
 
-// Test_platforms pins the table the check judges on to the cells the
-// cross-build lane compiles, read from the workflow itself rather than from a
-// copy. A cell the lane gains is a platform whose doc comments nothing judges
-// until this table gains it too: illumos and solaris joined the lane with
-// ADR 0144 and stayed unjudged here until this test existed. Under Bazel the
-// workflow reaches the test as a data dependency, at the same relative path.
+// Test_platforms pins the table every judgement is made on: the twelve cells
+// of scripts/ci/platforms.sh, in its order, read from the here-document the
+// script prints — never from a copy. scripts/pre-commit/check-platforms.sh
+// holds that table to bazel-ci.yml's cross-build matrix; this holds genindex
+// to the table, and illumos and solaris to two cells (ADR 0144): they joined
+// the lane and stayed unjudged here until a test like this one existed.
 func Test_platforms(t *testing.T) {
 	t.Parallel()
 	type tc struct {
 		// name describes the case.
 		name string
-		// workflow is the workflow file, relative to this package.
-		workflow string
-		// wantCells is how many cells the lane compiles.
-		wantCells int
+		// table is the table file, relative to this package.
+		table string
+		// want are the cells, in order.
+		want []string
 	}
 	tests := []tc{
-		{name: "the cross-build matrix", workflow: "../../.github/workflows/bazel-ci.yml", wantCells: 12},
+		{
+			name:  "the repository's table",
+			table: sdkTable,
+			want: []string{
+				"linux/amd64", "linux/arm64", "linux/386", "linux/arm", "darwin/arm64", "windows/amd64",
+				"freebsd/amd64", "openbsd/amd64", "netbsd/amd64", "dragonfly/amd64", "illumos/amd64", "solaris/amd64",
+			},
+		},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		src, err := os.ReadFile(filepath.FromSlash(c.workflow))
+		cells, err := readPlatforms(filepath.FromSlash(c.table))
 		if err != nil {
-			t.Fatalf("reading the workflow: %v", err)
+			t.Fatalf("readPlatforms = %v, want nil", err)
 		}
-		var lane []string
-		for _, m := range crossBuildCell.FindAllStringSubmatch(string(src), -1) {
-			lane = append(lane, m[1]+"/"+m[2])
-		}
-		//: a pattern that stopped matching would compare an empty lane.
-		if len(lane) != c.wantCells {
-			t.Fatalf("the workflow lists %d cells (%q), want %d", len(lane), lane, c.wantCells)
-		}
-		table := make([]string, 0, len(platforms))
-		for _, p := range platforms {
-			table = append(table, p.String())
-		}
-		if !slices.Equal(table, lane) {
-			t.Fatalf("platforms = %q, want the cross-build cells in the workflow's order %q", table, lane)
+		if got := cellNames(cells); !slices.Equal(got, c.want) {
+			t.Fatalf("cells = %q, want %q", got, c.want)
 		}
 	}
 	for _, c := range tests {
@@ -370,7 +375,7 @@ func Test_checkDocLinks_errors(t *testing.T) {
 		t.Helper()
 		root := stagePackage(t, c.files)
 
-		if _, err := checkDocLinks(root); err == nil {
+		if _, err := checkDocLinks(root, sdkCells(t)); err == nil {
 			t.Fatal("checkDocLinks = nil, want an error")
 		}
 	}
@@ -431,7 +436,7 @@ func Test_runDocLinkCheck(t *testing.T) {
 		}
 		var out bytes.Buffer
 
-		status := runDocLinkCheck(roots, &out)
+		status := runDocLinkCheck(roots, sdkCells(t), &out)
 
 		if status != c.wantStatus {
 			t.Fatalf("runDocLinkCheck = %d, want %d; report:\n%s", status, c.wantStatus, out.String())

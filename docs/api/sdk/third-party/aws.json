@@ -1,0 +1,214 @@
+{
+  "format": "sdk.api/v1",
+  "module": "github.com/kitsunium/sdk/third-party/aws",
+  "dir": "third-party/aws",
+  "cells": [
+    "linux/amd64",
+    "linux/arm64",
+    "linux/386",
+    "linux/arm",
+    "darwin/arm64",
+    "windows/amd64",
+    "freebsd/amd64",
+    "openbsd/amd64",
+    "netbsd/amd64",
+    "dragonfly/amd64",
+    "illumos/amd64",
+    "solaris/amd64"
+  ],
+  "packages": [
+    {
+      "path": "github.com/kitsunium/sdk/third-party/aws/writer/cloudwatch",
+      "name": "cloudwatch",
+      "dir": "writer/cloudwatch",
+      "layer": "thirdparty",
+      "doc": "Package cloudwatch — the AWS adapter. This file (with cred_adapter.go) is the\nONLY place that imports the AWS SDK; every other file is SDK-free and unit-\ntested through the deliverFunc seam. The live PutLogEvents lives in an\nanonymous closure returned by newDeliverFunc.\n\nPackage cloudwatch — range 0.3.25.* (ADR 0015 writer registry; PP octet 0x19).\n\nPackage cloudwatch — bridges writer.CredentialProvider onto the AWS SDK's\naws.CredentialsProvider so credentials refresh on each Retrieve. Split from\nclient.go to keep one struct per file.\n\nPackage cloudwatch registers the \"cloudwatch\" writer factory. It lives under\nthird-party/ — NOT in pkg/v1 — in the third-party/aws module it shares with\nthe s3 writer, so the AWS SDK it pulls never enters the module graph of\npkg/v1 consumers (ADR 0012), and a consumer of this writer inherits no other\nvendor (ADR 0157).\nBlank-importing the package self-registers the factory (and pulls the AWS\nSDK), so writer.Open(\"cloudwatch\",\nlogger.CloudWatchConfig{…}) resolves only in builds that opt in. The factory\nwraps the batching terminal sink (cwsink.go) with async (non-blocking ring +\nOnDrop) and levelgate (per-writer MinLevel).\n\nPackage cloudwatch — the batching terminal Sink. AWS-free: it talks to\nCloudWatch Logs only through the deliverFunc seam, so the batching/flush logic\nis unit-tested with a fake (the real AWS adapter lives in client.go). Each\nrecord becomes one log event (carrying its RecordEvent.Time); events are\ncoalesced via the generic kernel batcher and delivered when the batch reaches\nthe event cap, on the FlushEvery ticker, or on Flush / Close. The\nPutLogEvents chronological-order requirement is honoured by the deliver\nclosure (a stable sort by timestamp), so the coalescing/flush/ticker\nmachinery is the shared kernel/concur/batcher (ADR 0014), not a hand-rolled copy.\n\nPackage cloudwatch — declares the sentinels returned by the CloudWatch writer.\nEach var's name equals its errs.Define Reason in SCREAMING_SNAKE form.\n"
+    },
+    {
+      "path": "github.com/kitsunium/sdk/third-party/aws/writer/s3",
+      "name": "s3",
+      "dir": "writer/s3",
+      "layer": "thirdparty",
+      "doc": "Package s3 — the AWS adapter. This file (with cred_adapter.go) is the ONLY\nplace that imports the AWS SDK; every other file is SDK-free and unit-tested\nthrough the uploadFunc seam. The live PutObject lives in an anonymous closure\nreturned by newUploadFunc — confining the SDK here and keeping the batching\nlogic testable without a network.\n\nPackage s3 — range 0.3.35.* (ADR 0015 service slot 0x23).\n\nPackage s3 — bridges the SDK's writer.CredentialProvider onto the AWS SDK's\naws.CredentialsProvider so credentials refresh on each Retrieve. Split from\nclient.go to keep one struct per file.\n\nPackage s3 — declares the sentinels returned by the S3 writer. Each var's\nname equals its errs.Define Reason in SCREAMING_SNAKE form.\n\nPackage s3 registers the \"s3\" writer factory. It lives under third-party/ —\nNOT in pkg/v1 — in the third-party/aws module it shares with the cloudwatch\nwriter, so the AWS SDK it pulls never enters the module graph of pkg/v1\nconsumers (nothing in the SDK requires that module; see ADR 0012), and a\nconsumer of this writer inherits no other vendor (ADR 0157).\nBlank-importing the package self-registers the factory\n(and pulls the AWS SDK), so writer.Open(\"s3\", logger.S3Config{…}) resolves\nonly in builds that opt in. The factory wraps the batching terminal sink\n(s3sink.go) with the async middleware for a non-blocking ring + OnDrop, and\nwith levelgate for the per-writer MinLevel.\n\nPackage s3 — the batching terminal Sink. AWS-free: it talks to S3 only through\nthe uploader seam, so the batching/flush logic is unit-tested with a fake\n(the real AWS adapter lives in client.go). Records are coalesced into one\nuploaded object per batch via the generic kernel batcher — flushed when the\nbuffered bytes reach MaxBatchBytes, on the FlushEvery ticker, or on Flush /\nClose. The per-batch object key and the byte-weight both ride in the deliver\nclosure / WeightOf, so the coalescing/flush/ticker machinery is the shared\nkernel/concur/batcher (ADR 0014), not a hand-rolled copy.\n"
+    }
+  ],
+  "symbols": [
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/writer/cloudwatch.ClientInitFailed",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/aws/writer/cloudwatch",
+      "name": "ClientInitFailed",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.25.2",
+        "reason": "CLIENT_INIT_FAILED",
+        "public": "CloudWatch writer could not initialise its AWS client"
+      },
+      "doc": "ClientInitFailed wraps an AWS SDK client construction failure at Open\ntime (bad region, unreachable credential source, …).\n",
+      "file": "writer/cloudwatch/errors.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/writer/cloudwatch.CodeCWClientInitFailed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/aws/writer/cloudwatch",
+      "name": "CodeCWClientInitFailed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "203010",
+      "code": {
+        "value": "0.3.25.2"
+      },
+      "doc": "CodeCWClientInitFailed identifies a failure building the AWS CloudWatch Logs\nclient from the supplied region / credentials at Open time.\n",
+      "file": "writer/cloudwatch/codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/writer/cloudwatch.CodeCWEventRejected",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/aws/writer/cloudwatch",
+      "name": "CodeCWEventRejected",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "203029",
+      "code": {
+        "value": "0.3.25.21"
+      },
+      "doc": "CodeCWEventRejected identifies a single event dropped before delivery because\nits timestamp falls outside the PutLogEvents per-event bounds (older than 14\ndays or more than 2 hours in the future). The event is dropped and surfaced\nvia OnError instead of failing the whole batch.\n",
+      "file": "writer/cloudwatch/codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/writer/cloudwatch.CodeCWPutFailed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/aws/writer/cloudwatch",
+      "name": "CodeCWPutFailed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "203028",
+      "code": {
+        "value": "0.3.25.20"
+      },
+      "doc": "CodeCWPutFailed identifies a failed PutLogEvents delivery of a batched set of\nlog events.\n",
+      "file": "writer/cloudwatch/codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/writer/cloudwatch.EventRejected",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/aws/writer/cloudwatch",
+      "name": "EventRejected",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.25.21",
+        "reason": "EVENT_REJECTED",
+        "public": "CloudWatch writer dropped a log event with an out-of-range timestamp"
+      },
+      "doc": "EventRejected reports one event dropped before delivery because its\ntimestamp is outside the PutLogEvents per-event window (older than 14 days\nor more than 2 hours ahead). The whole batch still ships; only the\nout-of-window event is discarded and routed to OnError.\n",
+      "file": "writer/cloudwatch/errors.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/writer/cloudwatch.PutFailed",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/aws/writer/cloudwatch",
+      "name": "PutFailed",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.25.20",
+        "reason": "PUT_FAILED",
+        "public": "CloudWatch writer failed to deliver a log batch"
+      },
+      "doc": "PutFailed wraps a failed PutLogEvents delivery of a batch.\n",
+      "file": "writer/cloudwatch/errors.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/writer/cloudwatch.Writer",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/aws/writer/cloudwatch",
+      "name": "Writer",
+      "spelled": "writer.Factory",
+      "canonical": "github.com/kitsunium/sdk/internal/core/observe/logger/writer.Factory",
+      "doc": "Writer is the registered cloudwatch factory singleton (no init()).\n",
+      "file": "writer/cloudwatch/cw.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/writer/s3.ClientInitFailed",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/aws/writer/s3",
+      "name": "ClientInitFailed",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.35.2",
+        "reason": "CLIENT_INIT_FAILED",
+        "public": "S3 writer could not initialise its AWS client"
+      },
+      "doc": "ClientInitFailed wraps an AWS SDK config/client construction failure at\nOpen time (bad region, unreachable credential source, …).\n",
+      "file": "writer/s3/errors.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/writer/s3.CodeS3ClientInitFailed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/aws/writer/s3",
+      "name": "CodeS3ClientInitFailed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "205570",
+      "code": {
+        "value": "0.3.35.2"
+      },
+      "doc": "CodeS3ClientInitFailed identifies a failure building the AWS S3 client from\nthe supplied region / credentials at Open time.\n",
+      "file": "writer/s3/codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/writer/s3.CodeS3PutFailed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/aws/writer/s3",
+      "name": "CodeS3PutFailed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "205588",
+      "code": {
+        "value": "0.3.35.20"
+      },
+      "doc": "CodeS3PutFailed identifies a failed PutObject upload of a batched log object.\n",
+      "file": "writer/s3/codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/writer/s3.PutFailed",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/aws/writer/s3",
+      "name": "PutFailed",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.35.20",
+        "reason": "PUT_FAILED",
+        "public": "S3 writer failed to upload a log batch"
+      },
+      "doc": "PutFailed wraps a failed PutObject upload of a batched log object.\n",
+      "file": "writer/s3/errors.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/writer/s3.Writer",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/aws/writer/s3",
+      "name": "Writer",
+      "spelled": "writer.Factory",
+      "canonical": "github.com/kitsunium/sdk/internal/core/observe/logger/writer.Factory",
+      "doc": "Writer is the registered s3 factory singleton (no init(); package-level var).\n",
+      "file": "writer/s3/s3.go",
+      "layer": "thirdparty"
+    }
+  ]
+}

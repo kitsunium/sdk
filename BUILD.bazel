@@ -9,10 +9,14 @@ load("@gazelle//:def.bzl", "gazelle")
 
 gazelle(name = "gazelle")
 
-# The cross-build matrix tools/genindex judges doc links on: its Test_platforms
-# reads the workflow as a data dependency, so the table it holds cannot drift
-# from the cells the lane compiles.
-exports_files([".github/workflows/bazel-ci.yml"])
+# The files tools/genindex's tests read as data dependencies: the platforms
+# table every judgement is made on (scripts/pre-commit/check-platforms.sh
+# holds it to bazel-ci.yml's cross-build matrix), and the docs/api schema whose
+# vectors the writer is held to.
+exports_files([
+    "docs/api/schema.json",
+    "scripts/ci/platforms.sh",
+])
 
 # audit_sources lists every file the internal/kernel/errs AST audit reads
 # at runtime. The audit walks internal/, pkg/, third-party/ and framework/
