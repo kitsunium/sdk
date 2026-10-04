@@ -1,15 +1,11 @@
-// Package main — genindex extracts a symbol search index from a Go module's
+// Package main — genindex reads the SDK's Go code for the documentation, in
+// four modes.
+//
+// The symbol index (the default) extracts a search index from a module's
 // public packages and emits it as JSON for the static docs site to consume
-// client-side.
-//
-// The output schema is consumed by docs/site/src/components/Search.astro (via
-// MiniSearch) to power the "Symbols" tab of the search modal.
-//
-// Pipeline: invoked from docs/site/package.json's `prebuild` step, runs strictly
-// stdlib (no external deps — zero pollution of any go.sum) per tools/CLAUDE.md's
-// "single-purpose scripts" convention.
-//
-// Usage:
+// client-side: docs/site/src/components/Search.astro feeds it to MiniSearch
+// for the "Symbols" tab of the search modal, and docs/site/package.json's
+// `prebuild` step runs it.
 //
 //	go run github.com/kitsunium/sdk/tools/genindex \
 //	    -input ../pkg/v1 \
@@ -21,59 +17,76 @@
 // member, in square brackets — that names no symbol the package declares, which
 // go/doc renders as literal bracketed text (ADR 0138). `make lint-check` runs it
 // over the repository.
+//
+// With -write-api it writes docs/api/<module>.json for every module of the
+// workspace under -repo-root: every exported symbol, read from the code with
+// go/types on each cell of the platforms table (`make api`). With -check-api
+// it writes nothing: it regenerates the documents in memory and fails on any
+// byte that differs from docs/api (`make api-check`, in `make lint-check`);
+// -markers adds the comparison of every cell's symbols with the pin markers of
+// api_gen*_test.go files, -digests the check of every generated file's header
+// digests against the design files' bytes.
+//
+// Every mode is the standard library alone (tools/CLAUDE.md), so it adds no
+// dependency to any go.sum.
 package main
 
 import (
 	"encoding/json"
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 )
 
-// outputDirPerm is the mode the output directory is created with: readable by
-// everyone, writable by the build user. The file itself is served publicly.
-const outputDirPerm os.FileMode = 0o755
+const (
+	// outputDirPerm is the mode the output directory is created with: readable
+	// by everyone, writable by the build user. The file itself is served
+	// publicly.
+	outputDirPerm os.FileMode = 0o755
+	// usageStatus is the exit status of a command line the flags refuse, as
+	// the flag package's own.
+	usageStatus int = 2
+)
 
 // stdoutTargets are the -output values that mean "write to stdout" rather than
 // to a file of that name.
 var stdoutTargets = map[string]struct{}{"": {}, "-": {}}
 
-// main parses the flags, extracts the index and writes it out.
+// main parses the flags and runs the mode they select.
 //
 // Every failure is fatal and reported on stderr: a partial index is worse than
 // none, because the docs site would ship a search box that silently cannot find
-// half the API.
+// half the API — and a partial docs/api is worse still, since it is checked.
 func main() {
-	input := flag.String("input", "", "module root (e.g. ../pkg/v1)")
-	output := flag.String("output", "", "output JSON file (omit for stdout)")
-	urlBase := flag.String("url-base", "/v1/local", "URL prefix for symbol anchors")
-	module := flag.String("module", "github.com/kitsunium/sdk/pkg/v1", "Go module path of -input")
-	repoRoot := flag.String("repo-root", "", "filesystem path of the repo root (used to compute the source path; defaults to two levels above -input)")
-	sourceURLPrefix := flag.String("source-url-prefix", "", "if set, build SourceURL = prefix + repo-relative-path#L<line> (e.g. https://github.com/kitsunium/sdk/blob/<sha>/)")
-	checkLinks := flag.Bool("check-doclinks", false, "emit no index; fail on every same-package doc link under the directories given as arguments that names no declared symbol (ADR 0138)")
-	flag.Parse()
-
-	//: the check mode reads directories from the arguments and emits nothing.
-	if *checkLinks {
-		os.Exit(runDocLinkCheck(flag.Args(), os.Stderr))
+	o, err := parseFlags(os.Args[1:])
+	//: a flag the program does not know: the usage is printed already.
+	if err != nil {
+		os.Exit(usageStatus)
 	}
+	//: a mode reports its own exit status.
+	if o.mode() != modeIndex {
+		os.Exit(runMode(o))
+	}
+	runIndex(o)
+}
 
+// runIndex extracts the symbol index and writes it out.
+func runIndex(o *cliOptions) {
 	//: without a module root there is nothing to index.
-	if *input == "" {
+	if o.input == "" {
 		exitErr("genindex: -input is required")
 	}
 
 	//: an unresolvable root leaves the field empty, which disables source links
 	//: rather than emitting ones that point nowhere.
-	root, _ := defaultRepoRoot(*repoRoot, *input)
+	root, _ := defaultRepoRoot(o.repoRoot, o.input)
 	opts := &indexOptions{
-		root:            *input,
-		modulePath:      *module,
-		urlBase:         *urlBase,
+		root:            o.input,
+		modulePath:      o.module,
+		urlBase:         o.urlBase,
 		repoRoot:        root,
-		sourceURLPrefix: *sourceURLPrefix,
+		sourceURLPrefix: o.sourceURLPrefix,
 	}
 
 	syms, err := collect(opts)
@@ -85,7 +98,7 @@ func main() {
 
 	//: a written index that cannot be read back is the same failure as one that
 	//: was never written.
-	if werr := writeIndex(*output, buildIndex(opts, syms)); werr != nil {
+	if werr := writeIndex(o.output, buildIndex(opts, syms)); werr != nil {
 		exitErr("genindex: %v", werr)
 	}
 }

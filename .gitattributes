@@ -1,0 +1,16 @@
+# Bytes that are hashed or compared byte for byte keep LF on every checkout,
+# so a Windows clone with core.autocrlf reads what Linux and macOS read.
+#
+# design/ holds the SDK's design files; every file kit generates from one
+# names it with the sha256 of its bytes, and `tools/genindex -check-api
+# -digests` hashes them again (tools/genindex/CLAUDE.md).
+design/** text eol=lf
+# The files kit generates: the pins of every designed symbol and the ports.
+# Their headers carry the sha256 of their own body.
+**/api_gen*_test.go text eol=lf
+**/design_gen*.go text eol=lf
+# docs/api is written by `make api` and compared byte for byte by
+# `make api-check`.
+docs/api/** text eol=lf
+# The platforms table genindex reads without running it.
+scripts/ci/platforms.sh text eol=lf

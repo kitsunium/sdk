@@ -3,13 +3,14 @@
 # cross-build matrix are one table.
 #
 # scripts/ci/platforms.sh prints the twelve GOOS/GOARCH cells the SDK is built
-# for and judged on, and scripts/cross-platform-audit.sh loops over it. The
-# `cross-build` job of .github/workflows/bazel-ci.yml compiles the same cells,
-# but a job's matrix has to be written in the workflow itself. Before the table
-# existed the local audit carried a copy of its own, which nothing checked
-# against the lane's; the copy tools/genindex judges doc links on is held to
-# the workflow by its Test_platforms — illumos and solaris were compiled by the
-# lane and judged by no doc-link check until that test was written (ADR 0144).
+# for and judged on; tools/genindex reads it to judge doc links and to write
+# docs/api on every cell, and scripts/cross-platform-audit.sh loops over it.
+# The `cross-build` job of .github/workflows/bazel-ci.yml compiles the same
+# cells, but a job's matrix has to be written in the workflow itself. Before
+# the table existed the cells were written three times — the workflow, the
+# local audit and genindex's own list — and nothing but a Go test held one of
+# the copies to the workflow: illumos and solaris were compiled by the lane
+# and judged by no doc-link check until that test was written (ADR 0144).
 #
 # This fails when the table and the matrix differ: a cell one names and the
 # other does not, or the same cells in another order — the order is the
@@ -81,8 +82,9 @@ if [ "$table" != "$matrix" ]; then
   echo "  the cross-build matrix lists:"
   printf '%s\n' "$matrix" | sed 's/^/    /'
   echo ""
-  echo "  Edit both in the same change, in the same order: the table is what the"
-  echo "  local cross-build audit loops over, the matrix what CI compiles."
+  echo "  Edit both in the same change, in the same order: the table is what"
+  echo "  genindex judges doc links and writes docs/api on, the matrix what CI"
+  echo "  compiles."
   exit 1
 fi
 

@@ -338,7 +338,7 @@ byte-level base-N API: `codec.Marshal("base64", v)` is the one verb.
 |---|---|
 | New feature or bug fix | `/plan "description"` → `/do` → `/git --commit` → `/git --merge` |
 | Code review | `/review` |
-| Linting | `make lint` (mod-tidy + gazelle drift + gofumpt -l + ktn-linter + alloc-lane coverage + audit coverage + domain-doc drift + core symmetry + platforms table + package docs + BENCH.md presence + error-code drift + layer firewall + `make guard` + `make doclinks`) |
+| Linting | `make lint` (mod-tidy + gazelle drift + gofumpt -l + ktn-linter + alloc-lane coverage + audit coverage + domain-doc drift + core symmetry + platforms table + package docs + BENCH.md presence + error-code drift + layer firewall + `make guard` + `make doclinks` + `make api-check`) |
 | Vulnerability scan | `make vuln-install && make vuln-check` — govulncheck over every module, fails on a reachable vulnerability (ADR 0136); online, so not part of `make lint` |
 | Local test suite | `make build && make test` (build prep + race tests) |
 | Allocation gates | `make test-alloc` — race-off pass; the ONLY lane that runs `//go:build !race` tests (targets in `tools/alloc-lane-targets.txt`, see rule 12) |
@@ -346,6 +346,7 @@ byte-level base-N API: `codec.Marshal("base64", v)` is the one verb.
 | Regenerate BUILD.bazel | `bazel run //:gazelle` after changing imports or `go.mod` |
 | Coverage | `bazel coverage --combined_report=lcov //...` — LCOV at `$(bazel info output_path)/_coverage/_coverage_report.dat` |
 | Release dry-run | `make release-dry-run` (computes the release — the SDK's `vX.Y.Z` and the vendor modules that changed — locally without pushing tags — see ADR 0007, ADR 0162) |
+| Regenerate docs/api | `make api` — after a doc edit, and after any change to the exported surface: `docs/api/<module>.json` for every module of `go.work`, every exported symbol read from the code with go/types on the twelve cells of `scripts/ci/platforms.sh` (`tools/genindex -write-api`; the format is `docs/api/schema.json`). A doc edit needs this and nothing else; `make api-check`, in `make lint-check`, fails until it is run |
 | Regenerate READMEs | `make docs-readme` (regenerates the `README.md` of every `pkg/v1` package declaring `//go:generate gomarkdoc` — all 87 today — and of every `framework` package declaring one — 26 today — from its package doc comment; not the four `framework/connectors/*` modules, which that `go generate` does not reach, though `check-readme-drift.sh` checks them too; see ADR 0008) |
 
 Branch naming matches the conventional commit prefix: `feat/*`, `fix/*`, `refactor/*`, `chore/*`, `docs/*`.
@@ -373,7 +374,7 @@ sdk/
 ├── pkg/v1/                see pkg/CLAUDE.md + pkg/v1/CLAUDE.md
 ├── third-party/           opt-in vendor integrations, one Go module per vendor — see third-party/CLAUDE.md (ADR 0157)
 ├── framework/             the framework above pkg/v1, packages of the SDK module — see framework/CLAUDE.md (ADR 0147)
-├── docs/                  ADRs — see docs/CLAUDE.md
+├── docs/                  ADRs, and docs/api — the exported API, written from the code by `make api` — see docs/CLAUDE.md
 ├── .github/               CI workflows — bazel-ci.yml is the SDK lane
 ├── go.work, go.mod        workspace (read by Bazel via from_file) + the SDK module, `github.com/kitsunium/sdk` (ADR 0162)
 ├── MODULE.bazel           Bzlmod entry point (rules_go 0.60.0 + gazelle 0.50.0 + go_sdk 1.27.1 + go_deps)
@@ -415,10 +416,12 @@ sdk/
 | `GOWORK=off GOARCH=386 CGO_ENABLED=0 go test ./...` (in every module `bash scripts/ci/go-modules.sh` prints) | green — the 32-bit RUNTIME bar, run by CI's `test-386` job over the whole census, `tools/` included and no module skipped (ADR 0137, ADR 0162). `cross-build` proves the SDK compiles on 386; this proves it behaves, which is where a `int(0xffffffff)` read as `-1` shows up |
 | `make vuln-install && make vuln-check` | every module: no REACHABLE known vulnerability (`govulncheck` source mode, pinned in the `Makefile`; needs `vuln.go.dev`). Blocking in CI's `bazel` job and run daily by `vuln-scan.yml` (ADR 0136) |
 | `cd pkg && go test ./...` | green; `pkg/v1/data/codec` completes in seconds — `TestGenerateBenchMD` self-skips unless named via `-run` |
-| `make lint` | drift assertion (read-only): mod tidy + gazelle diff + gofumpt -l + `make guard` + `make doclinks` + ktn-linter + alloc-lane coverage + audit coverage + domain-doc drift + core symmetry + platforms table + package docs + BENCH.md presence + error-code drift + layer firewall (`scripts/check-layer-deps.sh`) |
+| `make lint` | drift assertion (read-only): mod tidy + gazelle diff + gofumpt -l + `make guard` + `make doclinks` + `make api-check` + ktn-linter + alloc-lane coverage + audit coverage + domain-doc drift + core symmetry + platforms table + package docs + BENCH.md presence + error-code drift + layer firewall (`scripts/check-layer-deps.sh`) |
 | `make guard` | `tools/sdkguard` over the SDK's own tree: the invariants (ADR 0033), then SDK002 over `internal/`, `pkg/`, `third-party/` and `framework/` — rule 2, no exemption (ADR 0161); no network — `-version-check=off` |
 | `make doclinks` | every same-package doc link in the repository names a symbol its package declares — a member of an aliased type is written `[Type].Member` (ADR 0138); part of `make lint-check`, so CI runs it |
-| `bash scripts/pre-commit/check-platforms.sh` | exit 0 — `scripts/ci/platforms.sh`, the table of the twelve cells, names the cells of `bazel-ci.yml`'s cross-build matrix, in its order |
+| `make api-check` | exit 0 — `docs/api` regenerated from the code in memory, on every cell of `scripts/ci/platforms.sh`, equals what is committed byte for byte; a difference names each record added, changed or removed. Part of `make lint-check`, so CI runs it, and named in `scripts/ci-gates-check.sh`'s GATES |
+| `make api` twice, then `git diff --exit-code docs/api` | no difference — the writer is deterministic: no timestamp, no absolute path, records sorted, the go command's environment pinned |
+| `bash scripts/pre-commit/check-platforms.sh` | exit 0 — `scripts/ci/platforms.sh`, the table genindex judges doc links and writes docs/api on, names the cells of `bazel-ci.yml`'s cross-build matrix, in its order |
 
 ## Reference
 

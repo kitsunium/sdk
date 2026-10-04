@@ -1,0 +1,103 @@
+{
+  "format": "sdk.api/v1",
+  "module": "github.com/kitsunium/sdk/third-party/db/writer/redis",
+  "dir": "third-party/db/writer/redis",
+  "cells": [
+    "linux/amd64",
+    "linux/arm64",
+    "linux/386",
+    "linux/arm",
+    "darwin/arm64",
+    "windows/amd64",
+    "freebsd/amd64",
+    "openbsd/amd64",
+    "netbsd/amd64",
+    "dragonfly/amd64",
+    "illumos/amd64",
+    "solaris/amd64"
+  ],
+  "packages": [
+    {
+      "path": "github.com/kitsunium/sdk/third-party/db/writer/redis",
+      "name": "redis",
+      "dir": ".",
+      "layer": "thirdparty",
+      "doc": "Package redis — the client seam: the ONLY file that imports the Redis driver.\nnewClient builds a lazy client over a Unix socket and returns the execBatch\nclosure (a pipelined XADD run) plus a closeFn that releases the client.\nReturning a closeFn rather than the *redis.Client keeps the driver type out of\nthe sink wrapper, so go-redis stays confined to this file.\n\nPackage redis — range 0.3.34.* (ADR 0015 service slot 0x22).\n\nPackage redis — declares the sentinels returned by the Redis writer's\nconstructor and XADD path. Each var's name equals its errs.Define Reason in\nSCREAMING_SNAKE form (short names per the AWS-writer convention; the package\nqualifier gives context). No socket path, credential, or record value is ever\nechoed into these errors (secret gate).\n\nPackage redis registers the \"redis\" writer factory (ADR 0015): a log sink that\nappends records to a Redis Stream via pipelined XADD over a Unix-domain socket\n(local-protocol). Importing the package self-registers the factory (no\ninit()), so writer.Open(\"redis\", writer.RedisStreamConfig{…}) resolves. It is a\ndep-light third-party integration: the github.com/redis/go-redis/v9 import is\nconfined to client.go, in a module of its own (ADR 0157), so pkg/v1 consumers\nnever pull the driver into their graph and a consumer of this writer pulls no\nother vendor.\n\nCredentials: RedisStreamConfig.Credentials is OPTIONAL (a socket-local Redis\nmay have no AUTH) and, when set, supplied programmatically — like the AWS\nwriters, there is no config-file Decoder because a live credential cannot be\nexpressed safely in YAML.\n\nPackage redis — redisSink, the thin wrapper that adds client cleanup to the\ndbsink-composed chain. It holds a closeFn (not the *redis.Client) so the\ndriver type stays confined to client.go; Close drains the chain then releases\nthe client exactly once.\n"
+    }
+  ],
+  "symbols": [
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/db/writer/redis.AddFailed",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/db/writer/redis",
+      "name": "AddFailed",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.34.2",
+        "reason": "ADD_FAILED",
+        "public": "Redis writer failed to append a log batch"
+      },
+      "doc": "AddFailed wraps a failed pipelined XADD batch.\n",
+      "file": "errors.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/db/writer/redis.ClientInitFailed",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/db/writer/redis",
+      "name": "ClientInitFailed",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.34.1",
+        "reason": "CLIENT_INIT_FAILED",
+        "public": "Redis writer could not initialise its client"
+      },
+      "doc": "ClientInitFailed wraps a failure to build the client: a missing\nsocket/stream or an unresolvable credential provider.\n",
+      "file": "errors.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/db/writer/redis.CodeRedisClientInitFailed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/db/writer/redis",
+      "name": "CodeRedisClientInitFailed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "205313",
+      "code": {
+        "value": "0.3.34.1"
+      },
+      "doc": "CodeRedisClientInitFailed identifies a failure to build the Redis client\nat Open time (missing socket/stream or an unresolvable credential provider).\nExitCode defaults to 74 (EX_IOERR).\n",
+      "file": "codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/db/writer/redis.CodeRedisXAddFailed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/db/writer/redis",
+      "name": "CodeRedisXAddFailed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "205314",
+      "code": {
+        "value": "0.3.34.2"
+      },
+      "doc": "CodeRedisXAddFailed identifies a failed pipelined XADD batch on the\ndrainer goroutine. ExitCode defaults to 74 (EX_IOERR).\n",
+      "file": "codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/db/writer/redis.Writer",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/db/writer/redis",
+      "name": "Writer",
+      "spelled": "writer.Factory",
+      "canonical": "github.com/kitsunium/sdk/internal/core/observe/logger/writer.Factory",
+      "doc": "Writer is the registered redis factory singleton. The blank assignment runs\nwriter.Register at package load (no init()), mirroring the codec convention.\n",
+      "file": "redis.go",
+      "layer": "thirdparty"
+    }
+  ]
+}

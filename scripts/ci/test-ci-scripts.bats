@@ -1,10 +1,10 @@
 #!/usr/bin/env bats
 # BATS tests for scripts/ci/: the module census every module-looping lane reads
 # (go-modules.sh, ADR 0137), the platforms table (platforms.sh) and the
-# govulncheck gate built on the census (vuln-check.sh, ADR 0136) — and for the
-# guard half of scripts/ci-gates-check.sh, the manifest that keeps every
-# `make lint` guard a step of the bazel job. Run by `make ci-scripts-check` in
-# the shell-gates job.
+# govulncheck gate built on the census (vuln-check.sh, ADR 0136) — and for
+# scripts/ci-gates-check.sh: the guards it keeps steps of the bazel job, and a
+# gate CI runs through a listed gate's recipe. Run by `make ci-scripts-check`
+# in the shell-gates job.
 #
 # The census is tested in throwaway repositories — each test copies the script
 # into one, because the script answers for the repository it lives in. The
@@ -143,9 +143,9 @@ job_body() {
 
 # ── platforms.sh ────────────────────────────────────────────────────────────
 
-# The cells are one table: the script prints it, the local audit loops over
-# it, and scripts/pre-commit/check-platforms.sh holds it to the cross-build
-# matrix. illumos and solaris are two cells (ADR 0144).
+# The cells are one table: the script prints it, genindex reads its
+# here-document, and scripts/pre-commit/check-platforms.sh holds it to the
+# cross-build matrix. illumos and solaris are two cells (ADR 0144).
 @test "platforms: the table prints the twelve cells, illumos and solaris apart" {
   run bash "$CI_DIR/platforms.sh"
 
@@ -358,6 +358,29 @@ drop_line() {
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"NOT LINTED: 'scripts/pre-commit/check-core-symmetry.sh'"* ]]
+}
+
+# api-check has no step of its own: CI runs it through `make lint-check`,
+# whose recipe runs `$(MAKE) api-check`. That line is then the gate's only
+# link to CI, and deleting it must read as the silent deletion it is.
+@test "gates: a gate a listed gate's recipe runs is enforced through it" {
+  gates_fixture
+
+  run bash scripts/ci-gates-check.sh
+
+  [ "$status" -eq 0 ]
+  run grep -c 'run: make api-check' .github/workflows/bazel-ci.yml
+  [ "$output" = "0" ]
+}
+
+@test "gates: a gate whose caller's recipe no longer runs it is UNGATED" {
+  gates_fixture
+  drop_line Makefile "MAKE) --no-print-directory api-check"
+
+  run bash scripts/ci-gates-check.sh
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"UNGATED: 'make api-check'"* ]]
 }
 
 @test "gates: a listed guard that does not exist is MISSING" {

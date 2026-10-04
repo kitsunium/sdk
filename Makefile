@@ -1,4 +1,4 @@
-.PHONY: help build test test-framework lint guard bench cover docs docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare ci-gates-check release-scripts-check pre-commit-check lint-check lint-ktn-check ci-scripts-check vuln-install vuln-check doclinks
+.PHONY: help build test test-framework lint guard bench cover docs docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare ci-gates-check release-scripts-check pre-commit-check lint-check lint-ktn-check ci-scripts-check vuln-install vuln-check doclinks api api-check
 
 # `make` with no args prints the help. No aliases — every target on its own.
 .DEFAULT_GOAL := help
@@ -34,6 +34,7 @@ help: ## Print this help (default goal).
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "cover"  "bazel coverage --combined_report=lcov //..."
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "release-dry-run"  "$(DIM)compute-bumps + cut-tags in dry-run (see ADR 0007)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "docs-readme"  "$(DIM)regenerate every pkg/v1/*/README.md from its doc comment (see ADR 0008)$(RST)"
+	@printf "  $(GREEN)%-7s$(RST)  %s\n" "api"          "$(DIM)write docs/api — every exported symbol, read from the code on the 12 cells$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "profile"      "$(DIM)capture cpu+mem+block+mutex pprof for codec bench (WAVE=<slug>)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "benchstat-diff" "$(DIM)compare two captured waves with mannwhitney p-values (BEFORE / AFTER)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "sdk-bench"        "$(DIM)run every internal/kernel/**/*_bench_test.go → .bench.out (COUNT=N)$(RST)"
@@ -119,8 +120,8 @@ lint:
 	# service domain has a core at the same path, and every code the core
 	# declares belongs to an engine at that path or is the core's own range.
 	bash scripts/pre-commit/check-core-symmetry.sh
-	# The platforms table is the cross-build matrix CI compiles: one table,
-	# written twice, held equal.
+	# The platforms table genindex judges and writes docs/api on is the
+	# cross-build matrix CI compiles: one table, written twice, held equal.
 	bash scripts/pre-commit/check-platforms.sh
 	# Package documentation, BENCH.md presence and the error-code YAML mirror.
 	# Only the in-repo pre-commit hook ran these until it was removed (ADR 0153);
@@ -135,8 +136,9 @@ lint:
 
 # `lint-check` and `lint-ktn-check` are the parts of `lint` a CI runner can
 # execute on its own: a Go toolchain and two pinned binaries, no Bazel, no
-# gazelle. `lint-check` also runs `doclinks` (ADR 0138), which needs nothing but
-# the toolchain either.
+# gazelle. `lint-check` also runs `doclinks` (ADR 0138) and `api-check`, which
+# need nothing but the toolchain either — api-check also the workspace's
+# modules, which the go command fetches when the module cache lacks them.
 #
 # They exist as named targets because of #236. Five of the eight checks `lint`
 # performed then were already invoked by bazel-ci.yml as direct `bash …` steps
@@ -174,6 +176,8 @@ lint-check:
 	$(MAKE) --no-print-directory guard
 	# Every same-package doc link resolves (ADR 0138).
 	$(MAKE) --no-print-directory doclinks
+	# docs/api is what the code exports, byte for byte, on every cell.
+	$(MAKE) --no-print-directory api-check
 
 # Gate on the gating phases (1-7) only — phase 8 (tests) is advisory, matching
 # the MCP daemon's active set and the PostToolUse hook. `--phases=all` pulled in
@@ -190,7 +194,32 @@ lint-ktn-check:
 # (ADR 0138). tools/genindex already walks packages through go/doc for the docs
 # site, so the check is a mode of it: stdlib-only, GOWORK=off, no network.
 doclinks:
-	cd tools/genindex && GOWORK=off go run . -check-doclinks $(CURDIR)
+	cd tools/genindex && GOWORK=off go run . -platforms $(CURDIR)/scripts/ci/platforms.sh -check-doclinks $(CURDIR)
+
+# `api` writes docs/api: one JSON document per module of go.work — the SDK
+# module and every vendor module — holding every exported symbol, internal
+# packages included, with its go: id, kind, signature as its file spells it and
+# canonically, owner, doc text, cells, file, codes, layer and family
+# (docs/api/schema.json). tools/genindex reads the CODE: the go command lists
+# each cell of scripts/ci/platforms.sh, go/types checks every package from
+# source with function bodies ignored, and the records that differ between
+# cells say on which they hold. Run it after a doc edit — a doc edit needs
+# nothing else — and after any change to the exported surface. Deterministic:
+# the same tree writes the same bytes on every machine. It needs the
+# workspace's modules in the module cache, so its first run may download them.
+api:
+	cd tools/genindex && GOWORK=off go run . -write-api -repo-root $(CURDIR) -platforms $(CURDIR)/scripts/ci/platforms.sh
+
+# `api-check` regenerates docs/api in memory and fails on any byte that
+# differs from what is committed, naming each record added, changed or
+# removed — a doc edit without `make api` included. It runs in `lint-check`,
+# so CI's required job runs it. genindex can also compare every cell's
+# symbols with the pin markers of api_gen*_test.go files (-markers) and every
+# generated file's digests with the design files' bytes (-digests); both are
+# tested on fixtures and are armed here in the change that commits the design
+# and the pins, so no commit in between is red.
+api-check:
+	cd tools/genindex && GOWORK=off go run . -check-api -repo-root $(CURDIR) -platforms $(CURDIR)/scripts/ci/platforms.sh
 
 # `guard` runs tools/sdkguard over the SDK's own tree, in two passes.
 #

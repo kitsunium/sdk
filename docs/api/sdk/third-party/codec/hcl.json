@@ -1,0 +1,145 @@
+{
+  "format": "sdk.api/v1",
+  "module": "github.com/kitsunium/sdk/third-party/codec/hcl",
+  "dir": "third-party/codec/hcl",
+  "cells": [
+    "linux/amd64",
+    "linux/arm64",
+    "linux/386",
+    "linux/arm",
+    "darwin/arm64",
+    "windows/amd64",
+    "freebsd/amd64",
+    "openbsd/amd64",
+    "netbsd/amd64",
+    "dragonfly/amd64",
+    "illumos/amd64",
+    "solaris/amd64"
+  ],
+  "packages": [
+    {
+      "path": "github.com/kitsunium/sdk/third-party/codec/hcl",
+      "name": "hcl",
+      "dir": ".",
+      "layer": "thirdparty",
+      "doc": "Package hcl wraps HashiCorp HCL v2 as a codec.Codec implementation. It lives\nunder third-party/, in a module of its own (ADR 0157) — NOT\ninternal/service/data/codec — because hashicorp/hcl/v2 pulls go-cty and a heavier\ndependency graph; quarantining it here keeps the dep-light SDK module — its\nservice layer and its proc syscall code — untouched (ADR 0012 / ADR 0021 §Why-not /\nADR 0022). It is opt-in: a consumer blank-imports this package to register\nthe \"hcl\" Format; pkg/v1/data/codec does NOT pull it (the public module stays\ndep-light).\n\nHCL is decode-oriented; symmetric value-marshal is struct-only via\ngohcl.EncodeIntoBody, so the top-level value MUST be a struct (or pointer to\none) with `hcl:\"…\"` field tags. Non-streaming; implements the optional Appender.\n\nPackage hcl — range 0.3.37.* (ADR 0022 third-party/codec/hcl block).\n\nPackage hcl — declares the sentinel *errs.Error values for the HCL codec.\n"
+    }
+  ],
+  "symbols": [
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/codec/hcl.CodeHCLMarshalFailed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/codec/hcl",
+      "name": "CodeHCLMarshalFailed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "206081",
+      "code": {
+        "value": "0.3.37.1"
+      },
+      "doc": "CodeHCLMarshalFailed identifies a failure encoding a value to HCL via\ngohcl.EncodeIntoBody (e.g. a top-level non-struct value, or an unsupported\nfield type — recovered from the library panic).\n",
+      "file": "codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/codec/hcl.CodeHCLSizeExceeded",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/codec/hcl",
+      "name": "CodeHCLSizeExceeded",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "206083",
+      "code": {
+        "value": "0.3.37.3"
+      },
+      "doc": "CodeHCLSizeExceeded identifies an Unmarshal input over the 10 MiB cap\n(CWE-400 defence before the parser allocates).\n",
+      "file": "codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/codec/hcl.CodeHCLUnmarshalFailed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/codec/hcl",
+      "name": "CodeHCLUnmarshalFailed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "206082",
+      "code": {
+        "value": "0.3.37.2"
+      },
+      "doc": "CodeHCLUnmarshalFailed identifies a failure parsing/decoding HCL via\nhclsimple.Decode (syntax error or schema mismatch).\n",
+      "file": "codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/codec/hcl.Codec",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/codec/hcl",
+      "name": "Codec",
+      "spelled": "codec.Codec",
+      "canonical": "github.com/kitsunium/sdk/internal/core/data/codec.Codec",
+      "doc": "Codec is the registered HCL singleton.\n",
+      "file": "codec.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/codec/hcl.MarshalFailed",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/codec/hcl",
+      "name": "MarshalFailed",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.37.1",
+        "reason": "HCL_MARSHAL_FAILED",
+        "public": "HCL encoding failed"
+      },
+      "doc": "MarshalFailed wraps an HCL encode failure (gohcl.EncodeIntoBody).\n",
+      "file": "errors.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/codec/hcl.New",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/third-party/codec/hcl",
+      "name": "New",
+      "spelled": "func() codec.Codec",
+      "canonical": "func() github.com/kitsunium/sdk/internal/core/data/codec.Codec",
+      "doc": "New returns the HCL codec singleton.\n",
+      "file": "codec.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/codec/hcl.SizeExceeded",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/codec/hcl",
+      "name": "SizeExceeded",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.37.3",
+        "reason": "HCL_SIZE_EXCEEDED",
+        "public": "HCL input exceeds size limit"
+      },
+      "doc": "SizeExceeded marks an Unmarshal input over the 10 MiB hard cap.\n",
+      "file": "errors.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/codec/hcl.UnmarshalFailed",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/codec/hcl",
+      "name": "UnmarshalFailed",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.37.2",
+        "reason": "HCL_UNMARSHAL_FAILED",
+        "public": "HCL decoding failed"
+      },
+      "doc": "UnmarshalFailed wraps an HCL parse/decode failure (hclsimple.Decode).\n",
+      "file": "errors.go",
+      "layer": "thirdparty"
+    }
+  ]
+}
