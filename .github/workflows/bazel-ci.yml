@@ -175,6 +175,13 @@ jobs:
       - name: layer invariant — no layer depends on one above it
         run: bash scripts/check-layer-deps.sh
 
+      # scripts/ci/platforms.sh is the table of cells the local cross-build
+      # audit loops over, and the cross-build matrix below is what CI
+      # compiles. A job's matrix has to be written here, so the table is
+      # written twice and this holds the two equal, cells and order.
+      - name: platforms invariant — the platforms table is the cross-build matrix
+        run: bash scripts/pre-commit/check-platforms.sh
+
       # The three checks of `make lint` that no lane ran (#236): `gofumpt -l`,
       # sdkguard and ktn-linter. The other five are the steps above — gazelle
       # drift, alloc-lane, audit-coverage, domain-docs, layer-deps — so this
