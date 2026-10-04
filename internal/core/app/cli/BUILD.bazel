@@ -9,6 +9,7 @@ go_library(
         "cli_command.go",
         "cli_invocation.go",
         "codes.go",
+        "design_gen.go",
         "errors.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/app/cli",

@@ -26,3 +26,7 @@ wrongly is an XSS the SDK cannot see.
 
 Error ranges `0.2.27.*`, and `0.3.57.*` — the engine's construction failures,
 declared here since ADR 0160. Maintainer rationale lives in `CLAUDE.md`.
+
+The ports — `Factory` and `Renderer` — are generated from
+`design/app/view.yaml` into `design_gen.go` (ADR 0163): a port changes in the
+design, then `kit gen`.

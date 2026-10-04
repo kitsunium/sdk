@@ -37,3 +37,7 @@ panic and always compile.
 
 - ADR 0016 — `docs/adr/0016-sdk-process-supervision-domain.md`
 - `internal/core/proc/CLAUDE.md` — maintainer notes
+
+The ports — `Process`, `Reaper`, `Group` and `Listener` — are generated from
+`design/proc.yaml` into `design_gen.go` (ADR 0163): a port changes in the
+design, then `kit gen`.

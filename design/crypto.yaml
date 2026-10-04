@@ -440,63 +440,367 @@ packages:
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/crypto
-    types:
-      - interface:
-          methods:
-            - name: Algorithm
-              out:
-                - type: Algorithm
-            - name: ID
-              out:
-                - type: byte
-            - in:
-                - name: key
-                  type: Key
-                - name: plaintext
-                - name: aad
-                  type: "[]byte"
-              name: Seal
-              out:
-                - name: box
-                  type: "[]byte"
-                - name: err
-                  type: error
-            - in:
-                - name: key
-                  type: Key
-                - name: box
-                - name: aad
-                  type: "[]byte"
-              name: Open
-              out:
-                - name: plaintext
-                  type: "[]byte"
-                - name: err
-                  type: error
+    ports:
+      - doc: |-
+          AEAD is an authenticated-encryption-with-associated-data scheme. Each
+          implementation owns its complete self-describing wire framing
+          ([Version][id][nonce][ciphertext||tag]) so the registry can dispatch Open by
+          reading the 1-byte id, and so the nonce — generated from crypto/rand inside
+          Seal — never reaches a caller. Implementations MUST be safe for concurrent
+          use and MUST return the shared non-oracle DecryptionFailed for every Open
+          failure (bad tag, bad header, wrong key) so they cannot become an oracle.
+
+          IFACE-PLUGIN: the registry hands plug-in AEAD instances back to callers behind
+          this interface; concrete scheme types stay unexported in their own packages.
+        methods:
+          - doc: Algorithm reports the canonical key under which this scheme registers.
+            name: Algorithm
+            out:
+              - type: Algorithm
+          - doc: |-
+              ID reports the 1-byte wire identifier embedded in the box header so Open
+              can resolve the scheme without the caller naming it.
+            name: ID
+            out:
+              - type: byte
+          - doc: |-
+              Seal encrypts plaintext, binding aad, and returns the self-framed box
+              (Version + id + random nonce + ciphertext||tag).
+            in:
+              - name: key
+                type: Key
+              - name: plaintext
+              - name: aad
+                type: "[]byte"
+            name: Seal
+            out:
+              - name: box
+                type: "[]byte"
+              - name: err
+                type: error
+          - doc: |-
+              Open reverses Seal: it validates the framing, decrypts, and verifies aad,
+              returning the plaintext or the non-oracle DecryptionFailed.
+            in:
+              - name: key
+                type: Key
+              - name: box
+              - name: aad
+                type: "[]byte"
+            name: Open
+            out:
+              - name: plaintext
+                type: "[]byte"
+              - name: err
+                type: error
         name: AEAD
-      - interface:
-          methods:
-            - name: Algorithm
-              out:
-                - type: Algorithm
-            - name: GenerateKey
-              out:
-                - name: pub
-                - name: priv
-                  type: "[]byte"
-                - name: err
-                  type: error
-            - in:
-                - name: priv
-                - name: peerPub
-                  type: "[]byte"
-              name: Shared
-              out:
-                - name: secret
-                  type: "[]byte"
-                - name: err
-                  type: error
+      - doc: |-
+          Agreement is a key-agreement scheme (Diffie-Hellman style): it produces an
+          ephemeral keypair and derives a shared secret from a local private key and a
+          peer public key. The raw Shared output is low-level key material and MUST be
+          run through a KDF (a Deriver) before use as a key — the pkg/v1 facade never
+          hands the raw secret back to generic callers. Implementations self-register
+          via RegisterAgreement.
+
+          IFACE-PLUGIN: the registry hands plug-in Agreement instances back behind this
+          interface; concrete scheme types stay unexported in their own packages.
+        methods:
+          - doc: Algorithm reports the canonical key under which this scheme registers.
+            name: Algorithm
+            out:
+              - type: Algorithm
+          - doc: |-
+              GenerateKey draws a fresh public/private keypair from the scheme's
+              entropy source.
+            name: GenerateKey
+            out:
+              - name: pub
+              - name: priv
+                type: "[]byte"
+              - name: err
+                type: error
+          - doc: |-
+              Shared derives the raw shared secret from priv and peerPub. The result
+              MUST be passed through a KDF before any use as a key.
+            in:
+              - name: priv
+              - name: peerPub
+                type: "[]byte"
+            name: Shared
+            out:
+              - name: secret
+                type: "[]byte"
+              - name: err
+                type: error
         name: Agreement
+      - doc: |-
+          Deriver is a key-derivation function for KEY SEPARATION: it expands one
+          high-entropy secret into independent, purpose-bound subkeys. It is NOT a
+          password hash — the input must already be a strong key (an AEAD Key, an HKDF
+          PRK, a Diffie-Hellman shared secret), never a human password. Password
+          stretching (argon2id) is a separate, deliberately slow port.
+
+          salt is optional domain randomness (nil is allowed); info is a context label
+          that binds each subkey to its purpose ("aead-key", "mac-key", …) so two
+          derivations from the same secret never collide. Implementations MUST be safe
+          for concurrent use.
+
+          IFACE-PLUGIN: the registry hands plug-in Deriver instances back to callers
+          behind this interface; concrete scheme types stay unexported in their own
+          packages.
+        methods:
+          - doc: Algorithm reports the canonical key under which this scheme registers.
+            name: Algorithm
+            out:
+              - type: Algorithm
+          - doc: |-
+              Derive expands secret (with optional salt and the context label info) into
+              a length-byte subkey, or DerivationFailed when length exceeds the scheme's
+              maximum output.
+            in:
+              - name: secret
+              - name: salt
+                type: "[]byte"
+              - name: info
+                type: string
+              - name: length
+                type: int
+            name: Derive
+            out:
+              - name: subkey
+                type: "[]byte"
+              - name: err
+                type: error
+        name: Deriver
+      - doc: |-
+          Hasher is a fingerprint / content-addressing hash scheme producing a
+          non-keyed digest of arbitrary bytes (content IDs, cache keys, dedup keys).
+
+          It is explicitly NOT authentication: no Hasher is a MAC, none takes a key,
+          and a digest is public — never branch on a secret-dependent comparison of
+          one. Keyed/authenticated integrity belongs to the AEAD and (future) signature
+          ports. Implementations self-register via RegisterHasher.
+
+          IFACE-PLUGIN: the registry hands plug-in Hasher instances back behind this
+          interface; concrete scheme types stay unexported in their own packages.
+        methods:
+          - doc: Algorithm reports the canonical key under which this hasher registers.
+            name: Algorithm
+            out:
+              - type: Algorithm
+          - doc: New returns a fresh hash.Hash for streaming (io.Copy) or one-shot use.
+            name: New
+            out:
+              - type: hash.Hash
+        name: Hasher
+      - doc: |-
+          MAC is a detached message-authentication-code scheme: it binds a secret Key
+          to a message and yields an authentication tag. Unlike a Hasher digest, a MAC
+          tag IS secret-comparison-sensitive — callers MUST route equality through
+          Verify (constant-time), never `==` or bytes.Equal, which is the exact inverse
+          of the Hasher rule. Implementations self-register via RegisterMAC.
+
+          IFACE-PLUGIN: the registry hands plug-in MAC instances back behind this
+          interface; concrete scheme types stay unexported in their own packages.
+        methods:
+          - doc: Algorithm reports the canonical key under which this MAC registers.
+            name: Algorithm
+            out:
+              - type: Algorithm
+          - doc: Tag returns the authentication tag over message under key.
+            in:
+              - name: key
+                type: Key
+              - name: message
+                type: "[]byte"
+            name: Tag
+            out:
+              - type: "[]byte"
+          - doc: |-
+              Verify reports whether tag authenticates message under key, using a
+              constant-time comparison so it never becomes a timing oracle.
+            in:
+              - name: key
+                type: Key
+              - name: message
+              - name: tag
+                type: "[]byte"
+            name: Verify
+            out:
+              - type: bool
+          - doc: |-
+              New returns a fresh streaming hash.Hash keyed by key, paralleling
+              Hasher.New, for incremental tagging over large inputs.
+            in:
+              - name: key
+                type: Key
+            name: New
+            out:
+              - type: hash.Hash
+        name: MAC
+      - doc: |-
+          PasswordHasher stretches a human password into a slow, salted, self-describing
+          PHC-string hash for storage. UNLIKE the Deriver (key separation) and Hasher
+          (fingerprints) ports, this one is DELIBERATELY SLOW and salted: it is the only
+          crypto surface meant to consume a low-entropy human secret.
+
+          The returned hash is a PHC string (`$id$params$salt$digest`) that embeds the
+          scheme id and its cost parameters, so Verify needs no side-channel: the stored
+          string fully describes how to check it. Implementations MUST compare digests
+          in constant time and MUST be safe for concurrent use.
+
+          IFACE-PLUGIN: the registry hands plug-in PasswordHasher instances back to
+          callers behind this interface; concrete scheme types stay unexported.
+        methods:
+          - doc: |-
+              Algorithm reports the canonical key under which this scheme registers; it
+              is also the PHC id segment (the first `$`-delimited field).
+            name: Algorithm
+            out:
+              - type: Algorithm
+          - doc: |-
+              Hash returns a PHC-string hash of password with a fresh random salt and
+              the scheme's current cost parameters, or PasswordHashFailed on an entropy
+              fault.
+            in:
+              - name: password
+                type: "[]byte"
+            name: Hash
+            out:
+              - name: phc
+                type: string
+              - name: err
+                type: error
+          - doc: |-
+              Verify reports whether password matches the stored PHC hash, comparing in
+              constant time. A malformed phc returns InvalidPasswordHash; a genuine
+              mismatch is (false, nil) so Verify is not an oracle on WHY it failed.
+            in:
+              - name: password
+                type: "[]byte"
+              - name: phc
+                type: string
+            name: Verify
+            out:
+              - name: ok
+                type: bool
+              - name: err
+                type: error
+          - doc: |-
+              NeedsRehash reports whether phc was produced with cost parameters weaker
+              than this scheme's current policy, so callers can transparently re-hash on
+              a successful login. A malformed phc reports false (Verify surfaces the error).
+            in:
+              - name: phc
+                type: string
+            name: NeedsRehash
+            out:
+              - name: stale
+                type: bool
+        name: PasswordHasher
+      - doc: |-
+          Signer is a detached digital-signature scheme over a public/private keypair.
+          Keys and signatures are scheme-specific byte slices (their lengths are fixed
+          per scheme); the registry dispatches on the Algorithm name. Implementations
+          MUST be safe for concurrent use, MUST NOT panic on a malformed key (return
+          SigningFailed instead), and Verify MUST run in constant time with respect to
+          the signature so it cannot become a timing oracle.
+
+          Unlike the AEAD port, a signature scheme has no hidden nonce and no wire
+          framing: the caller holds the keypair and chooses what bytes to sign. The
+          private key is secret material — treat it like Key.Bytes(): never log it.
+
+          IFACE-PLUGIN: the registry hands plug-in Signer instances back to callers
+          behind this interface; concrete scheme types stay unexported in their own
+          packages.
+        methods:
+          - doc: Algorithm reports the canonical key under which this scheme registers.
+            name: Algorithm
+            out:
+              - type: Algorithm
+          - doc: |-
+              GenerateKey draws a fresh keypair from crypto/rand, returning the public
+              and private key bytes (or KeyGenerationFailed on a host entropy fault).
+            name: GenerateKey
+            out:
+              - name: pub
+              - name: priv
+                type: "[]byte"
+              - name: err
+                type: error
+          - doc: |-
+              Sign produces a detached signature over message using priv, or
+              SigningFailed when priv is not a well-formed private key for this scheme.
+            in:
+              - name: priv
+              - name: message
+                type: "[]byte"
+            name: Sign
+            out:
+              - name: sig
+                type: "[]byte"
+              - name: err
+                type: error
+          - doc: |-
+              Verify reports whether sig is a valid signature for message under pub. A
+              malformed key or signature is reported as false, never as a panic.
+            in:
+              - name: pub
+              - name: message
+              - name: sig
+                type: "[]byte"
+            name: Verify
+            out:
+              - name: ok
+                type: bool
+        name: Signer
+      - doc: |-
+          StreamSealer is a streaming authenticated-encryption scheme: it seals and
+          opens an io.Writer / io.Reader pair in fixed-size chunks under a Key and
+          associated data, extending the whole-buffer AEAD domain to arbitrarily large
+          payloads. The Reader honours the hold-back contract: it MUST NOT surface a
+          chunk's plaintext downstream before that chunk authenticates, and a stream cut
+          short surfaces as StreamTruncated rather than as accepted plaintext (the
+          final chunk carries a flag that a truncated stream never reaches).
+          Implementations self-register via RegisterStreamSealer.
+
+          IFACE-PLUGIN: the registry hands plug-in StreamSealer instances back behind
+          this interface; concrete scheme types stay unexported in their own packages.
+        methods:
+          - doc: Algorithm reports the canonical key under which this scheme registers.
+            name: Algorithm
+            out:
+              - type: Algorithm
+          - doc: |-
+              Writer wraps dst so writes are sealed under key with aad; Close writes
+              the final authenticated chunk.
+            in:
+              - name: key
+                type: Key
+              - name: dst
+                type: io.Writer
+              - name: aad
+                type: "[]byte"
+            name: Writer
+            out:
+              - type: io.WriteCloser
+              - type: error
+          - doc: |-
+              Reader wraps src so reads are opened under key with aad; a truncated
+              stream surfaces as StreamTruncated from the returned reader.
+            in:
+              - name: key
+                type: Key
+              - name: src
+                type: io.Reader
+              - name: aad
+                type: "[]byte"
+            name: Reader
+            out:
+              - type: io.Reader
+              - type: error
+        name: StreamSealer
+    types:
       - methods:
           - name: String
             out:
@@ -508,35 +812,6 @@ packages:
             recv: value
         name: Algorithm
         underlying: string
-      - interface:
-          methods:
-            - name: Algorithm
-              out:
-                - type: Algorithm
-            - in:
-                - name: secret
-                - name: salt
-                  type: "[]byte"
-                - name: info
-                  type: string
-                - name: length
-                  type: int
-              name: Derive
-              out:
-                - name: subkey
-                  type: "[]byte"
-                - name: err
-                  type: error
-        name: Deriver
-      - interface:
-          methods:
-            - name: Algorithm
-              out:
-                - type: Algorithm
-            - name: New
-              out:
-                - type: hash.Hash
-        name: Hasher
       - methods:
           - name: Bytes
             out:
@@ -555,128 +830,6 @@ packages:
         name: Key
         struct:
           unexported: true
-      - interface:
-          methods:
-            - name: Algorithm
-              out:
-                - type: Algorithm
-            - in:
-                - name: key
-                  type: Key
-                - name: message
-                  type: "[]byte"
-              name: Tag
-              out:
-                - type: "[]byte"
-            - in:
-                - name: key
-                  type: Key
-                - name: message
-                - name: tag
-                  type: "[]byte"
-              name: Verify
-              out:
-                - type: bool
-            - in:
-                - name: key
-                  type: Key
-              name: New
-              out:
-                - type: hash.Hash
-        name: MAC
-      - interface:
-          methods:
-            - name: Algorithm
-              out:
-                - type: Algorithm
-            - in:
-                - name: password
-                  type: "[]byte"
-              name: Hash
-              out:
-                - name: phc
-                  type: string
-                - name: err
-                  type: error
-            - in:
-                - name: password
-                  type: "[]byte"
-                - name: phc
-                  type: string
-              name: Verify
-              out:
-                - name: ok
-                  type: bool
-                - name: err
-                  type: error
-            - in:
-                - name: phc
-                  type: string
-              name: NeedsRehash
-              out:
-                - name: stale
-                  type: bool
-        name: PasswordHasher
-      - interface:
-          methods:
-            - name: Algorithm
-              out:
-                - type: Algorithm
-            - name: GenerateKey
-              out:
-                - name: pub
-                - name: priv
-                  type: "[]byte"
-                - name: err
-                  type: error
-            - in:
-                - name: priv
-                - name: message
-                  type: "[]byte"
-              name: Sign
-              out:
-                - name: sig
-                  type: "[]byte"
-                - name: err
-                  type: error
-            - in:
-                - name: pub
-                - name: message
-                - name: sig
-                  type: "[]byte"
-              name: Verify
-              out:
-                - name: ok
-                  type: bool
-        name: Signer
-      - interface:
-          methods:
-            - name: Algorithm
-              out:
-                - type: Algorithm
-            - in:
-                - name: key
-                  type: Key
-                - name: dst
-                  type: io.Writer
-                - name: aad
-                  type: "[]byte"
-              name: Writer
-              out:
-                - type: io.WriteCloser
-                - type: error
-            - in:
-                - name: key
-                  type: Key
-                - name: src
-                  type: io.Reader
-                - name: aad
-                  type: "[]byte"
-              name: Reader
-              out:
-                - type: io.Reader
-                - type: error
-        name: StreamSealer
     variables:
       - name: UnknownAlgorithm
         type: "*errs.Error"

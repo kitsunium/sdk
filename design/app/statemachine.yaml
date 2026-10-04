@@ -97,6 +97,150 @@ packages:
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/app/statemachine
+    ports:
+      - doc: |-
+          Store is the port through which a machine reads and writes the entities
+          whose state it drives. The caller implements it over its own collection — a
+          document store, a table, a map — and hands it to the engine.
+
+          Implementations MUST be safe for concurrent use: the engine calls them from
+          the goroutine firing a transition and from its own loop at once.
+
+          The method set is FROZEN at five (ADR 0039): pkg/v1/app/statemachine aliases this
+          interface, so a sixth method would break every downstream implementation at
+          compile time. A new capability arrives as a sibling interface reached by
+          type assertion.
+        methods:
+          - doc: |-
+              Key returns the key entity is stored under. It must be a pure function
+              of the entity: the engine locks, records and schedules by it, and a
+              transition never changes it.
+            in:
+              - name: entity
+                type: E
+            name: Key
+            out:
+              - name: key
+                type: string
+          - doc: |-
+              Get returns the entity stored under key, and found == false — with a
+              nil error — when there is none.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+            name: Get
+            out:
+              - name: entity
+                type: E
+              - name: found
+                type: bool
+              - name: err
+                type: error
+          - doc: |-
+              Insert stores entity under a key no entity holds. When one does, it
+              stores nothing and reports inserted == false with a nil error.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: entity
+                type: E
+            name: Insert
+            out:
+              - name: inserted
+                type: bool
+              - name: err
+                type: error
+          - doc: |-
+              Replace stores entity over the entity holding its key. When none does
+              — it was deleted while a transition ran — it stores nothing and reports
+              replaced == false with a nil error: a transition never brings back an
+              entity somebody deleted.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: entity
+                type: E
+            name: Replace
+            out:
+              - name: replaced
+                type: bool
+              - name: err
+                type: error
+          - doc: |-
+              All yields every entity, then stops; an error ends the sequence. The
+              engine ranges over it once, when a machine opens, to reconcile its
+              journal and build its agenda.
+            in:
+              - name: ctx
+                type: context.Context
+            name: All
+            out:
+              - type: iter.Seq2[E, error]
+        name: Store
+        typeParams:
+          - constraint: any
+            name: E
+      - doc: |-
+          Journal keeps, beside the store, what a machine knows about each entity and
+          the entity does not carry: the instant it entered its state and the
+          transitions that brought it there. Without one the machine keeps it in
+          memory, and after a restart every entity re-enters its state at the moment
+          the machine opens — which resets every After timer.
+
+          Implementations MUST be safe for concurrent use. The engine calls them with
+          no lock of its bookkeeping held, one call at a time PER KEY: two writes of
+          one key arrive in the order the machine made them, and writes of different
+          keys may arrive at once — an implementation that rewrites one file orders
+          those itself. A journal may read the machine, its census or its records; it
+          must not tell it anything — Changed, Deleted, Start or Fire from inside a
+          journal call waits for itself.
+
+          Save and Delete take several records at once because a machine that opens
+          reconciles every entity in one pass; a journal that rewrites a whole file
+          then does it once rather than once per entity.
+
+          The method set is FROZEN at three (ADR 0039).
+        methods:
+          - doc: |-
+              Load returns every record the journal holds. The engine calls it once,
+              when a machine opens.
+            in:
+              - name: ctx
+                type: context.Context
+            name: Load
+            out:
+              - name: records
+                type: "[]RecordValue[S]"
+              - name: err
+                type: error
+          - doc: Save stores each record, replacing any record of the same key.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: records
+                type: RecordValue[S]
+            name: Save
+            out:
+              - type: error
+            variadic: true
+          - doc: |-
+              Delete forgets the records of keys; a key it does not hold is not an
+              error.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: keys
+                type: string
+            name: Delete
+            out:
+              - type: error
+            variadic: true
+        name: Journal
+        typeParams:
+          - constraint: comparable
+            name: S
     types:
       - name: RecordValue
         struct:
@@ -137,93 +281,6 @@ packages:
             - name: At
               tag: json:"at"
               type: time.Time
-        typeParams:
-          - constraint: comparable
-            name: S
-      - interface:
-          methods:
-            - in:
-                - name: entity
-                  type: E
-              name: Key
-              out:
-                - name: key
-                  type: string
-            - in:
-                - name: ctx
-                  type: context.Context
-                - name: key
-                  type: string
-              name: Get
-              out:
-                - name: entity
-                  type: E
-                - name: found
-                  type: bool
-                - name: err
-                  type: error
-            - in:
-                - name: ctx
-                  type: context.Context
-                - name: entity
-                  type: E
-              name: Insert
-              out:
-                - name: inserted
-                  type: bool
-                - name: err
-                  type: error
-            - in:
-                - name: ctx
-                  type: context.Context
-                - name: entity
-                  type: E
-              name: Replace
-              out:
-                - name: replaced
-                  type: bool
-                - name: err
-                  type: error
-            - in:
-                - name: ctx
-                  type: context.Context
-              name: All
-              out:
-                - type: iter.Seq2[E, error]
-        name: Store
-        typeParams:
-          - constraint: any
-            name: E
-      - interface:
-          methods:
-            - in:
-                - name: ctx
-                  type: context.Context
-              name: Load
-              out:
-                - name: records
-                  type: "[]RecordValue[S]"
-                - name: err
-                  type: error
-            - in:
-                - name: ctx
-                  type: context.Context
-                - name: records
-                  type: RecordValue[S]
-              name: Save
-              out:
-                - type: error
-              variadic: true
-            - in:
-                - name: ctx
-                  type: context.Context
-                - name: keys
-                  type: string
-              name: Delete
-              out:
-                - type: error
-              variadic: true
-        name: Journal
         typeParams:
           - constraint: comparable
             name: S

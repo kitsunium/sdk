@@ -51,32 +51,3 @@
 // A caller with a non-string key formats it once, at the edge, where the
 // encoding is a decision rather than a default.
 package cache
-
-import "context"
-
-// Store is the cache port. Implementations MUST be safe for concurrent use.
-//
-// The method set is deliberately three operations wide and is FROZEN: pkg/v1
-// aliases this interface, so under ADR 0039 a fourth method would break every
-// downstream implementer at compile time with no deprecation window. New
-// capabilities arrive as SIBLING interfaces discovered by type assertion —
-// [EntryFetcher], [Tagger] and [Loader] are the three that ship, and the model
-// is codec's Appender (ADR 0037).
-//
-// IFACE-PLUGIN: the concrete stores stay unexported behind their constructors
-// in internal/service/data/cache.
-type Store[V any] interface {
-	// Fetch returns the value stored under key and whether it was present and
-	// unexpired. It MUTATES the store — recency, counters, lazy expiry — which
-	// is why it is not called Get. A miss is (zero, false, nil), never an
-	// error: a cache that does not hold something has done nothing wrong.
-	Fetch(ctx context.Context, key string) (V, bool, error)
-	// Set stores entry under key, replacing whatever was there. An empty key,
-	// an empty tag, or a negative TTL that is not [NoExpiry] is refused with
-	// [CacheEntryRejected] rather than stored.
-	Set(ctx context.Context, key string, entry EntryValue[V]) error
-	// Delete removes key. It is idempotent: deleting a key that names nothing
-	// reports nil, because a caller who wanted it gone has got what they asked
-	// for.
-	Delete(ctx context.Context, key string) error
-}

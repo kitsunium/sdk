@@ -60,6 +60,26 @@ packages:
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/app/id
+    ports:
+      - doc: |-
+          Generator is the contract every identifier scheme satisfies. Instances MUST
+          be safe for concurrent use (New is called from many goroutines). Scheme-
+          specific options (snowflake node id, etc.) are supplied via the scheme's
+          constructor, not via this interface.
+
+          IFACE-PLUGIN: the registry stores plug-in scheme instances behind this
+          interface — concrete scheme types stay unexported per package.
+        methods:
+          - name: Scheme
+            out:
+              - type: Scheme
+          - name: New
+            out:
+              - name: newID
+                type: string
+              - name: err
+                type: error
+        name: Generator
     types:
       - methods:
           - name: String
@@ -72,18 +92,6 @@ packages:
             recv: value
         name: Scheme
         underlying: string
-      - interface:
-          methods:
-            - name: Scheme
-              out:
-                - type: Scheme
-            - name: New
-              out:
-                - name: newID
-                  type: string
-                - name: err
-                  type: error
-        name: Generator
     variables:
       - name: UnknownScheme
         type: "*errs.Error"

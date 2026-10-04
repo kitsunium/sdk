@@ -32,6 +32,61 @@ packages:
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/proc/ipc
+    ports:
+      - doc: |-
+          Listener is the accepting end of a private socket: it hands out the
+          connections of admitted peers only, and closes and counts the others.
+
+          It is frozen at these five methods (ADR 0039): a method added to a
+          published interface breaks every double a caller wrote, so a capability
+          that comes later is a sibling interface a Listener may also implement.
+        methods:
+          - doc: |-
+              Accept returns the next connection of an admitted peer. A peer the
+              kernel names and the configuration does not admit is closed at once,
+              counted by Refused, and never returned. After Close it returns the
+              CLOSED sentinel.
+            name: Accept
+            out:
+              - type: "*Conn"
+              - type: error
+          - doc: Addr is the endpoint's address.
+            name: Addr
+            out:
+              - type: net.Addr
+          - doc: Close stops accepting and releases the endpoint.
+            name: Close
+            out:
+              - type: error
+          - doc: |-
+              Path is the endpoint's configured path — the socket file, or the path
+              a Windows pipe's name is derived from.
+            name: Path
+            out:
+              - type: string
+          - doc: |-
+              Refused is how many connections Accept closed because their peer was
+              not admitted.
+            name: Refused
+            out:
+              - type: int64
+        name: Listener
+      - doc: |-
+          Dialer is the connecting end of a private socket: it reaches the listener
+          its configuration names and refuses — before a byte is sent — an endpoint
+          it cannot trust. It is frozen at one method (ADR 0039).
+        methods:
+          - doc: |-
+              Dial connects within ctx. Peer names the listener where the kernel
+              does; a listener of an account that is not admitted is refused.
+            in:
+              - name: ctx
+                type: context.Context
+            name: Dial
+            out:
+              - type: "*Conn"
+              - type: error
+        name: Dialer
     types:
       - name: PeerValue
         struct:
@@ -52,35 +107,6 @@ packages:
               type: net.Conn
             - name: Peer
               type: PeerValue
-      - interface:
-          methods:
-            - name: Accept
-              out:
-                - type: "*Conn"
-                - type: error
-            - name: Addr
-              out:
-                - type: net.Addr
-            - name: Close
-              out:
-                - type: error
-            - name: Path
-              out:
-                - type: string
-            - name: Refused
-              out:
-                - type: int64
-        name: Listener
-      - interface:
-          methods:
-            - in:
-                - name: ctx
-                  type: context.Context
-              name: Dial
-              out:
-                - type: "*Conn"
-                - type: error
-        name: Dialer
     variables:
       - name: Misconfigured
         type: "*errs.Error"

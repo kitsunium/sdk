@@ -6,11 +6,11 @@ go_library(
     name = "vfs",
     srcs = [
         "codes.go",
+        "design_gen.go",
         "errors.go",
         "path.go",
         "perm.go",
         "vfs.go",
-        "vfs_interface.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/data/vfs",
     visibility = [

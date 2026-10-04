@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T12:00:00Z -->
+<!-- updated: 2026-10-04T11:15:00Z -->
 # internal/core/app/view/
 
 ## Purpose
@@ -13,6 +13,15 @@ Code ranges: `0.2.27.*` (ADR 0058) for the port, and `0.3.57.*` for the
 html/template engine's construction failures — allocated to
 `internal/service/app/view`, which raises them, and declared here since
 ADR 0160. A code keeps its value when its declaration moves.
+
+**The ports are generated from the design** (ADR 0163): `Factory` and
+`Renderer` are declared, with their doc comments, under `ports:` in
+`design/app/view.yaml`, and `kit gen` writes them into `design_gen.go`. A port
+or its doc comment changes in the design, then `kit gen`, then `make api` —
+never in `design_gen.go`, whose header digests `make api-check` verifies. They
+moved there from `factory.go` and `view.go`, content moved and never deleted —
+but for the blank line each put between its two methods, which the design does
+not record: `go doc` shows both declarations without it.
 
 ## Why this shape
 

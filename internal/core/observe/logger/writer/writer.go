@@ -12,8 +12,6 @@
 // package-level var initialiser when imported — no init().
 package writer
 
-import corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
-
 // Name is the typed key under which a Factory registers (e.g. "console",
 // "file", "s3"). The zero value Name("") is reserved invalid, mirroring
 // codec.Format.
@@ -43,17 +41,3 @@ func (n Name) Known() bool {
 // concrete type MUST be rejected with the shared WriterConfigInvalid sentinel
 // rather than panic.
 type Config = any
-
-// Factory builds a Sink from a Config. It is the swap-able contract the
-// registry stores and hands back; concrete factory types stay unexported in
-// their own packages.
-//
-// IFACE-PLUGIN: the registry hands plug-in factory instances back to callers
-// so each writer can keep its concrete type unexported; the only stable
-// contract is the Factory interface itself.
-type Factory interface {
-	// Name reports the canonical key under which this factory registers.
-	Name() Name
-	// Open validates cfg and returns a ready Sink, or a typed error.
-	Open(cfg Config) (sink corelogger.Sink, err error)
-}

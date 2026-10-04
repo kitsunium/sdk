@@ -51,6 +51,12 @@
 //
 // The concrete filesystems live in internal/service/data/vfs; this package owns the
 // contract, the two guards, and the typed sentinels.
+//
+// Package vfs — the write contract and its ADR 0039 capability sibling.
+//
+// They live apart from vfs.go because that file carries the package's doc and
+// the one thing that is NOT an interface declaration: the FS alias that says
+// reading is io/fs unchanged.
 package vfs
 
 import "io/fs"

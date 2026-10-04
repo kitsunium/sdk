@@ -89,36 +89,3 @@ func (a Algorithm) Known() bool {
 	//: the enum is contiguous; anything past the last constant is not ours.
 	return a >= AlgorithmHS256 && a <= AlgorithmPasetoV4Public
 }
-
-// Issuer mints a signed token carrying claims. Implementations are bound to
-// exactly one [Algorithm] and one signing key at construction, MUST be safe for
-// concurrent use, and MUST NOT take an algorithm or a key from the claims.
-//
-// IFACE-PLUGIN: constructors in internal/service/security/token hand instances back
-// behind this interface; the concrete types stay unexported.
-type Issuer interface {
-	// Issue renders claims as a token string, or returns a typed verdict
-	// (IssueFailed / ExpiryRequired / KeyUnsuitable) when it cannot.
-	Issue(claims ClaimsValue) (string, error)
-}
-
-// Verifier authenticates a token and returns its claims. Implementations are
-// bound to exactly one [Algorithm] and one verification key at construction and
-// MUST be safe for concurrent use.
-//
-// The contract has three parts, and all three are security requirements:
-//
-//  1. The signature is checked BEFORE any claim is read, so a caller never
-//     acts on — or logs — the contents of an unauthenticated token.
-//  2. The token's own algorithm header is compared against the binding and is
-//     never used to select a key, an algorithm, or a code path.
-//  3. Failure returns exactly one typed verdict and a zero ClaimsValue. There
-//     is no "invalid, but here are the claims anyway" path.
-//
-// IFACE-PLUGIN: constructors in internal/service/security/token hand instances back
-// behind this interface; the concrete types stay unexported.
-type Verifier interface {
-	// Verify authenticates token and returns its claims, or one of the typed
-	// verdicts declared in this package.
-	Verify(token string) (ClaimsValue, error)
-}

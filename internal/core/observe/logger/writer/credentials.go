@@ -3,19 +3,6 @@
 // keeps secrets out of any accidental log emission (rule 4 Public/Private).
 package writer
 
-import "context"
-
-// CredentialProvider yields short-lived credentials on demand. The SDK never
-// stores, logs, or embeds the returned material in an errs Field; it is passed
-// straight to the underlying transport client. Consumers implement this to plug
-// in IAM roles, STS, Vault, or static keys without exposing the secret to the
-// logging pipeline.
-type CredentialProvider interface {
-	// Credentials returns the current credential set, or an error when it
-	// cannot be obtained (expired role, unreachable STS, …).
-	Credentials(ctx context.Context) (creds CredentialValue, err error)
-}
-
 // CredentialValue is an opaque, redacting AWS SigV4 credential set. Its String
 // output is always "<redacted>" so an accidental %v / %s never leaks the
 // secret; the typed accessors expose the material only to the transport factory

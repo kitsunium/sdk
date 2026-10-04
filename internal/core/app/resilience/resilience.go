@@ -21,15 +21,3 @@ import "context"
 // detect idempotence, so the hedging config makes the caller assert it in code
 // (HedgeConfig.Idempotent) instead of trusting a doc comment.
 type Operation func(ctx context.Context) error
-
-// Runner executes an Operation under a reliability policy and returns the
-// operation's error, a policy sentinel (RetryExhausted, CircuitOpen,
-// RateLimited, BulkheadFull, TimeoutExceeded, FallbackFailed), or ctx.Err().
-// Implementations MUST be safe for concurrent use. Runners compose: a Runner
-// may itself invoke an inner Runner inside its Operation.
-//
-// IFACE-PLUGIN: concrete policies (retry/breaker/...) implement this interface;
-// their concrete types stay unexported behind their constructors.
-type Runner interface {
-	Run(ctx context.Context, op Operation) error
-}

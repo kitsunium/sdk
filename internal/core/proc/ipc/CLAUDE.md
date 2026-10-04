@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T12:00:00Z -->
+<!-- updated: 2026-10-04T11:15:00Z -->
 # internal/core/proc/ipc/
 
 ## Purpose
@@ -22,6 +22,13 @@ Range `0.3.91.*`. It was allocated to the service package and keeps its value
 here: `LL = 3` records the layer that ALLOCATED the range, not the directory its
 declaration lives in (ADR 0160 §3). Imports: `context`, `net` and
 `internal/kernel/errs`.
+
+**The ports are generated from the design** (ADR 0163): `Listener` and `Dialer`
+are declared, with their doc comments, under `ports:` in
+`design/proc/ipc.yaml`, and `kit gen` writes them into `design_gen.go`. A port
+or its doc comment changes in the design, then `kit gen`, then `make api` —
+never in `design_gen.go`, whose header digests `make api-check` verifies. They
+moved there from `ipc.go`, content moved and never deleted.
 
 ## Surface
 

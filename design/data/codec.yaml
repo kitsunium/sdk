@@ -57,98 +57,122 @@ packages:
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/data/codec
-    types:
-      - interface:
-          embeds:
-            - Codec
-          methods:
-            - in:
-                - name: dst
-                  type: "[]byte"
-                - name: v
-                  type: any
-              name: Append
-              out:
-                - name: out
-                  type: "[]byte"
-                - name: err
-                  type: error
+    ports:
+      - doc: |-
+          Appender is the optional extension implemented by codecs that can encode
+          directly into a caller-supplied byte slice instead of allocating their own.
+          Hot paths (logger record formatting, NDJSON streams, batch sinks) consume
+          this interface to avoid the buffer-copy cost imposed by Marshal.
+
+          Implementations MUST:
+            - Append the encoded representation of v onto dst (typically via the
+              standard append(dst, …) idiom).
+            - Return the (possibly re-allocated) buffer back to the caller.
+            - Be safe for concurrent use by multiple goroutines.
+
+          The returned buffer's length grows by the number of bytes written; the
+          underlying array MAY be a fresh allocation when dst's capacity is too
+          small. Callers retain ownership of dst and SHOULD reuse it across calls.
+        embeds:
+          - Codec
+        methods:
+          - doc: |-
+              Append encodes v and appends the bytes onto dst. The returned slice
+              MUST contain the prior contents of dst followed by the encoded form.
+            in:
+              - name: dst
+                type: "[]byte"
+              - name: v
+                type: any
+            name: Append
+            out:
+              - name: out
+                type: "[]byte"
+              - name: err
+                type: error
         name: Appender
-      - interface:
-          methods:
-            - name: Name
-              out:
-                - type: string
-            - name: MIMETypes
-              out:
-                - type: "[]string"
-            - name: Extensions
-              out:
-                - type: "[]string"
-            - in:
-                - name: v
-                  type: any
-              name: Marshal
-              out:
-                - name: data
-                  type: "[]byte"
-                - name: err
-                  type: error
-            - in:
-                - name: data
-                  type: "[]byte"
-                - name: v
-                  type: any
-              name: Unmarshal
-              out:
-                - name: err
-                  type: error
+      - doc: |-
+          Codec is the minimum contract every format codec satisfies. Instances MUST
+          be safe for concurrent use; format-specific options are supplied via the
+          codec's constructor, not via the Codec interface.
+        methods:
+          - name: Name
+            out:
+              - type: string
+          - name: MIMETypes
+            out:
+              - type: "[]string"
+          - name: Extensions
+            out:
+              - type: "[]string"
+          - in:
+              - name: v
+                type: any
+            name: Marshal
+            out:
+              - name: data
+                type: "[]byte"
+              - name: err
+                type: error
+          - in:
+              - name: data
+                type: "[]byte"
+              - name: v
+                type: any
+            name: Unmarshal
+            out:
+              - name: err
+                type: error
         name: Codec
-      - interface:
-          embeds:
-            - Codec
-          methods:
-            - in:
-                - name: w
-                  type: io.Writer
-              name: NewEncoder
-              out:
-                - type: Encoder
-            - in:
-                - name: r
-                  type: io.Reader
-              name: NewDecoder
-              out:
-                - type: Decoder
+      - doc: |-
+          StreamingCodec is the optional extension for formats that support
+          incremental encode/decode over io.Writer / io.Reader. Codecs that CAN
+          stream SHOULD implement it; consumers detect support with a type assertion.
+        embeds:
+          - Codec
+        methods:
+          - in:
+              - name: w
+                type: io.Writer
+            name: NewEncoder
+            out:
+              - type: Encoder
+          - in:
+              - name: r
+                type: io.Reader
+            name: NewDecoder
+            out:
+              - type: Decoder
         name: StreamingCodec
-      - interface:
-          methods:
-            - in:
-                - name: v
-                  type: any
-              name: Encode
-              out:
-                - name: err
-                  type: error
-            - name: Close
-              out:
-                - name: err
-                  type: error
+      - doc: Encoder writes one or more values to the wrapped writer.
+        methods:
+          - in:
+              - name: v
+                type: any
+            name: Encode
+            out:
+              - name: err
+                type: error
+          - name: Close
+            out:
+              - name: err
+                type: error
         name: Encoder
-      - interface:
-          methods:
-            - in:
-                - name: v
-                  type: any
-              name: Decode
-              out:
-                - name: err
-                  type: error
-            - name: More
-              out:
-                - name: ok
-                  type: bool
+      - doc: Decoder reads one or more values from the wrapped reader.
+        methods:
+          - in:
+              - name: v
+                type: any
+            name: Decode
+            out:
+              - name: err
+                type: error
+          - name: More
+            out:
+              - name: ok
+                type: bool
         name: Decoder
+    types:
       - methods:
           - name: Known
             out:

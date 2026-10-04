@@ -6,6 +6,7 @@ go_library(
     name = "scheduler",
     srcs = [
         "codes.go",
+        "design_gen.go",
         "errors.go",
         "scheduler.go",
         "scheduler_entry.go",

@@ -6,6 +6,7 @@ go_library(
     name = "health",
     srcs = [
         "codes.go",
+        "design_gen.go",
         "errors.go",
         "health.go",
         "health_check.go",

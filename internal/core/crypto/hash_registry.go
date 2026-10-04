@@ -1,4 +1,6 @@
 // Package crypto — the process-wide Hasher registry + Sum / SumHex dispatch.
+//
+// Package crypto — the Hasher port: fingerprint / content-addressing hashing.
 package crypto
 
 import (

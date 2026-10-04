@@ -25,3 +25,6 @@ It is a display filter, not an access control: what no rule recognises is
 shown. The engine and its configuration live in
 `internal/service/security/redact`; facade: `pkg/v1/security/redact`.
 ADR 0101, ADR 0160. See `CLAUDE.md`.
+
+The `Redactor` port is generated from `design/security/redact.yaml` into
+`design_gen.go` (ADR 0163): it changes in the design, then `kit gen`.

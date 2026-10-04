@@ -4,11 +4,8 @@
 // the Phase-B wave). Concrete sources (env, file), the merge+decode loader, and
 // the cross-OS poll watcher live in internal/service/app/config; this package owns
 // only the contract + the typed failure sentinels.
+//
+// Package config — the optional self-validation contract.
+//
+// Package config — the change-observer contract.
 package config
-
-// Source yields a configuration layer as a flat map (later sources override
-// earlier ones in a Load). Implementations MUST be safe for concurrent Load.
-type Source interface {
-	// Load reads the source and returns its key→value map (nil map = empty layer).
-	Load() (values map[string]any, err error)
-}

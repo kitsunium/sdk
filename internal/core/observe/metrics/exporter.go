@@ -16,16 +16,6 @@ func (n ExporterName) String() string {
 	return string(n)
 }
 
-// Exporter ships a Snapshot to a backend (text writer, Prometheus, OTLP, …).
-// Implementations MUST be safe for concurrent use.
-//
-// IFACE-PLUGIN: the registry stores plug-in exporters behind this interface;
-// concrete exporter types stay unexported per package.
-type Exporter interface {
-	Name() ExporterName
-	Export(snap SnapshotValue) error
-}
-
 // registry maps each ExporterName to its Exporter — a read-mostly,
 // copy-on-write table (kernel/plugin.Registry), the same mechanism the other
 // signal's exporter registry runs on.

@@ -19,3 +19,7 @@ ONCE, at the root, and travels in the `sampled` bit. Tracer, samplers, recorder,
 the W3C parsers with `Inject` / `Extract`, and the OTLP/JSON encoder live in
 `internal/service/observe/trace`; facade:
 `pkg/v1/observe/trace`. ADR 0051. See `CLAUDE.md`.
+
+The ports — `Tracer`, `Span`, `Carrier` and `SpanExporter` — are generated from
+`design/observe/trace.yaml` into `design_gen.go` (ADR 0163): a port changes in
+the design, then `kit gen`.

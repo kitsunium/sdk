@@ -26,20 +26,29 @@ packages:
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/app/resilience
+    ports:
+      - doc: |-
+          Runner executes an Operation under a reliability policy and returns the
+          operation's error, a policy sentinel (RetryExhausted, CircuitOpen,
+          RateLimited, BulkheadFull, TimeoutExceeded, FallbackFailed), or ctx.Err().
+          Implementations MUST be safe for concurrent use. Runners compose: a Runner
+          may itself invoke an inner Runner inside its Operation.
+
+          IFACE-PLUGIN: concrete policies (retry/breaker/...) implement this interface;
+          their concrete types stay unexported behind their constructors.
+        methods:
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: op
+                type: Operation
+            name: Run
+            out:
+              - type: error
+        name: Runner
     types:
       - name: Operation
         underlying: func(ctx context.Context) error
-      - interface:
-          methods:
-            - in:
-                - name: ctx
-                  type: context.Context
-                - name: op
-                  type: Operation
-              name: Run
-              out:
-                - type: error
-        name: Runner
     variables:
       - name: RetryExhausted
         type: "*errs.Error"

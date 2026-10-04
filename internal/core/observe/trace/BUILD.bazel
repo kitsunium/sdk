@@ -6,9 +6,9 @@ go_library(
     name = "trace",
     srcs = [
         "attrs.go",
-        "carrier.go",
         "codes.go",
         "context.go",
+        "design_gen.go",
         "errors.go",
         "event_value.go",
         "exporter.go",

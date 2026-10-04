@@ -61,8 +61,6 @@
 // and {{template}}, which this package neither extends nor conventionalises.
 package view
 
-import "context"
-
 // ContentTypeHTML is the value an HTML [Renderer] reports from ContentType.
 //
 // The charset is not decoration. A response whose Content-Type carries no
@@ -70,42 +68,3 @@ import "context"
 // legacy multi-byte encoding can smuggle markup past an escaper that judged
 // the bytes as UTF-8.
 const ContentTypeHTML string = "text/html; charset=utf-8"
-
-// Renderer turns a named template and a data value into a complete document.
-//
-// The method set is FROZEN at two. This interface is aliased by pkg/v1/app/view,
-// Go interfaces are structural, and a third method would break every
-// downstream implementation at compile time with no deprecation window
-// (ADR 0039). New capabilities arrive as SIBLING interfaces reached by type
-// assertion — the model is codec's Appender (ADR 0037).
-type Renderer interface {
-	// Render executes the template registered under name against data and
-	// returns the complete document.
-	//
-	// It returns ([]byte, error) rather than writing to an io.Writer so that a
-	// failure mid-execution cannot leave a half-written response behind — see
-	// the package documentation. On any error the returned slice is nil.
-	//
-	// ctx is checked before the work starts and is otherwise not consulted:
-	// text/template's Execute takes no context and cannot be interrupted, so a
-	// runaway template is bounded by BYTES, not by time. That is the reason
-	// Config.MaxBytes exists and the reason it has no "unlimited" spelling.
-	//
-	// name is looked up exactly. A name the engine does not hold is
-	// [TemplateNotFound] — a Renderer built over an empty template set is a
-	// legitimate Renderer that refuses everything by name, which is a loud
-	// behaviour rather than an inert one (ADR 0031).
-	Render(ctx context.Context, name string, data any) ([]byte, error)
-
-	// ContentType returns the media type the bytes from Render carry, ready to
-	// be written as a Content-Type header — [ContentTypeHTML] for every engine
-	// registered today.
-	//
-	// It is a method rather than a package constant because it is the promise
-	// an engine makes about the escaping it performs. An engine that does not
-	// contextually escape HTML may not report an HTML content type, so a
-	// framework that writes this header verbatim (with X-Content-Type-Options:
-	// nosniff, which is the framework's job and not the SDK's) never labels
-	// unescaped output as a document the browser will parse as HTML.
-	ContentType() string
-}

@@ -10,3 +10,6 @@ can grow a method and break a downstream implementer (ADR 0039).
 
 The cron parser and the concrete engine live in `internal/service/app/scheduler`;
 facade: `pkg/v1/app/scheduler`. ADR 0041. See `CLAUDE.md`.
+
+The `Scheduler` port is generated from `design/app/scheduler.yaml` into
+`design_gen.go` (ADR 0163): it changes in the design, then `kit gen`.

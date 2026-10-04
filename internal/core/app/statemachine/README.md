@@ -24,3 +24,7 @@ codes (`0.3.88.*`) and their sentinels are declared here too (ADR 0160).
 The engine — declarations, per-entity locks, hooks, the agenda and the loop —
 is `internal/service/app/statemachine`. Public facade: `pkg/v1/app/statemachine`. See
 `CLAUDE.md`.
+
+The ports — `Store` and `Journal` — are generated from
+`design/app/statemachine.yaml` into `design_gen.go` (ADR 0163): a port changes
+in the design, then `kit gen`.

@@ -88,6 +88,107 @@ packages:
       fs: io/fs
       template: html/template
     path: github.com/kitsunium/sdk/internal/core/app/view
+    ports:
+      - doc: |-
+          Factory builds a [Renderer] of one engine from a [Config].
+
+          Two methods, and the registry hands instances back to callers so each engine
+          keeps its concrete type unexported — the stable contract is this interface.
+
+          # What an engine undertakes by registering
+
+          Registration is not merely a name binding; it is a promise the security model
+          rests on. An engine in this registry MUST:
+
+            - Contextually escape every value it renders, for the media type its
+              [Renderer.ContentType] reports. An engine that does not escape may not
+              report an HTML content type.
+            - Render into its own buffer and return complete bytes or none.
+            - Honour [Config.MaxBytes], clamping a non-positive value to
+              [DefaultMaxBytes].
+            - Refuse at construction a [Config] it cannot honour, and refuse at render
+              time — by name, with [TemplateNotFound] — a template it does not hold.
+            - Name every template by its SLASH PATH within [Config.FS].
+
+          That last one looks cosmetic and is not. html/template's own ParseFS names
+          templates by filepath.Base, so a tree holding admin/page.html and
+          user/page.html ends up with ONE template called "page.html" — measured, the
+          second parse silently wins and every request for the admin page renders the
+          user page. Full-path naming is the SDK refusing to inherit that.
+        methods:
+          - doc: |-
+              Engine returns the registry key this factory claims. It must be stable
+              and non-empty.
+            name: Engine
+            out:
+              - type: Engine
+          - doc: |-
+              New builds a Renderer from cfg, parsing the whole template tree eagerly.
+
+              Eager parsing is the point: a template that cannot be parsed, or cannot
+              be contextually escaped, will fail identically forever, so the failure
+              belongs in the process's first second — a deploy that does not come up —
+              rather than in the first request that happens to reach that page.
+            in:
+              - name: cfg
+                type: Config
+            name: New
+            out:
+              - type: Renderer
+              - type: error
+        name: Factory
+      - doc: |-
+          Renderer turns a named template and a data value into a complete document.
+
+          The method set is FROZEN at two. This interface is aliased by pkg/v1/app/view,
+          Go interfaces are structural, and a third method would break every
+          downstream implementation at compile time with no deprecation window
+          (ADR 0039). New capabilities arrive as SIBLING interfaces reached by type
+          assertion — the model is codec's Appender (ADR 0037).
+        methods:
+          - doc: |-
+              Render executes the template registered under name against data and
+              returns the complete document.
+
+              It returns ([]byte, error) rather than writing to an io.Writer so that a
+              failure mid-execution cannot leave a half-written response behind — see
+              the package documentation. On any error the returned slice is nil.
+
+              ctx is checked before the work starts and is otherwise not consulted:
+              text/template's Execute takes no context and cannot be interrupted, so a
+              runaway template is bounded by BYTES, not by time. That is the reason
+              Config.MaxBytes exists and the reason it has no "unlimited" spelling.
+
+              name is looked up exactly. A name the engine does not hold is
+              [TemplateNotFound] — a Renderer built over an empty template set is a
+              legitimate Renderer that refuses everything by name, which is a loud
+              behaviour rather than an inert one (ADR 0031).
+            in:
+              - name: ctx
+                type: context.Context
+              - name: name
+                type: string
+              - name: data
+                type: any
+            name: Render
+            out:
+              - type: "[]byte"
+              - type: error
+          - doc: |-
+              ContentType returns the media type the bytes from Render carry, ready to
+              be written as a Content-Type header — [ContentTypeHTML] for every engine
+              registered today.
+
+              It is a method rather than a package constant because it is the promise
+              an engine makes about the escaping it performs. An engine that does not
+              contextually escape HTML may not report an HTML content type, so a
+              framework that writes this header verbatim (with X-Content-Type-Options:
+              nosniff, which is the framework's job and not the SDK's) never labels
+              unescaped output as a document the browser will parse as HTML.
+            name: ContentType
+            out:
+              - type: string
+        name: Renderer
     types:
       - name: Config
         struct:
@@ -100,36 +201,6 @@ packages:
               type: int
       - name: Engine
         underlying: string
-      - interface:
-          methods:
-            - name: Engine
-              out:
-                - type: Engine
-            - in:
-                - name: cfg
-                  type: Config
-              name: New
-              out:
-                - type: Renderer
-                - type: error
-        name: Factory
-      - interface:
-          methods:
-            - in:
-                - name: ctx
-                  type: context.Context
-                - name: name
-                  type: string
-                - name: data
-                  type: any
-              name: Render
-              out:
-                - type: "[]byte"
-                - type: error
-            - name: ContentType
-              out:
-                - type: string
-        name: Renderer
     variables:
       - name: ViewMisconfigured
         type: "*errs.Error"

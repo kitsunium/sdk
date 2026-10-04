@@ -6,8 +6,8 @@ go_library(
     name = "docstore",
     srcs = [
         "codes.go",
+        "design_gen.go",
         "docstore.go",
-        "docstore_interface.go",
         "errors.go",
         "index.go",
         "value.go",

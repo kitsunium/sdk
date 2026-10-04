@@ -1,3 +1,5 @@
+// Package crypto — the digital-signature port implemented by each scheme.
+//
 // Package crypto — the process-wide Signer registry + GenerateKey / Sign / Verify dispatch.
 package crypto
 

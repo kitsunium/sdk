@@ -6,6 +6,7 @@ go_library(
     name = "events",
     srcs = [
         "codes.go",
+        "design_gen.go",
         "errors.go",
         "events.go",
         "events_dispatch.go",

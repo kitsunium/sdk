@@ -10,16 +10,8 @@
 //
 // A series is one instrument name plus one attribute set, and a Meter bounds
 // how many series a name may hold.
+//
+// Package metrics — the sibling port that documents an instrument NAME.
+//
+// Package metrics — the sibling port that mints the non-monotonic sum.
 package metrics
-
-// Counter is a MONOTONIC sum: it only ever increases. In the OTel data model
-// its points land in a Sum carrying Monotonic = true, which is what tells a
-// backend that a decrease is a restart rather than a measurement.
-type Counter interface {
-	// Add increments the counter by a non-negative delta. A non-positive
-	// delta is ignored — a counter that could go down is an UpDownCounter,
-	// and a backend reading this one is entitled to assume it cannot.
-	Add(delta int64)
-	// Inc increments the counter by one (Add(1) shorthand).
-	Inc()
-}

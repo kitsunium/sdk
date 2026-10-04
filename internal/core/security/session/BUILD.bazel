@@ -6,9 +6,9 @@ go_library(
     name = "session",
     srcs = [
         "codes.go",
+        "design_gen.go",
         "errors.go",
         "id.go",
-        "sealer.go",
         "session.go",
         "session_value.go",
         "state_value.go",

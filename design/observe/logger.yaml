@@ -137,60 +137,183 @@ packages:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       level: github.com/kitsunium/sdk/internal/core/observe/logger/level
     path: github.com/kitsunium/sdk/internal/core/observe/logger
-    types:
-      - interface:
-          methods:
-            - name: Name
-              out:
-                - name: name
-                  type: string
-            - in:
-                - name: dst
-                  type: "[]byte"
-                - name: groups
-                  type: "[]string"
-                - name: r
-                  type: RecordEvent
-              name: Append
-              out:
-                - name: out
-                  type: "[]byte"
+    ports:
+      - doc: |-
+          Encoder formats a RecordEvent into a byte slice. Implementations MUST be
+          safe for concurrent use by multiple goroutines and SHOULD avoid allocating
+          beyond the caller-supplied buffer (typically borrowed from the
+          kernel/concur/buffer pool) so the encoding step itself does not allocate.
+        methods:
+          - doc: |-
+              Name returns the canonical encoder identifier ("text", "ndjson",
+              "json"). Useful for diagnostic dumps and metrics tagging.
+            name: Name
+            out:
+              - name: name
+                type: string
+          - doc: |-
+              Append serialises r onto dst and returns the (possibly re-allocated)
+              buffer. groups carries the active group prefix stack — encoders are
+              responsible for rendering it as their format-specific prefix
+              ("g1.g2.key" for text, nested objects for JSON).
+            in:
+              - name: dst
+                type: "[]byte"
+              - name: groups
+                type: "[]string"
+              - name: r
+                type: RecordEvent
+            name: Append
+            out:
+              - name: out
+                type: "[]byte"
         name: Encoder
-      - interface:
-          methods:
-            - in:
-                - name: ctx
-                  type: context.Context
-                - name: r
-                  type: RecordEvent
-              name: Enabled
-              out:
-                - name: enabled
-                  type: bool
-            - in:
-                - name: ctx
-                  type: context.Context
-                - name: r
-                  type: RecordEvent
-              name: Handle
-              out:
-                - name: err
-                  type: error
-            - in:
-                - name: attrs
-                  type: "[]AttrValue"
-              name: WithAttrs
-              out:
-                - name: child
-                  type: Handler
-            - in:
-                - name: name
-                  type: string
-              name: WithGroup
-              out:
-                - name: child
-                  type: Handler
+      - doc: |-
+          Handler formats and emits RecordEvent values produced by a Logger.
+          Implementations MUST be safe for concurrent use by multiple goroutines.
+        methods:
+          - doc: |-
+              Enabled reports whether the handler would emit a record at the given
+              level, allowing callers to skip expensive attribute construction.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: r
+                type: RecordEvent
+            name: Enabled
+            out:
+              - name: enabled
+                type: bool
+          - doc: |-
+              Handle formats and writes a RecordEvent. Returning a non-nil error
+              signals a sink failure; the Logger may drop the record regardless.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: r
+                type: RecordEvent
+            name: Handle
+            out:
+              - name: err
+                type: error
+          - doc: |-
+              WithAttrs returns a derived Handler that prepends the given attrs to
+              every subsequent RecordEvent. The receiver MUST NOT be mutated.
+            in:
+              - name: attrs
+                type: "[]AttrValue"
+            name: WithAttrs
+            out:
+              - name: child
+                type: Handler
+          - doc: |-
+              WithGroup returns a derived Handler that namespaces every subsequent
+              attribute key under the given group name (rendered as "group.key"
+              for text handlers, or as a nested object for structured handlers).
+              An empty name MUST be treated as a no-op so callers can pass user
+              input without guarding it.
+            in:
+              - name: name
+                type: string
+            name: WithGroup
+            out:
+              - name: child
+                type: Handler
         name: Handler
+      - doc: |-
+          Logger is the primary logging interface. Implementations MUST be safe for
+          concurrent use by multiple goroutines.
+        methods:
+          - doc: |-
+              Log emits a RecordEvent at the given level with the supplied message
+              and attrs. Implementations SHOULD short-circuit when Enabled returns
+              false to avoid unnecessary formatting work.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: lv
+                type: level.Level
+              - name: msg
+                type: string
+              - name: attrs
+                type: AttrValue
+            name: Log
+            variadic: true
+          - doc: |-
+              With returns a derived Logger whose emitted records always include the
+              supplied attrs. The receiver MUST NOT be mutated.
+            in:
+              - name: attrs
+                type: AttrValue
+            name: With
+            out:
+              - name: child
+                type: Logger
+            variadic: true
+          - doc: |-
+              WithGroup returns a derived Logger whose subsequent attributes are
+              namespaced under the given group name. Empty names MUST be a no-op.
+            in:
+              - name: name
+                type: string
+            name: WithGroup
+            out:
+              - name: child
+                type: Logger
+          - doc: Enabled reports whether a record at the given level would be emitted.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: lv
+                type: level.Level
+            name: Enabled
+            out:
+              - name: enabled
+                type: bool
+        name: Logger
+      - doc: |-
+          Sink is the transport port consumed by the generic Handler. Implementations
+          MUST be safe for concurrent use by multiple goroutines and SHOULD assume
+          their own concurrency model (mutex / lock-free / batched flush) so the
+          Handler can stay encoder-agnostic. Sinks that need the severity level read
+          it directly from r.Level — the port is intentionally kept narrow.
+        methods:
+          - doc: |-
+              Write delivers the formatted byte payload p plus the originating record
+              to the underlying transport. Sinks MAY ignore p and re-serialise from
+              r when their wire protocol differs from the encoder's output (e.g. a
+              CloudWatch sink reads r.Time directly to populate the AWS request).
+            in:
+              - name: ctx
+                type: context.Context
+              - name: r
+                type: RecordEvent
+              - name: p
+                type: "[]byte"
+            name: Write
+            out:
+              - name: "n"
+                type: int
+              - name: err
+                type: error
+          - doc: Flush forces any buffered records out. A no-op for synchronous sinks.
+            in:
+              - name: ctx
+                type: context.Context
+            name: Flush
+            out:
+              - name: err
+                type: error
+          - doc: |-
+              Close releases any resources held by the sink (file descriptors, AWS
+              clients, network connections). Sinks MAY refuse subsequent Writes
+              after Close returns; callers MUST NOT use the sink after closing it.
+            name: Close
+            out:
+              - name: err
+                type: error
+        name: Sink
+    types:
       - methods:
           - name: String
             out:
@@ -198,44 +321,6 @@ packages:
             recv: value
         name: Kind
         underlying: int8
-      - interface:
-          methods:
-            - in:
-                - name: ctx
-                  type: context.Context
-                - name: lv
-                  type: level.Level
-                - name: msg
-                  type: string
-                - name: attrs
-                  type: AttrValue
-              name: Log
-              variadic: true
-            - in:
-                - name: attrs
-                  type: AttrValue
-              name: With
-              out:
-                - name: child
-                  type: Logger
-              variadic: true
-            - in:
-                - name: name
-                  type: string
-              name: WithGroup
-              out:
-                - name: child
-                  type: Logger
-            - in:
-                - name: ctx
-                  type: context.Context
-                - name: lv
-                  type: level.Level
-              name: Enabled
-              out:
-                - name: enabled
-                  type: bool
-        name: Logger
       - name: RecordEvent
         struct:
           fields:
@@ -258,33 +343,6 @@ packages:
               type: string
             - name: Value
               type: Value
-      - interface:
-          methods:
-            - in:
-                - name: ctx
-                  type: context.Context
-                - name: r
-                  type: RecordEvent
-                - name: p
-                  type: "[]byte"
-              name: Write
-              out:
-                - name: "n"
-                  type: int
-                - name: err
-                  type: error
-            - in:
-                - name: ctx
-                  type: context.Context
-              name: Flush
-              out:
-                - name: err
-                  type: error
-            - name: Close
-              out:
-                - name: err
-                  type: error
-        name: Sink
       - methods:
           - name: IsValid
             out:

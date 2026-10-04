@@ -6,12 +6,11 @@ go_library(
     name = "config",
     srcs = [
         "codes.go",
+        "design_gen.go",
         "errors.go",
         "origin.go",
         "schema.go",
         "source.go",
-        "validator.go",
-        "watcher.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/app/config",
     visibility = [

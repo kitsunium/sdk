@@ -14,6 +14,10 @@
 // internal/kernel/errs — no golang.org/x/sys — preserving the SDK's dep-light
 // invariant. Every error returned by the domain is one of the sentinels in
 // errors.go; service code wraps them with errs.Wrap and never defines new codes.
+//
+// Package proc — the Process port: lifetime control over a spawned process.
+//
+// Package proc — the Reaper port: collection of terminated child processes.
 package proc
 
 // Resource identifies a per-process resource governed by setrlimit(2). It is an

@@ -7,7 +7,7 @@ go_library(
     srcs = [
         "capability.go",
         "codes.go",
-        "deadletter.go",
+        "design_gen.go",
         "errors.go",
         "message.go",
         "policy.go",

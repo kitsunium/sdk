@@ -76,8 +76,9 @@ A surface file records every exported symbol of its packages:
 Doc text is recorded for ports alone (§2): every other doc stays a Go
 comment. Ids are the package-scoped `go:` ids of §5, derived, never written.
 The design was imported once from the code, with `kit design import -type
-library -ports internal/core/app/lock`, and re-importing it over itself
-writes nothing; from now on it is edited first.
+library -ports internal/core/app/lock`, then once more with `-ports
+internal/core/...` to make every core interface a port (§2); re-importing it
+over itself writes nothing, and from now on it is edited first.
 
 ### 2. What kit writes — and nothing else
 
@@ -107,19 +108,29 @@ that names its design file and two digests:
     collide when the value differs, and its type through its address;
   - a variable by address — or, when its package cannot spell its type, held
     equal to a variable of that type it can (282 sentinels);
-  - the existence alone of a type with nothing else to pin (94: structs that
-    export no field, options over an unexported configuration), whose marker
-    still carries its whole signature for `make api-check`.
+  - the existence alone of a type with nothing else to pin, or whose
+    signature its package's own files cannot spell (95: structs that export
+    no field, options over an unexported configuration, and
+    `security/redact.Redactor`, a port whose `Attrs` names a package only its
+    `design_gen.go` imports), whose marker still carries its whole signature
+    for `make api-check`.
 - **The ports** — `design_gen.go`, the interfaces a design file declares under
   `ports:`, with their names, signatures, embeds, type parameters and doc
   comments as the design writes them; no package comment, no suffix, no
-  forced `ctx` or `error`. The first are `internal/core/app/lock`'s `Locker`,
-  `Lease` and `Deadliner`: they moved out of `lock.go` and `lease.go` into the
-  design, doc comments included, and `lease.go`, left empty, is gone
-  (rule 5). The engines still assert them in
+  forced `ctx` or `error`. Every exported interface of `internal/core` is
+  one: 106 interfaces with 269 methods in 33 packages, the nine generic ones
+  and the twelve that embed another among them. The first were
+  `internal/core/app/lock`'s `Locker`, `Lease` and `Deadliner`: they moved out
+  of `lock.go` and `lease.go` into the design, doc comments included, and
+  `lease.go`, left empty, is gone (rule 5); the engines still assert them in
   `internal/service/app/lock/lock_compliance.go`. Every other core interface
-  follows in a second step, moved the same way (content moved, never
-  deleted).
+  followed in a second step, moved the same way — content moved, never
+  deleted. A file the move left with nothing but its package comment is gone
+  as well, its comment joined to its neighbour's in file-name order, the order
+  go/doc joins them in, so every core package's `go doc` reads as it did; a
+  file holding its package's own documentation stays, as `lock.go` does. One
+  difference the dialect makes: `app/view`'s `Factory` and `Renderer` put a
+  blank line between their two methods, which the design does not record.
 
 Nothing else in production code is generated: concrete types, constants,
 sentinels and every body stay hand-written, held by the pins. Nothing kit
@@ -324,18 +335,26 @@ layer and family included.
 
 ## As built
 
-- `design/`: 102 files, 38,527 lines (1.2 MB): the project file and 101
-  surface files, 315 packages, 7,528 records. `kit design import -type library`
-  over it writes nothing; `kit check` gives no finding with all nine rules.
-- The pins: 337 files — 312 `api_gen_test.go`, 25 per constraint —, 40,256
-  lines, 7,528 markers; 282 sentinels held by reference, 94 existence pins.
+- `design/`: 102 files, 40,526 lines (1.1 MB): the project file and 101
+  surface files, 315 packages, 7,528 records, 106 of them ports with their
+  doc comments. `kit design import -type library` over it writes nothing;
+  `kit check` gives no finding with all nine rules.
+- The pins: 337 files — 312 `api_gen_test.go`, 25 per constraint —, 40,239
+  lines, 7,528 markers; 282 sentinels held by reference, 95 existence pins.
   Gazelle added them to 297 test targets and gave 18 packages their first.
-  The port: `internal/core/app/lock/design_gen.go`, three interfaces, six
-  methods. `kit gen` writes 338 files from the design, then nothing on a second
-  run.
+- The ports: `design_gen.go` in 33 core packages, 2,711 lines, 106
+  interfaces and 269 methods — `app/lock`'s three first, then the 103 others.
+  `kit gen` writes 370 files from the design, then nothing on a second run.
+  The second step removed 35 hand-written files the move had left with
+  nothing but their package comment, and kept eight that hold their
+  package's comment alone.
 - `docs/api`: 14 documents, 367 packages, 7,510 symbols in 7,528 records,
-  2,175 with a code. Moving the ports changed nine records' `file` and the
-  core lock package's comment, which lost `lease.go`'s.
+  2,175 with a code. Moving the ports changed 375 records' `file` — nine in
+  the first step, 366 in the second — and one package comment, the core lock
+  package's, which lost `lease.go`'s; nothing else.
+- `go doc -all` of the 72 core packages: the same text before and after the
+  second step but for `app/view`, whose `Factory` and `Renderer` each lost the
+  blank line between their two methods.
 - `docs/error-codes.yaml`: 739 codes, the 733 the grep listed and the six
   meta-codes.
 - Cost, measured on an M1 Pro shared with other jobs (a load of 16 to 100),
@@ -358,12 +377,24 @@ layer and family included.
     them — 61 CPU s against 61 over three pairs on that load —, both checks
     reusing the model the `docs/api` check builds; `make lint-check` takes
     17 s and 35 CPU s on a quiet machine.
+  - The second step costs nothing measurable, each lane measured with the
+    first step's tree and the second's started together, every side cold:
+    `bazel test --config=race //...` — run in four parts, two output bases
+    at a time being all the disk held — 1,117.7 → 1,118.5 s of the actions'
+    CPU (+0.07 %), the same 4,326 actions and 317 tests; the cross-build
+    lane, 12 cells × 17 modules, 2,065 → 2,060 CPU s (−0.3 %), a cell
+    between −5.3 % and +4.1 % and its user CPU within 1.3 %.
   - A consumer's binary — every `pkg/v1` package imported, the lock ports in
     use — has the same byte count, the same 9,068 symbols with their kinds
     and sizes, and the same 5,426 functions at the same lines; only its build
     information (the scratch module's replace path) and the length of the
     runtime's function table (16 bytes) differ: the ports compile to
-    nothing.
+    nothing. The second step, measured with the same consumer also holding
+    the runtime type of each of the 93 ports `pkg/v1` aliases: the same
+    8,703,426 bytes, the same 9,198 symbols with their kinds and sizes, the
+    same 5,549 functions in the same files at the same sizes; nine of them
+    start at another line, and the function table's line encoding moves
+    96 bytes with them — positions, not code.
 
 ## Consequences
 
@@ -407,4 +438,5 @@ layer and family included.
 - `docs/api/schema.json` — the format, the id and canonical-signature vectors
 - `docs/site/CLAUDE.md` — the portal built from `docs/api`
 - `internal/core/app/lock/CLAUDE.md` — the first generated ports
+- `internal/core/CLAUDE.md` — every core interface a generated port, and each package's `CLAUDE.md` the files its ports left
 - `scripts/ci/platforms.sh`, `scripts/pre-commit/check-platforms.sh` — the platforms table

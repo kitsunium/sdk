@@ -35,37 +35,73 @@ packages:
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/app/events
+    ports:
+      - doc: |-
+          Bus dispatches a published event to the listeners registered for its type,
+          in priority order, on the publisher's goroutine. Implementations MUST be
+          safe for concurrent use.
+
+          IFACE-PLUGIN: the concrete engine stays unexported behind its constructor
+          in internal/service/app/events.
+
+          The interface is FROZEN at these three methods. pkg/v1/app/events aliases it,
+          so adding a fourth would break every downstream implementer at compile time
+          with no deprecation window (ADR 0039); a new capability gets a sibling
+          interface reached by type assertion.
+        methods:
+          - doc: |-
+              Subscribe registers sub against eventType. It is refused on a
+              subscription that could never run — empty name, nil Listener
+              ([InvalidSubscription]) — on a name already registered for that type
+              ([DuplicateListener]), and on a nil or interface eventType, which
+              Publish could never match ([InvalidEventType]).
+            in:
+              - name: eventType
+                type: EventType
+              - name: sub
+                type: SubscriptionValue
+            name: Subscribe
+            out:
+              - type: error
+          - doc: |-
+              Unsubscribe removes the listener registered under name for eventType.
+              A name that is not registered is [UnknownListener] rather than a silent
+              success: "I removed it" and "there was nothing to remove" are different
+              answers, and only one of them means the caller's mental model is right.
+            in:
+              - name: eventType
+                type: EventType
+              - name: name
+                type: string
+            name: Unsubscribe
+            out:
+              - type: error
+          - doc: |-
+              Publish calls every listener registered for the event's dynamic type,
+              in ascending [Priority] and then registration order, and returns what
+              happened.
+
+              A bus with no listener for this type is LEGITIMATE (ADR 0031):
+              publishing is a no-op that returns a zero [DispatchValue] and a nil
+              error. A publisher must not have to know whether anybody is listening —
+              that is the entire point of publishing.
+
+              The error aggregates what the listeners returned, with errors.Join. A
+              [Halt] is NOT part of it: stopping the dispatch is a decision, not a
+              failure, and it is reported through [DispatchValue.Halted].
+            in:
+              - name: ctx
+                type: context.Context
+              - name: event
+                type: any
+            name: Publish
+            out:
+              - type: DispatchValue
+              - type: error
+        name: Bus
     types:
       - name: Listener
         underlying: func(ctx context.Context, event any) error
-      - interface:
-          methods:
-            - in:
-                - name: eventType
-                  type: EventType
-                - name: sub
-                  type: SubscriptionValue
-              name: Subscribe
-              out:
-                - type: error
-            - in:
-                - name: eventType
-                  type: EventType
-                - name: name
-                  type: string
-              name: Unsubscribe
-              out:
-                - type: error
-            - in:
-                - name: ctx
-                  type: context.Context
-                - name: event
-                  type: any
-              name: Publish
-              out:
-                - type: DispatchValue
-                - type: error
-        name: Bus
       - name: DispatchValue
         struct:
           fields:

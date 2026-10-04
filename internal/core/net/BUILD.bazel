@@ -10,6 +10,7 @@ go_library(
         "client_config.go",
         "codes.go",
         "conn.go",
+        "design_gen.go",
         "drain.go",
         "duration.go",
         "errors.go",

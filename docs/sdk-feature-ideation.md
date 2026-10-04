@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-09 -->
+<!-- updated: 2026-10-04 -->
 # SDK — idéation de features (cartographie écosystème Go ↔ SDK ↔ framework)
 
 > Référencé par `docs/adr/0013-sdk-crypto-domain.md:157`. Ce document a vécu
@@ -405,7 +405,7 @@ mandat explicitement adverse, 3 tours.
 | Affirmation d'origine | Verdict | Preuve |
 |---|---|---|
 | « `scheduler` testable sans dormir via `kernel/clock` » | **FAUX** | `internal/kernel/clock/clock.go:9-13` — `Clock` n'expose que `Now()` et `Since()`. Ni `After`, ni `Timer`, ni `Sleep` à injecter. `testing/synctest` couvre déjà ce besoin. |
-| « `codec` s'arrête aux octets, pas objet » | **FAUX** | `internal/core/data/codec/codec_interface.go:19-20` — le contrat est `Marshal(v any)` / `Unmarshal(data []byte, v any)`. Retire au `mapper` sa justification. |
+| « `codec` s'arrête aux octets, pas objet » | **FAUX** | `internal/core/data/codec/design_gen.go:35-36` (écrit par `kit gen` depuis `design/data/codec.yaml`) — le contrat est `Marshal(v any)` / `Unmarshal(data []byte, v any)`. Retire au `mapper` sa justification. |
 | « `wire` est le modèle compatible » | **FAUX** | `google/wire` est **archivé** (dernier push 2025-08-22). |
 | « `lifecycle` est le pendant de `HttpKernel` » | **FAUX** | HttpKernel transforme une requête en réponse ; il ne supervise pas un processus. |
 | « port + registre » comme critère d'admission (§2 Q5) | **FAUX** | `proc`, `resilience` et `net` n'ont pas de registre — `internal/core/CLAUDE.md`. |

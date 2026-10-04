@@ -6,6 +6,7 @@ go_library(
     name = "redact",
     srcs = [
         "codes.go",
+        "design_gen.go",
         "errors.go",
         "redact.go",
     ],
@@ -37,7 +38,6 @@ go_test(
     ],
     deps = [
         ":redact",
-        "//internal/core/observe/logger",
         "//internal/kernel/errs",
     ],
 )

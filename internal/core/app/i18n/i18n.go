@@ -50,6 +50,8 @@
 // reading a format is a mechanism (ADR 0160). What they produce is assembled
 // here, by [NewTag], [NewPattern] and [NewCompiledMessage], which hold every
 // value to its own invariants whoever builds it.
+//
+// Package i18n — the message-source port and its two ADR 0039 siblings.
 package i18n
 
 // PluralRule reports which CLDR category a quantity falls in for ONE language.

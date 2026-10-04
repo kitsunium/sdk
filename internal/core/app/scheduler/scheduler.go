@@ -44,23 +44,3 @@ type Job func(ctx context.Context) error
 // a Schedule returning a value that is not strictly after its argument would
 // make that loop spin forever.
 type Schedule func(after time.Time) (next time.Time, ok bool)
-
-// Scheduler owns a set of named [EntryValue] pairings and fires them.
-// Implementations MUST be safe for concurrent use.
-//
-// IFACE-PLUGIN: the concrete engine stays unexported behind its constructor in
-// internal/service/app/scheduler.
-type Scheduler interface {
-	// Add registers an entry. It is refused while Run is executing
-	// ([SchedulerRunning]), on a name already registered ([DuplicateJob]), and
-	// on an entry that is not runnable — empty name, nil Job, nil Schedule
-	// ([InvalidEntry]).
-	Add(entry EntryValue) error
-	// Run drives the registered entries until ctx is cancelled, then waits for
-	// every in-flight job to return and reports nil. A Scheduler with no entry
-	// is legitimate and simply waits for ctx: only an unrunnable ENTRY is
-	// refused, never an empty entry set. Run is itself refused with
-	// [SchedulerRunning] while already running; once it returns, the Scheduler
-	// may be added to and run again.
-	Run(ctx context.Context) error
-}

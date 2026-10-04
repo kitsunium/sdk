@@ -6,6 +6,7 @@ go_library(
     name = "statemachine",
     srcs = [
         "codes.go",
+        "design_gen.go",
         "errors.go",
         "record.go",
         "statemachine.go",

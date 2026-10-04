@@ -138,6 +138,180 @@ packages:
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/proc
+    ports:
+      - doc: |-
+          Group is a handle to a cgroup v2 control group used to confine a process tree:
+          set controller limits, attach processes, and remove the group. Implementations
+          live in internal/service/proc/*; it is Linux-only and non-Linux builds return
+          a no-op satisfying this interface with UNSUPPORTED_PLATFORM.
+        methods:
+          - doc: |-
+              SetMemoryMax writes memory.max (systemd MemoryMax=); a negative value
+              means "max" (no limit).
+            in:
+              - name: bytes
+                type: int64
+            name: SetMemoryMax
+            out:
+              - type: error
+          - doc: |-
+              SetCPUMax writes cpu.max as "quota period" (systemd CPUQuota=); a negative
+              quota means "max".
+            in:
+              - name: quota
+              - name: period
+                type: int64
+            name: SetCPUMax
+            out:
+              - type: error
+          - doc: |-
+              SetPidsMax writes pids.max (systemd TasksMax=); a negative value means
+              "max".
+            in:
+              - name: "n"
+                type: int64
+            name: SetPidsMax
+            out:
+              - type: error
+          - doc: |-
+              SetIOMax writes one io.max line verbatim (systemd IO*Max=), e.g.
+              "8:0 rbps=1048576".
+            in:
+              - name: spec
+                type: string
+            name: SetIOMax
+            out:
+              - type: error
+          - doc: Add moves the process pid into this group by writing cgroup.procs.
+            in:
+              - name: pid
+                type: int
+            name: Add
+            out:
+              - type: error
+          - doc: |-
+              Kill atomically SIGKILLs every process in the group by writing "1" to
+              cgroup.kill (systemd KillMode=control-group; kernel >= 5.14). Unlike a
+              process-group kill, nothing escapes — a member that called setsid is still
+              in the control group. Returns UnsupportedPlatform when cgroup.kill is absent
+              (older kernels), so callers can fall back to SignalGroup.
+            name: Kill
+            out:
+              - type: error
+          - doc: |-
+              Freeze quiesces the whole group by writing "1" to cgroup.freeze (kernel
+              >= 5.2), stopping every member so a consistent signal sweep or snapshot can
+              run. Returns UnsupportedPlatform when cgroup.freeze is absent. Idempotent.
+            name: Freeze
+            out:
+              - type: error
+          - doc: |-
+              Thaw resumes a frozen group by writing "0" to cgroup.freeze. Returns
+              UnsupportedPlatform when cgroup.freeze is absent. Idempotent.
+            name: Thaw
+            out:
+              - type: error
+          - doc: Delete removes the (empty) control group; callers move processes out first.
+            name: Delete
+            out:
+              - type: error
+        name: Group
+      - doc: |-
+          Listener is the supervisor side of the sd_notify protocol: it owns the
+          AF_UNIX datagram socket a supervised child writes readiness to, and yields one
+          parsed, credential-verified NotificationValue per received datagram.
+          Implementations live in internal/service/proc/*.
+        methods:
+          - doc: |-
+              Recv blocks until the next datagram arrives and returns it parsed, with the
+              sender PID verified by the kernel. It returns a typed error on a malformed
+              datagram or once the listener is closed.
+            name: Recv
+            out:
+              - type: NotificationValue
+              - type: error
+          - doc: Close releases the socket and unblocks any in-flight Recv.
+            name: Close
+            out:
+              - type: error
+        name: Listener
+      - doc: |-
+          Process is a handle to a spawned process. It exposes only lifetime control —
+          observe completion, deliver a signal to the leader or its whole group, and
+          stop it gracefully. Implementations live in internal/service/proc/*; the
+          pkg/v1/proc/process facade returns this interface.
+        methods:
+          - doc: PID reports the process identifier of the leader.
+            name: PID
+            out:
+              - type: int
+          - doc: |-
+              Wait blocks until the process exits and returns its ExitValue — the real
+              one even when a running Reaper collected the child first. It is safe
+              to call once; concurrent or repeated calls observe the same outcome. Under
+              StdioCapture it returns only after every captured byte has reached the
+              caller's writers; if a writer itself failed, the ExitValue still reports the
+              real exit status and the error is StdioCaptureFailed.
+            name: Wait
+            out:
+              - type: ExitValue
+              - type: error
+          - doc: Signal delivers sig to the leader process only.
+            in:
+              - name: sig
+                type: Signal
+            name: Signal
+            out:
+              - type: error
+          - doc: |-
+              SignalGroup delivers sig to the leader's entire process group (kill(-pgid,
+              sig)), reaching forked grandchildren — the KillMode=control-group analogue.
+            in:
+              - name: sig
+                type: Signal
+            name: SignalGroup
+            out:
+              - type: error
+          - doc: |-
+              Stop terminates the process group gracefully: it sends sig, waits up to
+              grace for exit, then escalates to SIGKILL. It returns when the process has
+              exited or ctx is cancelled.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: grace
+                type: time.Duration
+              - name: sig
+                type: Signal
+            name: Stop
+            out:
+              - type: error
+        name: Process
+      - doc: |-
+          Reaper collects terminated child processes so they do not linger as zombies —
+          the core duty of any PID1 or subreaper. Implementations live in
+          internal/service/proc/*; non-supporting platforms return a no-op reaper.
+
+          A sweep collects every exited child, including one a Process handle is
+          waiting for; an implementation must hand such a child's exit status to that
+          Process rather than discard it, so its Wait still reports the real exit.
+        methods:
+          - doc: |-
+              Start begins a background SIGCHLD-driven loop that reaps children as they
+              exit. It is idempotent: a second Start while running is a no-op.
+            name: Start
+          - doc: |-
+              Stop ends the background loop after a final draining sweep, so shutdown
+              leaves no un-reaped zombies. It is safe to call without a prior Start.
+            name: Stop
+          - doc: |-
+              ReapOnce performs a single non-blocking sweep and reports how many
+              children were reaped. It is safe to call concurrently with the loop.
+            name: ReapOnce
+            out:
+              - type: int
+              - type: error
+        name: Reaper
     types:
       - methods:
           - name: Success
@@ -159,52 +333,6 @@ packages:
               type: time.Duration
             - name: MaxRSS
               type: int64
-      - interface:
-          methods:
-            - in:
-                - name: bytes
-                  type: int64
-              name: SetMemoryMax
-              out:
-                - type: error
-            - in:
-                - name: quota
-                - name: period
-                  type: int64
-              name: SetCPUMax
-              out:
-                - type: error
-            - in:
-                - name: "n"
-                  type: int64
-              name: SetPidsMax
-              out:
-                - type: error
-            - in:
-                - name: spec
-                  type: string
-              name: SetIOMax
-              out:
-                - type: error
-            - in:
-                - name: pid
-                  type: int
-              name: Add
-              out:
-                - type: error
-            - name: Kill
-              out:
-                - type: error
-            - name: Freeze
-              out:
-                - type: error
-            - name: Thaw
-              out:
-                - type: error
-            - name: Delete
-              out:
-                - type: error
-        name: Group
       - name: LimitValue
         struct:
           fields:
@@ -212,16 +340,6 @@ packages:
               type: uint64
             - name: Hard
               type: uint64
-      - interface:
-          methods:
-            - name: Recv
-              out:
-                - type: NotificationValue
-                - type: error
-            - name: Close
-              out:
-                - type: error
-        name: Listener
       - methods:
           - name: String
             out:
@@ -282,47 +400,6 @@ packages:
             recv: value
         name: Resource
         underlying: int
-      - interface:
-          methods:
-            - name: PID
-              out:
-                - type: int
-            - name: Wait
-              out:
-                - type: ExitValue
-                - type: error
-            - in:
-                - name: sig
-                  type: Signal
-              name: Signal
-              out:
-                - type: error
-            - in:
-                - name: sig
-                  type: Signal
-              name: SignalGroup
-              out:
-                - type: error
-            - in:
-                - name: ctx
-                  type: context.Context
-                - name: grace
-                  type: time.Duration
-                - name: sig
-                  type: Signal
-              name: Stop
-              out:
-                - type: error
-        name: Process
-      - interface:
-          methods:
-            - name: Start
-            - name: Stop
-            - name: ReapOnce
-              out:
-                - type: int
-                - type: error
-        name: Reaper
       - methods:
           - name: OS
             out:

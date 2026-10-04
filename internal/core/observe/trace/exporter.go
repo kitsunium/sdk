@@ -24,16 +24,6 @@ func (n ExporterName) String() string {
 	return string(n)
 }
 
-// SpanExporter ships a batch of finished spans to a backend.
-// Implementations MUST be safe for concurrent use.
-//
-// IFACE-PLUGIN: the registry stores plug-in exporters behind this interface;
-// concrete exporter types stay unexported per package.
-type SpanExporter interface {
-	Name() ExporterName
-	Export(spans SpansValue) error
-}
-
 // registry maps each ExporterName to its SpanExporter — a read-mostly,
 // copy-on-write table (kernel/plugin.Registry), the same mechanism the other
 // signal's exporter registry runs on.

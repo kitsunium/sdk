@@ -32,26 +32,44 @@ packages:
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/app/scheduler
+    ports:
+      - doc: |-
+          Scheduler owns a set of named [EntryValue] pairings and fires them.
+          Implementations MUST be safe for concurrent use.
+
+          IFACE-PLUGIN: the concrete engine stays unexported behind its constructor in
+          internal/service/app/scheduler.
+        methods:
+          - doc: |-
+              Add registers an entry. It is refused while Run is executing
+              ([SchedulerRunning]), on a name already registered ([DuplicateJob]), and
+              on an entry that is not runnable — empty name, nil Job, nil Schedule
+              ([InvalidEntry]).
+            in:
+              - name: entry
+                type: EntryValue
+            name: Add
+            out:
+              - type: error
+          - doc: |-
+              Run drives the registered entries until ctx is cancelled, then waits for
+              every in-flight job to return and reports nil. A Scheduler with no entry
+              is legitimate and simply waits for ctx: only an unrunnable ENTRY is
+              refused, never an empty entry set. Run is itself refused with
+              [SchedulerRunning] while already running; once it returns, the Scheduler
+              may be added to and run again.
+            in:
+              - name: ctx
+                type: context.Context
+            name: Run
+            out:
+              - type: error
+        name: Scheduler
     types:
       - name: Job
         underlying: func(ctx context.Context) error
       - name: Schedule
         underlying: func(after time.Time) (next time.Time, ok bool)
-      - interface:
-          methods:
-            - in:
-                - name: entry
-                  type: EntryValue
-              name: Add
-              out:
-                - type: error
-            - in:
-                - name: ctx
-                  type: context.Context
-              name: Run
-              out:
-                - type: error
-        name: Scheduler
       - name: EntryValue
         struct:
           fields:

@@ -37,3 +37,7 @@ A subject is a reference, never an identity: 1–128 bytes of lowercase `a-z`,
 
 Concrete stores, the keyring, the rotator and the subject keys:
 `internal/service/security/secret`. Public facade: `pkg/v1/security/secret`. See `CLAUDE.md`.
+
+The ports — `Store` and `SubjectKeyStore` — are generated from
+`design/security/secret.yaml` into `design_gen.go` (ADR 0163): a port changes
+in the design, then `kit gen`.

@@ -1,3 +1,5 @@
+// Package crypto — the password-hashing port implemented by each scheme.
+//
 // Package crypto — the process-wide PasswordHasher registry + HashPassword / VerifyPassword / NeedsRehash dispatch.
 package crypto
 

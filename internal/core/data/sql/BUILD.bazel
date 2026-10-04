@@ -6,10 +6,10 @@ go_library(
     name = "sql",
     srcs = [
         "codes.go",
+        "design_gen.go",
         "errors.go",
         "sql.go",
         "sql_dialect.go",
-        "sql_interface.go",
         "sql_migration.go",
         "sql_txoptions.go",
     ],
