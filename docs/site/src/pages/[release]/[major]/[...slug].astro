@@ -8,19 +8,22 @@
 import { getCollection, render } from "astro:content";
 import Default from "../../../layouts/Default.astro";
 import WhatsNew from "../../../components/WhatsNew.astro";
-import { withBase } from "../../../../scripts/lib/base.mjs";
+import { pagePath } from "../../../../scripts/lib/page-catalog.mjs";
 
 export async function getStaticPaths() {
   const all = await getCollection("docs");
   return all.map(entry => {
     //: entry.id (Astro 5 glob loader) looks like "local/v1/index",
     //: "local/v1/codec", "local/v1/adr/0001-foo". First two segments
-    //: are the release + major; everything else is the page slug.
-    const segments = entry.id.split("/");
+    //: are the release + major; everything else is the page slug, served
+    //: at its directory: "local/v1/index" at /local/v1/ and the ADR index
+    //: "local/v1/adr/index" at /local/v1/adr/, where its relative links to
+    //: the ADRs (./0001-foo/) and the contributors page's ../adr/ resolve.
+    const segments = pagePath(entry.id).split("/");
     const release = segments[0];
     const major = segments[1];
     const rest = segments.slice(2).join("/");
-    const slug = rest === "" || rest === "index" ? undefined : rest;
+    const slug = rest === "" ? undefined : rest;
     return {
       params: { release, major, slug },
       props: { entry },
@@ -53,16 +56,17 @@ const source = (entry.data as { source?: string | null } | undefined)?.source ??
 //: are reachable via in-page scroll / fragment links from the body.
 const tocHeadings = (headings ?? []).filter(h => h.depth === 2);
 
-//: Home page detection — Astro strips trailing /index so the landing
-//: page's entry.id is exactly "<release>/<major>". On that page we
-//: inject the <WhatsNew /> banner ABOVE the article (returning users
-//: see recent changes immediately; drive-by visitors get the README
-//: pitch right under the banner).
-const segments = entry.id.split("/");
+//: Home page detection — the landing page's id is "<release>/<major>/index"
+//: (content.config.ts keeps the file path), served at "<release>/<major>".
+//: On that page we inject the <WhatsNew /> banner ABOVE the article
+//: (returning users see recent changes immediately; drive-by visitors get
+//: the README pitch right under the banner).
+const segments = pagePath(entry.id).split("/");
 const isHome = segments.length === 2;
 const release = segments[0];
 const major = segments[1];
-const changelogHref = withBase(`/${release}/${major}/changelog/`);
+//: WhatsNew prefixes the deploy base itself: an absolute path without it.
+const changelogHref = `/${release}/${major}/changelog/`;
 ---
 
 <Default title={title} description={description} headings={tocHeadings} source={source}>

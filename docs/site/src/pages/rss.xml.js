@@ -5,6 +5,7 @@
 // Default.astro's <head>.
 import rss from "@astrojs/rss";
 import { getCollection } from "astro:content";
+import { pagePath } from "../../scripts/lib/page-catalog.mjs";
 
 export async function GET(context) {
   let entries = [];
@@ -21,11 +22,12 @@ export async function GET(context) {
     description: "Latest pages in the documentation portal.",
     site: context.site,
     items: entries.map((entry) => {
-      const segments = entry.id.split("/");
+      //: served at its directory: "<release>/<major>/adr/index" is …/adr/.
+      const segments = pagePath(entry.id).split("/");
       const major = segments[0];
       const release = segments[1];
       const rest = segments.slice(2).join("/");
-      const slug = rest === "" || rest === "index" ? "" : `${rest}/`;
+      const slug = rest === "" ? "" : `${rest}/`;
       return {
         title: entry.data?.title ?? rest ?? entry.id,
         description: entry.data?.description ?? "",

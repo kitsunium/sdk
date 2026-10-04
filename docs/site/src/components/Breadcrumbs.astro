@@ -16,7 +16,7 @@
 // page that exists: a family directory that is not itself a package
 // (`data` above — ADR 0155) has no page, so its crumb is plain text.
 import { getCollection } from "astro:content";
-import { RESERVED } from "../../scripts/lib/page-catalog.mjs";
+import { RESERVED, pagePath } from "../../scripts/lib/page-catalog.mjs";
 import { DEPLOY_BASE } from "../../scripts/lib/base.mjs";
 
 interface Props {
@@ -42,7 +42,9 @@ const root = segments.length >= 2 ? `${segments[0]}/${segments[1]}` : "";
 let pageIds = new Set<string>();
 try {
   const entries = await getCollection("docs", e => e.id.startsWith(`${root}/`));
-  pageIds = new Set(entries.map(e => e.id));
+  //: by the path each is served at: the ADR index "<root>/adr/index" is
+  //: the page of the "adr" crumb.
+  pageIds = new Set(entries.map(e => pagePath(e.id)));
 } catch { /* collection empty in bootstrap */ }
 
 const crumbs: Array<{ href: string | null; label: string }> = [];
