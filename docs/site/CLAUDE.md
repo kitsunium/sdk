@@ -11,16 +11,27 @@ drift from the code.
 
 ## Build pipeline
 
-`npm run build` → `prebuild` (sync) then `astro build` + `pagefind`:
+`npm run build` → `prebuild` (sync) then the content sync, `astro build` + `pagefind`:
 
 | Step | Script | Emits |
 |---|---|---|
 | `prebuild` | `scripts/sync-versions.mjs` | `src/content/docs/<release>/<major>/**` (gitignored), `src/data/versions.json`, `src/data/build-info.json`, the `src/data/features-<release>-<major>.json` banner data (curated in `src/data/features.mjs`; `scripts/gen-features.mjs` regenerates the local release's alone) |
 | | `scripts/gen-symbols.mjs` → `tools/genindex` | `public/_search/symbols-<major>.json` (⌘K search index) |
-| `build` | `astro build` + `pagefind` | `dist/` + `dist/_pagefind/` |
+| `build` | `scripts/sync-content.mjs`, then `astro build` + `pagefind` | `node_modules/.astro/data-store.json` (the content store, written before the build reads it), then `dist/` + `dist/_pagefind/` |
 | `test` | `node --test scripts/lib/*.test.mjs` | tag-format, feature-catalog, package-discovery, page-catalog and ADR-link unit tests |
 
 Run `make docs` / `make serve` from the repo root (they call the above); `make docs-dev` runs `npm run dev`, the same sync then `astro dev`.
+
+**The content store is written before `astro build` reads it, and must be.**
+The prebuild wipes it (`node_modules/.astro/`), and a fresh store is written
+while the content syncs, by a debounced write. When the sync ends with that
+write still in flight, `astro build` (5.18) reads the store before it lands —
+the file absent, so every collection empty — and renders 80 pages out of
+9,500 with exit status 0: a full build here did. `astro sync` is no cure, the
+CLI exiting the process as soon as its command resolves. `sync-content.mjs`
+runs the same sync through Astro's JavaScript API and lets Node exit once the
+write has landed; `astro build` then loads the complete store and re-syncs
+only what changed, in seconds.
 
 ## Layout
 
