@@ -333,7 +333,10 @@ jobs:
             cat /tmp/cut.log >&2
             exit 1
           fi
-          echo "::notice::published $sdk_tag and $(($(awk 'NF' /tmp/cut.log | wc -l) - 1)) vendor tag(s)"
+          # The tombstones of the first release are no vendor module: counted apart.
+          vendors="$(awk 'NF && NR > 1 && !/^(pkg|framework)\/v/ { n++ } END { print n + 0 }' /tmp/cut.log)"
+          tombstones="$(awk 'NF && NR > 1 && /^(pkg|framework)\/v/ { n++ } END { print n + 0 }' /tmp/cut.log)"
+          echo "::notice::published $sdk_tag, $vendors vendor tag(s) and $tombstones tombstone(s)"
 
       - name: Create the GitHub release
         # ONE release, for the SDK's tag (ADR 0162) — not one per module, which
