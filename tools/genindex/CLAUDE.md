@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-04T04:30:00Z -->
+<!-- updated: 2026-10-04T05:30:00Z -->
 # tools/genindex/
 
 ## Purpose
@@ -151,12 +151,16 @@ fixture repository. The `tools/` conventions are in `tools/CLAUDE.md`.
   A cell added to the lane fails `check-platforms.sh` until the table gains it,
   and the check and docs/api judge it from then on with no other edit.
 - **Two groups of tests skip under Bazel**, which stages this package's data
-  alone and has no `go` on its PATH: the end-to-end tests (`api_e2e_test.go`,
-  which run the go command) and the census and codes tests
-  (`api_census_test.go`, which read the whole repository). `go test` runs them
-  — CI's `test-386` job over every module of the census, and any local run —
-  which is their gate (rule 12). The vector tests and every unit test run in
-  both.
+  alone: the end-to-end tests (`api_e2e_test.go`, which run the go command
+  over the fixture repository under `testdata/`, never staged) and the census
+  and codes tests (`api_census_test.go`, which read the whole repository).
+  Each skips on what it reads being absent (`needFixture`,
+  `needRepository`), never on the PATH alone: GitHub's ubuntu runner puts a
+  `go` on a Bazel test's PATH and a Mac with Homebrew's go does not, and the
+  first push of these tests, guarded by `needGo` alone, failed the `bazel` job
+  there on a fixture it could not stage. `go test` runs them — CI's `test-386`
+  job and e2e-cross over every module of the census, and any local run — which
+  is their gate (rule 12). The vector tests and every unit test run in both.
 - `make api-check` needs the workspace's modules in the module cache: a first
   run downloads the vendor modules' dependencies. It costs about 11 s warm on
   an M1 Pro (`make lint-check` 4 s before, 15 s after; peak 1.3 GB, the vendor

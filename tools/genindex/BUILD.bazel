@@ -54,9 +54,11 @@ go_test(
     ],
     # The platforms table every judgement is made on, and the schema whose
     # vectors the writer is held to, at the same paths relative to this
-    # package as `go test` sees them. The tests that run the go command or
-    # read the whole repository skip here, where neither exists, and run under
-    # `go test` (test-386, and any local run).
+    # package as `go test` sees them. The end-to-end tests skip here, where
+    # the fixture repository under testdata is not staged, whether or not the
+    # sandbox's PATH has a go command; the tests that read the whole
+    # repository skip too. Both run under `go test` (test-386, e2e-cross, and
+    # any local run).
     data = [
         "//:docs/api/schema.json",
         "//:scripts/ci/platforms.sh",
