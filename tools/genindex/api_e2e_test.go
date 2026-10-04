@@ -25,14 +25,27 @@ const (
 	fixtureDesign string = "design/lock.yaml"
 )
 
-// needGo skips a test that runs the go command where there is none: a Bazel
-// test's sandbox has no go on its PATH. `go test` runs these — CI's test-386
-// job over every module of the census, tools/genindex included, and any
-// local run (rule 12).
+// needFixture skips a test that reads the fixture repository where it is not
+// staged: Bazel stages this package's data alone, and testdata/apirepo is not
+// among it (gazelle excludes testdata). A go command on the sandbox's PATH
+// says nothing about the fixture — GitHub's ubuntu runner has one there, a
+// Mac whose go comes from Homebrew has none — so this, not needGo, keeps the
+// end-to-end tests out of `bazel test`. `go test` runs them — CI's test-386
+// job and e2e-cross over every module of the census, tools/genindex
+// included, and any local run (rule 12).
+func needFixture(t *testing.T) {
+	t.Helper()
+	if _, err := os.Stat(fixtureRepo); err != nil {
+		t.Skipf("needs the fixture repository (%s): `go test` in tools/genindex runs this test", fixtureRepo)
+	}
+}
+
+// needGo skips a test that runs the go command where there is none on the
+// PATH. `go test` runs these, as needFixture says.
 func needGo(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("go"); err != nil {
-		t.Skip("no go command on PATH (a Bazel sandbox): `go test` in tools/genindex runs this test")
+		t.Skip("no go command on PATH: `go test` in tools/genindex runs this test")
 	}
 }
 
@@ -40,6 +53,7 @@ func needGo(t *testing.T) {
 // its docs/api, and returns the copy's root and cells.
 func fixtureCopy(t *testing.T) (root string, cells []platform) {
 	t.Helper()
+	needFixture(t)
 	needGo(t)
 	root = t.TempDir()
 	if err := os.CopyFS(root, os.DirFS(fixtureRepo)); err != nil {
