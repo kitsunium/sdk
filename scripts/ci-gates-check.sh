@@ -86,6 +86,8 @@ GUARDS=(
   scripts/pre-commit/check-pkg-docs.sh
   scripts/pre-commit/check-bench-md.sh
   scripts/pre-commit/check-error-codes-drift.sh
+  # The platforms table is the cross-build matrix CI compiles.
+  scripts/pre-commit/check-platforms.sh
   scripts/check-layer-deps.sh
 )
 

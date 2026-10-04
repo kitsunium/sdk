@@ -1,11 +1,12 @@
-<!-- updated: 2026-10-03T13:06:04Z -->
+<!-- updated: 2026-10-04T05:30:00Z -->
 # scripts/ci/
 
 ## Purpose
 
-The two helpers every lane that loops over Go modules shares: the module
-census (ADR 0137) and the govulncheck gate built on it (ADR 0136), with the
-BATS suite that pins both. Tooling, not library code — the tree's general
+The helpers the lanes share: the module census every lane that loops over Go
+modules reads (ADR 0137), the platforms table every lane that loops over
+GOOS/GOARCH cells reads, and the govulncheck gate built on the census
+(ADR 0136), with the BATS suite that pins them. Tooling, not library code — the tree's general
 rules (portability, the ADR 0088 and ADR 0137 rules, the Do NOT list) are in
 `scripts/CLAUDE.md`.
 
@@ -14,8 +15,9 @@ rules (portability, the ADR 0088 and ADR 0137 rules, the Do NOT list) are in
 | File | What it does | Run by |
 |---|---|---|
 | `go-modules.sh` | the census: one directory per `go.mod` git tracks, `.` for the root, sorted; a `go.mod` under `testdata/` is a fixture and left out, an untracked one is not reported; exit 1 with the reason on stderr when git cannot answer or answers nothing | `bazel-ci.yml`'s `cross-build` and `test-386`, `e2e-cross.yml`, `make test-framework`, `scripts/cross-platform-audit.sh`, `vuln-check.sh` |
+| `platforms.sh` | the platforms table: the twelve GOOS/GOARCH cells, one `goos/goarch` per line, in the order of `bazel-ci.yml`'s `cross-build` matrix, printed from its one here-document — which a program can read without running the script | `scripts/cross-platform-audit.sh`; `scripts/pre-commit/check-platforms.sh`, which holds it to the matrix |
 | `vuln-check.sh` | govulncheck in source mode, `GOWORK=off`, one module at a time — the whole census, or the modules named as arguments. govulncheck's exit 3 (a reachable vulnerable symbol) fails and names the module; any other non-zero fails as a scan that did not complete; "no packages matched" fails as an incomplete scan from any module — the root `.` included, the SDK module since ADR 0162. With `GOVULNCHECK_VERSION` set the scanner must report exactly that version | `make vuln-check` — a step of `bazel-ci.yml`'s `bazel` job and of the daily `vuln-scan.yml` |
-| `test-ci-scripts.bats` | the census in throwaway repositories (nesting, `testdata/`, untracked, empty, a failing git, this repository's tools), the lanes reading it and skipping no module, every govulncheck verdict through a stub scanner, and the guard half of `scripts/ci-gates-check.sh` | `make ci-scripts-check` (`scripts/ci-scripts-test.sh`), in `bazel-ci.yml`'s `shell-gates` job |
+| `test-ci-scripts.bats` | the census in throwaway repositories (nesting, `testdata/`, untracked, empty, a failing git, this repository's tools), the lanes reading it and skipping no module, the platforms table and the local audit reading it, every govulncheck verdict through a stub scanner, and the guard half of `scripts/ci-gates-check.sh` | `make ci-scripts-check` (`scripts/ci-scripts-test.sh`), in `bazel-ci.yml`'s `shell-gates` job |
 
 ## Rules
 
@@ -39,6 +41,7 @@ rules (portability, the ADR 0088 and ADR 0137 rules, the Do NOT list) are in
 
 ```sh
 bash scripts/ci/go-modules.sh                # prints the census
+bash scripts/ci/platforms.sh                 # prints the twelve cells
 make ci-scripts-check                        # needs bats on PATH
 make vuln-install && make vuln-check         # needs vuln.go.dev
 ```

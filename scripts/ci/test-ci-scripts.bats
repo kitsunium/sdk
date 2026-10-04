@@ -1,9 +1,10 @@
 #!/usr/bin/env bats
 # BATS tests for scripts/ci/: the module census every module-looping lane reads
-# (go-modules.sh, ADR 0137) and the govulncheck gate built on it (vuln-check.sh,
-# ADR 0136) — and for the guard half of scripts/ci-gates-check.sh, the manifest
-# that keeps every `make lint` guard a step of the bazel job. Run by
-# `make ci-scripts-check` in the shell-gates job.
+# (go-modules.sh, ADR 0137), the platforms table (platforms.sh) and the
+# govulncheck gate built on the census (vuln-check.sh, ADR 0136) — and for the
+# guard half of scripts/ci-gates-check.sh, the manifest that keeps every
+# `make lint` guard a step of the bazel job. Run by `make ci-scripts-check` in
+# the shell-gates job.
 #
 # The census is tested in throwaway repositories — each test copies the script
 # into one, because the script answers for the repository it lives in. The
@@ -138,6 +139,31 @@ job_body() {
 @test "lanes: the local cross-platform audit reads the same census" {
   run grep -c 'scripts/ci/go-modules.sh' "$REPO_ROOT/scripts/cross-platform-audit.sh"
   [ "$output" != "0" ]
+}
+
+# ── platforms.sh ────────────────────────────────────────────────────────────
+
+# The cells are one table: the script prints it, the local audit loops over
+# it, and scripts/pre-commit/check-platforms.sh holds it to the cross-build
+# matrix. illumos and solaris are two cells (ADR 0144).
+@test "platforms: the table prints the twelve cells, illumos and solaris apart" {
+  run bash "$CI_DIR/platforms.sh"
+
+  [ "$status" -eq 0 ]
+  n=0
+  while IFS= read -r cell; do
+    [[ "$cell" =~ ^[a-z0-9]+/[a-z0-9]+$ ]]
+    n=$((n + 1))
+  done <<<"$output"
+  [ "$n" -eq 12 ]
+  [[ "$output" == *$'illumos/amd64\nsolaris/amd64'* ]]
+}
+
+@test "lanes: the local cross-platform audit reads the platforms table, not a list" {
+  run grep -c 'scripts/ci/platforms.sh' "$REPO_ROOT/scripts/cross-platform-audit.sh"
+  [ "$output" != "0" ]
+  run grep -c 'linux/amd64' "$REPO_ROOT/scripts/cross-platform-audit.sh"
+  [ "$output" = "0" ]
 }
 
 # ── vuln-check.sh ───────────────────────────────────────────────────────────

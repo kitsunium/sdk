@@ -1,8 +1,9 @@
 #!/usr/bin/env bats
-# BATS tests for the guards in scripts/pre-commit/, in four groups: the two
+# BATS tests for the guards in scripts/pre-commit/, in five groups: the two
 # guards that piped into an early-exiting reader, check-domain-docs.sh reading a
 # core grouped by family, check-core-symmetry.sh holding the core to the
-# service (ADR 0160), and the portability of every guard. Each group says
+# service (ADR 0160), check-platforms.sh holding the platforms table to the
+# cross-build matrix, and the portability of every guard. Each group says
 # below what it pins and why.
 #
 # The early-exit cases were found by finishing the sweep ADR 0088 opened and
@@ -522,6 +523,73 @@ EOF
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"cannot read codeRangeOwners"* ]]
+}
+
+# --- check-platforms.sh -----------------------------------------------------
+
+# The platforms table and the cross-build matrix CI compiles are written in two
+# files, so the guard holds them equal: the same cells, in the
+# same order. mkplatroot copies the real table and workflow into the fixture,
+# so each case changes one thing.
+mkplatroot() {
+  root="$(cd "$SCRIPTS/../.." && pwd)"
+  mkdir -p scripts/ci .github/workflows
+  cp "$root/scripts/ci/platforms.sh" scripts/ci/
+  cp "$root/.github/workflows/bazel-ci.yml" .github/workflows/
+}
+
+@test "platforms: the table and the cross-build matrix name the same cells" {
+  mkplatroot
+
+  run "$SCRIPTS/check-platforms.sh" "$WORK"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"the same 12 cells, in the same order"* ]]
+}
+
+@test "platforms: a cell the matrix lacks is refused, both lists shown" {
+  mkplatroot
+  grep -v 'goos: solaris' .github/workflows/bazel-ci.yml >wf.tmp
+  mv wf.tmp .github/workflows/bazel-ci.yml
+
+  run "$SCRIPTS/check-platforms.sh" "$WORK"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"are not one table"* ]]
+  [[ "$output" == *"solaris/amd64"* ]]
+}
+
+@test "platforms: the same cells in another order are refused" {
+  mkplatroot
+  sed -e 's#^illumos/amd64$#TMP#' -e 's#^solaris/amd64$#illumos/amd64#' -e 's#^TMP$#solaris/amd64#' \
+    scripts/ci/platforms.sh >t.tmp
+  mv t.tmp scripts/ci/platforms.sh
+
+  run "$SCRIPTS/check-platforms.sh" "$WORK"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"are not one table"* ]]
+}
+
+@test "platforms: a table that prints nothing is refused, never passed" {
+  mkplatroot
+  printf '#!/usr/bin/env bash\nexit 0\n' >scripts/ci/platforms.sh
+
+  run "$SCRIPTS/check-platforms.sh" "$WORK"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"printed no cell"* ]]
+}
+
+@test "platforms: a workflow whose matrix cannot be found is refused" {
+  mkplatroot
+  sed 's/^  cross-build:/  cross-compile:/' .github/workflows/bazel-ci.yml >wf.tmp
+  mv wf.tmp .github/workflows/bazel-ci.yml
+
+  run "$SCRIPTS/check-platforms.sh" "$WORK"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no cell found in the cross-build matrix"* ]]
 }
 
 # --- portability (#260) -----------------------------------------------------
