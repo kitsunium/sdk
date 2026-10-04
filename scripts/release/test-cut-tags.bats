@@ -234,20 +234,38 @@ add_all_vendors() {
   g commit -q --no-verify -m "feat: the thirteen vendor modules"
 }
 
+# tombstone_notice <version> — the deprecation a tombstone's go.mod carries:
+# where the module went, and the command that migrates to it (ADR 0162). Spelled
+# out here, not read from cut-tags.sh, so the notice a consumer is shown changes
+# only when this suite does.
+tombstone_notice() {
+  echo "moved into github.com/kitsunium/sdk at $1, import paths unchanged; migrate with: go get github.com/kitsunium/sdk@$1 github.com/kitsunium/sdk/internal/kernel@none && go mod tidy"
+}
+
 # check_tombstone <dir> <version> — the tag <dir>/<version> names a child of the
 # release commit <version>, and of it alone; under <dir>, the connectors nested
-# in framework/ aside, its tree holds one file, <dir>/go.mod, which Go reads as
-# module github.com/kitsunium/sdk/<dir>, the SDK's go directive and one
-# requirement, the SDK at <version>; and nothing else differs from the release.
+# in framework/ aside, its tree holds one file, <dir>/go.mod, whose bytes are
+# the deprecation notice on the line above the module directive, then module
+# github.com/kitsunium/sdk/<dir>, the SDK's go directive and one requirement,
+# the SDK at <version> — and which Go reads as that module, deprecated with
+# that notice; and nothing else differs from the release.
 check_tombstone() {
-  local dir="$1" v="$2" t="$1/$2" json
+  local dir="$1" v="$2" t="$1/$2" json goline
   [ "$(g rev-list --parents -n1 "$t^{commit}")" = "$(g rev-parse "$t^{commit}") $(g rev-parse "$v^{commit}")" ]
   [ "$(g ls-tree -r --name-only "$t^{commit}" -- "$dir/" | awk '!/^framework\/connectors\/[a-z]+\//')" = "$dir/go.mod" ]
   [ -z "$(g diff --name-only "$v^{commit}" "$t^{commit}" | awk -v d="$dir/" 'index($0, d) != 1 || /^framework\/connectors\/[a-z]+\//')" ]
   g show "$t:$dir/go.mod" >"$BATS_TEST_TMPDIR/tombstone.mod"
+  goline="$(go mod edit -json go.mod | jq -r '.Go')"
+  # Byte for byte. The notice is one line, the comment right above `module`:
+  # `go get` prints a deprecation's first line alone.
+  printf '// Deprecated: %s\nmodule github.com/kitsunium/sdk/%s\n\ngo %s\n\nrequire github.com/kitsunium/sdk %s\n' \
+    "$(tombstone_notice "$v")" "$dir" "$goline" "$v" >"$BATS_TEST_TMPDIR/want.mod"
+  diff -u "$BATS_TEST_TMPDIR/want.mod" "$BATS_TEST_TMPDIR/tombstone.mod"
+  # And as Go reads it: the module, deprecated with the notice.
   json="$(go mod edit -json "$BATS_TEST_TMPDIR/tombstone.mod")"
   [ "$(jq -r '.Module.Path' <<<"$json")" = "github.com/kitsunium/sdk/$dir" ]
-  [ "$(jq -r '.Go' <<<"$json")" = "$(go mod edit -json go.mod | jq -r '.Go')" ]
+  [ "$(jq -r '.Module.Deprecated' <<<"$json")" = "$(tombstone_notice "$v")" ]
+  [ "$(jq -r '.Go' <<<"$json")" = "$goline" ]
   [ "$(jq -c '[.Require[] | [.Path, .Version]]' <<<"$json")" = "[[\"github.com/kitsunium/sdk\",\"$v\"]]" ]
   [ "$(jq '[.Replace, .Exclude, .Retract] | map((. // []) | length) | add' <<<"$json")" = "0" ]
 }
@@ -294,10 +312,12 @@ check_tombstone() {
   [ "$status" -eq 0 ]
   [ "$(would_tag)" = "v0.18.0 pkg/v0.18.0 framework/v0.18.0" ]
   [[ "$output" == *"v0.18.0 is the SDK module's first tag; it continues pkg/v0.17.0 (ADR 0162)"* ]]
-  # The dry run shows each tombstone's go.mod as it will be published.
+  # The dry run shows each tombstone's go.mod as it will be published, its
+  # deprecation notice included.
   [[ "$output" == *"--- pkg/go.mod (pkg/v0.18.0) ---"* ]]
   [[ "$output" == *"module github.com/kitsunium/sdk/framework"* ]]
   [[ "$output" == *"require github.com/kitsunium/sdk v0.18.0"* ]]
+  [ "$(grep -cF "// Deprecated: $(tombstone_notice v0.18.0)" <<<"$output")" -eq 2 ]
 }
 
 # …and it is the first release of the SDK module's content, which the proxy and
@@ -592,7 +612,10 @@ check_tombstone() {
 # and …/framework that provides none, that is those modules at v0.17.0 for
 # good, and a new consumer's bare `go mod tidy` lands there. The first root tag
 # cuts that last version of each — a go.mod alone on a child of the release
-# commit —, in the push that publishes it, and no other release ever does.
+# commit —, in the push that publishes it, and no other release ever does. That
+# go.mod deprecates its module with the migration command: Go reads a module's
+# deprecation from its latest go.mod, so `go get` and `go list -m -u` tell a
+# consumer still on it where it went.
 
 # The release v0.18.0 is: the SDK, the thirteen vendor modules whose go.mod the
 # merge rewrote, and the two tombstones — sixteen tags, one atomic push.

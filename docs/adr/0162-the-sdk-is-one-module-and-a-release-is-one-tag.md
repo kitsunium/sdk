@@ -85,13 +85,24 @@ irreversible for everyone who fetched it.
 **With the first root tag, and never again, two tombstone tags are cut** — the
 owner's decision of 2026-10-04, which reversed the first draft's "no
 tombstone": `pkg/v0.18.0` and `framework/v0.18.0`, each on a child of the
-release commit whose module directory holds a go.mod alone —
+release commit whose module directory holds a go.mod alone — a one-line
+`// Deprecated:` notice that names the SDK module and the migration command,
 `module github.com/kitsunium/sdk/pkg` (resp. `…/framework`), the repository's
-`go` directive, `require github.com/kitsunium/sdk v0.18.0`. The modules nested
-in `framework/` (`framework/connectors/*`) keep their files: they are modules
-of their own. Both go out in the push that publishes `v0.18.0`, which is atomic,
-so no moment exists where the SDK module's first release is published without
-them.
+`go` directive, `require github.com/kitsunium/sdk v0.18.0`:
+
+```
+// Deprecated: moved into github.com/kitsunium/sdk at v0.18.0, import paths unchanged; migrate with: go get github.com/kitsunium/sdk@v0.18.0 github.com/kitsunium/sdk/internal/kernel@none && go mod tidy
+module github.com/kitsunium/sdk/pkg
+
+go 1.27.1
+
+require github.com/kitsunium/sdk v0.18.0
+```
+
+The modules nested in `framework/` (`framework/connectors/*`) keep their
+files: they are modules of their own. Both go out in the push that publishes
+`v0.18.0`, which is atomic, so no moment exists where the SDK module's first
+release is published without them.
 
 Why. Go resolves an import that nothing in a go.mod provides by querying every
 prefix of its path at `latest`, longest first, and takes the longest module
@@ -116,8 +127,15 @@ repository out of them, so no import resolves to them. None ever again: from
 v0.18.0 on the base of a release is a root tag, and a tombstone is no release
 of pkg's (§4).
 
-A consumer migrates with one command (below), documented here, in the README
-and in the pull request.
+Go reads a module's deprecation from the same latest go.mod
+(`CheckDeprecation`, `cmd/go/internal/modload`), so the notice is what a
+consumer still on `…/pkg` or `…/framework` is told by its own tools:
+`go list -m -u` marks the module `(deprecated)`, and `go get` prints the
+notice — the first line of a deprecation alone, none of it past 500 bytes
+(`ShortMessage`, same package), hence one line.
+
+A consumer migrates with one command (below), documented here, in the README,
+in the pull request and in the tombstones' notice.
 
 ### 4. How a release computes what it tags
 
@@ -180,6 +198,13 @@ go mod tidy
 
 and, in the same `go get`, `github.com/kitsunium/sdk/<dir>@v0.18.0` for each
 vendor or connector module the go.mod requires. Import paths do not change.
+Go itself points a go.mod still on `…/pkg` or `…/framework` here: both
+modules are deprecated with this command, in one line (§3). The command alone
+also migrates a consumer of a vendor or connector module: `go get` removes the
+module's v0.17.0, which requires a retired module, and `go mod tidy` finds it
+again at its newest version, which requires the SDK module — measured on
+`framework/connectors/postgres` (§As built); naming it in the `go get` spares
+the `go: removed` line.
 
 **One removal takes out the five retired modules.** `go get <module>@none`
 removes the module and every module whose version requires it. Every version of
@@ -203,7 +228,7 @@ proxy with the tombstones (§As built), each command followed by
 | `…sdk@v0.18.0 …/pkg@v0.18.0 …/framework@v0.18.0` | `go mod tidy` fails, 129 ambiguous imports: the internal modules at v0.17.0 beside the SDK module |
 | `…/pkg@v0.18.0 …/framework@v0.18.0` | `go mod tidy` exits 0 and keeps the internal modules; `go build` fails, ambiguous imports |
 | `…/internal/kernel@none` alone | builds: the tidy re-resolves every import, and the tombstones send each to the SDK module. Not the command above: it leaves no requirement of the SDK until the tidy, and needs the proxy to list the tombstones |
-| `-u ./...` | refuses on an ambiguous import, the SDK module beside `…/pkg` v0.17.0, and leaves the go.mod as it was. Without the tombstones it changed nothing and said nothing |
+| `-u ./...` | refuses on an ambiguous import, the SDK module beside `…/pkg` v0.17.0, prints the deprecation notice of `…/pkg` and of `…/framework`, and leaves the go.mod as it was. Without the tombstones it changed nothing and said nothing |
 
 `sdkguard` names a go.mod left half-migrated — the SDK module beside a module
 it merged, a tombstone excepted — and prints the removal,
@@ -265,9 +290,17 @@ prints nothing — the `@` matters: without it a connector module,
   what a proxy lists for `…/pkg`.
 - **A blind upgrade of a v0.17.0 go.mod stops loudly.** `go get -u ./...`
   takes `…/pkg` and `…/framework` to their tombstones, finds the SDK module
-  beside `…/pkg` v0.17.0, fails on an ambiguous import and leaves the go.mod as
+  beside `…/pkg` v0.17.0, fails on an ambiguous import, prints both modules'
+  deprecation notice — the migration command in it — and leaves the go.mod as
   it was; before the tombstones it changed nothing and said nothing (both
   measured, §Consumer migration).
+- **A go.mod still on `…/pkg` or `…/framework` is told where they went, by
+  Go.** Their latest go.mod, the tombstone's, deprecates them: `go list -m -u`
+  marks both `(deprecated)`, and `go get` prints the notice for either module
+  it resolves or builds with (`go get`, `go get …/pkg@latest`, `go get -u
+  ./...`); against tombstones without the notice, `go get …/pkg@latest` took
+  the empty tombstone in silence (measured, §As built). The internal modules
+  have no tombstone and no notice; the command removes them with the others.
 - The census lanes skip no module: the root is the SDK, so the skips ADR 0157
   §5 put in `cross-build`, `test-386`, `e2e-cross` and `vuln-check.sh` are
   gone, and govulncheck answering "no packages" for the root fails like any
@@ -385,20 +418,28 @@ command removes them.
   `tombstone_commit` builds each from the release commit's tree with a
   temporary index, `write-tree` and `commit-tree` — no hook runs, the worktree
   is not touched —, the module directory reduced to the go.mod `go mod edit`
-  writes and the modules `go.work` names beneath it kept whole;
-  `assert_tombstone` and `assert_tombstone_tree` check the go.mod and the tree
-  before the tag, and the tags join the one atomic push. A tombstone tag that
-  already exists is refused, exit 1, before anything is tagged and before the
-  hold. In `lib/tag-format.sh`, `latest_pkg_tag` leaves out a tag whose `pkg/`
-  holds a go.mod alone, and `latest_release_tag` takes the root tag at a
-  version both carry, so the next release continues `v0.18.0`, unheld and with
-  no tombstone; the docs site's `git tag` fallback drops `pkg/v0.18.0` the same
+  writes and the modules `go.work` names beneath it kept whole. That go.mod
+  opens on the notice `tombstone_deprecation` gives, on the line above the
+  module directive, where Go reads it. `assert_tombstone` checks the go.mod —
+  the notice as `go mod edit -json` reads it, and that it is one line of at
+  most 500 bytes —, `assert_tombstone_tree` the tree, both before the tag, and
+  the tags join the one atomic push. A tombstone tag that already exists is
+  refused, exit 1, before anything is tagged and before the hold. In
+  `lib/tag-format.sh`, `latest_pkg_tag` leaves out a tag whose `pkg/` holds a
+  go.mod alone, and `latest_release_tag` takes the root tag at a version both
+  carry, so the next release continues `v0.18.0`, unheld and with no
+  tombstone; the docs site's `git tag` fallback drops `pkg/v0.18.0` the same
   way. The BATS cases — sixteen tags in one push, each tombstone's tree and
-  go.mod, no tombstone on the next release, a re-run that publishes nothing, a
-  tag already there refused, a hand-made one not read as history — were seen
-  red against the scripts before the change, all but the re-run and the tie,
-  which held already; the exemption in `latest_pkg_tag` and the refusal were
-  each removed once, and their cases went red.
+  go.mod (byte for byte, and the notice as Go reads it), no tombstone on the
+  next release, a re-run that publishes nothing, a tag already there refused,
+  a hand-made one not read as history — were seen red against the scripts
+  before the change, all but the re-run and the tie, which held already; the
+  exemption in `latest_pkg_tag` and the refusal were each removed once, and
+  their cases went red. The notice's cases were seen red against the writer
+  before it; a writer that drops the notice, writes it below the module
+  directive or past 500 bytes is refused by `assert_tombstone`, and nothing is
+  pushed; with that check removed as well, the suite's byte comparison still
+  goes red.
 - **sdkguard.** The freshness probe reads the SDK module from v0.18.0 up —
   against the real proxy, whose list for the root path is `v0.0.0`, the first
   draft printed `go get github.com/kitsunium/sdk@v0.0.0 …/pkg@none …` to a
@@ -424,6 +465,24 @@ command removes them.
   and `…/framework/connectors/postgres@v0.18.0`, and the graph check prints
   nothing. A consumer requiring `github.com/kitsunium/sdk` through a `replace`
   links nothing but the standard library and the SDK.
+- **Measured, the notice.** The release cut again with the notice, into a
+  second scratch clone, and served by a copy of that file proxy with its
+  tombstones in place of the first ones: their go.mod is the one §3 shows, at
+  `go 1.27.1`. On the consumer on `…/pkg` and `…/framework` v0.17.0,
+  `go list -m -u github.com/kitsunium/sdk/pkg` printed
+  `github.com/kitsunium/sdk/pkg v0.17.0 [v0.18.0] (deprecated)` —
+  `[v0.18.0]` alone against the first tombstones — and `-f '{{.Deprecated}}'`
+  the notice, and `go list -m -u all` marked `…/framework` too; `go get
+  …/pkg@latest` and `go get …/framework@latest` each printed
+  `go: module github.com/kitsunium/sdk/<dir> is deprecated: moved into
+  github.com/kitsunium/sdk at v0.18.0, …` for the module it resolved, and
+  `go get` and `go get -u ./...` for both — `go get …/pkg@latest` against the
+  first tombstones only upgraded it. The notice's command, run as printed, left
+  `github.com/kitsunium/sdk v0.18.0` alone, built, and the graph check printed
+  nothing; run alone on the consumer of `framework/connectors/postgres`
+  v0.17.0, it removed the connector with the retired modules, the tidy found
+  it again at v0.18.0, and it built on the SDK module and the connector. A new
+  module's bare `go mod tidy` still resolved to the SDK module alone.
 
 ## References
 

@@ -44,13 +44,16 @@
 #
 # That release, and no other, also cuts two tombstones (ADR 0162): pkg/vX.Y.Z
 # and framework/vX.Y.Z at its version, each on a child of the release commit
-# whose module directory holds a go.mod alone — the module's own path, the
-# SDK's go directive, and a requirement of the SDK at vX.Y.Z. Go resolves an
-# import that nothing in a go.mod provides to the longest module path whose
-# LATEST version provides the package; with the tombstones that is the SDK
-# module, without them …/pkg and …/framework at v0.17.0, for good. They go out
-# in the same atomic push as the root tag, and a tombstone tag that already
-# exists is refused before anything is tagged.
+# whose module directory holds a go.mod alone — a `// Deprecated:` notice that
+# names the SDK module and the command that migrates to it, the module's own
+# path, the SDK's go directive, and a requirement of the SDK at vX.Y.Z. Go
+# resolves an import that nothing in a go.mod provides to the longest module
+# path whose LATEST version provides the package; with the tombstones that is
+# the SDK module, without them …/pkg and …/framework at v0.17.0, for good. Go
+# reads a module's deprecation from its latest go.mod as well, so `go get` and
+# `go list -m -u` tell a consumer still on either module where it went. They
+# go out in the same atomic push as the root tag, and a tombstone tag that
+# already exists is refused before anything is tagged.
 
 set -euo pipefail
 shopt -s nullglob
@@ -96,8 +99,9 @@ recovery path for a refused release: SDK Release's workflow_dispatch input
 first release, or the first root tag after the pkg/vX.Y.Z history. Without it
 that release is refused with exit 3 (held), never cut by an automatic run.
 The first root tag after the pkg history also cuts pkg/vX.Y.Z and
-framework/vX.Y.Z at its version: tombstones, a go.mod that requires it and no
-package, in the same push (ADR 0162).
+framework/vX.Y.Z at its version: tombstones, a go.mod that requires it and
+deprecates its module with the migration command, and no package, in the same
+push (ADR 0162).
 EOF
       exit 0
       ;;
@@ -507,9 +511,24 @@ sdk_go_directive() {
   go mod edit -json go.mod | jq -r '.Go // empty'
 }
 
+# tombstone_deprecation <sem> — the notice a tombstone's go.mod carries on its
+# module directive (ADR 0162): where the module's packages went, and the
+# command ADR 0162 §Consumer migration documents to move a go.mod there. Go
+# reads a module's deprecation from its latest go.mod — the tombstone's, for
+# good —: `go list -m -u` marks the module "(deprecated)" and `go get` prints
+# the notice. One line: `go get` prints the first line of a deprecation alone,
+# and none of it past 500 bytes (ShortMessage, cmd/go/internal/modload, Go
+# 1.27.1); assert_tombstone holds both.
+tombstone_deprecation() {
+  printf 'moved into %s at %s, import paths unchanged; migrate with: go get %s@%s %s/internal/kernel@none && go mod tidy' \
+    "$SDK_MODULE" "$1" "$SDK_MODULE" "$1" "$SDK_MODULE"
+}
+
 # tombstone_gomod <dir> <sem> <out> — write to <out> the go.mod of the tombstone
-# of the module in <dir>: its own module path, the SDK's go directive and one
-# requirement, the SDK at <sem>; formatted by `go mod edit`, as Go writes it.
+# of the module in <dir>: the deprecation notice on the line right above the
+# module directive, where Go reads it, its own module path, the SDK's go
+# directive and one requirement, the SDK at <sem>; formatted by `go mod edit`,
+# as Go writes it, which keeps the comment where it stands.
 tombstone_gomod() {
   local dir="$1" sem="$2" out="$3" goline=""
   goline="$(sdk_go_directive)" || return 1
@@ -517,20 +536,32 @@ tombstone_gomod() {
     echo "cut-tags: the SDK's go.mod has no go directive for the tombstone of $dir to carry" >&2
     return 1
   fi
-  printf 'module %s\n' "$SDK_MODULE/$dir" >"$out" || return 1
+  printf '// Deprecated: %s\nmodule %s\n' "$(tombstone_deprecation "$sem")" "$SDK_MODULE/$dir" >"$out" || return 1
   go mod edit -go="$goline" -require="$SDK_MODULE@$sem" "$out"
 }
 
 # assert_tombstone <go.mod> <dir> <sem> — fail unless <go.mod> is the
-# tombstone's and nothing more: module $SDK_MODULE/<dir>, the SDK's go
-# directive, one requirement — the SDK at <sem> — and no other directive.
+# tombstone's and nothing more: module $SDK_MODULE/<dir>, deprecated — as Go
+# reads it — with the notice tombstone_deprecation writes, which `go get`
+# prints whole; the SDK's go directive; one requirement, the SDK at <sem>; and
+# no other directive.
 assert_tombstone() {
-  local gomod="$1" dir="$2" sem="$3" json="" goline=""
+  local gomod="$1" dir="$2" sem="$3" json="" goline="" notice="" bytes=0
   goline="$(sdk_go_directive)" || return 1
+  notice="$(tombstone_deprecation "$sem")"
+  bytes="$(printf '%s' "$notice" | wc -c)"
+  if [[ "$notice" == *$'\n'* ]] || [ "$((bytes))" -gt 500 ]; then
+    echo "cut-tags: the deprecation notice of the tombstone of $dir is not one line of at most 500 bytes — go get would not print it whole" >&2
+    return 1
+  fi
   json="$(go mod edit -json "$gomod")" || {
     echo "cut-tags: the tombstone go.mod of $dir does not parse" >&2
     return 1
   }
+  if ! jq -e --arg n "$notice" '.Module.Deprecated == $n' >/dev/null <<<"$json"; then
+    echo "cut-tags: the tombstone go.mod of $dir does not deprecate $SDK_MODULE/$dir with the migration notice, as Go reads it: '$(jq -r '.Module.Deprecated // ""' <<<"$json")'" >&2
+    return 1
+  fi
   if ! jq -e --arg m "$SDK_MODULE/$dir" --arg sdk "$SDK_MODULE" --arg v "$sem" --arg go "$goline" '
       .Module.Path == $m and .Go == $go and .Toolchain == null
       and ((.Require // []) | length == 1 and .[0].Path == $sdk and .[0].Version == $v)
@@ -866,7 +897,7 @@ if [ "$first" -eq 1 ] && [ -n "$last" ]; then
   echo "cut-tags: $next is the SDK module's first tag; it continues $last (ADR 0162)" >&2
 fi
 if [ "$tombstone" -eq 1 ]; then
-  echo "cut-tags: pkg/$next and framework/$next are tombstones: the last version of $SDK_MODULE/pkg and $SDK_MODULE/framework, which requires $next and provides no package, so an import of either path resolves to the SDK module (ADR 0162)" >&2
+  echo "cut-tags: pkg/$next and framework/$next are tombstones: the last version of $SDK_MODULE/pkg and $SDK_MODULE/framework, which requires $next, provides no package and deprecates its module with the migration command, so an import of either path resolves to the SDK module and go get names the move (ADR 0162)" >&2
 fi
 
 # Semver of the release (e.g. "v0.18.0"): the SDK's tag, and every vendor tag's

@@ -131,6 +131,12 @@ go get github.com/kitsunium/sdk@v0.18.0 github.com/kitsunium/sdk/internal/kernel
 go mod tidy
 ```
 
+Go names this command itself: v0.18.0 of `…/pkg` and `…/framework` deprecates
+them, so `go list -m -u` marks both `(deprecated)`, and `go get` prints, on one
+line, `go: module github.com/kitsunium/sdk/pkg is deprecated: moved into
+github.com/kitsunium/sdk at v0.18.0, import paths unchanged; migrate with:`
+and the command above.
+
 The one removal is enough: every version of `…/pkg`, `…/framework`,
 `…/internal/core` and `…/internal/service` up to v0.17.0 requires
 `…/internal/kernel`, so `go get` takes all five out and names each
@@ -138,7 +144,8 @@ The one removal is enough: every version of `…/pkg`, `…/framework`,
 migration: that version is empty, and the internal modules stay. Add
 `github.com/kitsunium/sdk/<module>@v0.18.0` to the same `go get` for each
 vendor or connector module your go.mod requires (`third-party/aws`,
-`framework/connectors/postgres`…).
+`framework/connectors/postgres`…); without it, `go get` removes that module
+with the old ones and `go mod tidy` finds it again at its newest version.
 
 Migrate from the bottom up: a library before the modules that require it. The
 `@none` takes out, with the old modules, every module that still requires
@@ -190,7 +197,7 @@ func main() {
 
 ## Releases
 
-Versioning follows [semver](https://semver.org/) and Go's sub-directory tag convention. A release is ONE tag, `vX.Y.Z`, on the SDK module `github.com/kitsunium/sdk`, and one GitHub release; a vendor or connector module is tagged at the same version — `third-party/<path>/vX.Y.Z`, `framework/connectors/<engine>/vX.Y.Z` — only by a release that changes it, and the release's notes list the ones it cut (ADR 0162). The releases up to v0.17.0 were cut as `pkg/vX.Y.Z` with every other module in lockstep (ADR 0017, ADR 0147, ADR 0157); those tags stay, and v0.18.0 cut `pkg/v0.18.0` and `framework/v0.18.0` once more, as tombstones — a go.mod that requires the SDK module and holds no package. A release is sized by the `release:*` label a maintainer sets on the pull request (ADR 0135). The full release workflow lives in ADR 0007 and the records that amend it (`docs/adr/`).
+Versioning follows [semver](https://semver.org/) and Go's sub-directory tag convention. A release is ONE tag, `vX.Y.Z`, on the SDK module `github.com/kitsunium/sdk`, and one GitHub release; a vendor or connector module is tagged at the same version — `third-party/<path>/vX.Y.Z`, `framework/connectors/<engine>/vX.Y.Z` — only by a release that changes it, and the release's notes list the ones it cut (ADR 0162). The releases up to v0.17.0 were cut as `pkg/vX.Y.Z` with every other module in lockstep (ADR 0017, ADR 0147, ADR 0157); those tags stay, and v0.18.0 cut `pkg/v0.18.0` and `framework/v0.18.0` once more, as tombstones — a go.mod that requires the SDK module, holds no package and deprecates its module with the migration command. A release is sized by the `release:*` label a maintainer sets on the pull request (ADR 0135). The full release workflow lives in ADR 0007 and the records that amend it (`docs/adr/`).
 
 ## Documentation
 
