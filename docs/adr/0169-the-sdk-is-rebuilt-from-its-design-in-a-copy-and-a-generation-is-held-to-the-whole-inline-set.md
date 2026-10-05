@@ -98,7 +98,7 @@ and is no CI gate.
 of the design's digest, but the generated headers carry the sha256 of the
 file's bytes, so the ten files generated from `sdk.yaml` change their header.
 
-## Measured
+### 4. Measured
 
 - **The guard finds what was found by hand.** With `backoff`'s
   `NormalMultiplier` and `NormalJitter` made wrappers, `kit gen` refuses:
@@ -106,7 +106,7 @@ file's bytes, so the ten files generated from `sdk.yaml` change their header.
   `backoff.Grow` 77 → 81 (+4) and `backoff.Widen` 80 → 84 (+4), each past
   the budget of 80. `Grow` and `Widen` were not in ADR 0168's account: the
   hand comparison saw `NewRetry` only.
-- **On this change it finds nothing**: `kit check -base fd54e5dd` (main,
+- **On this change it finds nothing**: `kit check -base` [`fd54e5dd`](https://github.com/kitsunium/sdk/commit/fd54e5dd) (main,
   before `semver` and `clock` were converted) is green — no function of the
   SDK lost its inlinability to the stage-6 wrappers.
 - **Cost** (M1 Pro, ≈ 320 packages, a 100 MB `-m=2` report): a clean tree
@@ -131,7 +131,7 @@ file's bytes, so the ten files generated from `sdk.yaml` change their header.
   `framework/kit` (277), `internal/core/net` (86 of 159),
   `internal/core/observe/trace` (82 of 116), `internal/kernel/errs` (71).
 
-## Consequences
+## Consequences / Semantics
 
 - A wrapper that would make any function of the project stop inlining is
   never written in silence, whoever calls it; the conversion of a package's
@@ -143,6 +143,15 @@ file's bytes, so the ten files generated from `sdk.yaml` change their header.
   by the pins. The table says where the next conversion moves the most.
 - `make from-zero` and `make kit-coverage` are local, like `make regen`:
   they need the pinned kit, which CI does not have.
+
+## Breaking changes
+
+None. Nothing exported changes: the change adds two local targets
+(`make from-zero`, `make kit-coverage`) and a sourced helper, and kit gains a
+rule (`inline`) and a refusal (`INLINE_LOST`) that hold what kit writes. A
+generation that kit `v0.1.0-rc.6` wrote and that makes no function of the
+project stop inlining is written by `v0.1.0-rc.7` byte for byte; one that
+does is refused where it was accepted, which is the point.
 
 ## Deferred
 
@@ -156,6 +165,22 @@ file's bytes, so the ten files generated from `sdk.yaml` change their header.
   the generation.
 - `make from-zero` builds the host cell; the twelve cells stay
   `cross-build`'s, on the committed tree.
+
+## Alternatives considered
+
+- **Compare the inline set by hand at each conversion**, as ADR 0168 did.
+  Rejected: it found `NewRetry` and missed `Grow` and `Widen`, and a rule a
+  person runs is a suggestion (principle 26).
+- **Measure only what the design names** (ADR 0168's measurement alone).
+  Rejected: a wrapper's cost lands on every function that inlines it,
+  whoever calls it.
+- **Rebuild from zero in the working tree**, as `make regen` does. Rejected
+  for this target: it needs a clean tree and deletes files the developer may
+  be editing; a copy proves the same over uncommitted work and writes
+  nothing.
+- **Hold the inline set in the SDK's CI.** Rejected for now: CI does not run
+  kit (ADR 0163 §7), and the guard needs the base's build, which only kit
+  knows how to state.
 
 ## References
 
