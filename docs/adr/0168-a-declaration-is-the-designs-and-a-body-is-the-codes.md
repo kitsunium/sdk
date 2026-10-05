@@ -98,7 +98,7 @@ instantiation, so nothing can be measured.
   impls.
 - A consumer importing every `pkg/v1` package and calling the semver
   functions, `ManualClock` and `Backoff.Delay`, built `-trimpath` from
-  `fd54e5dd` and from this change: the same symbols with the same sizes, but
+  [`fd54e5dd`](https://github.com/kitsunium/sdk/commit/fd54e5dd) and from this change: the same symbols with the same sizes, but
   `go:func.*` (+64 bytes, the inlining tree of one more level) and the module
   information (the replace path); the machine code of all 576 SDK functions
   is the same, compared function by function with addresses and global-data
@@ -111,7 +111,7 @@ instantiation, so nothing can be measured.
   (clock, ±18 % to ±107 %). With the machine code identical, the numbers
   measure the machine's load.
 
-## Consequences
+## Consequences / Semantics
 
 - A package can be rebuilt from its design: `kit gen -stubs` writes a
   panicking body for each impl the code lacks (`stubs_gen.go`, never
@@ -123,6 +123,18 @@ instantiation, so nothing can be measured.
   (ktn-linter's rule), naming the wrapper it is the body of.
 - The exported surface is identical, so the release is a patch.
 
+## Breaking changes
+
+None. Every exported name, kind, type, signature, value and doc text is the
+one the code declared: `docs/api` differs only in 24 `file` fields, which
+name `decl_gen.go`, and a consumer's binary has the same symbols and the same
+machine code (§4). The exported type `ManualClock` keeps its name, although
+`internal/`'s role-suffix rule (`KTN-STRUCT-ROLE`) would name a new struct
+otherwise: it is published as `pkg/v1/clock.ManualClock` (ADR 0090), and a
+rename is a break this change does not make. ktn-linter skips a generated
+file (`skip_generated: true`), so moving the declaration into `decl_gen.go`
+raises nothing it did not raise before.
+
 ## Deferred
 
 - kit measures a wrapper, its impl and the facade forwarders of it, not
@@ -131,6 +143,29 @@ instantiation, so nothing can be measured.
   measurement of the project's inline set before and after is the next step.
 - `kernel/backoff`, and every package whose bodies do not inline, keep their
   declarations hand-written, held by the pins as before.
+- The `implements:` assertions are written in `decl_gen.go`, beside the
+  declaration kit writes, and not in a `*_compliance.go` file as
+  `internal/`'s rule (`KTN-IFACE-ASSERT-PLACEMENT`) asks of hand-written ones:
+  they are compile-time declarations that cost nothing at run time, the
+  rule's gate skips generated files, and kit writing a second file per
+  package for them is a change of its own.
+
+## Alternatives considered
+
+- **Generate the bodies too** (a body fragment kit pastes into the
+  declaration). Rejected: a body is the code's, written and reviewed as Go;
+  kit would become an editor of logic, and nothing it could measure would
+  hold the fragment to its tests.
+- **Write a wrapper whatever it costs, and report the cost.** Rejected: a
+  public function never costs a call more than it did (ADR 0163 §10, ADR
+  0165), so a wrapper that does not inline — or whose body does not inline
+  into it — is refused, and the function keeps its body.
+- **Point every caller at the impl** (so a wrapper's cost never reaches
+  them, as tried on `backoff`'s `Grow` and `Widen`). Rejected for this
+  change: the callers outside the package cannot see an unexported impl —
+  `resilience.NewRetry` is one —, so the wrapper's cost reaches them all the
+  same; the package stays hand-written instead.
+
 
 ## References
 
