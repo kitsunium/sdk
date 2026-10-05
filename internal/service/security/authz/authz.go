@@ -131,14 +131,9 @@ func causeCode(cause error) string {
 	return "-"
 }
 
-// Must unwraps a constructor pair for a package-level var, panicking on error.
-//
-// It is the same shape internal/service/app/validation ships, and for the same
-// reason: a policy is built once at start-up, and a misconfiguration there is
-// a programming fault that must stop the process rather than be handled per
-// request. Never call it on data read at run time — that turns a bad
-// configuration file into a crash instead of an error.
-func Must(policy coreauthz.Policy, err error) coreauthz.Policy {
+// must is Must's body: decl_gen.go writes Must, from the
+// design, as one call of it.
+func must(policy coreauthz.Policy, err error) coreauthz.Policy {
 	//: refuse to hand back a policy the constructor already rejected.
 	if err != nil {
 		//: init-time panic: the binary is not fit to serve.
@@ -148,9 +143,9 @@ func Must(policy coreauthz.Policy, err error) coreauthz.Policy {
 	return policy
 }
 
-// MustCondition unwraps a condition constructor pair for a package-level var,
-// panicking on error. Same contract as [Must].
-func MustCondition(condition coreauthz.Condition, err error) coreauthz.Condition {
+// mustCondition is MustCondition's body: decl_gen.go writes MustCondition, from the
+// design, as one call of it.
+func mustCondition(condition coreauthz.Condition, err error) coreauthz.Condition {
 	//: refuse to hand back a condition the constructor already rejected.
 	if err != nil {
 		//: init-time panic: the binary is not fit to serve.

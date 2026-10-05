@@ -915,6 +915,7 @@ packages:
           - name: err
             type: error
         name: Must
+        impl: must
         out:
           - type: coreauthz.Policy
       - doc: |-
@@ -926,6 +927,7 @@ packages:
           - name: err
             type: error
         name: MustCondition
+        impl: mustCondition
         out:
           - type: coreauthz.Condition
       - doc: |-
@@ -1036,6 +1038,7 @@ packages:
           - name: policies
             type: coreauthz.Policy
         name: DenyOverrides
+        impl: denyOverrides
         out:
           - type: coreauthz.Policy
         variadic: true

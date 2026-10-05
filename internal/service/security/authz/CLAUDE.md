@@ -17,7 +17,7 @@ every evaluation verdict (`0.2.26.*`) are declared in
 
 | File | Surface |
 |---|---|
-| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `RuleValue`, `GrantValue`, `PermissionValue` and `RBACConfig` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `RuleValue`, `GrantValue`, `PermissionValue` and `RBACConfig` — each struct with every field, unexported ones included; `Must`, `MustCondition` and `DenyOverrides`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
 | `authz.go` | `Check` (the closure) · `Must` / `MustCondition` · the field-carrying `denied` helper |
 | `combine.go` | `DenyOverrides` — the one combining algorithm |
 | `rbac.go` | `PermissionValue` / `NewRBAC` + the inverted grant index |

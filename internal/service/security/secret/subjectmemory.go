@@ -24,10 +24,9 @@ type memorySubjectKeys struct {
 	keys map[string][]byte
 }
 
-// NewMemorySubjectKeyStore returns a core/security/secret.SubjectKeyStore that keeps
-// every wrapped key in this process's memory. It cannot fail. Insert and
-// Replace are atomic within the process — the only one that can see the map.
-func NewMemorySubjectKeyStore() coresecret.SubjectKeyStore {
+// newMemorySubjectKeyStore is NewMemorySubjectKeyStore's body: decl_gen.go writes NewMemorySubjectKeyStore, from the
+// design, as one call of it.
+func newMemorySubjectKeyStore() coresecret.SubjectKeyStore {
 	//: an empty store.
 	return &memorySubjectKeys{keys: make(map[string][]byte, initialSecrets)}
 }

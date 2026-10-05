@@ -84557,7 +84557,7 @@
       "spelled": "func(policies ...coreauthz.Policy) coreauthz.Policy",
       "canonical": "func(policies ...github.com/kitsunium/sdk/internal/core/security/authz.Policy) github.com/kitsunium/sdk/internal/core/security/authz.Policy",
       "doc": "DenyOverrides composes policies into one. A refusal from any member wins; an\n[coreauthz.Allow] is returned only when at least one member permitted and no\nmember refused; otherwise the composition abstains.\n\n# Why refusal wins, and why that is not configurable\n\nWhen one rule permits and another refuses, one of them has to lose, and the\nchoice is a security property rather than a preference. Under deny-overrides\nthe failure mode of a wrong rule set is a request that should have been\nallowed and was not — visible, reported, fixed within the hour. Under\npermit-overrides it is a request that should have been refused and was not\n— invisible, and discovered by whoever exploits it.\n\nXACML's permit-overrides, first-applicable and only-one-applicable are\ntherefore REFUSED BY NAME: this package ships one combining algorithm and no\nsetting that selects another. A caller who genuinely needs a grant that\nbeats a refusal — a break-glass path — writes it as a Go `if` around the\ncomposition, where the exception is visible at the call site instead of\nhidden in the semantics of a combiner. See ADR 0057 §D2.\n\n# It evaluates every member, and that is what makes it deny-overrides\n\nAn [coreauthz.Allow] does NOT short-circuit. A composition that returned on\nthe first grant would be first-applicable wearing this function's name, and\nit would produce a different answer depending on the order the policies were\nlisted in — the defect being ruled out here. Only a refusal short-circuits,\nbecause refusal is absorbing: once one member has said Deny, nothing any\nother member can say changes the result.\n\nThe composition is therefore commutative and associative, which is why\nnesting is invisible: DenyOverrides(a, DenyOverrides(b, c)) and\nDenyOverrides(a, b, c) agree, and so does any permutation of them.\n\n# The empty and nil cases\n\nDenyOverrides() with no members abstains — the identity of the combiner —\nand [Check] then refuses. An authorizer with no policy grants nothing, which\nis the exact opposite of internal/service/app/validation, where a validator with\nno constraint passes. Both are the safe direction for their domain, and the\ncontrast is the reason ADR 0031 is about SAFE defaults rather than permissive\nor restrictive ones.\n\nA nil member REFUSES rather than being skipped. Skipping it would silently\nshrink the policy set, which is the single most valuable edit an attacker\ncould make to a wiring file.\n",
-      "file": "internal/service/security/authz/combine.go",
+      "file": "internal/service/security/authz/decl_gen.go",
       "layer": "service",
       "family": "security"
     },
@@ -84593,7 +84593,7 @@
       "spelled": "func(policy coreauthz.Policy, err error) coreauthz.Policy",
       "canonical": "func(policy github.com/kitsunium/sdk/internal/core/security/authz.Policy, err error) github.com/kitsunium/sdk/internal/core/security/authz.Policy",
       "doc": "Must unwraps a constructor pair for a package-level var, panicking on error.\n\nIt is the same shape internal/service/app/validation ships, and for the same\nreason: a policy is built once at start-up, and a misconfiguration there is\na programming fault that must stop the process rather than be handled per\nrequest. Never call it on data read at run time — that turns a bad\nconfiguration file into a crash instead of an error.\n",
-      "file": "internal/service/security/authz/authz.go",
+      "file": "internal/service/security/authz/decl_gen.go",
       "layer": "service",
       "family": "security"
     },
@@ -84605,7 +84605,7 @@
       "spelled": "func(condition coreauthz.Condition, err error) coreauthz.Condition",
       "canonical": "func(condition github.com/kitsunium/sdk/internal/core/security/authz.Condition, err error) github.com/kitsunium/sdk/internal/core/security/authz.Condition",
       "doc": "MustCondition unwraps a condition constructor pair for a package-level var,\npanicking on error. Same contract as [Must].\n",
-      "file": "internal/service/security/authz/authz.go",
+      "file": "internal/service/security/authz/decl_gen.go",
       "layer": "service",
       "family": "security"
     },
@@ -84811,7 +84811,7 @@
       "spelled": "func(attrs []corelogger.AttrValue, maxBytes int) iter.Seq2[string, string]",
       "canonical": "func(attrs []github.com/kitsunium/sdk/internal/core/observe/logger.AttrValue, maxBytes int) iter.Seq2[string, string]",
       "doc": "Attrs renders log attributes as display text, one (key, text) pair at a\ntime, in order: a group is flattened into dotted keys (\"db.user\"), and each\ntext is cut to maxBytes (raised to MinBytes).\n\n  - An attribute — or a group — whose DOTTED key the Redactor recognises is\n    yielded once, as Placeholder: a group named \"session\" is one redacted\n    pair, not one per member.\n  - A string has the credentials of its URLs replaced; a number, a bool, a\n    duration and a time (UTC, RFC 3339 with nanoseconds) are written as Go\n    writes them.\n  - Anything else — what logger.Any carried — is an error rendered by\n    Config.Error, a fmt.Stringer by its String, or otherwise the value's\n    JSON through Value, so its declared secrets are replaced too;\n    Unencodable when encoding/json refuses it.\n\nIt is an iterator so the caller bounds the COUNT: a record carrying a group\nof ten thousand attributes costs the caller exactly as many pairs as it\nranges over before it breaks.\n",
-      "file": "internal/service/security/redact/attrs.go",
+      "file": "internal/service/security/redact/decl_gen.go",
       "layer": "service",
       "family": "security"
     },
@@ -85054,7 +85054,7 @@
       "spelled": "func(cfg MemoryConfig) coresecret.Store",
       "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/security/secret.MemoryConfig) github.com/kitsunium/sdk/internal/core/security/secret.Store",
       "doc": "NewMemory returns a Store that keeps every version in this process's memory.\nIt cannot fail: there is nothing to open and nothing a configuration can get\nwrong.\n",
-      "file": "internal/service/security/secret/memory.go",
+      "file": "internal/service/security/secret/decl_gen.go",
       "layer": "service",
       "family": "security"
     },
@@ -85066,7 +85066,7 @@
       "spelled": "func() coresecret.SubjectKeyStore",
       "canonical": "func() github.com/kitsunium/sdk/internal/core/security/secret.SubjectKeyStore",
       "doc": "NewMemorySubjectKeyStore returns a core/security/secret.SubjectKeyStore that keeps\nevery wrapped key in this process's memory. It cannot fail. Insert and\nReplace are atomic within the process — the only one that can see the map.\n",
-      "file": "internal/service/security/secret/subjectmemory.go",
+      "file": "internal/service/security/secret/decl_gen.go",
       "layer": "service",
       "family": "security"
     },

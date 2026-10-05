@@ -23,7 +23,7 @@ since ADR 0160, with its values unchanged; this package raises it.
 | File | Role |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
-| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `Config` and `Redactor` — each struct with every field, unexported ones included; the assertion `Redactor → coreredact.Redactor`. Their methods, constructors and helpers stay hand-written, in the files this document names |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `Config` and `Redactor` — each struct with every field, unexported ones included; `Redactor.Attrs`, each one call of its unexported body, measured to inline with the body inlined into it; the assertion `Redactor → coreredact.Redactor`. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
 | `redact.go` | `DefaultWords`, `Config`, `Redactor`, `NewRedactor`, `Name`, `bound` |
 | `plan.go` | the per-type plan: which members of a type's JSON form are secret by declaration, cached per `Redactor` |
 | `fields.go` | `writtenFields` — for a struct, the one field `encoding/json` writes under each member name, selected by `encoding/json`'s own rules (`jsonName`, level-by-level embedding, `dominant`) |
