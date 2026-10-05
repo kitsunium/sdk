@@ -35,5 +35,8 @@ filegroup(
 go_test(
     name = "async_test",
     srcs = ["api_gen_test.go"],
-    deps = [":async"],
+    deps = [
+        ":async",
+        "//internal/kernel/errs",
+    ],
 )

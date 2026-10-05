@@ -32,6 +32,7 @@ go_test(
         "errors_internal_test.go",
     ],
     embed = [":console"],
+    deps = ["//internal/kernel/errs"],
 )
 
 # audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.

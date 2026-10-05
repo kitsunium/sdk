@@ -61,7 +61,7 @@ A code keeps its value when its package moves, and when its declaration moves
 before the family existed, and each `0.3.*` range is its engine's — allocated
 to the service package at the same path, which raises it, and declared here
 since every `errs.Define` of a domain lives in its core. `codeRangeOwners`
-(`internal/kernel/errs/registry_ownership_external_test.go`) names these
+(`design/sdk.yaml`'s `codes.ranges`, which kit writes into `internal/kernel/errs/codes_gen_test.go` (ADR 0164)) names these
 directories under the same keys.
 
 ## Do NOT

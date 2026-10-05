@@ -10,7 +10,8 @@
 // does and the port does not describe, so its failures have nowhere to borrow a
 // code from, and they carried none at all until this range existed.
 //
-// Hand-registered in codeRangeOwners (ADR 0035) and already listed in
+// Registered in design/sdk.yaml's codes.ranges, which kit writes into
+// codeRangeOwners (ADR 0035, ADR 0164), and already listed in
 // //:audit_sources.
 //
 // Package ssh — discovering which subject this machine is enrolled as,

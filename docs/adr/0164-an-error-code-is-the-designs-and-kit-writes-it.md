@@ -22,7 +22,7 @@ Reason and texts lived in the code alone.
 ### 1. A package's codes and sentinels are sections of its design file
 
 Each package of the design gains two sections (kit's library dialect, platform
-ADR 0010's amendment of 2026-10-05):
+ADR 0010's amendment of 2026-10-05, [kitsunium/platform#54](https://github.com/kitsunium/platform/pull/54)):
 
 - `codes:` — the const declarations of the code type (`codes.type`,
   `errs.Code`) the package allocates, in order. A declaration holds its codes,
@@ -91,7 +91,10 @@ moved, never deleted — and `kit gen` wrote them back:
   joins them in — 81 into the next hand-written file, and 48, in the 24
   packages that kept no hand-written file, into a `doc.go` — so every
   package comment reads as it did;
-- 98 `codes_gen.go` and the ranges' `codes_gen_test.go` are kit's.
+- 98 `codes_gen.go` and the ranges' `codes_gen_test.go` are kit's; every
+  pin (`api_gen*_test.go`) has the body it had before the move — only its
+  header's design-file digest changed — so each code and sentinel is still
+  held by its type, even in a package left with nothing but a `doc.go`.
 
 `docs/api` changes only where a symbol's file changed (1 374 records now name
 `codes_gen.go`) — every doc text, value and canonical signature is the same —
@@ -103,11 +106,11 @@ name both packages `errs`. Their canonical type is unchanged.
 ### 5. Measured: initialisation does the same work
 
 A binary importing every public package of the SDK (98 packages, `-trimpath`),
-built from `a4d46d28` and from this change, run alternately with
+built from [`a4d46d28`](https://github.com/kitsunium/sdk/commit/a4d46d28) and from this change, run alternately with
 `GODEBUG=inittrace=1`, the SDK's packages summed per run, two rounds of 400
 runs each:
 
-| | before (`a4d46d28`) | after |
+| | before ([`a4d46d28`](https://github.com/kitsunium/sdk/commit/a4d46d28)) | after |
 |---|---|---|
 | init clock, median (round 1 / round 2) | 0.5810 / 0.5505 ms | 0.5815 / 0.5430 ms |
 | init bytes | 230 032 | 230 032 |
@@ -125,7 +128,7 @@ change. `make api-check` fails a `codes_gen.go` edited by hand, or a design
 edited without `kit gen`, on the digests. The SDK's CI still runs no kit
 (ADR 0163 §7).
 
-## Consequences
+## Consequences / Semantics
 
 - A code is written once, in the design; its constant, its sentinel and its
   pin are written from it.
@@ -133,6 +136,22 @@ edited without `kit gen`, on the digests. The SDK's CI still runs no kit
   a port's (ADR 0163 §4's exception for ports, extended to codes).
 - The exported surface is identical — same names, kinds, values and
   signatures — so the release is a patch.
+
+## Breaking changes
+
+None. Every exported name, kind, value, type and doc comment is the one the
+code declared; the release is a patch. A contributor now needs kit to change
+an error code, a sentinel or their doc comments — the same precondition ADR
+0163 set for every other part of the surface.
+
+## Deferred
+
+- `kit design import` does not write `codes.ranges`: the project file is
+  kept byte for byte, so the block was copied once from the hand-kept table.
+  A new range is added by hand, which is the allocation step ADR 0035 wants.
+- `pkg/v1/data/codec`'s four codes stay spelled `v1errs.Code` while their
+  file also needs the kernel's `errs`; giving the code type the plain name
+  would need kit to rename the other import, which it does not.
 
 ## Alternatives considered
 
@@ -150,5 +169,6 @@ edited without `kit gen`, on the digests. The SDK's CI still runs no kit
 
 ## References
 
-- platform PR #54 — the dialect, `kit gen`'s codes and the import
+- [kitsunium/platform#54](https://github.com/kitsunium/platform/pull/54) — the dialect, `kit gen`'s codes and the import (kit `v0.1.0-rc.2`)
+- [kitsunium/platform#55](https://github.com/kitsunium/platform/pull/55) — a package's pins may import what its `codes_gen.go` imports, so a package of codes alone keeps typed pins
 - `internal/kernel/errs/CLAUDE.md` — the registry audits

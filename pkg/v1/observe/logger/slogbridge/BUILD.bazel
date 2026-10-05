@@ -34,6 +34,7 @@ go_test(
     ],
     embed = [":slogbridge"],
     deps = [
+        "//internal/kernel/errs",
         "//pkg/v1/errs",
         "//pkg/v1/observe/logger",
         "//pkg/v1/security/secret",

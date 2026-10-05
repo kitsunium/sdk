@@ -29,7 +29,6 @@ go_test(
     deps = [
         ":config",
         "//internal/core/app/config",
-        "//internal/core/data/codec",
         "//internal/service/app/config",
         "//pkg/v1/data/codec",
         "//pkg/v1/errs",

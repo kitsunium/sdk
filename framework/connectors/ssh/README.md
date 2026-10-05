@@ -12,7 +12,7 @@ Everything it says about VERIFICATION is said in the entitlement contract's voca
 
 ENROLMENT is not in that contract. Minting a pair is something this package does and the port does not describe, so its failures have nowhere to borrow a code from, and they carried none at all until this range existed.
 
-Hand\-registered in codeRangeOwners \(ADR 0035\) and already listed in //:audit\_sources.
+Registered in design/sdk.yaml's codes.ranges, which kit writes into codeRangeOwners \(ADR 0035, ADR 0164\), and already listed in //:audit\_sources.
 
 Package ssh — discovering which subject this machine is enrolled as, from the layout ssh keys actually have on disk.
 
@@ -97,7 +97,7 @@ var EnrolmentFailed = errs.Define(CodeEnrolmentFailed, "ENROLMENT_FAILED",
 ```
 
 <a name="DefaultSSHDir"></a>
-## func [DefaultSSHDir](<https://github.com/kitsunium/sdk/blob/main/framework/connectors/ssh/discover.go#L182>)
+## func [DefaultSSHDir](<https://github.com/kitsunium/sdk/blob/main/framework/connectors/ssh/discover.go#L183>)
 
 ```go
 func DefaultSSHDir() string
@@ -106,7 +106,7 @@ func DefaultSSHDir() string
 DefaultSSHDir returns the conventional key location for the current user.
 
 <a name="DiscoverSubject"></a>
-## func [DiscoverSubject](<https://github.com/kitsunium/sdk/blob/main/framework/connectors/ssh/discover.go#L124>)
+## func [DiscoverSubject](<https://github.com/kitsunium/sdk/blob/main/framework/connectors/ssh/discover.go#L125>)
 
 ```go
 func DiscoverSubject(sshDir string) (uuid string, err error)

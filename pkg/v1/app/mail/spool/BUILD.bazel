@@ -28,6 +28,7 @@ go_test(
     ],
     deps = [
         ":spool",
+        "//internal/core/app/mail/spool",
         "//internal/service/app/mail/spool",
         "//pkg/v1/app/id",
         "//pkg/v1/app/mail",

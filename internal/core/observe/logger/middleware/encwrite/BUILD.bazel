@@ -35,5 +35,8 @@ filegroup(
 go_test(
     name = "encwrite_test",
     srcs = ["api_gen_test.go"],
-    deps = [":encwrite"],
+    deps = [
+        ":encwrite",
+        "//internal/kernel/errs",
+    ],
 )

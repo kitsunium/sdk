@@ -37,5 +37,8 @@ filegroup(
 go_test(
     name = "selfupdate_test",
     srcs = ["api_gen_test.go"],
-    deps = [":selfupdate"],
+    deps = [
+        ":selfupdate",
+        "//internal/kernel/errs",
+    ],
 )

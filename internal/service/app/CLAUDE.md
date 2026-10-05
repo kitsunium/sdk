@@ -60,7 +60,7 @@ retry on the `kernel/backoff` curve.
 Every range above kept its value when its package moved, and when its
 declaration moved to the core mirror (ADR 0160): no package of this family
 calls `errs.Define`. `codeRangeOwners`
-(`internal/kernel/errs/registry_ownership_external_test.go`) names the core
+(`design/sdk.yaml`'s `codes.ranges`, which kit writes into `internal/kernel/errs/codes_gen_test.go` (ADR 0164)) names the core
 directories under the same keys, and `//:audit_sources` lists the core labels;
 it keeps `cli`, `health`, `lifecycle`, `lock`, `scheduler` and `view` from this
 family only because their own tests read their sources at runtime.

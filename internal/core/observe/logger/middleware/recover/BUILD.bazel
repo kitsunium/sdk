@@ -35,5 +35,8 @@ filegroup(
 go_test(
     name = "recover_test",
     srcs = ["api_gen_test.go"],
-    deps = [":recover"],
+    deps = [
+        ":recover",
+        "//internal/kernel/errs",
+    ],
 )

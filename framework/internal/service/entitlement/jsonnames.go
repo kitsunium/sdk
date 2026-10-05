@@ -14,7 +14,8 @@
 // them puts a two-member group across two files and nothing else in either,
 // which is what KTN-STRUCT-PARTITION is for.
 //
-// Hand-registered in codeRangeOwners (ADR 0035) and in //:audit_sources, so a
+// Registered in design/sdk.yaml's codes.ranges, which kit writes into
+// codeRangeOwners (ADR 0035, ADR 0164), and in //:audit_sources, so a
 // code declared here that reaches into another package's range fails the build
 // rather than passing quietly.
 //

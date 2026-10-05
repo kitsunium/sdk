@@ -39,7 +39,10 @@ go_test(
         "api_gen_test.go",
         "port_external_test.go",
     ],
-    deps = [":mail"],
+    deps = [
+        ":mail",
+        "//internal/kernel/errs",
+    ],
 )
 
 # audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.

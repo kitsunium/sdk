@@ -59,7 +59,7 @@ cd internal/core && GOWORK=off go test -race -cover ./data/codec/...
 # Appender detection covered; ≥95% line coverage.
 ```
 
-The range-ownership audit (`registry_ownership_external_test.go`, in `bazel test //internal/kernel/errs:errs_test`, also run by `make test`) verifies the five `Code*` constants stay in the `0.2.2.*` block `codeRangeOwners` gives this package. The package's one `errs.Define`, `DuplicateRegistration`, is audited like any other (reason = `DUPLICATE_REGISTRATION`); the nil refusal spells its `CODEC_NIL` in the message.
+The range-ownership audit (`registry_ownership_external_test.go`, against the table kit writes from `design/sdk.yaml`'s `codes.ranges` — ADR 0164 —, in `bazel test //internal/kernel/errs:errs_test`, also run by `make test`) verifies the five `Code*` constants stay in the `0.2.2.*` block `codeRangeOwners` gives this package. The package's one `errs.Define`, `DuplicateRegistration`, is audited like any other (reason = `DUPLICATE_REGISTRATION`); the nil refusal spells its `CODEC_NIL` in the message.
 
 ## Subtree
 

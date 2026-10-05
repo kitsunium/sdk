@@ -35,5 +35,8 @@ filegroup(
 go_test(
     name = "sample_test",
     srcs = ["api_gen_test.go"],
-    deps = [":sample"],
+    deps = [
+        ":sample",
+        "//internal/kernel/errs",
+    ],
 )

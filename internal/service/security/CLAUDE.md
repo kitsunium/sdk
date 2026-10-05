@@ -39,7 +39,7 @@ ADR 0029).
 None of these packages declares a code (ADR 0160 §2). Each range above was
 allocated by its engine and is declared, with its value unchanged, in the core
 package at the same path, beside the port's verdicts: `codeRangeOwners`
-(`internal/kernel/errs/registry_ownership_external_test.go`) names
+(`design/sdk.yaml`'s `codes.ranges`, which kit writes into `internal/kernel/errs/codes_gen_test.go` (ADR 0164)) names
 `internal/core/security/<domain>` under the same keys, and `//:audit_sources`
 lists the core labels, not these.
 

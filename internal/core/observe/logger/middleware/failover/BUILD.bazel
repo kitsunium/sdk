@@ -35,5 +35,8 @@ filegroup(
 go_test(
     name = "failover_test",
     srcs = ["api_gen_test.go"],
-    deps = [":failover"],
+    deps = [
+        ":failover",
+        "//internal/kernel/errs",
+    ],
 )

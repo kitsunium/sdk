@@ -61,7 +61,7 @@ A code keeps its value when its package moves (ADR 0160): the ranges above
 are the ones these packages and their engines declared before the family
 existed — the eighteen `0.3.*` ranges under `codec/<format>/` among them, which
 the service codecs declared before their declarations moved here — and
-`codeRangeOwners` (`internal/kernel/errs/registry_ownership_external_test.go`)
+`codeRangeOwners` (`design/sdk.yaml`'s `codes.ranges`, which kit writes into `internal/kernel/errs/codes_gen_test.go` (ADR 0164))
 names these directories under the same keys.
 
 ## Do NOT

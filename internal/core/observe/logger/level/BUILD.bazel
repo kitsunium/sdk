@@ -32,7 +32,10 @@ go_test(
         "parse_external_test.go",
         "var_external_test.go",
     ],
-    deps = [":level"],
+    deps = [
+        ":level",
+        "//internal/kernel/errs",
+    ],
 )
 
 filegroup(
