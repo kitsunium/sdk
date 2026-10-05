@@ -35,11 +35,9 @@ func NewModule(name, doc string, parts ...ModulePart) *Module {
 	return ikit.NewModule(name, doc, parts...)
 }
 
-// Requires says the module needs other: an app that mounts the module and
-// not other mounts other at its defaults, and starts it first. The Go import
-// this takes makes a cycle impossible. A collaboration a module can do
-// without is a port with a fallback instead ([Fallback]).
-func Requires(other *Module) ModulePart {
+// requires is Requires's body: decl_gen.go writes Requires, from the
+// design, as one call of it.
+func requires(other *Module) ModulePart {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.Requires(other)
 }

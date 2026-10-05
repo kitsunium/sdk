@@ -13,18 +13,18 @@ import (
 	"strings"
 )
 
-// NodeID builds the ID of a node declared in a service. A service's own ID is
-// its name.
-func NodeID(service string, kind NodeKind, name string) string {
+// nodeID is NodeID's body: decl_gen.go writes NodeID, from the
+// design, as one call of it.
+func nodeID(service string, kind NodeKind, name string) string {
 	if kind == KindService {
 		return service
 	}
 	return service + "/" + string(kind) + "/" + name
 }
 
-// EdgeID builds the ID of an edge. The label is part of the identity: two
-// transitions of one workflow fired from one endpoint are two edges.
-func EdgeID(from string, kind EdgeKind, to, label string) string {
+// edgeID is EdgeID's body: decl_gen.go writes EdgeID, from the
+// design, as one call of it.
+func edgeID(from string, kind EdgeKind, to, label string) string {
 	id := from + "|" + string(kind) + "|" + to
 	if label != "" {
 		id += "|" + label
@@ -32,8 +32,9 @@ func EdgeID(from string, kind EdgeKind, to, label string) string {
 	return id
 }
 
-// Node returns the node with the given ID, or nil.
-func (g *GraphMessage) Node(id string) *NodeEntity {
+// node is GraphMessage.Node's body: decl_gen.go writes GraphMessage.Node, from the
+// design, as one call of it.
+func (g *GraphMessage) node(id string) *NodeEntity {
 	for i := range g.Nodes {
 		if g.Nodes[i].ID == id {
 			return &g.Nodes[i]
@@ -42,8 +43,9 @@ func (g *GraphMessage) Node(id string) *NodeEntity {
 	return nil
 }
 
-// Edge returns the edge with the given ID, or nil.
-func (g *GraphMessage) Edge(id string) *EdgeMessage {
+// edge is GraphMessage.Edge's body: decl_gen.go writes GraphMessage.Edge, from the
+// design, as one call of it.
+func (g *GraphMessage) edge(id string) *EdgeMessage {
 	for i := range g.Edges {
 		if g.Edges[i].ID == id {
 			return &g.Edges[i]

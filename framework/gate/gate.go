@@ -44,25 +44,9 @@ type UpdateAction = coregate.UpdateAction
 // unclaimed, so a decision nobody made never reads as "allow".
 type Outcome = coregate.Outcome
 
-// Decide classifies one invocation.
-//
-// Exemption is checked FIRST, and verify is not CALLED when it holds — which
-// is why this takes a function rather than an error. A shell-completion hook or
-// a `license status` on a machine whose licence is broken must not pay for a
-// network round trip, and neither should have to remember not to run one.
-//
-// The version floor is checked BEFORE a refusal is propagated, because an
-// out-of-date binary must be told to upgrade whether or not its entitlement is
-// also in order.
-//
-// It takes policy, your gate policy — a nil one refuses everything, including a
-// verification that would have passed; path, the command path relative to the
-// root with the root itself NOT included, where nil is the bare root
-// invocation; and verify, your entitlement verification, CALLED AT MOST ONCE
-// and only when the invocation is not exempt, with a nil verify refusing.
-//
-// It returns what to do, and everything the verifier said.
-func Decide(policy *Policy, path []string, verify func() error) Decision {
+// decide is Decide's body: decl_gen.go writes Decide, from the
+// design, as one call of it.
+func decide(policy *Policy, path []string, verify func() error) Decision {
 	//: delegate verbatim to the service implementation.
 	return svcgate.Decide(policy, path, verify)
 }

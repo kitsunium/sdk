@@ -10,26 +10,16 @@ import (
 // password, never a parameter.
 type DatabaseURL = ikit.DatabaseURLValue
 
-// Keeps says what the database keeps: a service's stores, a store, a
-// module's stores. The most precise wins: a store kept by name, then its
-// service, then its module, then the default database — the one declared
-// without Keeps —, then the data directory, then memory. [InMemory] wins
-// over all of them, on the app as on a store.
-func Keeps(things ...Keepable) DatabaseOption {
+// keeps is Keeps's body: decl_gen.go writes Keeps, from the
+// design, as one call of it.
+func keeps(things ...Keepable) DatabaseOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.Keeps(things...)
 }
 
-// Migrations are migrations, values of the SDK's sql.Migration, run when
-// the database starts (<name>-migrate: start) or by `<product> migrate up`,
-// kit's own first, each set under its own version table — and so its own
-// lock. On MySQL a DDL statement commits by itself: write one per migration.
-//
-// Given to [Database], they are the product's, under schema_migrations.
-// Given to [NewModule], they are the module's (ADR 0008), for the data it
-// keeps outside kit's stores: run on the database that keeps the module,
-// under <module>_migrations.
-func Migrations(m ...sql.Migration) interface {
+// migrations is Migrations's body: decl_gen.go writes Migrations, from the
+// design, as one call of it.
+func migrations(m ...sql.Migration) interface {
 	DatabaseOption
 	ModulePart
 } {

@@ -164,6 +164,7 @@ packages:
           - name: cfg
             type: Config
         name: Resolve
+        impl: resolve
         out:
           - type: Resolution
       - doc: |-
@@ -405,6 +406,7 @@ packages:
               call it on that; the chained form Resolve(...).Degraded() does not compile,
               which is a fair trade for not copying 88 bytes per query.
             name: Degraded
+            impl: degraded
             out:
               - type: bool
             recv: pointer
@@ -453,6 +455,7 @@ packages:
               - name: line
                 type: int
             name: Contains
+            impl: contains
             out:
               - type: bool
             recv: value
@@ -650,6 +653,7 @@ packages:
               - name: absFile
                 type: string
             name: ContainsFile
+            impl: containsFile
             out:
               - type: bool
             recv: pointer
@@ -660,6 +664,7 @@ packages:
               - name: absDir
                 type: string
             name: ContainsDir
+            impl: containsDir
             out:
               - type: bool
             recv: pointer
@@ -667,6 +672,7 @@ packages:
               IsEmpty reports whether the changed-set contains no touched files at all
               (clean branch, or a branch whose every change the caller's filter excluded).
             name: IsEmpty
+            impl: isEmpty
             out:
               - type: bool
             recv: pointer

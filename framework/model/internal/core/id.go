@@ -172,9 +172,9 @@ func parseService(s string) (module, service string, err error) {
 	return module, service, nil
 }
 
-// QualifiedServiceName is the service's ID segment: the qualification
-// [QualifiedService] applies.
-func (id *IDValue) QualifiedServiceName() string {
+// qualifiedServiceName is IDValue.QualifiedServiceName's body: decl_gen.go writes IDValue.QualifiedServiceName, from the
+// design, as one call of it.
+func (id *IDValue) qualifiedServiceName() string {
 	if id.Service == "" {
 		return ""
 	}
@@ -203,14 +203,17 @@ func (id *IDValue) String() string {
 	}
 }
 
-// BinaryID is the ID of a binary.
-func BinaryID(binary string) string { return BinaryScope + binary }
+// binaryID is BinaryID's body: decl_gen.go writes BinaryID, from the
+// design, as one call of it.
+func binaryID(binary string) string { return BinaryScope + binary }
 
-// RoleID is the ID of one process role of a binary.
-func RoleID(binary, role string) string { return BinaryScope + binary + "/role/" + role }
+// roleID is RoleID's body: decl_gen.go writes RoleID, from the
+// design, as one call of it.
+func roleID(binary, role string) string { return BinaryScope + binary + "/role/" + role }
 
-// LibraryID is the ID of a library.
-func LibraryID(library string) string { return LibraryScope + library }
+// libraryID is LibraryID's body: decl_gen.go writes LibraryID, from the
+// design, as one call of it.
+func libraryID(library string) string { return LibraryScope + library }
 
 // invalidID is the refusal of ParseID, naming the part that failed — never
 // the input.

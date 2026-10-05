@@ -15,7 +15,7 @@ must never surface as a fan-out failure.
 
 | File | Role |
 |---|---|
-| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declaration of ; `Floor`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): `Floor`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
 | `gate.go` | `gateSink` + `New(inner, min)` + `Floor(inner, min)` + `Write` / `Flush` / `Close` |
 
 No `codes.go` / `errors.go` — the gate never originates an error.

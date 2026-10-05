@@ -170,7 +170,7 @@ type LineRangeValue struct {
 ```
 
 <a name="LineRangeValue.Contains"></a>
-### func \(LineRangeValue\) [Contains](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/line_range.go>)
+### func \(LineRangeValue\) [Contains](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/decl_gen.go>)
 
 ```go
 func (LineRangeValue) Contains(line int) bool
@@ -212,7 +212,7 @@ type ResolutionValue struct {
 ```
 
 <a name="ResolutionValue.Degraded"></a>
-### func \(ResolutionValue\) [Degraded](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/git.go>)
+### func \(ResolutionValue\) [Degraded](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/decl_gen.go>)
 
 ```go
 func (*ResolutionValue) Degraded() bool

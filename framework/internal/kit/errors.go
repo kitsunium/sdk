@@ -58,43 +58,51 @@ type wireBody struct {
 // Error renders the code and the message. It never renders the cause.
 func (e *Error) Error() string { return e.Code + ": " + e.Message }
 
-// Unwrap returns the cause, so errors.Is and errors.As see through an Error.
-func (e *Error) Unwrap() error { return e.cause }
+// unwrap is Error.Unwrap's body: decl_gen.go writes Error.Unwrap, from the
+// design, as one call of it.
+func (e *Error) unwrap() error { return e.cause }
 
-// Wrap attaches the underlying cause, for the logs. It returns a copy.
-func (e *Error) Wrap(cause error) *Error {
+// wrap is Error.Wrap's body: decl_gen.go writes Error.Wrap, from the
+// design, as one call of it.
+func (e *Error) wrap(cause error) *Error {
 	c := *e
 	c.cause = cause
 	return &c
 }
 
-// Invalid reports a request the caller must change before retrying (400).
-func Invalid(message string) *Error {
+// invalid is Invalid's body: decl_gen.go writes Invalid, from the
+// design, as one call of it.
+func invalid(message string) *Error {
 	return NewError(http.StatusBadRequest, WireInvalid, message)
 }
 
-// NotFound reports that the addressed resource does not exist (404).
-func NotFound(message string) *Error {
+// notFound is NotFound's body: decl_gen.go writes NotFound, from the
+// design, as one call of it.
+func notFound(message string) *Error {
 	return NewError(http.StatusNotFound, WireNotFound, message)
 }
 
-// Conflict reports a request the resource's current state refuses (409).
-func Conflict(message string) *Error {
+// conflict is Conflict's body: decl_gen.go writes Conflict, from the
+// design, as one call of it.
+func conflict(message string) *Error {
 	return NewError(http.StatusConflict, WireConflict, message)
 }
 
-// Unauthenticated reports a caller who did not prove who they are (401).
-func Unauthenticated(message string) *Error {
+// unauthenticated is Unauthenticated's body: decl_gen.go writes Unauthenticated, from the
+// design, as one call of it.
+func unauthenticated(message string) *Error {
 	return NewError(http.StatusUnauthorized, WireUnauth, message)
 }
 
-// Forbidden reports a caller who may not do this (403).
-func Forbidden(message string) *Error {
+// forbidden is Forbidden's body: decl_gen.go writes Forbidden, from the
+// design, as one call of it.
+func forbidden(message string) *Error {
 	return NewError(http.StatusForbidden, WireForbidden, message)
 }
 
-// Unavailable reports a transient failure worth retrying later (503).
-func Unavailable(message string) *Error {
+// unavailable is Unavailable's body: decl_gen.go writes Unavailable, from the
+// design, as one call of it.
+func unavailable(message string) *Error {
 	return NewError(http.StatusServiceUnavailable, WireUnavailable, message)
 }
 
@@ -167,8 +175,8 @@ func describeSDK(err error, reason string) (int, wireBody) {
 	return status, wireBody{Code: strings.ToLower(reason), Message: errs.PublicOf(err)}
 }
 
-// NewError is an error answered with the HTTP status, carrying the wire code
-// and the message a caller reads.
-func NewError(status int, code, message string) *Error {
+// newError is NewError's body: decl_gen.go writes NewError, from the
+// design, as one call of it.
+func newError(status int, code, message string) *Error {
 	return &Error{Status: status, Code: code, Message: message}
 }

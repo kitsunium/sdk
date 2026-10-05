@@ -143,25 +143,25 @@ func (s *ChangedSetValue) ContainsLine(absFile string, line int) bool {
 	return false
 }
 
-// ContainsFile reports whether absFile appears anywhere in the diff,
-// including as the old side of a rename or a deletion.
-func (s *ChangedSetValue) ContainsFile(absFile string) bool {
+// containsFile is ChangedSetValue.ContainsFile's body: decl_gen.go writes ChangedSetValue.ContainsFile, from the
+// design, as one call of it.
+func (s *ChangedSetValue) containsFile(absFile string) bool {
 	_, ok := s.touchedFiles[filepath.Clean(absFile)]
 	//: Membership in the touched-file set is the answer.
 	return ok
 }
 
-// ContainsDir reports whether absDir directly encloses any touched file. It is
-// NOT recursive: the parent of a touched directory is not itself touched.
-func (s *ChangedSetValue) ContainsDir(absDir string) bool {
+// containsDir is ChangedSetValue.ContainsDir's body: decl_gen.go writes ChangedSetValue.ContainsDir, from the
+// design, as one call of it.
+func (s *ChangedSetValue) containsDir(absDir string) bool {
 	_, ok := s.touchedDirs[filepath.Clean(absDir)]
 	//: Membership in the touched-directory set is the answer.
 	return ok
 }
 
-// IsEmpty reports whether the changed-set contains no touched files at all
-// (clean branch, or a branch whose every change the caller's filter excluded).
-func (s *ChangedSetValue) IsEmpty() bool {
+// isEmpty is ChangedSetValue.IsEmpty's body: decl_gen.go writes ChangedSetValue.IsEmpty, from the
+// design, as one call of it.
+func (s *ChangedSetValue) isEmpty() bool {
 	//: Touched files is the canonical population marker.
 	return len(s.touchedFiles) == 0
 }

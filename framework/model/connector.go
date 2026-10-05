@@ -77,21 +77,20 @@ type (
 	Adapter = core.AdapterMessage
 )
 
-// IsEngine reports whether backend names an engine a database runs on.
-func IsEngine(backend string) bool {
+// isEngine is IsEngine's body: decl_gen.go writes IsEngine, from the
+// design, as one call of it.
+func isEngine(backend string) bool {
 	return core.IsEngine(backend)
 }
 
-// ConnectorCatalog is every connector kit ships, sorted by ID: what a
-// product may plug into.
-func ConnectorCatalog() []ConnectorInfo {
+// connectorCatalog is ConnectorCatalog's body: decl_gen.go writes ConnectorCatalog, from the
+// design, as one call of it.
+func connectorCatalog() []ConnectorInfo {
 	return core.ConnectorCatalog()
 }
 
-// ConnectorsOf derives the connectors a product uses from its nodes: an
-// endpoint, a frontend or an auth handler means HTTP, a mailer mail, a store
-// stores — and a database when one keeps it —, a topic, a subscription or
-// a queued command queues. Sorted by ID.
-func ConnectorsOf(nodes []Node) []Connector {
+// connectorsOf is ConnectorsOf's body: decl_gen.go writes ConnectorsOf, from the
+// design, as one call of it.
+func connectorsOf(nodes []Node) []Connector {
 	return core.ConnectorsOf(nodes)
 }

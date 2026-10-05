@@ -375,6 +375,7 @@ packages:
           - name: product
             type: "*Product"
         name: NewWithAnchors
+        impl: newWithAnchors
         out:
           - type: "*Service"
       - doc: |-
@@ -394,6 +395,7 @@ packages:
           - name: product
             type: "*Product"
         name: NewWithGetter
+        impl: newWithGetter
         out:
           - type: "*Service"
       - doc: |-
@@ -406,6 +408,7 @@ packages:
           - name: floor
             type: string
         name: RequiresUpdate
+        impl: requiresUpdate
         out:
           - type: bool
       - doc: |-
@@ -418,6 +421,7 @@ packages:
           - name: floor
             type: string
         name: UpdateRefusal
+        impl: updateRefusal
         out:
           - type: error
     imports:
@@ -2088,6 +2092,7 @@ packages:
           - name: product
             type: "*ProductValue"
         name: NewService
+        impl: newService
         out:
           - type: "*Service"
       - doc: |-
@@ -2188,6 +2193,7 @@ packages:
           - name: floor
             type: string
         name: UpdateRefusal
+        impl: updateRefusal
         out:
           - type: error
     imports:
@@ -2423,6 +2429,7 @@ packages:
 
               It returns the product's name, or "entitlement" when there is none.
             name: Label
+            impl: label
             out:
               - type: string
             recv: pointer
@@ -2439,6 +2446,7 @@ packages:
               It returns the product's publication points, or nil when there is no
               product.
             name: PublishedOrigins
+            impl: publishedOrigins
             out:
               - type: "[]coreent.OriginValue"
             recv: pointer
@@ -2567,6 +2575,7 @@ packages:
               - name: dir
                 type: string
             name: WithCache
+            impl: withCache
             out:
               - type: "*Service"
             recv: pointer
@@ -2581,6 +2590,7 @@ packages:
               - name: servers
                 type: "[]RoughtimeServerValue"
             name: WithTimeServers
+            impl: withTimeServers
             out:
               - type: "*Service"
             recv: pointer
@@ -2594,6 +2604,7 @@ packages:
               - name: fetch
                 type: BearerFetch
             name: WithBearerFetch
+            impl: withBearerFetch
             out:
               - type: "*Service"
             recv: pointer
@@ -2613,6 +2624,7 @@ packages:
               - name: origins
                 type: "[]coreent.OriginValue"
             name: WithOrigins
+            impl: withOrigins
             out:
               - type: "*Service"
             recv: pointer
@@ -2628,6 +2640,7 @@ packages:
               - name: version
                 type: string
             name: WithVersion
+            impl: withVersion
             out:
               - type: "*Service"
             recv: pointer
@@ -2652,6 +2665,7 @@ packages:
               - name: anchors
                 type: "[][]byte"
             name: WithAnchors
+            impl: withAnchors
             out:
               - type: "*Service"
             recv: pointer
@@ -2805,6 +2819,7 @@ packages:
               Unwrap ties the typed error to the sentinel so errors.Is keeps working
               through the exit-code dispatch.
             name: Unwrap
+            impl: unwrap
             out:
               - type: error
             recv: pointer

@@ -132,8 +132,9 @@ type counter struct {
 // Emit reports nothing.
 func (nop) Emit(_ *Event) {}
 
-// OpOf is the Op named name, or OpNone.
-func OpOf(name string) Op {
+// opOf is OpOf's body: decl_gen.go writes OpOf, from the
+// design, as one call of it.
+func opOf(name string) Op {
 	for i, n := range OpNames {
 		if n == name && i > 0 {
 			return Op(i)

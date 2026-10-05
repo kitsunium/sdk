@@ -209,6 +209,7 @@ packages:
           - name: name
             type: string
         name: OpOf
+        impl: opOf
         out:
           - type: Op
       - doc: |-
@@ -369,6 +370,7 @@ packages:
               - name: id
                 type: string
             name: Ref
+            impl: ref
             out:
               - type: NodeRef
             recv: pointer

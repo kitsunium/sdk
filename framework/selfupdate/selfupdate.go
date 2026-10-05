@@ -300,22 +300,16 @@ func New(version string, src Source) *Service {
 	return svcupd.NewService(version, src)
 }
 
-// NewWithDeps returns a Service with its three ports injected, for a caller that
-// supplies its own HTTP policy or a test that supplies doubles. A nil fs or
-// copier is legal on paths that never reach the disk.
-func NewWithDeps(version string, src Source, client Getter, fs FileSystem, copier Copier) *Service {
+// newWithDeps is NewWithDeps's body: decl_gen.go writes NewWithDeps, from the
+// design, as one call of it.
+func newWithDeps(version string, src Source, client Getter, fs FileSystem, copier Copier) *Service {
 	//: delegate verbatim to the service implementation.
 	return svcupd.NewUpdaterWithDeps(version, src, client, fs, copier)
 }
 
-// StdinIsTerminal reports whether a human could answer a prompt on this
-// process's standard input.
-//
-// It is a free function rather than something AuthoriseUnattendedUpgrade works
-// out for itself, and that is the point: the consent decision stays testable
-// without a pty, because the CALLER supplies the answer. Pass the result as the
-// interactive argument.
-func StdinIsTerminal() bool {
+// stdinIsTerminal is StdinIsTerminal's body: decl_gen.go writes StdinIsTerminal, from the
+// design, as one call of it.
+func stdinIsTerminal() bool {
 	//: delegate verbatim to the service implementation.
 	return svcupd.StdinIsTerminal()
 }

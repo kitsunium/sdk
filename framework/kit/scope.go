@@ -28,11 +28,9 @@ var (
 // a socket when every scope gives them the same value.
 type Scope = ikit.ScopeValue
 
-// PerEnv is the environment variable name, else fallback when it is unset
-// or empty; a leading "~/" in either is the user's home directory. The
-// status line's is PerEnv("CLAUDE_CONFIG_DIR", "~/.claude"): one daemon per
-// Claude configuration.
-func PerEnv(name, fallback string) Scope {
+// perEnv is PerEnv's body: decl_gen.go writes PerEnv, from the
+// design, as one call of it.
+func perEnv(name, fallback string) Scope {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.PerEnv(name, fallback)
 }

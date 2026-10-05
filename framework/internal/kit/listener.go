@@ -301,9 +301,8 @@ func closeLogged(a *App, id string, c io.Closer) {
 	}
 }
 
-// NewListener is a listener no service declares yet, speaking contract and
-// served by handler: [Service.Listen] makes one and declares it, which is how
-// a product gets one.
-func NewListener(contract string, handler ListenHandler) *Listener {
+// newListener is NewListener's body: decl_gen.go writes NewListener, from the
+// design, as one call of it.
+func newListener(contract string, handler ListenHandler) *Listener {
 	return &Listener{contract: contract, handler: handler}
 }

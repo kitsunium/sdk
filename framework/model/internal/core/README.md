@@ -1890,7 +1890,7 @@ InvalidID is returned by [ParseID](#ParseID) for a string the ID grammar does no
 Code `0.4.1.1` · reason `INVALID_ID` · public "The node identifier is not valid"
 
 <a name="BinaryID"></a>
-## func [BinaryID](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/id.go>)
+## func [BinaryID](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 ```go
 func BinaryID(binary string) string
@@ -1926,7 +1926,7 @@ func ConnectorsOf(nodes []NodeEntity) []ConnectorMessage
 ConnectorsOf derives the connectors a product uses from its nodes: an endpoint, a frontend or an auth handler means HTTP, a mailer mail, a store stores — and a database when one keeps it —, a topic, a subscription or a queued command queues. Sorted by ID.
 
 <a name="EdgeID"></a>
-## func [EdgeID](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/graph.go>)
+## func [EdgeID](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 ```go
 func EdgeID(from string, kind EdgeKind, to string, label string) string
@@ -1935,7 +1935,7 @@ func EdgeID(from string, kind EdgeKind, to string, label string) string
 EdgeID builds the ID of an edge. The label is part of the identity: two transitions of one workflow fired from one endpoint are two edges.
 
 <a name="IsEngine"></a>
-## func [IsEngine](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/connector.go>)
+## func [IsEngine](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 ```go
 func IsEngine(backend string) bool
@@ -1944,7 +1944,7 @@ func IsEngine(backend string) bool
 IsEngine reports whether backend names an engine a database runs on.
 
 <a name="LibraryID"></a>
-## func [LibraryID](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/id.go>)
+## func [LibraryID](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 ```go
 func LibraryID(library string) string
@@ -1973,7 +1973,7 @@ Mermaid renders the architecture of a graph as a Mermaid flowchart: one subgraph
 Each kind has its shape: an endpoint a box (marked "auth" when it asks for a user; an implementation of a port by its name), a store a cylinder, a topic a flag, a subscription a parallelogram (a watch, ADR 0008, marked with the mark it watches — its stores' arrows say where from), a workflow a hexagon, a job a stadium, the auth handler a trapezoid — a gate —, a mailer a subroutine box, a declared loop a circle, a hand-written loop a double circle, a port an inverted trapezoid — a socket, UML's required interface —, a command a parallelogram leaning back — a subscription's leans forward —, marked "queued" when it waits in its queue, and a query a rhombus, a question. An arrow is solid when it exists by construction or was observed, dotted when only the code says so — or when it is a port's binding to its own fallback, the default the app may replace, as the Studio draws it.
 
 <a name="ModulePrefix"></a>
-## func [ModulePrefix](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/module.go>)
+## func [ModulePrefix](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 ```go
 func ModulePrefix(name string) string
@@ -1982,7 +1982,7 @@ func ModulePrefix(name string) string
 ModulePrefix is a module's default mount prefix: "/\<name>/".
 
 <a name="NodeID"></a>
-## func [NodeID](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/graph.go>)
+## func [NodeID](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 ```go
 func NodeID(service string, kind NodeKind, name string) string
@@ -2009,7 +2009,7 @@ func QualifiedService(module string, service string) string
 QualifiedService is the name a module gives a service it lists: the module's own name for the service named like it, "\<module>.\<service>" otherwise. The runtime and the analyzer both qualify with it.
 
 <a name="RoleID"></a>
-## func [RoleID](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/id.go>)
+## func [RoleID](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 ```go
 func RoleID(binary string, role string) string
@@ -2055,7 +2055,7 @@ func TableName(service string, node string, suffix string) string
 TableName is the table a database keeps a kit table in (ADR 0004): the service's name — qualified, for a module's —, two underscores and the node's name, then suffix, '-' and '.' written '\_', lower case — "moderation.intake"'s store "cases" is moderation\_intake\_\_cases. A name the rule cannot keep as it is — upper case, longer than MaxTableLen, three underscores in a row, SQLite's own prefix — is cut and ends with a digest of the whole, so it stays one table's. The runtime and the analyzer name tables with it.
 
 <a name="UnderPrefix"></a>
-## func [UnderPrefix](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/module.go>)
+## func [UnderPrefix](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 ```go
 func UnderPrefix(prefix string, path string) string
@@ -3025,7 +3025,7 @@ type GraphMessage struct {
 ```
 
 <a name="GraphMessage.Edge"></a>
-### func \(GraphMessage\) [Edge](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/graph.go>)
+### func \(GraphMessage\) [Edge](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 ```go
 func (*GraphMessage) Edge(id string) *EdgeMessage
@@ -3043,7 +3043,7 @@ func (*GraphMessage) Files() []FileMessage
 Files returns every file the graph points at, each with its root — the product's module, or another Go module: a module's (ADR 0008), a library's —, sorted and deduplicated. It is the complete list of files a reader of this graph may legitimately ask to see, and the source endpoint serves nothing else.
 
 <a name="GraphMessage.ModuleOf"></a>
-### func \(GraphMessage\) [ModuleOf](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/module.go>)
+### func \(GraphMessage\) [ModuleOf](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 ```go
 func (*GraphMessage) ModuleOf(name string) *ModuleMessage
@@ -3052,7 +3052,7 @@ func (*GraphMessage) ModuleOf(name string) *ModuleMessage
 ModuleOf returns the module named name, or nil.
 
 <a name="GraphMessage.Node"></a>
-### func \(GraphMessage\) [Node](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/graph.go>)
+### func \(GraphMessage\) [Node](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 ```go
 func (*GraphMessage) Node(id string) *NodeEntity
@@ -3162,7 +3162,7 @@ type IDValue struct {
 ```
 
 <a name="IDValue.QualifiedServiceName"></a>
-### func \(IDValue\) [QualifiedServiceName](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/id.go>)
+### func \(IDValue\) [QualifiedServiceName](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 ```go
 func (*IDValue) QualifiedServiceName() string

@@ -26,18 +26,9 @@ const (
 	maxSignatureBytes int64 = 4 << 10
 )
 
-// WithVendorKey pins the ed25519 public half every release must be signed
-// with, and returns the Service so construction reads as one expression —
-// the same chaining shape license.NewService(...).WithVersion(...) uses.
-//
-// A Service built WITHOUT this call authenticates nothing and therefore
-// installs nothing: verifyArchive refuses with coreupd.NoVendorKey before a single
-// byte is fetched. That default is deliberate. The alternative — treat an
-// absent key as "verification not required" — would mean any construction
-// site that forgot the call silently reverted to the unauthenticated
-// behaviour this file exists to end, and nothing would ever fail to point it
-// out.
-func (u *Service) WithVendorKey(key []byte) *Service {
+// withVendorKey is Service.WithVendorKey's body: decl_gen.go writes Service.WithVendorKey, from the
+// design, as one call of it.
+func (u *Service) withVendorKey(key []byte) *Service {
 	return u.WithVendorKeys(key)
 }
 

@@ -21,7 +21,7 @@ reaches the SDK only through `pkg/v1/*` and `internal/kernel/errs`
 
 | File | Role |
 |---|---|
-| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `BundleValue`, `JWKValue`, `JWKSValue`, `ActionsClaimsValue`, `ProductValue`, `RoughtimeServerValue`, `Getter`, `BearerFetch`, `Service` and `UpdateRequiredError` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `BundleValue`, `JWKValue`, `JWKSValue`, `ActionsClaimsValue`, `ProductValue`, `RoughtimeServerValue`, `Getter`, `BearerFetch`, `Service` and `UpdateRequiredError` — each struct with every field, unexported ones included; `ProductValue.Label`, `ProductValue.PublishedOrigins`, `Service.WithCache`, `Service.WithTimeServers`, `Service.WithBearerFetch`, `Service.WithOrigins`, `Service.WithVersion`, `Service.WithAnchors`, `UpdateRequiredError.Unwrap`, `NewService` and `UpdateRefusal`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
 | `service.go` | the `Service` handle, `Verify`, the origin fallback, `matchSubject` |
 | `anchors.go` | the ORDERED list of vendor keys this verifier accepts, its bound, and the two readers |
 | `roster_parse.go` | `ParseRoster` — two documents, raw + detached signature |

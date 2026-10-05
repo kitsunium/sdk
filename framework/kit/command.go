@@ -31,31 +31,16 @@ type Command[C, R any] = ikit.Command[C, R]
 // [Parallelism].
 type CommandOption = ikit.CommandConfigurer
 
-// Queued sends a command to the background. Dispatch returns once the
-// command's own queue accepted it — a file queue under the data directory,
-// memory without one —, and a consumer handles it, [Parallelism] at a time,
-// retried after half a second up to [MaxDeliveries] attempts (5), then
-// dead-lettered. It answers nothing: its result is [Empty], and exposed, it
-// answers 202 Accepted.
-//
-// Delivery is at least once: Queued is the product's promise that the
-// handler tolerates a redelivery, and a [Command].Key narrows the duplicates
-// without removing them. The handler runs in the dispatcher's trace, as the
-// user who dispatched it ([UserID]); what the auth handler said about that
-// user is not queued. A queued command's input is a contract with the
-// messages already queued: add a field, never rename one.
-func Queued() CommandOption {
+// queued is Queued's body: decl_gen.go writes Queued, from the
+// design, as one call of it.
+func queued() CommandOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.Queued()
 }
 
-// NoTransaction runs a command outside a transaction of its own: its
-// writes land as its handler makes them, and its effects leave when made —
-// a failed command may have written or announced something. On the data
-// directory and in memory, where a writing command's transaction takes the
-// writer turn, it lets such commands run side by side. Dispatched inside
-// another command, it still runs in that one's transaction.
-func NoTransaction() CommandOption {
+// noTransaction is NoTransaction's body: decl_gen.go writes NoTransaction, from the
+// design, as one call of it.
+func noTransaction() CommandOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.NoTransaction()
 }

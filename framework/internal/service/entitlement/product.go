@@ -22,19 +22,9 @@ const unusableHost string = "\x00unusable"
 // while being a single point of failure.
 const minRedundantHosts int = 2
 
-// Label is the name this product is known by, falling back to the package name
-// when no product was configured.
-//
-// The receiver is a pointer on every method here because ProductValue is 72
-// bytes — four strings and a slice header — and copying all of it to read one
-// field is what KTN-VAR-BIGSTRUCT exists to catch. Hold the product in a
-// variable and call on that.
-//
-// It tolerates a nil receiver, as every method here does: the one code path
-// that runs when nothing else is working must not be the one that panics.
-//
-// It returns the product's name, or "entitlement" when there is none.
-func (p *ProductValue) Label() string {
+// label is ProductValue.Label's body: decl_gen.go writes ProductValue.Label, from the
+// design, as one call of it.
+func (p *ProductValue) label() string {
 	//: a nil product is a Service built without one — the same fallback, not a
 	//: panic. Every method here tolerates it for that reason.
 	if p == nil || p.Name == "" {
@@ -46,18 +36,9 @@ func (p *ProductValue) Label() string {
 	return p.Name
 }
 
-// PublishedOrigins returns the places this product's roster is published,
-// tolerating a nil receiver as every accessor here does.
-//
-// It exists because the FIELD cannot: reading p.Origins off a nil product
-// panics, and the two constructors did exactly that while the package
-// documented the opposite. A nil product publishes nowhere, which is a
-// verifier that will refuse with RosterUnreachable — the documented fallback,
-// and a very different outcome from a panic at construction.
-//
-// It returns the product's publication points, or nil when there is no
-// product.
-func (p *ProductValue) PublishedOrigins() []coreent.OriginValue {
+// publishedOrigins is ProductValue.PublishedOrigins's body: decl_gen.go writes ProductValue.PublishedOrigins, from the
+// design, as one call of it.
+func (p *ProductValue) publishedOrigins() []coreent.OriginValue {
 	//: a nil product names no publication point.
 	if p == nil {
 		//: the documented fallback: nowhere to fetch from.

@@ -274,6 +274,6 @@ func fieldsOf(plan *classPlan) (personal, special, secret []string) {
 	return slices.Clip(personal), slices.Clip(special), slices.Clip(secret)
 }
 
-// NewRecordsService is the records of the store port reaches: [App.Records]
-// and [RecordsOf] make one for a store the app mounts.
-func NewRecordsService(port recordsPort) RecordsService { return RecordsService{port: port} }
+// newRecordsService is NewRecordsService's body: decl_gen.go writes NewRecordsService, from the
+// design, as one call of it.
+func newRecordsService(port recordsPort) RecordsService { return RecordsService{port: port} }

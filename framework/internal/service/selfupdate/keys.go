@@ -50,21 +50,9 @@ func (u *Service) WithVendorKeys(keys ...[]byte) *Service {
 	return u
 }
 
-// WithSignatureDomain makes every signature cover domain, a NUL byte and the
-// manifest — never the manifest alone — so a key the vendor also signs other
-// documents with (a roster, another product's releases) cannot have one of
-// those signatures read as a release of this product. It also requires the
-// manifest to say which release it is and until when it may be installed, in
-// two header lines the signature therefore covers:
-//
-//	# tag v1.4.0
-//	# expires 2026-12-31T00:00:00Z
-//
-// A manifest naming another tag is refused — the replay of an older, signed
-// release under a newer name —, and so is one past its expiry — the freeze an
-// attacker who can only replay can otherwise hold an installation in. Without
-// a domain the historical form is verified unchanged.
-func (u *Service) WithSignatureDomain(domain string) *Service {
+// withSignatureDomain is Service.WithSignatureDomain's body: decl_gen.go writes Service.WithSignatureDomain, from the
+// design, as one call of it.
+func (u *Service) withSignatureDomain(domain string) *Service {
 	if u == nil {
 		return nil
 	}

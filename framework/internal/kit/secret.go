@@ -692,9 +692,8 @@ func (st *secretStores) missing(s *Secret, variable string, err error) phrase {
 	}
 }
 
-// NewSecret is a secret no service declares yet, rotated and kept as by
-// default: [Service.Secret] makes one and declares it, which is how a product
-// gets one.
-func NewSecret() *Secret {
+// newSecret is NewSecret's body: decl_gen.go writes NewSecret, from the
+// design, as one call of it.
+func newSecret() *Secret {
 	return &Secret{opts: secretOptions{every: defaultRotation, keep: defaultKeep}}
 }

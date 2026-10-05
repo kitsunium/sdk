@@ -42,6 +42,7 @@ Two packages, one API:
 
 | File | Holds |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): `IsEngine`, `ConnectorCatalog`, `ConnectorsOf`, `EdgeID`, `CompareSource`, `Merge`, `ServiceOf`, `ValidSegment`, `ValidName`, `ValidContract`, `BinaryID`, `RoleID`, `LibraryID`, `Mermaid`, `QualifiedService`, `ModulePrefix`, `UnderPrefix` and `TableName`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
 | `model.go` | `Graph`, `App` (its `Build`), `Source`, `Edge` (its `Contract`), `Stats`, `Diagnostic`, `Analysis`, `Version` (5: binaries, roles, CLI commands, listeners, libraries, presentations, the `contracts`/`runs`/`imports`/`renders` edges; the Studio's mock modes and control event removed — D13) |
 | `node.go` | `Node` — in `internal/core` its declaration is kit's, in `decl_gen.go`, with every other type this table names that is declared alone (ADR 0170); the public `node.go` aliases it |
 | `node_kind.go`, `edge_kind.go`, `event_type.go` | the closed sets `NodeKind`, `EdgeKind`, `EventType`: strings, each marked `//ktn:wire-format` |

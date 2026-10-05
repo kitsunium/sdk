@@ -128,4 +128,4 @@ asserts the typed `UnsupportedPlatform` with no listener and no path.
 
 ## Declarations
 
-`decl_gen.go` is written by kit gen from the design (ADR 0170): the declaration of ; `ReadyContext` and `StatusContext`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name.
+`decl_gen.go` is written by kit gen from the design (ADR 0170): `ReadyContext` and `StatusContext`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name.

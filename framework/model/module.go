@@ -22,21 +22,20 @@ type (
 	File = core.FileMessage
 )
 
-// QualifiedService is the name a module gives a service it lists: the
-// module's own name for the service named like it, "<module>.<service>"
-// otherwise. The runtime and the analyzer both qualify with it.
-func QualifiedService(module, service string) string {
+// qualifiedService is QualifiedService's body: decl_gen.go writes QualifiedService, from the
+// design, as one call of it.
+func qualifiedService(module, service string) string {
 	return core.QualifiedService(module, service)
 }
 
-// ModulePrefix is a module's default mount prefix: "/<name>/".
-func ModulePrefix(name string) string {
+// modulePrefix is ModulePrefix's body: decl_gen.go writes ModulePrefix, from the
+// design, as one call of it.
+func modulePrefix(name string) string {
 	return core.ModulePrefix(name)
 }
 
-// UnderPrefix is a route declared at path, served under a module's mount
-// prefix: "/reports" under "/moderation/" is "/moderation/reports", and
-// under "/" it stays "/reports".
-func UnderPrefix(prefix, path string) string {
+// underPrefix is UnderPrefix's body: decl_gen.go writes UnderPrefix, from the
+// design, as one call of it.
+func underPrefix(prefix, path string) string {
 	return core.UnderPrefix(prefix, path)
 }

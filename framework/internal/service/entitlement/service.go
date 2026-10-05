@@ -24,88 +24,49 @@ const maxArtefactBytes int64 = 4 << 20
 // number of origins, which is what makes adding an origin cheap.
 const fetchTimeout time.Duration = 3 * time.Second
 
-// WithTimeServers points the clock corroboration at a set of Roughtime servers,
-// or disables it with an empty list.
-//
-// Separate from the constructor because it is off by default and because the
-// list is a trust decision — each entry pins a public key — that belongs to
-// whoever assembled the binary rather than to this package.
-func (s *Service) WithTimeServers(servers []RoughtimeServerValue) *Service {
+// withTimeServers is Service.WithTimeServers's body: decl_gen.go writes Service.WithTimeServers, from the
+// design, as one call of it.
+func (s *Service) withTimeServers(servers []RoughtimeServerValue) *Service {
 	s.timeServers = servers
 	//: Return the receiver so construction reads as one expression.
 	return s
 }
 
-// WithBearerFetch replaces the transport used for the Actions token mint.
-//
-// Only a test should need this. The default refuses redirects, which is what
-// keeps the runner's credential from being forwarded to a destination
-// checkTokenURL never vouched for.
-func (s *Service) WithBearerFetch(fetch BearerFetch) *Service {
+// withBearerFetch is Service.WithBearerFetch's body: decl_gen.go writes Service.WithBearerFetch, from the
+// design, as one call of it.
+func (s *Service) withBearerFetch(fetch BearerFetch) *Service {
 	s.bearerFetch = fetch
 	//: Return the receiver so construction reads as one expression.
 	return s
 }
 
-// WithOrigins replaces the publication points this verifier will try.
-//
-// It changes WHERE the roster is looked for and nothing about whether the
-// answer is believed: authority comes from the vendor signature, never from the
-// origin that served the bytes, so pointing this at a hostile endpoint gains
-// that endpoint nothing — it can serve whatever it likes and still cannot forge
-// the anchor. That is what makes the setter safe to expose at all.
-//
-// An empty list is a construction error rather than a way to disable the fetch,
-// and currentRoster says so rather than reporting an unreachable roster nobody
-// asked for.
-func (s *Service) WithOrigins(origins []coreent.OriginValue) *Service {
+// withOrigins is Service.WithOrigins's body: decl_gen.go writes Service.WithOrigins, from the
+// design, as one call of it.
+func (s *Service) withOrigins(origins []coreent.OriginValue) *Service {
 	s.origins = origins
 	//: Return the receiver so construction reads as one expression.
 	return s
 }
 
-// WithVersion records the binary's own version so Verify can apply the
-// roster's mandatory-update floor.
-//
-// It is a separate call rather than a constructor parameter because
-// pkg/license must not import the command package that owns the version
-// string, and because a caller with nothing to declare — a test, a tool
-// embedding the check — should not have to invent one.
-func (s *Service) WithVersion(version string) *Service {
+// withVersion is Service.WithVersion's body: decl_gen.go writes Service.WithVersion, from the
+// design, as one call of it.
+func (s *Service) withVersion(version string) *Service {
 	s.version = version
 	//: Return the receiver so construction reads as one expression.
 	return s
 }
 
-// WithAnchors replaces the vendor keys this verifier accepts.
-//
-// It takes the full ORDERED list and does not add to what the constructor
-// recorded: an additive setter would make the order depend on the call sequence,
-// and the order is the build's statement of which anchor is current. The list
-// the caller passes is the list, and the constructor's key is not implicitly
-// first in it.
-//
-// A separate call rather than a parameter on every constructor because the
-// single-key form is the common one and must keep reading as it does; this is
-// what a test, or a build assembling its anchors from somewhere other than a
-// constant, reaches for. NewServiceWithAnchors is the production spelling.
-//
-// An empty list is not a way to disable authentication: parseBundleAnyAnchor
-// refuses every document with coreent.ErrRosterUnsigned, because with no anchor
-// no signature can be valid.
-func (s *Service) WithAnchors(anchors [][]byte) *Service {
+// withAnchors is Service.WithAnchors's body: decl_gen.go writes Service.WithAnchors, from the
+// design, as one call of it.
+func (s *Service) withAnchors(anchors [][]byte) *Service {
 	s.anchors = anchorList(anchors)
 	//: Return the receiver so construction reads as one expression.
 	return s
 }
 
-// NewService builds a verifier over the caller's ssh directory.
-//
-// One anchor, which is the single-key form every caller had before rotation was
-// possible: it is the one-element list and not a second representation, so no
-// path in this package can disagree with the multi-anchor one about what a
-// single key means.
-func NewService(identity coreent.Identity, vendor []byte, product *ProductValue) *Service {
+// newService is NewService's body: decl_gen.go writes NewService, from the
+// design, as one call of it.
+func newService(identity coreent.Identity, vendor []byte, product *ProductValue) *Service {
 	//: One key is one list. A nil vendor stays a one-element list holding a
 	//: malformed key — NOT an empty list — so it keeps drawing the refusal it
 	//: always drew, naming key_bytes rather than an absent anchor.

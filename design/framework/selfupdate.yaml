@@ -1008,6 +1008,7 @@ packages:
               AutoUpgradeEnv is the variable authorising an upgrade the user did not ask
               for, e.g. MY_TOOL_AUTO_UPGRADE.
             name: AutoUpgradeEnv
+            impl: autoUpgradeEnv
             out:
               - type: string
             recv: value
@@ -1015,6 +1016,7 @@ packages:
               SudoOptInEnv is the variable authorising privilege escalation when the install
               directory is not writable, e.g. MY_TOOL_ALLOW_SUDO.
             name: SudoOptInEnv
+            impl: sudoOptInEnv
             out:
               - type: string
             recv: value
@@ -1075,6 +1077,7 @@ packages:
               <PREFIX>_AUTO_UPGRADE=0: an explicit answer always wins. It grants nothing
               else: escalation keeps its own, separate opt-in.
             name: WithAutomaticConsent
+            impl: withAutomaticConsent
             out:
               - type: "*Service"
             recv: pointer
@@ -1083,6 +1086,7 @@ packages:
               <PREFIX>_ALLOW_SUDO says: a binary installed where its user cannot write is
               reported (ElevationNotAuthorised), never replaced through sudo.
             name: WithoutElevation
+            impl: withoutElevation
             out:
               - type: "*Service"
             recv: pointer
@@ -1136,6 +1140,7 @@ packages:
               - name: domain
                 type: string
             name: WithSignatureDomain
+            impl: withSignatureDomain
             out:
               - type: "*Service"
             recv: pointer
@@ -1152,6 +1157,7 @@ packages:
               - name: timeout
                 type: time.Duration
             name: WithProbe
+            impl: withProbe
             out:
               - type: "*Service"
             recv: pointer
@@ -1171,6 +1177,7 @@ packages:
               - name: key
                 type: "[]byte"
             name: WithVendorKey
+            impl: withVendorKey
             out:
               - type: "*Service"
             recv: pointer
@@ -1564,6 +1571,7 @@ packages:
           - name: copier
             type: Copier
         name: NewWithDeps
+        impl: newWithDeps
         out:
           - type: "*Service"
       - doc: |-
@@ -1575,6 +1583,7 @@ packages:
           without a pty, because the CALLER supplies the answer. Pass the result as the
           interactive argument.
         name: StdinIsTerminal
+        impl: stdinIsTerminal
         out:
           - type: bool
     imports:

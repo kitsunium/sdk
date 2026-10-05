@@ -69,8 +69,9 @@ func SetCookie(ctx context.Context, c *http.Cookie) {
 	}
 }
 
-// ClearCookie tells the browser to forget the cookie called name.
-func ClearCookie(ctx context.Context, name string) {
+// clearCookie is ClearCookie's body: decl_gen.go writes ClearCookie, from the
+// design, as one call of it.
+func clearCookie(ctx context.Context, name string) {
 	SetCookie(ctx, &http.Cookie{Name: name, Value: "", MaxAge: -1})
 }
 

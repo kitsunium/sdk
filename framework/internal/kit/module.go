@@ -155,11 +155,9 @@ func (r requirement) moduleConfigure(m *Module) {
 	m.requires = append(m.requires, r.module)
 }
 
-// Requires says the module needs other: an app that mounts the module and
-// not other mounts other at its defaults, and starts it first. The Go import
-// this takes makes a cycle impossible. A collaboration a module can do
-// without is a port with a fallback instead ([Fallback]).
-func Requires(other *Module) ModuleConfigurer { return requirement{module: other} }
+// requires is Requires's body: decl_gen.go writes Requires, from the
+// design, as one call of it.
+func requires(other *Module) ModuleConfigurer { return requirement{module: other} }
 
 // qualifiedKey is a setting's or a secret's name as a product says it: in a
 // configuration file's section, to kit.Set, to the secrets command —

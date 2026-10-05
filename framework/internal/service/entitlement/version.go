@@ -92,15 +92,16 @@ func (e *UpdateRequiredError) Error() string {
 	return fmt.Sprintf("this build is %s, the published minimum is %s", e.Current, e.Required)
 }
 
-// Unwrap ties the typed error to the sentinel so errors.Is keeps working
-// through the exit-code dispatch.
-func (e *UpdateRequiredError) Unwrap() error {
+// unwrap is UpdateRequiredError.Unwrap's body: decl_gen.go writes UpdateRequiredError.Unwrap, from the
+// design, as one call of it.
+func (e *UpdateRequiredError) unwrap() error {
 	//: The sentinel is what every errors.Is call in the gate matches on.
 	return coreent.ErrUpdateRequired
 }
 
-// UpdateRefusal builds the error a caller reports when the floor is not met.
-func UpdateRefusal(current, floor string) error {
+// updateRefusal is UpdateRefusal's body: decl_gen.go writes UpdateRefusal, from the
+// design, as one call of it.
+func updateRefusal(current, floor string) error {
 	//: A typed error so the caller can read the floor back, not just show it.
 	return &UpdateRequiredError{Current: current, Required: floor}
 }

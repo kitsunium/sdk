@@ -78,9 +78,9 @@ func (a *App) mountHealth(mux *http.ServeMux) {
 	}
 }
 
-// EnableStudio makes a serving app in dev mount the Studio's API.
-// framework/kit/studio calls it as it is imported; a product never does.
-func EnableStudio() {
+// enableStudio is EnableStudio's body: decl_gen.go writes EnableStudio, from the
+// design, as one call of it.
+func enableStudio() {
 	mount := (*App).mountIntrospection
 	studioMount.Store(&mount)
 }

@@ -245,7 +245,7 @@ InCI reports whether this process can even attempt to prove it is a CI run.
 It is deliberately NOT an entitlement check: both variables being present means only that a token could be requested. Anyone can set them, which is exactly why proving anything requires the signature that follows.
 
 <a name="NewService"></a>
-## func [NewService](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/service.go>)
+## func [NewService](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/decl_gen.go>)
 
 ```go
 func NewService(identity coreent.Identity, vendor []byte, product *ProductValue) *Service
@@ -359,7 +359,7 @@ Two cases deliberately do NOT require an update:
 The asymmetry is the point. A binary cannot demonstrate it is at or above a bar it cannot name, and the action that resolves it — install a published build — is precisely what coreent.ErrUpdateRequired already asks for. The cost is stated where it is paid: an anchored build whose version stamp failed is refused, and the ordinary unanchored developer loop never reaches this function at all because enforceLicense returns before Verify is called.
 
 <a name="UpdateRefusal"></a>
-## func [UpdateRefusal](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/version.go>)
+## func [UpdateRefusal](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/decl_gen.go>)
 
 ```go
 func UpdateRefusal(current string, floor string) error
@@ -586,7 +586,7 @@ DefaultCacheDir returns where the last authenticated roster is kept.
 An empty string means "no cache", which disables the offline fallback entirely rather than guessing at a location. That is the safe direction: a machine that cannot say where its cache lives falls back to requiring the network, which is the behaviour this package had before the cache existed.
 
 <a name="ProductValue.Label"></a>
-### func \(ProductValue\) [Label](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/product.go>)
+### func \(ProductValue\) [Label](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/decl_gen.go>)
 
 ```go
 func (*ProductValue) Label() string
@@ -601,7 +601,7 @@ It tolerates a nil receiver, as every method here does: the one code path that r
 It returns the product's name, or "entitlement" when there is none.
 
 <a name="ProductValue.PublishedOrigins"></a>
-### func \(ProductValue\) [PublishedOrigins](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/product.go>)
+### func \(ProductValue\) [PublishedOrigins](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/decl_gen.go>)
 
 ```go
 func (*ProductValue) PublishedOrigins() []coreent.OriginValue
@@ -675,7 +675,7 @@ Verify performs a full cold verification: fetch, authenticate, match, and prove 
 The ORDER below is load-bearing, and neither the offline fallback nor the clock ratchet disturbs it. The ratchet runs FIRST, before anything reads a date: a function that is about to compare four deadlines against the local clock should establish that the clock has not been moved before it starts, not after. The mandatory-update floor runs BEFORE the subject is looked up on purpose: an out-of-date binary must be told to upgrade whether or not its licence is also in order, and the upgrade path is the same either way. Because the cached roster is substituted inside currentRoster rather than around it, that floor applies to a cached document exactly as it does to a fetched one — which is what stops an out-of-date binary from skipping it by going offline, including by going offline with a copy in hand.
 
 <a name="Service.WithAnchors"></a>
-### func \(Service\) [WithAnchors](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/service.go>)
+### func \(Service\) [WithAnchors](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/decl_gen.go>)
 
 ```go
 func (*Service) WithAnchors(anchors [][]byte) *Service
@@ -690,7 +690,7 @@ A separate call rather than a parameter on every constructor because the single-
 An empty list is not a way to disable authentication: parseBundleAnyAnchor refuses every document with coreent.ErrRosterUnsigned, because with no anchor no signature can be valid.
 
 <a name="Service.WithBearerFetch"></a>
-### func \(Service\) [WithBearerFetch](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/service.go>)
+### func \(Service\) [WithBearerFetch](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/decl_gen.go>)
 
 ```go
 func (*Service) WithBearerFetch(fetch BearerFetch) *Service
@@ -701,7 +701,7 @@ WithBearerFetch replaces the transport used for the Actions token mint.
 Only a test should need this. The default refuses redirects, which is what keeps the runner's credential from being forwarded to a destination checkTokenURL never vouched for.
 
 <a name="Service.WithCache"></a>
-### func \(Service\) [WithCache](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/cache.go>)
+### func \(Service\) [WithCache](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/decl_gen.go>)
 
 ```go
 func (*Service) WithCache(dir string) *Service
@@ -712,7 +712,7 @@ WithCache points the offline fallback at a directory, or disables it with "".
 Only NewService sets this in production, and only the test constructors leave it empty: a Service built with an injected getter must not touch a real filesystem unless the test asked it to.
 
 <a name="Service.WithOrigins"></a>
-### func \(Service\) [WithOrigins](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/service.go>)
+### func \(Service\) [WithOrigins](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/decl_gen.go>)
 
 ```go
 func (*Service) WithOrigins(origins []coreent.OriginValue) *Service
@@ -725,7 +725,7 @@ It changes WHERE the roster is looked for and nothing about whether the answer i
 An empty list is a construction error rather than a way to disable the fetch, and currentRoster says so rather than reporting an unreachable roster nobody asked for.
 
 <a name="Service.WithTimeServers"></a>
-### func \(Service\) [WithTimeServers](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/service.go>)
+### func \(Service\) [WithTimeServers](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/decl_gen.go>)
 
 ```go
 func (*Service) WithTimeServers(servers []RoughtimeServerValue) *Service
@@ -736,7 +736,7 @@ WithTimeServers points the clock corroboration at a set of Roughtime servers, or
 Separate from the constructor because it is off by default and because the list is a trust decision — each entry pins a public key — that belongs to whoever assembled the binary rather than to this package.
 
 <a name="Service.WithVersion"></a>
-### func \(Service\) [WithVersion](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/service.go>)
+### func \(Service\) [WithVersion](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/decl_gen.go>)
 
 ```go
 func (*Service) WithVersion(version string) *Service
@@ -772,7 +772,7 @@ func (*UpdateRequiredError) Error() string
 Error renders both versions: "from what, to what" is the only question anyone asks at that point.
 
 <a name="UpdateRequiredError.Unwrap"></a>
-### func \(UpdateRequiredError\) [Unwrap](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/version.go>)
+### func \(UpdateRequiredError\) [Unwrap](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/decl_gen.go>)
 
 ```go
 func (*UpdateRequiredError) Unwrap() error

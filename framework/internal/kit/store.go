@@ -85,17 +85,9 @@ func (s *Service) Store[T any](name string, key func(T) string, opts ...StoreCon
 // storeConfigure sets the option on what it configures.
 func (readModelOption) storeConfigure(o *storeOptions) { o.readModel = true }
 
-// ReadModel marks a store as derived from others (ADR 0005): written by
-// projections — the subscriptions that keep it from the write side's
-// events —, read by queries. It changes nothing of how the store runs; the
-// diagram draws it on its domain's read side, and the static analysis warns
-// of a read model written by anything but a subscription. kit's topics are
-// queues, not logs: a read model cannot be replayed from its events, and one
-// fed by a topic lags the commands that feed it — a query that must read its
-// own writes reads the write side.
-//
-//	var Summaries = Service.Store("summaries", Summary.Key, kit.ReadModel())
-func ReadModel() StoreConfigurer { return readModelOption{} }
+// readModel is ReadModel's body: decl_gen.go writes ReadModel, from the
+// design, as one call of it.
+func readModel() StoreConfigurer { return readModelOption{} }
 
 // notRunning is the error of a building block used while its service is not
 // mounted in a running app.

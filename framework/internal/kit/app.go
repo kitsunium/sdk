@@ -728,9 +728,9 @@ type httpEngine = plug.HTTPServer
 // engine.
 var httpStart atomic.Pointer[func(a *App, ctx context.Context) error]
 
-// EnableServer makes an app in the server profile serve HTTP.
-// framework/kit/server calls it as it is imported; a product never does.
-func EnableServer() {
+// enableServer is EnableServer's body: decl_gen.go writes EnableServer, from the
+// design, as one call of it.
+func enableServer() {
 	start := (*App).startHTTP
 	httpStart.Store(&start)
 }

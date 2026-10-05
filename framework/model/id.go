@@ -52,20 +52,21 @@ type (
 	ID = core.IDValue
 )
 
-// ValidSegment reports whether s is a legal service, module, binary, role or
-// library name.
-func ValidSegment(s string) bool {
+// validSegment is ValidSegment's body: decl_gen.go writes ValidSegment, from the
+// design, as one call of it.
+func validSegment(s string) bool {
 	return core.ValidSegment(s)
 }
 
-// ValidName reports whether s is a legal node name. An endpoint named by its
-// route is legal as an ID but is not a name a declaration may give.
-func ValidName(s string) bool {
+// validName is ValidName's body: decl_gen.go writes ValidName, from the
+// design, as one call of it.
+func validName(s string) bool {
 	return core.ValidName(s)
 }
 
-// ValidContract reports whether s names a versioned contract: "render/v1".
-func ValidContract(s string) bool {
+// validContract is ValidContract's body: decl_gen.go writes ValidContract, from the
+// design, as one call of it.
+func validContract(s string) bool {
 	return core.ValidContract(s)
 }
 
@@ -76,17 +77,20 @@ func ParseID(s string) (ID, error) {
 	return core.ParseID(s)
 }
 
-// BinaryID is the ID of a binary.
-func BinaryID(binary string) string {
+// binaryID is BinaryID's body: decl_gen.go writes BinaryID, from the
+// design, as one call of it.
+func binaryID(binary string) string {
 	return core.BinaryID(binary)
 }
 
-// RoleID is the ID of one process role of a binary.
-func RoleID(binary, role string) string {
+// roleID is RoleID's body: decl_gen.go writes RoleID, from the
+// design, as one call of it.
+func roleID(binary, role string) string {
 	return core.RoleID(binary, role)
 }
 
-// LibraryID is the ID of a library.
-func LibraryID(library string) string {
+// libraryID is LibraryID's body: decl_gen.go writes LibraryID, from the
+// design, as one call of it.
+func libraryID(library string) string {
 	return core.LibraryID(library)
 }

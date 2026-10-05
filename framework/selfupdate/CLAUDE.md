@@ -63,3 +63,7 @@ nothing. Chain `WithVendorKey` with the build's linked-in anchor, or
 bazel test --config=race //framework/selfupdate:selfupdate_test
 (cd framework && GOWORK=off go test -race ./selfupdate/...)
 ```
+
+## Declarations
+
+`decl_gen.go` is written by kit gen from the design (ADR 0170): `NewWithDeps` and `StdinIsTerminal`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name.

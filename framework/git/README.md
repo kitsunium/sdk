@@ -143,7 +143,7 @@ Head reports what the working tree containing dir is at: its head commit, that c
 A dir outside any repository — or absent, or on a machine without git — is CodeRepositoryUnresolved. A repository whose HEAD names no commit yet, a bare repository and a failed read are CodeCommandFailed. The three git commands it runs are hardened like every other one here, and the commit time is read from the raw commit object rather than through \`git log\`, so a planted signature program has nothing to verify.
 
 <a name="Resolve"></a>
-## func [Resolve](<https://github.com/kitsunium/sdk/blob/main/framework/git/git.go>)
+## func [Resolve](<https://github.com/kitsunium/sdk/blob/main/framework/git/decl_gen.go>)
 
 ```go
 func Resolve(ctx context.Context, cfg Config) Resolution
@@ -316,7 +316,7 @@ type LineRange struct {
 ```
 
 <a name="LineRange.Contains"></a>
-### func \(LineRange\) [Contains](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/line_range.go>)
+### func \(LineRange\) [Contains](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/decl_gen.go>)
 
 ```go
 func (LineRange) Contains(line int) bool
@@ -357,7 +357,7 @@ type Resolution struct {
 ```
 
 <a name="Resolution.Degraded"></a>
-### func \(Resolution\) [Degraded](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/git.go>)
+### func \(Resolution\) [Degraded](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/decl_gen.go>)
 
 ```go
 func (*Resolution) Degraded() bool

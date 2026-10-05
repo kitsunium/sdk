@@ -703,7 +703,7 @@ New returns a Service for the given running version and release source.
 The returned Service carries NO vendor key and therefore installs nothing: chain WithVendorKey with the build's linked-in anchor. That is the safe direction — a Service that verified only when a key happened to be present would make the security property depend on a build flag.
 
 <a name="NewWithDeps"></a>
-## func [NewWithDeps](<https://github.com/kitsunium/sdk/blob/main/framework/selfupdate/selfupdate.go>)
+## func [NewWithDeps](<https://github.com/kitsunium/sdk/blob/main/framework/selfupdate/decl_gen.go>)
 
 ```go
 func NewWithDeps(version string, src Source, client Getter, fs FileSystem, copier Copier) *Service
@@ -712,7 +712,7 @@ func NewWithDeps(version string, src Source, client Getter, fs FileSystem, copie
 NewWithDeps returns a Service with its three ports injected, for a caller that supplies its own HTTP policy or a test that supplies doubles. A nil fs or copier is legal on paths that never reach the disk.
 
 <a name="StdinIsTerminal"></a>
-## func [StdinIsTerminal](<https://github.com/kitsunium/sdk/blob/main/framework/selfupdate/selfupdate.go>)
+## func [StdinIsTerminal](<https://github.com/kitsunium/sdk/blob/main/framework/selfupdate/decl_gen.go>)
 
 ```go
 func StdinIsTerminal() bool
@@ -942,7 +942,7 @@ func (*Service) Upgrade() (info UpdateValue, upgradeErr error)
 Upgrade downloads and applies the latest version.
 
 <a name="Service.WithAutomaticConsent"></a>
-### func \(Service\) [WithAutomaticConsent](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/consent_product.go>)
+### func \(Service\) [WithAutomaticConsent](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/decl_gen.go>)
 
 ```go
 func (*Service) WithAutomaticConsent() *Service
@@ -951,7 +951,7 @@ func (*Service) WithAutomaticConsent() *Service
 WithAutomaticConsent declares that the PRODUCT consents to unrequested upgrades — a status line that updates itself silently, its decision D11 —, so no environment variable has to grant it. An operator still refuses with \<PREFIX>\_AUTO\_UPGRADE=0: an explicit answer always wins. It grants nothing else: escalation keeps its own, separate opt-in.
 
 <a name="Service.WithProbe"></a>
-### func \(Service\) [WithProbe](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/probe.go>)
+### func \(Service\) [WithProbe](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/decl_gen.go>)
 
 ```go
 func (*Service) WithProbe(args []string, timeout time.Duration) *Service
@@ -960,7 +960,7 @@ func (*Service) WithProbe(args []string, timeout time.Duration) *Service
 WithProbe makes a replacement stand only once the NEW binary, run with args, exits 0 within timeout (zero: five seconds). Before the rename the previous binary is kept as \<binary>.prev — a hard link, so the binary's own name is never absent —, and a probe that fails puts it back and reports ProbeFailed. A daemon that updates itself declares the argument its binary answers cheaply ("version", "--probe").
 
 <a name="Service.WithSignatureDomain"></a>
-### func \(Service\) [WithSignatureDomain](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/keys.go>)
+### func \(Service\) [WithSignatureDomain](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/decl_gen.go>)
 
 ```go
 func (*Service) WithSignatureDomain(domain string) *Service
@@ -976,7 +976,7 @@ WithSignatureDomain makes every signature cover domain, a NUL byte and the manif
 A manifest naming another tag is refused — the replay of an older, signed release under a newer name —, and so is one past its expiry — the freeze an attacker who can only replay can otherwise hold an installation in. Without a domain the historical form is verified unchanged.
 
 <a name="Service.WithVendorKey"></a>
-### func \(Service\) [WithVendorKey](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/signature.go>)
+### func \(Service\) [WithVendorKey](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/decl_gen.go>)
 
 ```go
 func (*Service) WithVendorKey(key []byte) *Service
@@ -996,7 +996,7 @@ func (*Service) WithVendorKeys(keys ...[]byte) *Service
 WithVendorKeys links the keys a release may be signed with, in order: a release verifies when ANY of them verifies its manifest (ADR 0150). A key rotation publishes under the new key while builds carrying both accept it and builds carrying only the old one keep reading the old — neither side has to be updated first. Several keys are still ONE signer: no quorum is taken. A key of the wrong length is kept as it is and refused at verification, naming its length, exactly as a single wrong key always was.
 
 <a name="Service.WithoutElevation"></a>
-### func \(Service\) [WithoutElevation](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/consent_product.go>)
+### func \(Service\) [WithoutElevation](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/decl_gen.go>)
 
 ```go
 func (*Service) WithoutElevation() *Service
@@ -1045,7 +1045,7 @@ out receives the prompt; in supplies the answer; interactive says whether there 
 The order is: an explicit authorisation decides, in EITHER direction; otherwise a human is asked; otherwise the answer is no.
 
 <a name="Source.AutoUpgradeEnv"></a>
-### func \(Source\) [AutoUpgradeEnv](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/source.go>)
+### func \(Source\) [AutoUpgradeEnv](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/decl_gen.go>)
 
 ```go
 func (Source) AutoUpgradeEnv() string
@@ -1078,7 +1078,7 @@ ExplainUpgradeRefusal prints every way to get the required update installed afte
 It is deliberately exhaustive, including the sudo opt-in: the two authorisations are separate on purpose (one permits replacing the binary, the other permits doing it as root) and discovering the second one only after acting on the first is a bad afternoon.
 
 <a name="Source.SudoOptInEnv"></a>
-### func \(Source\) [SudoOptInEnv](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/source.go>)
+### func \(Source\) [SudoOptInEnv](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/decl_gen.go>)
 
 ```go
 func (Source) SudoOptInEnv() string

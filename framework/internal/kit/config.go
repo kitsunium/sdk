@@ -167,10 +167,9 @@ func (memoryOption) storeConfigure(o *storeOptions) { o.inMemory = true }
 // appConfigure sets the option on what it configures.
 func (memoryOption) appConfigure(o *appOptions) { o.memory = true }
 
-// InMemory keeps data in memory. On an app, it overrides the data directory
-// for every store and queue — what a test wants. On a store, it keeps that
-// store in memory even when the app has a data directory.
-func InMemory() interface {
+// inMemory is InMemory's body: decl_gen.go writes InMemory, from the
+// design, as one call of it.
+func inMemory() interface {
 	StoreConfigurer
 	AppConfigurer
 } {

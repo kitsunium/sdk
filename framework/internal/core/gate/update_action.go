@@ -28,11 +28,9 @@ const (
 	UpdateWarn
 )
 
-// Valid reports whether this action was set to one of the three answers. It is
-// false for the unclaimed zero value, and false for anything past the last
-// action — a value from a newer build of this package that this one cannot
-// honour.
-func (a UpdateAction) Valid() bool {
+// valid is UpdateAction.Valid's body: decl_gen.go writes UpdateAction.Valid, from the
+// design, as one call of it.
+func (a UpdateAction) valid() bool {
 	//: the zero value is unclaimed, and everything past the last action is a
 	//: value from a newer build of this package that this one cannot honour.
 	return a >= UpdateRefuse && a <= UpdateWarn

@@ -16,7 +16,7 @@ bounding *us*.
 
 | File | Role |
 |---|---|
-| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declaration of ; `Apply`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): `Apply`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
 | `memlimit.go` | `Apply` + the injected-seam `applyFrom`, the limit-file parsers, and every threshold constant |
 | `cgroup.go` | which limit files to consult: mount discovery (point AND root, octal escapes decoded), `/proc/self/cgroup` membership, the translation between the two, and the ancestor walk |
 

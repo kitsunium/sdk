@@ -122,6 +122,7 @@ packages:
           - name: verify
             type: func() error
         name: Decide
+        impl: decide
         out:
           - type: Decision
     imports:
@@ -428,6 +429,7 @@ packages:
               action — a value from a newer build of this package that this one cannot
               honour.
             name: Valid
+            impl: valid
             out:
               - type: bool
             recv: value

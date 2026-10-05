@@ -52,35 +52,23 @@ func HeldUntil[T any](until func(T) (time.Time, bool), reason string) StoreOptio
 	return ikit.HeldUntil[T](until, reason)
 }
 
-// Purpose says why the store keeps its records (GDPR art. 30(1)(b)): the
-// register lists it, and a person's export carries it.
-func Purpose(text string) StoreOption {
+// purpose is Purpose's body: decl_gen.go writes Purpose, from the
+// design, as one call of it.
+func purpose(text string) StoreOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.Purpose(text)
 }
 
-// DeleteOnErasure makes a person's erasure (kit.Erase) delete the store's
-// records instead of clearing them, as sessions and accounts want.
-func DeleteOnErasure() StoreOption {
+// deleteOnErasure is DeleteOnErasure's body: decl_gen.go writes DeleteOnErasure, from the
+// design, as one call of it.
+func deleteOnErasure() StoreOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.DeleteOnErasure()
 }
 
-// RetentionByProduct says the product keeps the store's retention itself:
-// its own code erases and deletes what it no longer needs — a record whose
-// life the product's own rules end, a lifecycle kit cannot read from the
-// entity. limits says, in the product's words, for how long and how, which
-// the register publishes as the store's time limits (GDPR art. 30(1)(f));
-// "" says only that the product keeps them.
-//
-// kit then runs no retention for the store, and warns of neither a missing
-// retention nor a missing subject. Its classified fields keep every other
-// promise: sealed at rest, never shown, exported with their person — when
-// the store names one — and erased by kit.Erase and Store.Erase. It goes
-// with kit.Purpose, kit.HeldUntil, kit.Anonymise and kit.DeleteOnErasure;
-// with kit.EraseAfter, kit.EraseAt, kit.DeleteAfter or kit.DeleteAt it is
-// refused: a store's retention is kit's or the product's, never both.
-func RetentionByProduct(limits string) StoreOption {
+// retentionByProduct is RetentionByProduct's body: decl_gen.go writes RetentionByProduct, from the
+// design, as one call of it.
+func retentionByProduct(limits string) StoreOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.RetentionByProduct(limits)
 }

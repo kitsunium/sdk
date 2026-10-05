@@ -12,14 +12,8 @@ import (
 // named after it with "___ix", within PostgreSQL's 63.
 const MaxTableLen int = core.MaxTableLen
 
-// TableName is the table a database keeps a kit table in (ADR 0004): the
-// service's name — qualified, for a module's —, two underscores and the
-// node's name, then suffix, '-' and '.' written '_', lower case —
-// "moderation.intake"'s store "cases" is moderation_intake__cases. A name
-// the rule cannot keep as it is — upper case, longer than MaxTableLen,
-// three underscores in a row, SQLite's own prefix — is cut and ends with a
-// digest of the whole, so it stays one table's. The runtime and the
-// analyzer name tables with it.
-func TableName(service, node, suffix string) string {
+// tableName is TableName's body: decl_gen.go writes TableName, from the
+// design, as one call of it.
+func tableName(service, node, suffix string) string {
 	return core.TableName(service, node, suffix)
 }

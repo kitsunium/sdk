@@ -164,10 +164,9 @@ func (s *Service) Loop(name string, run func(context.Context, WakeEvent) error, 
 	return l
 }
 
-// Nudge wakes the loop now, as if its deadline had come. The run's reason
-// is model.WakeManual; a nudge also cuts short the backoff after a failure.
-// It does nothing while the loop is not running.
-func (l *Loop) Nudge() { l.signal(WakeEvent{Reason: model.WakeManual}) }
+// nudge is Loop.Nudge's body: decl_gen.go writes Loop.Nudge, from the
+// design, as one call of it.
+func (l *Loop) nudge() { l.signal(WakeEvent{Reason: model.WakeManual}) }
 
 // describe fills the graph node out with what the Loop declares, and returns
 // its edges.
@@ -652,9 +651,9 @@ func (l *loopState) idle(a *App, at time.Time) {
 	a.mu.Unlock()
 }
 
-// NewLoop is a loop no service declares yet, whose runs are run:
-// [Service.Loop] makes one and declares it, which is how a product gets one.
-func NewLoop(run func(context.Context, WakeEvent) error) *Loop { return &Loop{run: run} }
+// newLoop is NewLoop's body: decl_gen.go writes NewLoop, from the
+// design, as one call of it.
+func newLoop(run func(context.Context, WakeEvent) error) *Loop { return &Loop{run: run} }
 
 // laterOf is the later of two instants.
 func laterOf(x, y time.Time) time.Time {

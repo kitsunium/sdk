@@ -50,10 +50,9 @@ type Include = svcgit.IncludeFunc
 // commit, so this is one engine's value (ADR 0074).
 type HeadState = svcgit.HeadValue
 
-// Resolve computes the changed set for the repository containing cfg.Root,
-// returning a degraded Resolution rather than an error when it cannot be
-// trusted. Check Resolution.Degraded before reading Set.
-func Resolve(ctx context.Context, cfg Config) Resolution {
+// resolve is Resolve's body: decl_gen.go writes Resolve, from the
+// design, as one call of it.
+func resolve(ctx context.Context, cfg Config) Resolution {
 	//: delegate verbatim to the service implementation.
 	return svcgit.Resolve(ctx, cfg)
 }

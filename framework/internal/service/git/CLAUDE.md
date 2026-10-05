@@ -15,7 +15,7 @@ code of its own: it emits the core's `0.2.33.*` sentinels.
 
 | File | Role |
 |---|---|
-| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `ChangedSetValue`, `Config`, `IncludeFunc` and `HeadValue` — each struct with every field, unexported ones included; the assertion `ChangedSetValue → coregit.ChangedSet`. Their methods, constructors and helpers stay hand-written, in the files this document names |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `ChangedSetValue`, `Config`, `IncludeFunc` and `HeadValue` — each struct with every field, unexported ones included; `ChangedSetValue.ContainsFile`, `ChangedSetValue.ContainsDir` and `ChangedSetValue.IsEmpty`, each one call of its unexported body, measured to inline with the body inlined into it; the assertion `ChangedSetValue → coregit.ChangedSet`. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
 | `exec.go` | the hardened runner — `runGitOutput`, `runGitBlob`, `gitProbe`, `hardenedGitConfig`, `extDiffGuard` |
 | `resolve.go` | `Resolve`, the four diff sources it folds together, `shallowState`, `spelledTopLevel` |
 | `diff_parse.go` | unified-diff and `--name-status -z` parsing, each path filtered through `IncludeFunc` |

@@ -76,12 +76,9 @@ func (p *ProductValue) DefaultCacheDir() string {
 	return filepath.Join(root, p.cacheDir())
 }
 
-// WithCache points the offline fallback at a directory, or disables it with "".
-//
-// Only NewService sets this in production, and only the test constructors leave
-// it empty: a Service built with an injected getter must not touch a real
-// filesystem unless the test asked it to.
-func (s *Service) WithCache(dir string) *Service {
+// withCache is Service.WithCache's body: decl_gen.go writes Service.WithCache, from the
+// design, as one call of it.
+func (s *Service) withCache(dir string) *Service {
 	s.cacheDir = dir
 	//: Return the receiver so construction reads as one expression.
 	return s

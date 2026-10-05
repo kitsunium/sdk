@@ -20,36 +20,29 @@ type SubscriptionOption = ikit.SubscriptionConfigurer
 // queued command's ([MaxDeliveries], [Parallelism]).
 type DeliveryOption = ikit.DeliveryOption
 
-// MaxDeliveries is how many attempts a message gets before it is
-// dead-lettered — a subscription's, or a queued command's. The default is
-// 5.
+// maxDeliveries is MaxDeliveries's body: decl_gen.go writes MaxDeliveries, from the
+// design, as one call of it.
 //
 // IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
 // only hands it to the declaration it configures.
-func MaxDeliveries(n int) DeliveryOption {
+func maxDeliveries(n int) DeliveryOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.MaxDeliveries(n)
 }
 
-// Parallelism is how many messages are handled at once — a subscription's,
-// or a queued command's. The default is 1.
+// parallelism is Parallelism's body: decl_gen.go writes Parallelism, from the
+// design, as one call of it.
 //
 // IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
 // only hands it to the declaration it configures.
-func Parallelism(n int) DeliveryOption {
+func parallelism(n int) DeliveryOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.Parallelism(n)
 }
 
-// OwnStores lets a watch ([Service].Watch) hear the stores of its own
-// module too — the product's own, for a watch of the product's —, which a
-// watch never hears by default. Such a watch never hears the writes its own
-// handler makes, in its handler's context — a handler that writes what it
-// watches, a screening that stamps the record it screened, would otherwise
-// hear itself forever —; a write the handler only causes, later and
-// elsewhere — a queued command's handling, a topic's delivery — is heard.
-// A subscription to a topic refuses it: a topic has no stores.
-func OwnStores() SubscriptionOption {
+// ownStores is OwnStores's body: decl_gen.go writes OwnStores, from the
+// design, as one call of it.
+func ownStores() SubscriptionOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.OwnStores()
 }

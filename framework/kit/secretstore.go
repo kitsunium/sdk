@@ -5,10 +5,9 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
 
-// SecretStore keeps the secrets in store instead of the environment's: a
-// test gives a store holding what its provided secrets hold. The
-// environment's variables are still read first.
-func SecretStore(store secret.Store) AppOption {
+// secretStore is SecretStore's body: decl_gen.go writes SecretStore, from the
+// design, as one call of it.
+func secretStore(store secret.Store) AppOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.SecretStore(store)
 }

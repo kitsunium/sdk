@@ -5,6 +5,7 @@ package(default_visibility = ["//visibility:public"])
 go_library(
     name = "selfupdate",
     srcs = [
+        "decl_gen.go",
         "doc.go",
         "selfupdate.go",
     ],

@@ -5,6 +5,7 @@ package(default_visibility = ["//visibility:public"])
 go_library(
     name = "gate",
     srcs = [
+        "decl_gen.go",
         "doc.go",
         "gate.go",
     ],

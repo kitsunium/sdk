@@ -15,7 +15,7 @@ family's own `internal/service/proc/internal/rlim`, which builds the
 
 | File | Role |
 |---|---|
-| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declaration of ; `Apply` and `PrepareSysProcAttr`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): `Apply` and `PrepareSysProcAttr`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
 | `rlimit.go` | platform-neutral surface: `Apply`, `PrepareSysProcAttr` delegating to the build-tagged impls |
 | `rlimit_linux.go` | Linux impl: full `Resource → RLIMIT_*` table (incl. `NPROC`/`MEMLOCK`), `setrlimit`/`prlimit64`, error wrapping |
 | `rlimit_unix.go` | Darwin/BSD impl (`unix && !linux`): native `setrlimit(2)` on self; a foreign pid → `UnsupportedPlatform` (no portable `prlimit64`) |

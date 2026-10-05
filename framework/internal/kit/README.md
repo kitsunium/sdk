@@ -1471,7 +1471,7 @@ func Anonymise[T any](fn func(*T)) StoreConfigurer
 Anonymise says what an erased record keeps: fn runs first, and generalises into unclassified fields — a birth date to its year, an address to its region; then kit clears the rest. kit cannot prove that what remains identifies no one: by declaring the function, the product asserts it.
 
 <a name="AnyUser"></a>
-## func [AnyUser](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/expose.go>)
+## func [AnyUser](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func AnyUser() ExposeConfigurer
@@ -1486,7 +1486,7 @@ var MyOrders = Service.Query("my-orders", myOrders, kit.Auth()).Expose("GET /ord
 It adds no authentication of its own: an exposure authenticates as its operation asks, so the operation declares [Auth](#Auth).
 
 <a name="Anyone"></a>
-## func [Anyone](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/expose.go>)
+## func [Anyone](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func Anyone() ExposeConfigurer
@@ -1571,7 +1571,7 @@ func Catalog() []model.Mechanic
 Catalog lists the generic mechanics kit offers: the building blocks a node composes rather than implements, each one backed by an SDK package. It is part of every graph, so the Studio — and an AI agent reading the graph — knows what can be added to a product and the exact code that adds it.
 
 <a name="ClearCookie"></a>
-## func [ClearCookie](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/request.go>)
+## func [ClearCookie](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func ClearCookie(ctx context.Context, name string)
@@ -1614,7 +1614,7 @@ app := kit.NewApp("todo", ...).With(kit.ConfigFiles(configFiles))
 ```
 
 <a name="Conflict"></a>
-## func [Conflict](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go>)
+## func [Conflict](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func Conflict(message string) *Error
@@ -1686,7 +1686,7 @@ func DeleteAt[T any](at func(T) (time.Time, bool)) StoreConfigurer
 DeleteAt deletes a record at the instant at returns.
 
 <a name="DeleteOnErasure"></a>
-## func [DeleteOnErasure](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/retention.go>)
+## func [DeleteOnErasure](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func DeleteOnErasure() StoreConfigurer
@@ -1704,7 +1704,7 @@ func DesignDigest(digest string) AppConfigurer
 DesignDigest records the digest of the design the product's code was generated from — what the generated wiring passes —, so the telemetry handshake can say it and a tool attached to the product can tell a process built from another design.
 
 <a name="EnableServer"></a>
-## func [EnableServer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/app.go>)
+## func [EnableServer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func EnableServer()
@@ -1713,7 +1713,7 @@ func EnableServer()
 EnableServer makes an app in the server profile serve HTTP. framework/kit/server calls it as it is imported; a product never does.
 
 <a name="EnableStudio"></a>
-## func [EnableStudio](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/introspect.go>)
+## func [EnableStudio](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func EnableStudio()
@@ -1797,7 +1797,7 @@ var Enforcer = Service.Port[Measure, Applied]("enforcer", kit.Fallback(QueueAPI)
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
 <a name="Forbidden"></a>
-## func [Forbidden](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go>)
+## func [Forbidden](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func Forbidden(message string) *Error
@@ -1855,7 +1855,7 @@ func IdleStop(d time.Duration) AppConfigurer
 IdleStop makes a daemon stop itself once, for d, no connection was open on any of its listeners and no activity of its services (Service.Activity) said it was busy: a daemon launched on demand by its clients ends when they stop coming. It is refused outside the daemon profile.
 
 <a name="InMemory"></a>
-## func [InMemory](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/config.go>)
+## func [InMemory](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func InMemory() interface{StoreConfigurer; AppConfigurer}
@@ -1873,7 +1873,7 @@ func Index[T any](name string, keys func(T) []string) StoreConfigurer
 Index declares an index where an entity may have several keys and a key several entities — the users a task is shared with. [StoreService.Find](#StoreService.Find) reads it. Empty keys are not indexed.
 
 <a name="Invalid"></a>
-## func [Invalid](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go>)
+## func [Invalid](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func Invalid(message string) *Error
@@ -2043,7 +2043,7 @@ func NewEndpointService[Req, Resp any]() *EndpointService[Req, Resp]
 NewEndpointService is an endpoint no service declares yet: [Service.Endpoint](#Service.Endpoint) makes one and declares it, which is how a product gets one.
 
 <a name="NewError"></a>
-## func [NewError](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go>)
+## func [NewError](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func NewError(status int, code string, message string) *Error
@@ -2061,7 +2061,7 @@ func NewID(prefix string) string
 NewID returns a new identifier with the given prefix: a TypeID, time ordered, like "todo\_01k5zq7m3xe8tvbfg0s7zr4w6c". The prefix must be one to sixty-three lower-case letters, with '\_' only between two letters; any other prefix is a programming error and panics.
 
 <a name="NewListener"></a>
-## func [NewListener](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/listener.go>)
+## func [NewListener](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func NewListener(contract string, handler ListenHandler) *Listener
@@ -2070,7 +2070,7 @@ func NewListener(contract string, handler ListenHandler) *Listener
 NewListener is a listener no service declares yet, speaking contract and served by handler: [Service.Listen](#Service.Listen) makes one and declares it, which is how a product gets one.
 
 <a name="NewLoop"></a>
-## func [NewLoop](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/loop.go>)
+## func [NewLoop](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func NewLoop(run func(context.Context, WakeEvent) error) *Loop
@@ -2079,7 +2079,7 @@ func NewLoop(run func(context.Context, WakeEvent) error) *Loop
 NewLoop is a loop no service declares yet, whose runs are run: [Service.Loop](#Service.Loop) makes one and declares it, which is how a product gets one.
 
 <a name="NewMailer"></a>
-## func [NewMailer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/mailer.go>)
+## func [NewMailer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func NewMailer() *Mailer
@@ -2123,7 +2123,7 @@ func NewQuery[Q, R any]() *Query[Q, R]
 NewQuery is a query no service declares yet: [Service.Query](#Service.Query) makes one and declares it, which is how a product gets one.
 
 <a name="NewRecordsService"></a>
-## func [NewRecordsService](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/records.go>)
+## func [NewRecordsService](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func NewRecordsService(port recordsPort) RecordsService
@@ -2132,7 +2132,7 @@ func NewRecordsService(port recordsPort) RecordsService
 NewRecordsService is the records of the store port reaches: [App.Records](#App.Records) and [RecordsOf](#RecordsOf) make one for a store the app mounts.
 
 <a name="NewSecret"></a>
-## func [NewSecret](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/secret.go>)
+## func [NewSecret](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func NewSecret() *Secret
@@ -2215,7 +2215,7 @@ NotCommon refuses a password among the ten thousand most common ones — the SDK
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
 <a name="NotFound"></a>
-## func [NotFound](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go>)
+## func [NotFound](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func NotFound(message string) *Error
@@ -2302,7 +2302,7 @@ func Profile(p string) AppConfigurer
 Profile selects the app's process profile: model.ProfileServer (the default), model.ProfileDaemon or model.ProfileCLI.
 
 <a name="Purpose"></a>
-## func [Purpose](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/retention.go>)
+## func [Purpose](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func Purpose(text string) StoreConfigurer
@@ -2346,7 +2346,7 @@ Buckets unused for ten minutes are forgotten, and at most 10 000 are kept: the l
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
 <a name="ReadModel"></a>
-## func [ReadModel](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/store.go>)
+## func [ReadModel](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func ReadModel() StoreConfigurer
@@ -2412,7 +2412,7 @@ Required drops a setting's default: a start without a value for it fails, saying
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
 <a name="Requires"></a>
-## func [Requires](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/module.go>)
+## func [Requires](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func Requires(other *Module) ModuleConfigurer
@@ -2421,7 +2421,7 @@ func Requires(other *Module) ModuleConfigurer
 Requires says the module needs other: an app that mounts the module and not other mounts other at its defaults, and starts it first. The Go import this takes makes a cycle impossible. A collaboration a module can do without is a port with a fallback instead ([Fallback](#Fallback)).
 
 <a name="RetentionByProduct"></a>
-## func [RetentionByProduct](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/retention.go>)
+## func [RetentionByProduct](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func RetentionByProduct(limits string) StoreConfigurer
@@ -2432,7 +2432,7 @@ RetentionByProduct says the product keeps the store's retention itself: its own 
 kit then runs no retention for the store, and warns of neither a missing retention nor a missing subject. Its classified fields keep every other promise: sealed at rest, never shown, exported with their person — when the store names one — and erased by kit.Erase and Store.Erase. It goes with kit.Purpose, kit.HeldUntil, kit.Anonymise and kit.DeleteOnErasure; with kit.EraseAfter, kit.EraseAt, kit.DeleteAfter or kit.DeleteAt it is refused: a store's retention is kit's or the product's, never both.
 
 <a name="Revisions"></a>
-## func [Revisions](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/revisions.go>)
+## func [Revisions](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func Revisions(n int) StoreConfigurer
@@ -2628,7 +2628,7 @@ On a database the transaction is the database's own, at its default isolation. O
 A command's handler runs in one already ([NoTransaction](#NoTransaction) opts out), and so does a workflow's transition.
 
 <a name="Unauthenticated"></a>
-## func [Unauthenticated](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go>)
+## func [Unauthenticated](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func Unauthenticated(message string) *Error
@@ -2637,7 +2637,7 @@ func Unauthenticated(message string) *Error
 Unauthenticated reports a caller who did not prove who they are (401).
 
 <a name="Unavailable"></a>
-## func [Unavailable](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go>)
+## func [Unavailable](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func Unavailable(message string) *Error
@@ -3329,7 +3329,7 @@ func (*Error) Error() string
 Error renders the code and the message. It never renders the cause.
 
 <a name="Error.Unwrap"></a>
-### func \(Error\) [Unwrap](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go>)
+### func \(Error\) [Unwrap](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func (*Error) Unwrap() error
@@ -3338,7 +3338,7 @@ func (*Error) Unwrap() error
 Unwrap returns the cause, so errors.Is and errors.As see through an Error.
 
 <a name="Error.Wrap"></a>
-### func \(Error\) [Wrap](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go>)
+### func \(Error\) [Wrap](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func (*Error) Wrap(cause error) *Error
@@ -3506,7 +3506,7 @@ type Loop struct{}
 ```
 
 <a name="Loop.Nudge"></a>
-### func \(Loop\) [Nudge](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/loop.go>)
+### func \(Loop\) [Nudge](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func (*Loop) Nudge()

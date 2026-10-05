@@ -9,8 +9,9 @@ import (
 	"strings"
 )
 
-// ModuleOf returns the module named name, or nil.
-func (g *GraphMessage) ModuleOf(name string) *ModuleMessage {
+// moduleOf is GraphMessage.ModuleOf's body: decl_gen.go writes GraphMessage.ModuleOf, from the
+// design, as one call of it.
+func (g *GraphMessage) moduleOf(name string) *ModuleMessage {
 	for i := range g.Modules {
 		if g.Modules[i].Name == name {
 			return &g.Modules[i]
@@ -32,13 +33,13 @@ func QualifiedService(module, service string) string {
 	return module + "." + service
 }
 
-// ModulePrefix is a module's default mount prefix: "/<name>/".
-func ModulePrefix(name string) string { return "/" + name + "/" }
+// modulePrefix is ModulePrefix's body: decl_gen.go writes ModulePrefix, from the
+// design, as one call of it.
+func modulePrefix(name string) string { return "/" + name + "/" }
 
-// UnderPrefix is a route declared at path, served under a module's mount
-// prefix: "/reports" under "/moderation/" is "/moderation/reports", and
-// under "/" it stays "/reports".
-func UnderPrefix(prefix, path string) string {
+// underPrefix is UnderPrefix's body: decl_gen.go writes UnderPrefix, from the
+// design, as one call of it.
+func underPrefix(prefix, path string) string {
 	if prefix == "" || prefix == "/" {
 		return path
 	}

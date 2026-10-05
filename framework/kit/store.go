@@ -21,17 +21,9 @@ type Store[T any] = ikit.StoreService[T]
 // StoreOption configures a store.
 type StoreOption = ikit.StoreConfigurer
 
-// ReadModel marks a store as derived from others (ADR 0005): written by
-// projections — the subscriptions that keep it from the write side's
-// events —, read by queries. It changes nothing of how the store runs; the
-// diagram draws it on its domain's read side, and the static analysis warns
-// of a read model written by anything but a subscription. kit's topics are
-// queues, not logs: a read model cannot be replayed from its events, and one
-// fed by a topic lags the commands that feed it — a query that must read its
-// own writes reads the write side.
-//
-//	var Summaries = Service.Store("summaries", Summary.Key, kit.ReadModel())
-func ReadModel() StoreOption {
+// readModel is ReadModel's body: decl_gen.go writes ReadModel, from the
+// design, as one call of it.
+func readModel() StoreOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.ReadModel()
 }

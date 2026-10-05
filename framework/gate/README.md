@@ -122,7 +122,7 @@ UpdateWarn runs the invocation anyway and reports the floor alongside it.
 Initialised with `github.com/kitsunium/sdk/framework/internal/core/gate.UpdateWarn`.
 
 <a name="Decide"></a>
-## func [Decide](<https://github.com/kitsunium/sdk/blob/main/framework/gate/gate.go>)
+## func [Decide](<https://github.com/kitsunium/sdk/blob/main/framework/gate/decl_gen.go>)
 
 ```go
 func Decide(policy *Policy, path []string, verify func() error) Decision
@@ -306,7 +306,7 @@ func (UpdateAction) String() string
 String names the action for a diagnostic, spelling the unclaimed zero value "unset" rather than inventing a name for it.
 
 <a name="UpdateAction.Valid"></a>
-### func \(UpdateAction\) [Valid](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/gate/update_action.go>)
+### func \(UpdateAction\) [Valid](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/gate/decl_gen.go>)
 
 ```go
 func (UpdateAction) Valid() bool

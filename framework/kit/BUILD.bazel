@@ -17,6 +17,7 @@ go_library(
         "config.go",
         "database.go",
         "database_interface.go",
+        "decl_gen.go",
         "decode.go",
         "doc.go",
         "endpoint.go",

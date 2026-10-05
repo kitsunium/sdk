@@ -196,33 +196,9 @@ func New(identity Identity, vendor []byte, product *Product) *Service {
 	return svcent.NewService(identity, vendor, product)
 }
 
-// NewWithAnchors returns a verifier that accepts SEVERAL vendor keys, in the
-// order given, so a signing key can be rotated in band.
-//
-// It takes identity, the machine's half of the proof; anchors, the ed25519 public
-// keys the binary links in, most-current first; and product, the vendor-specific
-// facts. A roster is authentic when it verifies against ANY of the anchors, which
-// is what lets a vendor publish under a new key while installations carrying only
-// the old one keep working — neither side has to be updated first.
-//
-// # What it costs, said here rather than only in the ADR
-//
-// Every anchor on the list is a key whose compromise is ACCEPTED while it is
-// listed, so this is strictly more surface than New's single key. What bounds it
-// is that the list is ordered, capped, and a BUILD decision: nothing at runtime
-// can extend it — not a roster field, not an environment variable, not the cache
-// — and a key leaves the list the way it entered, by shipping a build without it.
-// Past the cap the tail is dropped and a line is logged, because a build mistake
-// answered by refusing every verification would take a product down over a
-// misconfiguration.
-//
-// An EMPTY list is not a way to disable the signature check: every document is
-// then refused with ErrRosterUnsigned, since with no anchor no signature can be
-// valid.
-//
-// Service.WithAnchors sets the same list on a verifier already built, which is
-// what a test or a build assembling its anchors from elsewhere reaches for.
-func NewWithAnchors(identity Identity, anchors [][]byte, product *Product) *Service {
+// newWithAnchors is NewWithAnchors's body: decl_gen.go writes NewWithAnchors, from the
+// design, as one call of it.
+func newWithAnchors(identity Identity, anchors [][]byte, product *Product) *Service {
 	//: delegate verbatim to the service implementation.
 	return svcent.NewServiceWithAnchors(identity, anchors, product)
 }
@@ -269,31 +245,23 @@ type RoughtimeServer = svcent.RoughtimeServerValue
 // same refusal, and loops forever.
 type UpdateRequiredError = svcent.UpdateRequiredError
 
-// NewWithGetter returns a verifier whose roster fetches go through client.
-//
-// It takes client, the HTTP surface the roster is fetched over; identity, the
-// machine's half of the proof; vendor, the ed25519 public key the binary links
-// in; and product, the vendor-specific facts — a nil product uses the
-// documented fallbacks.
-func NewWithGetter(client Getter, identity Identity, vendor []byte, product *Product) *Service {
+// newWithGetter is NewWithGetter's body: decl_gen.go writes NewWithGetter, from the
+// design, as one call of it.
+func newWithGetter(client Getter, identity Identity, vendor []byte, product *Product) *Service {
 	//: delegate verbatim to the service implementation.
 	return svcent.NewServiceWithGetter(client, identity, vendor, product)
 }
 
-// RequiresUpdate reports whether current is below the floor a roster mandates.
-//
-// It takes the running build's version and the minimum the roster requires —
-// an empty floor requires nothing — and reports whether the build is below it.
-func RequiresUpdate(current, floor string) bool {
+// requiresUpdate is RequiresUpdate's body: decl_gen.go writes RequiresUpdate, from the
+// design, as one call of it.
+func requiresUpdate(current, floor string) bool {
 	//: delegate verbatim to the service implementation.
 	return svcent.RequiresUpdate(current, floor)
 }
 
-// UpdateRefusal builds the typed refusal for a build below the roster's floor.
-//
-// It takes the running build's version and the minimum the roster requires, and
-// returns an *UpdateRequiredError carrying both.
-func UpdateRefusal(current, floor string) error {
+// updateRefusal is UpdateRefusal's body: decl_gen.go writes UpdateRefusal, from the
+// design, as one call of it.
+func updateRefusal(current, floor string) error {
 	//: delegate verbatim to the service implementation.
 	return svcent.UpdateRefusal(current, floor)
 }

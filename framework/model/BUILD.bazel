@@ -8,6 +8,7 @@ go_library(
         "architecture.go",
         "code.go",
         "connector.go",
+        "decl_gen.go",
         "devtools.go",
         "doc.go",
         "edge_kind.go",

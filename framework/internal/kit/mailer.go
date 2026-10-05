@@ -910,7 +910,6 @@ func (a *App) hasMailer() bool {
 	return false
 }
 
-// NewMailer is a mailer no service declares yet, with the default attempts:
-// [Service.Mailer] makes one and declares it, which is how a product gets
-// one.
-func NewMailer() *Mailer { return &Mailer{opts: mailerOptions{maxAttempts: defaultMailAttempts}} }
+// newMailer is NewMailer's body: decl_gen.go writes NewMailer, from the
+// design, as one call of it.
+func newMailer() *Mailer { return &Mailer{opts: mailerOptions{maxAttempts: defaultMailAttempts}} }

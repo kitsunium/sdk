@@ -18,7 +18,7 @@ keeps its value when it moves (ADR 0160). Imports: the standard library and
 | File | Role |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167): what it decides and what it refuses to perform |
-| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `Outcome`, `DecisionValue`, `PolicyValue` and `UpdateAction` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `Outcome`, `DecisionValue`, `PolicyValue` and `UpdateAction` — each struct with every field, unexported ones included; `UpdateAction.Valid`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
 | `policy.go` | `PolicyValue`, `Exempt`, `Validate` |
 | `decision.go` | `DecisionValue`, `Outcome` |
 | `update_action.go` | `UpdateAction` — refuse, apply, warn |

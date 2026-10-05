@@ -758,6 +758,7 @@ packages:
           EnableServer makes an app in the server profile serve HTTP.
           framework/kit/server calls it as it is imported; a product never does.
         name: EnableServer
+        impl: enableServer
       - doc: |-
           Analyzer runs fn in the background once the product serves, in dev and when
           KIT_ANALYZE allows it. Without one, the graph is the runtime's alone.
@@ -1026,6 +1027,7 @@ packages:
           for every store and queue — what a test wants. On a store, it keeps that
           store in memory even when the app has a data directory.
         name: InMemory
+        impl: inMemory
         out:
           - type: interface{StoreConfigurer; AppConfigurer}
       - doc: |-
@@ -1170,6 +1172,7 @@ packages:
           - name: message
             type: string
         name: Invalid
+        impl: invalid
         out:
           - type: "*Error"
       - doc: NotFound reports that the addressed resource does not exist (404).
@@ -1177,6 +1180,7 @@ packages:
           - name: message
             type: string
         name: NotFound
+        impl: notFound
         out:
           - type: "*Error"
       - doc: Conflict reports a request the resource's current state refuses (409).
@@ -1184,6 +1188,7 @@ packages:
           - name: message
             type: string
         name: Conflict
+        impl: conflict
         out:
           - type: "*Error"
       - doc: Unauthenticated reports a caller who did not prove who they are (401).
@@ -1191,6 +1196,7 @@ packages:
           - name: message
             type: string
         name: Unauthenticated
+        impl: unauthenticated
         out:
           - type: "*Error"
       - doc: Forbidden reports a caller who may not do this (403).
@@ -1198,6 +1204,7 @@ packages:
           - name: message
             type: string
         name: Forbidden
+        impl: forbidden
         out:
           - type: "*Error"
       - doc: Unavailable reports a transient failure worth retrying later (503).
@@ -1205,6 +1212,7 @@ packages:
           - name: message
             type: string
         name: Unavailable
+        impl: unavailable
         out:
           - type: "*Error"
       - doc: |-
@@ -1217,6 +1225,7 @@ packages:
           - name: message
             type: string
         name: NewError
+        impl: newError
         out:
           - type: "*Error"
       - doc: |-
@@ -1232,6 +1241,7 @@ packages:
           takes [AnyUser] instead, and one with [AuthOptional] still knows the
           caller who signed in.
         name: Anyone
+        impl: anyone
         out:
           - type: ExposeConfigurer
       - doc: |-
@@ -1244,6 +1254,7 @@ packages:
           It adds no authentication of its own: an exposure authenticates as its
           operation asks, so the operation declares [Auth].
         name: AnyUser
+        impl: anyUser
         out:
           - type: ExposeConfigurer
       - doc: |-
@@ -1299,6 +1310,7 @@ packages:
           EnableStudio makes a serving app in dev mount the Studio's API.
           framework/kit/studio calls it as it is imported; a product never does.
         name: EnableStudio
+        impl: enableStudio
       - doc: |-
           SocketPath places the listener's socket at path — absolute, at most 103
           bytes — instead of <runtime dir of the app>/<service>-<name>.sock.
@@ -1371,6 +1383,7 @@ packages:
           - name: handler
             type: ListenHandler
         name: NewListener
+        impl: newListener
         out:
           - type: "*Listener"
       - doc: |-
@@ -1420,6 +1433,7 @@ packages:
           - name: run
             type: func(context.Context, WakeEvent) error
         name: NewLoop
+        impl: newLoop
         out:
           - type: "*Loop"
       - doc: |-
@@ -1451,6 +1465,7 @@ packages:
           [Service.Mailer] makes one and declares it, which is how a product gets
           one.
         name: NewMailer
+        impl: newMailer
         out:
           - type: "*Mailer"
       - doc: |-
@@ -1488,6 +1503,7 @@ packages:
           - name: other
             type: "*Module"
         name: Requires
+        impl: requires
         out:
           - type: ModuleConfigurer
       - doc: |-
@@ -1727,6 +1743,7 @@ packages:
           - name: port
             type: recordsPort
         name: NewRecordsService
+        impl: newRecordsService
         out:
           - type: RecordsService
       - doc: |-
@@ -1782,6 +1799,7 @@ packages:
           - name: name
             type: string
         name: ClearCookie
+        impl: clearCookie
       - doc: |-
           ClientIP returns the address of the client of the request ctx serves: the
           connection's peer, or — only when KIT_TRUST_PROXY=on — the last address of
@@ -1932,12 +1950,14 @@ packages:
           - name: text
             type: string
         name: Purpose
+        impl: purpose
         out:
           - type: StoreConfigurer
       - doc: |-
           DeleteOnErasure makes a person's erasure (kit.Erase) delete the store's
           records instead of clearing them, as sessions and accounts want.
         name: DeleteOnErasure
+        impl: deleteOnErasure
         out:
           - type: StoreConfigurer
       - doc: |-
@@ -1959,6 +1979,7 @@ packages:
           - name: limits
             type: string
         name: RetentionByProduct
+        impl: retentionByProduct
         out:
           - type: StoreConfigurer
       - doc: |-
@@ -1983,6 +2004,7 @@ packages:
           - name: "n"
             type: int
         name: Revisions
+        impl: revisions
         out:
           - type: StoreConfigurer
       - doc: NewBinary declares the binary named name.
@@ -2076,6 +2098,7 @@ packages:
           default: [Service.Secret] makes one and declares it, which is how a product
           gets one.
         name: NewSecret
+        impl: newSecret
         out:
           - type: "*Secret"
       - doc: |-
@@ -2183,6 +2206,7 @@ packages:
 
           	var Summaries = Service.Store("summaries", Summary.Key, kit.ReadModel())
         name: ReadModel
+        impl: readModel
         out:
           - type: StoreConfigurer
       - doc: |-
@@ -3128,6 +3152,7 @@ packages:
             recv: pointer
           - doc: Unwrap returns the cause, so errors.Is and errors.As see through an Error.
             name: Unwrap
+            impl: unwrap
             out:
               - type: error
             recv: pointer
@@ -3136,6 +3161,7 @@ packages:
               - name: cause
                 type: error
             name: Wrap
+            impl: wrap
             out:
               - type: "*Error"
             recv: pointer
@@ -3295,6 +3321,7 @@ packages:
               is model.WakeManual; a nudge also cuts short the backoff after a failure.
               It does nothing while the loop is not running.
             name: Nudge
+            impl: nudge
             recv: pointer
         name: Loop
         struct:
@@ -6874,6 +6901,7 @@ packages:
           - name: fn
             type: AnalyzeFunc
         name: Analyzer
+        impl: analyzer
         out:
           - type: AppOption
       - doc: |-
@@ -6883,6 +6911,7 @@ packages:
           - name: p
             type: string
         name: Profile
+        impl: profile
         out:
           - type: AppOption
       - doc: |-
@@ -6894,6 +6923,7 @@ packages:
           - name: d
             type: time.Duration
         name: IdleStop
+        impl: idleStop
         out:
           - type: AppOption
       - doc: |-
@@ -6907,6 +6937,7 @@ packages:
           - name: scope
             type: string
         name: Singleton
+        impl: singleton
         out:
           - type: AppOption
       - doc: |-
@@ -6920,6 +6951,7 @@ packages:
           - name: scopes
             type: Scope
         name: SingletonPer
+        impl: singletonPer
         out:
           - type: AppOption
         variadic: true
@@ -6933,6 +6965,7 @@ packages:
           - name: ctx
             type: context.Context
         name: Stop
+        impl: stop
         out:
           - type: bool
       - doc: |-
@@ -6945,6 +6978,7 @@ packages:
           IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
           only hands it to the declaration it configures.
         name: Auth
+        impl: auth
         out:
           - type: OperationOption
       - doc: |-
@@ -6954,6 +6988,7 @@ packages:
           IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
           only hands it to the declaration it configures.
         name: AuthOptional
+        impl: authOptional
         out:
           - type: OperationOption
       - doc: |-
@@ -7003,6 +7038,7 @@ packages:
           part of every graph, so the Studio — and an AI agent reading the graph —
           knows what can be added to a product and the exact code that adds it.
         name: Catalog
+        impl: catalog
         out:
           - type: "[]model.Mechanic"
       - doc: |-
@@ -7014,6 +7050,7 @@ packages:
           - name: prefix
             type: string
         name: NewID
+        impl: newID
         out:
           - type: string
       - doc: |-
@@ -7026,6 +7063,7 @@ packages:
           IFACE-OPAQUE: CLIOption is sealed — its one method is unexported — so
           only this package makes one, and a caller only passes it to CLI.
         name: DefaultCommand
+        impl: defaultCommand
         out:
           - type: CLIOption
       - doc: |-
@@ -7036,6 +7074,7 @@ packages:
           IFACE-OPAQUE: CLIOption is sealed — its one method is unexported — so
           only this package makes one, and a caller only passes it to CLI.
         name: FailSafe
+        impl: failSafe
         out:
           - type: CLIOption
       - doc: |-
@@ -7053,6 +7092,7 @@ packages:
           user is not queued. A queued command's input is a contract with the
           messages already queued: add a field, never rename one.
         name: Queued
+        impl: queued
         out:
           - type: CommandOption
       - doc: |-
@@ -7063,6 +7103,7 @@ packages:
           writer turn, it lets such commands run side by side. Dispatched inside
           another command, it still runs in that one's transaction.
         name: NoTransaction
+        impl: noTransaction
         out:
           - type: CommandOption
       - doc: Env selects the environment, instead of KIT_ENV.
@@ -7079,6 +7120,7 @@ packages:
           - name: addr
             type: string
         name: Listen
+        impl: listen
         out:
           - type: AppOption
       - doc: DataDir sets where stores and queues persist, instead of KIT_DATA_DIR.
@@ -7086,6 +7128,7 @@ packages:
           - name: dir
             type: string
         name: DataDir
+        impl: dataDir
         out:
           - type: AppOption
       - doc: |-
@@ -7095,6 +7138,7 @@ packages:
           - name: "on"
             type: bool
         name: Studio
+        impl: studio
         out:
           - type: AppOption
       - doc: Analyze switches the in-process static analysis on or off in dev.
@@ -7102,6 +7146,7 @@ packages:
           - name: "on"
             type: bool
         name: Analyze
+        impl: analyze
         out:
           - type: AppOption
       - doc: Logs sends the app's logs to w instead of standard error.
@@ -7109,6 +7154,7 @@ packages:
           - name: w
             type: io.Writer
         name: Logs
+        impl: logs
         out:
           - type: AppOption
       - doc: |-
@@ -7125,6 +7171,7 @@ packages:
           for every store and queue — what a test wants. On a store, it keeps that
           store in memory even when the app has a data directory.
         name: InMemory
+        impl: inMemory
         out:
           - type: interface{StoreOption; AppOption}
       - doc: |-
@@ -7137,6 +7184,7 @@ packages:
           - name: things
             type: Keepable
         name: Keeps
+        impl: keeps
         out:
           - type: DatabaseOption
         variadic: true
@@ -7154,6 +7202,7 @@ packages:
           - name: m
             type: sql.Migration
         name: Migrations
+        impl: migrations
         out:
           - type: interface{DatabaseOption; ModulePart}
         variadic: true
@@ -7210,6 +7259,7 @@ packages:
           - name: bytes
             type: int64
         name: MaxBody
+        impl: maxBody
         out:
           - type: EndpointOption
       - doc: |-
@@ -7225,6 +7275,7 @@ packages:
           - name: burst
             type: int
         name: RateLimit
+        impl: rateLimit
         out:
           - type: OperationOption
       - doc: |-
@@ -7237,6 +7288,7 @@ packages:
           - name: d
             type: time.Duration
         name: Timeout
+        impl: timeout
         out:
           - type: OperationOption
       - doc: |-
@@ -7249,6 +7301,7 @@ packages:
           - name: maxConcurrent
             type: int
         name: Bulkhead
+        impl: bulkhead
         out:
           - type: OperationOption
       - doc: Invalid reports a request the caller must change before retrying (400).
@@ -7306,6 +7359,7 @@ packages:
           takes [AnyUser] instead, and one with [AuthOptional] still knows the
           caller who signed in.
         name: Anyone
+        impl: anyone
         out:
           - type: ExposeOption
       - doc: |-
@@ -7318,6 +7372,7 @@ packages:
           It adds no authentication of its own: an exposure authenticates as its
           operation asks, so the operation declares [Auth].
         name: AnyUser
+        impl: anyUser
         out:
           - type: ExposeOption
       - doc: |-
@@ -7333,6 +7388,7 @@ packages:
           - name: ids
             type: string
         name: HoldSubject
+        impl: holdSubject
         out:
           - type: error
         variadic: true
@@ -7379,6 +7435,7 @@ packages:
           - name: path
             type: string
         name: SocketPath
+        impl: socketPath
         out:
           - type: ListenerOption
       - doc: |-
@@ -7394,6 +7451,7 @@ packages:
           - name: scopes
             type: Scope
         name: SocketPer
+        impl: socketPer
         out:
           - type: ListenerOption
         variadic: true
@@ -7410,6 +7468,7 @@ packages:
           - name: gids
             type: "[]int"
         name: AllowPeers
+        impl: allowPeers
         out:
           - type: ListenerOption
       - doc: |-
@@ -7440,6 +7499,7 @@ packages:
           - name: d
             type: time.Duration
         name: WakeEvery
+        impl: wakeEvery
         out:
           - type: LoopOption
       - doc: |-
@@ -7453,6 +7513,7 @@ packages:
           - name: next
             type: func(context.Context) (time.Time, bool)
         name: WakeAt
+        impl: wakeAt
         out:
           - type: LoopOption
       - doc: |-
@@ -7481,6 +7542,7 @@ packages:
           - name: addr
             type: string
         name: From
+        impl: from
         out:
           - type: MailerOption
       - doc: |-
@@ -7493,6 +7555,7 @@ packages:
           - name: "n"
             type: int
         name: MailAttempts
+        impl: mailAttempts
         out:
           - type: MailerOption
       - doc: |-
@@ -7530,6 +7593,7 @@ packages:
           - name: other
             type: "*Module"
         name: Requires
+        impl: requires
         out:
           - type: ModulePart
       - doc: |-
@@ -7574,6 +7638,7 @@ packages:
           - name: "n"
             type: int
         name: MinLength
+        impl: minLength
         out:
           - type: PasswordOption
       - doc: |-
@@ -7589,6 +7654,7 @@ packages:
           - name: "n"
             type: int
         name: NotReused
+        impl: notReused
         out:
           - type: PasswordOption
       - doc: |-
@@ -7600,6 +7666,7 @@ packages:
           where a policy is declared. Beside NIST's fifteen characters the list has
           little left to refuse; beside a shorter MinLength, it matters.
         name: NotCommon
+        impl: notCommon
         out:
           - type: PasswordOption
       - doc: |-
@@ -7714,6 +7781,7 @@ packages:
           - name: burst
             type: int
         name: RateLimitPerClient
+        impl: rateLimitPerClient
         out:
           - type: OperationOption
       - doc: |-
@@ -7781,6 +7849,7 @@ packages:
           - name: c
             type: "*http.Cookie"
         name: SetCookie
+        impl: setCookie
       - doc: ClearCookie tells the browser to forget the cookie called name.
         in:
           - name: ctx
@@ -7788,6 +7857,7 @@ packages:
           - name: name
             type: string
         name: ClearCookie
+        impl: clearCookie
       - doc: |-
           ClientIP returns the address of the client of the request ctx serves: the
           connection's peer, or — only when KIT_TRUST_PROXY=on — the last address of
@@ -7796,6 +7866,7 @@ packages:
           - name: ctx
             type: context.Context
         name: ClientIP
+        impl: clientIP
         out:
           - type: string
       - doc: UserAgent returns the User-Agent of the request ctx serves, clipped.
@@ -7803,6 +7874,7 @@ packages:
           - name: ctx
             type: context.Context
         name: UserAgent
+        impl: userAgent
         out:
           - type: string
       - doc: |-
@@ -7813,6 +7885,7 @@ packages:
           - name: ctx
             type: context.Context
         name: Now
+        impl: now
         out:
           - type: time.Time
       - doc: |-
@@ -7826,6 +7899,7 @@ packages:
           - name: d
             type: time.Duration
         name: NewTicker
+        impl: newTicker
         out:
           - type: clock.Ticker
       - doc: After is time.After on the app's clock.
@@ -7835,6 +7909,7 @@ packages:
           - name: d
             type: time.Duration
         name: After
+        impl: after
         out:
           - type: <-chan time.Time
       - doc: |-
@@ -7845,6 +7920,7 @@ packages:
           - name: ctx
             type: context.Context
         name: Log
+        impl: log
         out:
           - type: logger.Logger
       - doc: |-
@@ -7938,12 +8014,14 @@ packages:
           - name: text
             type: string
         name: Purpose
+        impl: purpose
         out:
           - type: StoreOption
       - doc: |-
           DeleteOnErasure makes a person's erasure (kit.Erase) delete the store's
           records instead of clearing them, as sessions and accounts want.
         name: DeleteOnErasure
+        impl: deleteOnErasure
         out:
           - type: StoreOption
       - doc: |-
@@ -7965,6 +8043,7 @@ packages:
           - name: limits
             type: string
         name: RetentionByProduct
+        impl: retentionByProduct
         out:
           - type: StoreOption
       - doc: |-
@@ -7989,6 +8068,7 @@ packages:
           - name: "n"
             type: int
         name: Revisions
+        impl: revisions
         out:
           - type: StoreOption
       - doc: NewBinary declares the binary named name.
@@ -8009,6 +8089,7 @@ packages:
           - name: fallback
             type: string
         name: PerEnv
+        impl: perEnv
         out:
           - type: Scope
       - doc: |-
@@ -8034,6 +8115,7 @@ packages:
           - name: bytes
             type: int
         name: Generated
+        impl: generated
         out:
           - type: SecretOption
       - doc: |-
@@ -8045,6 +8127,7 @@ packages:
           - name: d
             type: time.Duration
         name: RotateEvery
+        impl: rotateEvery
         out:
           - type: SecretOption
       - doc: |-
@@ -8059,6 +8142,7 @@ packages:
           - name: "n"
             type: int
         name: KeepVersions
+        impl: keepVersions
         out:
           - type: SecretOption
       - doc: |-
@@ -8072,6 +8156,7 @@ packages:
           _FILE variable names —, it is found at its next use. A generated secret
           is kit's to make and never absent: Optional with [Generated] is refused.
         name: Optional
+        impl: optional
         out:
           - type: SecretOption
       - doc: |-
@@ -8082,6 +8167,7 @@ packages:
           - name: store
             type: secret.Store
         name: SecretStore
+        impl: secretStore
         out:
           - type: AppOption
       - doc: |-
@@ -8101,6 +8187,7 @@ packages:
           IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
           only hands it to the declaration it configures.
         name: Required
+        impl: required
         out:
           - type: SettingOption
       - doc: |-
@@ -8134,6 +8221,7 @@ packages:
           - name: fsys
             type: fs.FS
         name: ConfigFiles
+        impl: configFiles
         out:
           - type: AppOption
       - doc: |-
@@ -8146,6 +8234,7 @@ packages:
           - name: dir
             type: string
         name: Root
+        impl: root
         out:
           - type: StaticOption
       - doc: |-
@@ -8160,6 +8249,7 @@ packages:
 
           	var Summaries = Service.Store("summaries", Summary.Key, kit.ReadModel())
         name: ReadModel
+        impl: readModel
         out:
           - type: StoreOption
       - doc: |-
@@ -8172,6 +8262,7 @@ packages:
           - name: gids
             type: int
         name: Telemetry
+        impl: telemetry
         out:
           - type: AppOption
         variadic: true
@@ -8184,6 +8275,7 @@ packages:
           - name: digest
             type: string
         name: DesignDigest
+        impl: designDigest
         out:
           - type: AppOption
       - doc: |-
@@ -8197,6 +8289,7 @@ packages:
           - name: "n"
             type: int
         name: MaxDeliveries
+        impl: maxDeliveries
         out:
           - type: DeliveryOption
       - doc: |-
@@ -8209,6 +8302,7 @@ packages:
           - name: "n"
             type: int
         name: Parallelism
+        impl: parallelism
         out:
           - type: DeliveryOption
       - doc: |-
@@ -8221,6 +8315,7 @@ packages:
           elsewhere — a queued command's handling, a topic's delivery — is heard.
           A subscription to a topic refuses it: a topic has no stores.
         name: OwnStores
+        impl: ownStores
         out:
           - type: SubscriptionOption
       - doc: |-
@@ -8271,6 +8366,7 @@ packages:
           - name: fn
             type: func(context.Context) error
         name: Transact
+        impl: transact
         out:
           - type: error
     imports:
