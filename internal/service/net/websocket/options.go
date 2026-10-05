@@ -64,26 +64,9 @@ type config struct {
 	clock clock.Waiter
 }
 
-// Subprotocols declares the subprotocols this server speaks, most preferred
-// first.
-//
-// The SERVER's order decides, not the client's: the client advertises what it
-// can do, and choosing among those is the server's call — a client that listed
-// a deprecated dialect first should not be able to pin the server to it.
-//
-// When the client offers none this server can speak, the upgrade still
-// succeeds with no Sec-WebSocket-Protocol header, which RFC 6455 §4.2.2 names
-// as the way to say "none agreed". Failing the handshake instead would be a
-// stricter rule than the protocol has, and it would break every client that
-// advertises an optional dialect.
-//
-// Each name must be an RFC 7230 token, which is what RFC 6455 §4.1 requires
-// of a subprotocol: the chosen one is written verbatim into the response, so a
-// name carrying a space, a comma or a quote would put a malformed handshake on
-// the wire — it is refused at Upgrade instead. The list is copied here, so a
-// caller reusing the slice it passed cannot change later handshakes, or race
-// with the ones in flight.
-func Subprotocols(names ...string) Option {
+// subprotocols is Subprotocols's body: decl_gen.go writes Subprotocols, from the
+// design, as one call of it.
+func subprotocols(names ...string) Option {
 	snapshot := slices.Clone(names)
 	//: applied in order by Upgrade, so a later option deliberately wins.
 	return func(c *config) {
@@ -168,18 +151,9 @@ func WriteTimeout(d time.Duration) Option {
 	}
 }
 
-// AllowOrigins replaces the default same-origin rule with an exact allowlist.
-//
-// The comparison is on the whole Origin header, case-insensitively — scheme,
-// host and port together. Comparing only the host would accept
-// http://app.example.com for an https server, which is precisely the downgrade
-// an origin check exists to notice. Behind a proxy that terminates TLS this is
-// the only way to have the scheme checked at all: the request arrives in
-// plaintext there, so the default rule cannot see which scheme the browser
-// used (see sameOrigin).
-//
-// The list is copied here, for the same reason Subprotocols copies its own.
-func AllowOrigins(origins ...string) Option {
+// allowOrigins is AllowOrigins's body: decl_gen.go writes AllowOrigins, from the
+// design, as one call of it.
+func allowOrigins(origins ...string) Option {
 	snapshot := slices.Clone(origins)
 	//: applied in order by Upgrade, so a later option deliberately wins.
 	return func(c *config) {

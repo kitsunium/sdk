@@ -78708,7 +78708,7 @@
       "spelled": "func(members ...corenet.Policy) corenet.Policy",
       "canonical": "func(members ...github.com/kitsunium/sdk/internal/core/net.Policy) github.com/kitsunium/sdk/internal/core/net.Policy",
       "doc": "Policies requires every policy to allow the request. Composition is by\nconjunction so that adding a policy can only ever narrow what is permitted.\n",
-      "file": "internal/service/net/client/policies.go",
+      "file": "internal/service/net/client/decl_gen.go",
       "layer": "service",
       "family": "net"
     },
@@ -78865,7 +78865,7 @@
       "spelled": "func(h corenet.PacketHandler) *PacketGroup",
       "canonical": "func(h github.com/kitsunium/sdk/internal/core/net.PacketHandler) *github.com/kitsunium/sdk/internal/service/net/server.PacketGroup",
       "doc": "Handle sets the group's handler, replacing any previous one.\n",
-      "file": "internal/service/net/server/packet_group.go",
+      "file": "internal/service/net/server/decl_gen.go",
       "layer": "service",
       "family": "net"
     },
@@ -78878,7 +78878,7 @@
       "spelled": "func(f corenet.PacketHandlerFunc) *PacketGroup",
       "canonical": "func(f github.com/kitsunium/sdk/internal/core/net.PacketHandlerFunc) *github.com/kitsunium/sdk/internal/service/net/server.PacketGroup",
       "doc": "HandleFunc sets the group's handler from a plain function.\n",
-      "file": "internal/service/net/server/packet_group.go",
+      "file": "internal/service/net/server/decl_gen.go",
       "layer": "service",
       "family": "net"
     },
@@ -78904,7 +78904,7 @@
       "spelled": "func(middlewares ...corenet.Middleware[corenet.PacketHandler]) *PacketGroup",
       "canonical": "func(middlewares ...github.com/kitsunium/sdk/internal/core/net.Middleware[github.com/kitsunium/sdk/internal/core/net.PacketHandler]) *github.com/kitsunium/sdk/internal/service/net/server.PacketGroup",
       "doc": "Use appends middlewares, outermost first.\n",
-      "file": "internal/service/net/server/packet_group.go",
+      "file": "internal/service/net/server/decl_gen.go",
       "layer": "service",
       "family": "net"
     },
@@ -79080,7 +79080,7 @@
       "spelled": "func(h corenet.ConnHandler) *StreamGroup",
       "canonical": "func(h github.com/kitsunium/sdk/internal/core/net.ConnHandler) *github.com/kitsunium/sdk/internal/service/net/server.StreamGroup",
       "doc": "Handle sets the group's handler, replacing any previous one.\n",
-      "file": "internal/service/net/server/stream_group.go",
+      "file": "internal/service/net/server/decl_gen.go",
       "layer": "service",
       "family": "net"
     },
@@ -79093,7 +79093,7 @@
       "spelled": "func(f corenet.ConnHandlerFunc) *StreamGroup",
       "canonical": "func(f github.com/kitsunium/sdk/internal/core/net.ConnHandlerFunc) *github.com/kitsunium/sdk/internal/service/net/server.StreamGroup",
       "doc": "HandleFunc sets the group's handler from a plain function. It exists because\nthe overwhelmingly common case is one function, and making that case require\na named type would be the papercut that decides whether the API feels light.\n",
-      "file": "internal/service/net/server/stream_group.go",
+      "file": "internal/service/net/server/decl_gen.go",
       "layer": "service",
       "family": "net"
     },
@@ -79106,7 +79106,7 @@
       "spelled": "func(h http.Handler) *StreamGroup",
       "canonical": "func(h net/http.Handler) *github.com/kitsunium/sdk/internal/service/net/server.StreamGroup",
       "doc": "HandleHTTP serves an http.Handler over this group's listeners.\n\nThe group keeps its own limits, TLS identity and drain; net/http only does\nthe protocol. That split is ADR 0029 D3: reimplementing HTTP would mean\nowning request smuggling defences, HTTP/2 flow control and HPACK to lose,\nnot gain, throughput.\n",
-      "file": "internal/service/net/server/stream_group.go",
+      "file": "internal/service/net/server/decl_gen.go",
       "layer": "service",
       "family": "net"
     },
@@ -79132,7 +79132,7 @@
       "spelled": "func(middlewares ...corenet.Middleware[corenet.ConnHandler]) *StreamGroup",
       "canonical": "func(middlewares ...github.com/kitsunium/sdk/internal/core/net.Middleware[github.com/kitsunium/sdk/internal/core/net.ConnHandler]) *github.com/kitsunium/sdk/internal/service/net/server.StreamGroup",
       "doc": "Use appends middlewares, outermost first.\n",
-      "file": "internal/service/net/server/stream_group.go",
+      "file": "internal/service/net/server/decl_gen.go",
       "layer": "service",
       "family": "net"
     },
@@ -79538,7 +79538,7 @@
       "spelled": "func(origins ...string) Option",
       "canonical": "func(origins ...string) github.com/kitsunium/sdk/internal/service/net/websocket.Option",
       "doc": "AllowOrigins replaces the default same-origin rule with an exact allowlist.\n\nThe comparison is on the whole Origin header, case-insensitively — scheme,\nhost and port together. Comparing only the host would accept\nhttp://app.example.com for an https server, which is precisely the downgrade\nan origin check exists to notice. Behind a proxy that terminates TLS this is\nthe only way to have the scheme checked at all: the request arrives in\nplaintext there, so the default rule cannot see which scheme the browser\nused (see sameOrigin).\n\nThe list is copied here, for the same reason Subprotocols copies its own.\n",
-      "file": "internal/service/net/websocket/options.go",
+      "file": "internal/service/net/websocket/decl_gen.go",
       "layer": "service",
       "family": "net"
     },
@@ -79651,7 +79651,7 @@
       "spelled": "func() corenet.WSCloseCode",
       "canonical": "func() github.com/kitsunium/sdk/internal/core/net.WSCloseCode",
       "doc": "PeerCloseCode returns the status code the peer's Close frame carried.\n\nIt reports [corenet.WSCloseNoStatus] when the peer closed without one — the\ncode that exists to describe exactly that — and zero when no Close frame was\never received, which is the case that matters most: it distinguishes a peer\nthat said goodbye from one that vanished.\n",
-      "file": "internal/service/net/websocket/websocket.go",
+      "file": "internal/service/net/websocket/decl_gen.go",
       "layer": "service",
       "family": "net"
     },
@@ -79664,7 +79664,7 @@
       "spelled": "func(payload []byte) error",
       "canonical": "func(payload []byte) error",
       "doc": "Ping sends a Ping frame carrying payload.\n\nIt is exported because the automatic heartbeat answers \"is the peer alive on\nits own schedule\"; a caller sometimes needs to ask at a moment of its own —\nright after a long computation, or before committing to expensive work on the\npeer's behalf. A payload past [corenet.WSMaxControlPayload] is refused: a\ncontrol frame must fit a buffer that is always available.\n",
-      "file": "internal/service/net/websocket/websocket.go",
+      "file": "internal/service/net/websocket/decl_gen.go",
       "layer": "service",
       "family": "net"
     },
@@ -79703,7 +79703,7 @@
       "spelled": "func(data []byte) error",
       "canonical": "func(data []byte) error",
       "doc": "SendBinary writes one binary message.\n",
-      "file": "internal/service/net/websocket/websocket.go",
+      "file": "internal/service/net/websocket/decl_gen.go",
       "layer": "service",
       "family": "net"
     },
@@ -79716,7 +79716,7 @@
       "spelled": "func(text string) error",
       "canonical": "func(text string) error",
       "doc": "SendText writes one UTF-8 text message.\n",
-      "file": "internal/service/net/websocket/websocket.go",
+      "file": "internal/service/net/websocket/decl_gen.go",
       "layer": "service",
       "family": "net"
     },
@@ -79793,7 +79793,7 @@
       "spelled": "func(b []byte) int",
       "canonical": "func(b []byte) int",
       "doc": "FrameHeaderLen returns the full header length announced by the first two\nbytes of a frame, or 0 when fewer than two bytes are available.\n\nIt exists so a reader can take exactly two bytes, learn how many more the\nheader needs, and take exactly those — never speculating past the header into\na payload it has not yet bounded.\n",
-      "file": "internal/service/net/websocket/frame.go",
+      "file": "internal/service/net/websocket/decl_gen.go",
       "layer": "service",
       "family": "net"
     },
@@ -79985,7 +79985,7 @@
       "spelled": "func(names ...string) Option",
       "canonical": "func(names ...string) github.com/kitsunium/sdk/internal/service/net/websocket.Option",
       "doc": "Subprotocols declares the subprotocols this server speaks, most preferred\nfirst.\n\nThe SERVER's order decides, not the client's: the client advertises what it\ncan do, and choosing among those is the server's call — a client that listed\na deprecated dialect first should not be able to pin the server to it.\n\nWhen the client offers none this server can speak, the upgrade still\nsucceeds with no Sec-WebSocket-Protocol header, which RFC 6455 §4.2.2 names\nas the way to say \"none agreed\". Failing the handshake instead would be a\nstricter rule than the protocol has, and it would break every client that\nadvertises an optional dialect.\n\nEach name must be an RFC 7230 token, which is what RFC 6455 §4.1 requires\nof a subprotocol: the chosen one is written verbatim into the response, so a\nname carrying a space, a comma or a quote would put a malformed handshake on\nthe wire — it is refused at Upgrade instead. The list is copied here, so a\ncaller reusing the slice it passed cannot change later handshakes, or race\nwith the ones in flight.\n",
-      "file": "internal/service/net/websocket/options.go",
+      "file": "internal/service/net/websocket/decl_gen.go",
       "layer": "service",
       "family": "net"
     },

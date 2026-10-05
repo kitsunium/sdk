@@ -10,21 +10,24 @@ func (g *PacketGroup) Name() string {
 	return g.name
 }
 
-// Handle sets the group's handler, replacing any previous one.
-func (g *PacketGroup) Handle(h corenet.PacketHandler) *PacketGroup {
+// handle is PacketGroup.Handle's body: decl_gen.go writes PacketGroup.Handle, from the
+// design, as one call of it.
+func (g *PacketGroup) handle(h corenet.PacketHandler) *PacketGroup {
 	g.handler = h
 	//: returned for chaining, so declaring a group stays a single expression.
 	return g
 }
 
-// HandleFunc sets the group's handler from a plain function.
-func (g *PacketGroup) HandleFunc(f corenet.PacketHandlerFunc) *PacketGroup {
+// handleFunc is PacketGroup.HandleFunc's body: decl_gen.go writes PacketGroup.HandleFunc, from the
+// design, as one call of it.
+func (g *PacketGroup) handleFunc(f corenet.PacketHandlerFunc) *PacketGroup {
 	//: the func adapter already satisfies the port.
 	return g.Handle(f)
 }
 
-// Use appends middlewares, outermost first.
-func (g *PacketGroup) Use(middlewares ...corenet.Middleware[corenet.PacketHandler]) *PacketGroup {
+// use is PacketGroup.Use's body: decl_gen.go writes PacketGroup.Use, from the
+// design, as one call of it.
+func (g *PacketGroup) use(middlewares ...corenet.Middleware[corenet.PacketHandler]) *PacketGroup {
 	g.middlewares = append(g.middlewares, middlewares...)
 	//: returned for chaining.
 	return g

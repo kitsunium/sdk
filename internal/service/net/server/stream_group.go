@@ -12,28 +12,24 @@ func (g *StreamGroup) Name() string {
 	return g.name
 }
 
-// Handle sets the group's handler, replacing any previous one.
-func (g *StreamGroup) Handle(h corenet.ConnHandler) *StreamGroup {
+// handle is StreamGroup.Handle's body: decl_gen.go writes StreamGroup.Handle, from the
+// design, as one call of it.
+func (g *StreamGroup) handle(h corenet.ConnHandler) *StreamGroup {
 	g.handler = h
 	//: returned for chaining, so declaring a group stays a single expression.
 	return g
 }
 
-// HandleFunc sets the group's handler from a plain function. It exists because
-// the overwhelmingly common case is one function, and making that case require
-// a named type would be the papercut that decides whether the API feels light.
-func (g *StreamGroup) HandleFunc(f corenet.ConnHandlerFunc) *StreamGroup {
+// handleFunc is StreamGroup.HandleFunc's body: decl_gen.go writes StreamGroup.HandleFunc, from the
+// design, as one call of it.
+func (g *StreamGroup) handleFunc(f corenet.ConnHandlerFunc) *StreamGroup {
 	//: the func adapter already satisfies the port.
 	return g.Handle(f)
 }
 
-// HandleHTTP serves an http.Handler over this group's listeners.
-//
-// The group keeps its own limits, TLS identity and drain; net/http only does
-// the protocol. That split is ADR 0029 D3: reimplementing HTTP would mean
-// owning request smuggling defences, HTTP/2 flow control and HPACK to lose,
-// not gain, throughput.
-func (g *StreamGroup) HandleHTTP(h http.Handler) *StreamGroup {
+// handleHTTP is StreamGroup.HandleHTTP's body: decl_gen.go writes StreamGroup.HandleHTTP, from the
+// design, as one call of it.
+func (g *StreamGroup) handleHTTP(h http.Handler) *StreamGroup {
 	adapter := newHTTPAdapter(h)
 	g.httpAdapter = adapter
 	//: the adapter IS a ConnHandler, so the rest of the engine is unchanged.
@@ -48,8 +44,9 @@ func (g *StreamGroup) tracksCloses() bool {
 	return g.httpAdapter != nil && g.limiter != nil
 }
 
-// Use appends middlewares, outermost first.
-func (g *StreamGroup) Use(middlewares ...corenet.Middleware[corenet.ConnHandler]) *StreamGroup {
+// use is StreamGroup.Use's body: decl_gen.go writes StreamGroup.Use, from the
+// design, as one call of it.
+func (g *StreamGroup) use(middlewares ...corenet.Middleware[corenet.ConnHandler]) *StreamGroup {
 	g.middlewares = append(g.middlewares, middlewares...)
 	//: returned for chaining.
 	return g

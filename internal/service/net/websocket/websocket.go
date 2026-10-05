@@ -164,13 +164,9 @@ func (c *Conn) Done() <-chan struct{} {
 	return c.done
 }
 
-// PeerCloseCode returns the status code the peer's Close frame carried.
-//
-// It reports [corenet.WSCloseNoStatus] when the peer closed without one — the
-// code that exists to describe exactly that — and zero when no Close frame was
-// ever received, which is the case that matters most: it distinguishes a peer
-// that said goodbye from one that vanished.
-func (c *Conn) PeerCloseCode() corenet.WSCloseCode {
+// peerCloseCode is Conn.PeerCloseCode's body: decl_gen.go writes Conn.PeerCloseCode, from the
+// design, as one call of it.
+func (c *Conn) peerCloseCode() corenet.WSCloseCode {
 	//: stored by the reader when a Close frame is parsed.
 	return corenet.WSCloseCode(c.peerCode.Load())
 }
@@ -279,26 +275,23 @@ func (c *Conn) Send(message corenet.WSMessageValue) error {
 	return c.sendFrame(message.OpCode(), message.Data)
 }
 
-// SendText writes one UTF-8 text message.
-func (c *Conn) SendText(text string) error {
+// sendText is Conn.SendText's body: decl_gen.go writes Conn.SendText, from the
+// design, as one call of it.
+func (c *Conn) sendText(text string) error {
 	//: the conversion is what the wire needs; validation happens in Send.
 	return c.Send(corenet.WSMessageValue{Data: []byte(text)})
 }
 
-// SendBinary writes one binary message.
-func (c *Conn) SendBinary(data []byte) error {
+// sendBinary is Conn.SendBinary's body: decl_gen.go writes Conn.SendBinary, from the
+// design, as one call of it.
+func (c *Conn) sendBinary(data []byte) error {
 	//: opaque bytes, so there is nothing to validate.
 	return c.Send(corenet.WSMessageValue{Binary: true, Data: data})
 }
 
-// Ping sends a Ping frame carrying payload.
-//
-// It is exported because the automatic heartbeat answers "is the peer alive on
-// its own schedule"; a caller sometimes needs to ask at a moment of its own —
-// right after a long computation, or before committing to expensive work on the
-// peer's behalf. A payload past [corenet.WSMaxControlPayload] is refused: a
-// control frame must fit a buffer that is always available.
-func (c *Conn) Ping(payload []byte) error {
+// ping is Conn.Ping's body: decl_gen.go writes Conn.Ping, from the
+// design, as one call of it.
+func (c *Conn) ping(payload []byte) error {
 	//: the control-frame ceiling is enforced by the frame encoder.
 	return c.sendFrame(corenet.WSPing, payload)
 }

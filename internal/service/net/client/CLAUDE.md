@@ -14,7 +14,7 @@ Public façade: `pkg/v1/net/client`.
 
 | File | Surface |
 |---|---|
-| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declaration of `Client` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declaration of `Client` — each struct with every field, unexported ones included; `Policies`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
 | `method_policy.go` | `methodPolicy` — closed set of HTTP methods |
 | `path_policy.go` | `pathPolicy` — anchored allow patterns |
 | `deny_policy.go` | `denyPolicy` — anchored deny patterns, final |

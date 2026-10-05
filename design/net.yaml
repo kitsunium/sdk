@@ -2135,6 +2135,7 @@ packages:
           - name: members
             type: corenet.Policy
         name: Policies
+        impl: policies
         out:
           - type: corenet.Policy
         variadic: true
@@ -2507,6 +2508,7 @@ packages:
               - name: h
                 type: corenet.PacketHandler
             name: Handle
+            impl: handle
             out:
               - type: "*PacketGroup"
             recv: pointer
@@ -2515,6 +2517,7 @@ packages:
               - name: f
                 type: corenet.PacketHandlerFunc
             name: HandleFunc
+            impl: handleFunc
             out:
               - type: "*PacketGroup"
             recv: pointer
@@ -2523,6 +2526,7 @@ packages:
               - name: middlewares
                 type: corenet.Middleware[corenet.PacketHandler]
             name: Use
+            impl: use
             out:
               - type: "*PacketGroup"
             recv: pointer
@@ -2751,6 +2755,7 @@ packages:
               - name: h
                 type: corenet.ConnHandler
             name: Handle
+            impl: handle
             out:
               - type: "*StreamGroup"
             recv: pointer
@@ -2762,6 +2767,7 @@ packages:
               - name: f
                 type: corenet.ConnHandlerFunc
             name: HandleFunc
+            impl: handleFunc
             out:
               - type: "*StreamGroup"
             recv: pointer
@@ -2776,6 +2782,7 @@ packages:
               - name: h
                 type: http.Handler
             name: HandleHTTP
+            impl: handleHTTP
             out:
               - type: "*StreamGroup"
             recv: pointer
@@ -2784,6 +2791,7 @@ packages:
               - name: middlewares
                 type: corenet.Middleware[corenet.ConnHandler]
             name: Use
+            impl: use
             out:
               - type: "*StreamGroup"
             recv: pointer
@@ -3430,6 +3438,7 @@ packages:
           - name: b
             type: "[]byte"
         name: FrameHeaderLen
+        impl: frameHeaderLen
         out:
           - type: int
       - doc: |-
@@ -3586,6 +3595,7 @@ packages:
           - name: names
             type: string
         name: Subprotocols
+        impl: subprotocols
         out:
           - type: Option
         variadic: true
@@ -3678,6 +3688,7 @@ packages:
           - name: origins
             type: string
         name: AllowOrigins
+        impl: allowOrigins
         out:
           - type: Option
         variadic: true
@@ -3852,6 +3863,7 @@ packages:
               ever received, which is the case that matters most: it distinguishes a peer
               that said goodbye from one that vanished.
             name: PeerCloseCode
+            impl: peerCloseCode
             out:
               - type: corenet.WSCloseCode
             recv: pointer
@@ -3900,6 +3912,7 @@ packages:
               - name: text
                 type: string
             name: SendText
+            impl: sendText
             out:
               - type: error
             recv: pointer
@@ -3908,6 +3921,7 @@ packages:
               - name: data
                 type: "[]byte"
             name: SendBinary
+            impl: sendBinary
             out:
               - type: error
             recv: pointer
@@ -3923,6 +3937,7 @@ packages:
               - name: payload
                 type: "[]byte"
             name: Ping
+            impl: ping
             out:
               - type: error
             recv: pointer

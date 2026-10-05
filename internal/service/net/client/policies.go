@@ -52,9 +52,9 @@ func DenyPaths(patterns ...string) (policy corenet.Policy, err error) {
 	return &denyPolicy{patterns: compiled}, nil
 }
 
-// Policies requires every policy to allow the request. Composition is by
-// conjunction so that adding a policy can only ever narrow what is permitted.
-func Policies(members ...corenet.Policy) corenet.Policy {
+// policies is Policies's body: decl_gen.go writes Policies, from the
+// design, as one call of it.
+func policies(members ...corenet.Policy) corenet.Policy {
 	//: an empty conjunction refuses; see conjunction.Allow.
 	return &conjunction{members: members}
 }

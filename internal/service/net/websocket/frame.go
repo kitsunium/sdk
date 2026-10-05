@@ -78,13 +78,9 @@ func (h FrameHeaderValue) ValidateFromClient() error {
 	return nil
 }
 
-// FrameHeaderLen returns the full header length announced by the first two
-// bytes of a frame, or 0 when fewer than two bytes are available.
-//
-// It exists so a reader can take exactly two bytes, learn how many more the
-// header needs, and take exactly those — never speculating past the header into
-// a payload it has not yet bounded.
-func FrameHeaderLen(b []byte) int {
+// frameHeaderLen is FrameHeaderLen's body: decl_gen.go writes FrameHeaderLen, from the
+// design, as one call of it.
+func frameHeaderLen(b []byte) int {
 	//: the two fixed bytes are what announces everything else.
 	if len(b) < MinHeaderLen {
 		//: not enough to know anything yet.

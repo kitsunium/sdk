@@ -609,7 +609,7 @@ Done is for the goroutines that are NOT reading. The one goroutine every connect
 Watching Done does not replace the reader. A connection nobody reads answers no Ping, replies to no Close, and is ended by the heartbeat within two ping intervals, however healthy the peer is.
 
 <a name="Conn.PeerCloseCode"></a>
-### func \(Conn\) [PeerCloseCode](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/websocket/websocket.go>)
+### func \(Conn\) [PeerCloseCode](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/websocket/decl_gen.go>)
 
 ```go
 func (*Conn) PeerCloseCode() corenet.WSCloseCode
@@ -620,7 +620,7 @@ PeerCloseCode returns the status code the peer's Close frame carried.
 It reports \[corenet.WSCloseNoStatus] when the peer closed without one — the code that exists to describe exactly that — and zero when no Close frame was ever received, which is the case that matters most: it distinguishes a peer that said goodbye from one that vanished.
 
 <a name="Conn.Ping"></a>
-### func \(Conn\) [Ping](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/websocket/websocket.go>)
+### func \(Conn\) [Ping](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/websocket/decl_gen.go>)
 
 ```go
 func (*Conn) Ping(payload []byte) error
@@ -657,7 +657,7 @@ Send writes one message as a single frame and returns once it is on the wire.
 The SDK never fragments what it sends. Fragmentation exists so a sender can begin a message whose length it does not yet know; every message this API can express is already in memory, so splitting it would add a failure mode (a half-sent message when the socket dies mid-sequence) in exchange for nothing.
 
 <a name="Conn.SendBinary"></a>
-### func \(Conn\) [SendBinary](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/websocket/websocket.go>)
+### func \(Conn\) [SendBinary](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/websocket/decl_gen.go>)
 
 ```go
 func (*Conn) SendBinary(data []byte) error
@@ -666,7 +666,7 @@ func (*Conn) SendBinary(data []byte) error
 SendBinary writes one binary message.
 
 <a name="Conn.SendText"></a>
-### func \(Conn\) [SendText](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/websocket/websocket.go>)
+### func \(Conn\) [SendText](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/websocket/decl_gen.go>)
 
 ```go
 func (*Conn) SendText(text string) error
