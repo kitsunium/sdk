@@ -58,3 +58,7 @@ benchmark, because a `Put` without its `Get` measures pool growth). The
 zero-alloc steady-state of `Get`/`Put` is the design's budget on `Get`
 (`allocs: 0`, ADR 0165): `perf_fixtures_test.go` holds its fixture, and the
 `perf_gen_test.go` kit gen writes counts it, race off.
+
+## Declarations
+
+`decl_gen.go` is written by kit gen from the design (ADR 0170): the declaration of ; `Get` and `Put`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name.

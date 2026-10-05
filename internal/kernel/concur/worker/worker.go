@@ -30,9 +30,9 @@ func Start(loop Loop) *LoopDaemon {
 	return ld
 }
 
-// NewLoopDaemon is the New-prefixed constructor alias mandated by the
-// struct-constructor lint; it delegates to Start, which is the idiomatic verb.
-func NewLoopDaemon(loop Loop) *LoopDaemon {
+// newLoopDaemon is NewLoopDaemon's body: decl_gen.go writes NewLoopDaemon, from the
+// design, as one call of it.
+func newLoopDaemon(loop Loop) *LoopDaemon {
 	//: single source of truth — Start owns the spawn + validation.
 	return Start(loop)
 }

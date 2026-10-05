@@ -240,6 +240,7 @@ packages:
           - name: opts
             type: DefineOption
         name: NewError
+        impl: newError
         out:
           - type: "*Error"
         variadic: true
@@ -331,6 +332,7 @@ packages:
           - name: val
             type: string
         name: NewFieldValue
+        impl: newFieldValue
         out:
           - type: FieldValue
       - doc: String builds a FieldValue holding a string value.
@@ -383,6 +385,7 @@ packages:
           - name: val
             type: float64
         name: Float
+        impl: float
         out:
           - type: FieldValue
       - doc: |-
@@ -416,6 +419,7 @@ packages:
           - name: mask
             type: Code
         name: NewPrefixMatcher
+        impl: newPrefixMatcher
         out:
           - type: "*PrefixMatcher"
       - doc: |-
@@ -423,6 +427,7 @@ packages:
           the audit test itself) can confirm the package is the one expected to
           own the SDK-wide code allocation audit.
         name: RegistryMarker
+        impl: registryMarker
         out:
           - type: string
       - doc: |-
@@ -470,11 +475,13 @@ packages:
         methods:
           - doc: Major returns the top octet (SemVer major byte).
             name: Major
+            impl: major
             out:
               - type: Major
             recv: value
           - doc: Layer returns the second-highest octet.
             name: Layer
+            impl: layer
             out:
               - type: Layer
             recv: value
@@ -485,6 +492,7 @@ packages:
             recv: value
           - doc: Serial returns the bottom octet.
             name: Serial
+            impl: serial
             out:
               - type: Serial
             recv: value
@@ -600,16 +608,19 @@ packages:
               can walk the chain. The nil-guard also makes this slightly more than a
               pure field getter, which matters for callers storing errors by value.
             name: Unwrap
+            impl: unwrap
             out:
               - type: error
             recv: pointer
           - doc: HTTPStatus returns the per-error override if set, otherwise 500.
             name: HTTPStatus
+            impl: httpStatus
             out:
               - type: int
             recv: pointer
           - doc: ExitCode returns the per-error override if set, otherwise 70 EX_SOFTWARE.
             name: ExitCode
+            impl: exitCode
             out:
               - type: int
             recv: pointer

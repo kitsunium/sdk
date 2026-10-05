@@ -1,11 +1,8 @@
 package errs
 
-// NewPrefixMatcher constructs a PrefixMatcher usable with errors.Is to
-// match all Codes sharing a given bit-prefix (defined by the mask).
-// Example: all codes originating from pkg/v1/* →
-//
-//	errors.Is(err, errs.NewPrefixMatcher(0x01_00_00_00, errs.MaskByMajor))
-func NewPrefixMatcher(prefix, mask Code) *PrefixMatcher {
+// newPrefixMatcher is NewPrefixMatcher's body: decl_gen.go writes NewPrefixMatcher, from the
+// design, as one call of it.
+func newPrefixMatcher(prefix, mask Code) *PrefixMatcher {
 	//: single struct literal — no allocation optimisation needed at this scale.
 	return &PrefixMatcher{prefix: prefix, mask: mask}
 }

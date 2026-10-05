@@ -44,10 +44,9 @@ func WithExitCode(code int) DefineOption {
 	}
 }
 
-// NewError is a tooling-friendly alias for Define. Prefer Define at call
-// sites for consistency; NewError exists so code generators and lints
-// expecting a NewXxx constructor on exported types find one.
-func NewError(code Code, reason, public, private string, opts ...DefineOption) *Error {
+// newError is NewError's body: decl_gen.go writes NewError, from the
+// design, as one call of it.
+func newError(code Code, reason, public, private string, opts ...DefineOption) *Error {
 	//: single source of truth lives in Define; NewError is a thin alias.
 	return Define(code, reason, public, private, opts...)
 }
@@ -357,10 +356,9 @@ func (e *Error) Source() error {
 	return e.source
 }
 
-// Unwrap delegates to Source so the stdlib errors.Is / errors.As machinery
-// can walk the chain. The nil-guard also makes this slightly more than a
-// pure field getter, which matters for callers storing errors by value.
-func (e *Error) Unwrap() error {
+// unwrap is Error.Unwrap's body: decl_gen.go writes Error.Unwrap, from the
+// design, as one call of it.
+func (e *Error) unwrap() error {
 	//: guard against nil receiver so errors.Is on a nil *Error is safe.
 	if e == nil {
 		//: no receiver — the chain ends here.
@@ -370,8 +368,9 @@ func (e *Error) Unwrap() error {
 	return e.Source()
 }
 
-// HTTPStatus returns the per-error override if set, otherwise 500.
-func (e *Error) HTTPStatus() int {
+// httpStatus is Error.HTTPStatus's body: decl_gen.go writes Error.HTTPStatus, from the
+// design, as one call of it.
+func (e *Error) httpStatus() int {
 	//: zero override signals "use the default"; non-zero wins.
 	if e.httpOverride != 0 {
 		//: honour the emitter's per-error override.
@@ -381,8 +380,9 @@ func (e *Error) HTTPStatus() int {
 	return defaultHTTPStatus
 }
 
-// ExitCode returns the per-error override if set, otherwise 70 EX_SOFTWARE.
-func (e *Error) ExitCode() int {
+// exitCode is Error.ExitCode's body: decl_gen.go writes Error.ExitCode, from the
+// design, as one call of it.
+func (e *Error) exitCode() int {
 	//: same zero-vs-non-zero discrimination as HTTPStatus.
 	if e.exitOverride != 0 {
 		//: honour the emitter's per-error override.

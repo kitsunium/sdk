@@ -36,10 +36,9 @@ const fieldBool fieldKind = 3
 // fieldFloat tags a FieldValue whose payload lives in the private fl member.
 const fieldFloat fieldKind = 4
 
-// NewFieldValue builds a string-typed FieldValue. Provided as a generic
-// constructor for tooling that expects a New-prefixed factory; for common
-// cases prefer the dedicated String/Int/Bool/Float helpers.
-func NewFieldValue(key, val string) FieldValue {
+// newFieldValue is NewFieldValue's body: decl_gen.go writes NewFieldValue, from the
+// design, as one call of it.
+func newFieldValue(key, val string) FieldValue {
 	//: delegate to String so the canonical path owns the invariant.
 	return String(key, val)
 }
@@ -74,8 +73,9 @@ func Bool(key string, val bool) FieldValue {
 	return FieldValue{key: key, kind: fieldBool, bl: val}
 }
 
-// Float builds a FieldValue holding a float64 value.
-func Float(key string, val float64) FieldValue {
+// float is Float's body: decl_gen.go writes Float, from the
+// design, as one call of it.
+func float(key string, val float64) FieldValue {
 	//: 64-bit only — callers of float32 widen on call.
 	return FieldValue{key: key, kind: fieldFloat, fl: val}
 }

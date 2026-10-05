@@ -46,14 +46,16 @@ func Pack(mm Major, ll Layer, pp PkgCode, ss Serial) Code {
 	return Code(mm)<<shiftMajor | Code(ll)<<shiftLayer | Code(pp)<<shiftPackage | Code(ss)
 }
 
-// Major returns the top octet (SemVer major byte).
-func (c Code) Major() Major {
+// major is Code.Major's body: decl_gen.go writes Code.Major, from the
+// design, as one call of it.
+func (c Code) major() Major {
 	//: unsigned shift is safe and drops the lower 24 bits.
 	return Major(c >> shiftMajor)
 }
 
-// Layer returns the second-highest octet.
-func (c Code) Layer() Layer {
+// layer is Code.Layer's body: decl_gen.go writes Code.Layer, from the
+// design, as one call of it.
+func (c Code) layer() Layer {
 	//: cast to uint8 truncates after the shift.
 	return Layer(c >> shiftLayer)
 }
@@ -64,8 +66,9 @@ func (c Code) Package() PkgCode {
 	return PkgCode(c >> shiftPackage)
 }
 
-// Serial returns the bottom octet.
-func (c Code) Serial() Serial {
+// serial is Code.Serial's body: decl_gen.go writes Code.Serial, from the
+// design, as one call of it.
+func (c Code) serial() Serial {
 	//: casting a uint32 to uint8 keeps only the low byte.
 	return Serial(c)
 }

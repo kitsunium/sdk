@@ -236,6 +236,7 @@ packages:
     functions:
       - doc: Get borrows a reusable byte buffer with zero length and capacity >= initialCap.
         name: Get
+        impl: get
         out:
           - type: "*[]byte"
       - doc: |-
@@ -252,6 +253,7 @@ packages:
           - name: b
             type: "*[]byte"
         name: Put
+        impl: put
     path: github.com/kitsunium/sdk/internal/kernel/concur/buffer
   - constants:
       - build: "!(386 || arm)"
@@ -1052,6 +1054,7 @@ packages:
           - name: loop
             type: Loop
         name: NewLoopDaemon
+        impl: newLoopDaemon
         out:
           - type: "*LoopDaemon"
     imports:

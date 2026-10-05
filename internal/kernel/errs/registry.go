@@ -5,10 +5,9 @@ package errs
 // existing.
 const registrySentinel string = "sdk-registry-audit-v1"
 
-// RegistryMarker returns the registry sentinel so external callers (and
-// the audit test itself) can confirm the package is the one expected to
-// own the SDK-wide code allocation audit.
-func RegistryMarker() string {
+// registryMarker is RegistryMarker's body: decl_gen.go writes RegistryMarker, from the
+// design, as one call of it.
+func registryMarker() string {
 	//: return the constant unchanged — purely documentary.
 	return registrySentinel
 }

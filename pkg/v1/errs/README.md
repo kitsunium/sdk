@@ -503,7 +503,7 @@ type Code uint32
 ```
 
 <a name="Code.Layer"></a>
-### func \(Code\) [Layer](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/errs/code.go>)
+### func \(Code\) [Layer](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/errs/decl_gen.go>)
 
 ```go
 func (Code) Layer() Layer
@@ -512,7 +512,7 @@ func (Code) Layer() Layer
 Layer returns the second-highest octet.
 
 <a name="Code.Major"></a>
-### func \(Code\) [Major](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/errs/code.go>)
+### func \(Code\) [Major](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/errs/decl_gen.go>)
 
 ```go
 func (Code) Major() Major
@@ -539,7 +539,7 @@ func (Code) Padded() string
 Padded returns the zero-padded "MMM.LLL.PPP.SSS" form. DISPLAY ONLY — must never be used as a lookup key; the canonical form is String().
 
 <a name="Code.Serial"></a>
-### func \(Code\) [Serial](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/errs/code.go>)
+### func \(Code\) [Serial](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/errs/decl_gen.go>)
 
 ```go
 func (Code) Serial() Serial

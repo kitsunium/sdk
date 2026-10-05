@@ -67912,7 +67912,7 @@
       "spelled": "func() *[]byte",
       "canonical": "func() *[]byte",
       "doc": "Get borrows a reusable byte buffer with zero length and capacity >= initialCap.\n",
-      "file": "internal/kernel/concur/buffer/buffer.go",
+      "file": "internal/kernel/concur/buffer/decl_gen.go",
       "layer": "kernel",
       "family": "concur"
     },
@@ -67924,7 +67924,7 @@
       "spelled": "func(b *[]byte)",
       "canonical": "func(b *[]byte)",
       "doc": "Put returns a buffer to the pool after use; the recycler truncates its length\nand drops it when cap exceeds maxRetain. A nil argument is a safe no-op so\ncall sites can always defer Put — the generic CappedPool cannot nil-check\na pointer-like T, so the guard lives here.\n\nPut ends the caller's ownership of b. Once it returns, neither *b nor the\nbytes it points at may be read or written — not even len(*b) — and b must\nnot be Put again: the pool may already have handed b to another goroutine,\nwhich writes both as its own. Copy out whatever is still needed before Put.\n",
-      "file": "internal/kernel/concur/buffer/buffer.go",
+      "file": "internal/kernel/concur/buffer/decl_gen.go",
       "layer": "kernel",
       "family": "concur"
     },
@@ -68429,7 +68429,7 @@
       "spelled": "func(loop Loop) *LoopDaemon",
       "canonical": "func(loop github.com/kitsunium/sdk/internal/kernel/concur/worker.Loop) *github.com/kitsunium/sdk/internal/kernel/concur/worker.LoopDaemon",
       "doc": "NewLoopDaemon is the New-prefixed constructor alias mandated by the\nstruct-constructor lint; it delegates to Start, which is the idiomatic verb.\n",
-      "file": "internal/kernel/concur/worker/worker.go",
+      "file": "internal/kernel/concur/worker/decl_gen.go",
       "layer": "kernel",
       "family": "concur"
     },
@@ -68502,7 +68502,7 @@
       "spelled": "func() Layer",
       "canonical": "func() github.com/kitsunium/sdk/internal/kernel/errs.Layer",
       "doc": "Layer returns the second-highest octet.\n",
-      "file": "internal/kernel/errs/code.go",
+      "file": "internal/kernel/errs/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -68515,7 +68515,7 @@
       "spelled": "func() Major",
       "canonical": "func() github.com/kitsunium/sdk/internal/kernel/errs.Major",
       "doc": "Major returns the top octet (SemVer major byte).\n",
-      "file": "internal/kernel/errs/code.go",
+      "file": "internal/kernel/errs/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -68554,7 +68554,7 @@
       "spelled": "func() Serial",
       "canonical": "func() github.com/kitsunium/sdk/internal/kernel/errs.Serial",
       "doc": "Serial returns the bottom octet.\n",
-      "file": "internal/kernel/errs/code.go",
+      "file": "internal/kernel/errs/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -68750,7 +68750,7 @@
       "spelled": "func() int",
       "canonical": "func() int",
       "doc": "ExitCode returns the per-error override if set, otherwise 70 EX_SOFTWARE.\n",
-      "file": "internal/kernel/errs/error.go",
+      "file": "internal/kernel/errs/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -68776,7 +68776,7 @@
       "spelled": "func() int",
       "canonical": "func() int",
       "doc": "HTTPStatus returns the per-error override if set, otherwise 500.\n",
-      "file": "internal/kernel/errs/error.go",
+      "file": "internal/kernel/errs/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -68880,7 +68880,7 @@
       "spelled": "func() error",
       "canonical": "func() error",
       "doc": "Unwrap delegates to Source so the stdlib errors.Is / errors.As machinery\ncan walk the chain. The nil-guard also makes this slightly more than a\npure field getter, which matters for callers storing errors by value.\n",
-      "file": "internal/kernel/errs/error.go",
+      "file": "internal/kernel/errs/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -68954,7 +68954,7 @@
       "spelled": "func(key string, val float64) FieldValue",
       "canonical": "func(key string, val float64) github.com/kitsunium/sdk/internal/kernel/errs.FieldValue",
       "doc": "Float builds a FieldValue holding a float64 value.\n",
-      "file": "internal/kernel/errs/field.go",
+      "file": "internal/kernel/errs/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -69114,7 +69114,7 @@
       "spelled": "func(code Code, reason string, public string, private string, opts ...DefineOption) *Error",
       "canonical": "func(code github.com/kitsunium/sdk/internal/kernel/errs.Code, reason string, public string, private string, opts ...github.com/kitsunium/sdk/internal/kernel/errs.DefineOption) *github.com/kitsunium/sdk/internal/kernel/errs.Error",
       "doc": "NewError is a tooling-friendly alias for Define. Prefer Define at call\nsites for consistency; NewError exists so code generators and lints\nexpecting a NewXxx constructor on exported types find one.\n",
-      "file": "internal/kernel/errs/error.go",
+      "file": "internal/kernel/errs/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -69126,7 +69126,7 @@
       "spelled": "func(key string, val string) FieldValue",
       "canonical": "func(key string, val string) github.com/kitsunium/sdk/internal/kernel/errs.FieldValue",
       "doc": "NewFieldValue builds a string-typed FieldValue. Provided as a generic\nconstructor for tooling that expects a New-prefixed factory; for common\ncases prefer the dedicated String/Int/Bool/Float helpers.\n",
-      "file": "internal/kernel/errs/field.go",
+      "file": "internal/kernel/errs/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -69138,7 +69138,7 @@
       "spelled": "func(prefix Code, mask Code) *PrefixMatcher",
       "canonical": "func(prefix github.com/kitsunium/sdk/internal/kernel/errs.Code, mask github.com/kitsunium/sdk/internal/kernel/errs.Code) *github.com/kitsunium/sdk/internal/kernel/errs.PrefixMatcher",
       "doc": "NewPrefixMatcher constructs a PrefixMatcher usable with errors.Is to\nmatch all Codes sharing a given bit-prefix (defined by the mask).\nExample: all codes originating from pkg/v1/* →\n\n\terrors.Is(err, errs.NewPrefixMatcher(0x01_00_00_00, errs.MaskByMajor))\n",
-      "file": "internal/kernel/errs/prefix_matcher.go",
+      "file": "internal/kernel/errs/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -69298,7 +69298,7 @@
       "spelled": "func() string",
       "canonical": "func() string",
       "doc": "RegistryMarker returns the registry sentinel so external callers (and\nthe audit test itself) can confirm the package is the one expected to\nown the SDK-wide code allocation audit.\n",
-      "file": "internal/kernel/errs/registry.go",
+      "file": "internal/kernel/errs/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
