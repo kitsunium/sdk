@@ -9,6 +9,7 @@ go_library(
         "blueprint.go",
         "book.go",
         "config.go",
+        "decl_gen.go",
         "definition.go",
         "doc.go",
         "locks.go",

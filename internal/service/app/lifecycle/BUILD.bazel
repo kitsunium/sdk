@@ -6,6 +6,7 @@ go_library(
     name = "lifecycle",
     srcs = [
         "config.go",
+        "decl_gen.go",
         "doc.go",
         "lifecycle.go",
         "run.go",

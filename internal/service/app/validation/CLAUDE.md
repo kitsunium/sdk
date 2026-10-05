@@ -17,6 +17,7 @@ refusal. Both ranges are declared in `internal/core/app/validation`
 
 | File | Surface |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declaration of `StructConfig` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `validation.go` | `All` / `First` / `Check` — composition and the error bridge |
 | `descend.go` | `Field` / `Each` / `Must` — reflection-free descent |
 | `presence.go` | `Required[T comparable]` |

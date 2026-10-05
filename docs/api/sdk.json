@@ -69855,7 +69855,7 @@
         }
       ],
       "doc": "Config configures one [New]. Its zero value is a working configuration.\n\nIt carries two writers and nothing else. There is no Signals field, no\nshutdown budget, no logger, no config source and no env prefix: every one of\nthose is a domain the SDK already ships, and a CLI that grew its own copy\nwould be a second, weaker one that the first would eventually disagree with.\nADR 0065 §D6 lists what this domain composes and what it refuses to redo.\n\nConfig is a published concrete shape (pkg/v1/app/cli.Config aliases it), so ADR\n0040 applies: it may still change while the module is v0, said out loud, and\nnot after v1.\n",
-      "file": "internal/service/app/cli/config.go",
+      "file": "internal/service/app/cli/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -69879,7 +69879,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "FlagSourceValue is one invocation's flags, shaped as the flat key→value\nlayer internal/core/app/config.Source yields. It is the whole of what this\ndomain contributes to configuration, and everything it deliberately is not\nis listed in [FlagSource].\n\nFlagSourceValue is a published concrete shape (pkg/v1/app/cli.FlagSource returns\nit), so ADR 0040 applies: it may still change while the module is v0, said\nout loud, and not after v1.\n",
-      "file": "internal/service/app/cli/flagsource.go",
+      "file": "internal/service/app/cli/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -70046,7 +70046,7 @@
         }
       ],
       "doc": "SchemaSpec declares a configuration's SHAPE: which keys the application\nreads, which of them it cannot start without, what each holds when nobody\nsupplies it, and what the decoded result must satisfy.\n\nThe zero value is a legitimate declaration. It requires nothing, defaults\nnothing, and adds no rule of its own — but the `validate` struct tags of T\nstill apply, because a schema that ignored the tags on the very type it\ndescribes would be a second place to look for the same answer, and it still\nrefuses an unknown key, because that is the check the zero value must not\nsilently disarm. A configuration with nothing declared passes, which is\nADR 0031's accepting half: \"nothing is declared\" and \"something is declared\nwrongly\" are opposite states and only the second is a defect.\n",
-      "file": "internal/service/app/config/schema_spec.go",
+      "file": "internal/service/app/config/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -70058,7 +70058,7 @@
       "spelled": "[T any] struct{}",
       "canonical": "[T any] struct{}",
       "doc": "SchemaValue is a compiled configuration shape: the default LAYER it\ncontributes, the keys it requires, the vocabulary it accepts, and the\nconstraint the decoded configuration must satisfy. Build one with\n[NewSchemaValue]; the zero value is not usable and [LoadSchema] refuses a nil one\nby name rather than loading nothing and reporting success.\n\nIt is safe for concurrent use and is meant to be built once, at start-up,\nand kept. pkg/v1/app/config.Schema aliases it.\n",
-      "file": "internal/service/app/config/schema.go",
+      "file": "internal/service/app/config/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -70118,7 +70118,7 @@
         }
       ],
       "doc": "Handler is one typed listener's registration: the [On] argument.\n\nIt is the typed front of core/app/events.SubscriptionValue, field for field.\nThe duplication is the layer: core owns the ERASED contract a bus can\nactually dispatch, and this owns the shape a caller writes. Collapsing them\nwould mean either putting a type parameter in the core port — which would\nmake the bus hold exactly one event type — or making every caller write\ntheir own assertion.\n",
-      "file": "internal/service/app/events/on.go",
+      "file": "internal/service/app/events/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -70200,7 +70200,7 @@
         }
       ],
       "doc": "AskConfig says where a process listens and which path answers whether it is\nready. Addr and Path are required; Timeout and Clock have working zeros.\n",
-      "file": "internal/service/app/health/ask.go",
+      "file": "internal/service/app/health/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -70251,7 +70251,7 @@
         }
       ],
       "doc": "Config parameterises [New]. Every field is optional and the zero value\nbuilds a working registry — one that runs on the wall clock, gives each\ncheck [DefaultCheckTimeout], observes nothing and notifies nobody.\n\nA registry with no checks at all is a legitimate registry (ADR 0031): every\nprobe answers healthy, because the process answering IS the evidence that it\nis running.\n",
-      "file": "internal/service/app/health/config.go",
+      "file": "internal/service/app/health/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -70297,7 +70297,7 @@
         }
       ],
       "doc": "HandlerConfig parameterises the three handlers. Its zero value serves the\naggregate and NOTHING else.\n",
-      "file": "internal/service/app/health/handler_config.go",
+      "file": "internal/service/app/health/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -70383,7 +70383,7 @@
       "spelled": "map[corei18n.Key]EntryValue",
       "canonical": "map[github.com/kitsunium/sdk/internal/core/app/i18n.Key]github.com/kitsunium/sdk/internal/service/app/i18n.EntryValue",
       "doc": "Catalogue is one language's entries, keyed by message key.\n",
-      "file": "internal/service/app/i18n/entry_value.go",
+      "file": "internal/service/app/i18n/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -70407,7 +70407,7 @@
         }
       ],
       "doc": "EntryValue is one catalogue entry before it is compiled: either a plain\npattern, or one pattern per CLDR category. pkg/v1/app/i18n publishes it as\n`Entry`.\n\nThe two shapes are what a catalogue FILE carries — a string, or a map from\ncategory name to string — so this type is the file's shape given a name, and\nthe decode from any of the codec domain's formats lands on it without a\nformat-specific struct tag anywhere.\n\nWhich shape was used is not cosmetic: a Forms entry DECLARES the message is\ncounted, and a counted message is checked at load against every category its\nlanguage can produce. An entry written as a plain string is not counted and\nis not checked, because \"Welcome back\" needs no plural form in any language.\n",
-      "file": "internal/service/app/i18n/entry_value.go",
+      "file": "internal/service/app/i18n/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -70431,7 +70431,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Negotiator resolves an Accept-Language header to one of a fixed set of\nlanguages.\n\nIt is built once, at wiring time, and used on every request. That split is\nthe point: everything that can be wrong — an empty supported set, an unset\ndefault, a default that is not itself supported — is refused HERE, so\n[Negotiator.Negotiate] has no failure mode at all and never has to decide\nwhat to do about a header it dislikes.\n",
-      "file": "internal/service/app/i18n/negotiator.go",
+      "file": "internal/service/app/i18n/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -70565,7 +70565,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "PluralValue is the CLDR plural specification of ONE language: the categories its\nrules can produce, and the rule that picks between them.\n\n# Why this table is written by hand, and is short\n\nCLDR's plural data covers about 200 locales. Vendoring it means shipping\ntens of thousands of generated lines nobody on the team has read, to answer\na question about languages the product does not have a single string in. So\nthis table holds the languages the SDK will actually be asked for, each rule\ntranscribed from the CLDR cardinal chart with its clause in the comment\nabove it, each pinned by a table test that walks the boundary values.\n\nThe consequence is stated plainly and is not a defect: a language absent\nfrom the table is REFUSED at catalogue construction, by name, with the\nsupported set beside it. It does not silently borrow English's rules. See\nADR 0063 §D1 and [corei18n.UnsupportedLanguage].\n\n# The one operand that is not implemented\n\nFour of these rules — French, Spanish, Italian and Portuguese — have a\n`many` clause CLDR writes as \"e = 0 and i != 0 and i % 1000000 = 0 and v = 0\nor e != 0..5\". The operand e is the compact-decimal exponent, and this\ndomain ships no compact-decimal formatter, so e is 0 for every quantity that\ncan reach these rules. The clause is therefore implemented at e = 0: the\nfirst half exactly, the second half never firing. That is not an\napproximation of the rule, it is the rule restricted to the inputs the\ndomain can produce — and it is written out at all four sites rather than\nonce here, because a reader checking one rule against CLDR must not have to\nfind this paragraph to know it is right.\n",
-      "file": "internal/service/app/i18n/plural_value.go",
+      "file": "internal/service/app/i18n/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -70616,7 +70616,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Printer renders messages in one language.\n\nIt holds a resolution CHAIN — the requested tag, its parents, then the\ncatalogue's fallback and its parents — and each step carries its own plural\nrules. A render walks the chain, takes the first language that holds the\nkey, and selects the plural form with that language's rules.\n\n# Build one per language, not one per request\n\n[NewPrinter] resolves the chain and allocates; [Printer.Render] walks it and\ndoes not. A server negotiates a language per request and then wants a\nPrinter for it, so the shape that pays off is a map from tag to Printer\nbuilt at startup:\n\n\tprinters := map[i18n.Tag]*i18n.Printer{}\n\tfor _, tag := range store.Tags() {\n\t\tp, err := i18n.NewPrinter(store, tag)\n\t\t…\n\t\tprinters[tag] = p\n\t}\n\t// per request\n\tp := printers[negotiator.Negotiate(r.Header.Get(\"Accept-Language\"))]\n\nBENCH.md reports both costs so the difference is a number rather than\nadvice.\n\nA Printer is immutable and safe for concurrent use.\n",
-      "file": "internal/service/app/i18n/printer.go",
+      "file": "internal/service/app/i18n/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -70679,7 +70679,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Store is an immutable, concurrent-safe [corei18n.Catalog] built from one\ncatalogue per language.\n\nIt implements the two ADR 0039 siblings as well: [corei18n.KeyLister], so a\ncaller's own test can assert no translation is missing, and\n[corei18n.Fallbacker], so a renderer can find the language that stands in\nwithout the fallback being a second constructor argument everywhere.\n\nNothing mutates after [NewStore] returns. There is no Add, no Reload and no\nSet: a catalogue that can change under a request is a catalogue where two\nparagraphs of one page can come from two different versions of the text, and\nreloading translations is a process restart or a second Store swapped in by\nthe caller — both of which the caller can already do, and neither of which\nneeds a lock on the render path.\n",
-      "file": "internal/service/app/i18n/store.go",
+      "file": "internal/service/app/i18n/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -70929,7 +70929,7 @@
         }
       ],
       "doc": "Config parameterises [New]. Every field is optional and the zero value\nbuilds a working Lifecycle — one that runs on the wall clock, gives each\ncomponent [DefaultStopTimeout] to stop, and reports nothing.\n",
-      "file": "internal/service/app/lifecycle/config.go",
+      "file": "internal/service/app/lifecycle/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -71044,7 +71044,7 @@
         }
       ],
       "doc": "RunConfig parameterises [Run]. Its zero value wires NOTHING: no signal\nhandler is installed and no datagram is sent, so [Run] reduces to\nstart-wait-on-ctx-stop.\n\nThat is the point. Signals and sd_notify are process-wide, observable side\neffects, and a library that installs them because it was imported is a\nlibrary that fights the caller's own main. Both are opt-in fields, and both\ndelegate to the SDK packages that already implement them — this file wires,\nit does not reimplement.\n",
-      "file": "internal/service/app/lifecycle/run.go",
+      "file": "internal/service/app/lifecycle/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -71103,7 +71103,7 @@
         }
       ],
       "doc": "SupervisionEventValue is one thing a supervisor did: a run started or\nended, a restart scheduled, the supervision over. Which fields mean\nsomething depends on Phase, and the others are zero.\n",
-      "file": "internal/service/app/lifecycle/supervise_event.go",
+      "file": "internal/service/app/lifecycle/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -71115,7 +71115,7 @@
       "spelled": "uint8",
       "canonical": "uint8",
       "doc": "SupervisionPhase names what a [SupervisionEventValue] reports.\n",
-      "file": "internal/service/app/lifecycle/supervise_event.go",
+      "file": "internal/service/app/lifecycle/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -71192,7 +71192,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Supervisor runs one function until it is stopped, restarting it after\nevery early end. Build one with [NewSupervisor]. It is safe for concurrent\nuse, and it can be started again once stopped.\n",
-      "file": "internal/service/app/lifecycle/supervise.go",
+      "file": "internal/service/app/lifecycle/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -71265,7 +71265,7 @@
         }
       ],
       "doc": "SupervisorConfig tunes [NewSupervisor]. Every field is optional, and the\nzero value supervises on the wall clock, restarting after one second,\ndoubling to a minute, and telling nobody. The name and the function are\nNewSupervisor's own arguments, because there is no supervisor without them.\n",
-      "file": "internal/service/app/lifecycle/supervise_config.go",
+      "file": "internal/service/app/lifecycle/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -71294,7 +71294,7 @@
         }
       ],
       "doc": "FileConfig parameterises [NewFileLocker].\n\nIts zero value is deliberately NOT a working locker: Dir must be stated,\nbecause the directory IS the lock's scope. Poll, by contrast, has a\ndefensible default and is clamped — the two ADR 0031 halves, side by side.\n",
-      "file": "internal/service/app/lock/file_config.go",
+      "file": "internal/service/app/lock/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -71330,7 +71330,7 @@
         }
       ],
       "doc": "KeepaliveConfig parameterises [Keepalive].\n\nIts zero value is deliberately NOT a working keepalive: Every must be\nstated, because a renewal cadence the SDK invented would be right only by\naccident against a lease lifetime it cannot see.\n",
-      "file": "internal/service/app/lock/keepalive.go",
+      "file": "internal/service/app/lock/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -71354,7 +71354,7 @@
         }
       ],
       "doc": "MemoryConfig parameterises [NewMemory].\n\nIts zero value is deliberately NOT a working locker: TTL must be stated.\nSee [NewMemory] for why refusing, rather than defaulting, is the only\ndefensible ADR 0031 half for a lease lifetime.\n",
-      "file": "internal/service/app/lock/config.go",
+      "file": "internal/service/app/lock/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -71390,7 +71390,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Composer turns a [coremail.MessageValue] into the wire bytes a transport\nsends. It is safe for concurrent use and holds no state between messages.\n",
-      "file": "internal/service/app/mail/composer.go",
+      "file": "internal/service/app/mail/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -71427,7 +71427,7 @@
         }
       ],
       "doc": "ComposerConfig configures a [Composer].\n\nBoth fields are optional and both CLAMP rather than refuse, because unlike a\nTLS mode there is exactly one defensible value for each (ADR 0031's clamping\nhalf): the system clock, and crypto/rand.\n",
-      "file": "internal/service/app/mail/composer_config.go",
+      "file": "internal/service/app/mail/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -71602,7 +71602,7 @@
         }
       ],
       "doc": "SMTPConfig configures the SMTP transport.\n\nEverything refusable about it is refused by [NewSMTP] at CONSTRUCTION rather\nthan at send time: an unset TLS mode, a port outside the protocol's range, or\ncredentials the transport would have to send in the clear. The fix for each\nis one line in the wiring, which is where the error is raised.\n",
-      "file": "internal/service/app/mail/smtpconfig.go",
+      "file": "internal/service/app/mail/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -71692,7 +71692,7 @@
       "spelled": "uint8",
       "canonical": "uint8",
       "doc": "TLSMode selects how the session is encrypted. Its ZERO VALUE IS REFUSED.\n\nThat refusal is the security decision of this package. Every other choice\nwould be wrong for somebody: defaulting to encryption breaks the caller\npointing at a plaintext relay inside a private network, and defaulting to\nnone ships every other caller's credentials in the clear. ADR 0031 admits a\nclamp where one value needs no explanation and demands a refusal where any\nSDK-chosen value would be arbitrary; this is unambiguously the second.\n\nThere is deliberately NO opportunistic mode — \"encrypt if the server offers\nit, continue in the clear if it does not\". It is the shape most mail\nlibraries ship and it means an active attacker who strips one line from the\nEHLO response reads the whole session, credentials included, while the\nsender's logs show a successful delivery. It cannot be configured here\nbecause it is not implemented, not because it is off by default.\n",
-      "file": "internal/service/app/mail/smtpconfig.go",
+      "file": "internal/service/app/mail/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -71849,7 +71849,7 @@
         }
       ],
       "doc": "AttemptValue is what one delivery attempt knows about itself. The spool\nputs it in the context it hands the transport, so a transport — or a\nframework's wrapper around one — can continue the trace of the Send, name\nthe attempt in a log, or refuse a mail it has seen before.\n",
-      "file": "internal/service/app/mail/spool/event.go",
+      "file": "internal/service/app/mail/spool/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -71923,7 +71923,7 @@
         }
       ],
       "doc": "Config configures [New]. Transport and MaxAttempts are required; every\nother field is optional.\n",
-      "file": "internal/service/app/mail/spool/config.go",
+      "file": "internal/service/app/mail/spool/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -71987,7 +71987,7 @@
         }
       ],
       "doc": "DeadLetterValue is a mail the spool gave up on, with why: the mail as it was\nspooled, when it was queued and when it failed for the last time, and that\nfailure's reason, wire-safe cause and code.\n",
-      "file": "internal/service/app/mail/spool/event.go",
+      "file": "internal/service/app/mail/spool/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -72092,7 +72092,7 @@
       "spelled": "uint8",
       "canonical": "uint8",
       "doc": "EventKind names what an [EventValue] reports.\n",
-      "file": "internal/service/app/mail/spool/event.go",
+      "file": "internal/service/app/mail/spool/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -72203,7 +72203,7 @@
         }
       ],
       "doc": "EventValue is one thing that happened to one mail. The mail, its metadata\nand its queue time travel with every event, because a spool may deliver a\nmail an earlier process queued, and an observer building a mailbox has\nseen no Send for it.\n",
-      "file": "internal/service/app/mail/spool/event.go",
+      "file": "internal/service/app/mail/spool/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -72350,7 +72350,7 @@
         }
       ],
       "doc": "BreakerConfig parameterises NewCircuitBreaker. A non-positive FailureThreshold\ndefaults to 5; a non-positive OpenDuration defaults to 30s; a nil Clock\ndefaults to clock.System; a nil Retryable counts every error as a failure.\n",
-      "file": "internal/service/app/resilience/breaker_config.go",
+      "file": "internal/service/app/resilience/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -72374,7 +72374,7 @@
         }
       ],
       "doc": "FallbackConfig parameterises NewFallback. A nil Fallback is refused (there is\nno defensible SDK-side substitute for the caller's own plan B); a nil\nRetryable falls back on every primary failure.\n",
-      "file": "internal/service/app/resilience/fallback_config.go",
+      "file": "internal/service/app/resilience/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -72413,7 +72413,7 @@
         }
       ],
       "doc": "HedgeConfig parameterises NewHedge. Three of its four knobs have no default:\nIdempotent, Delay and MaxInFlight are refused when unset, because every value\nthe SDK could pick for them is either a guess at the caller's requirement or\na licence to duplicate load the caller never agreed to (ADR 0031). MaxHedges\nis the one with an obvious floor and clamps to 1. A nil Clock measures the\ndelay on the wall clock.\n",
-      "file": "internal/service/app/resilience/hedge_config.go",
+      "file": "internal/service/app/resilience/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -72457,7 +72457,7 @@
         }
       ],
       "doc": "KeyedRateLimiterConfig parameterises NewKeyedRateLimiter: a token bucket per\nkey, at most MaxKeys of them, each forgotten after IdleTimeout without a\ncall.\n\nFour fields have no default and a zero in any of them is refused with\nPolicyMisconfigured on every call (ADR 0031): Rate for the reason\nRateLimiterConfig.Rate gives, and the three below because each of their\nzeros has two readings and one of them silently disarms the limiter.\n",
-      "file": "internal/service/app/resilience/keyed_ratelimit_config.go",
+      "file": "internal/service/app/resilience/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -72580,7 +72580,7 @@
         }
       ],
       "doc": "RateLimiterConfig parameterises NewRateLimiter. Burst is the bucket capacity\n(clamped to >= 1); a nil Clock defaults to System.\n",
-      "file": "internal/service/app/resilience/ratelimit_config.go",
+      "file": "internal/service/app/resilience/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -72625,7 +72625,7 @@
         }
       ],
       "doc": "RetryConfig parameterises NewRetry. A non-positive MaxAttempts clamps to 1; a\nMultiplier of 1 or below (or NaN) defaults to 2; a zero MaxDelay means no\ncap; a nil Retryable replays every error; a zero Jitter backs off\ndeterministically; a nil Clock waits on the wall clock.\n\nBaseDelay, MaxDelay, Multiplier and Jitter are the four fields of\nBackoffValue, under the same names and with the same meaning: NewRetry builds its curve\nfrom them, so a loop that retries on its own terms and a Retry policy\nconfigured alike wait alike.\n",
-      "file": "internal/service/app/resilience/retry_config.go",
+      "file": "internal/service/app/resilience/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -72649,7 +72649,7 @@
         }
       ],
       "doc": "Config parameterises [New]. Both fields are optional and the zero value\nbuilds a working scheduler — one that runs on the wall clock and reports\nnothing.\n",
-      "file": "internal/service/app/scheduler/config.go",
+      "file": "internal/service/app/scheduler/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -72751,7 +72751,7 @@
         }
       ],
       "doc": "ChangeValue describes one stored transition, as an OnTransition hook\nreceives it.\n",
-      "file": "internal/service/app/statemachine/definition.go",
+      "file": "internal/service/app/statemachine/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -72815,7 +72815,7 @@
         }
       ],
       "doc": "Config parameterises NewStateMachine. Only Store is required; every other zero\nfield resolves to a working default.\n",
-      "file": "internal/service/app/statemachine/config.go",
+      "file": "internal/service/app/statemachine/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -72881,7 +72881,7 @@
         }
       ],
       "doc": "FiringValue is a transition the machine's own loop is about to fire, as\nConfig.Observe is told it.\n",
-      "file": "internal/service/app/statemachine/config.go",
+      "file": "internal/service/app/statemachine/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -72935,7 +72935,7 @@
         }
       ],
       "doc": "LoopEvent is what Config.OnLoop is told about [StateMachine.Run]. Which fields\nare set depends on Kind.\n",
-      "file": "internal/service/app/statemachine/loop.go",
+      "file": "internal/service/app/statemachine/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -72947,7 +72947,7 @@
       "spelled": "uint8",
       "canonical": "uint8",
       "doc": "LoopEventKind says what a [LoopEvent] reports.\n",
-      "file": "internal/service/app/statemachine/loop.go",
+      "file": "internal/service/app/statemachine/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -73011,7 +73011,7 @@
       "spelled": "[E any, S comparable] struct{}",
       "canonical": "[E any, S comparable] struct{}",
       "doc": "MachineSpec declares a state machine over entities of type E whose state is\nan S: the state a new entity enters, the transitions between states and how\neach is fired, and the hooks that run on the way.\n\nA MachineSpec is DATA. Every transition is declared before a machine runs,\nwhich is what lets a caller draw the machine exactly — [MachineSpec.States]\nand [MachineSpec.Transitions] read it back — and what lets the engine know,\nfor any state, which timers and guards can move an entity out of it.\n\nFour kinds of transitions:\n\n  - On: an event, fired by a caller with [StateMachine.Fire];\n  - After: a duration spent in a state, fired by the machine's loop;\n  - At: an instant the entity carries — a due date, a deadline — fired by\n    the loop once it has come;\n  - When: a guard on the entity, fired by the loop as soon as it holds. A\n    guard sees the entity only and is asked again each time the entity is\n    written; a condition on the time is an instant, declared with At.\n\nWhen several automatic transitions leave a state and more than one is due,\nthe one declared FIRST fires.\n\nA mistake — a duplicate, an empty event name, a nil function, a duration\nthat is not positive — is recorded rather than panicked on, read back with\n[MachineSpec.Problems], and refused by NewStateMachine. Build a MachineSpec on one\ngoroutine; once a machine is built from it, the machine keeps its own copy\nand later declarations do not reach it.\n",
-      "file": "internal/service/app/statemachine/definition.go",
+      "file": "internal/service/app/statemachine/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -73203,7 +73203,7 @@
       "spelled": "[E any, S comparable] struct{}",
       "canonical": "[E any, S comparable] struct{}",
       "doc": "StateMachine runs a [MachineSpec] over the entities of a [corestm.Store]: it\ncreates them in their initial state, moves them along event transitions when\na caller fires one, and — while [StateMachine.Run] goes — along the timers and\nguards that are due. It is safe for concurrent use.\n\nTransitions of one entity run one at a time; transitions of different\nentities run concurrently. Beside the store the machine keeps one record per\nentity — its state, since when, its latest transitions — in memory and in\nthe configured journal, plus the census of entities per state.\n\nThe store may be written by others. Tell the machine through\n[StateMachine.Changed] and [StateMachine.Deleted]: a write can move a deadline or\nmake a guard hold, and a state changed behind the machine's back re-enters\nits state at the moment the machine learns of it.\n",
-      "file": "internal/service/app/statemachine/machine.go",
+      "file": "internal/service/app/statemachine/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -73359,7 +73359,7 @@
         }
       ],
       "doc": "TransitionValue is one declared transition, as [MachineSpec.Transitions]\nreads it back.\n",
-      "file": "internal/service/app/statemachine/definition.go",
+      "file": "internal/service/app/statemachine/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -73371,7 +73371,7 @@
       "spelled": "uint8",
       "canonical": "uint8",
       "doc": "Wake says why a run of the loop started.\n",
-      "file": "internal/service/app/statemachine/loop.go",
+      "file": "internal/service/app/statemachine/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -73622,7 +73622,7 @@
         }
       ],
       "doc": "StructConfig tunes a compiled struct validator.\n",
-      "file": "internal/service/app/validation/struct.go",
+      "file": "internal/service/app/validation/decl_gen.go",
       "layer": "service",
       "family": "app"
     },

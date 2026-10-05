@@ -51,29 +51,6 @@ const (
 	fieldStatus string = "status"
 )
 
-// AskConfig says where a process listens and which path answers whether it is
-// ready. Addr and Path are required; Timeout and Clock have working zeros.
-type AskConfig struct {
-	// Addr is the address the process LISTENS on, spelled as its listener was
-	// given it: ":4000", "0.0.0.0:4000", "[::]:4000", "127.0.0.1:4000",
-	// "localhost:4000". An unspecified host is not an address one can dial,
-	// so it becomes this machine's loopback of the same family: an empty host
-	// and 0.0.0.0 dial 127.0.0.1, :: dials ::1. Any other host is dialled as
-	// written. The port must be a number from 1 to 65535.
-	Addr string
-	// Path is the readiness endpoint, absolute and with an optional query:
-	// "/readyz", "/_kit/health/ready".
-	Path string
-	// Timeout bounds the whole exchange: dial, request, answer and drained
-	// body. Zero is [DefaultAskTimeout]; a negative value is refused. The
-	// caller's context bounds the exchange too, and whichever ends first ends
-	// it.
-	Timeout time.Duration
-	// Clock is the time source the budget is armed on; nil is clock.System. A
-	// manual clock makes the timeout a test can reach without waiting.
-	Clock clock.Timed
-}
-
 // askRequest is an AskConfig that passed validation: the URL to GET, the
 // host:port it names, the budget and the clock that measures it.
 type askRequest struct {

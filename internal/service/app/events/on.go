@@ -8,31 +8,6 @@ import (
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// Handler is one typed listener's registration: the [On] argument.
-//
-// It is the typed front of core/app/events.SubscriptionValue, field for field.
-// The duplication is the layer: core owns the ERASED contract a bus can
-// actually dispatch, and this owns the shape a caller writes. Collapsing them
-// would mean either putting a type parameter in the core port — which would
-// make the bus hold exactly one event type — or making every caller write
-// their own assertion.
-type Handler[E any] struct {
-	// Name identifies the listener in every error field and is the handle
-	// [Off] removes it by. It must be non-empty and unique among the
-	// listeners registered for E.
-	Name string
-	// Priority orders this listener among the others registered for E. Lower
-	// runs first; equal priorities run in registration order. Its zero value,
-	// core/app/events.PriorityNormal, is a working default.
-	Priority corev.Priority
-	// MayHalt authorises Handle to stop the dispatch by returning
-	// core/app/events.Halt. False — the zero value — means it cannot.
-	MayHalt bool
-	// Handle is the reaction. It receives the event ALREADY TYPED. It must be
-	// non-nil.
-	Handle func(ctx context.Context, event E) error
-}
-
 // On registers a typed listener for the event type E.
 //
 // It is a package-level FUNCTION and not a method on Bus because Go methods

@@ -2,37 +2,12 @@ package lock
 
 import (
 	"context"
-	"time"
 
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 
 	corelock "github.com/kitsunium/sdk/internal/core/app/lock"
 )
-
-// KeepaliveConfig parameterises [Keepalive].
-//
-// Its zero value is deliberately NOT a working keepalive: Every must be
-// stated, because a renewal cadence the SDK invented would be right only by
-// accident against a lease lifetime it cannot see.
-type KeepaliveConfig struct {
-	// Every is the renewal period. It MUST be positive, and it MUST be
-	// comfortably shorter than the lease TTL — a renewal that lands at the
-	// deadline has already lost every race it could lose. A third of the TTL
-	// leaves room for two consecutive failures.
-	//
-	// It is refused at zero rather than derived from the lease, because a
-	// Lease deliberately does not expose its TTL: the port's job is to say
-	// whether it can expire at all ([corelock.Deadliner]), not to let a helper
-	// reconstruct a schedule the caller never chose.
-	Every time.Duration
-	// Clock is the time source the renewal ticks on. nil means clock.System.
-	//
-	// A caller testing expiry MUST pass the SAME clock the locker was built
-	// with, or the renewals and the deadline will run on two different
-	// timelines.
-	Clock clock.Timed
-}
 
 // validate applies ADR 0031 to the renewal period.
 func (c KeepaliveConfig) validate() error {

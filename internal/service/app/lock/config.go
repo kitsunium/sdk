@@ -1,33 +1,11 @@
 package lock
 
 import (
-	"time"
-
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 
 	corelock "github.com/kitsunium/sdk/internal/core/app/lock"
 )
-
-// MemoryConfig parameterises [NewMemory].
-//
-// Its zero value is deliberately NOT a working locker: TTL must be stated.
-// See [NewMemory] for why refusing, rather than defaulting, is the only
-// defensible ADR 0031 half for a lease lifetime.
-type MemoryConfig struct {
-	// TTL is how long a lease is held before it can be taken by another
-	// caller. It MUST be positive; zero and negative are refused at
-	// construction, never reinterpreted.
-	TTL time.Duration
-	// Clock is the time source, injectable so expiry and waiting are testable
-	// without sleeping. nil means clock.System.
-	//
-	// The whole port is needed, not just the reading half: this locker WAITS
-	// for a holder's deadline rather than polling for it, so it needs
-	// clock.Waiter as well as clock.Clock — which is what clock.Timed is
-	// (ADR 0039).
-	Clock clock.Timed
-}
 
 // validate applies ADR 0031: refuse what the SDK cannot choose on the caller's
 // behalf, and reinterpret nothing.

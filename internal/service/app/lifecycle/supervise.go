@@ -5,38 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"runtime/debug"
-	"sync"
 	"time"
 
 	corelc "github.com/kitsunium/sdk/internal/core/app/lifecycle"
-	kbackoff "github.com/kitsunium/sdk/internal/kernel/backoff"
-	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
-
-// Supervisor runs one function until it is stopped, restarting it after
-// every early end. Build one with [NewSupervisor]. It is safe for concurrent
-// use, and it can be started again once stopped.
-type Supervisor struct {
-	// run is the supervised function.
-	run func(ctx context.Context) error
-	// clock stamps the events and paces the backoff.
-	clock clock.Timed
-	// observe is told about every event; nil tells nobody.
-	observe func(SupervisionEventValue)
-	// cancel ends the current supervision; done closes when it has ended.
-	// Both are nil before the first Start. Guarded by mu.
-	cancel context.CancelFunc
-	done   chan struct{}
-	// name identifies the supervisor.
-	name string
-	// backoff is the restart curve.
-	backoff kbackoff.Value
-	// healthy is how long a run lasts before its end is a first failure.
-	healthy time.Duration
-	// mu guards cancel and done.
-	mu sync.Mutex
-}
 
 // NewSupervisor builds a supervisor named name over run, tuned by cfg. run
 // must run until its context ends and then return; returning earlier — with

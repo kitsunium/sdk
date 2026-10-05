@@ -558,7 +558,8 @@ packages:
       corev: github.com/kitsunium/sdk/internal/core/app/events
     path: github.com/kitsunium/sdk/internal/service/app/events
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Handler is one typed listener's registration: the [On] argument.
 
           It is the typed front of core/app/events.SubscriptionValue, field for field.

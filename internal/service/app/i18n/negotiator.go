@@ -7,21 +7,6 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// Negotiator resolves an Accept-Language header to one of a fixed set of
-// languages.
-//
-// It is built once, at wiring time, and used on every request. That split is
-// the point: everything that can be wrong — an empty supported set, an unset
-// default, a default that is not itself supported — is refused HERE, so
-// [Negotiator.Negotiate] has no failure mode at all and never has to decide
-// what to do about a header it dislikes.
-type Negotiator struct {
-	// supported is the set a negotiation may return, in the caller's order.
-	supported []corei18n.TagValue
-	// fallback is returned when nothing in the header matches.
-	fallback corei18n.TagValue
-}
-
 // NewNegotiator returns a [Negotiator] over supported, falling back to
 // fallback, or refuses.
 //

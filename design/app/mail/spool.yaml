@@ -321,7 +321,8 @@ packages:
       kbackoff: github.com/kitsunium/sdk/internal/kernel/backoff
     path: github.com/kitsunium/sdk/internal/service/app/mail/spool
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Config configures [New]. Transport and MaxAttempts are required; every
           other field is optional.
         name: Config
@@ -402,7 +403,8 @@ packages:
                 the queue's own default.
               name: PollInterval
               type: time.Duration
-      - doc: EventKind names what an [EventValue] reports.
+      - decl: true
+        doc: EventKind names what an [EventValue] reports.
         methods:
           - doc: |-
               String renders the kind for a log line; a value this package never mints
@@ -413,7 +415,8 @@ packages:
             recv: value
         name: EventKind
         underlying: uint8
-      - doc: |-
+      - decl: true
+        doc: |-
           EventValue is one thing that happened to one mail. The mail, its metadata
           and its queue time travel with every event, because a spool may deliver a
           mail an earlier process queued, and an observer building a mailbox has
@@ -456,7 +459,8 @@ packages:
             - doc: Kind says what happened.
               name: Kind
               type: EventKind
-      - doc: |-
+      - decl: true
+        doc: |-
           AttemptValue is what one delivery attempt knows about itself. The spool
           puts it in the context it hands the transport, so a transport — or a
           framework's wrapper around one — can continue the trace of the Send, name
@@ -476,7 +480,8 @@ packages:
             - doc: Attempt numbers this attempt, from 1.
               name: Attempt
               type: int
-      - doc: |-
+      - decl: true
+        doc: |-
           DeadLetterValue is a mail the spool gave up on, with why: the mail as it was
           spooled, when it was queued and when it failed for the last time, and that
           failure's reason, wire-safe cause and code.

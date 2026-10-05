@@ -5,7 +5,6 @@ import (
 	"time"
 
 	coremail "github.com/kitsunium/sdk/internal/core/app/mail"
-	corenet "github.com/kitsunium/sdk/internal/core/net"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -21,23 +20,6 @@ const maxPort int = 65535
 // defaultLocalName is the EHLO name net/smtp itself uses when given none. A
 // submission server ignores which one it receives.
 const defaultLocalName string = "localhost"
-
-// TLSMode selects how the session is encrypted. Its ZERO VALUE IS REFUSED.
-//
-// That refusal is the security decision of this package. Every other choice
-// would be wrong for somebody: defaulting to encryption breaks the caller
-// pointing at a plaintext relay inside a private network, and defaulting to
-// none ships every other caller's credentials in the clear. ADR 0031 admits a
-// clamp where one value needs no explanation and demands a refusal where any
-// SDK-chosen value would be arbitrary; this is unambiguously the second.
-//
-// There is deliberately NO opportunistic mode — "encrypt if the server offers
-// it, continue in the clear if it does not". It is the shape most mail
-// libraries ship and it means an active attacker who strips one line from the
-// EHLO response reads the whole session, credentials included, while the
-// sender's logs show a successful delivery. It cannot be configured here
-// because it is not implemented, not because it is off by default.
-type TLSMode uint8
 
 const (
 	// TLSUnset is the zero value and is refused at construction.
@@ -84,46 +66,6 @@ func (m TLSMode) String() string {
 		//: not a mode.
 		return "invalid"
 	}
-}
-
-// SMTPConfig configures the SMTP transport.
-//
-// Everything refusable about it is refused by [NewSMTP] at CONSTRUCTION rather
-// than at send time: an unset TLS mode, a port outside the protocol's range, or
-// credentials the transport would have to send in the clear. The fix for each
-// is one line in the wiring, which is where the error is raised.
-type SMTPConfig struct {
-	// Host is the server's name. It is also the name TLS verifies the
-	// certificate against, and the name EHLO is answered by — so it is not
-	// interchangeable with an IP address.
-	Host string
-	// Port is the TCP port: 587 for submission with STARTTLS, 465 for
-	// submissions with implicit TLS (RFC 8314 §3.1), 25 for a relay.
-	Port int
-	// TLS selects the encryption mode. The zero value is refused.
-	TLS TLSMode
-	// Identity carries the trust anchors, the client certificate for mutual
-	// TLS, and the minimum protocol version. It is core/net's opaque identity,
-	// reused rather than twinned: a mail server's TLS is the same TLS every
-	// other outbound connection in this SDK uses, and a second configuration
-	// type would be a second place for a minimum version to be wrong.
-	//
-	// Its zero value is usable and means "the platform trust store, TLS 1.3
-	// minimum". [SMTPConfig.Host] is used as the verified name when the
-	// identity names none.
-	Identity corenet.IdentityValue
-	// Username is the SASL authentication identity. Empty means no AUTH
-	// command is issued at all.
-	Username string
-	// Password is the secret for Username. It never appears in an error, a
-	// field or a log line emitted by this package.
-	Password string
-	// LocalName is the domain given in EHLO. Empty selects "localhost", which
-	// is what net/smtp uses and what a submission server ignores.
-	LocalName string
-	// DialTimeout bounds the TCP connection. Non-positive clamps to
-	// [defaultDialTimeout]; a shorter context deadline still wins.
-	DialTimeout time.Duration
 }
 
 // validate refuses a configuration that cannot be honoured as written.

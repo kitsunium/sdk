@@ -1396,7 +1396,8 @@ packages:
       corenet: github.com/kitsunium/sdk/internal/core/net
     path: github.com/kitsunium/sdk/internal/service/app/mail
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Composer turns a [coremail.MessageValue] into the wire bytes a transport
           sends. It is safe for concurrent use and holds no state between messages.
         methods:
@@ -1436,8 +1437,13 @@ packages:
             recv: pointer
         name: Composer
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - name: clock
+              type: clock.Clock
+            - name: random
+              type: io.Reader
+      - decl: true
+        doc: |-
           ComposerConfig configures a [Composer].
 
           Both fields are optional and both CLAMP rather than refuse, because unlike a
@@ -1457,7 +1463,8 @@ packages:
                 crypto/rand.
               name: Rand
               type: io.Reader
-      - doc: |-
+      - decl: true
+        doc: |-
           TLSMode selects how the session is encrypted. Its ZERO VALUE IS REFUSED.
 
           That refusal is the security decision of this package. Every other choice
@@ -1481,7 +1488,8 @@ packages:
             recv: value
         name: TLSMode
         underlying: uint8
-      - doc: |-
+      - decl: true
+        doc: |-
           SMTPConfig configures the SMTP transport.
 
           Everything refusable about it is refused by [NewSMTP] at CONSTRUCTION rather

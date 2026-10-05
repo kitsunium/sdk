@@ -19,6 +19,7 @@ Code range: `0.3.60.*` (ADR 0063), declared with the port's `0.2.30.*` in
 
 | File | Surface |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `EntryValue`, `Catalogue`, `Negotiator`, `PluralValue`, `Printer` and `Store` — each struct with every field, unexported ones included; the assertions `Store → corei18n.Catalog`, `Store → corei18n.KeyLister` and `Store → corei18n.Fallbacker`. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `tag.go` | `ParseTag` — splits a written tag, places each subtag by length and order, and refuses BY NAME everything outside `language[-Script][-REGION]`; `corei18n.NewTag` then checks each subtag's shape and canonicalises its case |
 | `pattern.go` | `compilePattern` / `compileBraced` — the placeholder syntax, and every construct it refuses by name |
 | `pattern_compiler.go` | `patternCompiler` — the one-pass parser run at catalogue load; it hands its spans to `corei18n.NewPattern` |
@@ -27,7 +28,6 @@ Code range: `0.3.60.*` (ADR 0063), declared with the port's `0.2.30.*` in
 | `plural_value.go` | `PluralValue` — one language's categories and its rule |
 | `entry_value.go` | `EntryValue` + `Catalogue` + `Plain` / `PluralForms` |
 | `store.go` | `Store` + `NewStore` + `Lookup` / `Tags` / `Keys` / `Fallback` / `Missing` |
-| `store_compliance.go` | the compile-time proof that `Store` satisfies the port and both siblings |
 | `load.go` | `LoadFS` — one catalogue file per language, decoded through `codec`, read through `io/fs` |
 | `printer.go` | `Printer` + `NewPrinter` + `Tag` / `Render` / `RenderCount` |
 | `printer_link.go` | the resolution chain: `link` + `buildChain` / `appendLineage` |

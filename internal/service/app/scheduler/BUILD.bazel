@@ -5,9 +5,9 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "scheduler",
     srcs = [
-        "config.go",
         "cron.go",
         "cursor.go",
+        "decl_gen.go",
         "doc.go",
         "entry.go",
         "every.go",

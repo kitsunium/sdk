@@ -14,15 +14,16 @@ ADR 0026.
 
 | File | Policy | Notes |
 |---|---|---|
-| `retry.go` / `retry_config.go` | retry | capped exponential backoff (the `BackoffValue` curve), ctx-aware sleep on the injected `Clock`, `RetryExhausted` |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `BreakerConfig`, `FallbackConfig`, `HedgeConfig`, `KeyedRateLimiterConfig`, `RateLimiterConfig` and `RetryConfig` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
+| `retry.go` | retry | capped exponential backoff (the `BackoffValue` curve), ctx-aware sleep on the injected `Clock`, `RetryExhausted` |
 | `backoff.go` | — | `BackoffValue` — an alias of `kernel/backoff.Value`, the layer that owns the curve (ADR 0074, ADR 0103); `retryRunner.backoff`/`jittered` delegate to its two halves, `kernel/backoff.Grow` (pure, bounded, never negative) and `Widen` (jitter) |
-| `keyed_ratelimit.go` / `keyed_ratelimit_config.go` | keyed rate-limit | one `tokenBucket` per `Key(ctx)`, at most `MaxKeys` (LRU), forgotten after `IdleTimeout` (sliding), no sweeper; `Rate`/`Key`/`MaxKeys`/`IdleTimeout` refused at zero (ADR 0031, ADR 0103) |
-| `breaker.go` / `breaker_config.go` / `breaker_state.go` | circuit-breaker | Closed→Open→HalfOpen (injectable clock), `CircuitOpen` |
-| `ratelimit.go` / `ratelimit_config.go` | rate-limit | token bucket (reject mode), `RateLimited`; non-positive `Rate` refused (ADR 0031); `usableRate`/`bucketSize`/`newTokenBucket` shared with the keyed limiter |
+| `keyed_ratelimit.go` | keyed rate-limit | one `tokenBucket` per `Key(ctx)`, at most `MaxKeys` (LRU), forgotten after `IdleTimeout` (sliding), no sweeper; `Rate`/`Key`/`MaxKeys`/`IdleTimeout` refused at zero (ADR 0031, ADR 0103) |
+| `breaker.go` / `breaker_state.go` | circuit-breaker | Closed→Open→HalfOpen (injectable clock), `CircuitOpen` |
+| `ratelimit.go` | rate-limit | token bucket (reject mode), `RateLimited`; non-positive `Rate` refused (ADR 0031); `usableRate`/`bucketSize`/`newTokenBucket` shared with the keyed limiter |
 | `bulkhead.go` | bulkhead | buffered-channel semaphore (reject mode), `BulkheadFull` |
 | `timeout.go` | timeout | `context.WithTimeout`, `TimeoutExceeded`; non-positive `d` refused (ADR 0031) |
-| `fallback.go` / `fallback_config.go` | fallback | secondary `Operation` on primary failure; `FallbackFailed` carries BOTH errors; nil `Fallback` refused (ADR 0031) |
-| `hedge.go` / `hedge_config.go` / `hedge_race.go` / `hedge_outcome.go` | hedging | duplicate copies raced after `Delay`, first success wins; a copy's panic re-raised on the caller's goroutine with its original value; `Idempotent`/`Delay`/`MaxInFlight` refused, `MaxHedges`→1 (ADR 0031) |
+| `fallback.go` | fallback | secondary `Operation` on primary failure; `FallbackFailed` carries BOTH errors; nil `Fallback` refused (ADR 0031) |
+| `hedge.go` / `hedge_race.go` / `hedge_outcome.go` | hedging | duplicate copies raced after `Delay`, first success wins; a copy's panic re-raised on the caller's goroutine with its original value; `Idempotent`/`Delay`/`MaxInFlight` refused, `MaxHedges`→1 (ADR 0031) |
 | `wrap.go` | — | `wrapAs(sentinel, cause)` (sentinel origin-wins + cause as a field) over `wrapAsFields(sentinel, fields...)`, the one builder every outcome goes through, `FallbackFailed`'s two halves included |
 | `retryable.go` | — | `isRetryable(pred, err)` — nil-predicate default shared by retry + breaker |
 | `misconfigured.go` | — | `newMisconfigured(policy, knob)` — refuses every call with `PolicyMisconfigured` (ADR 0031) |

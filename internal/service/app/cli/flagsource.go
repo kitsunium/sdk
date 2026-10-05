@@ -7,18 +7,6 @@ import (
 	corecli "github.com/kitsunium/sdk/internal/core/app/cli"
 )
 
-// FlagSourceValue is one invocation's flags, shaped as the flat key→value
-// layer internal/core/app/config.Source yields. It is the whole of what this
-// domain contributes to configuration, and everything it deliberately is not
-// is listed in [FlagSource].
-//
-// FlagSourceValue is a published concrete shape (pkg/v1/app/cli.FlagSource returns
-// it), so ADR 0040 applies: it may still change while the module is v0, said
-// out loud, and not after v1.
-type FlagSourceValue struct {
-	values map[string]any
-}
-
 // FlagSource snapshots the flags an operator ACTUALLY TYPED on one invocation
 // and returns them as a configuration layer.
 //

@@ -9,18 +9,6 @@ import (
 // tagName is the struct tag the compiler reads.
 const tagName string = "validate"
 
-// StructConfig tunes a compiled struct validator.
-type StructConfig struct {
-	// StopAtFirst compiles a plan that stops at the first violation instead of
-	// collecting every one. The zero value collects everything, because a form
-	// that reports one error at a time makes the user submit it five times.
-	//
-	// It is compiled INTO the plan, nested plans included, so a stop-at-first
-	// validator really does stop: the later fields are never read and the
-	// later rules never run. It is not a filter applied to a full report.
-	StopAtFirst bool
-}
-
 // Struct compiles the `validate` struct tags of T into a Constraint. The plan
 // is compiled once per (type, mode) and cached, so calling Struct again for
 // the same T is one map read — which is what makes it usable inside a

@@ -18,6 +18,7 @@ the core's.
 
 | File | Surface |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declaration of `Handler` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `events.go` | `bus` (unexported) + `New() corev.Bus`, `Subscribe` / `Unsubscribe`, and the two validators |
 | `state.go` | `state` — one published membership version — plus `cloneStateWith` / `cloneStateWithout` / `insertOrdered` |
 | `publish.go` | `Publish`, `dispatch`, `classify`, `joinListenerFailure`, `call` (the panic guard) |

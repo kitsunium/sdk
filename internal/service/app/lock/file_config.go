@@ -28,29 +28,6 @@ const lockDirMode fs.FileMode = 0o700
 // lockFileMode is the mode a lock file is created with.
 const lockFileMode fs.FileMode = 0o600
 
-// FileConfig parameterises [NewFileLocker].
-//
-// Its zero value is deliberately NOT a working locker: Dir must be stated,
-// because the directory IS the lock's scope. Poll, by contrast, has a
-// defensible default and is clamped — the two ADR 0031 halves, side by side.
-type FileConfig struct {
-	// Dir holds one lock file per name. It is created 0700 if absent, and
-	// CHECKED if it already exists: a world-writable directory without the
-	// sticky bit is refused, because anyone able to unlink a lock file can
-	// replace its inode and split one lock into two.
-	//
-	// It MUST be set. There is no default: a temporary directory would make
-	// the lock's SCOPE — which processes it excludes — depend on a value
-	// nobody chose.
-	Dir string
-	// Poll is the interval between attempts while another process holds the
-	// lock. Zero means [defaultPoll]; negative is refused.
-	Poll time.Duration
-	// Clock is the time source the poll waits on, injectable so contention is
-	// testable without sleeping. nil means clock.System.
-	Clock clock.Timed
-}
-
 // validate applies ADR 0031: clamp the poll interval, refuse everything the
 // SDK cannot choose on the caller's behalf.
 func (c FileConfig) validate() error {

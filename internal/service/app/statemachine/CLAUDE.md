@@ -23,6 +23,7 @@ declares none and raises the core's.
 | File | Role |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `FiringValue`, `Config`, `MachineSpec`, `TransitionValue`, `ChangeValue`, `Wake`, `LoopEventKind`, `LoopEvent` and `StateMachine` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `machine.go` | `StateMachine`, `NewStateMachine`, the opening reconciliation (`open`, `loadJournal`, `syncJournal`, `admit`); `Census`, `Record`, `Records` |
 | `definition.go` | `MachineSpec` + `NewMachineSpec`, `Initial`/`On`/`After`/`At`/`When`/`OnEnter`/`OnTransition`, `Problems`/`States`/`Transitions`/`InitialState`/`Can`; `TransitionValue`, `ChangeValue` |
 | `blueprint.go` | the frozen copy a machine runs: indexes by (event, state) and by state; `dueAt`, `evaluate` (the first-declared rule, a panicking guard recovered) |

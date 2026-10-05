@@ -1,13 +1,10 @@
 package spool
 
 import (
-	"context"
 	"time"
 
 	coremail "github.com/kitsunium/sdk/internal/core/app/mail"
 	corespool "github.com/kitsunium/sdk/internal/core/app/mail/spool"
-	kbackoff "github.com/kitsunium/sdk/internal/kernel/backoff"
-	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 	svcmail "github.com/kitsunium/sdk/internal/service/app/mail"
 )
@@ -34,63 +31,6 @@ const (
 	// to drop a redelivery rather than send it twice.
 	DeliveredMemory int = 1024
 )
-
-// Config configures [New]. Transport and MaxAttempts are required; every
-// other field is optional.
-type Config struct {
-	// Transport delivers each mail: the SMTP transport, the capture transport
-	// in development and tests, a provider's connector.
-	Transport coremail.Transport
-	// Clock stamps every mail and every event, bounds every attempt and paces
-	// every retry. Nil means clock.System; a clock.ManualClock drives a test's
-	// retries without a sleep.
-	Clock clock.Timed
-	// Observe is told what happens to every mail — queued, sent, retrying,
-	// dead-lettered, dropped as a duplicate — one call at a time, on the
-	// caller of Send or the spool's own consumer. A mail's Queued event comes
-	// before every event of its delivery, even when the consumer delivers it
-	// before Send returns. It must be short, and must not call Send, which
-	// would wait for the call it is made from. Nil tells nobody: the spool
-	// writes nothing anywhere itself.
-	Observe func(EventValue)
-	// Annotate returns what Send's context knows that a delivery should know
-	// too — a trace to continue, the caller's identity — kept with the mail
-	// and handed back to every attempt through AttemptFrom. Nil keeps nothing.
-	// It must not return a secret: it is written into the spool as it is.
-	Annotate func(ctx context.Context) map[string]string
-	// NewID mints the spool's identifier for a mail Send queues; SendWithID
-	// takes its caller's instead. Nil mints a ULID. Every identifier must be
-	// new: the spool drops a mail whose identifier it delivered already, as a
-	// redelivery. One that is empty, longer than MaxIDBytes or not an RFC 5322
-	// dot-atom is refused at Send (SpoolMisconfigured), since it would become
-	// the left half of the mail's Message-ID.
-	NewID func() (string, error)
-	// Dir is the spool's directory: a durable queue that outlives the
-	// process, shared by every process that names it. Empty keeps the spool
-	// in memory, and a process that ends loses what it had not delivered.
-	Dir string
-	// From is the sender of every mail that names none. It must be a usable
-	// address when set.
-	From coremail.AddressValue
-	// Backoff is the wait before each retry: Backoff.Delay(attempt). The zero
-	// value is the DefaultRetryBase–DefaultRetryMax curve, and a curve without
-	// a positive BaseDelay starts from DefaultRetryBase under its own ceiling:
-	// a failed mail is never retried at once.
-	Backoff kbackoff.Value
-	// MaxAttempts is how many deliveries a mail gets before it is
-	// dead-lettered with its last failure. It is REQUIRED: zero reads as
-	// "unlimited" or as "none", two opposites, and neither is a mail spool.
-	MaxAttempts int
-	// SendTimeout bounds one attempt. Not positive means DefaultSendTimeout.
-	SendTimeout time.Duration
-	// MaxMessageBytes bounds one spooled mail. Zero means
-	// DefaultMaxMessageBytes; negative is refused.
-	MaxMessageBytes int
-	// PollInterval is how late a mail another PROCESS spooled into Dir may be
-	// noticed; a mail spooled by this process is delivered at once. Zero is
-	// the queue's own default.
-	PollInterval time.Duration
-}
 
 // validate refuses a spool that could never deliver.
 func (c *Config) validate() error {

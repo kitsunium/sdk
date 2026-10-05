@@ -628,7 +628,8 @@ packages:
       kbackoff: github.com/kitsunium/sdk/internal/kernel/backoff
     path: github.com/kitsunium/sdk/internal/service/app/lifecycle
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Config parameterises [New]. Every field is optional and the zero value
           builds a working Lifecycle — one that runs on the wall clock, gives each
           component [DefaultStopTimeout] to stop, and reports nothing.
@@ -678,7 +679,8 @@ packages:
                 wire this. The errors are still returned from Start and Stop either way.
               name: OnTransition
               type: func(corelc.TransitionValue)
-      - doc: |-
+      - decl: true
+        doc: |-
           RunConfig parameterises [Run]. Its zero value wires NOTHING: no signal
           handler is installed and no datagram is sent, so [Run] reduces to
           start-wait-on-ctx-stop.
@@ -711,7 +713,8 @@ packages:
                 silent rather than failing.
               name: Notify
               type: bool
-      - doc: |-
+      - decl: true
+        doc: |-
           Supervisor runs one function until it is stopped, restarting it after
           every early end. Build one with [NewSupervisor]. It is safe for concurrent
           use, and it can be started again once stopped.
@@ -757,8 +760,37 @@ packages:
             recv: pointer
         name: Supervisor
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - doc: run is the supervised function.
+              name: run
+              type: func(ctx context.Context) error
+            - doc: clock stamps the events and paces the backoff.
+              name: clock
+              type: clock.Timed
+            - doc: observe is told about every event; nil tells nobody.
+              name: observe
+              type: func(SupervisionEventValue)
+            - doc: |-
+                cancel ends the current supervision; done closes when it has ended.
+                Both are nil before the first Start. Guarded by mu.
+              name: cancel
+              type: context.CancelFunc
+            - name: done
+              type: chan struct{}
+            - doc: name identifies the supervisor.
+              name: name
+              type: string
+            - doc: backoff is the restart curve.
+              name: backoff
+              type: kbackoff.Value
+            - doc: healthy is how long a run lasts before its end is a first failure.
+              name: healthy
+              type: time.Duration
+            - doc: mu guards cancel and done.
+              name: mu
+              type: sync.Mutex
+      - decl: true
+        doc: |-
           SupervisorConfig tunes [NewSupervisor]. Every field is optional, and the
           zero value supervises on the wall clock, restarting after one second,
           doubling to a minute, and telling nobody. The name and the function are
@@ -791,7 +823,8 @@ packages:
                 consecutive-failure count. Not positive means [DefaultHealthyRun].
               name: HealthyAfter
               type: time.Duration
-      - doc: SupervisionPhase names what a [SupervisionEventValue] reports.
+      - decl: true
+        doc: SupervisionPhase names what a [SupervisionEventValue] reports.
         methods:
           - doc: |-
               String renders the phase for a log line; a value this package never mints
@@ -802,7 +835,8 @@ packages:
             recv: value
         name: SupervisionPhase
         underlying: uint8
-      - doc: |-
+      - decl: true
+        doc: |-
           SupervisionEventValue is one thing a supervisor did: a run started or
           ended, a restart scheduled, the supervision over. Which fields mean
           something depends on Phase, and the others are zero.

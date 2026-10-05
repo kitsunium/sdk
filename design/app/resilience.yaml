@@ -432,7 +432,8 @@ packages:
       kbackoff: github.com/kitsunium/sdk/internal/kernel/backoff
     path: github.com/kitsunium/sdk/internal/service/app/resilience
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           BreakerConfig parameterises NewCircuitBreaker. A non-positive FailureThreshold
           defaults to 5; a non-positive OpenDuration defaults to 30s; a nil Clock
           defaults to clock.System; a nil Retryable counts every error as a failure.
@@ -463,7 +464,8 @@ packages:
                 nested Retry(Breaker(op)) stack.
               name: Retryable
               type: func(error) bool
-      - doc: |-
+      - decl: true
+        doc: |-
           FallbackConfig parameterises NewFallback. A nil Fallback is refused (there is
           no defensible SDK-side substitute for the caller's own plan B); a nil
           Retryable falls back on every primary failure.
@@ -506,7 +508,8 @@ packages:
                 Fallback(Retry(Breaker(op))) stack.
               name: Retryable
               type: func(error) bool
-      - doc: |-
+      - decl: true
+        doc: |-
           HedgeConfig parameterises NewHedge. Three of its four knobs have no default:
           Idempotent, Delay and MaxInFlight are refused when unset, because every value
           the SDK could pick for them is either a guess at the caller's requirement or
@@ -600,7 +603,8 @@ packages:
                 policy that measures a wait, did not.
               name: Clock
               type: clock.Timed
-      - doc: |-
+      - decl: true
+        doc: |-
           KeyedRateLimiterConfig parameterises NewKeyedRateLimiter: a token bucket per
           key, at most MaxKeys of them, each forgotten after IdleTimeout without a
           call.
@@ -658,7 +662,8 @@ packages:
                 comes back is admitted a burst it would not yet have earned.
               name: IdleTimeout
               type: time.Duration
-      - doc: |-
+      - decl: true
+        doc: |-
           RateLimiterConfig parameterises NewRateLimiter. Burst is the bucket capacity
           (clamped to >= 1); a nil Clock defaults to System.
         name: RateLimiterConfig
@@ -679,7 +684,8 @@ packages:
               type: int
             - name: Clock
               type: clock.Clock
-      - doc: |-
+      - decl: true
+        doc: |-
           RetryConfig parameterises NewRetry. A non-positive MaxAttempts clamps to 1; a
           Multiplier of 1 or below (or NaN) defaults to 2; a zero MaxDelay means no
           cap; a nil Retryable replays every error; a zero Jitter backs off

@@ -492,7 +492,8 @@ packages:
       coresched: github.com/kitsunium/sdk/internal/core/app/scheduler
     path: github.com/kitsunium/sdk/internal/service/app/scheduler
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Config parameterises [New]. Both fields are optional and the zero value
           builds a working scheduler — one that runs on the wall clock and reports
           nothing.

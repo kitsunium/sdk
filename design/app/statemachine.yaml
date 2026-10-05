@@ -859,12 +859,14 @@ packages:
           - constraint: comparable
             name: S
     imports:
+      atomic: sync/atomic
       clock: github.com/kitsunium/sdk/internal/kernel/clock
       corestm: github.com/kitsunium/sdk/internal/core/app/statemachine
       kbackoff: github.com/kitsunium/sdk/internal/kernel/backoff
     path: github.com/kitsunium/sdk/internal/service/app/statemachine
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           FiringValue is a transition the machine's own loop is about to fire, as
           Config.Observe is told it.
         name: FiringValue
@@ -888,7 +890,8 @@ packages:
         typeParams:
           - constraint: comparable
             name: S
-      - doc: |-
+      - decl: true
+        doc: |-
           Config parameterises NewStateMachine. Only Store is required; every other zero
           field resolves to a working default.
         name: Config
@@ -964,7 +967,8 @@ packages:
             name: E
           - constraint: comparable
             name: S
-      - doc: |-
+      - decl: true
+        doc: |-
           MachineSpec declares a state machine over entities of type E whose state is
           an S: the state a new entity enters, the transitions between states and how
           each is fired, and the hooks that run on the way.
@@ -1147,13 +1151,38 @@ packages:
             recv: pointer
         name: MachineSpec
         struct:
-          unexported: true
+          fields:
+            - doc: state returns a pointer to the entity's state field.
+              name: state
+              type: func(*E) *S
+            - doc: enter holds the OnEnter hooks, per state, in declaration order.
+              name: enter
+              type: map[S][]func(context.Context, *E) error
+            - doc: initial is the state a new entity enters.
+              name: initial
+              type: S
+            - doc: order lists every state the declaration names, first mention first.
+              name: order
+              type: "[]S"
+            - doc: arrows lists the transitions in declaration order.
+              name: arrows
+              type: "[]arrow[E, S]"
+            - doc: after holds the OnTransition hooks in declaration order.
+              name: after
+              type: "[]func(context.Context, ChangeValue[E, S]) error"
+            - doc: problems lists the declaration's mistakes in the order they were made.
+              name: problems
+              type: "[]error"
+            - doc: hasInitial says Initial was called.
+              name: hasInitial
+              type: bool
         typeParams:
           - constraint: any
             name: E
           - constraint: comparable
             name: S
-      - doc: |-
+      - decl: true
+        doc: |-
           TransitionValue is one declared transition, as [MachineSpec.Transitions]
           reads it back.
         name: TransitionValue
@@ -1177,7 +1206,8 @@ packages:
         typeParams:
           - constraint: comparable
             name: S
-      - doc: |-
+      - decl: true
+        doc: |-
           ChangeValue describes one stored transition, as an OnTransition hook
           receives it.
         name: ChangeValue
@@ -1216,7 +1246,8 @@ packages:
             name: E
           - constraint: comparable
             name: S
-      - doc: Wake says why a run of the loop started.
+      - decl: true
+        doc: Wake says why a run of the loop started.
         methods:
           - doc: String returns "start", "due" or "change"; "" outside the set.
             name: String
@@ -1225,7 +1256,8 @@ packages:
             recv: value
         name: Wake
         underlying: uint8
-      - doc: LoopEventKind says what a [LoopEvent] reports.
+      - decl: true
+        doc: LoopEventKind says what a [LoopEvent] reports.
         methods:
           - doc: String returns "run-started", "run-ended" or "waiting"; "" outside the set.
             name: String
@@ -1234,7 +1266,8 @@ packages:
             recv: value
         name: LoopEventKind
         underlying: uint8
-      - doc: |-
+      - decl: true
+        doc: |-
           LoopEvent is what Config.OnLoop is told about [StateMachine.Run]. Which fields
           are set depends on Kind.
         name: LoopEvent
@@ -1266,7 +1299,8 @@ packages:
             - doc: Wake says why the run started.
               name: Wake
               type: Wake
-      - doc: |-
+      - decl: true
+        doc: |-
           StateMachine runs a [MachineSpec] over the entities of a [corestm.Store]: it
           creates them in their initial state, moves them along event transitions when
           a caller fires one, and — while [StateMachine.Run] goes — along the timers and
@@ -1427,7 +1461,22 @@ packages:
             recv: pointer
         name: StateMachine
         struct:
-          unexported: true
+          fields:
+            - name: store
+              type: corestm.Store[E]
+            - name: plan
+              type: "*blueprint[E, S]"
+            - name: book
+              type: "*book[S]"
+            - name: agenda
+              type: "*agenda"
+            - name: locks
+              type: "*keyLocks"
+            - name: cfg
+              type: settings[E, S]
+            - doc: running is held by a Run or a Step while it goes.
+              name: running
+              type: atomic.Bool
         typeParams:
           - constraint: any
             name: E

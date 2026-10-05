@@ -1427,7 +1427,8 @@ packages:
       fs: io/fs
     path: github.com/kitsunium/sdk/internal/service/app/i18n
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           EntryValue is one catalogue entry before it is compiled: either a plain
           pattern, or one pattern per CLDR category. pkg/v1/app/i18n publishes it as
           `Entry`.
@@ -1455,10 +1456,12 @@ packages:
                 when it holds a single category.
               name: Forms
               type: map[string]string
-      - doc: Catalogue is one language's entries, keyed by message key.
+      - decl: true
+        doc: Catalogue is one language's entries, keyed by message key.
         name: Catalogue
         underlying: map[corei18n.Key]EntryValue
-      - doc: |-
+      - decl: true
+        doc: |-
           Negotiator resolves an Accept-Language header to one of a fixed set of
           languages.
 
@@ -1523,8 +1526,15 @@ packages:
             recv: pointer
         name: Negotiator
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - doc: supported is the set a negotiation may return, in the caller's order.
+              name: supported
+              type: "[]corei18n.TagValue"
+            - doc: fallback is returned when nothing in the header matches.
+              name: fallback
+              type: corei18n.TagValue
+      - decl: true
+        doc: |-
           PluralValue is the CLDR plural specification of ONE language: the categories its
           rules can produce, and the rule that picks between them.
 
@@ -1590,8 +1600,21 @@ packages:
             recv: value
         name: PluralValue
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - doc: |-
+                forms is the set of categories this language's rules can produce,
+                ascending by Form value. It is what NewStore checks a plural message
+                against, so an incomplete translation is refused at load.
+              name: forms
+              type: "[]corei18n.Form"
+            - doc: |-
+                rule picks the category for a quantity. It is nil for a language with
+                no plural distinction at all — Japanese, Chinese — where a function
+                returning a constant would be that constant written the long way.
+              name: rule
+              type: corei18n.PluralRule
+      - decl: true
+        doc: |-
           Printer renders messages in one language.
 
           It holds a resolution CHAIN — the requested tag, its parents, then the
@@ -1696,8 +1719,22 @@ packages:
             recv: pointer
         name: Printer
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - doc: |-
+                catalog is the message source. It is the port, not the concrete Store,
+                so a caller can render from anything that implements it.
+              name: catalog
+              type: corei18n.Catalog
+            - doc: |-
+                tag is the language that was requested — what a caller puts in
+                Content-Language or an html lang attribute.
+              name: tag
+              type: corei18n.TagValue
+            - doc: chain is the resolution order, most specific first.
+              name: chain
+              type: "[]link"
+      - decl: true
+        doc: |-
           Store is an immutable, concurrent-safe [corei18n.Catalog] built from one
           catalogue per language.
 
@@ -1712,6 +1749,10 @@ packages:
           reloading translations is a process restart or a second Store swapped in by
           the caller — both of which the caller can already do, and neither of which
           needs a lock on the render path.
+        implements:
+          - corei18n.Catalog
+          - corei18n.KeyLister
+          - corei18n.Fallbacker
         methods:
           - doc: |-
               Lookup returns the message registered for exactly (tag, key). It performs no
@@ -1788,7 +1829,18 @@ packages:
             recv: pointer
         name: Store
         struct:
-          unexported: true
+          fields:
+            - doc: |-
+                fallback is the language a key is looked for in when the requested one
+                does not hold it. It is never the zero tag: NewStore refuses that.
+              name: fallback
+              type: corei18n.TagValue
+            - doc: byTag holds one compiled message map per language.
+              name: byTag
+              type: map[corei18n.TagValue]map[corei18n.Key]corei18n.MessageValue
+            - doc: tags is the sorted key set of byTag, computed once.
+              name: tags
+              type: "[]corei18n.TagValue"
   - doc: |-
       Package i18n is the public facade for the SDK's message-translation domain:
       a catalogue of translated messages, CLDR plural forms that are right in

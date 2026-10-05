@@ -966,7 +966,8 @@ packages:
       corelock: github.com/kitsunium/sdk/internal/core/app/lock
     path: github.com/kitsunium/sdk/internal/service/app/lock
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           MemoryConfig parameterises [NewMemory].
 
           Its zero value is deliberately NOT a working locker: TTL must be stated.
@@ -991,7 +992,8 @@ packages:
                 (ADR 0039).
               name: Clock
               type: clock.Timed
-      - doc: |-
+      - decl: true
+        doc: |-
           FileConfig parameterises [NewFileLocker].
 
           Its zero value is deliberately NOT a working locker: Dir must be stated,
@@ -1021,7 +1023,8 @@ packages:
                 testable without sleeping. nil means clock.System.
               name: Clock
               type: clock.Timed
-      - doc: |-
+      - decl: true
+        doc: |-
           KeepaliveConfig parameterises [Keepalive].
 
           Its zero value is deliberately NOT a working keepalive: Every must be

@@ -6,6 +6,7 @@ go_library(
     name = "i18n",
     srcs = [
         "accept.go",
+        "decl_gen.go",
         "doc.go",
         "entry_value.go",
         "errors.go",
@@ -20,7 +21,6 @@ go_library(
         "printer.go",
         "printer_link.go",
         "store.go",
-        "store_compliance.go",
         "tag.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/app/i18n",

@@ -41,12 +41,6 @@ const (
 	sleptWoken
 )
 
-// Wake says why a run of the loop started.
-type Wake uint8
-
-// LoopEventKind says what a [LoopEvent] reports.
-type LoopEventKind uint8
-
 // slept says what ended a sleep of the loop.
 type slept uint8
 
@@ -90,28 +84,6 @@ func (k LoopEventKind) String() string {
 	}
 	//: outside the set.
 	return ""
-}
-
-// LoopEvent is what Config.OnLoop is told about [StateMachine.Run]. Which fields
-// are set depends on Kind.
-type LoopEvent struct {
-	// Err joins what failed in the run; nil when nothing did.
-	Err error
-	// Started is when the run started.
-	Started time.Time
-	// Ended is when the run ended.
-	Ended time.Time
-	// Next is when the loop wakes by itself next — never sooner than
-	// Config.MinGap after the run ended; zero when only a write will wake it.
-	Next time.Time
-	// Fired counts the transitions the run stored.
-	Fired int
-	// Failed counts the transitions the run could not fire.
-	Failed int
-	// Kind says what is reported.
-	Kind LoopEventKind
-	// Wake says why the run started.
-	Wake Wake
 }
 
 // stepResult is what one pass did.

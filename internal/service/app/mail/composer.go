@@ -10,13 +10,6 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 )
 
-// Composer turns a [coremail.MessageValue] into the wire bytes a transport
-// sends. It is safe for concurrent use and holds no state between messages.
-type Composer struct {
-	clock  clock.Clock
-	random io.Reader
-}
-
 // NewComposer returns a composer wired from cfg.
 func NewComposer(cfg ComposerConfig) *Composer {
 	composer := &Composer{clock: cfg.Clock, random: cfg.Rand}

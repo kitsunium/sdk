@@ -11,34 +11,6 @@ import (
 	"github.com/kitsunium/sdk/internal/service/proc/systemd/notify"
 )
 
-// RunConfig parameterises [Run]. Its zero value wires NOTHING: no signal
-// handler is installed and no datagram is sent, so [Run] reduces to
-// start-wait-on-ctx-stop.
-//
-// That is the point. Signals and sd_notify are process-wide, observable side
-// effects, and a library that installs them because it was imported is a
-// library that fights the caller's own main. Both are opt-in fields, and both
-// delegate to the SDK packages that already implement them — this file wires,
-// it does not reimplement.
-type RunConfig struct {
-	// Signals is the set of OS signals that end the wait. An empty slice
-	// installs no handler at all: the caller's context stays the only way to
-	// end the wait, which is what a process whose main already owns signal
-	// handling needs.
-	//
-	// The subscription is torn down before Run returns, so a caller that runs
-	// two lifecycles in sequence does not accumulate handlers.
-	Signals []coreproc.Signal
-	// Notify asks for the systemd sd_notify(3) readiness protocol: READY=1
-	// once every component is up, STOPPING=1 before the shutdown begins.
-	//
-	// It is safe to set unconditionally on a process that may not be
-	// supervised: with $NOTIFY_SOCKET unset every notifier call is a
-	// documented no-op that returns nil, so an unsupervised binary stays
-	// silent rather than failing.
-	Notify bool
-}
-
 // Run starts every component, waits, and stops them again — the whole of a
 // service main, minus the caller's own wiring.
 //

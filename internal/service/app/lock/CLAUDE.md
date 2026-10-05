@@ -85,6 +85,7 @@ process pass the gate and then block on a `flock` its own process holds.
 
 | File | Role |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `MemoryConfig`, `FileConfig` and `KeepaliveConfig` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `config.go` | `MemoryConfig` + its ADR 0031 **refusal** (a non-positive TTL) |
 | `memory.go` | `memoryLocker`: the holding map, the fence ledger, takeover, wake-on-release and wake-on-deadline |
 | `holding.go` | `holding`: one live acquisition of one name — its token, fence and deadline, and the channel its end closes once to wake every waiter |

@@ -6,6 +6,7 @@ go_library(
     name = "spool",
     srcs = [
         "config.go",
+        "decl_gen.go",
         "deliver.go",
         "doc.go",
         "event.go",

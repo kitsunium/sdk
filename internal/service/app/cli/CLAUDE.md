@@ -17,6 +17,7 @@ declares no code; it raises the core's sentinels.
 
 | File | Surface |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `Config` and `FlagSourceValue` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `cli.go` | `New(Config, corecli.CommandValue) (corecli.Executor, error)` + the whole-tree validation + `newFlagSet` |
 | `config.go` | `Config` — `Output` / `ErrOutput`, both zero-valued to `os.Stderr` |
 | `execute.go` | `Execute` — the resolution loop, the parse verdict, the panic guard |

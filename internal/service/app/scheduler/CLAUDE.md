@@ -16,12 +16,12 @@ and only this package's parser raises the `0.3.43.*` refusals.
 
 | File | Surface |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declaration of `Config` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `cron.go` | `Parse` / `ParseInLocation`, `cronSchedule`, the calendar walk, the POSIX day rule |
 | `field_spec.go` | `fieldSpec` — one field's bounds, name table and hint; the item/range/step parser |
 | `cursor.go` | `cursor` — the wall-clock calendar position the walk advances; `materialise` + `earliest` resolve it to an instant, the first one on a fall-back day |
 | `every.go` | `Every(period)` — the fixed-interval Schedule |
 | `scheduler.go` | the engine struct, `New`, `Add`, `begin`/`finish`, `emit` |
-| `config.go` | `Config` — `Clock clock.Timed` + `OnResult func(ResultValue)` |
 | `entry.go` | `entry` — per-registration run state, `arm`, `due` (the missed-deadline walk) |
 | `run.go` | `Run`, the wait/fire/re-arm loop, `fire`, `run`, `invoke` (panic recovery) |
 | `reject.go` | the refusal helpers that raise the core's `0.3.43.*` sentinels |

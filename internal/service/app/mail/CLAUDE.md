@@ -21,13 +21,13 @@ This package declares no code and raises the core's.
 
 | File | What lives there |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `Composer`, `ComposerConfig`, `TLSMode` and `SMTPConfig` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `validate.go` | `Validate` — the one whole-message guard both transports and the spool run; it stops at the first refusal |
 | `header.go` | the reserved set and `IsReservedHeader`, and the INJECTION GATE — `ValidateHeaderName`, `ValidateHeaderValue`, and `ValidateHeader`, which runs both and refuses a reserved name |
 | `address.go` | `ValidateAddress`, `NeedsQuotedDisplayName`, and `IsDotAtom` — the dot-atom grammar, exported because a Message-ID's id-left is written in it too (the spool checks its identifiers with it) — plus the octet bounds the grammars are written in |
 | `attachment.go` | `ValidateAttachment` and its three sub-guards |
 | `envelope.go` | `Envelope` — validates, then derives the envelope: Bcc becomes RCPT TO and nothing else |
 | `composer.go` | `Composer`, `NewComposer`, `Compose`, and the message header block |
-| `composer_config.go` | `ComposerConfig` — the clock and the randomness source, both clamping |
 | `composition.go` | the per-message build state, the boundary generator, and the structure table |
 | `compose.go` | the media-type helpers, the part builders, and `estimateSize` |
 | `entity.go` | the MIME entity tree and the writer that renders it — including the multipart delimiters, written here rather than by `mime/multipart` |

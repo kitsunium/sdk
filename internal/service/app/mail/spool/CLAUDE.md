@@ -20,6 +20,7 @@ raises the core's.
 | File | Surface |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `Config`, `EventKind`, `EventValue`, `AttemptValue` and `DeadLetterValue` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `spool.go` | `Spool`, `New`, `Send` (`mint`), `SendWithID`, both through `queue` (`stamp`, `domainOf`), the per-identifier `announcement` count, `Run` (the queue's `Consume`, one mail at a time), `DeadLetters`, `Close` |
 | `identifier.go` | `MaxIDBytes` and `checkID` — the rule every identifier keeps, whoever minted it |
 | `config.go` | `Config`, `DefaultSendTimeout`, `DefaultRetryBase` / `DefaultRetryMax`, `DefaultMaxMessageBytes`, `DeliveredMemory`; the refusals |

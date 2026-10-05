@@ -11,44 +11,6 @@ import (
 // field.
 const chainSeparator string = " "
 
-// Printer renders messages in one language.
-//
-// It holds a resolution CHAIN — the requested tag, its parents, then the
-// catalogue's fallback and its parents — and each step carries its own plural
-// rules. A render walks the chain, takes the first language that holds the
-// key, and selects the plural form with that language's rules.
-//
-// # Build one per language, not one per request
-//
-// [NewPrinter] resolves the chain and allocates; [Printer.Render] walks it and
-// does not. A server negotiates a language per request and then wants a
-// Printer for it, so the shape that pays off is a map from tag to Printer
-// built at startup:
-//
-//	printers := map[i18n.Tag]*i18n.Printer{}
-//	for _, tag := range store.Tags() {
-//		p, err := i18n.NewPrinter(store, tag)
-//		…
-//		printers[tag] = p
-//	}
-//	// per request
-//	p := printers[negotiator.Negotiate(r.Header.Get("Accept-Language"))]
-//
-// BENCH.md reports both costs so the difference is a number rather than
-// advice.
-//
-// A Printer is immutable and safe for concurrent use.
-type Printer struct {
-	// catalog is the message source. It is the port, not the concrete Store,
-	// so a caller can render from anything that implements it.
-	catalog corei18n.Catalog
-	// tag is the language that was requested — what a caller puts in
-	// Content-Language or an html lang attribute.
-	tag corei18n.TagValue
-	// chain is the resolution order, most specific first.
-	chain []link
-}
-
 // NewPrinter returns a [Printer] rendering tag out of catalog, or refuses.
 //
 // Refused: a zero tag ([corei18n.CatalogInvalid]) and a language with no reviewed CLDR

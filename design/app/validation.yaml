@@ -845,7 +845,8 @@ packages:
       corevalidation: github.com/kitsunium/sdk/internal/core/app/validation
     path: github.com/kitsunium/sdk/internal/service/app/validation
     types:
-      - doc: StructConfig tunes a compiled struct validator.
+      - decl: true
+        doc: StructConfig tunes a compiled struct validator.
         name: StructConfig
         struct:
           fields:

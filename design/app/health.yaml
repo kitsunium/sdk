@@ -1089,7 +1089,8 @@ packages:
       http: net/http
     path: github.com/kitsunium/sdk/internal/service/app/health
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           AskConfig says where a process listens and which path answers whether it is
           ready. Addr and Path are required; Timeout and Clock have working zeros.
         name: AskConfig
@@ -1121,7 +1122,8 @@ packages:
                 manual clock makes the timeout a test can reach without waiting.
               name: Clock
               type: clock.Timed
-      - doc: |-
+      - decl: true
+        doc: |-
           Config parameterises [New]. Every field is optional and the zero value
           builds a working registry — one that runs on the wall clock, gives each
           check [DefaultCheckTimeout], observes nothing and notifies nobody.
@@ -1205,7 +1207,8 @@ packages:
                 the SDK writes nothing anywhere on the caller's behalf.
               name: OnNotifyError
               type: func(error)
-      - doc: |-
+      - decl: true
+        doc: |-
           HandlerConfig parameterises the three handlers. Its zero value serves the
           aggregate and NOTHING else.
         name: HandlerConfig

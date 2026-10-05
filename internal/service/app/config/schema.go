@@ -6,42 +6,6 @@ import (
 	svcvalidation "github.com/kitsunium/sdk/internal/service/app/validation"
 )
 
-// SchemaValue is a compiled configuration shape: the default LAYER it
-// contributes, the keys it requires, the vocabulary it accepts, and the
-// constraint the decoded configuration must satisfy. Build one with
-// [NewSchemaValue]; the zero value is not usable and [LoadSchema] refuses a nil one
-// by name rather than loading nothing and reporting success.
-//
-// It is safe for concurrent use and is meant to be built once, at start-up,
-// and kept. pkg/v1/app/config.Schema aliases it.
-type SchemaValue[T any] struct {
-	// defaults is the layer this schema contributes, already through the
-	// loader's JSON round trip so it holds exactly what a Source would have
-	// produced. It is merged UNDER every Source, which is what makes a default
-	// a default rather than a competitor.
-	defaults map[string]any
-	// declared is every key a default was declared for, in declaration order.
-	// It is what the construction-time contradiction check is scoped to: a
-	// violation at a key nobody defaulted is the operator's to fix, while a
-	// violation at a key the schema itself filled is the schema's.
-	declared []string
-	// required is every key a load must find, pre-split at construction so the
-	// presence pass parses nothing.
-	required []requiredKey
-	// known is the target type's whole vocabulary, with each key marked leaf
-	// or table. The unknown-key pass walks the merged map against it.
-	known map[string]keyKind
-	// secrets is every key whose field holds a core/security/secret.Value, and how,
-	// resolved once here so a load pays no walk for it (ADR 0097).
-	secrets map[string]secretHold
-	// strict refuses a key outside `known`. It is the INVERSE of the spec's
-	// AllowUnknownKeys so that the zero value of the spec is the strict one.
-	strict bool
-	// constraint is the `validate` tags of T composed with SchemaSpec.Rules,
-	// collect-all. It is compiled once here, never per load.
-	constraint corevalidation.Constraint[T]
-}
-
 // NewSchemaValue compiles spec into a [SchemaValue], refusing at CONSTRUCTION every
 // declaration that could not work — which is the whole point of having one.
 //

@@ -586,7 +586,8 @@ packages:
       corecli: github.com/kitsunium/sdk/internal/core/app/cli
     path: github.com/kitsunium/sdk/internal/service/app/cli
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Config configures one [New]. Its zero value is a working configuration.
 
           It carries two writers and nothing else. There is no Signals field, no
@@ -629,7 +630,8 @@ packages:
                 voices printing one failure is how a CLI ends up saying it twice.
               name: ErrOutput
               type: io.Writer
-      - doc: |-
+      - decl: true
+        doc: |-
           FlagSourceValue is one invocation's flags, shaped as the flat key→value
           layer internal/core/app/config.Source yields. It is the whole of what this
           domain contributes to configuration, and everything it deliberately is not
@@ -649,7 +651,9 @@ packages:
             recv: pointer
         name: FlagSourceValue
         struct:
-          unexported: true
+          fields:
+            - name: values
+              type: map[string]any
   - constants:
       - doc: Success is the process exit status of a command that did what it was asked.
         name: Success

@@ -8,6 +8,7 @@ go_library(
         "backend.go",
         "chain.go",
         "config.go",
+        "decl_gen.go",
         "dirsafety_posix.go",
         "dirsafety_windows.go",
         "doc.go",

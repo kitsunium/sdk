@@ -9,30 +9,6 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// Store is an immutable, concurrent-safe [corei18n.Catalog] built from one
-// catalogue per language.
-//
-// It implements the two ADR 0039 siblings as well: [corei18n.KeyLister], so a
-// caller's own test can assert no translation is missing, and
-// [corei18n.Fallbacker], so a renderer can find the language that stands in
-// without the fallback being a second constructor argument everywhere.
-//
-// Nothing mutates after [NewStore] returns. There is no Add, no Reload and no
-// Set: a catalogue that can change under a request is a catalogue where two
-// paragraphs of one page can come from two different versions of the text, and
-// reloading translations is a process restart or a second Store swapped in by
-// the caller — both of which the caller can already do, and neither of which
-// needs a lock on the render path.
-type Store struct {
-	// fallback is the language a key is looked for in when the requested one
-	// does not hold it. It is never the zero tag: NewStore refuses that.
-	fallback corei18n.TagValue
-	// byTag holds one compiled message map per language.
-	byTag map[corei18n.TagValue]map[corei18n.Key]corei18n.MessageValue
-	// tags is the sorted key set of byTag, computed once.
-	tags []corei18n.TagValue
-}
-
 // NewStore compiles catalogues into a [Store], or refuses.
 //
 // # Everything it refuses, and why each is refused HERE

@@ -5,37 +5,11 @@ import (
 	"errors"
 	"maps"
 	"slices"
-	"sync/atomic"
 	"time"
 
 	corestm "github.com/kitsunium/sdk/internal/core/app/statemachine"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
-
-// StateMachine runs a [MachineSpec] over the entities of a [corestm.Store]: it
-// creates them in their initial state, moves them along event transitions when
-// a caller fires one, and — while [StateMachine.Run] goes — along the timers and
-// guards that are due. It is safe for concurrent use.
-//
-// Transitions of one entity run one at a time; transitions of different
-// entities run concurrently. Beside the store the machine keeps one record per
-// entity — its state, since when, its latest transitions — in memory and in
-// the configured journal, plus the census of entities per state.
-//
-// The store may be written by others. Tell the machine through
-// [StateMachine.Changed] and [StateMachine.Deleted]: a write can move a deadline or
-// make a guard hold, and a state changed behind the machine's back re-enters
-// its state at the moment the machine learns of it.
-type StateMachine[E any, S comparable] struct {
-	store  corestm.Store[E]
-	plan   *blueprint[E, S]
-	book   *book[S]
-	agenda *agenda
-	locks  *keyLocks
-	cfg    settings[E, S]
-	// running is held by a Run or a Step while it goes.
-	running atomic.Bool
-}
 
 // NewStateMachine checks def and cfg, then opens a machine over cfg.Store: it
 // reads the journal, reads every entity once, reconciles the two — an entity

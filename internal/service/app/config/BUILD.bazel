@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "config",
     srcs = [
+        "decl_gen.go",
         "doc.go",
         "env_source.go",
         "file_source.go",
@@ -19,7 +20,6 @@ go_library(
         "schema_presence.go",
         "schema_reject.go",
         "schema_source.go",
-        "schema_spec.go",
         "wrap.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/app/config",

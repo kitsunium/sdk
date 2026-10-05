@@ -32,30 +32,6 @@ const (
 // loop that has been crashing on entry would slow a recovery for nothing.
 const DefaultHealthyRun time.Duration = time.Minute
 
-// SupervisorConfig tunes [NewSupervisor]. Every field is optional, and the
-// zero value supervises on the wall clock, restarting after one second,
-// doubling to a minute, and telling nobody. The name and the function are
-// NewSupervisor's own arguments, because there is no supervisor without them.
-type SupervisorConfig struct {
-	// Clock is the time source the supervisor stamps events with and waits
-	// its backoff on. Nil means clock.System; a clock.ManualClock drives
-	// every restart of a test without a sleep.
-	Clock clock.Timed
-	// Observe is told about every run started, every run ended, every
-	// restart scheduled and the end of the supervision, on the supervisor's
-	// goroutine, one call at a time. It must be short and must not panic. Nil
-	// observes nothing: the supervisor writes nothing anywhere itself.
-	Observe func(SupervisionEventValue)
-	// Backoff is the wait before the n-th consecutive restart. The zero
-	// value is the [DefaultRestartBase]–[DefaultRestartMax] curve, and a curve
-	// without a positive BaseDelay starts from [DefaultRestartBase] under its
-	// own ceiling: a supervisor never restarts at once.
-	Backoff kbackoff.Value
-	// HealthyAfter is how long a run must last for its end to reset the
-	// consecutive-failure count. Not positive means [DefaultHealthyRun].
-	HealthyAfter time.Duration
-}
-
 // validateSupervisor refuses a supervisor that could never run.
 func validateSupervisor(name string, run func(ctx context.Context) error) error {
 	//: an event nobody can attribute is not worth emitting.

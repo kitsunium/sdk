@@ -11,12 +11,12 @@ panic recovery, the staleness bound, the drain latch, and the HTTP handler
 
 | File | Role |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `AskConfig`, `Config` and `HandlerConfig` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `health.go`, `entry.go` | the registry and one registered check |
 | `inflight.go` | one execution of a check, shared by every probe waiting on it |
 | `runner.go` | runs a check under its timeout, recovers a panic; a caller whose own context ends stops waiting WITHOUT cancelling the shared run (`departed`), while the run's own budget (`boundRun`) cancels it whether or not anyone is still waiting |
 | `probe.go` | answers a probe: startup gating, drain latch, aggregation; a probe's checks run in parallel through `kernel/concur/group.Collect`, so results come back in registration order and a fault in the evaluation path is re-raised on the probing goroutine rather than crashing the process |
 | `handler.go` | the HTTP surface; renders only the `errs` Public half |
-| `handler_config.go` | `HandlerConfig` — the one knob the three handlers take |
 | `body.go` | the wire shape of a probe response, and of one check inside it |
 | `component.go` | the `lifecycle` bridge; a not-serving startup report with no error to join still fails `Start` (`STARTUP_PENDING`) |
 | `notify.go` | opt-in `sd_notify`, delegating to `service/proc/systemd/notify`; a datagram counts as announced only once DELIVERED, decided and sent under one lock; the STATUS line follows the readiness verdict into a drain (`TestDrainingIsAnnouncedToTheSupervisor`), and a serving verdict measured before `Drain` is never announced after it — the phase is read under the same lock (`TestAVerdictMeasuredBeforeTheDrainIsNotAnnouncedAfterIt`). The send is BOUNDED by the probe's own deadline, else by the budget a check gets (ADR 0072), which is what makes serialising it affordable: an unbounded write to a deaf supervisor held that lock and stopped every later probe from answering |

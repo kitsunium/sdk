@@ -13,6 +13,7 @@ ADR 0028 + ADR 0061 + ADR 0097. Emits the core sentinels `0.2.10.*`.
 
 | File | Surface |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `SchemaValue` and `SchemaSpec` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `env_source.go` | `EnvSource(prefix)` — `PREFIX_KEY` env vars, whole-document-JSON-coerced values; `Describe` names the variable, and `lookup` hands the loader a variable's RAW text for a secret field |
 | `file_source.go` | `FileSource(format, path)` — codec-dispatched file parse; `Describe` names the path; `parseDocument` — the codec lookup + decode both file sources share |
 | `fs_source.go` | `FSSource(fsys, format, path)` — `FileSource` over an `io/fs.FS` (an embedded configuration): the same parse, the same `CONFIG_SOURCE_FAILED` — a file the FS does not hold included, never an empty layer — and the same `Describe` (`"file"`, the path as given); a nil `fsys` is refused at `Load` |
@@ -20,7 +21,6 @@ ADR 0028 + ADR 0061 + ADR 0097. Emits the core sentinels `0.2.10.*`.
 | `load.go` | `Load[T]` / `LoadSchema[T]` — merge + key pass + JSON round-trip decode + constraints + Validate; the merge keeps its layers, and `restoreRawSecrets` undoes the environment's coercion for a `secret.Value` field |
 | `origins.go` | `LoadWithOrigins[T]` / `LoadSchemaWithOrigins[T]` — the same pipeline, plus one `core/app/config.OriginValue` per leaf key, attributed to the last layer that supplied it (ADR 0097) |
 | `schema.go` | `SchemaValue[T]` + `NewSchemaValue` + `Check` + `Source` — the compiled schema |
-| `schema_spec.go` | `SchemaSpec[T]` — the declaration (`Required` / `Defaults` / `AllowUnknownKeys` / `Rule`) |
 | `schema_defaults.go` | construction-time resolution: the default layer, the required keys, and every refusal |
 | `schema_keys.go` | the dotted key grammar and its resolution against the target type (leaf vs table), and — in the same walk — the keys whose field holds a `secret.Value` |
 | `schema_presence.go` | the LOAD-time key pass: missing required keys + unknown keys, over the merged map |
