@@ -32,6 +32,7 @@ var (
 func perfQueue(tb testing.TB, capacity int) ring.Queue[int] {
 	tb.Helper()
 	q, err := ring.New[int](capacity)
+	//: a capacity New refuses leaves the fixture nothing to measure.
 	if err != nil {
 		tb.Fatalf("New(%d): %v", capacity, err)
 	}
@@ -42,6 +43,7 @@ func perfQueue(tb testing.TB, capacity int) ring.Queue[int] {
 // once, then a write into a full ring, which returns Full.
 func perfTryWrite(tb testing.TB) func() {
 	q, full := perfQueue(tb, 1024), perfQueue(tb, 8)
+	//: fill the ring to capacity, so the call's second write returns Full.
 	for full.TryWrite(0) == nil {
 	}
 	return func() {

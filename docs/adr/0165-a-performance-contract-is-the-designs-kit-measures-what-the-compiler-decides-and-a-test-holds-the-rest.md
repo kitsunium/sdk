@@ -123,7 +123,7 @@ budgets on unexported paths (websocket, sse, the outbound client, token's
 split), bytes rather than counts (the decompression-bomb guard), and the
 per-codec allocation tables.
 
-## Consequences
+## Consequences / Semantics
 
 - **What kit measured on the SDK** (go1.27.1, darwin/arm64, the host cell):
   the `*Error` field reads inline at cost 3, `Pack` at 18, `CodeOf` …
@@ -143,3 +143,59 @@ per-codec allocation tables.
 - The kernel's root test target (`//internal/kernel:kernel_test`) is gone
   with its gate; the lane's hand-written entries for recycler, snapshot and
   semver moved into kit's section.
+
+## Breaking changes
+
+None for a consumer: no exported symbol changes, and docs/api moves by
+one package doc sentence. Inside the repository, test names move:
+`TestV116BuildSendAllocatesOnePerEmit` is `TestPerfAllocsBuildSend`, the
+kernel gate's and the recycler's, snapshot's and semver's
+`TestZeroAllocInvariant` / `TestReadingsAllocateNothing` are
+`TestPerfAllocs<Fixture>`, `TestT34TraceContextExtractionIsAllocationFree`
+is `TestPerfAllocsTraceContext`, and the target `//internal/kernel:kernel_test`
+is gone. A `-run` filter or a document naming the old names must follow.
+
+## Alternatives considered
+
+- **kit counting allocations itself at kit check.** Refused: it would run
+  the project's code inside kit, which kit check never does; a test in the
+  race-off lane is where the SDK already runs such code, and the
+  allocation claim stays executable without kit.
+- **`testing.AllocsPerRun` in the generated test.** Refused: its integer
+  division reads a call allocating on some runs only as 0, which three of
+  the converted tests had each demonstrated with a mutation.
+- **The minimum of several windows** (what the logger's trace test did, to
+  shed a stray runtime allocation). Refused for the generated test: windows
+  that follow one another cross a doubling slice's growth steps in some
+  windows and not others, so the minimum hides the very regression a total
+  exists to see. The warm-up as long as the window pays the runtime's lazy
+  caches instead, and GOMAXPROCS 1 with the collector off keeps the window
+  to the call; forty consecutive runs of every generated test were green.
+- **Argument lists in the design** (`bench: {args: [...]}`). Refused: an
+  argument is a Go expression kit would have to type against the signature,
+  and a receiver needs setting up anyway; the fixture is that set-up, in Go.
+- **An absolute ns/op bound.** Refused: a machine's number is that
+  machine's (rule 9); only a delta against the base is a contract.
+- **`*_external_test.go` names for the fixtures.** Not taken: the generated
+  file is kit's name, as `api_gen_test.go` is, and one fixture file name
+  across packages is what kit's documentation and the lane section name.
+
+## Deferred
+
+- The benchstat comparison of `nsop.maxDelta` against the base: the
+  benchmarks exist and their names are stable, but no lane runs head and
+  base and judges the delta yet.
+- The remaining hand-written allocation tests on unexported paths
+  (websocket, sse, the outbound client, token's split) and the per-codec
+  allocation tables: each needs an exported entry point or a port to hang
+  a budget on.
+- `inlineCost` pins: none is declared; a pin on a function that does not
+  inline (HasCode, 190) would keep it from growing, and is left to the
+  owner's call function by function.
+
+## References
+
+- kitsunium/platform#56 — kit's performance contracts, and platform ADR
+  0010's amendment of 2026-10-05
+- `tools/alloc-lane-targets.txt`, `scripts/pre-commit/check-alloc-lane-coverage.sh`
+- CLAUDE.md rules 9 and 12

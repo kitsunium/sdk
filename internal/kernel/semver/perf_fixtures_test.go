@@ -44,9 +44,11 @@ import (
 // perfIsValid is IsValid's fixture: a full version, and an invalid string.
 func perfIsValid(tb testing.TB) func() {
 	return func() {
+		//: the reading is right as well as free: a wrong answer fails the fixture.
 		if !semver.IsValid("v1.2.3-rc.1.beta-2+build.007.sha") {
 			tb.Fatal("IsValid refused a valid version")
 		}
+		//: the reading is right as well as free: a wrong answer fails the fixture.
 		if semver.IsValid("v1.2.3-01") {
 			tb.Fatal("IsValid accepted a padded pre-release number")
 		}
@@ -57,12 +59,15 @@ func perfIsValid(tb testing.TB) func() {
 // and a shorthand against an invalid string.
 func perfCompare(tb testing.TB) func() {
 	return func() {
+		//: the reading is right as well as free: a wrong answer fails the fixture.
 		if semver.Compare("v1.0.0-beta.11.x", "v1.0.0-beta.2.y.z") != 1 {
 			tb.Fatal("Compare put beta.11 below beta.2")
 		}
+		//: the reading is right as well as free: a wrong answer fails the fixture.
 		if semver.Compare("v18446744073709551616.0.0", "v18446744073709551615.9.9+meta") != 1 {
 			tb.Fatal("Compare misordered numbers past uint64")
 		}
+		//: the reading is right as well as free: a wrong answer fails the fixture.
 		if semver.Compare("v2", "2.0.0") != 1 {
 			tb.Fatal("Compare put an invalid string above a shorthand")
 		}
@@ -72,6 +77,7 @@ func perfCompare(tb testing.TB) func() {
 // perfPrerelease is Prerelease's fixture.
 func perfPrerelease(tb testing.TB) func() {
 	return func() {
+		//: the reading is right as well as free: a wrong answer fails the fixture.
 		if semver.Prerelease("v1.0.0-rc.1+build") != "-rc.1" {
 			tb.Fatal("Prerelease did not return the pre-release")
 		}
@@ -81,6 +87,7 @@ func perfPrerelease(tb testing.TB) func() {
 // perfIsPseudoVersion is IsPseudoVersion's fixture.
 func perfIsPseudoVersion(tb testing.TB) func() {
 	return func() {
+		//: the reading is right as well as free: a wrong answer fails the fixture.
 		if !semver.IsPseudoVersion("v1.2.4-pre.0.20260924100234-23e4c32e7484+incompatible") {
 			tb.Fatal("IsPseudoVersion refused a pseudo-version")
 		}
@@ -90,6 +97,7 @@ func perfIsPseudoVersion(tb testing.TB) func() {
 // perfPseudoVersionRev is PseudoVersionRev's fixture.
 func perfPseudoVersionRev(tb testing.TB) func() {
 	return func() {
+		//: the reading is right as well as free: a wrong answer fails the fixture.
 		if rev, ok := semver.PseudoVersionRev("v0.0.0-20260924095948-8cf38860b6ef"); !ok || rev != "8cf38860b6ef" {
 			tb.Fatal("PseudoVersionRev did not read the revision")
 		}
@@ -99,6 +107,7 @@ func perfPseudoVersionRev(tb testing.TB) func() {
 // perfPseudoVersionTime is PseudoVersionTime's fixture.
 func perfPseudoVersionTime(tb testing.TB) func() {
 	return func() {
+		//: the reading is right as well as free: a wrong answer fails the fixture.
 		if _, ok := semver.PseudoVersionTime("v1.2.4-0.20260924100234-23e4c32e7484"); !ok {
 			tb.Fatal("PseudoVersionTime did not read the time")
 		}

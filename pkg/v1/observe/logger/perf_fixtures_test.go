@@ -50,6 +50,7 @@ func perfBuildSend(tb testing.TB) func() {
 		Sink:    discardSink{},
 		Encoder: logger.TextEncoder(),
 	})
+	//: a Logger that cannot be built leaves nothing to emit through.
 	if err != nil {
 		tb.Fatalf("NewWithSink err = %v", err)
 	}
