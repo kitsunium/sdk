@@ -1217,7 +1217,8 @@ packages:
       coreproc: github.com/kitsunium/sdk/internal/core/proc
     path: github.com/kitsunium/sdk/internal/service/proc/cgroup
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Option customises a Create call (functional-option pattern). Construct
           options with the WithRoot helper; the zero set yields a group directly under
           the unified cgroup v2 mount.
@@ -1301,7 +1302,8 @@ packages:
             type: error
     path: github.com/kitsunium/sdk/internal/service/proc/childwait
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Claim is a spawner's hold on one child's exit status. It is created by Spawn,
           filled by a sweep that collects the child, and ended by the owner once the
           status is in hand. A Claim is safe for concurrent use. A nil *Claim holds
@@ -1339,7 +1341,21 @@ packages:
             recv: pointer
         name: Claim
         struct:
-          unexported: true
+          fields:
+            - doc: book is the ledger that holds this claim.
+              name: book
+              type: "*ledger"
+            - doc: pid is the claimed child's process id, and the ledger key.
+              name: pid
+              type: int
+            - doc: |-
+                collected reports that a sweep took the child and stored its status. It
+                and status are guarded by the ledger's mu.
+              name: collected
+              type: bool
+            - doc: status is the exit status the sweep collected, valid once collected.
+              name: status
+              type: StatusValue
       - build: "!unix"
         doc: |-
           StatusValue carries nothing off Unix: no sweep exists to collect a child, so
@@ -1798,7 +1814,8 @@ packages:
       coreproc: github.com/kitsunium/sdk/internal/core/proc
     path: github.com/kitsunium/sdk/internal/service/proc/reaper
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Option configures a reaper returned by New. Options are applied in order; an
           unknown or zero option is a no-op. The set is intentionally small — a reaper
           has little to tune beyond an optional sweep callback for observability.
@@ -1929,7 +1946,8 @@ packages:
       debug: runtime/debug
     path: github.com/kitsunium/sdk/internal/service/proc/self
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           BuildValue is what the running binary was built from: the toolchain, the
           main package, the main module with its version-control stamp, and every
           dependency with the replacement it was built through.
@@ -1969,7 +1987,8 @@ packages:
                 toolchain recorded them.
               name: Deps
               type: "[]ModuleValue"
-      - doc: |-
+      - decl: true
+        doc: |-
           ModuleValue is one module of the running binary, described by the code
           that was actually built for it.
 
@@ -2030,7 +2049,8 @@ packages:
                 toolchain records nothing of the kind for a dependency.
               name: Modified
               type: bool
-      - doc: |-
+      - decl: true
+        doc: |-
           StatsValue is the running process at one instant, as the Go runtime and
           the kernel account for it.
 
@@ -2118,7 +2138,8 @@ packages:
                 does not exist — Windows, Plan 9, wasm — and wherever it failed.
               name: CPUEstimated
               type: bool
-      - doc: |-
+      - decl: true
+        doc: |-
           DistributionValue is one of the Go runtime's cumulative histograms, read
           as durations. Its buckets are the runtime's own — the shape of
           runtime/metrics.Float64Histogram — and it is a value: reading it never
@@ -2235,7 +2256,8 @@ packages:
       coreproc: github.com/kitsunium/sdk/internal/core/proc
     path: github.com/kitsunium/sdk/internal/service/proc/signal
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Target names the recipient of a relayed signal: a positive value is a pid; a
           value below -1 is the negation of a process-group id (kill(2) delivers to the
           whole group whose id is its absolute value). It is a plain int so call sites

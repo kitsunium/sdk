@@ -27,69 +27,6 @@ const (
 	settingTrue string = "true"
 )
 
-// BuildValue is what the running binary was built from: the toolchain, the
-// main package, the main module with its version-control stamp, and every
-// dependency with the replacement it was built through.
-//
-// It is the engine's own value (ADR 0074): no port in the proc domain speaks
-// it, and it describes one mechanism's reading of runtime/debug.
-type BuildValue struct {
-	// GoVersion is the toolchain that built the binary, e.g. "go1.27.1".
-	GoVersion string
-	// Path is the import path of the main package, e.g.
-	// "github.com/acme/app/cmd/server".
-	Path string
-	// Main is the main module.
-	Main ModuleValue
-	// Deps are the dependencies linked into the binary, in the order the
-	// toolchain recorded them.
-	Deps []ModuleValue
-}
-
-// ModuleValue is one module of the running binary, described by the code
-// that was actually built for it.
-//
-// Its fields separate the three things a recorded version conflates: a
-// RELEASE (Version), a COMMIT (Revision and Time), and a DIRECTORY on the
-// build machine (Local and Dir). A pseudo-version names a commit rather than
-// a release, so it fills Revision and Time and leaves Version empty; a module
-// built from a directory has no version to tell at all.
-type ModuleValue struct {
-	// Time is the commit's time, when known: the main module's vcs.time
-	// stamp, or the timestamp a pseudo-version carries. Zero otherwise.
-	Time time.Time
-	// Path is the module path the build required, e.g.
-	// "github.com/kitsunium/sdk".
-	Path string
-	// Version is the released version the code came from, e.g. "v0.4.6", or
-	// "" when there is none to tell: a pseudo-version (a commit, in Revision),
-	// a module built from a local directory, or a main module built without
-	// one. A "+dirty" suffix is not kept here; it is what Modified says.
-	Version string
-	// Revision is the version-control commit the code came from, when known:
-	// the main module's vcs.revision stamp (a full object name), or the
-	// commit a pseudo-version names (its twelve-character prefix).
-	Revision string
-	// Dir is the directory a replace directive pointed the module at, as the
-	// toolchain recorded it — relative to the main module, or to the
-	// workspace root in workspace mode — or "" when it was not replaced by a
-	// directory. A workspace module is Local with no Dir: the toolchain does
-	// not record where it was.
-	Dir string
-	// Replacement is the module path a replace directive substituted, when it
-	// substituted another module rather than a directory; Version is then
-	// that module's.
-	Replacement string
-	// Local reports that the code came from a directory on the build machine
-	// rather than from a published version: a directory replacement, a
-	// workspace module, or a main module built inside its own source tree.
-	Local bool
-	// Modified reports that the build included uncommitted changes: the main
-	// module's vcs.modified stamp, or the "+dirty" its version carried. The
-	// toolchain records nothing of the kind for a dependency.
-	Modified bool
-}
-
 // Module returns the module whose path is path — the main module or one of
 // the dependencies — and whether the build contains it.
 func (b *BuildValue) Module(path string) (found ModuleValue, ok bool) {

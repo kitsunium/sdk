@@ -10,6 +10,7 @@ go_library(
         "cgroup_linux.go",
         "cgroup_other.go",
         "cgroup_windows.go",
+        "decl_gen.go",
         "doc.go",
         "option.go",
     ],

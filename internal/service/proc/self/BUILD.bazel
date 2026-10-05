@@ -8,6 +8,7 @@ go_library(
         "build.go",
         "cputime_other.go",
         "cputime_unix.go",
+        "decl_gen.go",
         "doc.go",
         "stats.go",
     ],

@@ -5,22 +5,6 @@ import (
 	"sync"
 )
 
-// Claim is a spawner's hold on one child's exit status. It is created by Spawn,
-// filled by a sweep that collects the child, and ended by the owner once the
-// status is in hand. A Claim is safe for concurrent use. A nil *Claim holds
-// nothing: every method answers as for a claim no sweep ever filled.
-type Claim struct {
-	// book is the ledger that holds this claim.
-	book *ledger
-	// pid is the claimed child's process id, and the ledger key.
-	pid int
-	// collected reports that a sweep took the child and stored its status. It
-	// and status are guarded by the ledger's mu.
-	collected bool
-	// status is the exit status the sweep collected, valid once collected.
-	status StatusValue
-}
-
 // ledger is the process-wide record of claimed children. There is exactly one,
 // because wait4(-1) collects the children of the whole process.
 type ledger struct {

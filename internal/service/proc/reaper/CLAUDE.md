@@ -34,6 +34,7 @@ anywhere in the process, and every `Process.Wait` collects its own child.
 
 | File | Build tag | Role |
 |---|---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declaration of `Option`. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `reaper.go` | (all) | `Option`/`config` surface; `WithOnReap`; `resolve` |
 | `reaper_unix.go` | `unix` | `unixReaper` (its timer sweep's `clk` and `sweepEvery` set by `New` to `clock.System` and `timerSweepEvery`), `New`, `Start`/`Stop`/`loop`, `ReapOnce`, `drain`/`drainResult` (over `childwait.ReapAny`)/`classifyWaitErr`, `LastError`, `IsPID1` |
 | `subreaper_linux.go` | `linux` | `SetChildSubreaper` via `prctl(PR_SET_CHILD_SUBREAPER, 1)` |

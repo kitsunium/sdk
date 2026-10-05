@@ -10,7 +10,6 @@ import (
 	"runtime"
 	"slices"
 	"strconv"
-	"sync"
 	"time"
 
 	coreipc "github.com/kitsunium/sdk/internal/core/proc/ipc"
@@ -25,37 +24,6 @@ const maxPath int = 103
 // already at the path. A local socket answers in microseconds; a second is a
 // process that is not coming.
 const dialTimeout time.Duration = time.Second
-
-// Config is where a private socket lives and who, besides its own account,
-// may use it. The same value serves the listener and its clients.
-type Config struct {
-	// Path is the socket's absolute path. Its directory is created 0700 when
-	// missing and refused when another account could write to it.
-	Path string
-	// AllowUIDs and AllowGIDs admit peers besides this process's own user:
-	// an on-call group declared at deployment, say. They are enforced where
-	// the kernel names the peer (Peer.Verified); the directory must still
-	// let those accounts reach the socket, which is the deployment's to
-	// arrange — this package never widens a directory. Windows has no UID:
-	// there the pipe's DACL admits this account only, and the lists admit
-	// nobody more.
-	AllowUIDs, AllowGIDs []int
-}
-
-// Listener accepts the connections of admitted peers only; a peer the
-// kernel names and the configuration does not admit is closed and counted.
-// It is the engine behind the core Listener port.
-type Listener struct {
-	cfg  Config
-	ln   acceptor
-	self int
-	// selfSID is this process's account on Windows, empty elsewhere.
-	selfSID string
-
-	mu      sync.Mutex
-	closed  bool
-	refused int64
-}
 
 // acceptor is the endpoint a Listener accepts on: a Unix socket
 // (socket.go), a named pipe on Windows (pipe_windows.go). accept returns the
@@ -153,13 +121,6 @@ func admit(p coreipc.PeerValue, self int, cfg *Config) error {
 		return nil
 	}
 	return errs.Wrap(coreipc.PeerRefused, errs.WrapParams{}, errs.Int("uid", p.UID), errs.Int("gid", p.GID))
-}
-
-// Dialer connects to the private socket a configuration names: the engine
-// behind the core Dialer port. Code that holds the port dials the same
-// endpoint as often as it needs to, and a test hands that code a double.
-type Dialer struct {
-	cfg Config
 }
 
 // NewDialer validates cfg and returns a Dialer for it. The allow-lists are

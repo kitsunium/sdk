@@ -1,10 +1,5 @@
 package reaper
 
-// Option configures a reaper returned by New. Options are applied in order; an
-// unknown or zero option is a no-op. The set is intentionally small — a reaper
-// has little to tune beyond an optional sweep callback for observability.
-type Option func(*config)
-
 // config is the internal, mutable accumulator an Option mutates. It never
 // escapes the package: New copies the resolved values into the concrete reaper.
 type config struct {

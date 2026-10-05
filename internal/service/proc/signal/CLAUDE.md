@@ -110,3 +110,7 @@ The #62 acceptance criteria are covered by two `//go:build unix` files:
 refusal, a pid terminated, and a clean drain; `relay_other_test.go`
 (`//go:build !unix && !windows`) asserts the stub returns
 `CodeUnsupportedPlatform`.
+
+## Declarations
+
+`decl_gen.go` is written by kit gen from the design (ADR 0170): the declaration of `Target`. Their methods, constructors and helpers stay hand-written, in the files this document names.

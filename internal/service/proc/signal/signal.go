@@ -9,12 +9,6 @@ import (
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 )
 
-// Target names the recipient of a relayed signal: a positive value is a pid; a
-// value below -1 is the negation of a process-group id (kill(2) delivers to the
-// whole group whose id is its absolute value). It is a plain int so call sites
-// can pass a raw pid or -pgid without a constructor.
-type Target int
-
 // Notify subscribes to sigs and returns a receive-only channel of typed Signals
 // plus a stop function. Each delivery of one of sigs is translated from its
 // os.Signal carrier to a coreproc.Signal and sent on the channel. The channel is

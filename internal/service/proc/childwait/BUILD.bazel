@@ -8,6 +8,7 @@ go_library(
         "childwait.go",
         "childwait_other.go",
         "childwait_unix.go",
+        "decl_gen.go",
         "doc.go",
         "waitany_solaris.go",
         "waitany_unix.go",

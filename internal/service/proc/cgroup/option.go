@@ -13,11 +13,6 @@ type groupConfig struct {
 	root string
 }
 
-// Option customises a Create call (functional-option pattern). Construct
-// options with the WithRoot helper; the zero set yields a group directly under
-// the unified cgroup v2 mount.
-type Option func(*groupConfig)
-
 // defaultConfig returns the baseline groupConfig used when no Option overrides
 // it: the new group is created directly under the unified cgroup v2 mount.
 func defaultConfig() groupConfig {

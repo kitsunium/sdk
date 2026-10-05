@@ -37,6 +37,7 @@ allocation and one map insert per spawn, removed by `Release` after the wait.
 | File | Build tag | Role |
 |---|---|---|
 | `doc.go` | (all) | the package comment — kit writes it from the design (ADR 0167) |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declaration of `Claim` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `childwait.go` | (all) | `Claim`; the process-wide `ledger`; `Spawn`; `Claim.Collected` / `Reclaim` / `Release`; `deliver` / `handOver` / `forget` |
 | `childwait_unix.go` | `unix` | `StatusValue` (`syscall.WaitStatus` + `syscall.Rusage`); `ReapAny` |
 | `waitany_unix.go` | `unix && !solaris` | `anyChildPID = -1` |

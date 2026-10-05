@@ -6,11 +6,11 @@ go_library(
     name = "ipc",
     srcs = [
         "chain_unix.go",
+        "decl_gen.go",
         "dir_other.go",
         "dir_unix.go",
         "doc.go",
         "ipc.go",
-        "ipc_compliance.go",
         "peer_linux.go",
         "peer_other.go",
         "pipe_windows.go",

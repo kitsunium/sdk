@@ -467,7 +467,8 @@ packages:
       coreipc: github.com/kitsunium/sdk/internal/core/proc/ipc
     path: github.com/kitsunium/sdk/internal/service/proc/ipc
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Config is where a private socket lives and who, besides its own account,
           may use it. The same value serves the listener and its clients.
         name: Config
@@ -497,10 +498,13 @@ packages:
                 nobody more.
               name: AllowGIDs
               type: "[]int"
-      - doc: |-
+      - decl: true
+        doc: |-
           Listener accepts the connections of admitted peers only; a peer the
           kernel names and the configuration does not admit is closed and counted.
           It is the engine behind the core Listener port.
+        implements:
+          - coreipc.Listener
         methods:
           - doc: |-
               Accept returns the next connection of an admitted peer. A peer the kernel
@@ -537,11 +541,29 @@ packages:
             recv: pointer
         name: Listener
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - name: cfg
+              type: Config
+            - name: ln
+              type: acceptor
+            - name: self
+              type: int
+            - doc: selfSID is this process's account on Windows, empty elsewhere.
+              name: selfSID
+              type: string
+            - name: mu
+              type: sync.Mutex
+            - name: closed
+              type: bool
+            - name: refused
+              type: int64
+      - decl: true
+        doc: |-
           Dialer connects to the private socket a configuration names: the engine
           behind the core Dialer port. Code that holds the port dials the same
           endpoint as often as it needs to, and a test hands that code a double.
+        implements:
+          - coreipc.Dialer
         methods:
           - doc: |-
               Dial connects to the dialer's socket, exactly as the package-level Dial
@@ -556,7 +578,9 @@ packages:
             recv: pointer
         name: Dialer
         struct:
-          unexported: true
+          fields:
+            - name: cfg
+              type: Config
   - doc: |-
       Package ipc is a private socket between processes of one machine — a
       daemon and the short-lived clients that talk to it, a product and the tool

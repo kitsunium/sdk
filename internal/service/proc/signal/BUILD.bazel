@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "signal",
     srcs = [
+        "decl_gen.go",
         "doc.go",
         "relay_other.go",
         "relay_unix.go",

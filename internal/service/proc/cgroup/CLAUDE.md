@@ -14,6 +14,7 @@ plus `internal/core/proc` and `internal/kernel/errs` — no `golang.org/x/sys`.
 
 | File | Role |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declaration of `Option`. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `cgroup.go` | platform-neutral surface: `Available`, `Create` delegating to the build-tagged impls |
 | `option.go` | `Option` functional-option type, `WithRoot`, `groupConfig` accumulator |
 | `cgroup_linux.go` | Linux impl: `controlGroup` (satisfies `core/proc.Group`), controller writes, mkdir/rmdir |
