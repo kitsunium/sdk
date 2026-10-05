@@ -34,9 +34,9 @@ func (s StatusValue) Resolved() StatusValue {
 	return StatusValue{Code: StatusUnset}
 }
 
-// isUnset is StatusValue.IsUnset's body: decl_gen.go writes StatusValue.IsUnset, from the
-// design, as one call of it.
-func (s StatusValue) isUnset() bool {
+// IsUnset reports whether the status carries no judgement at all. It is what the
+// OTLP encoder asks before deciding whether the `status` field is worth a line.
+func (s StatusValue) IsUnset() bool {
 	//: unset AND unmessaged; a message with no code is not a status.
 	return s.Code == StatusUnset && s.Message == ""
 }

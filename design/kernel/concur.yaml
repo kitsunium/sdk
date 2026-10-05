@@ -234,11 +234,6 @@ packages:
       recycling mechanism lives in recycler, the 64-KiB capacity threshold and the
       *[]byte type live here.
     functions:
-      - doc: Get borrows a reusable byte buffer with zero length and capacity >= initialCap.
-        name: Get
-        impl: get
-        out:
-          - type: "*[]byte"
       - doc: |-
           Put returns a buffer to the pool after use; the recycler truncates its length
           and drops it when cap exceeds maxRetain. A nil argument is a safe no-op so
@@ -253,7 +248,11 @@ packages:
           - name: b
             type: "*[]byte"
         name: Put
-        impl: put
+      - doc: Get borrows a reusable byte buffer with zero length and capacity >= initialCap.
+        impl: get
+        name: Get
+        out:
+          - type: "*[]byte"
     path: github.com/kitsunium/sdk/internal/kernel/concur/buffer
   - constants:
       - build: "!(386 || arm)"
@@ -988,6 +987,16 @@ packages:
       struct-constructor lint expects.
     functions:
       - doc: |-
+          NewLoopDaemon is the New-prefixed constructor alias mandated by the
+          struct-constructor lint; it delegates to Start, which is the idiomatic verb.
+        impl: newLoopDaemon
+        in:
+          - name: loop
+            type: Loop
+        name: NewLoopDaemon
+        out:
+          - type: "*LoopDaemon"
+      - doc: |-
           WithClock makes [Every] tick on w instead of the wall clock. Its use is a
           test's: a clock.ManualClock advanced past the interval delivers a tick
           exactly then, so a cadence is asserted by moving time rather than by
@@ -1045,16 +1054,6 @@ packages:
           - name: loop
             type: Loop
         name: Start
-        out:
-          - type: "*LoopDaemon"
-      - doc: |-
-          NewLoopDaemon is the New-prefixed constructor alias mandated by the
-          struct-constructor lint; it delegates to Start, which is the idiomatic verb.
-        in:
-          - name: loop
-            type: Loop
-        name: NewLoopDaemon
-        impl: newLoopDaemon
         out:
           - type: "*LoopDaemon"
     imports:

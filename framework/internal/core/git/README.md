@@ -170,7 +170,7 @@ type LineRangeValue struct {
 ```
 
 <a name="LineRangeValue.Contains"></a>
-### func \(LineRangeValue\) [Contains](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/decl_gen.go>)
+### func \(LineRangeValue\) [Contains](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/line_range.go>)
 
 ```go
 func (LineRangeValue) Contains(line int) bool

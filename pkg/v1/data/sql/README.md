@@ -622,7 +622,7 @@ type Dialect uint8
 ```
 
 <a name="Dialect.ForUpdate"></a>
-### func \(Dialect\) [ForUpdate](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/decl_gen.go>)
+### func \(Dialect\) [ForUpdate](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/sql_dialect.go>)
 
 ```go
 func (Dialect) ForUpdate() string
@@ -633,7 +633,7 @@ ForUpdate renders the clause that ends a read by locking the rows it returns unt
 SQLite has no row lock and no such clause, and renders the empty string: a SQLite transaction excludes every other writer with the database's one write lock, which it takes at its first WRITE, so a transaction that must read under exclusion writes first (ADR 0140). A dialect that is not [Dialect.Valid](#Dialect.Valid) renders the clause: an engine without one refuses the statement, which is louder than a lock dropped in silence.
 
 <a name="Dialect.ForUpdateSkipLocked"></a>
-### func \(Dialect\) [ForUpdateSkipLocked](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/decl_gen.go>)
+### func \(Dialect\) [ForUpdateSkipLocked](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/sql_dialect.go>)
 
 ```go
 func (Dialect) ForUpdateSkipLocked() string

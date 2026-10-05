@@ -264,7 +264,6 @@ packages:
           - name: b
             type: Status
         name: Worst
-        impl: worst
         out:
           - type: Status
     imports:
@@ -845,7 +844,6 @@ packages:
               routing (the zero-value rule of the type comment, applied to every other
               value nobody assigned on purpose).
             name: Serving
-            impl: serving
             out:
               - type: bool
             recv: value
@@ -1029,7 +1027,6 @@ packages:
           - name: name
             type: string
         name: Component
-        impl: component
         out:
           - type: corelc.ComponentValue
       - doc: |-
@@ -1041,7 +1038,6 @@ packages:
           - name: cfg
             type: HandlerConfig
         name: NewStartupHandler
-        impl: newStartupHandler
         out:
           - type: http.Handler
       - doc: |-
@@ -1054,7 +1050,6 @@ packages:
           - name: cfg
             type: HandlerConfig
         name: NewReadinessHandler
-        impl: newReadinessHandler
         out:
           - type: http.Handler
       - doc: |-
@@ -1069,7 +1064,6 @@ packages:
           - name: cfg
             type: HandlerConfig
         name: NewLivenessHandler
-        impl: newLivenessHandler
         out:
           - type: http.Handler
       - doc: |-

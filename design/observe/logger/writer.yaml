@@ -128,9 +128,15 @@ packages:
           - name: sessionToken
             type: string
         name: NewCredentialValue
-        impl: newCredentialValue
         out:
           - type: CredentialValue
+      - doc: |-
+          Available returns the sorted list of registered Names, or nil before any
+          Register.
+        impl: available
+        name: Available
+        out:
+          - type: "[]Name"
       - doc: |-
           Register inserts f into the registry under f.Name() and returns it so callers
           can bind the singleton to a typed package-level variable like
@@ -179,13 +185,6 @@ packages:
             type: corelogger.Sink
           - name: err
             type: error
-      - doc: |-
-          Available returns the sorted list of registered Names, or nil before any
-          Register.
-        name: Available
-        impl: available
-        out:
-          - type: "[]Name"
     imports:
       clock: github.com/kitsunium/sdk/internal/kernel/clock
       corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
@@ -753,8 +752,8 @@ packages:
               GoString implements fmt.GoStringer so %#v stays redacted too. fmt bypasses
               String for %#v (Go-syntax formatting) and would otherwise dump the unexported
               credential fields; GoString closes that leak.
-            name: GoString
             impl: goString
+            name: GoString
             out:
               - type: string
             recv: value
@@ -1018,7 +1017,6 @@ packages:
           - name: min
             type: level.Level
         name: Floor
-        impl: floor
         out:
           - type: corelogger.Sink
     imports:

@@ -1471,7 +1471,7 @@ func Anonymise[T any](fn func(*T)) StoreConfigurer
 Anonymise says what an erased record keeps: fn runs first, and generalises into unclassified fields — a birth date to its year, an address to its region; then kit clears the rest. kit cannot prove that what remains identifies no one: by declaring the function, the product asserts it.
 
 <a name="AnyUser"></a>
-## func [AnyUser](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
+## func [AnyUser](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/expose.go>)
 
 ```go
 func AnyUser() ExposeConfigurer
@@ -1486,7 +1486,7 @@ var MyOrders = Service.Query("my-orders", myOrders, kit.Auth()).Expose("GET /ord
 It adds no authentication of its own: an exposure authenticates as its operation asks, so the operation declares [Auth](#Auth).
 
 <a name="Anyone"></a>
-## func [Anyone](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
+## func [Anyone](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/expose.go>)
 
 ```go
 func Anyone() ExposeConfigurer
@@ -2043,7 +2043,7 @@ func NewEndpointService[Req, Resp any]() *EndpointService[Req, Resp]
 NewEndpointService is an endpoint no service declares yet: [Service.Endpoint](#Service.Endpoint) makes one and declares it, which is how a product gets one.
 
 <a name="NewError"></a>
-## func [NewError](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
+## func [NewError](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go>)
 
 ```go
 func NewError(status int, code string, message string) *Error
@@ -2061,7 +2061,7 @@ func NewID(prefix string) string
 NewID returns a new identifier with the given prefix: a TypeID, time ordered, like "todo\_01k5zq7m3xe8tvbfg0s7zr4w6c". The prefix must be one to sixty-three lower-case letters, with '\_' only between two letters; any other prefix is a programming error and panics.
 
 <a name="NewListener"></a>
-## func [NewListener](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
+## func [NewListener](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/listener.go>)
 
 ```go
 func NewListener(contract string, handler ListenHandler) *Listener
@@ -2302,7 +2302,7 @@ func Profile(p string) AppConfigurer
 Profile selects the app's process profile: model.ProfileServer (the default), model.ProfileDaemon or model.ProfileCLI.
 
 <a name="Purpose"></a>
-## func [Purpose](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
+## func [Purpose](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/retention.go>)
 
 ```go
 func Purpose(text string) StoreConfigurer
@@ -2421,7 +2421,7 @@ func Requires(other *Module) ModuleConfigurer
 Requires says the module needs other: an app that mounts the module and not other mounts other at its defaults, and starts it first. The Go import this takes makes a cycle impossible. A collaboration a module can do without is a port with a fallback instead ([Fallback](#Fallback)).
 
 <a name="RetentionByProduct"></a>
-## func [RetentionByProduct](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
+## func [RetentionByProduct](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/retention.go>)
 
 ```go
 func RetentionByProduct(limits string) StoreConfigurer
@@ -2918,7 +2918,7 @@ type AuthenticatorHandler[P, D any] struct{}
 ```
 
 <a name="Binary"></a>
-## type [Binary](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
+## type [Binary](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/roles.go>)
 
 Binary is one executable the product ships, made of process roles: a status line and its daemon are two roles of one binary, "statusline" and "statusline daemon". Each role is an App — its own services, its own profile — and two roles talk only through a declared, versioned contract (D22): a listener one serves and the other dials, never each other's code.
 
@@ -3338,7 +3338,7 @@ func (*Error) Unwrap() error
 Unwrap returns the cause, so errors.Is and errors.As see through an Error.
 
 <a name="Error.Wrap"></a>
-### func \(Error\) [Wrap](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
+### func \(Error\) [Wrap](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go>)
 
 ```go
 func (*Error) Wrap(cause error) *Error

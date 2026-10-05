@@ -9,9 +9,30 @@ import (
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// component is Component's body: decl_gen.go writes Component, from the
-// design, as one call of it.
-func component(registry corehealth.Health, name string) corelc.ComponentValue {
+// Component adapts a registry to core/app/lifecycle: its Start runs the startup
+// checks, and its Stop marks the process draining.
+//
+// # Add it LAST
+//
+// One rule, and it happens to be right in both directions, because a
+// Lifecycle's stop order is the exact reverse of its Add order (ADR 0050):
+//
+//   - Added last, it STARTS last — so its startup checks run after every
+//     component they might depend on is already up, which is the only order in
+//     which "the migration ran" is a question worth asking.
+//   - Added last, it STOPS first — so readiness flips to not-ready before a
+//     single other component begins closing. That is the whole point: an
+//     orchestrator observes the 503, withdraws the replica from routing, and
+//     the drain then runs against a socket nothing new arrives on.
+//
+// Get that order wrong and the drain begins while the load balancer is still
+// sending traffic — the connections the drain is waiting for keep being
+// created, and the shutdown budget expires against work that never stops
+// arriving.
+//
+// Liveness deliberately keeps answering through the whole shutdown, so the
+// orchestrator withdraws the replica rather than killing it.
+func Component(registry corehealth.Health, name string) corelc.ComponentValue {
 	//: both halves are required by lifecycle.Add; neither is a placeholder.
 	return corelc.ComponentValue{
 		Name:  name,

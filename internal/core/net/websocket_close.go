@@ -59,9 +59,14 @@ const (
 	wsClosePrivateHigh WSCloseCode = 4999
 )
 
-// sendable is WSCloseCode.Sendable's body: decl_gen.go writes WSCloseCode.Sendable, from the
-// design, as one call of it.
-func (c WSCloseCode) sendable() bool {
+// Sendable reports whether the code may appear in a Close frame on the wire.
+//
+// It is deliberately a property of the CODE rather than a check inside the
+// sender, because the same question is asked twice from opposite directions: a
+// peer that sends 1006 is committing a protocol error, and so is this endpoint
+// if it ever does. One predicate, both directions, no chance of the two
+// drifting apart.
+func (c WSCloseCode) Sendable() bool {
 	//: the assigned block, minus the hole at 1004 and minus the three codes
 	//: that describe the absence of a close frame (1005, 1006, 1015).
 	if c >= wsCloseProtocolLow && c <= wsCloseRegisteredHigh {
@@ -75,9 +80,14 @@ func (c WSCloseCode) sendable() bool {
 	return c >= wsCloseLibraryLow && c <= wsClosePrivateHigh
 }
 
-// echoable is WSCloseCode.Echoable's body: decl_gen.go writes WSCloseCode.Echoable, from the
-// design, as one call of it.
-func (c WSCloseCode) echoable() WSCloseCode {
+// Echoable returns the code to send back when answering this one.
+//
+// It exists because §5.5.1 says an endpoint SHOULD echo the peer's status code,
+// and the one code a peer can leave us holding — WSCloseNoStatus, for a Close
+// with no payload — is a code §7.4.1 forbids on the wire. Echoing blindly is
+// therefore a protocol error waiting for the first well-behaved peer that
+// closes without saying why.
+func (c WSCloseCode) Echoable() WSCloseCode {
 	//: the only unsendable value that can reach here is "the peer sent none",
 	//: and a normal closure is the honest thing to answer: nothing went wrong.
 	if !c.Sendable() {

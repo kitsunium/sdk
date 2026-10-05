@@ -321,7 +321,7 @@ type Duration int64
 ```
 
 <a name="Duration.Duration"></a>
-### func \(Duration\) [Duration](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/decl_gen.go>)
+### func \(Duration\) [Duration](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/duration.go>)
 
 ```go
 func (Duration) Duration() time.Duration

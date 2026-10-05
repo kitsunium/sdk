@@ -14,16 +14,23 @@ const (
 	Deny
 )
 
-// granted is Decision.Granted's body: decl_gen.go writes Decision.Granted, from the
-// design, as one call of it.
-func (d Decision) granted() bool {
+// Granted reports whether d permits the request. It is true for [Allow] and
+// for nothing else.
+//
+// It exists so that no call site has to spell the test itself. `d != Deny` is
+// the same expression with an extra character and a security hole in it: it is
+// true for [Abstain], so it authorizes every request no policy recognised, and
+// it is true for a corrupt Decision value as well.
+func (d Decision) Granted() bool {
 	//: exactly one of the three states permits, and it is not the zero one.
 	return d == Allow
 }
 
-// valid is Decision.Valid's body: decl_gen.go writes Decision.Valid, from the
-// design, as one call of it.
-func (d Decision) valid() bool {
+// Valid reports whether d is one of the three named states. A Decision that is
+// not is a defect in the policy that produced it — a numeric conversion, a
+// zeroed struct field read as a Decision, a value from a future version of a
+// caller's own code — and the SDK refuses on it rather than guessing.
+func (d Decision) Valid() bool {
 	//: switch rather than a range test, so adding a state forces a visit here.
 	switch d {
 	//: the three states the contract declares, and nothing else.

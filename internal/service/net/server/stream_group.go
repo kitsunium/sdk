@@ -27,9 +27,13 @@ func (g *StreamGroup) handleFunc(f corenet.ConnHandlerFunc) *StreamGroup {
 	return g.Handle(f)
 }
 
-// handleHTTP is StreamGroup.HandleHTTP's body: decl_gen.go writes StreamGroup.HandleHTTP, from the
-// design, as one call of it.
-func (g *StreamGroup) handleHTTP(h http.Handler) *StreamGroup {
+// HandleHTTP serves an http.Handler over this group's listeners.
+//
+// The group keeps its own limits, TLS identity and drain; net/http only does
+// the protocol. That split is ADR 0029 D3: reimplementing HTTP would mean
+// owning request smuggling defences, HTTP/2 flow control and HPACK to lose,
+// not gain, throughput.
+func (g *StreamGroup) HandleHTTP(h http.Handler) *StreamGroup {
 	adapter := newHTTPAdapter(h)
 	g.httpAdapter = adapter
 	//: the adapter IS a ConnHandler, so the rest of the engine is unchanged.
@@ -44,9 +48,8 @@ func (g *StreamGroup) tracksCloses() bool {
 	return g.httpAdapter != nil && g.limiter != nil
 }
 
-// use is StreamGroup.Use's body: decl_gen.go writes StreamGroup.Use, from the
-// design, as one call of it.
-func (g *StreamGroup) use(middlewares ...corenet.Middleware[corenet.ConnHandler]) *StreamGroup {
+// Use appends middlewares, outermost first.
+func (g *StreamGroup) Use(middlewares ...corenet.Middleware[corenet.ConnHandler]) *StreamGroup {
 	g.middlewares = append(g.middlewares, middlewares...)
 	//: returned for chaining.
 	return g

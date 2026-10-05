@@ -69,3 +69,10 @@ const (
 	// a rendered line, a page, a report.
 	KindPresentation NodeKind = "presentation"
 )
+
+// NodeKind is the closed set of building blocks a kit product is made of.
+// It is a wire format — the graph's JSON and the Studio's TypeScript unions
+// carry these names —, so it stays a string.
+//
+//ktn:wire-format
+type NodeKind string

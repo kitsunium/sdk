@@ -433,7 +433,7 @@ func (Report) OK() bool
 OK reports whether the value satisfied every constraint. It is the question to ask; comparing len(report) to zero says the same thing less clearly.
 
 <a name="Report.Paths"></a>
-### func \(Report\) [Paths](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/validation/decl_gen.go>)
+### func \(Report\) [Paths](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/validation/report.go>)
 
 ```go
 func (Report) Paths() []string

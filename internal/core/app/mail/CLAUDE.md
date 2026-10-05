@@ -49,7 +49,7 @@ short names a consumer writes (`mail.Message`, `mail.Address`), exactly as
 | File | What lives there |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
-| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `AddressValue`, `AttachmentValue`, `HeaderFieldValue`, `MessageValue`, `DeliveryValue` and `EnvelopeValue` — each struct with every field, unexported ones included; `AddressValue.IsZero` and `AttachmentValue.Inline`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `AddressValue`, `AttachmentValue`, `HeaderFieldValue`, `MessageValue`, `DeliveryValue` and `EnvelopeValue` — each struct with every field, unexported ones included; `AttachmentValue.Inline`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
 | `address_value.go` | `AddressValue` and `IsZero` |
 | `attachment_value.go` | `AttachmentValue`, `Inline`, `DefaultAttachmentType` |
 | `header.go` | the thirteen field-name constants (`HeaderFrom` … `HeaderContentID`) and `HeaderFieldValue` |

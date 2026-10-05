@@ -66,4 +66,4 @@ cd internal/core && GOWORK=off go test -race -cover ./observe/logger/level/...
 
 ## Declarations
 
-`decl_gen.go` is written by kit gen from the design (ADR 0170): the declarations of `Level` and `Var` — each struct with every field, unexported ones included; `Var.Set`, `Var.Level` and `NewVar`, each one call of its unexported body, measured to inline with the body inlined into it; the assertion `Var → Leveler`. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name.
+`decl_gen.go` is written by kit gen from the design (ADR 0170): the declarations of `Level` and `Var` — each struct with every field, unexported ones included; `Var.Set` and `Var.Level`, each one call of its unexported body, measured to inline with the body inlined into it; the assertion `Var → Leveler`. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name.

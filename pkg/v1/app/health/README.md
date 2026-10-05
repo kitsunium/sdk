@@ -936,7 +936,7 @@ type Status uint8
 ```
 
 <a name="Status.Serving"></a>
-### func \(Status\) [Serving](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/health/decl_gen.go>)
+### func \(Status\) [Serving](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/health/health_status.go>)
 
 ```go
 func (Status) Serving() bool

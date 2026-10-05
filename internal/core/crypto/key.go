@@ -7,9 +7,10 @@ import "bytes"
 // fixed length keeps the surface tiny and the validation total.
 const KeyLen int = 32
 
-// newKey is NewKey's body: decl_gen.go writes NewKey, from the
-// design, as one call of it.
-func newKey(raw []byte) (key Key, err error) {
+// NewKey builds a Key from raw, which MUST be exactly KeyLen (32) bytes. A wrong
+// length returns InvalidKey rather than silently truncating or padding; the
+// bytes are copied so a later mutation of raw cannot affect the Key.
+func NewKey(raw []byte) (key Key, err error) {
 	//: reject any non-32-byte input — never truncate or pad a key silently.
 	if len(raw) != KeyLen {
 		//: surface the typed sentinel; callers HasCode(err, CodeInvalidKey).

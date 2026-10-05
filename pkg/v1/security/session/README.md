@@ -605,7 +605,7 @@ func (Session) Delete(key string) SessionValue
 Delete returns a copy without key. Deleting an absent key is not an error — the caller asked for the key to be gone and it is.
 
 <a name="Session.ExpiresAt"></a>
-### func \(Session\) [ExpiresAt](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/session/decl_gen.go>)
+### func \(Session\) [ExpiresAt](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/session/session_value.go>)
 
 ```go
 func (Session) ExpiresAt() time.Time
@@ -641,7 +641,7 @@ func (Session) ID() ID
 ID reports the session's identifier. It is a bearer secret: see [ID](#ID).
 
 <a name="Session.IsZero"></a>
-### func \(Session\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/session/decl_gen.go>)
+### func \(Session\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/session/session_value.go>)
 
 ```go
 func (Session) IsZero() bool

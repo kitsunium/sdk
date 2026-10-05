@@ -28,9 +28,10 @@ type memoryStore struct {
 	clk clock.Clock
 }
 
-// newMemory is NewMemory's body: decl_gen.go writes NewMemory, from the
-// design, as one call of it.
-func newMemory(cfg MemoryConfig) coresecret.Store {
+// NewMemory returns a Store that keeps every version in this process's memory.
+// It cannot fail: there is nothing to open and nothing a configuration can get
+// wrong.
+func NewMemory(cfg MemoryConfig) coresecret.Store {
 	//: a nil clock is a working configuration, so it is filled, not refused.
 	clk := cfg.Clock
 	//: the production default.

@@ -879,7 +879,7 @@ DefaultCacheDir returns where the last authenticated roster is kept.
 An empty string means "no cache", which disables the offline fallback entirely rather than guessing at a location. That is the safe direction: a machine that cannot say where its cache lives falls back to requiring the network, which is the behaviour this package had before the cache existed.
 
 <a name="Product.Label"></a>
-### func \(Product\) [Label](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/decl_gen.go>)
+### func \(Product\) [Label](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/product.go>)
 
 ```go
 func (*Product) Label() string
@@ -894,7 +894,7 @@ It tolerates a nil receiver, as every method here does: the one code path that r
 It returns the product's name, or "entitlement" when there is none.
 
 <a name="Product.PublishedOrigins"></a>
-### func \(Product\) [PublishedOrigins](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/decl_gen.go>)
+### func \(Product\) [PublishedOrigins](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/product.go>)
 
 ```go
 func (*Product) PublishedOrigins() []coreent.OriginValue

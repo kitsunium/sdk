@@ -39,9 +39,17 @@ func New(code Code, reason, public, private string, fields ...Field) error {
 	return kerrs.NewRuntime(code, reason, public, private, fields...)
 }
 
-// wrap is Wrap's body: decl_gen.go writes Wrap, from the
-// design, as one call of it.
-func wrap(cause error, params WrapParams, fields ...Field) error {
+// Wrap attaches a cause to a new error with origin-wins semantics and preserves
+// the chain (errors.Is / errors.Unwrap walk through it). When the cause is
+// already an SDK error (directly or behind a fmt.Errorf("%w") wrap) the result
+// inherits its Code/Reason/Public/Private and appends params.Code to the trail;
+// otherwise params.Code becomes the origin. Bad params at runtime do not panic —
+// the returned error carries a typed validation code.
+//
+// Declared as a function (not a var alias over the kernel Wrap) so the public
+// signature returns error: the concrete *errs.Error stays unexported, never
+// leaking through the facade.
+func Wrap(cause error, params WrapParams, fields ...Field) error {
 	//: delegate to the kernel; the explicit error return type erases the
 	//: concrete *errs.Error from the public signature.
 	return kerrs.Wrap(cause, params, fields...)

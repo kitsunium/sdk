@@ -23,16 +23,39 @@ type memoryTransport struct {
 	keep int
 }
 
-// newMemory is NewMemory's body: decl_gen.go writes NewMemory, from the
-// design, as one call of it.
-func newMemory() coremail.FullTransport {
+// NewMemory returns a transport that composes every message and keeps the
+// result instead of dialling anything.
+//
+// It COMPOSES, and that is the whole design. A stub that recorded the Message
+// value would accept a subject carrying a CRLF, an inline attachment with no
+// body, a Bcc the caller expected in a header — every refusal the SMTP
+// transport makes, made nowhere — and a consumer's test suite would pass right
+// up until production. Because this transport runs the same composer, a message
+// refused in production is refused in the test that was supposed to catch it,
+// with the same typed error.
+//
+// It takes no arguments for the same reason core/data/vfs.NewMem does: every knob it
+// could offer is one a consumer's test must set before it can assert anything,
+// and the value of a double is that it costs one line.
+//
+// Safe for concurrent use.
+func NewMemory() coremail.FullTransport {
 	//: the same composer the SMTP transport builds, with the same defaults.
 	return &memoryTransport{composer: NewComposer(ComposerConfig{})}
 }
 
-// newCapture is NewCapture's body: decl_gen.go writes NewCapture, from the
-// design, as one call of it.
-func newCapture(keep int) coremail.FullTransport {
+// NewCapture returns the transport a development server and a test deliver
+// through: NewMemory's double — it composes every message, refuses what SMTP
+// refuses, dials nothing — keeping only the last keep deliveries, the oldest
+// dropped first. Sent reads them, raw bytes included, for a mailbox to show or
+// a test to read a link from; Reset empties it.
+//
+// NewMemory keeps everything, which is what a test that sends three messages
+// wants; a server that runs for days and captures every mail it would have
+// sent needs a bound. A non-positive keep is [DefaultCaptureKeep]: its zero
+// has one reading, "I did not think about it", and a mailbox of the last two
+// hundred is the answer that needs no explanation (ADR 0031).
+func NewCapture(keep int) coremail.FullTransport {
 	//: an unset bound is the default one, never "unbounded".
 	if keep <= 0 {
 		keep = DefaultCaptureKeep

@@ -50,9 +50,24 @@ func NeverSample(_ coretrace.SamplingParams) bool {
 	return false
 }
 
-// parentBased is ParentBased's body: decl_gen.go writes ParentBased, from the
-// design, as one call of it.
-func parentBased(root coretrace.Sampler) coretrace.Sampler {
+// ParentBased returns a Sampler that HONOURS a valid parent's decision and
+// consults root only when there is no parent.
+//
+// It is the sampler almost every deployment wants, and the reason is the whole
+// design of the domain: the decision is taken once, at the root, and travels in
+// the traceparent's sampled bit. A process that re-decided for an inbound
+// request with a valid parent would produce a trace with a hole in the middle —
+// its own spans missing from a trace the caller kept, or present in one the
+// caller dropped, so the backend stores fragments of a request nobody can
+// reassemble.
+//
+// A nil root CLAMPS to AlwaysSample rather than refusing. The nil means "the
+// caller did not name a root policy", and a sampler that dropped everything
+// would silently turn tracing off — the ADR 0031 failure this whole family is
+// written against. Every other constructor in this file refuses instead; this
+// one clamps because AlwaysSample is a description of the safe direction, not a
+// number chosen on the caller's behalf.
+func ParentBased(root coretrace.Sampler) coretrace.Sampler {
 	//: an unnamed root policy keeps traces rather than losing them.
 	if root == nil {
 		//: the safe direction.

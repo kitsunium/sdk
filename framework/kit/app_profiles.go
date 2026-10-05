@@ -12,30 +12,40 @@ import (
 // app holds its singleton lock.
 const CodeSingletonHeld errs.Code = ikit.CodeSingletonHeld
 
-// profile is Profile's body: decl_gen.go writes Profile, from the
-// design, as one call of it.
-func profile(p string) AppOption {
+// Profile selects the app's process profile: model.ProfileServer (the
+// default), model.ProfileDaemon or model.ProfileCLI.
+func Profile(p string) AppOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.Profile(p)
 }
 
-// idleStop is IdleStop's body: decl_gen.go writes IdleStop, from the
-// design, as one call of it.
-func idleStop(d time.Duration) AppOption {
+// IdleStop makes a daemon stop itself once, for d, no connection was open on
+// any of its listeners and no activity of its services (Service.Activity)
+// said it was busy: a daemon launched on demand by its clients ends when
+// they stop coming. It is refused outside the daemon profile.
+func IdleStop(d time.Duration) AppOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.IdleStop(d)
 }
 
-// singleton is Singleton's body: decl_gen.go writes Singleton, from the
-// design, as one call of it.
-func singleton(scope string) AppOption {
+// Singleton keeps one process of the app alive per scope on this machine: the
+// start takes an exclusive file lock named after scope in the app's runtime
+// directory (pkg/v1/app/lock: flock, LockFileEx) and holds it until the process
+// ends. A second process refuses to start with CodeSingletonHeld — for a
+// daemon's client, the sign to talk to the one that runs. The kernel drops
+// the lock with a dead process.
+func Singleton(scope string) AppOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.Singleton(scope)
 }
 
-// singletonPer is SingletonPer's body: decl_gen.go writes SingletonPer, from the
-// design, as one call of it.
-func singletonPer(scopes ...Scope) AppOption {
+// SingletonPer keeps one process of the app alive per value of scopes on
+// this machine — per user, per installed executable, per configuration
+// directory ([PerUID], [PerExecutable], [PerConfigDir], [PerEnv]) —: the lock
+// is named after the scopes' key ([ScopeKey]), computed at the start, and
+// held as Singleton's is. A client that must find the process computes the
+// same key from the same scopes.
+func SingletonPer(scopes ...Scope) AppOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.SingletonPer(scopes...)
 }

@@ -2144,14 +2144,13 @@ packages:
           - name: backend
             type: string
         name: IsEngine
-        impl: isEngine
         out:
           - type: bool
       - doc: |-
           ConnectorCatalog is every connector kit ships, sorted by ID: what a
           product may plug into.
-        name: ConnectorCatalog
         impl: connectorCatalog
+        name: ConnectorCatalog
         out:
           - type: "[]ConnectorInfo"
       - doc: |-
@@ -2159,13 +2158,113 @@ packages:
           endpoint, a frontend or an auth handler means HTTP, a mailer mail, a store
           stores — and a database when one keeps it —, a topic, a subscription or
           a queued command queues. Sorted by ID.
+        impl: connectorsOf
         in:
           - name: nodes
             type: "[]Node"
         name: ConnectorsOf
-        impl: connectorsOf
         out:
           - type: "[]Connector"
+      - doc: |-
+          EdgeID builds the ID of an edge. The label is part of the identity: two
+          transitions of one workflow fired from one endpoint are two edges.
+        impl: edgeID
+        in:
+          - name: from
+            type: string
+          - name: kind
+            type: EdgeKind
+          - name: to
+          - name: label
+            type: string
+        name: EdgeID
+        out:
+          - type: string
+      - doc: ServiceOf returns the service part of a node ID.
+        impl: serviceOf
+        in:
+          - name: id
+            type: string
+        name: ServiceOf
+        out:
+          - type: string
+      - doc: |-
+          ValidName reports whether s is a legal node name. An endpoint named by its
+          route is legal as an ID but is not a name a declaration may give.
+        impl: validName
+        in:
+          - name: s
+            type: string
+        name: ValidName
+        out:
+          - type: bool
+      - doc: LibraryID is the ID of a library.
+        impl: libraryID
+        in:
+          - name: library
+            type: string
+        name: LibraryID
+        out:
+          - type: string
+      - doc: |-
+          Mermaid renders the architecture of a graph as a Mermaid flowchart: one
+          subgraph per service — a module's inside the module's own, ADR 0008 —, one
+          arrow per edge. GitHub renders it in Markdown, which makes a product's
+          README carry its own, always regenerable, diagram.
+
+          Each kind has its shape: an endpoint a box (marked "auth" when it asks for
+          a user; an implementation of a port by its name), a store a cylinder, a
+          topic a flag, a subscription a parallelogram (a watch, ADR 0008, marked
+          with the mark it watches — its stores' arrows say where from), a
+          workflow a hexagon, a job a
+          stadium, the auth handler a trapezoid — a gate —, a mailer a subroutine
+          box, a declared loop a circle, a hand-written loop a double circle, a
+          port an inverted trapezoid — a socket, UML's required interface —, a
+          command a parallelogram leaning back — a subscription's leans forward —,
+          marked "queued" when it waits in its queue, and a query a rhombus, a
+          question. An arrow is solid when it exists by construction or was
+          observed, dotted when only the code says so — or when it is a port's
+          binding to its own fallback, the default the app may replace, as the
+          Studio draws it.
+        impl: mermaid
+        in:
+          - name: g
+            type: "*Graph"
+        name: Mermaid
+        out:
+          - type: string
+      - doc: |-
+          QualifiedService is the name a module gives a service it lists: the
+          module's own name for the service named like it, "<module>.<service>"
+          otherwise. The runtime and the analyzer both qualify with it.
+        impl: qualifiedService
+        in:
+          - name: module
+          - name: service
+            type: string
+        name: QualifiedService
+        out:
+          - type: string
+      - doc: "ModulePrefix is a module's default mount prefix: \"/<name>/\"."
+        impl: modulePrefix
+        in:
+          - name: name
+            type: string
+        name: ModulePrefix
+        out:
+          - type: string
+      - doc: |-
+          UnderPrefix is a route declared at path, served under a module's mount
+          prefix: "/reports" under "/moderation/" is "/moderation/reports", and
+          under "/" it stays "/reports".
+        impl: underPrefix
+        in:
+          - name: prefix
+          - name: path
+            type: string
+        name: UnderPrefix
+        out:
+          - type: string
       - doc: |-
           SplitDoc splits a description into its default text and its translations.
 
@@ -2201,28 +2300,12 @@ packages:
         name: NodeID
         out:
           - type: string
-      - doc: |-
-          EdgeID builds the ID of an edge. The label is part of the identity: two
-          transitions of one workflow fired from one endpoint are two edges.
-        in:
-          - name: from
-            type: string
-          - name: kind
-            type: EdgeKind
-          - name: to
-          - name: label
-            type: string
-        name: EdgeID
-        impl: edgeID
-        out:
-          - type: string
       - doc: CompareSource orders sources by root, file, then line.
         in:
           - name: a
           - name: b
             type: Source
         name: CompareSource
-        impl: compareSource
         out:
           - type: int
       - doc: |-
@@ -2243,17 +2326,8 @@ packages:
           - name: extra
             type: "*Graph"
         name: Merge
-        impl: merge
         out:
           - type: "*Graph"
-      - doc: ServiceOf returns the service part of a node ID.
-        in:
-          - name: id
-            type: string
-        name: ServiceOf
-        impl: serviceOf
-        out:
-          - type: string
       - doc: |-
           ValidSegment reports whether s is a legal service, module, binary, role or
           library name.
@@ -2261,17 +2335,6 @@ packages:
           - name: s
             type: string
         name: ValidSegment
-        impl: validSegment
-        out:
-          - type: bool
-      - doc: |-
-          ValidName reports whether s is a legal node name. An endpoint named by its
-          route is legal as an ID but is not a name a declaration may give.
-        in:
-          - name: s
-            type: string
-        name: ValidName
-        impl: validName
         out:
           - type: bool
       - doc: "ValidContract reports whether s names a versioned contract: \"render/v1\"."
@@ -2279,7 +2342,6 @@ packages:
           - name: s
             type: string
         name: ValidContract
-        impl: validContract
         out:
           - type: bool
       - doc: |-
@@ -2298,7 +2360,6 @@ packages:
           - name: binary
             type: string
         name: BinaryID
-        impl: binaryID
         out:
           - type: string
       - doc: RoleID is the ID of one process role of a binary.
@@ -2307,73 +2368,6 @@ packages:
           - name: role
             type: string
         name: RoleID
-        out:
-          - type: string
-      - doc: LibraryID is the ID of a library.
-        in:
-          - name: library
-            type: string
-        name: LibraryID
-        impl: libraryID
-        out:
-          - type: string
-      - doc: |-
-          Mermaid renders the architecture of a graph as a Mermaid flowchart: one
-          subgraph per service — a module's inside the module's own, ADR 0008 —, one
-          arrow per edge. GitHub renders it in Markdown, which makes a product's
-          README carry its own, always regenerable, diagram.
-
-          Each kind has its shape: an endpoint a box (marked "auth" when it asks for
-          a user; an implementation of a port by its name), a store a cylinder, a
-          topic a flag, a subscription a parallelogram (a watch, ADR 0008, marked
-          with the mark it watches — its stores' arrows say where from), a
-          workflow a hexagon, a job a
-          stadium, the auth handler a trapezoid — a gate —, a mailer a subroutine
-          box, a declared loop a circle, a hand-written loop a double circle, a
-          port an inverted trapezoid — a socket, UML's required interface —, a
-          command a parallelogram leaning back — a subscription's leans forward —,
-          marked "queued" when it waits in its queue, and a query a rhombus, a
-          question. An arrow is solid when it exists by construction or was
-          observed, dotted when only the code says so — or when it is a port's
-          binding to its own fallback, the default the app may replace, as the
-          Studio draws it.
-        in:
-          - name: g
-            type: "*Graph"
-        name: Mermaid
-        impl: mermaid
-        out:
-          - type: string
-      - doc: |-
-          QualifiedService is the name a module gives a service it lists: the
-          module's own name for the service named like it, "<module>.<service>"
-          otherwise. The runtime and the analyzer both qualify with it.
-        in:
-          - name: module
-          - name: service
-            type: string
-        name: QualifiedService
-        impl: qualifiedService
-        out:
-          - type: string
-      - doc: "ModulePrefix is a module's default mount prefix: \"/<name>/\"."
-        in:
-          - name: name
-            type: string
-        name: ModulePrefix
-        impl: modulePrefix
-        out:
-          - type: string
-      - doc: |-
-          UnderPrefix is a route declared at path, served under a module's mount
-          prefix: "/reports" under "/moderation/" is "/moderation/reports", and
-          under "/" it stays "/reports".
-        in:
-          - name: prefix
-          - name: path
-            type: string
-        name: UnderPrefix
-        impl: underPrefix
         out:
           - type: string
       - doc: |-
@@ -2391,7 +2385,6 @@ packages:
           - name: suffix
             type: string
         name: TableName
-        impl: tableName
         out:
           - type: string
     imports:
@@ -3684,7 +3677,6 @@ packages:
           - name: backend
             type: string
         name: IsEngine
-        impl: isEngine
         out:
           - type: bool
       - doc: |-
@@ -3704,6 +3696,22 @@ packages:
         name: ConnectorsOf
         out:
           - type: "[]ConnectorMessage"
+      - doc: LibraryID is the ID of a library.
+        impl: libraryID
+        in:
+          - name: library
+            type: string
+        name: LibraryID
+        out:
+          - type: string
+      - doc: "ModulePrefix is a module's default mount prefix: \"/<name>/\"."
+        impl: modulePrefix
+        in:
+          - name: name
+            type: string
+        name: ModulePrefix
+        out:
+          - type: string
       - doc: |-
           SplitDoc splits a description into its default text and its translations.
 
@@ -3737,7 +3745,6 @@ packages:
           - name: name
             type: string
         name: NodeID
-        impl: nodeID
         out:
           - type: string
       - doc: |-
@@ -3752,7 +3759,6 @@ packages:
           - name: label
             type: string
         name: EdgeID
-        impl: edgeID
         out:
           - type: string
       - doc: CompareSource orders sources by root, file, then line.
@@ -3831,7 +3837,6 @@ packages:
           - name: binary
             type: string
         name: BinaryID
-        impl: binaryID
         out:
           - type: string
       - doc: RoleID is the ID of one process role of a binary.
@@ -3840,15 +3845,6 @@ packages:
           - name: role
             type: string
         name: RoleID
-        impl: roleID
-        out:
-          - type: string
-      - doc: LibraryID is the ID of a library.
-        in:
-          - name: library
-            type: string
-        name: LibraryID
-        impl: libraryID
         out:
           - type: string
       - doc: |-
@@ -3888,14 +3884,6 @@ packages:
         name: QualifiedService
         out:
           - type: string
-      - doc: "ModulePrefix is a module's default mount prefix: \"/<name>/\"."
-        in:
-          - name: name
-            type: string
-        name: ModulePrefix
-        impl: modulePrefix
-        out:
-          - type: string
       - doc: |-
           UnderPrefix is a route declared at path, served under a module's mount
           prefix: "/reports" under "/moderation/" is "/moderation/reports", and
@@ -3905,7 +3893,6 @@ packages:
           - name: path
             type: string
         name: UnderPrefix
-        impl: underPrefix
         out:
           - type: string
       - doc: |-
@@ -4474,48 +4461,6 @@ packages:
               type: string
       - decl: true
         doc: |-
-          MailMessage is a whole captured mail, for the Studio's mailbox.
-          It is kept by the capture transport of dev and tests only, never in
-          production.
-        name: MailMessage
-        struct:
-          fields:
-            - embedded: true
-              type: MailSummary
-            - doc: Text is the plain text body.
-              name: Text
-              tag: json:"text,omitempty"
-              type: string
-            - doc: |-
-                HTML is the HTML body. The Studio renders it in a sandboxed frame
-                that runs no script.
-              name: HTML
-              tag: json:"html,omitempty"
-              type: string
-            - doc: Headers are the extra headers, rendered.
-              name: Headers
-              tag: json:"headers,omitempty"
-              type: map[string]string
-            - doc: Raw is the composed message, as the transport received it.
-              name: Raw
-              tag: json:"raw,omitempty"
-              type: string
-      - decl: true
-        doc: |-
-          EdgeKind says how two nodes relate.
-          It is a wire format — the graph's JSON and the Studio's TypeScript unions
-          carry these names —, so it stays a string.
-        name: EdgeKind
-        underlying: string
-      - decl: true
-        doc: |-
-          EventType names the kind of a live event.
-          It is a wire format — the graph's JSON and the Studio's TypeScript unions
-          carry these names —, so it stays a string.
-        name: EventType
-        underlying: string
-      - decl: true
-        doc: |-
           StoreHistoryMessage is what a store remembers of its records.
           Fields names the fields it keeps former values of; Kept and Bytes weigh
           them.
@@ -4707,7 +4652,6 @@ packages:
               QualifiedServiceName is the service's ID segment: the qualification
               [QualifiedService] applies.
             name: QualifiedServiceName
-            impl: qualifiedServiceName
             out:
               - type: string
             recv: pointer
@@ -4755,7 +4699,6 @@ packages:
               - name: id
                 type: string
             name: Node
-            impl: node
             out:
               - type: "*NodeEntity"
             recv: pointer
@@ -4764,7 +4707,6 @@ packages:
               - name: id
                 type: string
             name: Edge
-            impl: edge
             out:
               - type: "*EdgeMessage"
             recv: pointer
@@ -4790,7 +4732,6 @@ packages:
               - name: name
                 type: string
             name: ModuleOf
-            impl: moduleOf
             out:
               - type: "*ModuleMessage"
             recv: pointer
@@ -6326,13 +6267,6 @@ packages:
               name: History
               tag: json:"history,omitempty"
               type: int
-      - decl: true
-        doc: |-
-          NodeKind is the closed set of building blocks a kit product is made of.
-          It is a wire format — the graph's JSON and the Studio's TypeScript unions
-          carry these names —, so it stays a string.
-        name: NodeKind
-        underlying: string
       - decl: true
         doc: |-
           BinarySpec is one executable the product ships: the [NodeEntity.Binary] of a
@@ -8001,6 +7935,51 @@ packages:
               name: Node
               tag: json:"node,omitempty"
               type: string
+      - doc: |-
+          MailMessage is a whole captured mail, for the Studio's mailbox.
+          It is kept by the capture transport of dev and tests only, never in
+          production.
+        name: MailMessage
+        struct:
+          fields:
+            - embedded: true
+              type: MailSummary
+            - doc: Text is the plain text body.
+              name: Text
+              tag: json:"text,omitempty"
+              type: string
+            - doc: |-
+                HTML is the HTML body. The Studio renders it in a sandboxed frame
+                that runs no script.
+              name: HTML
+              tag: json:"html,omitempty"
+              type: string
+            - doc: Headers are the extra headers, rendered.
+              name: Headers
+              tag: json:"headers,omitempty"
+              type: map[string]string
+            - doc: Raw is the composed message, as the transport received it.
+              name: Raw
+              tag: json:"raw,omitempty"
+              type: string
+      - doc: |-
+          EdgeKind says how two nodes relate.
+          It is a wire format — the graph's JSON and the Studio's TypeScript unions
+          carry these names —, so it stays a string.
+        name: EdgeKind
+        underlying: string
+      - doc: |-
+          EventType names the kind of a live event.
+          It is a wire format — the graph's JSON and the Studio's TypeScript unions
+          carry these names —, so it stays a string.
+        name: EventType
+        underlying: string
+      - doc: |-
+          NodeKind is the closed set of building blocks a kit product is made of.
+          It is a wire format — the graph's JSON and the Studio's TypeScript unions
+          carry these names —, so it stays a string.
+        name: NodeKind
+        underlying: string
     variables:
       - doc: |-
           IDPattern is the whole grammar as one regular expression, anchored —

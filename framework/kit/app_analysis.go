@@ -11,9 +11,9 @@ import (
 // tool gives one, in dev, through [Analyzer].
 type AnalyzeFunc = ikit.AnalyzeFunc
 
-// analyzer is Analyzer's body: decl_gen.go writes Analyzer, from the
-// design, as one call of it.
-func analyzer(fn AnalyzeFunc) AppOption {
+// Analyzer runs fn in the background once the product serves, in dev and when
+// KIT_ANALYZE allows it. Without one, the graph is the runtime's alone.
+func Analyzer(fn AnalyzeFunc) AppOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.Analyzer(fn)
 }

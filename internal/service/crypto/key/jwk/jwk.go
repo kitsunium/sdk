@@ -77,23 +77,23 @@ func (k KeyValue) KeyOps() []string {
 	return slices.Clone(k.keyOps)
 }
 
-// isZero is KeyValue.IsZero's body: decl_gen.go writes KeyValue.IsZero, from the
-// design, as one call of it.
-func (k KeyValue) isZero() bool {
+// IsZero reports whether k is the zero KeyValue — no kty, hence nothing to
+// serialise. Every marshaller rejects it with MissingMember.
+func (k KeyValue) IsZero() bool {
 	//: kty is required by RFC 7517 §4.1, so its absence marks the zero value.
 	return k.kty == ""
 }
 
-// isPrivate is KeyValue.IsPrivate's body: decl_gen.go writes KeyValue.IsPrivate, from the
-// design, as one call of it.
-func (k KeyValue) isPrivate() bool {
+// IsPrivate reports whether k holds private material ("d" or "k"). It is the
+// question to ask before publishing a set: a true here means MarshalPrivate,
+// and only MarshalPrivate, can serialise this key whole.
+func (k KeyValue) IsPrivate() bool {
 	//: the single secret member covers EC "d", OKP "d" and oct "k".
 	return len(k.priv) != 0
 }
 
-// withKid is KeyValue.WithKid's body: decl_gen.go writes KeyValue.WithKid, from the
-// design, as one call of it.
-func (k KeyValue) withKid(kid string) KeyValue {
+// WithKid returns a copy of k carrying kid. Passing the empty string clears it.
+func (k KeyValue) WithKid(kid string) KeyValue {
 	//: the value receiver already gives us the copy; slices stay shared but the
 	//: type exposes no way to mutate them.
 	k.kid = kid
@@ -101,36 +101,37 @@ func (k KeyValue) withKid(kid string) KeyValue {
 	return k
 }
 
-// withUse is KeyValue.WithUse's body: decl_gen.go writes KeyValue.WithUse, from the
-// design, as one call of it.
-func (k KeyValue) withUse(use string) KeyValue {
+// WithUse returns a copy of k carrying use ("sig" / "enc"). The value is not
+// validated — RFC 7517 §4.2 leaves the vocabulary open.
+func (k KeyValue) WithUse(use string) KeyValue {
 	//: same copy-on-write shape as WithKid.
 	k.use = use
 	//: hand back the modified copy.
 	return k
 }
 
-// withAlg is KeyValue.WithAlg's body: decl_gen.go writes KeyValue.WithAlg, from the
-// design, as one call of it.
-func (k KeyValue) withAlg(alg string) KeyValue {
+// WithAlg returns a copy of k carrying alg (e.g. "ES256"). The value is not
+// checked against crv: an "alg" is a publisher's assertion, and rejecting an
+// unfamiliar one here would break interop for no security gain.
+func (k KeyValue) WithAlg(alg string) KeyValue {
 	//: same copy-on-write shape as WithKid.
 	k.alg = alg
 	//: hand back the modified copy.
 	return k
 }
 
-// withKeyOps is KeyValue.WithKeyOps's body: decl_gen.go writes KeyValue.WithKeyOps, from the
-// design, as one call of it.
-func (k KeyValue) withKeyOps(ops ...string) KeyValue {
+// WithKeyOps returns a copy of k carrying key_ops. The slice is copied.
+func (k KeyValue) WithKeyOps(ops ...string) KeyValue {
 	//: clone so a later mutation of the caller's slice cannot reach the key.
 	k.keyOps = slices.Clone(ops)
 	//: hand back the modified copy.
 	return k
 }
 
-// public is KeyValue.Public's body: decl_gen.go writes KeyValue.Public, from the
-// design, as one call of it.
-func (k KeyValue) public() (pub KeyValue, err error) {
+// Public returns the public half of k: the same key with its private member
+// dropped. It refuses a symmetric key with NoPublicForm, because "the public
+// half of an oct key" is not a thing that exists — the k member IS the secret.
+func (k KeyValue) Public() (pub KeyValue, err error) {
 	//: the zero KeyValue has nothing to reduce.
 	if k.IsZero() {
 		//: nothing to publish.

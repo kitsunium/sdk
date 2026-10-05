@@ -117,7 +117,7 @@ type ChangedSetValue struct{}
 ```
 
 <a name="ChangedSetValue.ContainsDir"></a>
-### func \(ChangedSetValue\) [ContainsDir](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/git/decl_gen.go>)
+### func \(ChangedSetValue\) [ContainsDir](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/git/changed_set.go>)
 
 ```go
 func (*ChangedSetValue) ContainsDir(absDir string) bool
@@ -126,7 +126,7 @@ func (*ChangedSetValue) ContainsDir(absDir string) bool
 ContainsDir reports whether absDir directly encloses any touched file. It is NOT recursive: the parent of a touched directory is not itself touched.
 
 <a name="ChangedSetValue.ContainsFile"></a>
-### func \(ChangedSetValue\) [ContainsFile](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/git/decl_gen.go>)
+### func \(ChangedSetValue\) [ContainsFile](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/git/changed_set.go>)
 
 ```go
 func (*ChangedSetValue) ContainsFile(absFile string) bool

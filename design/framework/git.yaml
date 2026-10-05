@@ -158,13 +158,13 @@ packages:
           Resolve computes the changed set for the repository containing cfg.Root,
           returning a degraded Resolution rather than an error when it cannot be
           trusted. Check Resolution.Degraded before reading Set.
+        impl: resolve
         in:
           - name: ctx
             type: context.Context
           - name: cfg
             type: Config
         name: Resolve
-        impl: resolve
         out:
           - type: Resolution
       - doc: |-
@@ -405,8 +405,8 @@ packages:
               KTN-VAR-BIGSTRUCT exists to catch. Assign the resolution to a variable and
               call it on that; the chained form Resolve(...).Degraded() does not compile,
               which is a fair trade for not copying 88 bytes per query.
-            name: Degraded
             impl: degraded
+            name: Degraded
             out:
               - type: bool
             recv: pointer
@@ -455,7 +455,6 @@ packages:
               - name: line
                 type: int
             name: Contains
-            impl: contains
             out:
               - type: bool
             recv: value
@@ -653,7 +652,6 @@ packages:
               - name: absFile
                 type: string
             name: ContainsFile
-            impl: containsFile
             out:
               - type: bool
             recv: pointer
@@ -664,15 +662,14 @@ packages:
               - name: absDir
                 type: string
             name: ContainsDir
-            impl: containsDir
             out:
               - type: bool
             recv: pointer
           - doc: |-
               IsEmpty reports whether the changed-set contains no touched files at all
               (clean branch, or a branch whose every change the caller's filter excluded).
-            name: IsEmpty
             impl: isEmpty
+            name: IsEmpty
             out:
               - type: bool
             recv: pointer

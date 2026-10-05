@@ -326,11 +326,11 @@ packages:
       - doc: |-
           IsRegisteredClaim reports whether name is one of the seven registered claim
           names this domain models itself.
+        impl: isRegisteredClaim
         in:
           - name: name
             type: string
         name: IsRegisteredClaim
-        impl: isRegisteredClaim
         out:
           - type: bool
       - doc: |-
@@ -340,8 +340,8 @@ packages:
 
           pkg/v1/security/token re-exports it as the shorter NewClaims, since the Value suffix
           is a core-layer naming rule (KTN-STRUCT-ROLE) and not a consumer's concern.
-        name: NewClaimsValue
         impl: newClaimsValue
+        name: NewClaimsValue
         out:
           - type: ClaimsValue
     imports:
@@ -752,7 +752,6 @@ packages:
               - name: name
                 type: string
             name: PrivateRaw
-            impl: privateRaw
             out:
               - name: raw
                 type: "[]byte"
@@ -761,7 +760,6 @@ packages:
             recv: value
           - doc: IsZero reports whether c carries no claim at all.
             name: IsZero
-            impl: isZero
             out:
               - type: bool
             recv: value
@@ -779,20 +777,11 @@ packages:
             out:
               - type: string
             recv: value
-          - doc: |-
-              GoString implements fmt.GoStringer so %#v stays redacted too — fmt bypasses
-              String for Go-syntax formatting and would otherwise dump every field.
-            name: GoString
-            impl: goString
-            out:
-              - type: string
-            recv: value
           - doc: WithIssuer returns a copy of c carrying iss. The empty string clears it.
             in:
               - name: iss
                 type: string
             name: WithIssuer
-            impl: withIssuer
             out:
               - type: ClaimsValue
             recv: value
@@ -801,7 +790,6 @@ packages:
               - name: sub
                 type: string
             name: WithSubject
-            impl: withSubject
             out:
               - type: ClaimsValue
             recv: value
@@ -810,7 +798,6 @@ packages:
               - name: jti
                 type: string
             name: WithID
-            impl: withID
             out:
               - type: ClaimsValue
             recv: value
@@ -822,7 +809,6 @@ packages:
               - name: aud
                 type: string
             name: WithAudience
-            impl: withAudience
             out:
               - type: ClaimsValue
             recv: value
@@ -834,7 +820,6 @@ packages:
               - name: exp
                 type: time.Time
             name: WithExpiry
-            impl: withExpiry
             out:
               - type: ClaimsValue
             recv: value
@@ -843,7 +828,6 @@ packages:
               - name: nbf
                 type: time.Time
             name: WithNotBefore
-            impl: withNotBefore
             out:
               - type: ClaimsValue
             recv: value
@@ -852,7 +836,6 @@ packages:
               - name: iat
                 type: time.Time
             name: WithIssuedAt
-            impl: withIssuedAt
             out:
               - type: ClaimsValue
             recv: value
@@ -883,6 +866,14 @@ packages:
                 type: ClaimsValue
               - name: err
                 type: error
+            recv: value
+          - doc: |-
+              GoString implements fmt.GoStringer so %#v stays redacted too — fmt bypasses
+              String for Go-syntax formatting and would otherwise dump every field.
+            impl: goString
+            name: GoString
+            out:
+              - type: string
             recv: value
         name: ClaimsValue
         struct:
@@ -926,6 +917,15 @@ packages:
           is absent by construction.
         methods:
           - doc: |-
+              Known reports whether a names an algorithm this domain implements. It is the
+              guard every constructor runs before binding a key, so an out-of-range value
+              is refused at construction rather than at the first verification.
+            impl: known
+            name: Known
+            out:
+              - type: bool
+            recv: value
+          - doc: |-
               String reports the wire name of a — the JOSE "alg" header value for the JWS
               algorithms, and the version+purpose header for PASETO. An unknown Algorithm
               renders "unknown", which matches no wire name, so a zero value can never be
@@ -933,15 +933,6 @@ packages:
             name: String
             out:
               - type: string
-            recv: value
-          - doc: |-
-              Known reports whether a names an algorithm this domain implements. It is the
-              guard every constructor runs before binding a key, so an out-of-range value
-              is refused at construction rather than at the first verification.
-            name: Known
-            impl: known
-            out:
-              - type: bool
             recv: value
         name: Algorithm
         underlying: uint8

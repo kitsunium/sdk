@@ -53,16 +53,16 @@ func (s SourceValue) envPrefix() string {
 	return b.String()
 }
 
-// autoUpgradeEnv is SourceValue.AutoUpgradeEnv's body: decl_gen.go writes SourceValue.AutoUpgradeEnv, from the
-// design, as one call of it.
-func (s SourceValue) autoUpgradeEnv() string {
+// AutoUpgradeEnv is the variable authorising an upgrade the user did not ask
+// for, e.g. MY_TOOL_AUTO_UPGRADE.
+func (s SourceValue) AutoUpgradeEnv() string {
 	//: prefix plus the fixed suffix.
 	return s.envPrefix() + envSuffixAutoUpgrade
 }
 
-// sudoOptInEnv is SourceValue.SudoOptInEnv's body: decl_gen.go writes SourceValue.SudoOptInEnv, from the
-// design, as one call of it.
-func (s SourceValue) sudoOptInEnv() string {
+// SudoOptInEnv is the variable authorising privilege escalation when the install
+// directory is not writable, e.g. MY_TOOL_ALLOW_SUDO.
+func (s SourceValue) SudoOptInEnv() string {
 	//: prefix plus the fixed suffix.
 	return s.envPrefix() + envSuffixAllowSudo
 }

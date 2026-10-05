@@ -512,7 +512,7 @@ type DBPointer struct {
 ```
 
 <a name="DBPointer.Equal"></a>
-### func \(DBPointer\) [Equal](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/decl_gen.go>)
+### func \(DBPointer\) [Equal](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/types.go>)
 
 ```go
 func (DBPointer) Equal(other DBPointer) bool
@@ -521,7 +521,7 @@ func (DBPointer) Equal(other DBPointer) bool
 Equal reports whether p and other name the same namespace and identifier.
 
 <a name="DBPointer.IsZero"></a>
-### func \(DBPointer\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/decl_gen.go>)
+### func \(DBPointer\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/types.go>)
 
 ```go
 func (DBPointer) IsZero() bool
@@ -563,7 +563,7 @@ func (DateTime) MarshalJSON() ([]byte, error)
 MarshalJSON writes dt as encoding/json writes the UTC time.Time it denotes.
 
 <a name="DateTime.Time"></a>
-### func \(DateTime\) [Time](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/decl_gen.go>)
+### func \(DateTime\) [Time](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/types.go>)
 
 ```go
 func (DateTime) Time() time.Time
@@ -769,7 +769,7 @@ type ObjectID[12] byte
 ```
 
 <a name="ObjectID.Hex"></a>
-### func \(ObjectID\) [Hex](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/decl_gen.go>)
+### func \(ObjectID\) [Hex](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/objectid.go>)
 
 ```go
 func (ObjectID) Hex() string
@@ -778,7 +778,7 @@ func (ObjectID) Hex() string
 Hex returns the 24-digit lowercase hexadecimal form of id.
 
 <a name="ObjectID.IsZero"></a>
-### func \(ObjectID\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/decl_gen.go>)
+### func \(ObjectID\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/objectid.go>)
 
 ```go
 func (ObjectID) IsZero() bool
@@ -861,7 +861,7 @@ type Regex struct {
 ```
 
 <a name="Regex.Equal"></a>
-### func \(Regex\) [Equal](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/decl_gen.go>)
+### func \(Regex\) [Equal](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/types.go>)
 
 ```go
 func (Regex) Equal(other Regex) bool
@@ -941,7 +941,7 @@ func (Timestamp) Before(other Timestamp) bool
 Before reports whether t is earlier than other.
 
 <a name="Timestamp.Compare"></a>
-### func \(Timestamp\) [Compare](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/decl_gen.go>)
+### func \(Timestamp\) [Compare](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/types.go>)
 
 ```go
 func (Timestamp) Compare(other Timestamp) int

@@ -535,7 +535,7 @@ type CloseCode uint16
 ```
 
 <a name="CloseCode.Echoable"></a>
-### func \(CloseCode\) [Echoable](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/decl_gen.go>)
+### func \(CloseCode\) [Echoable](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/websocket_close.go>)
 
 ```go
 func (CloseCode) Echoable() WSCloseCode
@@ -546,7 +546,7 @@ Echoable returns the code to send back when answering this one.
 It exists because §5.5.1 says an endpoint SHOULD echo the peer's status code, and the one code a peer can leave us holding — WSCloseNoStatus, for a Close with no payload — is a code §7.4.1 forbids on the wire. Echoing blindly is therefore a protocol error waiting for the first well-behaved peer that closes without saying why.
 
 <a name="CloseCode.Sendable"></a>
-### func \(CloseCode\) [Sendable](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/decl_gen.go>)
+### func \(CloseCode\) [Sendable](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/websocket_close.go>)
 
 ```go
 func (CloseCode) Sendable() bool
@@ -707,7 +707,7 @@ type Message struct {
 ```
 
 <a name="Message.OpCode"></a>
-### func \(Message\) [OpCode](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/decl_gen.go>)
+### func \(Message\) [OpCode](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/websocket_message.go>)
 
 ```go
 func (Message) OpCode() WSOpCode

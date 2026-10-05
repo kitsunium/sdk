@@ -2,9 +2,12 @@ package selfupdate
 
 import "io"
 
-// withAutomaticConsent is Service.WithAutomaticConsent's body: decl_gen.go writes Service.WithAutomaticConsent, from the
-// design, as one call of it.
-func (u *Service) withAutomaticConsent() *Service {
+// WithAutomaticConsent declares that the PRODUCT consents to unrequested
+// upgrades — a status line that updates itself silently, its decision D11 —,
+// so no environment variable has to grant it. An operator still refuses with
+// <PREFIX>_AUTO_UPGRADE=0: an explicit answer always wins. It grants nothing
+// else: escalation keeps its own, separate opt-in.
+func (u *Service) WithAutomaticConsent() *Service {
 	//: a nil Service stays nil, as every With* here.
 	if u == nil {
 		//: nothing to configure.
@@ -14,9 +17,10 @@ func (u *Service) withAutomaticConsent() *Service {
 	return u
 }
 
-// withoutElevation is Service.WithoutElevation's body: decl_gen.go writes Service.WithoutElevation, from the
-// design, as one call of it.
-func (u *Service) withoutElevation() *Service {
+// WithoutElevation forbids the privileged replacement outright, whatever
+// <PREFIX>_ALLOW_SUDO says: a binary installed where its user cannot write is
+// reported (ElevationNotAuthorised), never replaced through sudo.
+func (u *Service) WithoutElevation() *Service {
 	//: a nil Service stays nil, as every With* here.
 	if u == nil {
 		//: nothing to configure.

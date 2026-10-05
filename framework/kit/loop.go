@@ -27,22 +27,22 @@ type LoopOption = ikit.LoopConfigurer
 // to one minute — and reads its select statements to draw what it waits on.
 type Routine = ikit.Routine
 
-// wakeEvery is WakeEvery's body: decl_gen.go writes WakeEvery, from the
-// design, as one call of it.
+// WakeEvery wakes the loop every d.
 //
 // IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
 // only hands it to the declaration it configures.
-func wakeEvery(d time.Duration) LoopOption {
+func WakeEvery(d time.Duration) LoopOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.WakeEvery(d)
 }
 
-// wakeAt is WakeAt's body: decl_gen.go writes WakeAt, from the
-// design, as one call of it.
+// WakeAt wakes the loop at the time next returns, asked again after every
+// run; false means "no deadline for now". It is how a loop sleeps exactly
+// until its next piece of work — the next reminder due — rather than polling.
 //
 // IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
 // only hands it to the declaration it configures.
-func wakeAt(next func(context.Context) (time.Time, bool)) LoopOption {
+func WakeAt(next func(context.Context) (time.Time, bool)) LoopOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.WakeAt(next)
 }

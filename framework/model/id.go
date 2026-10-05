@@ -52,9 +52,9 @@ type (
 	ID = core.IDValue
 )
 
-// validSegment is ValidSegment's body: decl_gen.go writes ValidSegment, from the
-// design, as one call of it.
-func validSegment(s string) bool {
+// ValidSegment reports whether s is a legal service, module, binary, role or
+// library name.
+func ValidSegment(s string) bool {
 	return core.ValidSegment(s)
 }
 
@@ -64,9 +64,8 @@ func validName(s string) bool {
 	return core.ValidName(s)
 }
 
-// validContract is ValidContract's body: decl_gen.go writes ValidContract, from the
-// design, as one call of it.
-func validContract(s string) bool {
+// ValidContract reports whether s names a versioned contract: "render/v1".
+func ValidContract(s string) bool {
 	return core.ValidContract(s)
 }
 
@@ -77,9 +76,8 @@ func ParseID(s string) (ID, error) {
 	return core.ParseID(s)
 }
 
-// binaryID is BinaryID's body: decl_gen.go writes BinaryID, from the
-// design, as one call of it.
-func binaryID(binary string) string {
+// BinaryID is the ID of a binary.
+func BinaryID(binary string) string {
 	return core.BinaryID(binary)
 }
 

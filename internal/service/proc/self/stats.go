@@ -35,9 +35,8 @@ const maxDuration time.Duration = math.MaxInt64
 // runtime's own bring-up — microseconds, not the lifetime of anything.
 var started = time.Now()
 
-// count is DistributionValue.Count's body: decl_gen.go writes DistributionValue.Count, from the
-// design, as one call of it.
-func (d DistributionValue) count() uint64 {
+// Count returns how many observations the distribution holds.
+func (d DistributionValue) Count() uint64 {
 	var total uint64
 	//: every bucket's count.
 	for _, count := range d.Counts {

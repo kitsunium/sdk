@@ -299,7 +299,7 @@ type BuildInfo struct {
 ```
 
 <a name="BuildInfo.Module"></a>
-### func \(BuildInfo\) [Module](<https://github.com/kitsunium/sdk/blob/main/internal/service/proc/self/decl_gen.go>)
+### func \(BuildInfo\) [Module](<https://github.com/kitsunium/sdk/blob/main/internal/service/proc/self/build.go>)
 
 ```go
 func (*BuildInfo) Module(path string) (found ModuleValue, ok bool)
@@ -329,7 +329,7 @@ type Distribution struct {
 ```
 
 <a name="Distribution.Count"></a>
-### func \(Distribution\) [Count](<https://github.com/kitsunium/sdk/blob/main/internal/service/proc/self/decl_gen.go>)
+### func \(Distribution\) [Count](<https://github.com/kitsunium/sdk/blob/main/internal/service/proc/self/stats.go>)
 
 ```go
 func (Distribution) Count() uint64
@@ -379,7 +379,7 @@ type ExitResult struct {
 ```
 
 <a name="ExitResult.Success"></a>
-### func \(ExitResult\) [Success](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/decl_gen.go>)
+### func \(ExitResult\) [Success](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/exit.go>)
 
 ```go
 func (ExitResult) Success() bool
@@ -602,7 +602,7 @@ func (Signal) Known() bool
 Known reports whether s names a signal in the platform table.
 
 <a name="Signal.OS"></a>
-### func \(Signal\) [OS](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/decl_gen.go>)
+### func \(Signal\) [OS](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/signal.go>)
 
 ```go
 func (Signal) OS() os.Signal

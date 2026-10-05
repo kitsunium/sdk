@@ -19,15 +19,24 @@ func edgeID(from string, kind EdgeKind, to, label string) string {
 	return core.EdgeID(from, kind, to, label)
 }
 
-// compareSource is CompareSource's body: decl_gen.go writes CompareSource, from the
-// design, as one call of it.
-func compareSource(a, b Source) int {
+// CompareSource orders sources by root, file, then line.
+func CompareSource(a, b Source) int {
 	return core.CompareSource(a, b)
 }
 
-// merge is Merge's body: decl_gen.go writes Merge, from the
-// design, as one call of it.
-func merge(base, extra *Graph) *Graph {
+// Merge enriches a graph with what another description of the same product
+// knows. base is authoritative on which nodes exist — a runtime graph describes
+// what the process actually serves —, on the modules it mounts, on what each
+// of its ports calls and on which stores feed each of its watches: the app
+// chose them when it started, where the analysis only reads the same rules
+// over the whole module. extra, typically
+// the static analysis, contributes documentation, handler ranges — an
+// authorization function's too —, transition callers and the edges it
+// found. Nodes only extra knows about are dropped: code that is compiled but
+// not mounted in this app is not part of this product — save a node of a
+// module's service the base mounts, which a package the binary does not link
+// declares: a warning says so.
+func Merge(base, extra *Graph) *Graph {
 	return core.Merge(base, extra)
 }
 

@@ -11,9 +11,8 @@ const devVersion string = "dev"
 // Leave it as the zero value in local dev; FrameworkVersion returns "dev".
 var Version string
 
-// frameworkVersion is FrameworkVersion's body: decl_gen.go writes FrameworkVersion, from the
-// design, as one call of it.
-func frameworkVersion() string {
+// FrameworkVersion returns the linked-in SDK version, or "dev" if unset.
+func FrameworkVersion() string {
 	//: empty means no -ldflags override — return the dev sentinel.
 	if Version == "" {
 		//: keep the sentinel stable so tests can pin expectations.

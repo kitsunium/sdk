@@ -221,7 +221,6 @@ packages:
           - name: raw
             type: "[]byte"
         name: NewID
-        impl: newID
         out:
           - name: id
             type: ID
@@ -683,8 +682,37 @@ packages:
               This is the ONLY way the secret leaves the type. Hand it to a Set-Cookie
               value or to [Sealer.Seal]; never to a logger, a metric label, a URL, or an
               error's Public string. A zero-value ID reveals "".
-            name: Reveal
             impl: reveal
+            name: Reveal
+            out:
+              - type: string
+            recv: value
+          - doc: |-
+              Equal reports whether i and other are the same identifier, in time that does
+              not depend on how many leading bytes they share. Every comparison of a
+              session identifier in this SDK goes through here or through crypto/subtle
+              directly; none of them uses == or string equality.
+            impl: equal
+            in:
+              - name: other
+                type: ID
+            name: Equal
+            out:
+              - type: bool
+            recv: value
+          - doc: |-
+              IsZero reports whether the ID names nothing — the zero value, which no
+              constructor produces. A store refuses it with [InvalidID].
+            impl: isZero
+            name: IsZero
+            out:
+              - type: bool
+            recv: value
+          - doc: |-
+              GoString implements fmt.GoStringer so %#v stays redacted: fmt bypasses String
+              for Go-syntax formatting and would otherwise dump the backing slice.
+            impl: goString
+            name: GoString
             out:
               - type: string
             recv: value
@@ -704,39 +732,10 @@ packages:
               - type: string
             recv: value
           - doc: |-
-              Equal reports whether i and other are the same identifier, in time that does
-              not depend on how many leading bytes they share. Every comparison of a
-              session identifier in this SDK goes through here or through crypto/subtle
-              directly; none of them uses == or string equality.
-            in:
-              - name: other
-                type: ID
-            name: Equal
-            impl: equal
-            out:
-              - type: bool
-            recv: value
-          - doc: |-
-              IsZero reports whether the ID names nothing — the zero value, which no
-              constructor produces. A store refuses it with [InvalidID].
-            name: IsZero
-            impl: isZero
-            out:
-              - type: bool
-            recv: value
-          - doc: |-
               String implements fmt.Stringer and always redacts, so an identifier never
               reaches a log line through %v or %s. Use [ID.Reveal] when the destination is
               a cookie, and [ID.Digest] when it is a log line that needs correlation.
             name: String
-            out:
-              - type: string
-            recv: value
-          - doc: |-
-              GoString implements fmt.GoStringer so %#v stays redacted: fmt bypasses String
-              for Go-syntax formatting and would otherwise dump the backing slice.
-            name: GoString
-            impl: goString
             out:
               - type: string
             recv: value
@@ -760,6 +759,14 @@ packages:
           that call always mints a new identifier. A caller therefore cannot express
           "keep this identifier and log this user in" — the sentence has no method.
         methods:
+          - doc: |-
+              GoString implements fmt.GoStringer so %#v stays redacted too — fmt bypasses
+              String for Go-syntax formatting and would otherwise dump every field.
+            impl: goString
+            name: GoString
+            out:
+              - type: string
+            recv: value
           - doc: "ID reports the session's identifier. It is a bearer secret: see [ID]."
             name: ID
             out:
@@ -794,7 +801,6 @@ packages:
               averaging or by preferring the later one — the earlier deadline always wins,
               which is what makes the absolute timeout a ceiling rather than a suggestion.
             name: ExpiresAt
-            impl: expiresAt
             out:
               - type: time.Time
             recv: value
@@ -813,7 +819,6 @@ packages:
               [Store] method returns alongside its error. There is no "invalid, but here
               are the claims anyway" path.
             name: IsZero
-            impl: isZero
             out:
               - type: bool
             recv: value
@@ -879,14 +884,6 @@ packages:
               tell "the session was empty" from "the session had five keys", which is what
               a %v is usually reaching for.
             name: String
-            out:
-              - type: string
-            recv: value
-          - doc: |-
-              GoString implements fmt.GoStringer so %#v stays redacted too — fmt bypasses
-              String for Go-syntax formatting and would otherwise dump every field.
-            name: GoString
-            impl: goString
             out:
               - type: string
             recv: value

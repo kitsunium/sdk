@@ -22,22 +22,21 @@ type Mailer = ikit.Mailer
 // MailerOption configures a mailer.
 type MailerOption = ikit.MailerConfigurer
 
-// from is From's body: decl_gen.go writes From, from the
-// design, as one call of it.
+// From sets the sender of every message that names none.
 //
 // IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
 // only hands it to the declaration it configures.
-func from(name, addr string) MailerOption {
+func From(name, addr string) MailerOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.From(name, addr)
 }
 
-// mailAttempts is MailAttempts's body: decl_gen.go writes MailAttempts, from the
-// design, as one call of it.
+// MailAttempts is how many deliveries a message gets before it is
+// dead-lettered. The default is 6, backing off from one second.
 //
 // IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
 // only hands it to the declaration it configures.
-func mailAttempts(n int) MailerOption {
+func MailAttempts(n int) MailerOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.MailAttempts(n)
 }

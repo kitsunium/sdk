@@ -20,32 +20,37 @@ type Listener = ikit.Listener
 // ListenerOption tunes a listener.
 type ListenerOption = ikit.ListenerConfigurer
 
-// socketPath is SocketPath's body: decl_gen.go writes SocketPath, from the
-// design, as one call of it.
+// SocketPath places the listener's socket at path — absolute, at most 103
+// bytes — instead of <runtime dir of the app>/<service>-<name>.sock.
 //
 // IFACE-OPAQUE: ListenerOption is sealed — its one method is unexported —
 // so only this package makes one, and a caller only passes it to Listen.
-func socketPath(path string) ListenerOption {
+func SocketPath(path string) ListenerOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.SocketPath(path)
 }
 
-// socketPer is SocketPer's body: decl_gen.go writes SocketPer, from the
-// design, as one call of it.
+// SocketPer names the listener's socket after the value of scopes in this
+// process — <runtime dir of the app>/<service>-<name>-<key>.sock, the key
+// being [ScopeKey]'s —: one daemon per user, per executable, per
+// configuration directory. A client finds it with SocketPathIn or DialIn,
+// which compute the same key from the same declaration.
 //
 // IFACE-OPAQUE: ListenerOption is sealed — its one method is unexported —
 // so only this package makes one, and a caller only passes it to Listen.
-func socketPer(scopes ...Scope) ListenerOption {
+func SocketPer(scopes ...Scope) ListenerOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.SocketPer(scopes...)
 }
 
-// allowPeers is AllowPeers's body: decl_gen.go writes AllowPeers, from the
-// design, as one call of it.
+// AllowPeers admits accounts besides the product's own: an on-call group
+// declared at deployment. The kernel checks them where it names the peer; the
+// socket's directory must still let them through, which is the deployment's
+// to arrange.
 //
 // IFACE-OPAQUE: ListenerOption is sealed — its one method is unexported —
 // so only this package makes one, and a caller only passes it to Listen.
-func allowPeers(uids, gids []int) ListenerOption {
+func AllowPeers(uids, gids []int) ListenerOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.AllowPeers(uids, gids)
 }

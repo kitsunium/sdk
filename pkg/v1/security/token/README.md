@@ -1252,7 +1252,7 @@ func (Claims) ID() string
 ID reports the "jti" claim, empty when the token carried none.
 
 <a name="Claims.IsZero"></a>
-### func \(Claims\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/decl_gen.go>)
+### func \(Claims\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims.go>)
 
 ```go
 func (Claims) IsZero() bool
@@ -1297,7 +1297,7 @@ func (Claims) PrivateNames() []string
 PrivateNames returns the application claim names, sorted, so a caller enumerating them gets a stable order rather than Go's randomised map order.
 
 <a name="Claims.PrivateRaw"></a>
-### func \(Claims\) [PrivateRaw](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/decl_gen.go>)
+### func \(Claims\) [PrivateRaw](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims.go>)
 
 ```go
 func (Claims) PrivateRaw(name string) (raw []byte, found bool)
@@ -1326,7 +1326,7 @@ func (Claims) Subject() string
 Subject reports the "sub" claim, empty when the token carried none.
 
 <a name="Claims.WithAudience"></a>
-### func \(Claims\) [WithAudience](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/decl_gen.go>)
+### func \(Claims\) [WithAudience](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims_with.go>)
 
 ```go
 func (Claims) WithAudience(aud ...string) ClaimsValue
@@ -1335,7 +1335,7 @@ func (Claims) WithAudience(aud ...string) ClaimsValue
 WithAudience returns a copy of c whose "aud" claim is exactly aud. Passing no argument clears the claim; the slice is copied, so a later mutation of the caller's backing array cannot reach the claim set.
 
 <a name="Claims.WithExpiry"></a>
-### func \(Claims\) [WithExpiry](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/decl_gen.go>)
+### func \(Claims\) [WithExpiry](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims_with.go>)
 
 ```go
 func (Claims) WithExpiry(exp time.Time) ClaimsValue
@@ -1344,7 +1344,7 @@ func (Claims) WithExpiry(exp time.Time) ClaimsValue
 WithExpiry returns a copy of c carrying exp. The zero Time clears the claim, which a verifier reads as "no expiry was sent" — not as "expired".
 
 <a name="Claims.WithID"></a>
-### func \(Claims\) [WithID](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/decl_gen.go>)
+### func \(Claims\) [WithID](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims_with.go>)
 
 ```go
 func (Claims) WithID(jti string) ClaimsValue
@@ -1353,7 +1353,7 @@ func (Claims) WithID(jti string) ClaimsValue
 WithID returns a copy of c carrying jti. The empty string clears it.
 
 <a name="Claims.WithIssuedAt"></a>
-### func \(Claims\) [WithIssuedAt](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/decl_gen.go>)
+### func \(Claims\) [WithIssuedAt](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims_with.go>)
 
 ```go
 func (Claims) WithIssuedAt(iat time.Time) ClaimsValue
@@ -1362,7 +1362,7 @@ func (Claims) WithIssuedAt(iat time.Time) ClaimsValue
 WithIssuedAt returns a copy of c carrying iat. The zero Time clears it.
 
 <a name="Claims.WithIssuer"></a>
-### func \(Claims\) [WithIssuer](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/decl_gen.go>)
+### func \(Claims\) [WithIssuer](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims_with.go>)
 
 ```go
 func (Claims) WithIssuer(iss string) ClaimsValue
@@ -1371,7 +1371,7 @@ func (Claims) WithIssuer(iss string) ClaimsValue
 WithIssuer returns a copy of c carrying iss. The empty string clears it.
 
 <a name="Claims.WithNotBefore"></a>
-### func \(Claims\) [WithNotBefore](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/decl_gen.go>)
+### func \(Claims\) [WithNotBefore](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims_with.go>)
 
 ```go
 func (Claims) WithNotBefore(nbf time.Time) ClaimsValue
@@ -1397,7 +1397,7 @@ It refuses three things rather than accommodating them:
 raw is copied and is NOT validated as JSON here: the format package that produced it already parsed it, and re-parsing in the value type would put a second, differently-strict JSON reader on the trusted path.
 
 <a name="Claims.WithSubject"></a>
-### func \(Claims\) [WithSubject](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/decl_gen.go>)
+### func \(Claims\) [WithSubject](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims_with.go>)
 
 ```go
 func (Claims) WithSubject(sub string) ClaimsValue
@@ -1549,7 +1549,7 @@ func (JWK) Ed25519Private() (priv []byte, err error)
 Ed25519Private returns the raw 64-octet private key (seed||public) that service/crypto/sign/ed25519sig.Sign expects, re-expanded from the stored seed. It hands back live private material — straight to the scheme, never to a log.
 
 <a name="JWK.Ed25519Public"></a>
-### func \(JWK\) [Ed25519Public](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/decl_gen.go>)
+### func \(JWK\) [Ed25519Public](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/bridge.go>)
 
 ```go
 func (JWK) Ed25519Public() (pub []byte, err error)
@@ -1576,7 +1576,7 @@ func (JWK) GoString() string
 GoString implements fmt.GoStringer so %#v stays redacted too — fmt bypasses String for Go-syntax formatting and would otherwise dump the raw slices.
 
 <a name="JWK.IsPrivate"></a>
-### func \(JWK\) [IsPrivate](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/decl_gen.go>)
+### func \(JWK\) [IsPrivate](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/jwk.go>)
 
 ```go
 func (JWK) IsPrivate() bool
@@ -1585,7 +1585,7 @@ func (JWK) IsPrivate() bool
 IsPrivate reports whether k holds private material ("d" or "k"). It is the question to ask before publishing a set: a true here means MarshalPrivate, and only MarshalPrivate, can serialise this key whole.
 
 <a name="JWK.IsZero"></a>
-### func \(JWK\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/decl_gen.go>)
+### func \(JWK\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/jwk.go>)
 
 ```go
 func (JWK) IsZero() bool
@@ -1652,7 +1652,7 @@ MarshalPublic renders the public JWK: "kty", "crv", the public members, and what
 A symmetric key is refused with NoPublicForm rather than rendered without its "k": an oct JWK IS its secret, so there is no public projection of one, and handing back a key-shaped object with no key would be worse than an error.
 
 <a name="JWK.Public"></a>
-### func \(JWK\) [Public](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/decl_gen.go>)
+### func \(JWK\) [Public](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/jwk.go>)
 
 ```go
 func (JWK) Public() (pub KeyValue, err error)
@@ -1701,7 +1701,7 @@ func (JWK) Use() string
 Use reports the key's "use" member ("sig" / "enc"), empty when absent.
 
 <a name="JWK.WithAlg"></a>
-### func \(JWK\) [WithAlg](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/decl_gen.go>)
+### func \(JWK\) [WithAlg](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/jwk.go>)
 
 ```go
 func (JWK) WithAlg(alg string) KeyValue
@@ -1710,7 +1710,7 @@ func (JWK) WithAlg(alg string) KeyValue
 WithAlg returns a copy of k carrying alg (e.g. "ES256"). The value is not checked against crv: an "alg" is a publisher's assertion, and rejecting an unfamiliar one here would break interop for no security gain.
 
 <a name="JWK.WithKeyOps"></a>
-### func \(JWK\) [WithKeyOps](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/decl_gen.go>)
+### func \(JWK\) [WithKeyOps](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/jwk.go>)
 
 ```go
 func (JWK) WithKeyOps(ops ...string) KeyValue
@@ -1719,7 +1719,7 @@ func (JWK) WithKeyOps(ops ...string) KeyValue
 WithKeyOps returns a copy of k carrying key\_ops. The slice is copied.
 
 <a name="JWK.WithKid"></a>
-### func \(JWK\) [WithKid](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/decl_gen.go>)
+### func \(JWK\) [WithKid](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/jwk.go>)
 
 ```go
 func (JWK) WithKid(kid string) KeyValue
@@ -1737,7 +1737,7 @@ func (JWK) WithThumbprintKid() (identified KeyValue, err error)
 WithThumbprintKid returns a copy of k whose "kid" is its RFC 7638 thumbprint — a deterministic, collision-resistant id derived from the key itself rather than from a counter somebody has to remember to bump.
 
 <a name="JWK.WithUse"></a>
-### func \(JWK\) [WithUse](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/decl_gen.go>)
+### func \(JWK\) [WithUse](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/jwk.go>)
 
 ```go
 func (JWK) WithUse(use string) KeyValue
@@ -1761,7 +1761,7 @@ type JWKSet struct{}
 ```
 
 <a name="JWKSet.AllByKid"></a>
-### func \(JWKSet\) [AllByKid](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/decl_gen.go>)
+### func \(JWKSet\) [AllByKid](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/set.go>)
 
 ```go
 func (JWKSet) AllByKid(kid string) []KeyValue

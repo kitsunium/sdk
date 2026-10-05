@@ -506,6 +506,18 @@ packages:
         implements:
           - coreipc.Listener
         methods:
+          - doc: Addr is the listener's address.
+            impl: addr
+            name: Addr
+            out:
+              - type: net.Addr
+            recv: pointer
+          - doc: Path is the socket's path.
+            impl: path
+            name: Path
+            out:
+              - type: string
+            recv: pointer
           - doc: |-
               Accept returns the next connection of an admitted peer. A peer the kernel
               names and the configuration does not admit is closed at once, counted
@@ -521,18 +533,6 @@ packages:
             name: Refused
             out:
               - type: int64
-            recv: pointer
-          - doc: Addr is the listener's address.
-            name: Addr
-            impl: addr
-            out:
-              - type: net.Addr
-            recv: pointer
-          - doc: Path is the socket's path.
-            name: Path
-            impl: path
-            out:
-              - type: string
             recv: pointer
           - doc: |-
               Close stops accepting and removes the socket file (a named pipe vanishes

@@ -36,7 +36,6 @@ packages:
           pool. The recycler reset the buffer on its previous Put, so callers append
           directly without re-resetting. The caller owns it until ReleaseBuffer.
         name: AcquireBuffer
-        impl: acquireBuffer
         out:
           - type: "*bytes.Buffer"
       - doc: |-
@@ -48,7 +47,6 @@ packages:
           - name: buf
             type: "*bytes.Buffer"
         name: ReleaseBuffer
-        impl: releaseBuffer
       - doc: |-
           DetachBuffer hands the caller the bytes encoded into buf and ends the
           caller's ownership of buf, by the cheaper of two releases for its size. A

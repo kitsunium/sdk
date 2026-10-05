@@ -14,9 +14,26 @@ type fallbackRunner struct {
 	retryable func(error) bool
 }
 
-// newFallback is NewFallback's body: decl_gen.go writes NewFallback, from the
-// design, as one call of it.
-func newFallback(cfg FallbackConfig) coreres.Runner {
+// NewFallback returns a Runner that runs cfg.Fallback when the Operation passed
+// to Run fails, and returns nil when the fallback succeeds — that masking IS
+// the policy. When both fail the result is FallbackFailed, carrying both
+// messages as fields so neither failure is lost.
+//
+// A cancelled context is reported as itself, never as FallbackFailed: when it
+// is already dead after the primary the fallback does not run at all, and when
+// it dies WHILE the fallback runs, a failed fallback returns ctx.Err(). A
+// fallback that succeeds despite a late cancellation still returns nil — the
+// work was done.
+//
+// A nil cfg.Fallback is refused: every call returns PolicyMisconfigured without
+// running the operation (ADR 0031). A fallback policy with no fallback would
+// run the primary and pass its error through unchanged — indistinguishable
+// from no policy at all, while the caller believes their plan B is in place.
+//
+// The primary error is NOT surfaced when the fallback succeeds; that is what a
+// fallback is for. A caller who needs to know how often plan B fires
+// instruments the fallback Operation itself, which is an ordinary closure.
+func NewFallback(cfg FallbackConfig) coreres.Runner {
 	//: the secondary IS this policy — there is no SDK-side operation that is
 	//: not a guess at the caller's intent, so refuse rather than invent one.
 	if cfg.Fallback == nil {

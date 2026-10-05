@@ -133,4 +133,4 @@ cd internal/service && GOWORK=off go test -run='^$' -bench=. -benchmem -benchtim
 
 ## Declarations
 
-`decl_gen.go` is written by kit gen from the design (ADR 0170): `ReservesKey`, `NewJSON`, `NewText` and `AppendSanitized`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name.
+`decl_gen.go` is written by kit gen from the design (ADR 0170): `ReservesKey`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name.

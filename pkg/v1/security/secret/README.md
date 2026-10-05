@@ -1205,7 +1205,7 @@ func (Value) MarshalText() (text []byte, err error)
 MarshalText implements encoding.TextMarshaler and writes [Redacted](#Redacted), which is what TOML, YAML, XML and log/slog's text handler reach for.
 
 <a name="Value.Reveal"></a>
-### func \(Value\) [Reveal](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/decl_gen.go>)
+### func \(Value\) [Reveal](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/value.go>)
 
 ```go
 func (Value) Reveal() []byte
@@ -1216,7 +1216,7 @@ Reveal returns a fresh copy of the secret's bytes — the only way out besides [
 Hand the result to the API that consumes the secret; never to a logger, a metric label, a URL or an error message.
 
 <a name="Value.RevealString"></a>
-### func \(Value\) [RevealString](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/decl_gen.go>)
+### func \(Value\) [RevealString](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/value.go>)
 
 ```go
 func (Value) RevealString() string
@@ -1243,7 +1243,7 @@ func (*Value) UnmarshalJSON(data []byte) error
 UnmarshalJSON implements json.Unmarshaler. It accepts a JSON STRING and nothing else: a number has already been re-spelled before a decoder sees it (1e3 arrives as 1000, a twenty-digit token loses its tail to float64), so storing one would store a secret nobody wrote. A null leaves the Value as it was, which is encoding/json's own convention for a field that decodes itself. Every refusal is [ValueRefused](#ValueRefused), and none of them quotes the input.
 
 <a name="Value.UnmarshalText"></a>
-### func \(Value\) [UnmarshalText](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/decl_gen.go>)
+### func \(Value\) [UnmarshalText](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/value.go>)
 
 ```go
 func (*Value) UnmarshalText(text []byte) error

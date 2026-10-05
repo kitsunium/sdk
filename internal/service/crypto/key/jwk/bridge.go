@@ -221,9 +221,9 @@ func FromEd25519Private(priv []byte) (key KeyValue, err error) {
 	}, nil
 }
 
-// ed25519Public is KeyValue.Ed25519Public's body: decl_gen.go writes KeyValue.Ed25519Public, from the
-// design, as one call of it.
-func (k KeyValue) ed25519Public() (pub []byte, err error) {
+// Ed25519Public returns the raw 32-octet public key, ready for
+// service/crypto/sign/ed25519sig.Verify.
+func (k KeyValue) Ed25519Public() (pub []byte, err error) {
 	//: only an OKP key has an Ed25519 rendering.
 	if k.kty != TypeOKP {
 		//: wrong family for this accessor.
@@ -252,9 +252,13 @@ func (k KeyValue) Ed25519Private() (priv []byte, err error) {
 	return ed25519.NewKeyFromSeed(k.priv), nil
 }
 
-// fromSecret is FromSecret's body: decl_gen.go writes FromSecret, from the
-// design, as one call of it.
-func fromSecret(secret corecrypto.Key) (key KeyValue, err error) {
+// FromSecret builds an oct JWK from the SDK's redacting symmetric key — the one
+// service/crypto/mac/hmacsha2 tags and verifies with.
+//
+// The resulting key is still redacting under %v, and still refuses
+// MarshalPublic: wrapping a crypto.Key in a JWK must not be a way around the
+// protection crypto.Key was given.
+func FromSecret(secret corecrypto.Key) (key KeyValue, err error) {
 	//: Bytes() already clones; a zero-value crypto.Key yields nil.
 	raw := secret.Bytes()
 	//: the SDK's symmetric surface is one fixed length.

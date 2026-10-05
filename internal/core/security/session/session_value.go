@@ -69,9 +69,11 @@ func (s SessionValue) LastSeen() time.Time {
 	return s.lastSeen
 }
 
-// expiresAt is SessionValue.ExpiresAt's body: decl_gen.go writes SessionValue.ExpiresAt, from the
-// design, as one call of it.
-func (s SessionValue) expiresAt() time.Time {
+// ExpiresAt reports the EFFECTIVE deadline: the earlier of the absolute
+// ceiling and the sliding idle window. The two are never reconciled by
+// averaging or by preferring the later one — the earlier deadline always wins,
+// which is what makes the absolute timeout a ceiling rather than a suggestion.
+func (s SessionValue) ExpiresAt() time.Time {
 	//: a sliding window that outran the ceiling would make the ceiling
 	//: decorative; the store clamps at write time and this is the guard that
 	//: makes the invariant true even for a value built elsewhere.
@@ -90,9 +92,10 @@ func (s SessionValue) LiveAt(now time.Time) bool {
 	return now.Before(s.ExpiresAt())
 }
 
-// isZero is SessionValue.IsZero's body: decl_gen.go writes SessionValue.IsZero, from the
-// design, as one call of it.
-func (s SessionValue) isZero() bool {
+// IsZero reports whether this is the zero SessionValue — what every failing
+// [Store] method returns alongside its error. There is no "invalid, but here
+// are the claims anyway" path.
+func (s SessionValue) IsZero() bool {
 	//: the identifier is the one field no real session lacks.
 	return s.id.IsZero()
 }

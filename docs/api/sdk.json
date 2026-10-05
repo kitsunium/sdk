@@ -4591,7 +4591,7 @@
       "spelled": "func(line int) bool",
       "canonical": "func(line int) bool",
       "doc": "Contains reports whether line falls inside the range. Both bounds are\ninclusive, which is what makes a single-line hunk (Start == End) match.\n",
-      "file": "framework/internal/core/git/decl_gen.go",
+      "file": "framework/internal/core/git/line_range.go",
       "layer": "framework"
     },
     {
@@ -5509,7 +5509,7 @@
       "spelled": "func() ExposeConfigurer",
       "canonical": "func() github.com/kitsunium/sdk/framework/internal/kit.ExposeConfigurer",
       "doc": "AnyUser says that an exposure is open to any signed-in user, on purpose:\nits operation asks for a user ([Auth]) and declares no permission and no\nrule — its handler reads [UserID] and keeps to what that user owns.\n\n\tvar MyOrders = Service.Query(\"my-orders\", myOrders, kit.Auth()).Expose(\"GET /orders\", kit.AnyUser())\n\nIt adds no authentication of its own: an exposure authenticates as its\noperation asks, so the operation declares [Auth].\n",
-      "file": "framework/internal/kit/decl_gen.go",
+      "file": "framework/internal/kit/expose.go",
       "layer": "framework"
     },
     {
@@ -5520,7 +5520,7 @@
       "spelled": "func() ExposeConfigurer",
       "canonical": "func() github.com/kitsunium/sdk/framework/internal/kit.ExposeConfigurer",
       "doc": "Anyone says that an exposure is open to everyone, on purpose: its\noperation declares no permission and no rule, and whoever reaches the\nroute may run it — a public form, say. It says so on the exposure's node,\nwhere the diagram and the API page read it. An exposure whose operation\ndeclares no rule refuses the start unless it says this, or [AnyUser].\n\n\tvar Report = Service.Command(\"report\", file).Expose(\"POST /reports\", kit.Anyone())\n\nIt adds no authentication: an operation that asks for a user ([Auth])\ntakes [AnyUser] instead, and one with [AuthOptional] still knows the\ncaller who signed in.\n",
-      "file": "framework/internal/kit/decl_gen.go",
+      "file": "framework/internal/kit/expose.go",
       "layer": "framework"
     },
     {
@@ -5751,7 +5751,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Binary is one executable the product ships, made of process roles: a\nstatus line and its daemon are two roles of one binary, \"statusline\" and\n\"statusline daemon\". Each role is an App — its own services, its own\nprofile — and two roles talk only through a declared, versioned contract\n(D22): a listener one serves and the other dials, never each other's code.\n\n\tvar Binary = kit.NewBinary(\"statusline\", \"The status line of a Claude session.\").\n\t\tRole(\"render\", RenderApp).                // statusline ...\n\t\tRole(\"daemon\", DaemonApp, \"daemon\").      // statusline daemon ...\n\t\tTalks(\"render\", \"daemon\", \"render/v1\")\n\n\tfunc main() { os.Exit(Binary.Main(context.Background(), os.Args[1:])) }\n\nThe package that declares a binary and its roles is wiring, generated from\nthe design (D22).\n",
-      "file": "framework/internal/kit/decl_gen.go",
+      "file": "framework/internal/kit/roles.go",
       "layer": "framework"
     },
     {
@@ -7637,7 +7637,7 @@
       "spelled": "func(cause error) *Error",
       "canonical": "func(cause error) *github.com/kitsunium/sdk/framework/internal/kit.Error",
       "doc": "Wrap attaches the underlying cause, for the logs. It returns a copy.\n",
-      "file": "framework/internal/kit/decl_gen.go",
+      "file": "framework/internal/kit/errors.go",
       "layer": "framework"
     },
     {
@@ -8290,7 +8290,7 @@
       "spelled": "func(status int, code string, message string) *Error",
       "canonical": "func(status int, code string, message string) *github.com/kitsunium/sdk/framework/internal/kit.Error",
       "doc": "NewError is an error answered with the HTTP status, carrying the wire code\nand the message a caller reads.\n",
-      "file": "framework/internal/kit/decl_gen.go",
+      "file": "framework/internal/kit/errors.go",
       "layer": "framework"
     },
     {
@@ -8312,7 +8312,7 @@
       "spelled": "func(contract string, handler ListenHandler) *Listener",
       "canonical": "func(contract string, handler github.com/kitsunium/sdk/framework/internal/kit.ListenHandler) *github.com/kitsunium/sdk/framework/internal/kit.Listener",
       "doc": "NewListener is a listener no service declares yet, speaking contract and\nserved by handler: [Service.Listen] makes one and declares it, which is how\na product gets one.\n",
-      "file": "framework/internal/kit/decl_gen.go",
+      "file": "framework/internal/kit/listener.go",
       "layer": "framework"
     },
     {
@@ -8769,7 +8769,7 @@
       "spelled": "func(text string) StoreConfigurer",
       "canonical": "func(text string) github.com/kitsunium/sdk/framework/internal/kit.StoreConfigurer",
       "doc": "Purpose says why the store keeps its records (GDPR art. 30(1)(b)): the\nregister lists it, and a person's export carries it.\n",
-      "file": "framework/internal/kit/decl_gen.go",
+      "file": "framework/internal/kit/retention.go",
       "layer": "framework"
     },
     {
@@ -8996,7 +8996,7 @@
       "spelled": "func(limits string) StoreConfigurer",
       "canonical": "func(limits string) github.com/kitsunium/sdk/framework/internal/kit.StoreConfigurer",
       "doc": "RetentionByProduct says the product keeps the store's retention itself:\nits own code erases and deletes what it no longer needs — a record whose\nlife the product's own rules end, a lifecycle kit cannot read from the\nentity. limits says, in the product's words, for how long and how, which\nthe register publishes as the store's time limits (GDPR art. 30(1)(f));\n\"\" says only that the product keeps them.\n\nkit then runs no retention for the store, and warns of neither a missing\nretention nor a missing subject. Its classified fields keep every other\npromise: sealed at rest, never shown, exported with their person — when\nthe store names one — and erased by kit.Erase and Store.Erase. It goes\nwith kit.Purpose, kit.HeldUntil, kit.Anonymise and kit.DeleteOnErasure;\nwith kit.EraseAfter, kit.EraseAt, kit.DeleteAfter or kit.DeleteAt it is\nrefused: a store's retention is kit's or the product's, never both.\n",
-      "file": "framework/internal/kit/decl_gen.go",
+      "file": "framework/internal/kit/retention.go",
       "layer": "framework"
     },
     {
@@ -11267,7 +11267,7 @@
       "spelled": "func() string",
       "canonical": "func() string",
       "doc": "Label is the name this product is known by, falling back to the package name\nwhen no product was configured.\n\nThe receiver is a pointer on every method here because ProductValue is 72\nbytes — four strings and a slice header — and copying all of it to read one\nfield is what KTN-VAR-BIGSTRUCT exists to catch. Hold the product in a\nvariable and call on that.\n\nIt tolerates a nil receiver, as every method here does: the one code path\nthat runs when nothing else is working must not be the one that panics.\n\nIt returns the product's name, or \"entitlement\" when there is none.\n",
-      "file": "framework/internal/service/entitlement/decl_gen.go",
+      "file": "framework/internal/service/entitlement/product.go",
       "layer": "framework"
     },
     {
@@ -11279,7 +11279,7 @@
       "spelled": "func() []coreent.OriginValue",
       "canonical": "func() []github.com/kitsunium/sdk/framework/internal/core/entitlement.OriginValue",
       "doc": "PublishedOrigins returns the places this product's roster is published,\ntolerating a nil receiver as every accessor here does.\n\nIt exists because the FIELD cannot: reading p.Origins off a nil product\npanics, and the two constructors did exactly that while the package\ndocumented the opposite. A nil product publishes nowhere, which is a\nverifier that will refuse with RosterUnreachable — the documented fallback,\nand a very different outcome from a panic at construction.\n\nIt returns the product's publication points, or nil when there is no\nproduct.\n",
-      "file": "framework/internal/service/entitlement/decl_gen.go",
+      "file": "framework/internal/service/entitlement/product.go",
       "layer": "framework"
     },
     {
@@ -11572,7 +11572,7 @@
       "spelled": "func(absDir string) bool",
       "canonical": "func(absDir string) bool",
       "doc": "ContainsDir reports whether absDir directly encloses any touched file. It is\nNOT recursive: the parent of a touched directory is not itself touched.\n",
-      "file": "framework/internal/service/git/decl_gen.go",
+      "file": "framework/internal/service/git/changed_set.go",
       "layer": "framework"
     },
     {
@@ -11584,7 +11584,7 @@
       "spelled": "func(absFile string) bool",
       "canonical": "func(absFile string) bool",
       "doc": "ContainsFile reports whether absFile appears anywhere in the diff,\nincluding as the old side of a rename or a deletion.\n",
-      "file": "framework/internal/service/git/decl_gen.go",
+      "file": "framework/internal/service/git/changed_set.go",
       "layer": "framework"
     },
     {
@@ -12122,7 +12122,7 @@
       "spelled": "func() *Service",
       "canonical": "func() *github.com/kitsunium/sdk/framework/internal/service/selfupdate.Service",
       "doc": "WithAutomaticConsent declares that the PRODUCT consents to unrequested\nupgrades — a status line that updates itself silently, its decision D11 —,\nso no environment variable has to grant it. An operator still refuses with\n<PREFIX>_AUTO_UPGRADE=0: an explicit answer always wins. It grants nothing\nelse: escalation keeps its own, separate opt-in.\n",
-      "file": "framework/internal/service/selfupdate/decl_gen.go",
+      "file": "framework/internal/service/selfupdate/consent_product.go",
       "layer": "framework"
     },
     {
@@ -12134,7 +12134,7 @@
       "spelled": "func(args []string, timeout time.Duration) *Service",
       "canonical": "func(args []string, timeout time.Duration) *github.com/kitsunium/sdk/framework/internal/service/selfupdate.Service",
       "doc": "WithProbe makes a replacement stand only once the NEW binary, run with args,\nexits 0 within timeout (zero: five seconds). Before the rename the previous\nbinary is kept as <binary>.prev — a hard link, so the binary's own name is\nnever absent —, and a probe that fails puts it back and reports ProbeFailed.\nA daemon that updates itself declares the argument its binary answers\ncheaply (\"version\", \"--probe\").\n",
-      "file": "framework/internal/service/selfupdate/decl_gen.go",
+      "file": "framework/internal/service/selfupdate/probe.go",
       "layer": "framework"
     },
     {
@@ -12146,7 +12146,7 @@
       "spelled": "func(domain string) *Service",
       "canonical": "func(domain string) *github.com/kitsunium/sdk/framework/internal/service/selfupdate.Service",
       "doc": "WithSignatureDomain makes every signature cover domain, a NUL byte and the\nmanifest — never the manifest alone — so a key the vendor also signs other\ndocuments with (a roster, another product's releases) cannot have one of\nthose signatures read as a release of this product. It also requires the\nmanifest to say which release it is and until when it may be installed, in\ntwo header lines the signature therefore covers:\n\n\t# tag v1.4.0\n\t# expires 2026-12-31T00:00:00Z\n\nA manifest naming another tag is refused — the replay of an older, signed\nrelease under a newer name —, and so is one past its expiry — the freeze an\nattacker who can only replay can otherwise hold an installation in. Without\na domain the historical form is verified unchanged.\n",
-      "file": "framework/internal/service/selfupdate/decl_gen.go",
+      "file": "framework/internal/service/selfupdate/keys.go",
       "layer": "framework"
     },
     {
@@ -12182,7 +12182,7 @@
       "spelled": "func() *Service",
       "canonical": "func() *github.com/kitsunium/sdk/framework/internal/service/selfupdate.Service",
       "doc": "WithoutElevation forbids the privileged replacement outright, whatever\n<PREFIX>_ALLOW_SUDO says: a binary installed where its user cannot write is\nreported (ElevationNotAuthorised), never replaced through sudo.\n",
-      "file": "framework/internal/service/selfupdate/decl_gen.go",
+      "file": "framework/internal/service/selfupdate/consent_product.go",
       "layer": "framework"
     },
     {
@@ -12239,7 +12239,7 @@
       "spelled": "func() string",
       "canonical": "func() string",
       "doc": "AutoUpgradeEnv is the variable authorising an upgrade the user did not ask\nfor, e.g. MY_TOOL_AUTO_UPGRADE.\n",
-      "file": "framework/internal/service/selfupdate/decl_gen.go",
+      "file": "framework/internal/service/selfupdate/source.go",
       "layer": "framework"
     },
     {
@@ -12275,7 +12275,7 @@
       "spelled": "func() string",
       "canonical": "func() string",
       "doc": "SudoOptInEnv is the variable authorising privilege escalation when the install\ndirectory is not writable, e.g. MY_TOOL_ALLOW_SUDO.\n",
-      "file": "framework/internal/service/selfupdate/decl_gen.go",
+      "file": "framework/internal/service/selfupdate/source.go",
       "layer": "framework"
     },
     {
@@ -12348,7 +12348,7 @@
       "spelled": "func(uids []int, gids []int) ListenerOption",
       "canonical": "func(uids []int, gids []int) github.com/kitsunium/sdk/framework/kit.ListenerOption",
       "doc": "AllowPeers admits accounts besides the product's own: an on-call group\ndeclared at deployment. The kernel checks them where it names the peer; the\nsocket's directory must still let them through, which is the deployment's\nto arrange.\n\nIFACE-OPAQUE: ListenerOption is sealed — its one method is unexported —\nso only this package makes one, and a caller only passes it to Listen.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/listener.go",
       "layer": "framework"
     },
     {
@@ -12359,7 +12359,7 @@
       "spelled": "func(on bool) AppOption",
       "canonical": "func(on bool) github.com/kitsunium/sdk/framework/kit.AppOption",
       "doc": "Analyze switches the in-process static analysis on or off in dev.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/config.go",
       "layer": "framework"
     },
     {
@@ -12382,7 +12382,7 @@
       "spelled": "func(fn AnalyzeFunc) AppOption",
       "canonical": "func(fn github.com/kitsunium/sdk/framework/kit.AnalyzeFunc) github.com/kitsunium/sdk/framework/kit.AppOption",
       "doc": "Analyzer runs fn in the background once the product serves, in dev and when\nKIT_ANALYZE allows it. Without one, the graph is the runtime's alone.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/app_analysis.go",
       "layer": "framework"
     },
     {
@@ -12404,7 +12404,7 @@
       "spelled": "func() ExposeOption",
       "canonical": "func() github.com/kitsunium/sdk/framework/kit.ExposeOption",
       "doc": "AnyUser says that an exposure is open to any signed-in user, on purpose:\nits operation asks for a user ([Auth]) and declares no permission and no\nrule — its handler reads [UserID] and keeps to what that user owns.\n\n\tvar MyOrders = Service.Query(\"my-orders\", myOrders, kit.Auth()).Expose(\"GET /orders\", kit.AnyUser())\n\nIt adds no authentication of its own: an exposure authenticates as its\noperation asks, so the operation declares [Auth].\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/expose.go",
       "layer": "framework"
     },
     {
@@ -12415,7 +12415,7 @@
       "spelled": "func() ExposeOption",
       "canonical": "func() github.com/kitsunium/sdk/framework/kit.ExposeOption",
       "doc": "Anyone says that an exposure is open to everyone, on purpose: its\noperation declares no permission and no rule, and whoever reaches the\nroute may run it — a public form, say. It says so on the exposure's node,\nwhere the diagram and the API page read it. An exposure whose operation\ndeclares no rule refuses the start unless it says this, or [AnyUser].\n\n\tvar Report = Service.Command(\"report\", file).Expose(\"POST /reports\", kit.Anyone())\n\nIt adds no authentication: an operation that asks for a user ([Auth])\ntakes [AnyUser] instead, and one with [AuthOptional] still knows the\ncaller who signed in.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/expose.go",
       "layer": "framework"
     },
     {
@@ -12450,7 +12450,7 @@
       "spelled": "func() OperationOption",
       "canonical": "func() github.com/kitsunium/sdk/framework/kit.OperationOption",
       "doc": "Auth makes an endpoint require an authenticated caller: the app's auth\nhandler runs first, and a request without valid credentials is answered\n401 before the handler runs. A command or a query that asks for one is\nrefused 401 when its caller carries no user: an in-process dispatch\ncarries its caller's, and is not authenticated again.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/auth.go",
       "layer": "framework"
     },
     {
@@ -12472,7 +12472,7 @@
       "spelled": "func() OperationOption",
       "canonical": "func() github.com/kitsunium/sdk/framework/kit.OperationOption",
       "doc": "AuthOptional runs the app's auth handler when the request carries\ncredentials, and serves anonymous callers too: [UserID] tells which.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/auth.go",
       "layer": "framework"
     },
     {
@@ -12518,7 +12518,7 @@
       "spelled": "func(maxConcurrent int) OperationOption",
       "canonical": "func(maxConcurrent int) github.com/kitsunium/sdk/framework/kit.OperationOption",
       "doc": "Bulkhead caps how many requests the handler serves at once; the overflow\nanswers 503. It is the SDK's resilience bulkhead.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/endpoint.go",
       "layer": "framework"
     },
     {
@@ -13845,7 +13845,7 @@
       "spelled": "func(fsys fs.FS) AppOption",
       "canonical": "func(fsys io/fs.FS) github.com/kitsunium/sdk/framework/kit.AppOption",
       "doc": "ConfigFiles gives kit the product's configuration files: config/config.<ext>,\nwhich every environment reads, and config/<env>.<ext>, the environment's\nown — <env> being KIT_ENV as written, dev when kit dev runs the product —\nin JSON, YAML or TOML (json, yaml or yml, toml). A file maps the names of\nthe settings to their values; it never holds a secret, and a key no\nservice declares stops the start. The files belong in the binary:\n\n\t//go:embed config\n\tvar configFiles embed.FS\n\n\tapp := kit.NewApp(\"todo\", ...).With(kit.ConfigFiles(configFiles))\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/setting.go",
       "layer": "framework"
     },
     {
@@ -13867,7 +13867,7 @@
       "spelled": "func(dir string) AppOption",
       "canonical": "func(dir string) github.com/kitsunium/sdk/framework/kit.AppOption",
       "doc": "DataDir sets where stores and queues persist, instead of KIT_DATA_DIR.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/config.go",
       "layer": "framework"
     },
     {
@@ -13913,7 +13913,7 @@
       "spelled": "func() CLIOption",
       "canonical": "func() github.com/kitsunium/sdk/framework/kit.CLIOption",
       "doc": "DefaultCommand makes the command Main's default: it runs with every\nargument when the first names no other command — neither one of the\nproduct's nor one of Main's (serve, help…) —, and with none when there\nis none. Main then never answers a usage error. One command of an app may\nbe its default.\n\nIFACE-OPAQUE: CLIOption is sealed — its one method is unexported — so\nonly this package makes one, and a caller only passes it to CLI.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/cli.go",
       "layer": "framework"
     },
     {
@@ -13994,7 +13994,7 @@
       "spelled": "func(digest string) AppOption",
       "canonical": "func(digest string) github.com/kitsunium/sdk/framework/kit.AppOption",
       "doc": "DesignDigest records the digest of the design the product's code was\ngenerated from — what the generated wiring passes —, so the telemetry\nhandshake can say it and a tool attached to the product can tell a process\nbuilt from another design.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/telemetry.go",
       "layer": "framework"
     },
     {
@@ -14194,7 +14194,7 @@
       "spelled": "func() CLIOption",
       "canonical": "func() github.com/kitsunium/sdk/framework/kit.CLIOption",
       "doc": "FailSafe makes the command's status always 0: a status line, a prompt\nhook, anything a shell runs on every keystroke must never fail the shell.\nA non-zero status, a start that fails and a panic are logged instead.\n\nIFACE-OPAQUE: CLIOption is sealed — its one method is unexported — so\nonly this package makes one, and a caller only passes it to CLI.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/cli.go",
       "layer": "framework"
     },
     {
@@ -14251,7 +14251,7 @@
       "spelled": "func(name string, addr string) MailerOption",
       "canonical": "func(name string, addr string) github.com/kitsunium/sdk/framework/kit.MailerOption",
       "doc": "From sets the sender of every message that names none.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/mailer.go",
       "layer": "framework"
     },
     {
@@ -14274,7 +14274,7 @@
       "spelled": "func(bytes int) SecretOption",
       "canonical": "func(bytes int) github.com/kitsunium/sdk/framework/kit.SecretOption",
       "doc": "Generated makes the secret kit's to make: versions of bytes random bytes —\n32 for a key — the first made on the first start, a new one every 30 days,\nthe last 3 kept, unless [RotateEvery] and [KeepVersions] say otherwise.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/secret.go",
       "layer": "framework"
     },
     {
@@ -14307,7 +14307,7 @@
       "spelled": "func(d time.Duration) AppOption",
       "canonical": "func(d time.Duration) github.com/kitsunium/sdk/framework/kit.AppOption",
       "doc": "IdleStop makes a daemon stop itself once, for d, no connection was open on\nany of its listeners and no activity of its services (Service.Activity)\nsaid it was busy: a daemon launched on demand by its clients ends when\nthey stop coming. It is refused outside the daemon profile.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/app_profiles.go",
       "layer": "framework"
     },
     {
@@ -14363,7 +14363,7 @@
       "spelled": "func(n int) SecretOption",
       "canonical": "func(n int) github.com/kitsunium/sdk/framework/kit.SecretOption",
       "doc": "KeepVersions is how many versions of a generated secret a rotation leaves,\nthe new one included: at least 2, so that what the version it replaces\nsealed or signed still opens and verifies. Cover the longest-lived box or\nsignature in flight: its lifetime divided by the interval, plus one.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/secret.go",
       "layer": "framework"
     },
     {
@@ -14386,7 +14386,7 @@
       "spelled": "func(things ...Keepable) DatabaseOption",
       "canonical": "func(things ...github.com/kitsunium/sdk/framework/kit.Keepable) github.com/kitsunium/sdk/framework/kit.DatabaseOption",
       "doc": "Keeps says what the database keeps: a service's stores, a store, a\nmodule's stores. The most precise wins: a store kept by name, then its\nservice, then its module, then the default database — the one declared\nwithout Keeps —, then the data directory, then memory. [InMemory] wins\nover all of them, on the app as on a store.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/database.go",
       "layer": "framework"
     },
     {
@@ -14397,7 +14397,7 @@
       "spelled": "func(addr string) AppOption",
       "canonical": "func(addr string) github.com/kitsunium/sdk/framework/kit.AppOption",
       "doc": "Listen sets the listening address, instead of KIT_ADDR or PORT. \":0\" picks\na free port; App.URL tells which.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/config.go",
       "layer": "framework"
     },
     {
@@ -14455,7 +14455,7 @@
       "spelled": "func(w io.Writer) AppOption",
       "canonical": "func(w io.Writer) github.com/kitsunium/sdk/framework/kit.AppOption",
       "doc": "Logs sends the app's logs to w instead of standard error.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/config.go",
       "layer": "framework"
     },
     {
@@ -14490,7 +14490,7 @@
       "spelled": "func(n int) MailerOption",
       "canonical": "func(n int) github.com/kitsunium/sdk/framework/kit.MailerOption",
       "doc": "MailAttempts is how many deliveries a message gets before it is\ndead-lettered. The default is 6, backing off from one second.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/mailer.go",
       "layer": "framework"
     },
     {
@@ -14537,7 +14537,7 @@
       "spelled": "func(bytes int64) EndpointOption",
       "canonical": "func(bytes int64) github.com/kitsunium/sdk/framework/kit.EndpointOption",
       "doc": "MaxBody bounds the request body the endpoint reads. The default is\n[DefaultMaxBody].\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/endpoint.go",
       "layer": "framework"
     },
     {
@@ -14548,7 +14548,7 @@
       "spelled": "func(n int) DeliveryOption",
       "canonical": "func(n int) github.com/kitsunium/sdk/framework/kit.DeliveryOption",
       "doc": "MaxDeliveries is how many attempts a message gets before it is\ndead-lettered — a subscription's, or a queued command's. The default is\n5.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/topic.go",
       "layer": "framework"
     },
     {
@@ -14570,7 +14570,7 @@
       "spelled": "func(n int) PasswordOption",
       "canonical": "func(n int) github.com/kitsunium/sdk/framework/kit.PasswordOption",
       "doc": "MinLength refuses a password shorter than n characters, counted as NIST\ncounts them: one per Unicode code point. The default is 15, NIST's figure\nfor a password used alone; 8 is the floor NIST allows with a second\nfactor, and a smaller n is refused. There is no composition rule, ever:\nNIST says SHALL NOT.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/passwords.go",
       "layer": "framework"
     },
     {
@@ -14718,7 +14718,7 @@
       "spelled": "func() CommandOption",
       "canonical": "func() github.com/kitsunium/sdk/framework/kit.CommandOption",
       "doc": "NoTransaction runs a command outside a transaction of its own: its\nwrites land as its handler makes them, and its effects leave when made —\na failed command may have written or announced something. On the data\ndirectory and in memory, where a writing command's transaction takes the\nwriter turn, it lets such commands run side by side. Dispatched inside\nanother command, it still runs in that one's transaction.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/command.go",
       "layer": "framework"
     },
     {
@@ -14729,7 +14729,7 @@
       "spelled": "func() PasswordOption",
       "canonical": "func() github.com/kitsunium/sdk/framework/kit.PasswordOption",
       "doc": "NotCommon refuses a password among the ten thousand most common ones —\nthe SDK's password.IsCommon, which compares them without regard to case —:\nthe blocklist NIST SP 800-63B-4 requires a verifier to check, beyond the\nthree thousand OWASP ASVS 5.0 (6.2.4) asks for. Every policy checks it (ADR\n0007 §2: on by default once the SDK has the list); the option says so\nwhere a policy is declared. Beside NIST's fifteen characters the list has\nlittle left to refuse; beside a shorter MinLength, it matters.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/passwords.go",
       "layer": "framework"
     },
     {
@@ -14751,7 +14751,7 @@
       "spelled": "func(n int) PasswordOption",
       "canonical": "func(n int) github.com/kitsunium/sdk/framework/kit.PasswordOption",
       "doc": "NotReused refuses a password that the current hash, or any of the n\nformer ones, verifies — n from 1 to 100. It is a compliance policy, off by\ndefault: PCI DSS asks for it, OWASP ASVS 4.0.3 asks most products not to\nimpose it. kit keeps the field's last n hashes, so it implies history=n,\nand a tag whose history is smaller than n is refused.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/passwords.go",
       "layer": "framework"
     },
     {
@@ -14797,7 +14797,7 @@
       "spelled": "func() SecretOption",
       "canonical": "func() github.com/kitsunium/sdk/framework/kit.SecretOption",
       "doc": "Optional makes a provided secret one the product can do without — the key\nof a feature that stays off while nobody gives it. A start where it is set\nnowhere goes on; [Secret].Present says whether it is set now, and a use of\nit while it is absent — [Secret].Value, Seal, Open, Sign or Verify —\nanswers an error errs.HasCode matches with [CodeSecretMissing]. It is read\nwhere it lives at every use, as every provided secret is: given later —\n`secrets set` in the environment's store, a new content in the file its\n_FILE variable names —, it is found at its next use. A generated secret\nis kit's to make and never absent: Optional with [Generated] is refused.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/secret.go",
       "layer": "framework"
     },
     {
@@ -14808,7 +14808,7 @@
       "spelled": "func() SubscriptionOption",
       "canonical": "func() github.com/kitsunium/sdk/framework/kit.SubscriptionOption",
       "doc": "OwnStores lets a watch ([Service].Watch) hear the stores of its own\nmodule too — the product's own, for a watch of the product's —, which a\nwatch never hears by default. Such a watch never hears the writes its own\nhandler makes, in its handler's context — a handler that writes what it\nwatches, a screening that stamps the record it screened, would otherwise\nhear itself forever —; a write the handler only causes, later and\nelsewhere — a queued command's handling, a topic's delivery — is heard.\nA subscription to a topic refuses it: a topic has no stores.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/topic.go",
       "layer": "framework"
     },
     {
@@ -14819,7 +14819,7 @@
       "spelled": "func(n int) DeliveryOption",
       "canonical": "func(n int) github.com/kitsunium/sdk/framework/kit.DeliveryOption",
       "doc": "Parallelism is how many messages are handled at once — a subscription's,\nor a queued command's. The default is 1.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/topic.go",
       "layer": "framework"
     },
     {
@@ -14985,7 +14985,7 @@
       "spelled": "func(p string) AppOption",
       "canonical": "func(p string) github.com/kitsunium/sdk/framework/kit.AppOption",
       "doc": "Profile selects the app's process profile: model.ProfileServer (the\ndefault), model.ProfileDaemon or model.ProfileCLI.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/app_profiles.go",
       "layer": "framework"
     },
     {
@@ -15031,7 +15031,7 @@
       "spelled": "func() CommandOption",
       "canonical": "func() github.com/kitsunium/sdk/framework/kit.CommandOption",
       "doc": "Queued sends a command to the background. Dispatch returns once the\ncommand's own queue accepted it — a file queue under the data directory,\nmemory without one —, and a consumer handles it, [Parallelism] at a time,\nretried after half a second up to [MaxDeliveries] attempts (5), then\ndead-lettered. It answers nothing: its result is [Empty], and exposed, it\nanswers 202 Accepted.\n\nDelivery is at least once: Queued is the product's promise that the\nhandler tolerates a redelivery, and a [Command].Key narrows the duplicates\nwithout removing them. The handler runs in the dispatcher's trace, as the\nuser who dispatched it ([UserID]); what the auth handler said about that\nuser is not queued. A queued command's input is a contract with the\nmessages already queued: add a field, never rename one.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/command.go",
       "layer": "framework"
     },
     {
@@ -15042,7 +15042,7 @@
       "spelled": "func(perSecond float64, burst int) OperationOption",
       "canonical": "func(perSecond float64, burst int) github.com/kitsunium/sdk/framework/kit.OperationOption",
       "doc": "RateLimit puts a token bucket in front of the handler: perSecond tokens a\nsecond, up to burst at once. An empty bucket answers 429 at once. It is the\nSDK's resilience rate limiter.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/endpoint.go",
       "layer": "framework"
     },
     {
@@ -15109,7 +15109,7 @@
       "spelled": "func() SettingOption",
       "canonical": "func() github.com/kitsunium/sdk/framework/kit.SettingOption",
       "doc": "Required drops a setting's default: a start without a value for it fails,\nsaying where to give one.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/setting.go",
       "layer": "framework"
     },
     {
@@ -15165,7 +15165,7 @@
       "spelled": "func(dir string) StaticOption",
       "canonical": "func(dir string) github.com/kitsunium/sdk/framework/kit.StaticOption",
       "doc": "Root serves the sub-directory dir of the file system rather than its root —\n\"assets\" for a //go:embed assets directive.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/static.go",
       "layer": "framework"
     },
     {
@@ -15176,7 +15176,7 @@
       "spelled": "func(d time.Duration) SecretOption",
       "canonical": "func(d time.Duration) github.com/kitsunium/sdk/framework/kit.SecretOption",
       "doc": "RotateEvery is how often kit makes a new version of a generated secret.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/secret.go",
       "layer": "framework"
     },
     {
@@ -15246,7 +15246,7 @@
       "spelled": "func(store secret.Store) AppOption",
       "canonical": "func(store github.com/kitsunium/sdk/pkg/v1/security/secret.Store) github.com/kitsunium/sdk/framework/kit.AppOption",
       "doc": "SecretStore keeps the secrets in store instead of the environment's: a\ntest gives a store holding what its provided secrets hold. The\nenvironment's variables are still read first.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/secretstore.go",
       "layer": "framework"
     },
     {
@@ -15327,7 +15327,7 @@
       "spelled": "func(scope string) AppOption",
       "canonical": "func(scope string) github.com/kitsunium/sdk/framework/kit.AppOption",
       "doc": "Singleton keeps one process of the app alive per scope on this machine: the\nstart takes an exclusive file lock named after scope in the app's runtime\ndirectory (pkg/v1/app/lock: flock, LockFileEx) and holds it until the process\nends. A second process refuses to start with CodeSingletonHeld — for a\ndaemon's client, the sign to talk to the one that runs. The kernel drops\nthe lock with a dead process.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/app_profiles.go",
       "layer": "framework"
     },
     {
@@ -15338,7 +15338,7 @@
       "spelled": "func(scopes ...Scope) AppOption",
       "canonical": "func(scopes ...github.com/kitsunium/sdk/framework/kit.Scope) github.com/kitsunium/sdk/framework/kit.AppOption",
       "doc": "SingletonPer keeps one process of the app alive per value of scopes on\nthis machine — per user, per installed executable, per configuration\ndirectory ([PerUID], [PerExecutable], [PerConfigDir], [PerEnv]) —: the lock\nis named after the scopes' key ([ScopeKey]), computed at the start, and\nheld as Singleton's is. A client that must find the process computes the\nsame key from the same scopes.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/app_profiles.go",
       "layer": "framework"
     },
     {
@@ -15349,7 +15349,7 @@
       "spelled": "func(path string) ListenerOption",
       "canonical": "func(path string) github.com/kitsunium/sdk/framework/kit.ListenerOption",
       "doc": "SocketPath places the listener's socket at path — absolute, at most 103\nbytes — instead of <runtime dir of the app>/<service>-<name>.sock.\n\nIFACE-OPAQUE: ListenerOption is sealed — its one method is unexported —\nso only this package makes one, and a caller only passes it to Listen.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/listener.go",
       "layer": "framework"
     },
     {
@@ -15371,7 +15371,7 @@
       "spelled": "func(scopes ...Scope) ListenerOption",
       "canonical": "func(scopes ...github.com/kitsunium/sdk/framework/kit.Scope) github.com/kitsunium/sdk/framework/kit.ListenerOption",
       "doc": "SocketPer names the listener's socket after the value of scopes in this\nprocess — <runtime dir of the app>/<service>-<name>-<key>.sock, the key\nbeing [ScopeKey]'s —: one daemon per user, per executable, per\nconfiguration directory. A client finds it with SocketPathIn or DialIn,\nwhich compute the same key from the same declaration.\n\nIFACE-OPAQUE: ListenerOption is sealed — its one method is unexported —\nso only this package makes one, and a caller only passes it to Listen.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/listener.go",
       "layer": "framework"
     },
     {
@@ -15454,7 +15454,7 @@
       "spelled": "func(on bool) AppOption",
       "canonical": "func(on bool) github.com/kitsunium/sdk/framework/kit.AppOption",
       "doc": "Studio switches the Studio on or off in dev. It is always off in\nproduction.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/config.go",
       "layer": "framework"
     },
     {
@@ -15489,7 +15489,7 @@
       "spelled": "func(path string, gids ...int) AppOption",
       "canonical": "func(path string, gids ...int) github.com/kitsunium/sdk/framework/kit.AppOption",
       "doc": "Telemetry exports the app's telemetry on the private socket at path —\nabsolute, and short enough for a Unix socket (pkg/v1/proc/ipc) — admitting the groups gids besides the\nproduct's own account. It wins over KIT_TELEMETRY.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/telemetry.go",
       "layer": "framework"
     },
     {
@@ -15500,7 +15500,7 @@
       "spelled": "func(d time.Duration) OperationOption",
       "canonical": "func(d time.Duration) github.com/kitsunium/sdk/framework/kit.OperationOption",
       "doc": "Timeout cancels the handler's context after d and answers 504. It is the\nSDK's resilience timeout.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/endpoint.go",
       "layer": "framework"
     },
     {
@@ -15523,7 +15523,7 @@
       "spelled": "func(ctx context.Context, fn func(context.Context) error) error",
       "canonical": "func(ctx context.Context, fn func(context.Context) error) error",
       "doc": "Transact runs fn in one transaction and returns fn's error: nil commits\nwhat fn wrote, an error undoes it — a panic too, which then continues.\n\n\terr := kit.Transact(ctx, func(ctx context.Context) error {\n\t\tif _, err := Cases.Update(ctx, id, closeCase); err != nil {\n\t\t\treturn err // what this function wrote is undone\n\t\t}\n\t\tif err := Decisions.Insert(ctx, d); err != nil {\n\t\t\treturn err\n\t\t}\n\t\treturn Changes.Publish(ctx, Closed{ID: id}) // held: queued after the commit\n\t})\n\nA transaction belongs to one database: the one its first store call\nreaches — at its first call on a database, at its first write on the data\ndirectory, which counts as one, memory with it. Inside it, a store of\nanother database is read as usual; writing one is refused ([Invalid],\n[CodeTransactionSpan]). A Transact inside another is a savepoint: its\nfailure undoes its own writes, and the outer transaction goes on if its\ncaller handles the error.\n\nWhat leaves the process waits for the outermost commit: a topic's\npublish, a queued command's dispatch, a mail — whose outbox ID [Mailer].Send\nreturns at once —, a watch's notice, the store's write hooks that wake\nworkflows and loops, a workflow's OnTransition hooks. Each is checked when\nit is made, so a caller's mistake returns to the caller; a rollback drops\nthem, and a savepoint's rollback its own. One a queue refuses after the\ncommit is logged and reported, and the commit stands; a process that dies\nbetween the commit and the release loses what was held.\n\nOn a database the transaction is the database's own, at its default\nisolation. On the data directory and in memory kit keeps its own: it takes\nthe data's writer turn — one transaction at a time; a write outside any\nwaits for it, and such writes share the turn among themselves —, its\nwrites land at once, and an error writes each entity's previous value\nback, newest first. It is atomic against an error, not against a crash,\nand a reader may see a write before its commit. A store kept in memory by\n[InMemory] — a cache — is in no transaction: its writes land and stay.\n\nA command's handler runs in one already ([NoTransaction] opts out), and\nso does a workflow's transition.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/transact.go",
       "layer": "framework"
     },
     {
@@ -15625,7 +15625,7 @@
       "spelled": "func(next func(context.Context) (time.Time, bool)) LoopOption",
       "canonical": "func(next func(context.Context) (time.Time, bool)) github.com/kitsunium/sdk/framework/kit.LoopOption",
       "doc": "WakeAt wakes the loop at the time next returns, asked again after every\nrun; false means \"no deadline for now\". It is how a loop sleeps exactly\nuntil its next piece of work — the next reminder due — rather than polling.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/loop.go",
       "layer": "framework"
     },
     {
@@ -15636,7 +15636,7 @@
       "spelled": "func(d time.Duration) LoopOption",
       "canonical": "func(d time.Duration) github.com/kitsunium/sdk/framework/kit.LoopOption",
       "doc": "WakeEvery wakes the loop every d.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
-      "file": "framework/kit/decl_gen.go",
+      "file": "framework/kit/loop.go",
       "layer": "framework"
     },
     {
@@ -16034,7 +16034,7 @@
       "spelled": "func(binary string) string",
       "canonical": "func(binary string) string",
       "doc": "BinaryID is the ID of a binary.\n",
-      "file": "framework/model/decl_gen.go",
+      "file": "framework/model/id.go",
       "layer": "framework"
     },
     {
@@ -16491,7 +16491,7 @@
       "spelled": "func(a Source, b Source) int",
       "canonical": "func(a github.com/kitsunium/sdk/framework/model.Source, b github.com/kitsunium/sdk/framework/model.Source) int",
       "doc": "CompareSource orders sources by root, file, then line.\n",
-      "file": "framework/model/decl_gen.go",
+      "file": "framework/model/graph.go",
       "layer": "framework"
     },
     {
@@ -17703,7 +17703,7 @@
       "spelled": "func(backend string) bool",
       "canonical": "func(backend string) bool",
       "doc": "IsEngine reports whether backend names an engine a database runs on.\n",
-      "file": "framework/model/decl_gen.go",
+      "file": "framework/model/connector.go",
       "layer": "framework"
     },
     {
@@ -18609,7 +18609,7 @@
       "spelled": "func(base *Graph, extra *Graph) *Graph",
       "canonical": "func(base *github.com/kitsunium/sdk/framework/model.Graph, extra *github.com/kitsunium/sdk/framework/model.Graph) *github.com/kitsunium/sdk/framework/model.Graph",
       "doc": "Merge enriches a graph with what another description of the same product\nknows. base is authoritative on which nodes exist — a runtime graph describes\nwhat the process actually serves —, on the modules it mounts, on what each\nof its ports calls and on which stores feed each of its watches: the app\nchose them when it started, where the analysis only reads the same rules\nover the whole module. extra, typically\nthe static analysis, contributes documentation, handler ranges — an\nauthorization function's too —, transition callers and the edges it\nfound. Nodes only extra knows about are dropped: code that is compiled but\nnot mounted in this app is not part of this product — save a node of a\nmodule's service the base mounts, which a package the binary does not link\ndeclares: a warning says so.\n",
-      "file": "framework/model/decl_gen.go",
+      "file": "framework/model/graph.go",
       "layer": "framework"
     },
     {
@@ -20232,7 +20232,7 @@
       "spelled": "func(service string, node string, suffix string) string",
       "canonical": "func(service string, node string, suffix string) string",
       "doc": "TableName is the table a database keeps a kit table in (ADR 0004): the\nservice's name — qualified, for a module's —, two underscores and the\nnode's name, then suffix, '-' and '.' written '_', lower case —\n\"moderation.intake\"'s store \"cases\" is moderation_intake__cases. A name\nthe rule cannot keep as it is — upper case, longer than MaxTableLen,\nthree underscores in a row, SQLite's own prefix — is cut and ends with a\ndigest of the whole, so it stays one table's. The runtime and the\nanalyzer name tables with it.\n",
-      "file": "framework/model/decl_gen.go",
+      "file": "framework/model/table.go",
       "layer": "framework"
     },
     {
@@ -20380,7 +20380,7 @@
       "spelled": "func(s string) bool",
       "canonical": "func(s string) bool",
       "doc": "ValidContract reports whether s names a versioned contract: \"render/v1\".\n",
-      "file": "framework/model/decl_gen.go",
+      "file": "framework/model/id.go",
       "layer": "framework"
     },
     {
@@ -20402,7 +20402,7 @@
       "spelled": "func(s string) bool",
       "canonical": "func(s string) bool",
       "doc": "ValidSegment reports whether s is a legal service, module, binary, role or\nlibrary name.\n",
-      "file": "framework/model/decl_gen.go",
+      "file": "framework/model/id.go",
       "layer": "framework"
     },
     {
@@ -20993,7 +20993,7 @@
       "spelled": "func(binary string) string",
       "canonical": "func(binary string) string",
       "doc": "BinaryID is the ID of a binary.\n",
-      "file": "framework/model/internal/core/decl_gen.go",
+      "file": "framework/model/internal/core/id.go",
       "layer": "framework"
     },
     {
@@ -22575,7 +22575,7 @@
       "spelled": "func(from string, kind EdgeKind, to string, label string) string",
       "canonical": "func(from string, kind github.com/kitsunium/sdk/framework/model/internal/core.EdgeKind, to string, label string) string",
       "doc": "EdgeID builds the ID of an edge. The label is part of the identity: two\ntransitions of one workflow fired from one endpoint are two edges.\n",
-      "file": "framework/model/internal/core/decl_gen.go",
+      "file": "framework/model/internal/core/graph.go",
       "layer": "framework"
     },
     {
@@ -22598,7 +22598,7 @@
       "spelled": "string",
       "canonical": "string",
       "doc": "EdgeKind says how two nodes relate.\nIt is a wire format — the graph's JSON and the Studio's TypeScript unions\ncarry these names —, so it stays a string.\n",
-      "file": "framework/model/internal/core/decl_gen.go",
+      "file": "framework/model/internal/core/edge_kind.go",
       "layer": "framework"
     },
     {
@@ -23149,7 +23149,7 @@
       "spelled": "string",
       "canonical": "string",
       "doc": "EventType names the kind of a live event.\nIt is a wire format — the graph's JSON and the Studio's TypeScript unions\ncarry these names —, so it stays a string.\n",
-      "file": "framework/model/internal/core/decl_gen.go",
+      "file": "framework/model/internal/core/event_type.go",
       "layer": "framework"
     },
     {
@@ -23673,7 +23673,7 @@
       "spelled": "func(id string) *EdgeMessage",
       "canonical": "func(id string) *github.com/kitsunium/sdk/framework/model/internal/core.EdgeMessage",
       "doc": "Edge returns the edge with the given ID, or nil.\n",
-      "file": "framework/model/internal/core/decl_gen.go",
+      "file": "framework/model/internal/core/graph.go",
       "layer": "framework"
     },
     {
@@ -23697,7 +23697,7 @@
       "spelled": "func(name string) *ModuleMessage",
       "canonical": "func(name string) *github.com/kitsunium/sdk/framework/model/internal/core.ModuleMessage",
       "doc": "ModuleOf returns the module named name, or nil.\n",
-      "file": "framework/model/internal/core/decl_gen.go",
+      "file": "framework/model/internal/core/module.go",
       "layer": "framework"
     },
     {
@@ -23709,7 +23709,7 @@
       "spelled": "func(id string) *NodeEntity",
       "canonical": "func(id string) *github.com/kitsunium/sdk/framework/model/internal/core.NodeEntity",
       "doc": "Node returns the node with the given ID, or nil.\n",
-      "file": "framework/model/internal/core/decl_gen.go",
+      "file": "framework/model/internal/core/graph.go",
       "layer": "framework"
     },
     {
@@ -23911,7 +23911,7 @@
       "spelled": "func() string",
       "canonical": "func() string",
       "doc": "QualifiedServiceName is the service's ID segment: the qualification\n[QualifiedService] applies.\n",
-      "file": "framework/model/internal/core/decl_gen.go",
+      "file": "framework/model/internal/core/id.go",
       "layer": "framework"
     },
     {
@@ -24012,7 +24012,7 @@
       "spelled": "func(backend string) bool",
       "canonical": "func(backend string) bool",
       "doc": "IsEngine reports whether backend names an engine a database runs on.\n",
-      "file": "framework/model/internal/core/decl_gen.go",
+      "file": "framework/model/internal/core/connector.go",
       "layer": "framework"
     },
     {
@@ -25062,7 +25062,7 @@
         }
       ],
       "doc": "MailMessage is a whole captured mail, for the Studio's mailbox.\nIt is kept by the capture transport of dev and tests only, never in\nproduction.\n",
-      "file": "framework/model/internal/core/decl_gen.go",
+      "file": "framework/model/internal/core/devtools.go",
       "layer": "framework"
     },
     {
@@ -25950,7 +25950,7 @@
       "spelled": "func(service string, kind NodeKind, name string) string",
       "canonical": "func(service string, kind github.com/kitsunium/sdk/framework/model/internal/core.NodeKind, name string) string",
       "doc": "NodeID builds the ID of a node declared in a service. A service's own ID is\nits name.\n",
-      "file": "framework/model/internal/core/decl_gen.go",
+      "file": "framework/model/internal/core/graph.go",
       "layer": "framework"
     },
     {
@@ -25961,7 +25961,7 @@
       "spelled": "string",
       "canonical": "string",
       "doc": "NodeKind is the closed set of building blocks a kit product is made of.\nIt is a wire format — the graph's JSON and the Studio's TypeScript unions\ncarry these names —, so it stays a string.\n",
-      "file": "framework/model/internal/core/decl_gen.go",
+      "file": "framework/model/internal/core/node_kind.go",
       "layer": "framework"
     },
     {
@@ -27351,7 +27351,7 @@
       "spelled": "func(binary string, role string) string",
       "canonical": "func(binary string, role string) string",
       "doc": "RoleID is the ID of one process role of a binary.\n",
-      "file": "framework/model/internal/core/decl_gen.go",
+      "file": "framework/model/internal/core/id.go",
       "layer": "framework"
     },
     {
@@ -29149,7 +29149,7 @@
       "spelled": "func(prefix string, path string) string",
       "canonical": "func(prefix string, path string) string",
       "doc": "UnderPrefix is a route declared at path, served under a module's mount\nprefix: \"/reports\" under \"/moderation/\" is \"/moderation/reports\", and\nunder \"/\" it stays \"/reports\".\n",
-      "file": "framework/model/internal/core/decl_gen.go",
+      "file": "framework/model/internal/core/module.go",
       "layer": "framework"
     },
     {
@@ -30719,7 +30719,7 @@
       "spelled": "func(id string) NodeRef",
       "canonical": "func(id string) github.com/kitsunium/sdk/framework/telemetry.NodeRef",
       "doc": "Ref is the reference of node id in the handshake's table; zero when the\ntable does not hold it.\n",
-      "file": "framework/telemetry/decl_gen.go",
+      "file": "framework/telemetry/exporter.go",
       "layer": "framework"
     },
     {
@@ -31121,7 +31121,7 @@
       "spelled": "func(name string) Op",
       "canonical": "func(name string) github.com/kitsunium/sdk/framework/telemetry.Op",
       "doc": "OpOf is the Op named name, or OpNone.\n",
-      "file": "framework/telemetry/decl_gen.go",
+      "file": "framework/telemetry/telemetry.go",
       "layer": "framework"
     },
     {
@@ -31586,7 +31586,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "IsGroup reports whether this command dispatches to children rather than\nrunning an [Action]. It reads the declaration rather than a flag set at\nconstruction, so it answers the same on a CommandValue the caller has just\nwritten and on one the engine has already validated.\n",
-      "file": "internal/core/app/cli/decl_gen.go",
+      "file": "internal/core/app/cli/cli_command.go",
       "layer": "core",
       "family": "app"
     },
@@ -33484,7 +33484,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "Serving reports whether a probe carrying this status should keep receiving\ntraffic — which is exactly the question an HTTP status code answers.\n\nDegraded serves. That is the whole meaning of marking a check non-critical:\nif a degraded replica were removed from routing, a \"non-critical\" cache\noutage would take the fleet down just as thoroughly as a critical one.\n\nA Status outside the three does NOT serve — String already calls it\n\"unknown\", and a verdict nobody minted is the one that must not authorise\nrouting (the zero-value rule of the type comment, applied to every other\nvalue nobody assigned on purpose).\n",
-      "file": "internal/core/app/health/decl_gen.go",
+      "file": "internal/core/app/health/health_status.go",
       "layer": "core",
       "family": "app"
     },
@@ -33565,7 +33565,7 @@
       "spelled": "func(a Status, b Status) Status",
       "canonical": "func(a github.com/kitsunium/sdk/internal/core/app/health.Status, b github.com/kitsunium/sdk/internal/core/app/health.Status) github.com/kitsunium/sdk/internal/core/app/health.Status",
       "doc": "Worst returns the more severe of two statuses, which is the SDK's whole\naggregation rule: a set is as healthy as its least healthy member.\n\nIt exists as a named function rather than an inline min so the rule has one\ndefinition and one test, and so a reader looking for \"how does one failing\ncheck affect the whole probe\" finds a function rather than an idiom.\n\nA value outside the three ranks with Unhealthy. Status is ordered\nworst-first, so a plain min would rank a cast value like Status(42) ABOVE\nHealthy and let Worst(Healthy, Status(42)) answer Healthy — the fail-open\nServing already refuses for the same value.\n",
-      "file": "internal/core/app/health/decl_gen.go",
+      "file": "internal/core/app/health/health_status.go",
       "layer": "core",
       "family": "app"
     },
@@ -34013,7 +34013,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "Valid reports whether f is one of the six categories CLDR defines.\n",
-      "file": "internal/core/app/i18n/decl_gen.go",
+      "file": "internal/core/app/i18n/form.go",
       "layer": "core",
       "family": "app"
     },
@@ -34317,7 +34317,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "IsPlural reports whether the message carries any category beyond\n[FormOther].\n",
-      "file": "internal/core/app/i18n/decl_gen.go",
+      "file": "internal/core/app/i18n/message_value.go",
       "layer": "core",
       "family": "app"
     },
@@ -34498,7 +34498,7 @@
       "spelled": "func() (parent TagValue, ok bool)",
       "canonical": "func() (parent github.com/kitsunium/sdk/internal/core/app/i18n.TagValue, ok bool)",
       "doc": "Parent removes the most specific subtag and reports whether one was removed:\n\"fr-Latn-CA\" → \"fr-Latn\" → \"fr\" → (zero tag, false).\n\nIt is the truncation RFC 4647 §3.4 Lookup performs, and it is a value\noperation rather than a negotiation policy, so it lives here. It allocates\nnothing: the parent's canonical form is a prefix of the child's.\n\nRFC 4647 §3.4 also says a single-character subtag is skipped rather than\nused as a lookup key, because a lone \"u\" or \"x\" is an extension singleton\nand not a language. This subset admits no single-character subtag at all, so\nthe rule is satisfied by the grammar and there is nothing to skip — stated\nhere because a reader comparing this code to the RFC will look for it.\n",
-      "file": "internal/core/app/i18n/decl_gen.go",
+      "file": "internal/core/app/i18n/tag_value.go",
       "layer": "core",
       "family": "app"
     },
@@ -34524,7 +34524,7 @@
       "spelled": "func() string",
       "canonical": "func() string",
       "doc": "Script returns the Titlecase script subtag, or \"\" when the tag carries none.\n",
-      "file": "internal/core/app/i18n/decl_gen.go",
+      "file": "internal/core/app/i18n/tag_value.go",
       "layer": "core",
       "family": "app"
     },
@@ -36057,7 +36057,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "IsZero reports whether the address carries no addr-spec at all, which is the\nzero value a caller gets from an unfilled struct field.\n",
-      "file": "internal/core/app/mail/decl_gen.go",
+      "file": "internal/core/app/mail/address_value.go",
       "layer": "core",
       "family": "app"
     },
@@ -39401,7 +39401,7 @@
       "spelled": "func() []string",
       "canonical": "func() []string",
       "doc": "Paths returns the located path of every violation, in report order. It is\nthe shape an HTTP layer wants when it maps a report onto a form: the caller\nalready knows its own field names, and needs the SDK to say which ones.\n",
-      "file": "internal/core/app/validation/decl_gen.go",
+      "file": "internal/core/app/validation/report.go",
       "layer": "core",
       "family": "app"
     },
@@ -41214,7 +41214,7 @@
       "spelled": "func(raw []byte) (key Key, err error)",
       "canonical": "func(raw []byte) (key github.com/kitsunium/sdk/internal/core/crypto.Key, err error)",
       "doc": "NewKey builds a Key from raw, which MUST be exactly KeyLen (32) bytes. A wrong\nlength returns InvalidKey rather than silently truncating or padding; the\nbytes are copied so a later mutation of raw cannot affect the Key.\n",
-      "file": "internal/core/crypto/decl_gen.go",
+      "file": "internal/core/crypto/key.go",
       "layer": "core",
       "family": "crypto"
     },
@@ -44232,7 +44232,7 @@
       "spelled": "func() *bytes.Buffer",
       "canonical": "func() *bytes.Buffer",
       "doc": "AcquireBuffer returns a clean, zero-length *bytes.Buffer from the shared\npool. The recycler reset the buffer on its previous Put, so callers append\ndirectly without re-resetting. The caller owns it until ReleaseBuffer.\n",
-      "file": "internal/core/data/codec/scratch/decl_gen.go",
+      "file": "internal/core/data/codec/scratch/scratch.go",
       "layer": "core",
       "family": "data"
     },
@@ -44281,7 +44281,7 @@
       "spelled": "func(buf *bytes.Buffer)",
       "canonical": "func(buf *bytes.Buffer)",
       "doc": "ReleaseBuffer returns buf to the shared pool unless its capacity exceeds\nMaxRetainedBufBytes, in which case the recycler orphans it for the GC.\nCallers MUST NOT use buf — or any slice aliasing buf.Bytes() — after this\ncall; clone first if the encoded bytes must outlive the release.\n",
-      "file": "internal/core/data/codec/scratch/decl_gen.go",
+      "file": "internal/core/data/codec/scratch/scratch.go",
       "layer": "core",
       "family": "data"
     },
@@ -47986,7 +47986,7 @@
       "spelled": "func() string",
       "canonical": "func() string",
       "doc": "ForUpdate renders the clause that ends a read by locking the rows it returns\nuntil the transaction ends, leading space included: \" FOR UPDATE\" on\nPostgreSQL and MySQL. On MySQL it is also a locking read, which reads the\nlatest committed rows rather than a REPEATABLE READ transaction's snapshot.\n\nSQLite has no row lock and no such clause, and renders the empty string: a\nSQLite transaction excludes every other writer with the database's one write\nlock, which it takes at its first WRITE, so a transaction that must read\nunder exclusion writes first (ADR 0140). A dialect that is not\n[Dialect.Valid] renders the clause: an engine without one refuses the\nstatement, which is louder than a lock dropped in silence.\n",
-      "file": "internal/core/data/sql/decl_gen.go",
+      "file": "internal/core/data/sql/sql_dialect.go",
       "layer": "core",
       "family": "data"
     },
@@ -47999,7 +47999,7 @@
       "spelled": "func() string",
       "canonical": "func() string",
       "doc": "ForUpdateSkipLocked renders the clause that ends a read by locking the rows\nit returns and SKIPPING those another transaction holds, leading space\nincluded: \" FOR UPDATE SKIP LOCKED\" on PostgreSQL and MySQL. Two readers\nthen never wait on each other's rows and never take the same one.\n\nIt needs PostgreSQL 9.5, MySQL 8.0.1 or MariaDB 10.6 — later than the\nfloors [DialectPostgres] and [DialectMySQL] name — and an older server\nrefuses the statement. SQLite renders the empty string and a dialect that is\nnot [Dialect.Valid] the clause, for the reasons [Dialect.ForUpdate] gives: a\nSQLite transaction that has written holds the database's only write lock,\nso no row it reads is held by anybody else.\n",
-      "file": "internal/core/data/sql/decl_gen.go",
+      "file": "internal/core/data/sql/sql_dialect.go",
       "layer": "core",
       "family": "data"
     },
@@ -50607,7 +50607,7 @@
       "spelled": "func() time.Duration",
       "canonical": "func() time.Duration",
       "doc": "Duration returns the value as a plain time.Duration.\n",
-      "file": "internal/core/net/decl_gen.go",
+      "file": "internal/core/net/duration.go",
       "layer": "core",
       "family": "net"
     },
@@ -50881,7 +50881,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "IsZero reports whether the identity carries no material at all, which is the\nzero value a caller gets when no TLS was configured.\n",
-      "file": "internal/core/net/decl_gen.go",
+      "file": "internal/core/net/identity.go",
       "layer": "core",
       "family": "net"
     },
@@ -51777,7 +51777,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "Degraded reports whether any listener fell back from a requested\noptimisation, so a caller can assert \"no silent degradation\" in one call\ninstead of walking the slice.\n",
-      "file": "internal/core/net/decl_gen.go",
+      "file": "internal/core/net/state.go",
       "layer": "core",
       "family": "net"
     },
@@ -51994,7 +51994,7 @@
       "spelled": "func() WSCloseCode",
       "canonical": "func() github.com/kitsunium/sdk/internal/core/net.WSCloseCode",
       "doc": "Echoable returns the code to send back when answering this one.\n\nIt exists because §5.5.1 says an endpoint SHOULD echo the peer's status code,\nand the one code a peer can leave us holding — WSCloseNoStatus, for a Close\nwith no payload — is a code §7.4.1 forbids on the wire. Echoing blindly is\ntherefore a protocol error waiting for the first well-behaved peer that\ncloses without saying why.\n",
-      "file": "internal/core/net/decl_gen.go",
+      "file": "internal/core/net/websocket_close.go",
       "layer": "core",
       "family": "net"
     },
@@ -52007,7 +52007,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "Sendable reports whether the code may appear in a Close frame on the wire.\n\nIt is deliberately a property of the CODE rather than a check inside the\nsender, because the same question is asked twice from opposite directions: a\npeer that sends 1006 is committing a protocol error, and so is this endpoint\nif it ever does. One predicate, both directions, no chance of the two\ndrifting apart.\n",
-      "file": "internal/core/net/decl_gen.go",
+      "file": "internal/core/net/websocket_close.go",
       "layer": "core",
       "family": "net"
     },
@@ -52352,7 +52352,7 @@
       "spelled": "func() WSOpCode",
       "canonical": "func() github.com/kitsunium/sdk/internal/core/net.WSOpCode",
       "doc": "OpCode returns the frame opcode this message is carried under.\n",
-      "file": "internal/core/net/decl_gen.go",
+      "file": "internal/core/net/websocket_message.go",
       "layer": "core",
       "family": "net"
     },
@@ -52377,7 +52377,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "Defined reports whether RFC 6455 assigns this opcode a meaning.\n",
-      "file": "internal/core/net/decl_gen.go",
+      "file": "internal/core/net/websocket_opcode.go",
       "layer": "core",
       "family": "net"
     },
@@ -52390,7 +52390,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "IsControl reports whether the opcode names a control frame.\n\nControl frames are the ones that may be injected BETWEEN the fragments of a\nmessage, so the distinction decides which fragmentation rules apply.\n",
-      "file": "internal/core/net/decl_gen.go",
+      "file": "internal/core/net/websocket_opcode.go",
       "layer": "core",
       "family": "net"
     },
@@ -52552,7 +52552,7 @@
       "spelled": "func(v any) Value",
       "canonical": "func(v any) github.com/kitsunium/sdk/internal/core/observe/logger.Value",
       "doc": "AnyValue builds a Value of KindAny carrying an arbitrary payload. Handlers\ninspect the concrete type via type assertion and fall back to \"?\" when the\ntype is not in their format table.\n",
-      "file": "internal/core/observe/logger/decl_gen.go",
+      "file": "internal/core/observe/logger/value.go",
       "layer": "core",
       "family": "observe"
     },
@@ -52588,7 +52588,7 @@
       "spelled": "func(v bool) Value",
       "canonical": "func(v bool) github.com/kitsunium/sdk/internal/core/observe/logger.Value",
       "doc": "BoolValue builds a Value of kind bool.\n",
-      "file": "internal/core/observe/logger/decl_gen.go",
+      "file": "internal/core/observe/logger/value.go",
       "layer": "core",
       "family": "observe"
     },
@@ -52713,7 +52713,7 @@
       "spelled": "func(v time.Duration) Value",
       "canonical": "func(v time.Duration) github.com/kitsunium/sdk/internal/core/observe/logger.Value",
       "doc": "DurationValue builds a Value of kind duration. Storing the int64 nanosecond\ncount in bits keeps the hot path allocation-free.\n",
-      "file": "internal/core/observe/logger/decl_gen.go",
+      "file": "internal/core/observe/logger/value.go",
       "layer": "core",
       "family": "observe"
     },
@@ -52792,7 +52792,7 @@
       "spelled": "func(attrs ...AttrValue) Value",
       "canonical": "func(attrs ...github.com/kitsunium/sdk/internal/core/observe/logger.AttrValue) github.com/kitsunium/sdk/internal/core/observe/logger.Value",
       "doc": "GroupValue builds a Value whose payload is a slice of AttrValue, modelling\na nested attribute group. The slice is stored verbatim — callers MUST NOT\nmutate it after the Value is constructed.\n",
-      "file": "internal/core/observe/logger/decl_gen.go",
+      "file": "internal/core/observe/logger/value.go",
       "layer": "core",
       "family": "observe"
     },
@@ -52885,7 +52885,7 @@
       "spelled": "func(v int64) Value",
       "canonical": "func(v int64) github.com/kitsunium/sdk/internal/core/observe/logger.Value",
       "doc": "Int64Value builds a Value of kind int64. int and int32 callers should widen\nto int64 at the call site.\n",
-      "file": "internal/core/observe/logger/decl_gen.go",
+      "file": "internal/core/observe/logger/value.go",
       "layer": "core",
       "family": "observe"
     },
@@ -52897,7 +52897,7 @@
       "spelled": "func(v int) Value",
       "canonical": "func(v int) github.com/kitsunium/sdk/internal/core/observe/logger.Value",
       "doc": "IntValue builds a Value of kind int64 from a plain int. Provided for caller\nergonomy so the most common integer type does not need an explicit cast.\n",
-      "file": "internal/core/observe/logger/decl_gen.go",
+      "file": "internal/core/observe/logger/value.go",
       "layer": "core",
       "family": "observe"
     },
@@ -53290,7 +53290,7 @@
       "spelled": "func(v time.Time) Value",
       "canonical": "func(v time.Time) github.com/kitsunium/sdk/internal/core/observe/logger.Value",
       "doc": "TimeValue builds a Value of kind time. The time.Time payload lives in the\nany field because its locale + monotonic representation does not fit into\nnum without additional storage.\n",
-      "file": "internal/core/observe/logger/decl_gen.go",
+      "file": "internal/core/observe/logger/value.go",
       "layer": "core",
       "family": "observe"
     },
@@ -53339,7 +53339,7 @@
       "spelled": "func(dst []byte) []byte",
       "canonical": "func(dst []byte) []byte",
       "doc": "AppendSpanIDHex appends the span identifier to dst as 16 lowercase hex\ndigits and returns the extended buffer. Same contract as AppendTraceIDHex.\n",
-      "file": "internal/core/observe/logger/decl_gen.go",
+      "file": "internal/core/observe/logger/trace_context.go",
       "layer": "core",
       "family": "observe"
     },
@@ -53352,7 +53352,7 @@
       "spelled": "func(dst []byte) []byte",
       "canonical": "func(dst []byte) []byte",
       "doc": "AppendTraceIDHex appends the trace identifier to dst as 32 LOWERCASE hex\ndigits and returns the extended buffer.\n\nThe spelling is normative — \"Trace IDs and span IDs must be lowercase and\nhex-encoded\" (specification/compatibility/logging_trace_context.md) — and\nthree formatters (the text encoder, the JSON encoder and the legacy text\nhandler) have to agree on it byte for byte, which is why it lives beside the\nvalue rather than three times over in internal/service/observe/logger.\n\nIt appends and never returns a string: a string would be one heap allocation\nper emitted record, and the logger's one-allocation-per-emit contract has no\nroom for a second. See ADR 0062 and pkg/v1/observe/logger/BENCH.md.\n",
-      "file": "internal/core/observe/logger/decl_gen.go",
+      "file": "internal/core/observe/logger/trace_context.go",
       "layer": "core",
       "family": "observe"
     },
@@ -53416,7 +53416,7 @@
       "spelled": "func(v uint64) Value",
       "canonical": "func(v uint64) github.com/kitsunium/sdk/internal/core/observe/logger.Value",
       "doc": "Uint64Value builds a Value of kind uint64.\n",
-      "file": "internal/core/observe/logger/decl_gen.go",
+      "file": "internal/core/observe/logger/value.go",
       "layer": "core",
       "family": "observe"
     },
@@ -53480,7 +53480,7 @@
       "spelled": "func() time.Duration",
       "canonical": "func() time.Duration",
       "doc": "Duration returns the time.Duration payload. The result is undefined when\nKind is not KindDuration; callers MUST guard with Kind() before calling\nthis accessor.\n",
-      "file": "internal/core/observe/logger/decl_gen.go",
+      "file": "internal/core/observe/logger/value.go",
       "layer": "core",
       "family": "observe"
     },
@@ -53739,7 +53739,7 @@
       "spelled": "func(initial Level) *Var",
       "canonical": "func(initial github.com/kitsunium/sdk/internal/core/observe/logger/level.Level) *github.com/kitsunium/sdk/internal/core/observe/logger/level.Var",
       "doc": "NewVar returns a Var initialised to initial. The returned pointer is the\nLeveler a gate or sink holds; callers later retune it with Set.\n",
-      "file": "internal/core/observe/logger/level/decl_gen.go",
+      "file": "internal/core/observe/logger/level/var.go",
       "layer": "core",
       "family": "observe"
     },
@@ -55413,7 +55413,7 @@
       "spelled": "func(accessKeyID string, secretAccessKey string, sessionToken string) CredentialValue",
       "canonical": "func(accessKeyID string, secretAccessKey string, sessionToken string) github.com/kitsunium/sdk/internal/core/observe/logger/writer.CredentialValue",
       "doc": "NewCredentialValue builds a CredentialValue from SigV4 material. An empty\nsessionToken is valid for long-lived keys; supply it for STS / assumed roles.\n",
-      "file": "internal/core/observe/logger/writer/decl_gen.go",
+      "file": "internal/core/observe/logger/writer/credentials.go",
       "layer": "core",
       "family": "observe"
     },
@@ -57224,7 +57224,7 @@
       "spelled": "func() Temporality",
       "canonical": "func() github.com/kitsunium/sdk/internal/core/observe/metrics.Temporality",
       "doc": "Resolved maps the UNSET zero value onto the temporality a Meter actually\nimplements, and refuses anything that is neither of the three constants.\n\nTemporalityUnspecified CLAMPS to TemporalityCumulative rather than refusing,\nand the reason is not convention: an in-memory meter accumulates into atomics\nand never resets them unless it is asked to, so \"cumulative\" is a DESCRIPTION\nof what the unconfigured meter does, not a value invented on the caller's\nbehalf. Any other default would be a claim about the implementation that the\nimplementation does not honour (ADR 0031 §clamp).\n\nAn out-of-range value can only come from a deliberate cast — Temporality(7)\nis not something a caller reaches by forgetting a field — so it is a\nprogramming error and panics with InvalidTemporality rather than being\nquietly folded into the default, which would hide the cast forever.\n",
-      "file": "internal/core/observe/metrics/decl_gen.go",
+      "file": "internal/core/observe/metrics/temporality.go",
       "layer": "core",
       "family": "observe"
     },
@@ -57506,7 +57506,7 @@
       "spelled": "func(dst []byte) []byte",
       "canonical": "func(dst []byte) []byte",
       "doc": "AppendIdentity appends an INJECTIVE binary encoding of the attribute's value\n— its kind tag followed by fixed-width or length-prefixed bytes — to dst.\n\nThe kind tag is what keeps String(\"v\", \"1\") and Int64(\"v\", 1) apart: without\nit the two would encode identically and two series carrying different\ndimensions would silently accumulate into one. It lives with the type rather\nthan in the meter so that every Meter implementation inherits the same\ninjectivity instead of re-deriving it.\n",
-      "file": "internal/core/observe/otel/decl_gen.go",
+      "file": "internal/core/observe/otel/attr_value.go",
       "layer": "core",
       "family": "observe"
     },
@@ -57608,7 +57608,7 @@
       "spelled": "func(a AttrValue, b AttrValue) int",
       "canonical": "func(a github.com/kitsunium/sdk/internal/core/observe/otel.AttrValue, b github.com/kitsunium/sdk/internal/core/observe/otel.AttrValue) int",
       "doc": "CompareAttrKey orders two attributes by Key alone. A package-level function\nvalue, not a closure, so passing it to slices.SortFunc allocates nothing.\n",
-      "file": "internal/core/observe/otel/decl_gen.go",
+      "file": "internal/core/observe/otel/attr_value.go",
       "layer": "core",
       "family": "observe"
     },
@@ -57668,7 +57668,7 @@
       "spelled": "func(scope ScopeValue, defaultName string) ScopeValue",
       "canonical": "func(scope github.com/kitsunium/sdk/internal/core/observe/otel.ScopeValue, defaultName string) github.com/kitsunium/sdk/internal/core/observe/otel.ScopeValue",
       "doc": "NormalizeScope returns scope with an empty Name filled by defaultName.\nVersion is left exactly as supplied.\n\nThe default is a PARAMETER because it is the one part of the shared model\nthat must not be shared: a scope names the library that produced THIS\nsignal, so a span batch stamped with the metrics package's name would tell a\nbackend that the metrics package emitted spans. Each signal passes its own\nDefaultScopeName (ADR 0051 §Decision 2).\n",
-      "file": "internal/core/observe/otel/decl_gen.go",
+      "file": "internal/core/observe/otel/scope_value.go",
       "layer": "core",
       "family": "observe"
     },
@@ -58702,7 +58702,7 @@
       "spelled": "func(parent context.Context, context SpanContextValue) context.Context",
       "canonical": "func(parent context.Context, context github.com/kitsunium/sdk/internal/core/observe/trace.SpanContextValue) context.Context",
       "doc": "ContextWithSpanContext returns a copy of parent carrying context.\n\nAn INVALID context is still stored rather than skipped. Storing it is what\nmakes \"this scope deliberately has no trace\" expressible: a handler that ran\nunder an unsampled or absent traceparent shadows any outer context instead of\nsilently re-parenting its children onto it.\n",
-      "file": "internal/core/observe/trace/decl_gen.go",
+      "file": "internal/core/observe/trace/context.go",
       "layer": "core",
       "family": "observe"
     },
@@ -59045,7 +59045,7 @@
       "spelled": "func() LinkValue",
       "canonical": "func() github.com/kitsunium/sdk/internal/core/observe/trace.LinkValue",
       "doc": "Normalized returns the link a span actually records: attributes sorted,\nvalidated and owned.\n",
-      "file": "internal/core/observe/trace/decl_gen.go",
+      "file": "internal/core/observe/trace/link_value.go",
       "layer": "core",
       "family": "observe"
     },
@@ -59108,7 +59108,7 @@
       "spelled": "func(size int) StateBuilder",
       "canonical": "func(size int) github.com/kitsunium/sdk/internal/core/observe/trace.StateBuilder",
       "doc": "NewStateBuilder returns an empty builder with room for size members. A size\nabove MaxTraceStateMembers is clamped to it — no list holds more — and a\nnegative one is read as zero.\n",
-      "file": "internal/core/observe/trace/decl_gen.go",
+      "file": "internal/core/observe/trace/state_builder.go",
       "layer": "core",
       "family": "observe"
     },
@@ -59479,7 +59479,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "IsSampled reports whether the sampled bit is set on this context.\n\nIt is the ONLY sampling question anything downstream asks. The decision is\ntaken once, at the root of the trace, and travels in this bit; re-deciding per\nspan produces a trace with holes in the middle, which is worse than no trace\nat all because it looks complete.\n",
-      "file": "internal/core/observe/trace/decl_gen.go",
+      "file": "internal/core/observe/trace/span_context.go",
       "layer": "core",
       "family": "observe"
     },
@@ -59492,7 +59492,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "IsValid reports whether the context names a joinable span: both identifiers\npresent and non-zero.\n",
-      "file": "internal/core/observe/trace/decl_gen.go",
+      "file": "internal/core/observe/trace/span_context.go",
       "layer": "core",
       "family": "observe"
     },
@@ -59505,7 +59505,7 @@
       "spelled": "func(state StateValue) SpanContextValue",
       "canonical": "func(state github.com/kitsunium/sdk/internal/core/observe/trace.StateValue) github.com/kitsunium/sdk/internal/core/observe/trace.SpanContextValue",
       "doc": "WithState returns a copy of c carrying state. It exists so a caller who\nmutates the vendor list does not have to rebuild the identity around it.\n",
-      "file": "internal/core/observe/trace/decl_gen.go",
+      "file": "internal/core/observe/trace/span_context.go",
       "layer": "core",
       "family": "observe"
     },
@@ -59630,7 +59630,7 @@
       "spelled": "func() SpanKind",
       "canonical": "func() github.com/kitsunium/sdk/internal/core/observe/trace.SpanKind",
       "doc": "Resolved returns the kind a span actually carries: SpanKindUnspecified clamps\nto SpanKindInternal, every declared value is honoured, and anything else — a\ncast, since there is no other way to produce one — clamps too.\n\nIt clamps where Temporality refuses (ADR 0044 §Decision 3), and the asymmetry\napplies the clamp-or-refuse question honestly: an unstated temporality changes what a\nNUMBER means, so no default can be chosen for the caller; an unstated kind\nchanges only how a span is drawn, and the specification itself names the\ndefault. A clamp is right exactly when the SDK is not substituting judgement.\n",
-      "file": "internal/core/observe/trace/decl_gen.go",
+      "file": "internal/core/observe/trace/span_kind.go",
       "layer": "core",
       "family": "observe"
     },
@@ -59857,7 +59857,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "IsRoot reports whether the span has no parent.\n",
-      "file": "internal/core/observe/trace/decl_gen.go",
+      "file": "internal/core/observe/trace/span_value.go",
       "layer": "core",
       "family": "observe"
     },
@@ -59899,7 +59899,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "IsEmpty reports whether the payload carries no span. An exporter uses it to\nskip a POST that would carry nothing.\n",
-      "file": "internal/core/observe/trace/decl_gen.go",
+      "file": "internal/core/observe/trace/spans_value.go",
       "layer": "core",
       "family": "observe"
     },
@@ -60115,7 +60115,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "IsUnset reports whether the status carries no judgement at all. It is what the\nOTLP encoder asks before deciding whether the `status` field is worth a line.\n",
-      "file": "internal/core/observe/trace/decl_gen.go",
+      "file": "internal/core/observe/trace/status_value.go",
       "layer": "core",
       "family": "observe"
     },
@@ -60166,7 +60166,7 @@
       "spelled": "func() TraceFlags",
       "canonical": "func() github.com/kitsunium/sdk/internal/core/observe/trace.TraceFlags",
       "doc": "Sanitized returns f with every bit this specification version does not define\ncleared.\n\nIt is applied on the way OUT, never on the way in. §3.2.2.5.2 says a vendor\nMUST set undefined bits to zero, so emitting a bit we did not set would make\nthis SDK a non-conforming producer; but §3.2.4 says a receiver must not\n\"assume anything about unknown fields\", so clearing them on the way in would\ndestroy information a future version defines. Keeping the received byte and\nmasking at format time satisfies both halves at once.\n",
-      "file": "internal/core/observe/trace/decl_gen.go",
+      "file": "internal/core/observe/trace/identifier.go",
       "layer": "core",
       "family": "observe"
     },
@@ -60179,7 +60179,7 @@
       "spelled": "func(sampled bool) TraceFlags",
       "canonical": "func(sampled bool) github.com/kitsunium/sdk/internal/core/observe/trace.TraceFlags",
       "doc": "WithSampled returns f with the sampled bit set to sampled, leaving every\nother bit as it was.\n",
-      "file": "internal/core/observe/trace/decl_gen.go",
+      "file": "internal/core/observe/trace/identifier.go",
       "layer": "core",
       "family": "observe"
     },
@@ -60806,7 +60806,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "Success reports whether the process exited normally with status zero.\n",
-      "file": "internal/core/proc/decl_gen.go",
+      "file": "internal/core/proc/exit.go",
       "layer": "core",
       "family": "proc"
     },
@@ -61227,7 +61227,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "Ready reports whether the datagram carried READY=1.\n",
-      "file": "internal/core/proc/decl_gen.go",
+      "file": "internal/core/proc/notification.go",
       "layer": "core",
       "family": "proc"
     },
@@ -61240,7 +61240,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "Reloading reports whether the datagram carried RELOADING=1.\n",
-      "file": "internal/core/proc/decl_gen.go",
+      "file": "internal/core/proc/notification.go",
       "layer": "core",
       "family": "proc"
     },
@@ -61253,7 +61253,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "Stopping reports whether the datagram carried STOPPING=1.\n",
-      "file": "internal/core/proc/decl_gen.go",
+      "file": "internal/core/proc/notification.go",
       "layer": "core",
       "family": "proc"
     },
@@ -61266,7 +61266,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "Watchdog reports whether the datagram carried WATCHDOG=1 (a keep-alive ping).\n",
-      "file": "internal/core/proc/decl_gen.go",
+      "file": "internal/core/proc/notification.go",
       "layer": "core",
       "family": "proc"
     },
@@ -61693,7 +61693,7 @@
       "spelled": "func() os.Signal",
       "canonical": "func() os.Signal",
       "doc": "OS bridges s to the os.Signal expected by os/signal and Process.Signal. It is\na zero-cost conversion to syscall.Signal — the canonical os.Signal carrier.\n",
-      "file": "internal/core/proc/decl_gen.go",
+      "file": "internal/core/proc/signal.go",
       "layer": "core",
       "family": "proc"
     },
@@ -62579,7 +62579,7 @@
       "spelled": "func(key string, value bool) AttrValue",
       "canonical": "func(key string, value bool) github.com/kitsunium/sdk/internal/core/security/authz.AttrValue",
       "doc": "AttrBool builds a flag attribute. A flag that is present and false is a\ndifferent fact from a flag that is absent, and this is the constructor that\nlets a caller state the first one.\n",
-      "file": "internal/core/security/authz/decl_gen.go",
+      "file": "internal/core/security/authz/attr_value.go",
       "layer": "core",
       "family": "security"
     },
@@ -62591,7 +62591,7 @@
       "spelled": "func(key string, value int64) AttrValue",
       "canonical": "func(key string, value int64) github.com/kitsunium/sdk/internal/core/security/authz.AttrValue",
       "doc": "AttrInt64 builds a whole-number attribute. Timestamps travel here as Unix\nseconds: the domain deliberately has no time kind, because an attribute\ncarrying a time zone would make two requests with the same instant compare\nunequal.\n",
-      "file": "internal/core/security/authz/decl_gen.go",
+      "file": "internal/core/security/authz/attr_value.go",
       "layer": "core",
       "family": "security"
     },
@@ -62615,7 +62615,7 @@
       "spelled": "func(key string, value string) AttrValue",
       "canonical": "func(key string, value string) github.com/kitsunium/sdk/internal/core/security/authz.AttrValue",
       "doc": "AttrString builds a text attribute.\n",
-      "file": "internal/core/security/authz/decl_gen.go",
+      "file": "internal/core/security/authz/attr_value.go",
       "layer": "core",
       "family": "security"
     },
@@ -62627,7 +62627,7 @@
       "spelled": "func(key string, values ...string) AttrValue",
       "canonical": "func(key string, values ...string) github.com/kitsunium/sdk/internal/core/security/authz.AttrValue",
       "doc": "AttrStrings builds a set attribute — roles, groups, scopes. The slice is\ncloned, so the caller keeps ownership of the one it passed.\n\nAttrStrings(key) with no values is a legitimate attribute: it states that\nthe subject holds NO roles, which is a different fact from the caller not\nhaving said. Rules distinguish the two, and only the second is an error.\n",
-      "file": "internal/core/security/authz/decl_gen.go",
+      "file": "internal/core/security/authz/attr_value.go",
       "layer": "core",
       "family": "security"
     },
@@ -62665,7 +62665,7 @@
       "spelled": "func(want string) (found bool, ok bool)",
       "canonical": "func(want string) (found bool, ok bool)",
       "doc": "Contains reports whether a [KindStrings] attribute holds want. ok is false\nwhen the attribute is not [KindStrings], which the caller MUST distinguish\nfrom a set that simply does not contain want.\n\nIt exists so membership does not have to allocate: [AttrValue.StringsValue]\nclones, and membership is the single hottest attribute read in the domain —\nevery RBAC evaluation performs one per role.\n",
-      "file": "internal/core/security/authz/decl_gen.go",
+      "file": "internal/core/security/authz/attr_value.go",
       "layer": "core",
       "family": "security"
     },
@@ -62730,7 +62730,7 @@
       "spelled": "func() (values []string, ok bool)",
       "canonical": "func() (values []string, ok bool)",
       "doc": "StringsValue returns a copy of the set payload. ok is false when the\nattribute is not [KindStrings]. The copy is what makes an AttrValue safe to\nshare across goroutines: a caller that sorts or appends to the result cannot\nreach the attribute the next request will evaluate.\n",
-      "file": "internal/core/security/authz/decl_gen.go",
+      "file": "internal/core/security/authz/attr_value.go",
       "layer": "core",
       "family": "security"
     },
@@ -62930,7 +62930,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "Granted reports whether d permits the request. It is true for [Allow] and\nfor nothing else.\n\nIt exists so that no call site has to spell the test itself. `d != Deny` is\nthe same expression with an extra character and a security hole in it: it is\ntrue for [Abstain], so it authorizes every request no policy recognised, and\nit is true for a corrupt Decision value as well.\n",
-      "file": "internal/core/security/authz/decl_gen.go",
+      "file": "internal/core/security/authz/decision.go",
       "layer": "core",
       "family": "security"
     },
@@ -62956,7 +62956,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "Valid reports whether d is one of the three named states. A Decision that is\nnot is a defect in the policy that produced it — a numeric conversion, a\nzeroed struct field read as a Decision, a value from a future version of a\ncaller's own code — and the SDK refuses on it rather than guessing.\n",
-      "file": "internal/core/security/authz/decl_gen.go",
+      "file": "internal/core/security/authz/decision.go",
       "layer": "core",
       "family": "security"
     },
@@ -63063,7 +63063,7 @@
       "spelled": "func(subject string, action string, resource string, attrs ...AttrValue) RequestValue",
       "canonical": "func(subject string, action string, resource string, attrs ...github.com/kitsunium/sdk/internal/core/security/authz.AttrValue) github.com/kitsunium/sdk/internal/core/security/authz.RequestValue",
       "doc": "NewRequestValue builds the immutable question. Attributes are indexed by\ntheir key; a later attribute with the same key replaces an earlier one, so\nthe caller can layer defaults and then override them.\n\nAn attribute with an empty key or the zero [KindInvalid] kind is DROPPED\nrather than stored. The invariant is worth the drop: every attribute a rule\ncan find is one it can use, so \"found but unusable\" is not a state any rule\nhas to handle. The dropped attribute is then simply absent, and absence is\nalready a refusal in every rule that names it — the failure mode is closed.\n\nAn empty action or resource is accepted and matches no grant and no rule, so\nsuch a request is refused by the closure. It is not rejected here because\ndoing so would put an error return on the constructor every request calls,\nto catch a mistake that already fails closed.\n",
-      "file": "internal/core/security/authz/decl_gen.go",
+      "file": "internal/core/security/authz/request_value.go",
       "layer": "core",
       "family": "security"
     },
@@ -63160,7 +63160,7 @@
       "spelled": "func() int",
       "canonical": "func() int",
       "doc": "AttrCount returns how many attributes the request carries. It exists for\ndiagnostics and tests; no rule reads it, because \"how many facts\" never\nanswers \"which fact\".\n",
-      "file": "internal/core/security/authz/decl_gen.go",
+      "file": "internal/core/security/authz/request_value.go",
       "layer": "core",
       "family": "security"
     },
@@ -64380,7 +64380,7 @@
       "spelled": "func() []byte",
       "canonical": "func() []byte",
       "doc": "Reveal returns a fresh copy of the secret's bytes — the only way out besides\n[Value.RevealString]. The copy is the caller's: mutating it cannot reach the\nValue. The zero Value reveals nil.\n\nHand the result to the API that consumes the secret; never to a logger, a\nmetric label, a URL or an error message.\n",
-      "file": "internal/core/security/secret/decl_gen.go",
+      "file": "internal/core/security/secret/value.go",
       "layer": "core",
       "family": "security"
     },
@@ -64393,7 +64393,7 @@
       "spelled": "func() string",
       "canonical": "func() string",
       "doc": "RevealString returns the secret as a string. The same warning as\n[Value.Reveal] applies, with one more: a Go string cannot be cleared, so a\nrevealed string lives until the collector reclaims it.\n",
-      "file": "internal/core/security/secret/decl_gen.go",
+      "file": "internal/core/security/secret/value.go",
       "layer": "core",
       "family": "security"
     },
@@ -64432,7 +64432,7 @@
       "spelled": "func(text []byte) error",
       "canonical": "func(text []byte) error",
       "doc": "UnmarshalText implements encoding.TextUnmarshaler. The text becomes the\nsecret, copied — except [Redacted] itself, which is refused with\n[ValueRefused]: every rendering of a Value writes it, so finding it on the\nway in means a rendered configuration was loaded as a real one, and every\nsecret in it would otherwise silently become the placeholder.\n",
-      "file": "internal/core/security/secret/decl_gen.go",
+      "file": "internal/core/security/secret/value.go",
       "layer": "core",
       "family": "security"
     },
@@ -64991,7 +64991,7 @@
       "spelled": "func(raw []byte) (id ID, err error)",
       "canonical": "func(raw []byte) (id github.com/kitsunium/sdk/internal/core/security/session.ID, err error)",
       "doc": "NewID builds an ID from raw, which MUST be exactly [IDLen] bytes. A wrong\nlength returns [InvalidID] rather than padding or truncating — a truncated\nidentifier is a weaker secret that would still work. The bytes are copied so\na later mutation of raw cannot reach the ID.\n",
-      "file": "internal/core/security/session/decl_gen.go",
+      "file": "internal/core/security/session/id.go",
       "layer": "core",
       "family": "security"
     },
@@ -65202,7 +65202,7 @@
       "spelled": "func() time.Time",
       "canonical": "func() time.Time",
       "doc": "ExpiresAt reports the EFFECTIVE deadline: the earlier of the absolute\nceiling and the sliding idle window. The two are never reconciled by\naveraging or by preferring the later one — the earlier deadline always wins,\nwhich is what makes the absolute timeout a ceiling rather than a suggestion.\n",
-      "file": "internal/core/security/session/decl_gen.go",
+      "file": "internal/core/security/session/session_value.go",
       "layer": "core",
       "family": "security"
     },
@@ -65254,7 +65254,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "IsZero reports whether this is the zero SessionValue — what every failing\n[Store] method returns alongside its error. There is no \"invalid, but here\nare the claims anyway\" path.\n",
-      "file": "internal/core/security/session/decl_gen.go",
+      "file": "internal/core/security/session/session_value.go",
       "layer": "core",
       "family": "security"
     },
@@ -65839,7 +65839,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "IsZero reports whether c carries no claim at all.\n",
-      "file": "internal/core/security/token/decl_gen.go",
+      "file": "internal/core/security/token/claims.go",
       "layer": "core",
       "family": "security"
     },
@@ -65904,7 +65904,7 @@
       "spelled": "func(name string) (raw []byte, found bool)",
       "canonical": "func(name string) (raw []byte, found bool)",
       "doc": "PrivateRaw returns a copy of the raw JSON encoding of the named application\nclaim. The second result reports presence, so a claim explicitly set to JSON\nnull is distinguishable from a claim that was never sent.\n",
-      "file": "internal/core/security/token/decl_gen.go",
+      "file": "internal/core/security/token/claims.go",
       "layer": "core",
       "family": "security"
     },
@@ -65943,7 +65943,7 @@
       "spelled": "func(aud ...string) ClaimsValue",
       "canonical": "func(aud ...string) github.com/kitsunium/sdk/internal/core/security/token.ClaimsValue",
       "doc": "WithAudience returns a copy of c whose \"aud\" claim is exactly aud. Passing no\nargument clears the claim; the slice is copied, so a later mutation of the\ncaller's backing array cannot reach the claim set.\n",
-      "file": "internal/core/security/token/decl_gen.go",
+      "file": "internal/core/security/token/claims_with.go",
       "layer": "core",
       "family": "security"
     },
@@ -65956,7 +65956,7 @@
       "spelled": "func(exp time.Time) ClaimsValue",
       "canonical": "func(exp time.Time) github.com/kitsunium/sdk/internal/core/security/token.ClaimsValue",
       "doc": "WithExpiry returns a copy of c carrying exp. The zero Time clears the claim,\nwhich a verifier reads as \"no expiry was sent\" — not as \"expired\".\n",
-      "file": "internal/core/security/token/decl_gen.go",
+      "file": "internal/core/security/token/claims_with.go",
       "layer": "core",
       "family": "security"
     },
@@ -65969,7 +65969,7 @@
       "spelled": "func(jti string) ClaimsValue",
       "canonical": "func(jti string) github.com/kitsunium/sdk/internal/core/security/token.ClaimsValue",
       "doc": "WithID returns a copy of c carrying jti. The empty string clears it.\n",
-      "file": "internal/core/security/token/decl_gen.go",
+      "file": "internal/core/security/token/claims_with.go",
       "layer": "core",
       "family": "security"
     },
@@ -65982,7 +65982,7 @@
       "spelled": "func(iat time.Time) ClaimsValue",
       "canonical": "func(iat time.Time) github.com/kitsunium/sdk/internal/core/security/token.ClaimsValue",
       "doc": "WithIssuedAt returns a copy of c carrying iat. The zero Time clears it.\n",
-      "file": "internal/core/security/token/decl_gen.go",
+      "file": "internal/core/security/token/claims_with.go",
       "layer": "core",
       "family": "security"
     },
@@ -65995,7 +65995,7 @@
       "spelled": "func(iss string) ClaimsValue",
       "canonical": "func(iss string) github.com/kitsunium/sdk/internal/core/security/token.ClaimsValue",
       "doc": "WithIssuer returns a copy of c carrying iss. The empty string clears it.\n",
-      "file": "internal/core/security/token/decl_gen.go",
+      "file": "internal/core/security/token/claims_with.go",
       "layer": "core",
       "family": "security"
     },
@@ -66008,7 +66008,7 @@
       "spelled": "func(nbf time.Time) ClaimsValue",
       "canonical": "func(nbf time.Time) github.com/kitsunium/sdk/internal/core/security/token.ClaimsValue",
       "doc": "WithNotBefore returns a copy of c carrying nbf. The zero Time clears it.\n",
-      "file": "internal/core/security/token/decl_gen.go",
+      "file": "internal/core/security/token/claims_with.go",
       "layer": "core",
       "family": "security"
     },
@@ -66034,7 +66034,7 @@
       "spelled": "func(sub string) ClaimsValue",
       "canonical": "func(sub string) github.com/kitsunium/sdk/internal/core/security/token.ClaimsValue",
       "doc": "WithSubject returns a copy of c carrying sub. The empty string clears it.\n",
-      "file": "internal/core/security/token/decl_gen.go",
+      "file": "internal/core/security/token/claims_with.go",
       "layer": "core",
       "family": "security"
     },
@@ -67924,7 +67924,7 @@
       "spelled": "func(b *[]byte)",
       "canonical": "func(b *[]byte)",
       "doc": "Put returns a buffer to the pool after use; the recycler truncates its length\nand drops it when cap exceeds maxRetain. A nil argument is a safe no-op so\ncall sites can always defer Put — the generic CappedPool cannot nil-check\na pointer-like T, so the guard lives here.\n\nPut ends the caller's ownership of b. Once it returns, neither *b nor the\nbytes it points at may be read or written — not even len(*b) — and b must\nnot be Put again: the pool may already have handed b to another goroutine,\nwhich writes both as its own. Copy out whatever is still needed before Put.\n",
-      "file": "internal/kernel/concur/buffer/decl_gen.go",
+      "file": "internal/kernel/concur/buffer/buffer.go",
       "layer": "kernel",
       "family": "concur"
     },
@@ -68502,7 +68502,7 @@
       "spelled": "func() Layer",
       "canonical": "func() github.com/kitsunium/sdk/internal/kernel/errs.Layer",
       "doc": "Layer returns the second-highest octet.\n",
-      "file": "internal/kernel/errs/decl_gen.go",
+      "file": "internal/kernel/errs/code.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -68515,7 +68515,7 @@
       "spelled": "func() Major",
       "canonical": "func() github.com/kitsunium/sdk/internal/kernel/errs.Major",
       "doc": "Major returns the top octet (SemVer major byte).\n",
-      "file": "internal/kernel/errs/decl_gen.go",
+      "file": "internal/kernel/errs/code.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -68554,7 +68554,7 @@
       "spelled": "func() Serial",
       "canonical": "func() github.com/kitsunium/sdk/internal/kernel/errs.Serial",
       "doc": "Serial returns the bottom octet.\n",
-      "file": "internal/kernel/errs/decl_gen.go",
+      "file": "internal/kernel/errs/code.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -68750,7 +68750,7 @@
       "spelled": "func() int",
       "canonical": "func() int",
       "doc": "ExitCode returns the per-error override if set, otherwise 70 EX_SOFTWARE.\n",
-      "file": "internal/kernel/errs/decl_gen.go",
+      "file": "internal/kernel/errs/error.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -68776,7 +68776,7 @@
       "spelled": "func() int",
       "canonical": "func() int",
       "doc": "HTTPStatus returns the per-error override if set, otherwise 500.\n",
-      "file": "internal/kernel/errs/decl_gen.go",
+      "file": "internal/kernel/errs/error.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -68880,7 +68880,7 @@
       "spelled": "func() error",
       "canonical": "func() error",
       "doc": "Unwrap delegates to Source so the stdlib errors.Is / errors.As machinery\ncan walk the chain. The nil-guard also makes this slightly more than a\npure field getter, which matters for callers storing errors by value.\n",
-      "file": "internal/kernel/errs/decl_gen.go",
+      "file": "internal/kernel/errs/error.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -68954,7 +68954,7 @@
       "spelled": "func(key string, val float64) FieldValue",
       "canonical": "func(key string, val float64) github.com/kitsunium/sdk/internal/kernel/errs.FieldValue",
       "doc": "Float builds a FieldValue holding a float64 value.\n",
-      "file": "internal/kernel/errs/decl_gen.go",
+      "file": "internal/kernel/errs/field.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -70212,7 +70212,7 @@
       "spelled": "func(registry corehealth.Health, name string) corelc.ComponentValue",
       "canonical": "func(registry github.com/kitsunium/sdk/internal/core/app/health.Health, name string) github.com/kitsunium/sdk/internal/core/app/lifecycle.ComponentValue",
       "doc": "Component adapts a registry to core/app/lifecycle: its Start runs the startup\nchecks, and its Stop marks the process draining.\n\n# Add it LAST\n\nOne rule, and it happens to be right in both directions, because a\nLifecycle's stop order is the exact reverse of its Add order (ADR 0050):\n\n  - Added last, it STARTS last — so its startup checks run after every\n    component they might depend on is already up, which is the only order in\n    which \"the migration ran\" is a question worth asking.\n  - Added last, it STOPS first — so readiness flips to not-ready before a\n    single other component begins closing. That is the whole point: an\n    orchestrator observes the 503, withdraws the replica from routing, and\n    the drain then runs against a socket nothing new arrives on.\n\nGet that order wrong and the drain begins while the load balancer is still\nsending traffic — the connections the drain is waiting for keep being\ncreated, and the shutdown budget expires against work that never stops\narriving.\n\nLiveness deliberately keeps answering through the whole shutdown, so the\norchestrator withdraws the replica rather than killing it.\n",
-      "file": "internal/service/app/health/decl_gen.go",
+      "file": "internal/service/app/health/component.go",
       "layer": "service",
       "family": "app"
     },
@@ -70347,7 +70347,7 @@
       "spelled": "func(registry corehealth.Health, cfg HandlerConfig) http.Handler",
       "canonical": "func(registry github.com/kitsunium/sdk/internal/core/app/health.Health, cfg github.com/kitsunium/sdk/internal/service/app/health.HandlerConfig) net/http.Handler",
       "doc": "NewLivenessHandler serves the liveness probe: 200 unless the process is\nirrecoverable.\n\nNothing outside the process can make this return 503, because nothing\noutside the process can be registered on it — see core/app/health.SelfCheck.\n",
-      "file": "internal/service/app/health/decl_gen.go",
+      "file": "internal/service/app/health/handler.go",
       "layer": "service",
       "family": "app"
     },
@@ -70359,7 +70359,7 @@
       "spelled": "func(registry corehealth.Health, cfg HandlerConfig) http.Handler",
       "canonical": "func(registry github.com/kitsunium/sdk/internal/core/app/health.Health, cfg github.com/kitsunium/sdk/internal/service/app/health.HandlerConfig) net/http.Handler",
       "doc": "NewReadinessHandler serves the readiness probe: 200 while the replica can\ntake traffic (healthy OR degraded), 503 otherwise — including while starting\nand after Drain.\n",
-      "file": "internal/service/app/health/decl_gen.go",
+      "file": "internal/service/app/health/handler.go",
       "layer": "service",
       "family": "app"
     },
@@ -70371,7 +70371,7 @@
       "spelled": "func(registry corehealth.Health, cfg HandlerConfig) http.Handler",
       "canonical": "func(registry github.com/kitsunium/sdk/internal/core/app/health.Health, cfg github.com/kitsunium/sdk/internal/service/app/health.HandlerConfig) net/http.Handler",
       "doc": "NewStartupHandler serves the startup probe: 200 once every startup check has\npassed, 503 while any has not.\n",
-      "file": "internal/service/app/health/decl_gen.go",
+      "file": "internal/service/app/health/handler.go",
       "layer": "service",
       "family": "app"
     },
@@ -70718,7 +70718,7 @@
       "spelled": "func(tag corei18n.TagValue, key corei18n.Key) (message corei18n.MessageValue, ok bool)",
       "canonical": "func(tag github.com/kitsunium/sdk/internal/core/app/i18n.TagValue, key github.com/kitsunium/sdk/internal/core/app/i18n.Key) (message github.com/kitsunium/sdk/internal/core/app/i18n.MessageValue, ok bool)",
       "doc": "Lookup returns the message registered for exactly (tag, key). It performs no\nfallback and no plural selection — see [corei18n.Catalog].\n",
-      "file": "internal/service/app/i18n/decl_gen.go",
+      "file": "internal/service/app/i18n/store.go",
       "layer": "service",
       "family": "app"
     },
@@ -71205,7 +71205,7 @@
       "spelled": "func() corelc.ComponentValue",
       "canonical": "func() github.com/kitsunium/sdk/internal/core/app/lifecycle.ComponentValue",
       "doc": "Component returns the supervisor as a Lifecycle component: its name, Start\nas the component's Start, Stop as its Stop — so the Lifecycle budgets the\nwait for the function to return like any other shutdown.\n",
-      "file": "internal/service/app/lifecycle/decl_gen.go",
+      "file": "internal/service/app/lifecycle/supervise.go",
       "layer": "service",
       "family": "app"
     },
@@ -71500,7 +71500,7 @@
       "spelled": "func(keep int) coremail.FullTransport",
       "canonical": "func(keep int) github.com/kitsunium/sdk/internal/core/app/mail.FullTransport",
       "doc": "NewCapture returns the transport a development server and a test deliver\nthrough: NewMemory's double — it composes every message, refuses what SMTP\nrefuses, dials nothing — keeping only the last keep deliveries, the oldest\ndropped first. Sent reads them, raw bytes included, for a mailbox to show or\na test to read a link from; Reset empties it.\n\nNewMemory keeps everything, which is what a test that sends three messages\nwants; a server that runs for days and captures every mail it would have\nsent needs a bound. A non-positive keep is [DefaultCaptureKeep]: its zero\nhas one reading, \"I did not think about it\", and a mailbox of the last two\nhundred is the answer that needs no explanation (ADR 0031).\n",
-      "file": "internal/service/app/mail/decl_gen.go",
+      "file": "internal/service/app/mail/memory.go",
       "layer": "service",
       "family": "app"
     },
@@ -71512,7 +71512,7 @@
       "spelled": "func(cfg ComposerConfig) *Composer",
       "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/app/mail.ComposerConfig) *github.com/kitsunium/sdk/internal/service/app/mail.Composer",
       "doc": "NewComposer returns a composer wired from cfg.\n",
-      "file": "internal/service/app/mail/decl_gen.go",
+      "file": "internal/service/app/mail/composer.go",
       "layer": "service",
       "family": "app"
     },
@@ -71524,7 +71524,7 @@
       "spelled": "func() coremail.FullTransport",
       "canonical": "func() github.com/kitsunium/sdk/internal/core/app/mail.FullTransport",
       "doc": "NewMemory returns a transport that composes every message and keeps the\nresult instead of dialling anything.\n\nIt COMPOSES, and that is the whole design. A stub that recorded the Message\nvalue would accept a subject carrying a CRLF, an inline attachment with no\nbody, a Bcc the caller expected in a header — every refusal the SMTP\ntransport makes, made nowhere — and a consumer's test suite would pass right\nup until production. Because this transport runs the same composer, a message\nrefused in production is refused in the test that was supposed to catch it,\nwith the same typed error.\n\nIt takes no arguments for the same reason core/data/vfs.NewMem does: every knob it\ncould offer is one a consumer's test must set before it can assert anything,\nand the value of a double is that it costs one line.\n\nSafe for concurrent use.\n",
-      "file": "internal/service/app/mail/decl_gen.go",
+      "file": "internal/service/app/mail/memory.go",
       "layer": "service",
       "family": "app"
     },
@@ -72469,7 +72469,7 @@
       "spelled": "func(maxConcurrent int) coreres.Runner",
       "canonical": "func(maxConcurrent int) github.com/kitsunium/sdk/internal/core/app/resilience.Runner",
       "doc": "NewBulkhead returns a Runner that admits at most maxConcurrent simultaneous\noperations (clamped to >= 1). Excess calls return BulkheadFull immediately\n(reject mode — no queuing).\n",
-      "file": "internal/service/app/resilience/decl_gen.go",
+      "file": "internal/service/app/resilience/bulkhead.go",
       "layer": "service",
       "family": "app"
     },
@@ -72481,7 +72481,7 @@
       "spelled": "func(cfg BreakerConfig) coreres.Runner",
       "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/app/resilience.BreakerConfig) github.com/kitsunium/sdk/internal/core/app/resilience.Runner",
       "doc": "NewCircuitBreaker returns a Runner guarding op with a Closed→Open→HalfOpen\nbreaker. Open calls return CircuitOpen until OpenDuration elapses; a\nnon-positive OpenDuration clamps to defaultOpenDuration, because a breaker\nwhose cooldown is zero admits the next call immediately and therefore\nprotects nothing (ADR 0031). An error rejected by cfg.Retryable is returned\nverbatim and left out of the state machine entirely, so deterministic\nfailures cannot trip the breaker.\n",
-      "file": "internal/service/app/resilience/decl_gen.go",
+      "file": "internal/service/app/resilience/breaker.go",
       "layer": "service",
       "family": "app"
     },
@@ -72493,7 +72493,7 @@
       "spelled": "func(cfg FallbackConfig) coreres.Runner",
       "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/app/resilience.FallbackConfig) github.com/kitsunium/sdk/internal/core/app/resilience.Runner",
       "doc": "NewFallback returns a Runner that runs cfg.Fallback when the Operation passed\nto Run fails, and returns nil when the fallback succeeds — that masking IS\nthe policy. When both fail the result is FallbackFailed, carrying both\nmessages as fields so neither failure is lost.\n\nA cancelled context is reported as itself, never as FallbackFailed: when it\nis already dead after the primary the fallback does not run at all, and when\nit dies WHILE the fallback runs, a failed fallback returns ctx.Err(). A\nfallback that succeeds despite a late cancellation still returns nil — the\nwork was done.\n\nA nil cfg.Fallback is refused: every call returns PolicyMisconfigured without\nrunning the operation (ADR 0031). A fallback policy with no fallback would\nrun the primary and pass its error through unchanged — indistinguishable\nfrom no policy at all, while the caller believes their plan B is in place.\n\nThe primary error is NOT surfaced when the fallback succeeds; that is what a\nfallback is for. A caller who needs to know how often plan B fires\ninstruments the fallback Operation itself, which is an ordinary closure.\n",
-      "file": "internal/service/app/resilience/decl_gen.go",
+      "file": "internal/service/app/resilience/fallback.go",
       "layer": "service",
       "family": "app"
     },
@@ -72553,7 +72553,7 @@
       "spelled": "func(d time.Duration) coreres.Runner",
       "canonical": "func(d time.Duration) github.com/kitsunium/sdk/internal/core/app/resilience.Runner",
       "doc": "NewTimeout returns a Runner that fails an Operation with TimeoutExceeded if it\ndoes not finish within d. The Operation MUST honour ctx for the deadline to\nfire promptly (a ctx-ignoring op caps precision at op granularity).\n\nA non-positive d is refused: every call returns PolicyMisconfigured without\nrunning the operation (ADR 0031). context.WithTimeout(ctx, 0) yields an\nalready-expired context, so the previous behaviour failed even an\ninstantaneous operation with TimeoutExceeded — a policy that could never\nadmit anything, reporting it with the error it uses when it is working.\n",
-      "file": "internal/service/app/resilience/decl_gen.go",
+      "file": "internal/service/app/resilience/timeout.go",
       "layer": "service",
       "family": "app"
     },
@@ -73832,7 +73832,7 @@
       "spelled": "func(segment string) KeyTree",
       "canonical": "func(segment string) github.com/kitsunium/sdk/internal/service/crypto/kdf/keytree.KeyTree",
       "doc": "Child returns a new KeyTree one segment deeper; the receiver is unchanged.\n",
-      "file": "internal/service/crypto/kdf/keytree/decl_gen.go",
+      "file": "internal/service/crypto/kdf/keytree/keytree.go",
       "layer": "service",
       "family": "crypto"
     },
@@ -73857,7 +73857,7 @@
       "spelled": "func(algo corecrypto.Algorithm, master corecrypto.Key) KeyTree",
       "canonical": "func(algo github.com/kitsunium/sdk/internal/core/crypto.Algorithm, master github.com/kitsunium/sdk/internal/core/crypto.Key) github.com/kitsunium/sdk/internal/service/crypto/kdf/keytree.KeyTree",
       "doc": "NewKeyTree returns the root KeyTree for master, deriving children under algo.\n",
-      "file": "internal/service/crypto/kdf/keytree/decl_gen.go",
+      "file": "internal/service/crypto/kdf/keytree/keytree.go",
       "layer": "service",
       "family": "crypto"
     },
@@ -73981,7 +73981,7 @@
       "spelled": "func(secret corecrypto.Key) (key KeyValue, err error)",
       "canonical": "func(secret github.com/kitsunium/sdk/internal/core/crypto.Key) (key github.com/kitsunium/sdk/internal/service/crypto/key/jwk.KeyValue, err error)",
       "doc": "FromSecret builds an oct JWK from the SDK's redacting symmetric key — the one\nservice/crypto/mac/hmacsha2 tags and verifies with.\n\nThe resulting key is still redacting under %v, and still refuses\nMarshalPublic: wrapping a crypto.Key in a JWK must not be a way around the\nprotection crypto.Key was given.\n",
-      "file": "internal/service/crypto/key/jwk/decl_gen.go",
+      "file": "internal/service/crypto/key/jwk/bridge.go",
       "layer": "service",
       "family": "crypto"
     },
@@ -74071,7 +74071,7 @@
       "spelled": "func() (pub []byte, err error)",
       "canonical": "func() (pub []byte, err error)",
       "doc": "Ed25519Public returns the raw 32-octet public key, ready for\nservice/crypto/sign/ed25519sig.Verify.\n",
-      "file": "internal/service/crypto/key/jwk/decl_gen.go",
+      "file": "internal/service/crypto/key/jwk/bridge.go",
       "layer": "service",
       "family": "crypto"
     },
@@ -74110,7 +74110,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "IsPrivate reports whether k holds private material (\"d\" or \"k\"). It is the\nquestion to ask before publishing a set: a true here means MarshalPrivate,\nand only MarshalPrivate, can serialise this key whole.\n",
-      "file": "internal/service/crypto/key/jwk/decl_gen.go",
+      "file": "internal/service/crypto/key/jwk/jwk.go",
       "layer": "service",
       "family": "crypto"
     },
@@ -74123,7 +74123,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "IsZero reports whether k is the zero KeyValue — no kty, hence nothing to\nserialise. Every marshaller rejects it with MissingMember.\n",
-      "file": "internal/service/crypto/key/jwk/decl_gen.go",
+      "file": "internal/service/crypto/key/jwk/jwk.go",
       "layer": "service",
       "family": "crypto"
     },
@@ -74214,7 +74214,7 @@
       "spelled": "func() (pub KeyValue, err error)",
       "canonical": "func() (pub github.com/kitsunium/sdk/internal/service/crypto/key/jwk.KeyValue, err error)",
       "doc": "Public returns the public half of k: the same key with its private member\ndropped. It refuses a symmetric key with NoPublicForm, because \"the public\nhalf of an oct key\" is not a thing that exists — the k member IS the secret.\n",
-      "file": "internal/service/crypto/key/jwk/decl_gen.go",
+      "file": "internal/service/crypto/key/jwk/jwk.go",
       "layer": "service",
       "family": "crypto"
     },
@@ -74279,7 +74279,7 @@
       "spelled": "func(alg string) KeyValue",
       "canonical": "func(alg string) github.com/kitsunium/sdk/internal/service/crypto/key/jwk.KeyValue",
       "doc": "WithAlg returns a copy of k carrying alg (e.g. \"ES256\"). The value is not\nchecked against crv: an \"alg\" is a publisher's assertion, and rejecting an\nunfamiliar one here would break interop for no security gain.\n",
-      "file": "internal/service/crypto/key/jwk/decl_gen.go",
+      "file": "internal/service/crypto/key/jwk/jwk.go",
       "layer": "service",
       "family": "crypto"
     },
@@ -74292,7 +74292,7 @@
       "spelled": "func(ops ...string) KeyValue",
       "canonical": "func(ops ...string) github.com/kitsunium/sdk/internal/service/crypto/key/jwk.KeyValue",
       "doc": "WithKeyOps returns a copy of k carrying key_ops. The slice is copied.\n",
-      "file": "internal/service/crypto/key/jwk/decl_gen.go",
+      "file": "internal/service/crypto/key/jwk/jwk.go",
       "layer": "service",
       "family": "crypto"
     },
@@ -74305,7 +74305,7 @@
       "spelled": "func(kid string) KeyValue",
       "canonical": "func(kid string) github.com/kitsunium/sdk/internal/service/crypto/key/jwk.KeyValue",
       "doc": "WithKid returns a copy of k carrying kid. Passing the empty string clears it.\n",
-      "file": "internal/service/crypto/key/jwk/decl_gen.go",
+      "file": "internal/service/crypto/key/jwk/jwk.go",
       "layer": "service",
       "family": "crypto"
     },
@@ -74331,7 +74331,7 @@
       "spelled": "func(use string) KeyValue",
       "canonical": "func(use string) github.com/kitsunium/sdk/internal/service/crypto/key/jwk.KeyValue",
       "doc": "WithUse returns a copy of k carrying use (\"sig\" / \"enc\"). The value is not\nvalidated — RFC 7517 §4.2 leaves the vocabulary open.\n",
-      "file": "internal/service/crypto/key/jwk/decl_gen.go",
+      "file": "internal/service/crypto/key/jwk/jwk.go",
       "layer": "service",
       "family": "crypto"
     },
@@ -74392,7 +74392,7 @@
       "spelled": "func(kid string) []KeyValue",
       "canonical": "func(kid string) []github.com/kitsunium/sdk/internal/service/crypto/key/jwk.KeyValue",
       "doc": "AllByKid returns every key carrying kid, in document order — the rotation\npath. During a rollover a caller typically walks the candidates until one\nverifies, which is exactly the decision this package refuses to make for it.\n\nAn empty kid returns no candidates rather than every keyless key: \"match the\nkeys that have no id\" is never what a lookup by id means.\n",
-      "file": "internal/service/crypto/key/jwk/decl_gen.go",
+      "file": "internal/service/crypto/key/jwk/set.go",
       "layer": "service",
       "family": "crypto"
     },
@@ -75150,7 +75150,7 @@
       "spelled": "func(other DBPointer) bool",
       "canonical": "func(other github.com/kitsunium/sdk/internal/service/data/codec/bson.DBPointer) bool",
       "doc": "Equal reports whether p and other name the same namespace and identifier.\n",
-      "file": "internal/service/data/codec/bson/decl_gen.go",
+      "file": "internal/service/data/codec/bson/types.go",
       "layer": "service",
       "family": "data"
     },
@@ -75163,7 +75163,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "IsZero reports whether p is the empty pointer — what omitempty leaves out.\n",
-      "file": "internal/service/data/codec/bson/decl_gen.go",
+      "file": "internal/service/data/codec/bson/types.go",
       "layer": "service",
       "family": "data"
     },
@@ -75214,7 +75214,7 @@
       "spelled": "func() time.Time",
       "canonical": "func() time.Time",
       "doc": "Time returns the instant dt denotes, in the local time zone; call UTC on it\nfor the zone BSON stores.\n",
-      "file": "internal/service/data/codec/bson/decl_gen.go",
+      "file": "internal/service/data/codec/bson/types.go",
       "layer": "service",
       "family": "data"
     },
@@ -75426,7 +75426,7 @@
       "spelled": "func(t time.Time) DateTime",
       "canonical": "func(t time.Time) github.com/kitsunium/sdk/internal/service/data/codec/bson.DateTime",
       "doc": "NewDateTimeFromTime returns the DateTime t falls in, truncated to the\nmillisecond: the instant a time.Time is written as.\n",
-      "file": "internal/service/data/codec/bson/decl_gen.go",
+      "file": "internal/service/data/codec/bson/types.go",
       "layer": "service",
       "family": "data"
     },
@@ -75487,7 +75487,7 @@
       "spelled": "func() string",
       "canonical": "func() string",
       "doc": "Hex returns the 24-digit lowercase hexadecimal form of id.\n",
-      "file": "internal/service/data/codec/bson/decl_gen.go",
+      "file": "internal/service/data/codec/bson/objectid.go",
       "layer": "service",
       "family": "data"
     },
@@ -75500,7 +75500,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "IsZero reports whether id is NilObjectID — what omitempty leaves out.\n",
-      "file": "internal/service/data/codec/bson/decl_gen.go",
+      "file": "internal/service/data/codec/bson/objectid.go",
       "layer": "service",
       "family": "data"
     },
@@ -75639,7 +75639,7 @@
       "spelled": "func(other Regex) bool",
       "canonical": "func(other github.com/kitsunium/sdk/internal/service/data/codec/bson.Regex) bool",
       "doc": "Equal reports whether r and other have the same pattern and options.\n",
-      "file": "internal/service/data/codec/bson/decl_gen.go",
+      "file": "internal/service/data/codec/bson/types.go",
       "layer": "service",
       "family": "data"
     },
@@ -75740,7 +75740,7 @@
       "spelled": "func(other Timestamp) int",
       "canonical": "func(other github.com/kitsunium/sdk/internal/service/data/codec/bson.Timestamp) int",
       "doc": "Compare returns -1 when t is before other, +1 when it is after, 0 when equal.\n",
-      "file": "internal/service/data/codec/bson/decl_gen.go",
+      "file": "internal/service/data/codec/bson/types.go",
       "layer": "service",
       "family": "data"
     },
@@ -76287,7 +76287,7 @@
       "spelled": "func(t reflect.Type) *ShapeValue",
       "canonical": "func(t reflect.Type) *github.com/kitsunium/sdk/internal/service/data/codec/jsonshape.ShapeValue",
       "doc": "Of describes the values of t on the wire. A nil t — the type of a nil\ninterface — is Any. Of never fails: what encoding/json refuses is described\nas Unsupported where it occurs. Every call returns a new tree, which the\ncaller may keep and change.\n",
-      "file": "internal/service/data/codec/jsonshape/decl_gen.go",
+      "file": "internal/service/data/codec/jsonshape/shape.go",
       "layer": "service",
       "family": "data"
     },
@@ -76909,7 +76909,7 @@
       "spelled": "func(zone *time.Location) time.Time",
       "canonical": "func(zone *time.Location) time.Time",
       "doc": "AsTime returns the day at midnight in zone.\n",
-      "file": "internal/service/data/codec/toml/decl_gen.go",
+      "file": "internal/service/data/codec/toml/localtime.go",
       "layer": "service",
       "family": "data"
     },
@@ -76922,7 +76922,7 @@
       "spelled": "func() ([]byte, error)",
       "canonical": "func() ([]byte, error)",
       "doc": "MarshalText returns the day as String writes it.\n",
-      "file": "internal/service/data/codec/toml/decl_gen.go",
+      "file": "internal/service/data/codec/toml/localtime.go",
       "layer": "service",
       "family": "data"
     },
@@ -76998,7 +76998,7 @@
       "spelled": "func() ([]byte, error)",
       "canonical": "func() ([]byte, error)",
       "doc": "MarshalText returns the date-time as String writes it.\n",
-      "file": "internal/service/data/codec/toml/decl_gen.go",
+      "file": "internal/service/data/codec/toml/localtime.go",
       "layer": "service",
       "family": "data"
     },
@@ -77076,7 +77076,7 @@
       "spelled": "func() ([]byte, error)",
       "canonical": "func() ([]byte, error)",
       "doc": "MarshalText returns the time as String writes it.\n",
-      "file": "internal/service/data/codec/toml/decl_gen.go",
+      "file": "internal/service/data/codec/toml/localtime.go",
       "layer": "service",
       "family": "data"
     },
@@ -78904,7 +78904,7 @@
       "spelled": "func(middlewares ...corenet.Middleware[corenet.PacketHandler]) *PacketGroup",
       "canonical": "func(middlewares ...github.com/kitsunium/sdk/internal/core/net.Middleware[github.com/kitsunium/sdk/internal/core/net.PacketHandler]) *github.com/kitsunium/sdk/internal/service/net/server.PacketGroup",
       "doc": "Use appends middlewares, outermost first.\n",
-      "file": "internal/service/net/server/decl_gen.go",
+      "file": "internal/service/net/server/packet_group.go",
       "layer": "service",
       "family": "net"
     },
@@ -79106,7 +79106,7 @@
       "spelled": "func(h http.Handler) *StreamGroup",
       "canonical": "func(h net/http.Handler) *github.com/kitsunium/sdk/internal/service/net/server.StreamGroup",
       "doc": "HandleHTTP serves an http.Handler over this group's listeners.\n\nThe group keeps its own limits, TLS identity and drain; net/http only does\nthe protocol. That split is ADR 0029 D3: reimplementing HTTP would mean\nowning request smuggling defences, HTTP/2 flow control and HPACK to lose,\nnot gain, throughput.\n",
-      "file": "internal/service/net/server/decl_gen.go",
+      "file": "internal/service/net/server/stream_group.go",
       "layer": "service",
       "family": "net"
     },
@@ -79132,7 +79132,7 @@
       "spelled": "func(middlewares ...corenet.Middleware[corenet.ConnHandler]) *StreamGroup",
       "canonical": "func(middlewares ...github.com/kitsunium/sdk/internal/core/net.Middleware[github.com/kitsunium/sdk/internal/core/net.ConnHandler]) *github.com/kitsunium/sdk/internal/service/net/server.StreamGroup",
       "doc": "Use appends middlewares, outermost first.\n",
-      "file": "internal/service/net/server/decl_gen.go",
+      "file": "internal/service/net/server/stream_group.go",
       "layer": "service",
       "family": "net"
     },
@@ -79538,7 +79538,7 @@
       "spelled": "func(origins ...string) Option",
       "canonical": "func(origins ...string) github.com/kitsunium/sdk/internal/service/net/websocket.Option",
       "doc": "AllowOrigins replaces the default same-origin rule with an exact allowlist.\n\nThe comparison is on the whole Origin header, case-insensitively — scheme,\nhost and port together. Comparing only the host would accept\nhttp://app.example.com for an https server, which is precisely the downgrade\nan origin check exists to notice. Behind a proxy that terminates TLS this is\nthe only way to have the scheme checked at all: the request arrives in\nplaintext there, so the default rule cannot see which scheme the browser\nused (see sameOrigin).\n\nThe list is copied here, for the same reason Subprotocols copies its own.\n",
-      "file": "internal/service/net/websocket/decl_gen.go",
+      "file": "internal/service/net/websocket/options.go",
       "layer": "service",
       "family": "net"
     },
@@ -79793,7 +79793,7 @@
       "spelled": "func(b []byte) int",
       "canonical": "func(b []byte) int",
       "doc": "FrameHeaderLen returns the full header length announced by the first two\nbytes of a frame, or 0 when fewer than two bytes are available.\n\nIt exists so a reader can take exactly two bytes, learn how many more the\nheader needs, and take exactly those — never speculating past the header into\na payload it has not yet bounded.\n",
-      "file": "internal/service/net/websocket/decl_gen.go",
+      "file": "internal/service/net/websocket/frame.go",
       "layer": "service",
       "family": "net"
     },
@@ -79985,7 +79985,7 @@
       "spelled": "func(names ...string) Option",
       "canonical": "func(names ...string) github.com/kitsunium/sdk/internal/service/net/websocket.Option",
       "doc": "Subprotocols declares the subprotocols this server speaks, most preferred\nfirst.\n\nThe SERVER's order decides, not the client's: the client advertises what it\ncan do, and choosing among those is the server's call — a client that listed\na deprecated dialect first should not be able to pin the server to it.\n\nWhen the client offers none this server can speak, the upgrade still\nsucceeds with no Sec-WebSocket-Protocol header, which RFC 6455 §4.2.2 names\nas the way to say \"none agreed\". Failing the handshake instead would be a\nstricter rule than the protocol has, and it would break every client that\nadvertises an optional dialect.\n\nEach name must be an RFC 7230 token, which is what RFC 6455 §4.1 requires\nof a subprotocol: the chosen one is written verbatim into the response, so a\nname carrying a space, a comma or a quote would put a malformed handshake on\nthe wire — it is refused at Upgrade instead. The list is copied here, so a\ncaller reusing the slice it passed cannot change later handshakes, or race\nwith the ones in flight.\n",
-      "file": "internal/service/net/websocket/decl_gen.go",
+      "file": "internal/service/net/websocket/options.go",
       "layer": "service",
       "family": "net"
     },
@@ -80328,7 +80328,7 @@
       "spelled": "func(dst io.Writer, failure *errs.WrapParams) *Stream",
       "canonical": "func(dst io.Writer, failure *github.com/kitsunium/sdk/internal/kernel/errs.WrapParams) *github.com/kitsunium/sdk/internal/service/observe/internal/otlp.Stream",
       "doc": "NewStream binds a Stream to dst. failure is the wrap a writer fault leaves\nunder — the calling signal's EXPORT_FAILED, in its own words.\n",
-      "file": "internal/service/observe/internal/otlp/decl_gen.go",
+      "file": "internal/service/observe/internal/otlp/stream.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80755,7 +80755,7 @@
       "spelled": "func(enc encoder.Encoder, sink corelogger.Sink, min level.Level) (h corelogger.Handler, err error)",
       "canonical": "func(enc github.com/kitsunium/sdk/internal/service/observe/logger/encoder.Encoder, sink github.com/kitsunium/sdk/internal/core/observe/logger.Sink, min github.com/kitsunium/sdk/internal/core/observe/logger/level.Level) (h github.com/kitsunium/sdk/internal/core/observe/logger.Handler, err error)",
       "doc": "NewHandler composes enc with sink and gates emission on the supplied\nminimum level. A nil enc OR sink is rejected so callers cannot\naccidentally construct a dead handler.\n",
-      "file": "internal/service/observe/logger/decl_gen.go",
+      "file": "internal/service/observe/logger/handler.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80791,7 +80791,7 @@
       "spelled": "func(lg corelogger.Logger, owned io.Closer) corelogger.Logger",
       "canonical": "func(lg github.com/kitsunium/sdk/internal/core/observe/logger.Logger, owned io.Closer) github.com/kitsunium/sdk/internal/core/observe/logger.Logger",
       "doc": "Owning returns lg carrying owned as the resources it owns, so that Close\nreleases them.\n\nIt exists for a constructor that OPENS writers on its caller's behalf —\npkg/v1/observe/logger.NewMulti resolves each spec through the writer registry, so the\ncaller never holds a Sink it could close — and hands back a Logger that was\notherwise the only thing referring to them. Without it those files were held\nuntil a collection ran their finalizers: a descriptor leak for a program that\nrebuilds its logger, and on Windows a log file nothing could delete or rotate\nwhile the process lived (ADR 0095).\n\nThe result is still this package's concrete Logger, so Build and LogAttrs\nkeep their fast path. A Logger this package did not build is returned\nunchanged — it has no Close to carry the resources to.\n",
-      "file": "internal/service/observe/logger/decl_gen.go",
+      "file": "internal/service/observe/logger/owning.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80829,7 +80829,7 @@
       "spelled": "func(ctx context.Context, r corelogger.RecordEvent) bool",
       "canonical": "func(ctx context.Context, r github.com/kitsunium/sdk/internal/core/observe/logger.RecordEvent) bool",
       "doc": "Enabled reports whether the handler would emit a record at r.Level, taking\ncontext cancellation into account.\n",
-      "file": "internal/service/observe/logger/decl_gen.go",
+      "file": "internal/service/observe/logger/text_handler.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80855,7 +80855,7 @@
       "spelled": "func(attrs []corelogger.AttrValue) corelogger.Handler",
       "canonical": "func(attrs []github.com/kitsunium/sdk/internal/core/observe/logger.AttrValue) github.com/kitsunium/sdk/internal/core/observe/logger.Handler",
       "doc": "WithAttrs returns a derived TextHandler sharing the writer but owning a new\nattrs slice that prepends the given attributes to every record.\n",
-      "file": "internal/service/observe/logger/decl_gen.go",
+      "file": "internal/service/observe/logger/text_handler.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80868,7 +80868,7 @@
       "spelled": "func(name string) corelogger.Handler",
       "canonical": "func(name string) github.com/kitsunium/sdk/internal/core/observe/logger.Handler",
       "doc": "WithGroup returns a derived TextHandler that namespaces every subsequent\nattribute key under the given group name (rendered as \"name.key\").\n",
-      "file": "internal/service/observe/logger/decl_gen.go",
+      "file": "internal/service/observe/logger/text_handler.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80880,7 +80880,7 @@
       "spelled": "func(lg corelogger.Logger, skip int) corelogger.Logger",
       "canonical": "func(lg github.com/kitsunium/sdk/internal/core/observe/logger.Logger, skip int) github.com/kitsunium/sdk/internal/core/observe/logger.Logger",
       "doc": "WithCaller returns a derived Logger whose emitted records carry a \"source\"\nattribute resolving the captured call-site program counter into\nfile:line:function. The skip argument is the extra stack-frame offset\nreserved for wrapper layers; pass 0 for direct callers. Foreign Logger\nimplementations (not produced by New) are returned unchanged so callers fail\nsafe rather than losing their logger. A nil Logger is returned as-is.\n",
-      "file": "internal/service/observe/logger/decl_gen.go",
+      "file": "internal/service/observe/logger/source.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80892,7 +80892,7 @@
       "spelled": "func(dst []byte, text string) []byte",
       "canonical": "func(dst []byte, text string) []byte",
       "doc": "AppendSanitized copies text onto dst replacing '\\n', '\\r', and NUL\nwith a single space so the content can never inject a new frame in a\nline-framed downstream sink. Other control characters are preserved to\nkeep the rendering faithful; only framing-sensitive bytes are stripped.\nIt scrubs every attacker-influenceable textual field — the Message, group\nnames, and attribute keys — not just the Message (V110).\n\nIt is exported for one caller outside this package: the legacy\nservice/observe/logger.TextHandler, which renders the same line shape without going\nthrough an Encoder. That handler once appended all three fields verbatim —\nthe scrub existed, but only here — so a line break in any of them forged a\nlog line. One function shared by both renderers cannot drift from itself.\n",
-      "file": "internal/service/observe/logger/encoder/decl_gen.go",
+      "file": "internal/service/observe/logger/encoder/text.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80917,7 +80917,7 @@
       "spelled": "func(clk clock.Clock) Encoder",
       "canonical": "func(clk github.com/kitsunium/sdk/internal/kernel/clock.Clock) github.com/kitsunium/sdk/internal/service/observe/logger/encoder.Encoder",
       "doc": "NewJSON builds an Encoder that renders records as single-line JSON. Pass\nclock.System for production use; tests inject a fake clock. A nil clock\nfalls back to the real wall clock so callers can pass clock.System or nil\ninterchangeably.\nIFACE-PLUGIN: returns the Encoder contract so callers depend on the\npublic surface; the concrete jsonEncoder is intentionally hidden.\n",
-      "file": "internal/service/observe/logger/encoder/decl_gen.go",
+      "file": "internal/service/observe/logger/encoder/json.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80929,7 +80929,7 @@
       "spelled": "func(clk clock.Clock) Encoder",
       "canonical": "func(clk github.com/kitsunium/sdk/internal/kernel/clock.Clock) github.com/kitsunium/sdk/internal/service/observe/logger/encoder.Encoder",
       "doc": "NewText builds an Encoder bound to the supplied clock. Pass clock.System\nfor production use; tests inject a fake clock. A nil clock falls back to\nthe real wall clock so callers can pass clock.System or nil interchangeably.\nIFACE-PLUGIN: returns the Encoder contract so callers depend on the\npublic surface; the concrete textEncoder is intentionally hidden.\n",
-      "file": "internal/service/observe/logger/encoder/decl_gen.go",
+      "file": "internal/service/observe/logger/encoder/text.go",
       "layer": "service",
       "family": "observe"
     },
@@ -81270,7 +81270,7 @@
       "spelled": "func(downstream corelogger.Sink, cfg Config) (sink corelogger.Sink, err error)",
       "canonical": "func(downstream github.com/kitsunium/sdk/internal/core/observe/logger.Sink, cfg github.com/kitsunium/sdk/internal/service/observe/logger/middleware/recover.Config) (sink github.com/kitsunium/sdk/internal/core/observe/logger.Sink, err error)",
       "doc": "NewWithConfig wraps downstream with panic recovery and the supplied\nConfig. A zero-value cfg is equivalent to New: panics in Write / Flush /\nClose become Panicked sentinels and no callback fires. Setting\ncfg.OnPanic makes each absorbed panic observable without changing the\nreturned error — see Finding V34.\n",
-      "file": "internal/service/observe/logger/middleware/recover/decl_gen.go",
+      "file": "internal/service/observe/logger/middleware/recover/recover_sink.go",
       "layer": "service",
       "family": "observe"
     },
@@ -81378,7 +81378,7 @@
       "spelled": "func(cfg Config) *TeeSink",
       "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/observe/logger/middleware/tee.Config) *github.com/kitsunium/sdk/internal/service/observe/logger/middleware/tee.TeeSink",
       "doc": "NewTeeSink builds a TeeSink from cfg. The primaries slice is copied so\nlater caller mutation cannot affect the sink. A nil cfg.Spill disables the\ndead-letter seam.\n",
-      "file": "internal/service/observe/logger/middleware/tee/decl_gen.go",
+      "file": "internal/service/observe/logger/middleware/tee/tee.go",
       "layer": "service",
       "family": "observe"
     },
@@ -81775,7 +81775,7 @@
       "spelled": "func(inner corelogger.Sink, min level.Level) corelogger.Sink",
       "canonical": "func(inner github.com/kitsunium/sdk/internal/core/observe/logger.Sink, min github.com/kitsunium/sdk/internal/core/observe/logger/level.Level) github.com/kitsunium/sdk/internal/core/observe/logger.Sink",
       "doc": "Floor wraps inner so only records with Level >= min reach it, for every min —\nInfo included. It is the gate without New's reading of Info as \"inherit\":\nthat reading belongs to a writer configuration, whose zero MinLevel must not\nnarrow anything, and a caller who names a floor outside one means the floor\nit named. A nil inner yields nil, which a fan-out skips and NewWithSink\nrefuses, rather than a gate that fails on its first record.\n\nIFACE-PLUGIN: the gate is returned behind the Sink interface; the concrete\ngateSink type stays unexported.\n",
-      "file": "internal/service/observe/logger/writer/levelgate/decl_gen.go",
+      "file": "internal/service/observe/logger/writer/levelgate/gate.go",
       "layer": "service",
       "family": "observe"
     },
@@ -82652,7 +82652,7 @@
       "spelled": "func(cfg TracerConfig) *Tracer",
       "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/observe/trace.TracerConfig) *github.com/kitsunium/sdk/internal/service/observe/trace.Tracer",
       "doc": "NewTracer builds a Tracer from cfg, applying every clamp once.\n\nIt returns the concrete type rather than the core/observe/trace.Tracer interface so a\ncaller keeps reach to anything the concrete type grows later without the\ninterface having to (ADR 0039 §widening a returned value is safe). It cannot\nfail: every field of TracerConfig has a resolved meaning, and the only inputs\nthat could be refused — a sampling ratio, an OTLP endpoint — are refused by\ntheir own constructors, before they ever reach here.\n",
-      "file": "internal/service/observe/trace/decl_gen.go",
+      "file": "internal/service/observe/trace/tracer.go",
       "layer": "service",
       "family": "observe"
     },
@@ -82735,7 +82735,7 @@
       "spelled": "func(root coretrace.Sampler) coretrace.Sampler",
       "canonical": "func(root github.com/kitsunium/sdk/internal/core/observe/trace.Sampler) github.com/kitsunium/sdk/internal/core/observe/trace.Sampler",
       "doc": "ParentBased returns a Sampler that HONOURS a valid parent's decision and\nconsults root only when there is no parent.\n\nIt is the sampler almost every deployment wants, and the reason is the whole\ndesign of the domain: the decision is taken once, at the root, and travels in\nthe traceparent's sampled bit. A process that re-decided for an inbound\nrequest with a valid parent would produce a trace with a hole in the middle —\nits own spans missing from a trace the caller kept, or present in one the\ncaller dropped, so the backend stores fragments of a request nobody can\nreassemble.\n\nA nil root CLAMPS to AlwaysSample rather than refusing. The nil means \"the\ncaller did not name a root policy\", and a sampler that dropped everything\nwould silently turn tracing off — the ADR 0031 failure this whole family is\nwritten against. Every other constructor in this file refuses instead; this\none clamps because AlwaysSample is a description of the safe direction, not a\nnumber chosen on the caller's behalf.\n",
-      "file": "internal/service/observe/trace/decl_gen.go",
+      "file": "internal/service/observe/trace/sampler.go",
       "layer": "service",
       "family": "observe"
     },
@@ -83809,7 +83809,7 @@
       "spelled": "func(path string) (found ModuleValue, ok bool)",
       "canonical": "func(path string) (found github.com/kitsunium/sdk/internal/service/proc/self.ModuleValue, ok bool)",
       "doc": "Module returns the module whose path is path — the main module or one of\nthe dependencies — and whether the build contains it.\n",
-      "file": "internal/service/proc/self/decl_gen.go",
+      "file": "internal/service/proc/self/build.go",
       "layer": "service",
       "family": "proc"
     },
@@ -83846,7 +83846,7 @@
       "spelled": "func() uint64",
       "canonical": "func() uint64",
       "doc": "Count returns how many observations the distribution holds.\n",
-      "file": "internal/service/proc/self/decl_gen.go",
+      "file": "internal/service/proc/self/stats.go",
       "layer": "service",
       "family": "proc"
     },
@@ -84413,7 +84413,7 @@
       "spelled": "func(ctx context.Context, msg string) error",
       "canonical": "func(ctx context.Context, msg string) error",
       "doc": "StatusContext is [Status] bounded by ctx — see [NotifyContext].\n",
-      "file": "internal/service/proc/systemd/notify/decl_gen.go",
+      "file": "internal/service/proc/systemd/notify/notify.go",
       "layer": "service",
       "family": "proc"
     },
@@ -84557,7 +84557,7 @@
       "spelled": "func(policies ...coreauthz.Policy) coreauthz.Policy",
       "canonical": "func(policies ...github.com/kitsunium/sdk/internal/core/security/authz.Policy) github.com/kitsunium/sdk/internal/core/security/authz.Policy",
       "doc": "DenyOverrides composes policies into one. A refusal from any member wins; an\n[coreauthz.Allow] is returned only when at least one member permitted and no\nmember refused; otherwise the composition abstains.\n\n# Why refusal wins, and why that is not configurable\n\nWhen one rule permits and another refuses, one of them has to lose, and the\nchoice is a security property rather than a preference. Under deny-overrides\nthe failure mode of a wrong rule set is a request that should have been\nallowed and was not — visible, reported, fixed within the hour. Under\npermit-overrides it is a request that should have been refused and was not\n— invisible, and discovered by whoever exploits it.\n\nXACML's permit-overrides, first-applicable and only-one-applicable are\ntherefore REFUSED BY NAME: this package ships one combining algorithm and no\nsetting that selects another. A caller who genuinely needs a grant that\nbeats a refusal — a break-glass path — writes it as a Go `if` around the\ncomposition, where the exception is visible at the call site instead of\nhidden in the semantics of a combiner. See ADR 0057 §D2.\n\n# It evaluates every member, and that is what makes it deny-overrides\n\nAn [coreauthz.Allow] does NOT short-circuit. A composition that returned on\nthe first grant would be first-applicable wearing this function's name, and\nit would produce a different answer depending on the order the policies were\nlisted in — the defect being ruled out here. Only a refusal short-circuits,\nbecause refusal is absorbing: once one member has said Deny, nothing any\nother member can say changes the result.\n\nThe composition is therefore commutative and associative, which is why\nnesting is invisible: DenyOverrides(a, DenyOverrides(b, c)) and\nDenyOverrides(a, b, c) agree, and so does any permutation of them.\n\n# The empty and nil cases\n\nDenyOverrides() with no members abstains — the identity of the combiner —\nand [Check] then refuses. An authorizer with no policy grants nothing, which\nis the exact opposite of internal/service/app/validation, where a validator with\nno constraint passes. Both are the safe direction for their domain, and the\ncontrast is the reason ADR 0031 is about SAFE defaults rather than permissive\nor restrictive ones.\n\nA nil member REFUSES rather than being skipped. Skipping it would silently\nshrink the policy set, which is the single most valuable edit an attacker\ncould make to a wiring file.\n",
-      "file": "internal/service/security/authz/decl_gen.go",
+      "file": "internal/service/security/authz/combine.go",
       "layer": "service",
       "family": "security"
     },
@@ -84811,7 +84811,7 @@
       "spelled": "func(attrs []corelogger.AttrValue, maxBytes int) iter.Seq2[string, string]",
       "canonical": "func(attrs []github.com/kitsunium/sdk/internal/core/observe/logger.AttrValue, maxBytes int) iter.Seq2[string, string]",
       "doc": "Attrs renders log attributes as display text, one (key, text) pair at a\ntime, in order: a group is flattened into dotted keys (\"db.user\"), and each\ntext is cut to maxBytes (raised to MinBytes).\n\n  - An attribute — or a group — whose DOTTED key the Redactor recognises is\n    yielded once, as Placeholder: a group named \"session\" is one redacted\n    pair, not one per member.\n  - A string has the credentials of its URLs replaced; a number, a bool, a\n    duration and a time (UTC, RFC 3339 with nanoseconds) are written as Go\n    writes them.\n  - Anything else — what logger.Any carried — is an error rendered by\n    Config.Error, a fmt.Stringer by its String, or otherwise the value's\n    JSON through Value, so its declared secrets are replaced too;\n    Unencodable when encoding/json refuses it.\n\nIt is an iterator so the caller bounds the COUNT: a record carrying a group\nof ten thousand attributes costs the caller exactly as many pairs as it\nranges over before it breaks.\n",
-      "file": "internal/service/security/redact/decl_gen.go",
+      "file": "internal/service/security/redact/attrs.go",
       "layer": "service",
       "family": "security"
     },
@@ -85054,7 +85054,7 @@
       "spelled": "func(cfg MemoryConfig) coresecret.Store",
       "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/security/secret.MemoryConfig) github.com/kitsunium/sdk/internal/core/security/secret.Store",
       "doc": "NewMemory returns a Store that keeps every version in this process's memory.\nIt cannot fail: there is nothing to open and nothing a configuration can get\nwrong.\n",
-      "file": "internal/service/security/secret/decl_gen.go",
+      "file": "internal/service/security/secret/memory.go",
       "layer": "service",
       "family": "security"
     },
@@ -86269,7 +86269,7 @@
       "spelled": "func(err error) int",
       "canonical": "func(err error) int",
       "doc": "Status is the process exit status for what [Executor].Execute returned: 0\nwhen err is nil, and errs.ExitCodeOf(err) otherwise.\n\nIt is a guard on the SDK's existing convention and not a second one.\nerrs.ExitCodeOf answers \"what status does THIS ERROR map to\", so it returns\nthe EX_SOFTWARE default (70) for a nil it was never meant to be handed —\nwhich is correct for an accessor and catastrophic at a CLI boundary, where\nsuccess is the common case. This is the one place in the SDK where nil has\nto mean 0, so this is where the guard lives.\n\n\tos.Exit(cli.Status(app.Execute(ctx, os.Args[1:])))\n",
-      "file": "pkg/v1/app/cli/decl_gen.go",
+      "file": "pkg/v1/app/cli/cli.go",
       "layer": "public",
       "family": "app"
     },
@@ -102666,7 +102666,7 @@
       "spelled": "func(cause error, params WrapParams, fields ...Field) error",
       "canonical": "func(cause error, params github.com/kitsunium/sdk/pkg/v1/errs.WrapParams, fields ...github.com/kitsunium/sdk/pkg/v1/errs.Field) error",
       "doc": "Wrap attaches a cause to a new error with origin-wins semantics and preserves\nthe chain (errors.Is / errors.Unwrap walk through it). When the cause is\nalready an SDK error (directly or behind a fmt.Errorf(\"%w\") wrap) the result\ninherits its Code/Reason/Public/Private and appends params.Code to the trail;\notherwise params.Code becomes the origin. Bad params at runtime do not panic —\nthe returned error carries a typed validation code.\n\nDeclared as a function (not a var alias over the kernel Wrap) so the public\nsignature returns error: the concrete *errs.Error stays unexported, never\nleaking through the facade.\n",
-      "file": "pkg/v1/errs/decl_gen.go",
+      "file": "pkg/v1/errs/construct.go",
       "layer": "public",
       "family": "root"
     },
@@ -104940,7 +104940,7 @@
       "spelled": "func(key string, val time.Duration) Attr",
       "canonical": "func(key string, val time.Duration) github.com/kitsunium/sdk/pkg/v1/observe/logger.Attr",
       "doc": "Duration builds an Attr carrying a time.Duration value.\n",
-      "file": "pkg/v1/observe/logger/decl_gen.go",
+      "file": "pkg/v1/observe/logger/logger.go",
       "layer": "public",
       "family": "observe"
     },
@@ -105015,7 +105015,7 @@
       "spelled": "func() string",
       "canonical": "func() string",
       "doc": "FrameworkVersion returns the linked-in SDK version, or \"dev\" if unset.\n",
-      "file": "pkg/v1/observe/logger/decl_gen.go",
+      "file": "pkg/v1/observe/logger/version.go",
       "layer": "public",
       "family": "observe"
     },
@@ -105039,7 +105039,7 @@
       "spelled": "func(ctx context.Context, lg Logger, msg string, attrs ...Attr)",
       "canonical": "func(ctx context.Context, lg github.com/kitsunium/sdk/pkg/v1/observe/logger.Logger, msg string, attrs ...github.com/kitsunium/sdk/pkg/v1/observe/logger.Attr)",
       "doc": "Info emits a RecordEvent at LevelInfo through lg.\n",
-      "file": "pkg/v1/observe/logger/decl_gen.go",
+      "file": "pkg/v1/observe/logger/logger.go",
       "layer": "public",
       "family": "observe"
     },
@@ -105383,7 +105383,7 @@
       "spelled": "func() Encoder",
       "canonical": "func() github.com/kitsunium/sdk/pkg/v1/observe/logger.Encoder",
       "doc": "NewJSONEncoder returns a structured single-line JSON encoder, rendering each\nrecord as one encoding/json-compatible object per line:\n{\"ts\":…,\"level\":…,\"msg\":…,<flat attrs>}. Grouped attributes flatten to\ndotted keys (\"g1.g2.key\") to match the text encoder's convention. Pass it to\nNewWithSink via SinkConfig.Encoder for machine-readable output.\n",
-      "file": "pkg/v1/observe/logger/decl_gen.go",
+      "file": "pkg/v1/observe/logger/encoder.go",
       "layer": "public",
       "family": "observe"
     },
@@ -105443,7 +105443,7 @@
       "spelled": "func() Encoder",
       "canonical": "func() github.com/kitsunium/sdk/pkg/v1/observe/logger.Encoder",
       "doc": "NewTextEncoder returns the default human-readable encoder, rendering each\nrecord as \"TIME LEVEL msg key=val …\\n\" with RFC3339-millisecond timestamps.\nIt is a named peer of TextEncoder bound to the real system clock.\n",
-      "file": "pkg/v1/observe/logger/decl_gen.go",
+      "file": "pkg/v1/observe/logger/encoder.go",
       "layer": "public",
       "family": "observe"
     },
@@ -105467,7 +105467,7 @@
       "spelled": "func(w io.Writer) (sink Sink, err error)",
       "canonical": "func(w io.Writer) (sink github.com/kitsunium/sdk/pkg/v1/observe/logger.Sink, err error)",
       "doc": "NewWriterSink wraps an arbitrary [io.Writer] in a [Sink] so callers can\ncompose plain file / network / bytes.Buffer writers with [Multi] for\nfan-out. The returned Sink serialises Write calls through an internal\nmutex (identical contract to [ConsoleStderr] / [ConsoleStdout]).\n\nReturns [WriterRequired] when w is nil.\n\n\tf, _ := os.OpenFile(\"/var/log/app.log\", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)\n\tfileSink, _ := logger.NewWriterSink(f)\n\tlg, _ := logger.NewWithSink(logger.SinkConfig{\n\t    Sink: logger.Multi(logger.ConsoleStderr(), fileSink),\n\t})\n",
-      "file": "pkg/v1/observe/logger/decl_gen.go",
+      "file": "pkg/v1/observe/logger/sink.go",
       "layer": "public",
       "family": "observe"
     },
@@ -105642,7 +105642,7 @@
       "spelled": "func() Encoder",
       "canonical": "func() github.com/kitsunium/sdk/pkg/v1/observe/logger.Encoder",
       "doc": "TextEncoder returns a fresh text Encoder bound to the real system clock.\nCallers passing a custom Encoder to NewWithSink usually want this as a\nstarting point — it is the same encoder NewText / Default rely on.\n",
-      "file": "pkg/v1/observe/logger/decl_gen.go",
+      "file": "pkg/v1/observe/logger/sink.go",
       "layer": "public",
       "family": "observe"
     },
@@ -105771,7 +105771,7 @@
       "spelled": "func(ctx context.Context, lg Logger, msg string, attrs ...Attr)",
       "canonical": "func(ctx context.Context, lg github.com/kitsunium/sdk/pkg/v1/observe/logger.Logger, msg string, attrs ...github.com/kitsunium/sdk/pkg/v1/observe/logger.Attr)",
       "doc": "Warn emits a RecordEvent at LevelWarn through lg.\n",
-      "file": "pkg/v1/observe/logger/decl_gen.go",
+      "file": "pkg/v1/observe/logger/logger.go",
       "layer": "public",
       "family": "observe"
     },
@@ -109309,7 +109309,7 @@
       "spelled": "func(caps ...Capability) []Capability",
       "canonical": "func(caps ...github.com/kitsunium/sdk/pkg/v1/proc.Capability) []github.com/kitsunium/sdk/pkg/v1/proc.Capability",
       "doc": "MissingCapabilities returns the subset of caps with no native backend on the\ncurrent platform; an empty (nil) result means every capability is present.\n",
-      "file": "pkg/v1/proc/decl_gen.go",
+      "file": "pkg/v1/proc/capability.go",
       "layer": "public",
       "family": "proc"
     },
@@ -109333,7 +109333,7 @@
       "spelled": "func(c Capability) bool",
       "canonical": "func(c github.com/kitsunium/sdk/pkg/v1/proc.Capability) bool",
       "doc": "Supported reports whether cap has a native backend on the current GOOS. It is\npure, allocation-free and race-clean: it consults runtime.GOOS only, never a\nruntime delegation probe (see the package doc on cgroup.Available()).\n",
-      "file": "pkg/v1/proc/decl_gen.go",
+      "file": "pkg/v1/proc/capability.go",
       "layer": "public",
       "family": "proc"
     },

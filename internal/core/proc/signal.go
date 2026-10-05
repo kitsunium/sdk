@@ -7,9 +7,9 @@ import (
 	"syscall"
 )
 
-// os is Signal.OS's body: decl_gen.go writes Signal.OS, from the
-// design, as one call of it.
-func (s Signal) os() os.Signal {
+// OS bridges s to the os.Signal expected by os/signal and Process.Signal. It is
+// a zero-cost conversion to syscall.Signal — the canonical os.Signal carrier.
+func (s Signal) OS() os.Signal {
 	//: syscall.Signal is the portable os.Signal implementation across platforms.
 	return syscall.Signal(s)
 }

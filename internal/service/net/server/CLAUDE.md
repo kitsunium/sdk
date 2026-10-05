@@ -13,7 +13,7 @@ Public façade: `pkg/v1/net/server`.
 
 | File | Surface |
 |---|---|
-| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `Option`, `GroupOption`, `PacketGroup`, `Server` and `StreamGroup` — each struct with every field, unexported ones included; `PacketGroup.Handle`, `PacketGroup.HandleFunc`, `PacketGroup.Use`, `StreamGroup.Handle`, `StreamGroup.HandleFunc`, `StreamGroup.HandleHTTP` and `StreamGroup.Use`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `Option`, `GroupOption`, `PacketGroup`, `Server` and `StreamGroup` — each struct with every field, unexported ones included; `PacketGroup.Handle`, `PacketGroup.HandleFunc`, `StreamGroup.Handle` and `StreamGroup.HandleFunc`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
 | `server.go` | `Server`, `New`, `Group`, `State` |
 | `lifecycle.go` | `Start`, `Serve`, `Shutdown`, `Close`, the accept loop and its backoff (`acceptDelay`, `backOff`), the drain |
 | `stream_group.go` | `StreamGroup` — `Handle`, `HandleFunc`, `HandleHTTP`, `Use` |

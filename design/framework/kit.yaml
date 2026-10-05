@@ -755,11 +755,6 @@ packages:
           - type: "*App"
         variadic: true
       - doc: |-
-          EnableServer makes an app in the server profile serve HTTP.
-          framework/kit/server calls it as it is imported; a product never does.
-        name: EnableServer
-        impl: enableServer
-      - doc: |-
           Analyzer runs fn in the background once the product serves, in dev and when
           KIT_ANALYZE allows it. Without one, the graph is the runtime's alone.
         in:
@@ -1023,14 +1018,6 @@ packages:
         out:
           - type: AppConfigurer
       - doc: |-
-          InMemory keeps data in memory. On an app, it overrides the data directory
-          for every store and queue — what a test wants. On a store, it keeps that
-          store in memory even when the app has a data directory.
-        name: InMemory
-        impl: inMemory
-        out:
-          - type: interface{StoreConfigurer; AppConfigurer}
-      - doc: |-
           Keeps says what the database keeps: a service's stores, a store, a
           module's stores. The most precise wins: a store kept by name, then its
           service, then its module, then the default database — the one declared
@@ -1099,6 +1086,127 @@ packages:
         out:
           - type: AppConfigurer
         variadic: true
+      - doc: |-
+          EnableServer makes an app in the server profile serve HTTP.
+          framework/kit/server calls it as it is imported; a product never does.
+        impl: enableServer
+        name: EnableServer
+      - doc: |-
+          InMemory keeps data in memory. On an app, it overrides the data directory
+          for every store and queue — what a test wants. On a store, it keeps that
+          store in memory even when the app has a data directory.
+        impl: inMemory
+        name: InMemory
+        out:
+          - type: interface{StoreConfigurer; AppConfigurer}
+      - doc: |-
+          EnableStudio makes a serving app in dev mount the Studio's API.
+          framework/kit/studio calls it as it is imported; a product never does.
+        impl: enableStudio
+        name: EnableStudio
+      - doc: |-
+          NewLoop is a loop no service declares yet, whose runs are run:
+          [Service.Loop] makes one and declares it, which is how a product gets one.
+        impl: newLoop
+        in:
+          - name: run
+            type: func(context.Context, WakeEvent) error
+        name: NewLoop
+        out:
+          - type: "*Loop"
+      - doc: |-
+          NewMailer is a mailer no service declares yet, with the default attempts:
+          [Service.Mailer] makes one and declares it, which is how a product gets
+          one.
+        impl: newMailer
+        name: NewMailer
+        out:
+          - type: "*Mailer"
+      - doc: |-
+          Requires says the module needs other: an app that mounts the module and
+          not other mounts other at its defaults, and starts it first. The Go import
+          this takes makes a cycle impossible. A collaboration a module can do
+          without is a port with a fallback instead ([Fallback]).
+        impl: requires
+        in:
+          - name: other
+            type: "*Module"
+        name: Requires
+        out:
+          - type: ModuleConfigurer
+      - doc: |-
+          NewRecordsService is the records of the store port reaches: [App.Records]
+          and [RecordsOf] make one for a store the app mounts.
+        impl: newRecordsService
+        in:
+          - name: port
+            type: recordsPort
+        name: NewRecordsService
+        out:
+          - type: RecordsService
+      - doc: ClearCookie tells the browser to forget the cookie called name.
+        impl: clearCookie
+        in:
+          - name: ctx
+            type: context.Context
+          - name: name
+            type: string
+        name: ClearCookie
+      - doc: |-
+          DeleteOnErasure makes a person's erasure (kit.Erase) delete the store's
+          records instead of clearing them, as sessions and accounts want.
+        impl: deleteOnErasure
+        name: DeleteOnErasure
+        out:
+          - type: StoreConfigurer
+      - doc: |-
+          Revisions keeps the n previous versions of each record of the store, n
+          from 1 to 100, as WordPress keeps a post's revisions: every write that
+          changes a record makes a version, numbered from 1 and never renumbered,
+          stamped with when it was made, the caller's user and the command that
+          made it; the oldest beyond n are pruned by the write that makes a newer
+          one, unless a legal hold keeps the record.
+
+          	var Pages = Service.Store("pages", Page.Key, kit.Revisions(20))
+
+          	revs, err := Pages.Revisions(ctx, id)                            // newest first
+          	edits, err := Pages.Diff(ctx, id, revs[3].Number, revs[0].Number)
+          	page, err := Pages.Restore(ctx, id, revs[3].Number)              // a new version
+          	page, err = Pages.Restore(ctx, id, revs[3].Number, "/title")     // the title only
+
+          A store with Revisions(n) holds up to n+1 times its records: in memory
+          with the store in the data directory, in the table <table>___vs on a
+          database, which kit's migrations create.
+        impl: revisions
+        in:
+          - name: "n"
+            type: int
+        name: Revisions
+        out:
+          - type: StoreConfigurer
+      - doc: |-
+          NewSecret is a secret no service declares yet, rotated and kept as by
+          default: [Service.Secret] makes one and declares it, which is how a product
+          gets one.
+        impl: newSecret
+        name: NewSecret
+        out:
+          - type: "*Secret"
+      - doc: |-
+          ReadModel marks a store as derived from others (ADR 0005): written by
+          projections — the subscriptions that keep it from the write side's
+          events —, read by queries. It changes nothing of how the store runs; the
+          diagram draws it on its domain's read side, and the static analysis warns
+          of a read model written by anything but a subscription. kit's topics are
+          queues, not logs: a read model cannot be replayed from its events, and one
+          fed by a topic lags the commands that feed it — a query that must read its
+          own writes reads the write side.
+
+          	var Summaries = Service.Store("summaries", Summary.Key, kit.ReadModel())
+        impl: readModel
+        name: ReadModel
+        out:
+          - type: StoreConfigurer
       - doc: |-
           Name overrides the endpoint's name, which otherwise is its handler's
           function name, or its route when the handler is a function literal.
@@ -1219,7 +1327,6 @@ packages:
           - name: message
             type: string
         name: NewError
-        impl: newError
         out:
           - type: "*Error"
       - doc: |-
@@ -1235,7 +1342,6 @@ packages:
           takes [AnyUser] instead, and one with [AuthOptional] still knows the
           caller who signed in.
         name: Anyone
-        impl: anyone
         out:
           - type: ExposeConfigurer
       - doc: |-
@@ -1248,7 +1354,6 @@ packages:
           It adds no authentication of its own: an exposure authenticates as its
           operation asks, so the operation declares [Auth].
         name: AnyUser
-        impl: anyUser
         out:
           - type: ExposeConfigurer
       - doc: |-
@@ -1300,11 +1405,6 @@ packages:
         typeParams:
           - constraint: any
             name: T
-      - doc: |-
-          EnableStudio makes a serving app in dev mount the Studio's API.
-          framework/kit/studio calls it as it is imported; a product never does.
-        name: EnableStudio
-        impl: enableStudio
       - doc: |-
           SocketPath places the listener's socket at path — absolute, at most 103
           bytes — instead of <runtime dir of the app>/<service>-<name>.sock.
@@ -1377,7 +1477,6 @@ packages:
           - name: handler
             type: ListenHandler
         name: NewListener
-        impl: newListener
         out:
           - type: "*Listener"
       - doc: |-
@@ -1421,16 +1520,6 @@ packages:
           - constraint: any
             name: T
       - doc: |-
-          NewLoop is a loop no service declares yet, whose runs are run:
-          [Service.Loop] makes one and declares it, which is how a product gets one.
-        in:
-          - name: run
-            type: func(context.Context, WakeEvent) error
-        name: NewLoop
-        impl: newLoop
-        out:
-          - type: "*Loop"
-      - doc: |-
           From sets the sender of every message that names none.
 
           IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
@@ -1454,14 +1543,6 @@ packages:
         name: MailAttempts
         out:
           - type: MailerConfigurer
-      - doc: |-
-          NewMailer is a mailer no service declares yet, with the default attempts:
-          [Service.Mailer] makes one and declares it, which is how a product gets
-          one.
-        name: NewMailer
-        impl: newMailer
-        out:
-          - type: "*Mailer"
       - doc: |-
           NewModule declares a module named name — lower-case letters, digits and
           dashes, starting with a letter; "kit", "external" and "schema" are kit's — that doc
@@ -1488,18 +1569,6 @@ packages:
         out:
           - type: "*Module"
         variadic: true
-      - doc: |-
-          Requires says the module needs other: an app that mounts the module and
-          not other mounts other at its defaults, and starts it first. The Go import
-          this takes makes a cycle impossible. A collaboration a module can do
-          without is a port with a fallback instead ([Fallback]).
-        in:
-          - name: other
-            type: "*Module"
-        name: Requires
-        impl: requires
-        out:
-          - type: ModuleConfigurer
       - doc: |-
           Mount mounts module m with options: [Prefix] serves its routes elsewhere
           than "/<module>/", [Bind] chooses what one of its ports calls.
@@ -1731,16 +1800,6 @@ packages:
           - type: RecordsService
           - type: error
       - doc: |-
-          NewRecordsService is the records of the store port reaches: [App.Records]
-          and [RecordsOf] make one for a store the app mounts.
-        in:
-          - name: port
-            type: recordsPort
-        name: NewRecordsService
-        impl: newRecordsService
-        out:
-          - type: RecordsService
-      - doc: |-
           Replace runs fn in place of op's code, in the app it is given to: an
           endpoint's handler — or, with ADR 0005, a command's or a query's — or what
           a port calls. It replaces the code, not the mechanics: authentication,
@@ -1786,14 +1845,6 @@ packages:
           - name: c
             type: "*http.Cookie"
         name: SetCookie
-      - doc: ClearCookie tells the browser to forget the cookie called name.
-        in:
-          - name: ctx
-            type: context.Context
-          - name: name
-            type: string
-        name: ClearCookie
-        impl: clearCookie
       - doc: |-
           ClientIP returns the address of the client of the request ctx serves: the
           connection's peer, or — only when KIT_TRUST_PROXY=on — the last address of
@@ -1944,14 +1995,6 @@ packages:
           - name: text
             type: string
         name: Purpose
-        impl: purpose
-        out:
-          - type: StoreConfigurer
-      - doc: |-
-          DeleteOnErasure makes a person's erasure (kit.Erase) delete the store's
-          records instead of clearing them, as sessions and accounts want.
-        name: DeleteOnErasure
-        impl: deleteOnErasure
         out:
           - type: StoreConfigurer
       - doc: |-
@@ -1973,32 +2016,6 @@ packages:
           - name: limits
             type: string
         name: RetentionByProduct
-        impl: retentionByProduct
-        out:
-          - type: StoreConfigurer
-      - doc: |-
-          Revisions keeps the n previous versions of each record of the store, n
-          from 1 to 100, as WordPress keeps a post's revisions: every write that
-          changes a record makes a version, numbered from 1 and never renumbered,
-          stamped with when it was made, the caller's user and the command that
-          made it; the oldest beyond n are pruned by the write that makes a newer
-          one, unless a legal hold keeps the record.
-
-          	var Pages = Service.Store("pages", Page.Key, kit.Revisions(20))
-
-          	revs, err := Pages.Revisions(ctx, id)                            // newest first
-          	edits, err := Pages.Diff(ctx, id, revs[3].Number, revs[0].Number)
-          	page, err := Pages.Restore(ctx, id, revs[3].Number)              // a new version
-          	page, err = Pages.Restore(ctx, id, revs[3].Number, "/title")     // the title only
-
-          A store with Revisions(n) holds up to n+1 times its records: in memory
-          with the store in the data directory, in the table <table>___vs on a
-          database, which kit's migrations create.
-        in:
-          - name: "n"
-            type: int
-        name: Revisions
-        impl: revisions
         out:
           - type: StoreConfigurer
       - doc: NewBinary declares the binary named name.
@@ -2087,14 +2104,6 @@ packages:
         name: KeepVersions
         out:
           - type: SecretConfigurer
-      - doc: |-
-          NewSecret is a secret no service declares yet, rotated and kept as by
-          default: [Service.Secret] makes one and declares it, which is how a product
-          gets one.
-        name: NewSecret
-        impl: newSecret
-        out:
-          - type: "*Secret"
       - doc: |-
           SecretStore keeps the secrets in store instead of the environment's: a
           test gives a store holding what its provided secrets hold. The
@@ -2188,21 +2197,6 @@ packages:
         name: Root
         out:
           - type: StaticConfigurer
-      - doc: |-
-          ReadModel marks a store as derived from others (ADR 0005): written by
-          projections — the subscriptions that keep it from the write side's
-          events —, read by queries. It changes nothing of how the store runs; the
-          diagram draws it on its domain's read side, and the static analysis warns
-          of a read model written by anything but a subscription. kit's topics are
-          queues, not logs: a read model cannot be replayed from its events, and one
-          fed by a topic lags the commands that feed it — a query that must read its
-          own writes reads the write side.
-
-          	var Summaries = Service.Store("summaries", Summary.Key, kit.ReadModel())
-        name: ReadModel
-        impl: readModel
-        out:
-          - type: StoreConfigurer
       - doc: |-
           NewStoreService is a store no service declares yet, keying its entities
           with key: [Service.Store] makes one and declares it, which is how a product
@@ -3139,23 +3133,22 @@ packages:
           caller reads. Any other error becomes a 500 whose body says nothing about
           it: an error message is the classic place a secret leaks from.
         methods:
+          - doc: Unwrap returns the cause, so errors.Is and errors.As see through an Error.
+            impl: unwrap
+            name: Unwrap
+            out:
+              - type: error
+            recv: pointer
           - doc: Error renders the code and the message. It never renders the cause.
             name: Error
             out:
               - type: string
-            recv: pointer
-          - doc: Unwrap returns the cause, so errors.Is and errors.As see through an Error.
-            name: Unwrap
-            impl: unwrap
-            out:
-              - type: error
             recv: pointer
           - doc: Wrap attaches the underlying cause, for the logs. It returns a copy.
             in:
               - name: cause
                 type: error
             name: Wrap
-            impl: wrap
             out:
               - type: "*Error"
             recv: pointer
@@ -3314,8 +3307,8 @@ packages:
               Nudge wakes the loop now, as if its deadline had come. The run's reason
               is model.WakeManual; a nudge also cuts short the backoff after a failure.
               It does nothing while the loop is not running.
-            name: Nudge
             impl: nudge
+            name: Nudge
             recv: pointer
         name: Loop
         struct:
@@ -3798,79 +3791,6 @@ packages:
         typeParams:
           - constraint: any
             name: T
-      - decl: true
-        doc: |-
-          Binary is one executable the product ships, made of process roles: a
-          status line and its daemon are two roles of one binary, "statusline" and
-          "statusline daemon". Each role is an App — its own services, its own
-          profile — and two roles talk only through a declared, versioned contract
-          (D22): a listener one serves and the other dials, never each other's code.
-
-          	var Binary = kit.NewBinary("statusline", "The status line of a Claude session.").
-          		Role("render", RenderApp).                // statusline ...
-          		Role("daemon", DaemonApp, "daemon").      // statusline daemon ...
-          		Talks("render", "daemon", "render/v1")
-
-          	func main() { os.Exit(Binary.Main(context.Background(), os.Args[1:])) }
-
-          The package that declares a binary and its roles is wiring, generated from
-          the design (D22).
-        methods:
-          - doc: |-
-              Role adds a process role named name, run by app, selected when the
-              process's first arguments are args; the role without args is the default.
-              It returns b, so roles chain.
-            in:
-              - name: name
-                type: string
-              - name: app
-                type: "*App"
-              - name: args
-                type: string
-            name: Role
-            out:
-              - type: "*Binary"
-            recv: pointer
-            variadic: true
-          - doc: |-
-              Talks declares that role from talks to role to through contract —
-              "<name>/v<major>". It is the only edge two roles may have.
-            in:
-              - name: from
-              - name: to
-              - name: contractName
-                type: string
-            name: Talks
-            out:
-              - type: "*Binary"
-            recv: pointer
-          - doc: |-
-              Main runs the role the arguments select — the one whose args are the
-              longest prefix of them, else the default role — with the rest of the
-              arguments, through its App's Main. It returns the process exit status.
-            in:
-              - name: ctx
-                type: context.Context
-              - name: args
-                type: "[]string"
-            name: Main
-            out:
-              - type: int
-            recv: pointer
-        name: Binary
-        struct:
-          fields:
-            - name: name
-            - name: doc
-              type: string
-            - name: decl
-              type: pos
-            - name: roles
-              type: "[]*role"
-            - name: contracts
-              type: "[]contract"
-            - name: problems
-              type: "[]phrase"
       - decl: true
         doc: |-
           ScopeValue is one part of a path computed at the start: the user, the
@@ -5420,6 +5340,67 @@ packages:
         interface:
           unexported: true
         name: QueryConfigurer
+      - doc: |-
+          Binary is one executable the product ships, made of process roles: a
+          status line and its daemon are two roles of one binary, "statusline" and
+          "statusline daemon". Each role is an App — its own services, its own
+          profile — and two roles talk only through a declared, versioned contract
+          (D22): a listener one serves and the other dials, never each other's code.
+
+          	var Binary = kit.NewBinary("statusline", "The status line of a Claude session.").
+          		Role("render", RenderApp).                // statusline ...
+          		Role("daemon", DaemonApp, "daemon").      // statusline daemon ...
+          		Talks("render", "daemon", "render/v1")
+
+          	func main() { os.Exit(Binary.Main(context.Background(), os.Args[1:])) }
+
+          The package that declares a binary and its roles is wiring, generated from
+          the design (D22).
+        methods:
+          - doc: |-
+              Role adds a process role named name, run by app, selected when the
+              process's first arguments are args; the role without args is the default.
+              It returns b, so roles chain.
+            in:
+              - name: name
+                type: string
+              - name: app
+                type: "*App"
+              - name: args
+                type: string
+            name: Role
+            out:
+              - type: "*Binary"
+            recv: pointer
+            variadic: true
+          - doc: |-
+              Talks declares that role from talks to role to through contract —
+              "<name>/v<major>". It is the only edge two roles may have.
+            in:
+              - name: from
+              - name: to
+              - name: contractName
+                type: string
+            name: Talks
+            out:
+              - type: "*Binary"
+            recv: pointer
+          - doc: |-
+              Main runs the role the arguments select — the one whose args are the
+              longest prefix of them, else the default role — with the rest of the
+              arguments, through its App's Main. It returns the process exit status.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: args
+                type: "[]string"
+            name: Main
+            out:
+              - type: int
+            recv: pointer
+        name: Binary
+        struct:
+          unexported: true
       - doc: SecretConfigurer configures a secret.
         interface:
           unexported: true
@@ -6895,7 +6876,6 @@ packages:
           - name: fn
             type: AnalyzeFunc
         name: Analyzer
-        impl: analyzer
         out:
           - type: AppOption
       - doc: |-
@@ -6905,7 +6885,6 @@ packages:
           - name: p
             type: string
         name: Profile
-        impl: profile
         out:
           - type: AppOption
       - doc: |-
@@ -6917,7 +6896,6 @@ packages:
           - name: d
             type: time.Duration
         name: IdleStop
-        impl: idleStop
         out:
           - type: AppOption
       - doc: |-
@@ -6931,7 +6909,6 @@ packages:
           - name: scope
             type: string
         name: Singleton
-        impl: singleton
         out:
           - type: AppOption
       - doc: |-
@@ -6945,23 +6922,9 @@ packages:
           - name: scopes
             type: Scope
         name: SingletonPer
-        impl: singletonPer
         out:
           - type: AppOption
         variadic: true
-      - doc: |-
-          Stop asks the app ctx runs in to end its run: Run returns as it does on a
-          signal, its stop draining every component — a daemon told "stop" by its
-          client, on its listener, ends itself so. It returns at once, before the
-          stop; it reports false when ctx runs in no app — a handler's, a loop's, a
-          command's context does — or the app does not run.
-        in:
-          - name: ctx
-            type: context.Context
-        name: Stop
-        impl: stop
-        out:
-          - type: bool
       - doc: |-
           Auth makes an endpoint require an authenticated caller: the app's auth
           handler runs first, and a request without valid credentials is answered
@@ -6972,7 +6935,6 @@ packages:
           IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
           only hands it to the declaration it configures.
         name: Auth
-        impl: auth
         out:
           - type: OperationOption
       - doc: |-
@@ -6982,7 +6944,6 @@ packages:
           IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
           only hands it to the declaration it configures.
         name: AuthOptional
-        impl: authOptional
         out:
           - type: OperationOption
       - doc: |-
@@ -7027,27 +6988,6 @@ packages:
           - constraint: any
             name: D
       - doc: |-
-          Catalog lists the generic mechanics kit offers: the building blocks a node
-          composes rather than implements, each one backed by an SDK package. It is
-          part of every graph, so the Studio — and an AI agent reading the graph —
-          knows what can be added to a product and the exact code that adds it.
-        name: Catalog
-        impl: catalog
-        out:
-          - type: "[]model.Mechanic"
-      - doc: |-
-          NewID returns a new identifier with the given prefix: a TypeID, time
-          ordered, like "todo_01k5zq7m3xe8tvbfg0s7zr4w6c". The prefix must be one to
-          sixty-three lower-case letters, with '_' only between two letters; any
-          other prefix is a programming error and panics.
-        in:
-          - name: prefix
-            type: string
-        name: NewID
-        impl: newID
-        out:
-          - type: string
-      - doc: |-
           DefaultCommand makes the command Main's default: it runs with every
           argument when the first names no other command — neither one of the
           product's nor one of Main's (serve, help…) —, and with none when there
@@ -7057,7 +6997,6 @@ packages:
           IFACE-OPAQUE: CLIOption is sealed — its one method is unexported — so
           only this package makes one, and a caller only passes it to CLI.
         name: DefaultCommand
-        impl: defaultCommand
         out:
           - type: CLIOption
       - doc: |-
@@ -7068,7 +7007,6 @@ packages:
           IFACE-OPAQUE: CLIOption is sealed — its one method is unexported — so
           only this package makes one, and a caller only passes it to CLI.
         name: FailSafe
-        impl: failSafe
         out:
           - type: CLIOption
       - doc: |-
@@ -7086,7 +7024,6 @@ packages:
           user is not queued. A queued command's input is a contract with the
           messages already queued: add a field, never rename one.
         name: Queued
-        impl: queued
         out:
           - type: CommandOption
       - doc: |-
@@ -7097,7 +7034,6 @@ packages:
           writer turn, it lets such commands run side by side. Dispatched inside
           another command, it still runs in that one's transaction.
         name: NoTransaction
-        impl: noTransaction
         out:
           - type: CommandOption
       - doc: Env selects the environment, instead of KIT_ENV.
@@ -7114,7 +7050,6 @@ packages:
           - name: addr
             type: string
         name: Listen
-        impl: listen
         out:
           - type: AppOption
       - doc: DataDir sets where stores and queues persist, instead of KIT_DATA_DIR.
@@ -7122,7 +7057,6 @@ packages:
           - name: dir
             type: string
         name: DataDir
-        impl: dataDir
         out:
           - type: AppOption
       - doc: |-
@@ -7132,7 +7066,6 @@ packages:
           - name: "on"
             type: bool
         name: Studio
-        impl: studio
         out:
           - type: AppOption
       - doc: Analyze switches the in-process static analysis on or off in dev.
@@ -7140,7 +7073,6 @@ packages:
           - name: "on"
             type: bool
         name: Analyze
-        impl: analyze
         out:
           - type: AppOption
       - doc: Logs sends the app's logs to w instead of standard error.
@@ -7148,7 +7080,6 @@ packages:
           - name: w
             type: io.Writer
         name: Logs
-        impl: logs
         out:
           - type: AppOption
       - doc: |-
@@ -7161,14 +7092,6 @@ packages:
         out:
           - type: AppOption
       - doc: |-
-          InMemory keeps data in memory. On an app, it overrides the data directory
-          for every store and queue — what a test wants. On a store, it keeps that
-          store in memory even when the app has a data directory.
-        name: InMemory
-        impl: inMemory
-        out:
-          - type: interface{StoreOption; AppOption}
-      - doc: |-
           Keeps says what the database keeps: a service's stores, a store, a
           module's stores. The most precise wins: a store kept by name, then its
           service, then its module, then the default database — the one declared
@@ -7178,27 +7101,8 @@ packages:
           - name: things
             type: Keepable
         name: Keeps
-        impl: keeps
         out:
           - type: DatabaseOption
-        variadic: true
-      - doc: |-
-          Migrations are migrations, values of the SDK's sql.Migration, run when
-          the database starts (<name>-migrate: start) or by `<product> migrate up`,
-          kit's own first, each set under its own version table — and so its own
-          lock. On MySQL a DDL statement commits by itself: write one per migration.
-
-          Given to [Database], they are the product's, under schema_migrations.
-          Given to [NewModule], they are the module's (ADR 0008), for the data it
-          keeps outside kit's stores: run on the database that keeps the module,
-          under <module>_migrations.
-        in:
-          - name: m
-            type: sql.Migration
-        name: Migrations
-        impl: migrations
-        out:
-          - type: interface{DatabaseOption; ModulePart}
         variadic: true
       - doc: |-
           Database declares a database the product keeps its stores in, named name,
@@ -7238,6 +7142,302 @@ packages:
           - type: AppOption
         variadic: true
       - doc: |-
+          Stop asks the app ctx runs in to end its run: Run returns as it does on a
+          signal, its stop draining every component — a daemon told "stop" by its
+          client, on its listener, ends itself so. It returns at once, before the
+          stop; it reports false when ctx runs in no app — a handler's, a loop's, a
+          command's context does — or the app does not run.
+        impl: stop
+        in:
+          - name: ctx
+            type: context.Context
+        name: Stop
+        out:
+          - type: bool
+      - doc: |-
+          Catalog lists the generic mechanics kit offers: the building blocks a node
+          composes rather than implements, each one backed by an SDK package. It is
+          part of every graph, so the Studio — and an AI agent reading the graph —
+          knows what can be added to a product and the exact code that adds it.
+        impl: catalog
+        name: Catalog
+        out:
+          - type: "[]model.Mechanic"
+      - doc: |-
+          NewID returns a new identifier with the given prefix: a TypeID, time
+          ordered, like "todo_01k5zq7m3xe8tvbfg0s7zr4w6c". The prefix must be one to
+          sixty-three lower-case letters, with '_' only between two letters; any
+          other prefix is a programming error and panics.
+        impl: newID
+        in:
+          - name: prefix
+            type: string
+        name: NewID
+        out:
+          - type: string
+      - doc: |-
+          InMemory keeps data in memory. On an app, it overrides the data directory
+          for every store and queue — what a test wants. On a store, it keeps that
+          store in memory even when the app has a data directory.
+        impl: inMemory
+        name: InMemory
+        out:
+          - type: interface{StoreOption; AppOption}
+      - doc: |-
+          Migrations are migrations, values of the SDK's sql.Migration, run when
+          the database starts (<name>-migrate: start) or by `<product> migrate up`,
+          kit's own first, each set under its own version table — and so its own
+          lock. On MySQL a DDL statement commits by itself: write one per migration.
+
+          Given to [Database], they are the product's, under schema_migrations.
+          Given to [NewModule], they are the module's (ADR 0008), for the data it
+          keeps outside kit's stores: run on the database that keeps the module,
+          under <module>_migrations.
+        impl: migrations
+        in:
+          - name: m
+            type: sql.Migration
+        name: Migrations
+        out:
+          - type: interface{DatabaseOption; ModulePart}
+        variadic: true
+      - doc: |-
+          HoldSubject places a legal hold on every record whose subject is one of
+          ids, in every store of the app: an authority's request about a person.
+          It holds the records they have now; a record written later is not held.
+          reason is kept as Store.Hold keeps it.
+        impl: holdSubject
+        in:
+          - name: ctx
+            type: context.Context
+          - name: reason
+            type: string
+          - name: ids
+            type: string
+        name: HoldSubject
+        out:
+          - type: error
+        variadic: true
+      - doc: |-
+          Requires says the module needs other: an app that mounts the module and
+          not other mounts other at its defaults, and starts it first. The Go import
+          this takes makes a cycle impossible. A collaboration a module can do
+          without is a port with a fallback instead ([Fallback]).
+        impl: requires
+        in:
+          - name: other
+            type: "*Module"
+        name: Requires
+        out:
+          - type: ModulePart
+      - doc: |-
+          RateLimitPerClient gives every client of an endpoint a token bucket of its
+          own: perSecond tokens a second, up to burst at once. A client is the
+          authenticated user when there is one, and the client's address otherwise
+          ([ClientIP]); in-process calls through [Endpoint].Call share one bucket. One
+          client emptying its bucket is answered 429; the others are not — which is
+          what a sign-in endpoint needs, where one shared bucket would let a single
+          client lock everybody out.
+
+          Buckets unused for ten minutes are forgotten, and at most 10 000 are kept:
+          the least recently used goes first. It is the SDK's keyed rate limiter.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        impl: rateLimitPerClient
+        in:
+          - name: perSecond
+            type: float64
+          - name: burst
+            type: int
+        name: RateLimitPerClient
+        out:
+          - type: OperationOption
+      - doc: |-
+          SetCookie adds a Set-Cookie header to the HTTP response of the endpoint
+          ctx serves. kit fills what a cookie left zero with safe defaults — Path
+          "/", HttpOnly, SameSite Lax, and Secure outside dev — so a session cookie
+          is hardened unless the code says otherwise. In an in-process
+          [Endpoint].Call there is no response: the cookie is dropped.
+
+          HttpOnly is always set, and Secure always outside dev (and in dev for
+          SameSite=None, which browsers require): a boolean has no "unset" a default
+          could fill, and kit chooses the hardened reading. A cookie set more than
+          once in one response keeps its last value, and cookies set before an error
+          are sent with the error — clearing a stale session on a 401 works.
+        impl: setCookie
+        in:
+          - name: ctx
+            type: context.Context
+          - name: c
+            type: "*http.Cookie"
+        name: SetCookie
+      - doc: ClearCookie tells the browser to forget the cookie called name.
+        impl: clearCookie
+        in:
+          - name: ctx
+            type: context.Context
+          - name: name
+            type: string
+        name: ClearCookie
+      - doc: |-
+          ClientIP returns the address of the client of the request ctx serves: the
+          connection's peer, or — only when KIT_TRUST_PROXY=on — the last address of
+          X-Forwarded-For, the one the trusted proxy appended. It is "" outside an HTTP request.
+        impl: clientIP
+        in:
+          - name: ctx
+            type: context.Context
+        name: ClientIP
+        out:
+          - type: string
+      - doc: UserAgent returns the User-Agent of the request ctx serves, clipped.
+        impl: userAgent
+        in:
+          - name: ctx
+            type: context.Context
+        name: UserAgent
+        out:
+          - type: string
+      - doc: |-
+          Now returns the app's time: the system clock, or the clock a test gave
+          with [Clock]. Product code that compares with a deadline reads it rather
+          than time.Now, so that a test's manual clock reaches it.
+        impl: now
+        in:
+          - name: ctx
+            type: context.Context
+        name: Now
+        out:
+          - type: time.Time
+      - doc: |-
+          NewTicker is a ticker of period d on the app's clock, for a loop written by
+          hand ([Service].Go): a test's manual clock drives it like every timer kit
+          runs itself, where a time.Ticker would tick on the wall clock whatever the
+          test does. It panics on a non-positive d, as time.NewTicker does.
+        impl: newTicker
+        in:
+          - name: ctx
+            type: context.Context
+          - name: d
+            type: time.Duration
+        name: NewTicker
+        out:
+          - type: clock.Ticker
+      - doc: After is time.After on the app's clock.
+        impl: after
+        in:
+          - name: ctx
+            type: context.Context
+          - name: d
+            type: time.Duration
+        name: After
+        out:
+          - type: <-chan time.Time
+      - doc: |-
+          Log returns the app's logger, for the node ctx runs inside. In dev, every
+          record it writes inside a span is also kept beside that span, so the
+          Studio shows a request's logs with its trace.
+        impl: log
+        in:
+          - name: ctx
+            type: context.Context
+        name: Log
+        out:
+          - type: logger.Logger
+      - doc: |-
+          Purpose says why the store keeps its records (GDPR art. 30(1)(b)): the
+          register lists it, and a person's export carries it.
+        impl: purpose
+        in:
+          - name: text
+            type: string
+        name: Purpose
+        out:
+          - type: StoreOption
+      - doc: |-
+          DeleteOnErasure makes a person's erasure (kit.Erase) delete the store's
+          records instead of clearing them, as sessions and accounts want.
+        impl: deleteOnErasure
+        name: DeleteOnErasure
+        out:
+          - type: StoreOption
+      - doc: |-
+          RetentionByProduct says the product keeps the store's retention itself:
+          its own code erases and deletes what it no longer needs — a record whose
+          life the product's own rules end, a lifecycle kit cannot read from the
+          entity. limits says, in the product's words, for how long and how, which
+          the register publishes as the store's time limits (GDPR art. 30(1)(f));
+          "" says only that the product keeps them.
+
+          kit then runs no retention for the store, and warns of neither a missing
+          retention nor a missing subject. Its classified fields keep every other
+          promise: sealed at rest, never shown, exported with their person — when
+          the store names one — and erased by kit.Erase and Store.Erase. It goes
+          with kit.Purpose, kit.HeldUntil, kit.Anonymise and kit.DeleteOnErasure;
+          with kit.EraseAfter, kit.EraseAt, kit.DeleteAfter or kit.DeleteAt it is
+          refused: a store's retention is kit's or the product's, never both.
+        impl: retentionByProduct
+        in:
+          - name: limits
+            type: string
+        name: RetentionByProduct
+        out:
+          - type: StoreOption
+      - doc: |-
+          Revisions keeps the n previous versions of each record of the store, n
+          from 1 to 100, as WordPress keeps a post's revisions: every write that
+          changes a record makes a version, numbered from 1 and never renumbered,
+          stamped with when it was made, the caller's user and the command that
+          made it; the oldest beyond n are pruned by the write that makes a newer
+          one, unless a legal hold keeps the record.
+
+          	var Pages = Service.Store("pages", Page.Key, kit.Revisions(20))
+
+          	revs, err := Pages.Revisions(ctx, id)                            // newest first
+          	edits, err := Pages.Diff(ctx, id, revs[3].Number, revs[0].Number)
+          	page, err := Pages.Restore(ctx, id, revs[3].Number)              // a new version
+          	page, err = Pages.Restore(ctx, id, revs[3].Number, "/title")     // the title only
+
+          A store with Revisions(n) holds up to n+1 times its records: in memory
+          with the store in the data directory, in the table <table>___vs on a
+          database, which kit's migrations create.
+        impl: revisions
+        in:
+          - name: "n"
+            type: int
+        name: Revisions
+        out:
+          - type: StoreOption
+      - doc: |-
+          PerEnv is the environment variable name, else fallback when it is unset
+          or empty; a leading "~/" in either is the user's home directory. The
+          status line's is PerEnv("CLAUDE_CONFIG_DIR", "~/.claude"): one daemon per
+          Claude configuration.
+        impl: perEnv
+        in:
+          - name: name
+          - name: fallback
+            type: string
+        name: PerEnv
+        out:
+          - type: Scope
+      - doc: |-
+          ReadModel marks a store as derived from others (ADR 0005): written by
+          projections — the subscriptions that keep it from the write side's
+          events —, read by queries. It changes nothing of how the store runs; the
+          diagram draws it on its domain's read side, and the static analysis warns
+          of a read model written by anything but a subscription. kit's topics are
+          queues, not logs: a read model cannot be replayed from its events, and one
+          fed by a topic lags the commands that feed it — a query that must read its
+          own writes reads the write side.
+
+          	var Summaries = Service.Store("summaries", Summary.Key, kit.ReadModel())
+        impl: readModel
+        name: ReadModel
+        out:
+          - type: StoreOption
+      - doc: |-
           Name overrides the endpoint's name, which otherwise is its handler's
           function name, or its route when the handler is a function literal.
         in:
@@ -7253,7 +7453,6 @@ packages:
           - name: bytes
             type: int64
         name: MaxBody
-        impl: maxBody
         out:
           - type: EndpointOption
       - doc: |-
@@ -7269,7 +7468,6 @@ packages:
           - name: burst
             type: int
         name: RateLimit
-        impl: rateLimit
         out:
           - type: OperationOption
       - doc: |-
@@ -7282,7 +7480,6 @@ packages:
           - name: d
             type: time.Duration
         name: Timeout
-        impl: timeout
         out:
           - type: OperationOption
       - doc: |-
@@ -7295,7 +7492,6 @@ packages:
           - name: maxConcurrent
             type: int
         name: Bulkhead
-        impl: bulkhead
         out:
           - type: OperationOption
       - doc: Invalid reports a request the caller must change before retrying (400).
@@ -7353,7 +7549,6 @@ packages:
           takes [AnyUser] instead, and one with [AuthOptional] still knows the
           caller who signed in.
         name: Anyone
-        impl: anyone
         out:
           - type: ExposeOption
       - doc: |-
@@ -7366,26 +7561,8 @@ packages:
           It adds no authentication of its own: an exposure authenticates as its
           operation asks, so the operation declares [Auth].
         name: AnyUser
-        impl: anyUser
         out:
           - type: ExposeOption
-      - doc: |-
-          HoldSubject places a legal hold on every record whose subject is one of
-          ids, in every store of the app: an authority's request about a person.
-          It holds the records they have now; a record written later is not held.
-          reason is kept as Store.Hold keeps it.
-        in:
-          - name: ctx
-            type: context.Context
-          - name: reason
-            type: string
-          - name: ids
-            type: string
-        name: HoldSubject
-        impl: holdSubject
-        out:
-          - type: error
-        variadic: true
       - doc: |-
           Unique declares a unique index: no two entities may share a key, and a
           write that would is refused with a [Conflict] error. An empty key is not
@@ -7429,7 +7606,6 @@ packages:
           - name: path
             type: string
         name: SocketPath
-        impl: socketPath
         out:
           - type: ListenerOption
       - doc: |-
@@ -7445,7 +7621,6 @@ packages:
           - name: scopes
             type: Scope
         name: SocketPer
-        impl: socketPer
         out:
           - type: ListenerOption
         variadic: true
@@ -7462,7 +7637,6 @@ packages:
           - name: gids
             type: "[]int"
         name: AllowPeers
-        impl: allowPeers
         out:
           - type: ListenerOption
       - doc: |-
@@ -7493,7 +7667,6 @@ packages:
           - name: d
             type: time.Duration
         name: WakeEvery
-        impl: wakeEvery
         out:
           - type: LoopOption
       - doc: |-
@@ -7507,7 +7680,6 @@ packages:
           - name: next
             type: func(context.Context) (time.Time, bool)
         name: WakeAt
-        impl: wakeAt
         out:
           - type: LoopOption
       - doc: |-
@@ -7536,7 +7708,6 @@ packages:
           - name: addr
             type: string
         name: From
-        impl: from
         out:
           - type: MailerOption
       - doc: |-
@@ -7549,7 +7720,6 @@ packages:
           - name: "n"
             type: int
         name: MailAttempts
-        impl: mailAttempts
         out:
           - type: MailerOption
       - doc: |-
@@ -7578,18 +7748,6 @@ packages:
         out:
           - type: "*Module"
         variadic: true
-      - doc: |-
-          Requires says the module needs other: an app that mounts the module and
-          not other mounts other at its defaults, and starts it first. The Go import
-          this takes makes a cycle impossible. A collaboration a module can do
-          without is a port with a fallback instead ([Fallback]).
-        in:
-          - name: other
-            type: "*Module"
-        name: Requires
-        impl: requires
-        out:
-          - type: ModulePart
       - doc: |-
           Mount mounts module m with options: [Prefix] serves its routes elsewhere
           than "/<module>/", [Bind] chooses what one of its ports calls.
@@ -7632,7 +7790,6 @@ packages:
           - name: "n"
             type: int
         name: MinLength
-        impl: minLength
         out:
           - type: PasswordOption
       - doc: |-
@@ -7648,7 +7805,6 @@ packages:
           - name: "n"
             type: int
         name: NotReused
-        impl: notReused
         out:
           - type: PasswordOption
       - doc: |-
@@ -7660,7 +7816,6 @@ packages:
           where a policy is declared. Beside NIST's fifteen characters the list has
           little left to refuse; beside a shorter MinLength, it matters.
         name: NotCommon
-        impl: notCommon
         out:
           - type: PasswordOption
       - doc: |-
@@ -7756,29 +7911,6 @@ packages:
           - type: error
         variadic: true
       - doc: |-
-          RateLimitPerClient gives every client of an endpoint a token bucket of its
-          own: perSecond tokens a second, up to burst at once. A client is the
-          authenticated user when there is one, and the client's address otherwise
-          ([ClientIP]); in-process calls through [Endpoint].Call share one bucket. One
-          client emptying its bucket is answered 429; the others are not — which is
-          what a sign-in endpoint needs, where one shared bucket would let a single
-          client lock everybody out.
-
-          Buckets unused for ten minutes are forgotten, and at most 10 000 are kept:
-          the least recently used goes first. It is the SDK's keyed rate limiter.
-
-          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
-          only hands it to the declaration it configures.
-        in:
-          - name: perSecond
-            type: float64
-          - name: burst
-            type: int
-        name: RateLimitPerClient
-        impl: rateLimitPerClient
-        out:
-          - type: OperationOption
-      - doc: |-
           RecordsOf is [App].Records for code the app runs and that does not hold
           it — a module's watch, its endpoints: the records port of the store whose
           node ID is store, in the app ctx runs in. Outside a running app it is an
@@ -7825,98 +7957,6 @@ packages:
           - name: Req
           - constraint: any
             name: Resp
-      - doc: |-
-          SetCookie adds a Set-Cookie header to the HTTP response of the endpoint
-          ctx serves. kit fills what a cookie left zero with safe defaults — Path
-          "/", HttpOnly, SameSite Lax, and Secure outside dev — so a session cookie
-          is hardened unless the code says otherwise. In an in-process
-          [Endpoint].Call there is no response: the cookie is dropped.
-
-          HttpOnly is always set, and Secure always outside dev (and in dev for
-          SameSite=None, which browsers require): a boolean has no "unset" a default
-          could fill, and kit chooses the hardened reading. A cookie set more than
-          once in one response keeps its last value, and cookies set before an error
-          are sent with the error — clearing a stale session on a 401 works.
-        in:
-          - name: ctx
-            type: context.Context
-          - name: c
-            type: "*http.Cookie"
-        name: SetCookie
-        impl: setCookie
-      - doc: ClearCookie tells the browser to forget the cookie called name.
-        in:
-          - name: ctx
-            type: context.Context
-          - name: name
-            type: string
-        name: ClearCookie
-        impl: clearCookie
-      - doc: |-
-          ClientIP returns the address of the client of the request ctx serves: the
-          connection's peer, or — only when KIT_TRUST_PROXY=on — the last address of
-          X-Forwarded-For, the one the trusted proxy appended. It is "" outside an HTTP request.
-        in:
-          - name: ctx
-            type: context.Context
-        name: ClientIP
-        impl: clientIP
-        out:
-          - type: string
-      - doc: UserAgent returns the User-Agent of the request ctx serves, clipped.
-        in:
-          - name: ctx
-            type: context.Context
-        name: UserAgent
-        impl: userAgent
-        out:
-          - type: string
-      - doc: |-
-          Now returns the app's time: the system clock, or the clock a test gave
-          with [Clock]. Product code that compares with a deadline reads it rather
-          than time.Now, so that a test's manual clock reaches it.
-        in:
-          - name: ctx
-            type: context.Context
-        name: Now
-        impl: now
-        out:
-          - type: time.Time
-      - doc: |-
-          NewTicker is a ticker of period d on the app's clock, for a loop written by
-          hand ([Service].Go): a test's manual clock drives it like every timer kit
-          runs itself, where a time.Ticker would tick on the wall clock whatever the
-          test does. It panics on a non-positive d, as time.NewTicker does.
-        in:
-          - name: ctx
-            type: context.Context
-          - name: d
-            type: time.Duration
-        name: NewTicker
-        impl: newTicker
-        out:
-          - type: clock.Ticker
-      - doc: After is time.After on the app's clock.
-        in:
-          - name: ctx
-            type: context.Context
-          - name: d
-            type: time.Duration
-        name: After
-        impl: after
-        out:
-          - type: <-chan time.Time
-      - doc: |-
-          Log returns the app's logger, for the node ctx runs inside. In dev, every
-          record it writes inside a span is also kept beside that span, so the
-          Studio shows a request's logs with its trace.
-        in:
-          - name: ctx
-            type: context.Context
-        name: Log
-        impl: log
-        out:
-          - type: logger.Logger
       - doc: |-
           EraseAfter erases a record's personal data delay after the instant since
           returns — its closing, say; false means "not yet": an open record is never
@@ -8001,70 +8041,6 @@ packages:
         typeParams:
           - constraint: any
             name: T
-      - doc: |-
-          Purpose says why the store keeps its records (GDPR art. 30(1)(b)): the
-          register lists it, and a person's export carries it.
-        in:
-          - name: text
-            type: string
-        name: Purpose
-        impl: purpose
-        out:
-          - type: StoreOption
-      - doc: |-
-          DeleteOnErasure makes a person's erasure (kit.Erase) delete the store's
-          records instead of clearing them, as sessions and accounts want.
-        name: DeleteOnErasure
-        impl: deleteOnErasure
-        out:
-          - type: StoreOption
-      - doc: |-
-          RetentionByProduct says the product keeps the store's retention itself:
-          its own code erases and deletes what it no longer needs — a record whose
-          life the product's own rules end, a lifecycle kit cannot read from the
-          entity. limits says, in the product's words, for how long and how, which
-          the register publishes as the store's time limits (GDPR art. 30(1)(f));
-          "" says only that the product keeps them.
-
-          kit then runs no retention for the store, and warns of neither a missing
-          retention nor a missing subject. Its classified fields keep every other
-          promise: sealed at rest, never shown, exported with their person — when
-          the store names one — and erased by kit.Erase and Store.Erase. It goes
-          with kit.Purpose, kit.HeldUntil, kit.Anonymise and kit.DeleteOnErasure;
-          with kit.EraseAfter, kit.EraseAt, kit.DeleteAfter or kit.DeleteAt it is
-          refused: a store's retention is kit's or the product's, never both.
-        in:
-          - name: limits
-            type: string
-        name: RetentionByProduct
-        impl: retentionByProduct
-        out:
-          - type: StoreOption
-      - doc: |-
-          Revisions keeps the n previous versions of each record of the store, n
-          from 1 to 100, as WordPress keeps a post's revisions: every write that
-          changes a record makes a version, numbered from 1 and never renumbered,
-          stamped with when it was made, the caller's user and the command that
-          made it; the oldest beyond n are pruned by the write that makes a newer
-          one, unless a legal hold keeps the record.
-
-          	var Pages = Service.Store("pages", Page.Key, kit.Revisions(20))
-
-          	revs, err := Pages.Revisions(ctx, id)                            // newest first
-          	edits, err := Pages.Diff(ctx, id, revs[3].Number, revs[0].Number)
-          	page, err := Pages.Restore(ctx, id, revs[3].Number)              // a new version
-          	page, err = Pages.Restore(ctx, id, revs[3].Number, "/title")     // the title only
-
-          A store with Revisions(n) holds up to n+1 times its records: in memory
-          with the store in the data directory, in the table <table>___vs on a
-          database, which kit's migrations create.
-        in:
-          - name: "n"
-            type: int
-        name: Revisions
-        impl: revisions
-        out:
-          - type: StoreOption
       - doc: NewBinary declares the binary named name.
         in:
           - name: name
@@ -8073,19 +8049,6 @@ packages:
         name: NewBinary
         out:
           - type: "*Binary"
-      - doc: |-
-          PerEnv is the environment variable name, else fallback when it is unset
-          or empty; a leading "~/" in either is the user's home directory. The
-          status line's is PerEnv("CLAUDE_CONFIG_DIR", "~/.claude"): one daemon per
-          Claude configuration.
-        in:
-          - name: name
-          - name: fallback
-            type: string
-        name: PerEnv
-        impl: perEnv
-        out:
-          - type: Scope
       - doc: |-
           ScopeKey is the name the scopes give in this process: 16 hex digits of the
           SHA-256 of their values. A client computes the key the daemon computed
@@ -8109,7 +8072,6 @@ packages:
           - name: bytes
             type: int
         name: Generated
-        impl: generated
         out:
           - type: SecretOption
       - doc: |-
@@ -8121,7 +8083,6 @@ packages:
           - name: d
             type: time.Duration
         name: RotateEvery
-        impl: rotateEvery
         out:
           - type: SecretOption
       - doc: |-
@@ -8136,7 +8097,6 @@ packages:
           - name: "n"
             type: int
         name: KeepVersions
-        impl: keepVersions
         out:
           - type: SecretOption
       - doc: |-
@@ -8150,7 +8110,6 @@ packages:
           _FILE variable names —, it is found at its next use. A generated secret
           is kit's to make and never absent: Optional with [Generated] is refused.
         name: Optional
-        impl: optional
         out:
           - type: SecretOption
       - doc: |-
@@ -8161,7 +8120,6 @@ packages:
           - name: store
             type: secret.Store
         name: SecretStore
-        impl: secretStore
         out:
           - type: AppOption
       - doc: |-
@@ -8181,7 +8139,6 @@ packages:
           IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
           only hands it to the declaration it configures.
         name: Required
-        impl: required
         out:
           - type: SettingOption
       - doc: |-
@@ -8215,7 +8172,6 @@ packages:
           - name: fsys
             type: fs.FS
         name: ConfigFiles
-        impl: configFiles
         out:
           - type: AppOption
       - doc: |-
@@ -8228,24 +8184,8 @@ packages:
           - name: dir
             type: string
         name: Root
-        impl: root
         out:
           - type: StaticOption
-      - doc: |-
-          ReadModel marks a store as derived from others (ADR 0005): written by
-          projections — the subscriptions that keep it from the write side's
-          events —, read by queries. It changes nothing of how the store runs; the
-          diagram draws it on its domain's read side, and the static analysis warns
-          of a read model written by anything but a subscription. kit's topics are
-          queues, not logs: a read model cannot be replayed from its events, and one
-          fed by a topic lags the commands that feed it — a query that must read its
-          own writes reads the write side.
-
-          	var Summaries = Service.Store("summaries", Summary.Key, kit.ReadModel())
-        name: ReadModel
-        impl: readModel
-        out:
-          - type: StoreOption
       - doc: |-
           Telemetry exports the app's telemetry on the private socket at path —
           absolute, and short enough for a Unix socket (pkg/v1/proc/ipc) — admitting the groups gids besides the
@@ -8256,7 +8196,6 @@ packages:
           - name: gids
             type: int
         name: Telemetry
-        impl: telemetry
         out:
           - type: AppOption
         variadic: true
@@ -8269,7 +8208,6 @@ packages:
           - name: digest
             type: string
         name: DesignDigest
-        impl: designDigest
         out:
           - type: AppOption
       - doc: |-
@@ -8283,7 +8221,6 @@ packages:
           - name: "n"
             type: int
         name: MaxDeliveries
-        impl: maxDeliveries
         out:
           - type: DeliveryOption
       - doc: |-
@@ -8296,7 +8233,6 @@ packages:
           - name: "n"
             type: int
         name: Parallelism
-        impl: parallelism
         out:
           - type: DeliveryOption
       - doc: |-
@@ -8309,7 +8245,6 @@ packages:
           elsewhere — a queued command's handling, a topic's delivery — is heard.
           A subscription to a topic refuses it: a topic has no stores.
         name: OwnStores
-        impl: ownStores
         out:
           - type: SubscriptionOption
       - doc: |-
@@ -8360,7 +8295,6 @@ packages:
           - name: fn
             type: func(context.Context) error
         name: Transact
-        impl: transact
         out:
           - type: error
     imports:

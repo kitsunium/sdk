@@ -95,6 +95,25 @@ packages:
       exporter emits.
     functions:
       - doc: |-
+          ResourceOf renders the shared ResourceValue a Meter or a Tracer publishes.
+          Its attributes are already sorted, validated and owned, so this is a field
+          copy and nothing else.
+        impl: resourceOf
+        in:
+          - name: resource
+            type: coreotel.ResourceValue
+        name: ResourceOf
+        out:
+          - type: ResourceMessage
+      - doc: ScopeOf renders the shared ScopeValue a Meter or a Tracer publishes.
+        impl: scopeOf
+        in:
+          - name: scope
+            type: coreotel.ScopeValue
+        name: ScopeOf
+        out:
+          - type: ScopeMessage
+      - doc: |-
           Attrs renders an attribute set as the repeated KeyValue every OTLP message
           spells its dimensions with. An empty set stays nil, which encoding/json
           omits — the proto3 rule for an empty repeated field.
@@ -168,17 +187,6 @@ packages:
         out:
           - type: Uint64
       - doc: |-
-          ResourceOf renders the shared ResourceValue a Meter or a Tracer publishes.
-          Its attributes are already sorted, validated and owned, so this is a field
-          copy and nothing else.
-        in:
-          - name: resource
-            type: coreotel.ResourceValue
-        name: ResourceOf
-        impl: resourceOf
-        out:
-          - type: ResourceMessage
-      - doc: |-
           DecodeRejected reports how many items a 2xx body says were rejected,
           decoding the body's partialSuccess into into — a pointer to the signal's own
           message, which this function reads back and nothing else keeps.
@@ -196,14 +204,6 @@ packages:
         name: DecodeRejected
         out:
           - type: int64
-      - doc: ScopeOf renders the shared ScopeValue a Meter or a Tracer publishes.
-        in:
-          - name: scope
-            type: coreotel.ScopeValue
-        name: ScopeOf
-        impl: scopeOf
-        out:
-          - type: ScopeMessage
       - doc: |-
           NewSender validates cfg and builds the sender a signal's
           NewOTLPHTTPExporter wraps. A refused endpoint fails HERE, at wiring, under
@@ -233,7 +233,6 @@ packages:
           - name: failure
             type: "*errs.WrapParams"
         name: NewStream
-        impl: newStream
         out:
           - type: "*Stream"
     imports:

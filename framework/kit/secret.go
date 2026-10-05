@@ -14,39 +14,48 @@ type Secret = ikit.Secret
 // SecretOption configures a secret.
 type SecretOption = ikit.SecretConfigurer
 
-// generated is Generated's body: decl_gen.go writes Generated, from the
-// design, as one call of it.
+// Generated makes the secret kit's to make: versions of bytes random bytes —
+// 32 for a key — the first made on the first start, a new one every 30 days,
+// the last 3 kept, unless [RotateEvery] and [KeepVersions] say otherwise.
 //
 // IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
 // only hands it to the declaration it configures.
-func generated(bytes int) SecretOption {
+func Generated(bytes int) SecretOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.Generated(bytes)
 }
 
-// rotateEvery is RotateEvery's body: decl_gen.go writes RotateEvery, from the
-// design, as one call of it.
+// RotateEvery is how often kit makes a new version of a generated secret.
 //
 // IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
 // only hands it to the declaration it configures.
-func rotateEvery(d time.Duration) SecretOption {
+func RotateEvery(d time.Duration) SecretOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.RotateEvery(d)
 }
 
-// keepVersions is KeepVersions's body: decl_gen.go writes KeepVersions, from the
-// design, as one call of it.
+// KeepVersions is how many versions of a generated secret a rotation leaves,
+// the new one included: at least 2, so that what the version it replaces
+// sealed or signed still opens and verifies. Cover the longest-lived box or
+// signature in flight: its lifetime divided by the interval, plus one.
 //
 // IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
 // only hands it to the declaration it configures.
-func keepVersions(n int) SecretOption {
+func KeepVersions(n int) SecretOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.KeepVersions(n)
 }
 
-// optional is Optional's body: decl_gen.go writes Optional, from the
-// design, as one call of it.
-func optional() SecretOption {
+// Optional makes a provided secret one the product can do without — the key
+// of a feature that stays off while nobody gives it. A start where it is set
+// nowhere goes on; [Secret].Present says whether it is set now, and a use of
+// it while it is absent — [Secret].Value, Seal, Open, Sign or Verify —
+// answers an error errs.HasCode matches with [CodeSecretMissing]. It is read
+// where it lives at every use, as every provided secret is: given later —
+// `secrets set` in the environment's store, a new content in the file its
+// _FILE variable names —, it is found at its next use. A generated secret
+// is kit's to make and never absent: Optional with [Generated] is refused.
+func Optional() SecretOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.Optional()
 }

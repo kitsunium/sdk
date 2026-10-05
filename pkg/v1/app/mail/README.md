@@ -507,7 +507,7 @@ type Address struct {
 ```
 
 <a name="Address.IsZero"></a>
-### func \(Address\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/mail/decl_gen.go>)
+### func \(Address\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/mail/address_value.go>)
 
 ```go
 func (Address) IsZero() bool

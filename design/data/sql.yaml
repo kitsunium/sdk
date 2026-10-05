@@ -265,6 +265,23 @@ packages:
       Transactor honours.
     functions:
       - doc: |-
+          Irreversible is the [Step] a caller assigns to [MigrationValue.Down] to
+          declare that the migration cannot be reversed. It always fails, with a typed
+          error naming the version.
+
+          It is a value rather than a nil convention so the claim appears in the diff
+          and in the version-table review, and so `Down` reports a refusal the caller
+          wrote rather than a nil dereference the SDK discovered.
+        impl: irreversible
+        in:
+          - name: ctx
+            type: context.Context
+          - name: ex
+            type: Executor
+        name: Irreversible
+        out:
+          - type: error
+      - doc: |-
           ParseDialect resolves a dialect name. It never guesses.
 
           A name in the accepted set resolves. A name in the refused set returns
@@ -280,23 +297,6 @@ packages:
             type: Dialect
           - name: err
             type: error
-      - doc: |-
-          Irreversible is the [Step] a caller assigns to [MigrationValue.Down] to
-          declare that the migration cannot be reversed. It always fails, with a typed
-          error naming the version.
-
-          It is a value rather than a nil convention so the claim appears in the diff
-          and in the version-table review, and so `Down` reports a refusal the caller
-          wrote rather than a nil dereference the SDK discovered.
-        in:
-          - name: ctx
-            type: context.Context
-          - name: ex
-            type: Executor
-        name: Irreversible
-        impl: irreversible
-        out:
-          - type: error
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       stdsql: database/sql
@@ -855,14 +855,9 @@ packages:
           configuration field looks like, and reading it as "probably Postgres" is how
           a MySQL deployment discovers the difference in production (ADR 0031).
         methods:
-          - doc: String returns the dialect's canonical lowercase name.
-            name: String
-            out:
-              - type: string
-            recv: value
           - doc: Valid reports whether d is a dialect this domain can actually spell.
-            name: Valid
             impl: valid
+            name: Valid
             out:
               - type: bool
             recv: value
@@ -878,10 +873,15 @@ packages:
               file's write lock for the whole run instead, which the operating system
               releases when its holder dies, as a server releases an advisory lock
               (ADR 0140).
-            name: SupportsAdvisoryLock
             impl: supportsAdvisoryLock
+            name: SupportsAdvisoryLock
             out:
               - type: bool
+            recv: value
+          - doc: String returns the dialect's canonical lowercase name.
+            name: String
+            out:
+              - type: string
             recv: value
           - doc: |-
               Placeholder renders the bind marker of a statement's n-th argument, counted
@@ -937,7 +937,6 @@ packages:
               [Dialect.Valid] renders the clause: an engine without one refuses the
               statement, which is louder than a lock dropped in silence.
             name: ForUpdate
-            impl: forUpdate
             out:
               - type: string
             recv: value
@@ -954,7 +953,6 @@ packages:
               SQLite transaction that has written holds the database's only write lock,
               so no row it reads is held by anybody else.
             name: ForUpdateSkipLocked
-            impl: forUpdateSkipLocked
             out:
               - type: string
             recv: value
@@ -1054,16 +1052,16 @@ packages:
               explicit `Serializable` to whatever the outer transaction happened to use is
               the kind of "helpful" behaviour that produces a data race nobody can find
               (ADR 0055 §D5).
-            name: IsZero
             impl: isZero
+            name: IsZero
             out:
               - type: bool
             recv: value
           - doc: |-
               StdOptions renders the value as the stdlib's own option struct, ready for
               (*sql.DB).BeginTx.
-            name: StdOptions
             impl: stdOptions
+            name: StdOptions
             out:
               - type: "*stdsql.TxOptions"
             recv: value
@@ -1313,13 +1311,23 @@ packages:
           version table is, or already quoted, as the queue's is — and must have been
           validated at construction, which is the whole defence of an interpolated
           identifier.
+        impl: fileLockSQL
         in:
           - name: table
             type: string
         name: FileLockSQL
-        impl: fileLockSQL
         out:
           - type: string
+      - doc: |-
+          NewWithheld returns cause withheld: reachable by errors.Is and errors.As,
+          absent from Error().
+        impl: newWithheld
+        in:
+          - name: cause
+            type: error
+        name: NewWithheld
+        out:
+          - type: Withheld
       - doc: |-
           NewChecker returns a bounded liveness probe over cfg.DB.
 
@@ -1397,16 +1405,6 @@ packages:
             type: coresql.Transactor
           - name: err
             type: error
-      - doc: |-
-          NewWithheld returns cause withheld: reachable by errors.Is and errors.As,
-          absent from Error().
-        in:
-          - name: cause
-            type: error
-        name: NewWithheld
-        impl: newWithheld
-        out:
-          - type: Withheld
     imports:
       clock: github.com/kitsunium/sdk/internal/kernel/clock
       coresql: github.com/kitsunium/sdk/internal/core/data/sql
@@ -1561,6 +1559,12 @@ packages:
           QUEUE_BACKEND_FAILED — since each package's errors are its own; what they
           share is only this rendering of somebody else's.
         methods:
+          - doc: Unwrap hands errors.Is and errors.As the driver's own error.
+            impl: unwrap
+            name: Unwrap
+            out:
+              - type: error
+            recv: value
           - doc: |-
               Error renders what can be said without the driver's words: a context's end
               in its own words, since those hold no data; otherwise the driver error's Go
@@ -1568,12 +1572,6 @@ packages:
             name: Error
             out:
               - type: string
-            recv: value
-          - doc: Unwrap hands errors.Is and errors.As the driver's own error.
-            name: Unwrap
-            impl: unwrap
-            out:
-              - type: error
             recv: value
         name: Withheld
         struct:
@@ -2052,6 +2050,7 @@ packages:
           It is the ergonomic form of [Transactor].Transact for the common case. The
           port itself keeps the options parameter so it never needs a second method
           (ADR 0039); this helper keeps the call site short.
+        impl: transact
         in:
           - name: ctx
             type: context.Context
@@ -2060,7 +2059,6 @@ packages:
           - name: fn
             type: TxFunc
         name: Transact
-        impl: transact
         out:
           - type: error
     imports:

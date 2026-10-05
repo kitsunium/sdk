@@ -199,6 +199,14 @@ packages:
       for ints). Strings live in `str`. Time, Group and Any payloads live in
       `any`. The zero Value carries Kind == KindAny with a nil `any` payload.
     functions:
+      - doc: Float64Value builds a Value of kind float64.
+        impl: float64Value
+        in:
+          - name: v
+            type: float64
+        name: Float64Value
+        out:
+          - type: Value
       - doc: |-
           NewValue is a generic alias of AnyValue, exposed for tooling that expects a
           New-prefixed constructor on every exported type. Prefer the typed
@@ -223,7 +231,6 @@ packages:
           - name: v
             type: int64
         name: Int64Value
-        impl: int64Value
         out:
           - type: Value
       - doc: |-
@@ -233,7 +240,6 @@ packages:
           - name: v
             type: int
         name: IntValue
-        impl: intValue
         out:
           - type: Value
       - doc: Uint64Value builds a Value of kind uint64.
@@ -241,15 +247,6 @@ packages:
           - name: v
             type: uint64
         name: Uint64Value
-        impl: uint64Value
-        out:
-          - type: Value
-      - doc: Float64Value builds a Value of kind float64.
-        in:
-          - name: v
-            type: float64
-        name: Float64Value
-        impl: float64Value
         out:
           - type: Value
       - doc: BoolValue builds a Value of kind bool.
@@ -257,7 +254,6 @@ packages:
           - name: v
             type: bool
         name: BoolValue
-        impl: boolValue
         out:
           - type: Value
       - doc: |-
@@ -267,7 +263,6 @@ packages:
           - name: v
             type: time.Duration
         name: DurationValue
-        impl: durationValue
         out:
           - type: Value
       - doc: |-
@@ -278,7 +273,6 @@ packages:
           - name: v
             type: time.Time
         name: TimeValue
-        impl: timeValue
         out:
           - type: Value
       - doc: |-
@@ -289,7 +283,6 @@ packages:
           - name: attrs
             type: AttrValue
         name: GroupValue
-        impl: groupValue
         out:
           - type: Value
         variadic: true
@@ -301,7 +294,6 @@ packages:
           - name: v
             type: any
         name: AnyValue
-        impl: anyValue
         out:
           - type: Value
     imports:
@@ -637,7 +629,6 @@ packages:
               - name: dst
                 type: "[]byte"
             name: AppendTraceIDHex
-            impl: appendTraceIDHex
             out:
               - type: "[]byte"
             recv: value
@@ -648,7 +639,6 @@ packages:
               - name: dst
                 type: "[]byte"
             name: AppendSpanIDHex
-            impl: appendSpanIDHex
             out:
               - type: "[]byte"
             recv: value
@@ -737,7 +727,6 @@ packages:
               Kind is not KindDuration; callers MUST guard with Kind() before calling
               this accessor.
             name: Duration
-            impl: duration
             out:
               - type: time.Duration
             recv: value
@@ -829,7 +818,6 @@ packages:
           - name: min
             type: level.Level
         name: NewHandler
-        impl: newHandler
         out:
           - name: h
             type: corelogger.Handler
@@ -916,7 +904,6 @@ packages:
           - name: owned
             type: io.Closer
         name: Owning
-        impl: owning
         out:
           - type: corelogger.Logger
       - doc: |-
@@ -932,7 +919,6 @@ packages:
           - name: skip
             type: int
         name: WithCaller
-        impl: withCaller
         out:
           - type: corelogger.Logger
       - doc: |-
@@ -1067,7 +1053,6 @@ packages:
               - name: r
                 type: corelogger.RecordEvent
             name: Enabled
-            impl: enabled
             out:
               - type: bool
             recv: pointer
@@ -1078,7 +1063,6 @@ packages:
               - name: attrs
                 type: "[]corelogger.AttrValue"
             name: WithAttrs
-            impl: withAttrs
             out:
               - type: corelogger.Handler
             recv: pointer
@@ -1089,7 +1073,6 @@ packages:
               - name: name
                 type: string
             name: WithGroup
-            impl: withGroup
             out:
               - type: corelogger.Handler
             recv: pointer
@@ -1207,11 +1190,11 @@ packages:
 
           Inside a group the key is already prefixed ("http.trace_id"), so it cannot
           collide and is left alone.
+        impl: reservesKey
         in:
           - name: key
             type: string
         name: ReservesKey
-        impl: reservesKey
         out:
           - type: bool
       - doc: |-
@@ -1225,7 +1208,6 @@ packages:
           - name: clk
             type: clock.Clock
         name: NewJSON
-        impl: newJSON
         out:
           - type: Encoder
       - doc: |-
@@ -1238,7 +1220,6 @@ packages:
           - name: clk
             type: clock.Clock
         name: NewText
-        impl: newText
         out:
           - type: Encoder
       - doc: |-
@@ -1260,7 +1241,6 @@ packages:
           - name: text
             type: string
         name: AppendSanitized
-        impl: appendSanitized
         out:
           - type: "[]byte"
     imports:
@@ -1458,8 +1438,8 @@ packages:
       Package memory — compile-time proof that *Memory satisfies the core Sink port.
     functions:
       - doc: NewMemory returns an empty Memory sink ready to record received records.
-        name: NewMemory
         impl: newMemory
+        name: NewMemory
         out:
           - type: "*Memory"
     imports:
@@ -2318,12 +2298,24 @@ packages:
             name: WriterSpec
             target: corewriter.Spec
     functions:
+      - doc: Debug emits a RecordEvent at LevelDebug through lg.
+        impl: debug
+        in:
+          - name: ctx
+            type: context.Context
+          - name: lg
+            type: Logger
+          - name: msg
+            type: string
+          - name: attrs
+            type: Attr
+        name: Debug
+        variadic: true
       - doc: |-
           NewTextEncoder returns the default human-readable encoder, rendering each
           record as "TIME LEVEL msg key=val …\n" with RFC3339-millisecond timestamps.
           It is a named peer of TextEncoder bound to the real system clock.
         name: NewTextEncoder
-        impl: newTextEncoder
         out:
           - type: Encoder
       - doc: |-
@@ -2333,7 +2325,6 @@ packages:
           dotted keys ("g1.g2.key") to match the text encoder's convention. Pass it to
           NewWithSink via SinkConfig.Encoder for machine-readable output.
         name: NewJSONEncoder
-        impl: newJSONEncoder
         out:
           - type: Encoder
       - doc: |-
@@ -2431,19 +2422,6 @@ packages:
             type: Logger
           - name: err
             type: error
-      - doc: Debug emits a RecordEvent at LevelDebug through lg.
-        in:
-          - name: ctx
-            type: context.Context
-          - name: lg
-            type: Logger
-          - name: msg
-            type: string
-          - name: attrs
-            type: Attr
-        name: Debug
-        impl: debug
-        variadic: true
       - doc: Info emits a RecordEvent at LevelInfo through lg.
         in:
           - name: ctx
@@ -2455,7 +2433,6 @@ packages:
           - name: attrs
             type: Attr
         name: Info
-        impl: info
         variadic: true
       - doc: Warn emits a RecordEvent at LevelWarn through lg.
         in:
@@ -2468,7 +2445,6 @@ packages:
           - name: attrs
             type: Attr
         name: Warn
-        impl: warn
         variadic: true
       - doc: Error emits a RecordEvent at LevelError through lg.
         in:
@@ -2542,7 +2518,6 @@ packages:
           - name: val
             type: time.Duration
         name: Duration
-        impl: duration
         out:
           - type: Attr
       - doc: Time builds an Attr carrying a time.Time value.
@@ -2596,7 +2571,6 @@ packages:
           - name: w
             type: io.Writer
         name: NewWriterSink
-        impl: newWriterSink
         out:
           - name: sink
             type: Sink
@@ -2607,7 +2581,6 @@ packages:
           Callers passing a custom Encoder to NewWithSink usually want this as a
           starting point — it is the same encoder NewText / Default rely on.
         name: TextEncoder
-        impl: textEncoder
         out:
           - type: Encoder
       - doc: |-
@@ -2634,7 +2607,6 @@ packages:
           - type: TraceContext
       - doc: FrameworkVersion returns the linked-in SDK version, or "dev" if unset.
         name: FrameworkVersion
-        impl: frameworkVersion
         out:
           - type: string
       - doc: |-

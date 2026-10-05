@@ -116,9 +116,13 @@ func renderFrame(frame runtime.Frame) string {
 	return frame.File + ":" + strconv.Itoa(frame.Line) + ":" + frame.Function
 }
 
-// withCaller is WithCaller's body: decl_gen.go writes WithCaller, from the
-// design, as one call of it.
-func withCaller(lg corelogger.Logger, skip int) corelogger.Logger {
+// WithCaller returns a derived Logger whose emitted records carry a "source"
+// attribute resolving the captured call-site program counter into
+// file:line:function. The skip argument is the extra stack-frame offset
+// reserved for wrapper layers; pass 0 for direct callers. Foreign Logger
+// implementations (not produced by New) are returned unchanged so callers fail
+// safe rather than losing their logger. A nil Logger is returned as-is.
+func WithCaller(lg corelogger.Logger, skip int) corelogger.Logger {
 	//: a nil logger has nothing to wrap — hand it straight back.
 	if lg == nil {
 		//: preserve the nil so the caller observes their own input.

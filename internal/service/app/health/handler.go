@@ -19,23 +19,27 @@ const genericReason string = "A health check reported a failure"
 // encoder does not depend on it.
 var fallbackBody = []byte(`{"status":"unhealthy"}`)
 
-// newStartupHandler is NewStartupHandler's body: decl_gen.go writes NewStartupHandler, from the
-// design, as one call of it.
-func newStartupHandler(registry corehealth.Health, cfg HandlerConfig) http.Handler {
+// NewStartupHandler serves the startup probe: 200 once every startup check has
+// passed, 503 while any has not.
+func NewStartupHandler(registry corehealth.Health, cfg HandlerConfig) http.Handler {
 	//: one handler per probe; see the package comment.
 	return &handler{registry: registry, probe: corehealth.ProbeStartup, cfg: cfg}
 }
 
-// newReadinessHandler is NewReadinessHandler's body: decl_gen.go writes NewReadinessHandler, from the
-// design, as one call of it.
-func newReadinessHandler(registry corehealth.Health, cfg HandlerConfig) http.Handler {
+// NewReadinessHandler serves the readiness probe: 200 while the replica can
+// take traffic (healthy OR degraded), 503 otherwise — including while starting
+// and after Drain.
+func NewReadinessHandler(registry corehealth.Health, cfg HandlerConfig) http.Handler {
 	//: the only probe a dependency check can influence.
 	return &handler{registry: registry, probe: corehealth.ProbeReadiness, cfg: cfg}
 }
 
-// newLivenessHandler is NewLivenessHandler's body: decl_gen.go writes NewLivenessHandler, from the
-// design, as one call of it.
-func newLivenessHandler(registry corehealth.Health, cfg HandlerConfig) http.Handler {
+// NewLivenessHandler serves the liveness probe: 200 unless the process is
+// irrecoverable.
+//
+// Nothing outside the process can make this return 503, because nothing
+// outside the process can be registered on it — see core/app/health.SelfCheck.
+func NewLivenessHandler(registry corehealth.Health, cfg HandlerConfig) http.Handler {
 	//: the only probe whose failure restarts anything.
 	return &handler{registry: registry, probe: corehealth.ProbeLiveness, cfg: cfg}
 }

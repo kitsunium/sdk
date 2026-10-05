@@ -39,9 +39,10 @@ func (r ReportValue) First() (violation ViolationValue, ok bool) {
 	return r[0], true
 }
 
-// paths is ReportValue.Paths's body: decl_gen.go writes ReportValue.Paths, from the
-// design, as one call of it.
-func (r ReportValue) paths() []string {
+// Paths returns the located path of every violation, in report order. It is
+// the shape an HTTP layer wants when it maps a report onto a form: the caller
+// already knows its own field names, and needs the SDK to say which ones.
+func (r ReportValue) Paths() []string {
 	//: an OK report yields nil rather than an empty slice — same convention as
 	//: the report itself, and it keeps the accepting path allocation-free.
 	if len(r) == 0 {

@@ -1292,17 +1292,6 @@ packages:
             - type: Watcher
     functions:
       - doc: |-
-          FileSource returns a Source reading path and parsing it as format (the codec
-          must be registered — blank-import its package, e.g. pkg/v1/data/codec).
-        in:
-          - name: format
-          - name: path
-            type: string
-        name: FileSource
-        impl: fileSource
-        out:
-          - type: Source
-      - doc: |-
           FSSource returns a Source reading path inside fsys and parsing it as format
           — [FileSource] over an io/fs.FS, such as an embed.FS. path is an io/fs name:
           slash-separated and unrooted. It fails with SourceFailed exactly where
@@ -1316,6 +1305,17 @@ packages:
           - name: path
             type: string
         name: FSSource
+        out:
+          - type: Source
+      - doc: |-
+          FileSource returns a Source reading path and parsing it as format (the codec
+          must be registered — blank-import its package, e.g. pkg/v1/data/codec).
+        impl: fileSource
+        in:
+          - name: format
+          - name: path
+            type: string
+        name: FileSource
         out:
           - type: Source
     imports:

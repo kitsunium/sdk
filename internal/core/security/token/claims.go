@@ -111,9 +111,10 @@ func (c ClaimsValue) PrivateNames() []string {
 	return slices.Sorted(maps.Keys(c.private))
 }
 
-// privateRaw is ClaimsValue.PrivateRaw's body: decl_gen.go writes ClaimsValue.PrivateRaw, from the
-// design, as one call of it.
-func (c ClaimsValue) privateRaw(name string) (raw []byte, found bool) {
+// PrivateRaw returns a copy of the raw JSON encoding of the named application
+// claim. The second result reports presence, so a claim explicitly set to JSON
+// null is distinguishable from a claim that was never sent.
+func (c ClaimsValue) PrivateRaw(name string) (raw []byte, found bool) {
 	//: map lookup on the raw encodings.
 	stored, ok := c.private[name]
 	//: absence is a normal answer, not an error.
@@ -125,9 +126,8 @@ func (c ClaimsValue) privateRaw(name string) (raw []byte, found bool) {
 	return slices.Clone(stored), true
 }
 
-// isZero is ClaimsValue.IsZero's body: decl_gen.go writes ClaimsValue.IsZero, from the
-// design, as one call of it.
-func (c ClaimsValue) isZero() bool {
+// IsZero reports whether c carries no claim at all.
+func (c ClaimsValue) IsZero() bool {
 	//: an empty claim set has no registered claim and no private one.
 	return c.issuer == "" && c.subject == "" && c.id == "" &&
 		len(c.audience) == 0 && len(c.private) == 0 &&

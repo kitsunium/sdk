@@ -1008,7 +1008,6 @@ packages:
               AutoUpgradeEnv is the variable authorising an upgrade the user did not ask
               for, e.g. MY_TOOL_AUTO_UPGRADE.
             name: AutoUpgradeEnv
-            impl: autoUpgradeEnv
             out:
               - type: string
             recv: value
@@ -1016,7 +1015,6 @@ packages:
               SudoOptInEnv is the variable authorising privilege escalation when the install
               directory is not writable, e.g. MY_TOOL_ALLOW_SUDO.
             name: SudoOptInEnv
-            impl: sudoOptInEnv
             out:
               - type: string
             recv: value
@@ -1077,7 +1075,6 @@ packages:
               <PREFIX>_AUTO_UPGRADE=0: an explicit answer always wins. It grants nothing
               else: escalation keeps its own, separate opt-in.
             name: WithAutomaticConsent
-            impl: withAutomaticConsent
             out:
               - type: "*Service"
             recv: pointer
@@ -1086,7 +1083,6 @@ packages:
               <PREFIX>_ALLOW_SUDO says: a binary installed where its user cannot write is
               reported (ElevationNotAuthorised), never replaced through sudo.
             name: WithoutElevation
-            impl: withoutElevation
             out:
               - type: "*Service"
             recv: pointer
@@ -1104,6 +1100,26 @@ packages:
             name: AuthoriseUnattendedUpgrade
             out:
               - type: bool
+            recv: pointer
+          - doc: |-
+              WithVendorKey pins the ed25519 public half every release must be signed
+              with, and returns the Service so construction reads as one expression —
+              the same chaining shape license.NewService(...).WithVersion(...) uses.
+
+              A Service built WITHOUT this call authenticates nothing and therefore
+              installs nothing: verifyArchive refuses with coreupd.NoVendorKey before a single
+              byte is fetched. That default is deliberate. The alternative — treat an
+              absent key as "verification not required" — would mean any construction
+              site that forgot the call silently reverted to the unauthenticated
+              behaviour this file exists to end, and nothing would ever fail to point it
+              out.
+            impl: withVendorKey
+            in:
+              - name: key
+                type: "[]byte"
+            name: WithVendorKey
+            out:
+              - type: "*Service"
             recv: pointer
           - doc: |-
               WithVendorKeys links the keys a release may be signed with, in order: a
@@ -1140,7 +1156,6 @@ packages:
               - name: domain
                 type: string
             name: WithSignatureDomain
-            impl: withSignatureDomain
             out:
               - type: "*Service"
             recv: pointer
@@ -1157,27 +1172,6 @@ packages:
               - name: timeout
                 type: time.Duration
             name: WithProbe
-            impl: withProbe
-            out:
-              - type: "*Service"
-            recv: pointer
-          - doc: |-
-              WithVendorKey pins the ed25519 public half every release must be signed
-              with, and returns the Service so construction reads as one expression —
-              the same chaining shape license.NewService(...).WithVersion(...) uses.
-
-              A Service built WITHOUT this call authenticates nothing and therefore
-              installs nothing: verifyArchive refuses with coreupd.NoVendorKey before a single
-              byte is fetched. That default is deliberate. The alternative — treat an
-              absent key as "verification not required" — would mean any construction
-              site that forgot the call silently reverted to the unauthenticated
-              behaviour this file exists to end, and nothing would ever fail to point it
-              out.
-            in:
-              - name: key
-                type: "[]byte"
-            name: WithVendorKey
-            impl: withVendorKey
             out:
               - type: "*Service"
             recv: pointer
@@ -1541,6 +1535,37 @@ packages:
       probe it is kept as <binary>.prev and put back when the probe fails.
     functions:
       - doc: |-
+          NewWithDeps returns a Service with its three ports injected, for a caller that
+          supplies its own HTTP policy or a test that supplies doubles. A nil fs or
+          copier is legal on paths that never reach the disk.
+        impl: newWithDeps
+        in:
+          - name: version
+            type: string
+          - name: src
+            type: Source
+          - name: client
+            type: Getter
+          - name: fs
+            type: FileSystem
+          - name: copier
+            type: Copier
+        name: NewWithDeps
+        out:
+          - type: "*Service"
+      - doc: |-
+          StdinIsTerminal reports whether a human could answer a prompt on this
+          process's standard input.
+
+          It is a free function rather than something AuthoriseUnattendedUpgrade works
+          out for itself, and that is the point: the consent decision stays testable
+          without a pty, because the CALLER supplies the answer. Pass the result as the
+          interactive argument.
+        impl: stdinIsTerminal
+        name: StdinIsTerminal
+        out:
+          - type: bool
+      - doc: |-
           New returns a Service for the given running version and release source.
 
           The returned Service carries NO vendor key and therefore installs nothing:
@@ -1555,37 +1580,6 @@ packages:
         name: New
         out:
           - type: "*Service"
-      - doc: |-
-          NewWithDeps returns a Service with its three ports injected, for a caller that
-          supplies its own HTTP policy or a test that supplies doubles. A nil fs or
-          copier is legal on paths that never reach the disk.
-        in:
-          - name: version
-            type: string
-          - name: src
-            type: Source
-          - name: client
-            type: Getter
-          - name: fs
-            type: FileSystem
-          - name: copier
-            type: Copier
-        name: NewWithDeps
-        impl: newWithDeps
-        out:
-          - type: "*Service"
-      - doc: |-
-          StdinIsTerminal reports whether a human could answer a prompt on this
-          process's standard input.
-
-          It is a free function rather than something AuthoriseUnattendedUpgrade works
-          out for itself, and that is the point: the consent decision stays testable
-          without a pty, because the CALLER supplies the answer. Pass the result as the
-          interactive argument.
-        name: StdinIsTerminal
-        impl: stdinIsTerminal
-        out:
-          - type: bool
     imports:
       coreupd: github.com/kitsunium/sdk/framework/internal/core/selfupdate
       errs: github.com/kitsunium/sdk/internal/kernel/errs

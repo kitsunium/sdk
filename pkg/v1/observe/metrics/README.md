@@ -778,7 +778,7 @@ type Attr struct {
 ```
 
 <a name="Attr.AppendIdentity"></a>
-### func \(Attr\) [AppendIdentity](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/otel/decl_gen.go>)
+### func \(Attr\) [AppendIdentity](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/otel/attr_value.go>)
 
 ```go
 func (Attr) AppendIdentity(dst []byte) []byte
@@ -1527,7 +1527,7 @@ type Temporality uint8
 ```
 
 <a name="Temporality.Resolved"></a>
-### func \(Temporality\) [Resolved](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/metrics/decl_gen.go>)
+### func \(Temporality\) [Resolved](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/metrics/temporality.go>)
 
 ```go
 func (Temporality) Resolved() Temporality

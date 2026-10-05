@@ -115,6 +115,13 @@ packages:
       self-register via a package-level var initialiser when imported — no init().
     functions:
       - doc: |-
+          Available returns the sorted list of registered Algorithms, or nil before
+          any Register.
+        impl: available
+        name: Available
+        out:
+          - type: "[]Algorithm"
+      - doc: |-
           Register inserts c into the registry under c.Algorithm() and returns it so
           callers can bind the singleton to a typed package-level variable like
           `var GzipCompressor = transform.Register(gzipCompressor{})`. Panics on a nil
@@ -147,13 +154,6 @@ packages:
             type: Compressor
           - name: ok
             type: bool
-      - doc: |-
-          Available returns the sorted list of registered Algorithms, or nil before
-          any Register.
-        name: Available
-        impl: available
-        out:
-          - type: "[]Algorithm"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/data/transform
@@ -421,11 +421,11 @@ packages:
           zlib.DefaultCompression, so no configuration can hand back a compressor that
           silently does not compress (ADR 0031). The result is NOT registered; the
           registry entry is the default-level ZlibCompressor singleton.
+        impl: newZlibCompressor
         in:
           - name: level
             type: int
         name: NewZlibCompressor
-        impl: newZlibCompressor
         out:
           - type: coretransform.Compressor
     imports:

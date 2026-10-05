@@ -1,8 +1,20 @@
 package authz
 
-// newRequestValue is NewRequestValue's body: decl_gen.go writes NewRequestValue, from the
-// design, as one call of it.
-func newRequestValue(subject, action, resource string, attrs ...AttrValue) RequestValue {
+// NewRequestValue builds the immutable question. Attributes are indexed by
+// their key; a later attribute with the same key replaces an earlier one, so
+// the caller can layer defaults and then override them.
+//
+// An attribute with an empty key or the zero [KindInvalid] kind is DROPPED
+// rather than stored. The invariant is worth the drop: every attribute a rule
+// can find is one it can use, so "found but unusable" is not a state any rule
+// has to handle. The dropped attribute is then simply absent, and absence is
+// already a refusal in every rule that names it — the failure mode is closed.
+//
+// An empty action or resource is accepted and matches no grant and no rule, so
+// such a request is refused by the closure. It is not rejected here because
+// doing so would put an error return on the constructor every request calls,
+// to catch a mistake that already fails closed.
+func NewRequestValue(subject, action, resource string, attrs ...AttrValue) RequestValue {
 	//: the common request carries attributes; build the map only when it does,
 	//: so an attribute-free request allocates nothing beyond the value itself.
 	var indexed map[string]AttrValue
@@ -58,9 +70,10 @@ func (r RequestValue) Attr(key string) (attr AttrValue, ok bool) {
 	return attr, ok
 }
 
-// attrCount is RequestValue.AttrCount's body: decl_gen.go writes RequestValue.AttrCount, from the
-// design, as one call of it.
-func (r RequestValue) attrCount() int {
+// AttrCount returns how many attributes the request carries. It exists for
+// diagnostics and tests; no rule reads it, because "how many facts" never
+// answers "which fact".
+func (r RequestValue) AttrCount() int {
 	//: len of a nil map is 0, so the no-attrs case needs no branch.
 	return len(r.attrs)
 }

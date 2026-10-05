@@ -98,9 +98,13 @@ func fromString(text string) Value {
 	return NewValue([]byte(text))
 }
 
-// reveal is Value.Reveal's body: decl_gen.go writes Value.Reveal, from the
-// design, as one call of it.
-func (v Value) reveal() []byte {
+// Reveal returns a fresh copy of the secret's bytes — the only way out besides
+// [Value.RevealString]. The copy is the caller's: mutating it cannot reach the
+// Value. The zero Value reveals nil.
+//
+// Hand the result to the API that consumes the secret; never to a logger, a
+// metric label, a URL or an error message.
+func (v Value) Reveal() []byte {
 	//: the zero Value has nothing to reveal.
 	if v.held == nil {
 		//: nil, not an empty slice, so a caller can tell "unset" apart.
@@ -110,9 +114,10 @@ func (v Value) reveal() []byte {
 	return bytes.Clone(v.held.raw)
 }
 
-// revealString is Value.RevealString's body: decl_gen.go writes Value.RevealString, from the
-// design, as one call of it.
-func (v Value) revealString() string {
+// RevealString returns the secret as a string. The same warning as
+// [Value.Reveal] applies, with one more: a Go string cannot be cleared, so a
+// revealed string lives until the collector reclaims it.
+func (v Value) RevealString() string {
 	//: the zero Value reveals the empty string.
 	if v.held == nil {
 		//: nothing held.
@@ -225,9 +230,12 @@ func (v *Value) UnmarshalJSON(data []byte) error {
 	return v.UnmarshalText([]byte(text))
 }
 
-// unmarshalText is Value.UnmarshalText's body: decl_gen.go writes Value.UnmarshalText, from the
-// design, as one call of it.
-func (v *Value) unmarshalText(text []byte) error {
+// UnmarshalText implements encoding.TextUnmarshaler. The text becomes the
+// secret, copied — except [Redacted] itself, which is refused with
+// [ValueRefused]: every rendering of a Value writes it, so finding it on the
+// way in means a rendered configuration was loaded as a real one, and every
+// secret in it would otherwise silently become the placeholder.
+func (v *Value) UnmarshalText(text []byte) error {
 	//: a rendering fed back is refused, never stored.
 	if string(text) == Redacted {
 		//: ValueRefused names nothing: the input is known and is not a secret.

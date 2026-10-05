@@ -248,7 +248,7 @@ The WHOLE tree is checked, not the branch an invocation happens to take, so a mi
 Each [Binder](#Binder) is CALLED once here, on a throwaway flag set, which is what proves it binds no reserved name — so a Binder must be safe to call more than once and must touch only the set it is given.
 
 <a name="Status"></a>
-## func [Status](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/decl_gen.go>)
+## func [Status](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/cli.go>)
 
 ```go
 func Status(err error) int
@@ -334,7 +334,7 @@ type Command struct {
 ```
 
 <a name="Command.IsGroup"></a>
-### func \(Command\) [IsGroup](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/cli/decl_gen.go>)
+### func \(Command\) [IsGroup](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/cli/cli_command.go>)
 
 ```go
 func (Command) IsGroup() bool

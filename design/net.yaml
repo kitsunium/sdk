@@ -646,13 +646,13 @@ packages:
 
           The channel is closed, never sent on, so every observer sees it and a late
           observer sees it immediately.
+        impl: withDrainSignal
         in:
           - name: ctx
             type: context.Context
           - name: draining
             type: <-chan struct{}
         name: WithDrainSignal
-        impl: withDrainSignal
         out:
           - type: context.Context
       - doc: |-
@@ -1326,13 +1326,13 @@ packages:
           - ConnHandler
         methods:
           - doc: ServeConn implements ConnHandler by calling f.
+            impl: serveConn
             in:
               - name: ctx
                 type: context.Context
               - name: c
                 type: Conn
             name: ServeConn
-            impl: serveConn
             out:
               - type: error
             recv: value
@@ -1359,7 +1359,6 @@ packages:
         methods:
           - doc: Duration returns the value as a plain time.Duration.
             name: Duration
-            impl: duration
             out:
               - type: time.Duration
             recv: value
@@ -1402,6 +1401,14 @@ packages:
           The zero value is valid and means "no identity" — IsZero reports it.
         methods:
           - doc: |-
+              GoString implements fmt.GoStringer so %#v stays redacted too — fmt bypasses
+              String for Go-syntax formatting and would otherwise dump the unexported fields.
+            impl: goString
+            name: GoString
+            out:
+              - type: string
+            recv: value
+          - doc: |-
               String implements fmt.Stringer and always redacts so key material never
               reaches a log line through %v or %s.
             name: String
@@ -1409,18 +1416,9 @@ packages:
               - type: string
             recv: value
           - doc: |-
-              GoString implements fmt.GoStringer so %#v stays redacted too — fmt bypasses
-              String for Go-syntax formatting and would otherwise dump the unexported fields.
-            name: GoString
-            impl: goString
-            out:
-              - type: string
-            recv: value
-          - doc: |-
               IsZero reports whether the identity carries no material at all, which is the
               zero value a caller gets when no TLS was configured.
             name: IsZero
-            impl: isZero
             out:
               - type: bool
             recv: value
@@ -1650,13 +1648,13 @@ packages:
           - PacketHandler
         methods:
           - doc: ServePacket implements PacketHandler by calling f.
+            impl: servePacket
             in:
               - name: ctx
                 type: context.Context
               - name: p
                 type: Packet
             name: ServePacket
-            impl: servePacket
             out:
               - type: error
             recv: value
@@ -1681,11 +1679,11 @@ packages:
           - Policy
         methods:
           - doc: Allow implements Policy by calling f.
+            impl: allow
             in:
               - name: req
                 type: RequestValue
             name: Allow
-            impl: allow
             out:
               - type: error
             recv: value
@@ -1829,7 +1827,6 @@ packages:
               optimisation, so a caller can assert "no silent degradation" in one call
               instead of walking the slice.
             name: Degraded
-            impl: degraded
             out:
               - type: bool
             recv: value
@@ -1967,7 +1964,6 @@ packages:
               if it ever does. One predicate, both directions, no chance of the two
               drifting apart.
             name: Sendable
-            impl: sendable
             out:
               - type: bool
             recv: value
@@ -1980,7 +1976,6 @@ packages:
               therefore a protocol error waiting for the first well-behaved peer that
               closes without saying why.
             name: Echoable
-            impl: echoable
             out:
               - type: WSCloseCode
             recv: value
@@ -1998,7 +1993,6 @@ packages:
         methods:
           - doc: OpCode returns the frame opcode this message is carried under.
             name: OpCode
-            impl: opCode
             out:
               - type: WSOpCode
             recv: value
@@ -2027,13 +2021,11 @@ packages:
               Control frames are the ones that may be injected BETWEEN the fragments of a
               message, so the distinction decides which fragmentation rules apply.
             name: IsControl
-            impl: isControl
             out:
               - type: bool
             recv: value
           - doc: Defined reports whether RFC 6455 assigns this opcode a meaning.
             name: Defined
-            impl: defined
             out:
               - type: bool
             recv: value
@@ -2088,6 +2080,17 @@ packages:
           - name: err
             type: error
       - doc: |-
+          Policies requires every policy to allow the request. Composition is by
+          conjunction so that adding a policy can only ever narrow what is permitted.
+        impl: policies
+        in:
+          - name: members
+            type: corenet.Policy
+        name: Policies
+        out:
+          - type: corenet.Policy
+        variadic: true
+      - doc: |-
           AllowMethods admits only the named HTTP methods. Passing none admits none:
           an allowlist that lost its contents must close, not open.
         in:
@@ -2127,17 +2130,6 @@ packages:
             type: corenet.Policy
           - name: err
             type: error
-        variadic: true
-      - doc: |-
-          Policies requires every policy to allow the request. Composition is by
-          conjunction so that adding a policy can only ever narrow what is permitted.
-        in:
-          - name: members
-            type: corenet.Policy
-        name: Policies
-        impl: policies
-        out:
-          - type: corenet.Policy
         variadic: true
     imports:
       corenet: github.com/kitsunium/sdk/internal/core/net
@@ -2498,35 +2490,34 @@ packages:
           chain and one policy. It mirrors StreamGroup deliberately: the whole point of
           the domain is that a UDP service is wired the same way a TCP one is.
         methods:
-          - doc: Name returns the group's name.
-            name: Name
-            out:
-              - type: string
-            recv: pointer
           - doc: Handle sets the group's handler, replacing any previous one.
+            impl: handle
             in:
               - name: h
                 type: corenet.PacketHandler
             name: Handle
-            impl: handle
             out:
               - type: "*PacketGroup"
             recv: pointer
           - doc: HandleFunc sets the group's handler from a plain function.
+            impl: handleFunc
             in:
               - name: f
                 type: corenet.PacketHandlerFunc
             name: HandleFunc
-            impl: handleFunc
             out:
               - type: "*PacketGroup"
+            recv: pointer
+          - doc: Name returns the group's name.
+            name: Name
+            out:
+              - type: string
             recv: pointer
           - doc: Use appends middlewares, outermost first.
             in:
               - name: middlewares
                 type: corenet.Middleware[corenet.PacketHandler]
             name: Use
-            impl: use
             out:
               - type: "*PacketGroup"
             recv: pointer
@@ -2745,17 +2736,12 @@ packages:
           TCP port and a Unix socket — or two ports with different TLS identities —
           without the caller assembling the wiring twice.
         methods:
-          - doc: Name returns the group's name.
-            name: Name
-            out:
-              - type: string
-            recv: pointer
           - doc: Handle sets the group's handler, replacing any previous one.
+            impl: handle
             in:
               - name: h
                 type: corenet.ConnHandler
             name: Handle
-            impl: handle
             out:
               - type: "*StreamGroup"
             recv: pointer
@@ -2763,13 +2749,18 @@ packages:
               HandleFunc sets the group's handler from a plain function. It exists because
               the overwhelmingly common case is one function, and making that case require
               a named type would be the papercut that decides whether the API feels light.
+            impl: handleFunc
             in:
               - name: f
                 type: corenet.ConnHandlerFunc
             name: HandleFunc
-            impl: handleFunc
             out:
               - type: "*StreamGroup"
+            recv: pointer
+          - doc: Name returns the group's name.
+            name: Name
+            out:
+              - type: string
             recv: pointer
           - doc: |-
               HandleHTTP serves an http.Handler over this group's listeners.
@@ -2782,7 +2773,6 @@ packages:
               - name: h
                 type: http.Handler
             name: HandleHTTP
-            impl: handleHTTP
             out:
               - type: "*StreamGroup"
             recv: pointer
@@ -2791,7 +2781,6 @@ packages:
               - name: middlewares
                 type: corenet.Middleware[corenet.ConnHandler]
             name: Use
-            impl: use
             out:
               - type: "*StreamGroup"
             recv: pointer
@@ -3438,7 +3427,6 @@ packages:
           - name: b
             type: "[]byte"
         name: FrameHeaderLen
-        impl: frameHeaderLen
         out:
           - type: int
       - doc: |-
@@ -3595,7 +3583,6 @@ packages:
           - name: names
             type: string
         name: Subprotocols
-        impl: subprotocols
         out:
           - type: Option
         variadic: true
@@ -3688,7 +3675,6 @@ packages:
           - name: origins
             type: string
         name: AllowOrigins
-        impl: allowOrigins
         out:
           - type: Option
         variadic: true
@@ -3831,6 +3817,52 @@ packages:
           messages in from several producers is the normal shape.
         methods:
           - doc: |-
+              PeerCloseCode returns the status code the peer's Close frame carried.
+
+              It reports [corenet.WSCloseNoStatus] when the peer closed without one — the
+              code that exists to describe exactly that — and zero when no Close frame was
+              ever received, which is the case that matters most: it distinguishes a peer
+              that said goodbye from one that vanished.
+            impl: peerCloseCode
+            name: PeerCloseCode
+            out:
+              - type: corenet.WSCloseCode
+            recv: pointer
+          - doc: SendText writes one UTF-8 text message.
+            impl: sendText
+            in:
+              - name: text
+                type: string
+            name: SendText
+            out:
+              - type: error
+            recv: pointer
+          - doc: SendBinary writes one binary message.
+            impl: sendBinary
+            in:
+              - name: data
+                type: "[]byte"
+            name: SendBinary
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              Ping sends a Ping frame carrying payload.
+
+              It is exported because the automatic heartbeat answers "is the peer alive on
+              its own schedule"; a caller sometimes needs to ask at a moment of its own —
+              right after a long computation, or before committing to expensive work on the
+              peer's behalf. A payload past [corenet.WSMaxControlPayload] is refused: a
+              control frame must fit a buffer that is always available.
+            impl: ping
+            in:
+              - name: payload
+                type: "[]byte"
+            name: Ping
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
               Subprotocol returns the subprotocol the handshake agreed on, or "" when none
               was.
             name: Subprotocol
@@ -3854,18 +3886,6 @@ packages:
             name: Done
             out:
               - type: <-chan struct{}
-            recv: pointer
-          - doc: |-
-              PeerCloseCode returns the status code the peer's Close frame carried.
-
-              It reports [corenet.WSCloseNoStatus] when the peer closed without one — the
-              code that exists to describe exactly that — and zero when no Close frame was
-              ever received, which is the case that matters most: it distinguishes a peer
-              that said goodbye from one that vanished.
-            name: PeerCloseCode
-            impl: peerCloseCode
-            out:
-              - type: corenet.WSCloseCode
             recv: pointer
           - doc: |-
               Receive reads the next complete message, answering control frames on the way.
@@ -3904,40 +3924,6 @@ packages:
               - name: message
                 type: corenet.WSMessageValue
             name: Send
-            out:
-              - type: error
-            recv: pointer
-          - doc: SendText writes one UTF-8 text message.
-            in:
-              - name: text
-                type: string
-            name: SendText
-            impl: sendText
-            out:
-              - type: error
-            recv: pointer
-          - doc: SendBinary writes one binary message.
-            in:
-              - name: data
-                type: "[]byte"
-            name: SendBinary
-            impl: sendBinary
-            out:
-              - type: error
-            recv: pointer
-          - doc: |-
-              Ping sends a Ping frame carrying payload.
-
-              It is exported because the automatic heartbeat answers "is the peer alive on
-              its own schedule"; a caller sometimes needs to ask at a moment of its own —
-              right after a long computation, or before committing to expensive work on the
-              peer's behalf. A payload past [corenet.WSMaxControlPayload] is refused: a
-              control frame must fit a buffer that is always available.
-            in:
-              - name: payload
-                type: "[]byte"
-            name: Ping
-            impl: ping
             out:
               - type: error
             recv: pointer

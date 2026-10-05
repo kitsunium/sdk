@@ -591,7 +591,7 @@ Without that import the file/console Names do not resolve and DefaultMulti retur
 Like every Logger NewMulti returns, it owns the writers it opened and implements io.Closer: Close releases the console writer and the file.
 
 <a name="Duration"></a>
-## func [Duration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/decl_gen.go>)
+## func [Duration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/logger.go>)
 
 ```go
 func Duration(key string, val time.Duration) Attr
@@ -618,7 +618,7 @@ func Float64(key string, val float64) Attr
 Float64 builds an Attr carrying a float64 value.
 
 <a name="FrameworkVersion"></a>
-## func [FrameworkVersion](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/decl_gen.go>)
+## func [FrameworkVersion](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/version.go>)
 
 ```go
 func FrameworkVersion() string
@@ -640,7 +640,7 @@ FromConfig returns TopologyInvalid (1.1.0.4) when format is unregistered, the bl
 Like NewMulti's, the returned Logger owns the writers it opened — the caller never held them — and implements io.Closer to release them, once.
 
 <a name="Info"></a>
-## func [Info](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/decl_gen.go>)
+## func [Info](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/logger.go>)
 
 ```go
 func Info(ctx context.Context, lg Logger, msg string, attrs ...Attr)
@@ -707,7 +707,7 @@ func NewCredentialValue(accessKeyID string, secretAccessKey string, sessionToken
 NewCredentialValue builds a CredentialValue from AWS SigV4 material. An empty sessionToken is valid for long-lived keys.
 
 <a name="NewJSONEncoder"></a>
-## func [NewJSONEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/decl_gen.go>)
+## func [NewJSONEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/encoder.go>)
 
 ```go
 func NewJSONEncoder() Encoder
@@ -782,7 +782,7 @@ lg, err := logger.NewText(logger.Config{
 ```
 
 <a name="NewTextEncoder"></a>
-## func [NewTextEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/decl_gen.go>)
+## func [NewTextEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/encoder.go>)
 
 ```go
 func NewTextEncoder() Encoder
@@ -800,7 +800,7 @@ func NewWithSink(cfg SinkConfig) (lg Logger, err error)
 NewWithSink builds a Logger forwarding records through cfg.Sink and formatting them with cfg.Encoder. It is the port-and-adapter entry point for callers that want full control over both the format (Encoder) and the transport (Sink); use NewText for the default text-on-stderr wiring.
 
 <a name="NewWriterSink"></a>
-## func [NewWriterSink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/decl_gen.go>)
+## func [NewWriterSink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/sink.go>)
 
 ```go
 func NewWriterSink(w io.Writer) (sink Sink, err error)
@@ -839,7 +839,7 @@ func String(key string, val string) Attr
 String builds an Attr carrying a string value.
 
 <a name="TextEncoder"></a>
-## func [TextEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/decl_gen.go>)
+## func [TextEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/sink.go>)
 
 ```go
 func TextEncoder() Encoder
@@ -881,7 +881,7 @@ func Uint64(key string, val uint64) Attr
 Uint64 builds an Attr carrying a uint64 value.
 
 <a name="Warn"></a>
-## func [Warn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/decl_gen.go>)
+## func [Warn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/logger.go>)
 
 ```go
 func Warn(ctx context.Context, lg Logger, msg string, attrs ...Attr)
@@ -1872,7 +1872,7 @@ type TraceContext struct {
 ```
 
 <a name="TraceContext.AppendSpanIDHex"></a>
-### func \(TraceContext\) [AppendSpanIDHex](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/decl_gen.go>)
+### func \(TraceContext\) [AppendSpanIDHex](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/trace_context.go>)
 
 ```go
 func (TraceContext) AppendSpanIDHex(dst []byte) []byte
@@ -1881,7 +1881,7 @@ func (TraceContext) AppendSpanIDHex(dst []byte) []byte
 AppendSpanIDHex appends the span identifier to dst as 16 lowercase hex digits and returns the extended buffer. Same contract as AppendTraceIDHex.
 
 <a name="TraceContext.AppendTraceIDHex"></a>
-### func \(TraceContext\) [AppendTraceIDHex](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/decl_gen.go>)
+### func \(TraceContext\) [AppendTraceIDHex](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/trace_context.go>)
 
 ```go
 func (TraceContext) AppendTraceIDHex(dst []byte) []byte

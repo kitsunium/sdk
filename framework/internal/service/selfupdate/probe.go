@@ -31,9 +31,13 @@ type linker interface {
 	Link(oldpath, newpath string) error
 }
 
-// withProbe is Service.WithProbe's body: decl_gen.go writes Service.WithProbe, from the
-// design, as one call of it.
-func (u *Service) withProbe(args []string, timeout time.Duration) *Service {
+// WithProbe makes a replacement stand only once the NEW binary, run with args,
+// exits 0 within timeout (zero: five seconds). Before the rename the previous
+// binary is kept as <binary>.prev — a hard link, so the binary's own name is
+// never absent —, and a probe that fails puts it back and reports ProbeFailed.
+// A daemon that updates itself declares the argument its binary answers
+// cheaply ("version", "--probe").
+func (u *Service) WithProbe(args []string, timeout time.Duration) *Service {
 	if u == nil {
 		return nil
 	}

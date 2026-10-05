@@ -774,8 +774,8 @@ packages:
               having it here means no rule computes a float. Decimal(1.0, 1) is integer
               valued (n is 1, v is 1), which is precisely why v and f are separate
               operands.
-            name: IsIntegerValued
             impl: isIntegerValued
+            name: IsIntegerValued
             out:
               - type: bool
             recv: value
@@ -823,7 +823,6 @@ packages:
             recv: value
           - doc: Valid reports whether f is one of the six categories CLDR defines.
             name: Valid
-            impl: valid
             out:
               - type: bool
             recv: value
@@ -906,6 +905,20 @@ packages:
           comment on why the plural rules follow the message.
         methods:
           - doc: |-
+              HasForm reports whether the message carries a pattern for form.
+
+              It is what internal/service/app/i18n's load-time completeness check reads: for
+              each category the registered language's rules can produce, the message must
+              answer true, or the catalogue is refused naming the key and the category.
+            impl: hasForm
+            in:
+              - name: form
+                type: Form
+            name: HasForm
+            out:
+              - type: bool
+            recv: value
+          - doc: |-
               Format renders the pattern registered for form, substituting args.
 
               It returns [PluralFormMissing] when the message does not carry form, and
@@ -936,24 +949,9 @@ packages:
                 type: error
             recv: value
           - doc: |-
-              HasForm reports whether the message carries a pattern for form.
-
-              It is what internal/service/app/i18n's load-time completeness check reads: for
-              each category the registered language's rules can produce, the message must
-              answer true, or the catalogue is refused naming the key and the category.
-            in:
-              - name: form
-                type: Form
-            name: HasForm
-            impl: hasForm
-            out:
-              - type: bool
-            recv: value
-          - doc: |-
               IsPlural reports whether the message carries any category beyond
               [FormOther].
             name: IsPlural
-            impl: isPlural
             out:
               - type: bool
             recv: value
@@ -1068,7 +1066,6 @@ packages:
             recv: value
           - doc: Script returns the Titlecase script subtag, or "" when the tag carries none.
             name: Script
-            impl: script
             out:
               - type: string
             recv: value
@@ -1093,7 +1090,6 @@ packages:
               the rule is satisfied by the grammar and there is nothing to skip — stated
               here because a reader comparing this code to the RFC will look for it.
             name: Parent
-            impl: parent
             out:
               - name: parent
                 type: TagValue
@@ -1170,11 +1166,11 @@ packages:
       domain admits, and everything outside it refused BY NAME.
     functions:
       - doc: Plain returns an uncounted [EntryValue].
+        impl: plain
         in:
           - name: text
             type: string
         name: Plain
-        impl: plain
         out:
           - type: EntryValue
       - doc: |-
@@ -1184,11 +1180,11 @@ packages:
           A non-nil, EMPTY map still marks the entry counted, and is refused at load
           for missing `other` — which is the honest answer to a translator who wrote
           `"cart.items": {}`.
+        impl: pluralForms
         in:
           - name: forms
             type: map[string]string
         name: PluralForms
-        impl: pluralForms
         out:
           - type: EntryValue
       - doc: |-
@@ -1574,6 +1570,18 @@ packages:
           find this paragraph to know it is right.
         methods:
           - doc: |-
+              Valid reports whether p describes a language.
+
+              It reads the category SET rather than the rule, because Japanese and Chinese
+              legitimately carry no rule and are nonetheless perfectly valid entries. The
+              zero PluralValue describes nothing, and it is the only value this reports
+              false for.
+            impl: valid
+            name: Valid
+            out:
+              - type: bool
+            recv: value
+          - doc: |-
               Forms returns the CLDR categories this language can produce, ascending. The
               returned slice is shared and MUST NOT be modified: it is read on the load
               path by every catalogue in the process.
@@ -1594,18 +1602,6 @@ packages:
             name: Select
             out:
               - type: corei18n.Form
-            recv: value
-          - doc: |-
-              Valid reports whether p describes a language.
-
-              It reads the category SET rather than the rule, because Japanese and Chinese
-              legitimately carry no rule and are nonetheless perfectly valid entries. The
-              zero PluralValue describes nothing, and it is the only value this reports
-              false for.
-            name: Valid
-            impl: valid
-            out:
-              - type: bool
             recv: value
         name: PluralValue
         struct:
@@ -1772,7 +1768,6 @@ packages:
               - name: key
                 type: corei18n.Key
             name: Lookup
-            impl: lookup
             out:
               - name: message
                 type: corei18n.MessageValue

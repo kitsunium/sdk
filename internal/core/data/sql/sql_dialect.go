@@ -156,9 +156,18 @@ func (d Dialect) QuoteIdent(name string) string {
 	return ""
 }
 
-// forUpdate is Dialect.ForUpdate's body: decl_gen.go writes Dialect.ForUpdate, from the
-// design, as one call of it.
-func (d Dialect) forUpdate() string {
+// ForUpdate renders the clause that ends a read by locking the rows it returns
+// until the transaction ends, leading space included: " FOR UPDATE" on
+// PostgreSQL and MySQL. On MySQL it is also a locking read, which reads the
+// latest committed rows rather than a REPEATABLE READ transaction's snapshot.
+//
+// SQLite has no row lock and no such clause, and renders the empty string: a
+// SQLite transaction excludes every other writer with the database's one write
+// lock, which it takes at its first WRITE, so a transaction that must read
+// under exclusion writes first (ADR 0140). A dialect that is not
+// [Dialect.Valid] renders the clause: an engine without one refuses the
+// statement, which is louder than a lock dropped in silence.
+func (d Dialect) ForUpdate() string {
 	//: SQLite: the database's write lock is the exclusion.
 	if d == DialectSQLite {
 		//: nothing to add.
@@ -168,9 +177,18 @@ func (d Dialect) forUpdate() string {
 	return " FOR UPDATE"
 }
 
-// forUpdateSkipLocked is Dialect.ForUpdateSkipLocked's body: decl_gen.go writes Dialect.ForUpdateSkipLocked, from the
-// design, as one call of it.
-func (d Dialect) forUpdateSkipLocked() string {
+// ForUpdateSkipLocked renders the clause that ends a read by locking the rows
+// it returns and SKIPPING those another transaction holds, leading space
+// included: " FOR UPDATE SKIP LOCKED" on PostgreSQL and MySQL. Two readers
+// then never wait on each other's rows and never take the same one.
+//
+// It needs PostgreSQL 9.5, MySQL 8.0.1 or MariaDB 10.6 — later than the
+// floors [DialectPostgres] and [DialectMySQL] name — and an older server
+// refuses the statement. SQLite renders the empty string and a dialect that is
+// not [Dialect.Valid] the clause, for the reasons [Dialect.ForUpdate] gives: a
+// SQLite transaction that has written holds the database's only write lock,
+// so no row it reads is held by anybody else.
+func (d Dialect) ForUpdateSkipLocked() string {
 	//: SQLite: the database's write lock is the exclusion.
 	if d == DialectSQLite {
 		//: nothing to add.

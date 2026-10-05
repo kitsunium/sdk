@@ -161,9 +161,9 @@ func (m MessageValue) hasForm(form Form) bool {
 	return ok
 }
 
-// isPlural is MessageValue.IsPlural's body: decl_gen.go writes MessageValue.IsPlural, from the
-// design, as one call of it.
-func (m MessageValue) isPlural() bool {
+// IsPlural reports whether the message carries any category beyond
+// [FormOther].
+func (m MessageValue) IsPlural() bool {
 	//: the plural slice is nil for a message with only `other`.
 	return len(m.plural) > 0
 }

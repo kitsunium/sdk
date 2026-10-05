@@ -19,9 +19,25 @@ const (
 	decimal     int  = 10
 )
 
-// attrs is Redactor.Attrs's body: decl_gen.go writes Redactor.Attrs, from the
-// design, as one call of it.
-func (r *Redactor) attrs(attrs []corelogger.AttrValue, maxBytes int) iter.Seq2[string, string] {
+// Attrs renders log attributes as display text, one (key, text) pair at a
+// time, in order: a group is flattened into dotted keys ("db.user"), and each
+// text is cut to maxBytes (raised to MinBytes).
+//
+//   - An attribute — or a group — whose DOTTED key the Redactor recognises is
+//     yielded once, as Placeholder: a group named "session" is one redacted
+//     pair, not one per member.
+//   - A string has the credentials of its URLs replaced; a number, a bool, a
+//     duration and a time (UTC, RFC 3339 with nanoseconds) are written as Go
+//     writes them.
+//   - Anything else — what logger.Any carried — is an error rendered by
+//     Config.Error, a fmt.Stringer by its String, or otherwise the value's
+//     JSON through Value, so its declared secrets are replaced too;
+//     Unencodable when encoding/json refuses it.
+//
+// It is an iterator so the caller bounds the COUNT: a record carrying a group
+// of ten thousand attributes costs the caller exactly as many pairs as it
+// ranges over before it breaks.
+func (r *Redactor) Attrs(attrs []corelogger.AttrValue, maxBytes int) iter.Seq2[string, string] {
 	limit := bound(maxBytes)
 	//: nothing is rendered until the caller ranges.
 	return func(yield func(key, text string) bool) {

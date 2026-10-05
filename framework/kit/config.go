@@ -25,37 +25,34 @@ func Env(env string) AppOption {
 	return ikit.Env(env)
 }
 
-// listen is Listen's body: decl_gen.go writes Listen, from the
-// design, as one call of it.
-func listen(addr string) AppOption {
+// Listen sets the listening address, instead of KIT_ADDR or PORT. ":0" picks
+// a free port; App.URL tells which.
+func Listen(addr string) AppOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.Listen(addr)
 }
 
-// dataDir is DataDir's body: decl_gen.go writes DataDir, from the
-// design, as one call of it.
-func dataDir(dir string) AppOption {
+// DataDir sets where stores and queues persist, instead of KIT_DATA_DIR.
+func DataDir(dir string) AppOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.DataDir(dir)
 }
 
-// studio is Studio's body: decl_gen.go writes Studio, from the
-// design, as one call of it.
-func studio(on bool) AppOption {
+// Studio switches the Studio on or off in dev. It is always off in
+// production.
+func Studio(on bool) AppOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.Studio(on)
 }
 
-// analyze is Analyze's body: decl_gen.go writes Analyze, from the
-// design, as one call of it.
-func analyze(on bool) AppOption {
+// Analyze switches the in-process static analysis on or off in dev.
+func Analyze(on bool) AppOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.Analyze(on)
 }
 
-// logs is Logs's body: decl_gen.go writes Logs, from the
-// design, as one call of it.
-func logs(w io.Writer) AppOption {
+// Logs sends the app's logs to w instead of standard error.
+func Logs(w io.Writer) AppOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.Logs(w)
 }

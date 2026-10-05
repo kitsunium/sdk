@@ -783,7 +783,6 @@ packages:
               IsZero reports whether the address carries no addr-spec at all, which is the
               zero value a caller gets from an unfilled struct field.
             name: IsZero
-            impl: isZero
             out:
               - type: bool
             recv: value
@@ -821,8 +820,8 @@ packages:
           - doc: |-
               Inline reports whether this part is referenced from the body rather than
               listed as a file.
-            name: Inline
             impl: inline
+            name: Inline
             out:
               - type: bool
             recv: pointer
@@ -1194,7 +1193,6 @@ packages:
           - name: cfg
             type: ComposerConfig
         name: NewComposer
-        impl: newComposer
         out:
           - type: "*Composer"
       - doc: |-
@@ -1297,7 +1295,6 @@ packages:
 
           Safe for concurrent use.
         name: NewMemory
-        impl: newMemory
         out:
           - type: coremail.FullTransport
       - doc: |-
@@ -1316,7 +1313,6 @@ packages:
           - name: keep
             type: int
         name: NewCapture
-        impl: newCapture
         out:
           - type: coremail.FullTransport
       - doc: |-

@@ -12,16 +12,14 @@ import (
 // each path segment in the canonical HKDF info, making the encoding injective.
 const lenPrefixBytes int = 4
 
-// newKeyTree is NewKeyTree's body: decl_gen.go writes NewKeyTree, from the
-// design, as one call of it.
-func newKeyTree(algo corecrypto.Algorithm, master corecrypto.Key) KeyTree {
+// NewKeyTree returns the root KeyTree for master, deriving children under algo.
+func NewKeyTree(algo corecrypto.Algorithm, master corecrypto.Key) KeyTree {
 	//: the root carries an empty path; children append to a copy
 	return KeyTree{algo: algo, master: master, path: nil}
 }
 
-// child is KeyTree.Child's body: decl_gen.go writes KeyTree.Child, from the
-// design, as one call of it.
-func (t KeyTree) child(segment string) KeyTree {
+// Child returns a new KeyTree one segment deeper; the receiver is unchanged.
+func (t KeyTree) Child(segment string) KeyTree {
 	//: copy the path so the receiver stays immutable across children
 	next := make([]string, len(t.path), len(t.path)+1)
 	copy(next, t.path)

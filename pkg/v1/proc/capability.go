@@ -85,9 +85,10 @@ func (c Capability) String() string {
 	return capabilityNames[c]
 }
 
-// supported is Supported's body: decl_gen.go writes Supported, from the
-// design, as one call of it.
-func supported(c Capability) bool {
+// Supported reports whether cap has a native backend on the current GOOS. It is
+// pure, allocation-free and race-clean: it consults runtime.GOOS only, never a
+// runtime delegation probe (see the package doc on cgroup.Available()).
+func Supported(c Capability) bool {
 	goss, ok := capabilityGOOS[c]
 	//: a capability absent from the table has no native backend anywhere.
 	if !ok {
@@ -98,9 +99,9 @@ func supported(c Capability) bool {
 	return slices.Contains(goss, runtime.GOOS)
 }
 
-// missingCapabilities is MissingCapabilities's body: decl_gen.go writes MissingCapabilities, from the
-// design, as one call of it.
-func missingCapabilities(caps ...Capability) []Capability {
+// MissingCapabilities returns the subset of caps with no native backend on the
+// current platform; an empty (nil) result means every capability is present.
+func MissingCapabilities(caps ...Capability) []Capability {
 	//: accumulate only the unsupported capabilities; nil when all are present.
 	var missing []Capability
 	//: test each requested capability against the platform matrix.

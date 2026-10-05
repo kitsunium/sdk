@@ -27,9 +27,9 @@ func (i IdentityValue) goString() string {
 	return "<redacted>"
 }
 
-// isZero is IdentityValue.IsZero's body: decl_gen.go writes IdentityValue.IsZero, from the
-// design, as one call of it.
-func (i IdentityValue) isZero() bool {
+// IsZero reports whether the identity carries no material at all, which is the
+// zero value a caller gets when no TLS was configured.
+func (i IdentityValue) IsZero() bool {
 	//: minVersion is always set by NewIdentity, so it discriminates the zero value.
 	return i.minVersion == 0 && len(i.certs) == 0 && i.roots == nil && i.clientCAs == nil
 }

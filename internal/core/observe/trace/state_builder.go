@@ -2,9 +2,10 @@ package trace
 
 import "slices"
 
-// newStateBuilder is NewStateBuilder's body: decl_gen.go writes NewStateBuilder, from the
-// design, as one call of it.
-func newStateBuilder(size int) StateBuilder {
+// NewStateBuilder returns an empty builder with room for size members. A size
+// above MaxTraceStateMembers is clamped to it — no list holds more — and a
+// negative one is read as zero.
+func NewStateBuilder(size int) StateBuilder {
 	//: the room is a hint; the grammar's own cap bounds it.
 	return StateBuilder{entries: make([]traceStateEntry, 0, min(max(size, 0), MaxTraceStateMembers))}
 }

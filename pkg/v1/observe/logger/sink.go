@@ -46,9 +46,19 @@ func NewWithSink(cfg SinkConfig) (lg Logger, err error) {
 	return base.With(corelogger.AttrValue{Key: "framework_version", Value: corelogger.StringValue(FrameworkVersion())}), nil
 }
 
-// newWriterSink is NewWriterSink's body: decl_gen.go writes NewWriterSink, from the
-// design, as one call of it.
-func newWriterSink(w io.Writer) (sink Sink, err error) {
+// NewWriterSink wraps an arbitrary [io.Writer] in a [Sink] so callers can
+// compose plain file / network / bytes.Buffer writers with [Multi] for
+// fan-out. The returned Sink serialises Write calls through an internal
+// mutex (identical contract to [ConsoleStderr] / [ConsoleStdout]).
+//
+// Returns [WriterRequired] when w is nil.
+//
+//	f, _ := os.OpenFile("/var/log/app.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+//	fileSink, _ := logger.NewWriterSink(f)
+//	lg, _ := logger.NewWithSink(logger.SinkConfig{
+//	    Sink: logger.Multi(logger.ConsoleStderr(), fileSink),
+//	})
+func NewWriterSink(w io.Writer) (sink Sink, err error) {
 	//: refuse nil writers up-front with the same sentinel NewText uses,
 	//: so callers see a consistent failure mode across the public API.
 	if w == nil {
@@ -68,9 +78,10 @@ func newWriterSink(w io.Writer) (sink Sink, err error) {
 	return built, nil
 }
 
-// textEncoder is TextEncoder's body: decl_gen.go writes TextEncoder, from the
-// design, as one call of it.
-func textEncoder() Encoder {
+// TextEncoder returns a fresh text Encoder bound to the real system clock.
+// Callers passing a custom Encoder to NewWithSink usually want this as a
+// starting point — it is the same encoder NewText / Default rely on.
+func TextEncoder() Encoder {
 	//: reuse the canonical text encoder constructor with the system clock.
 	return encoder.NewText(clock.System)
 }

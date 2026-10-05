@@ -85,9 +85,13 @@ func (s Set) Keys() []KeyValue {
 	return slices.Clone(s.keys)
 }
 
-// allByKid is Set.AllByKid's body: decl_gen.go writes Set.AllByKid, from the
-// design, as one call of it.
-func (s Set) allByKid(kid string) []KeyValue {
+// AllByKid returns every key carrying kid, in document order — the rotation
+// path. During a rollover a caller typically walks the candidates until one
+// verifies, which is exactly the decision this package refuses to make for it.
+//
+// An empty kid returns no candidates rather than every keyless key: "match the
+// keys that have no id" is never what a lookup by id means.
+func (s Set) AllByKid(kid string) []KeyValue {
 	//: an empty kid selects nothing, deliberately.
 	if kid == "" {
 		//: no candidates.

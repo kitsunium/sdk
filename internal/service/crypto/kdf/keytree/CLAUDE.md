@@ -31,4 +31,4 @@ prefix-free, so `Child("a/b").Child("c")` and `Child("a").Child("b/c")` derive
 
 ## Declarations
 
-`decl_gen.go` is written by kit gen from the design (ADR 0170): the declaration of `KeyTree` — each struct with every field, unexported ones included; `KeyTree.Child` and `NewKeyTree`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name.
+`decl_gen.go` is written by kit gen from the design (ADR 0170): the declaration of `KeyTree` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names.

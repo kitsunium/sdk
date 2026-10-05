@@ -45,9 +45,21 @@ func (t Temporality) String() string {
 	}
 }
 
-// resolved is Temporality.Resolved's body: decl_gen.go writes Temporality.Resolved, from the
-// design, as one call of it.
-func (t Temporality) resolved() Temporality {
+// Resolved maps the UNSET zero value onto the temporality a Meter actually
+// implements, and refuses anything that is neither of the three constants.
+//
+// TemporalityUnspecified CLAMPS to TemporalityCumulative rather than refusing,
+// and the reason is not convention: an in-memory meter accumulates into atomics
+// and never resets them unless it is asked to, so "cumulative" is a DESCRIPTION
+// of what the unconfigured meter does, not a value invented on the caller's
+// behalf. Any other default would be a claim about the implementation that the
+// implementation does not honour (ADR 0031 §clamp).
+//
+// An out-of-range value can only come from a deliberate cast — Temporality(7)
+// is not something a caller reaches by forgetting a field — so it is a
+// programming error and panics with InvalidTemporality rather than being
+// quietly folded into the default, which would hide the cast forever.
+func (t Temporality) Resolved() Temporality {
 	//: one branch per legal value.
 	switch t {
 	//: the unset knob takes the temporality the meter implements.

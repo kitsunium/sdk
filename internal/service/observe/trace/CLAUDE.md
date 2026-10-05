@@ -24,7 +24,7 @@ sentinels as `coretrace.X` and declares none.
 | File | Surface |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
-| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `TracerConfig`, `OTLPHTTPConfig`, `Recorder`, `RecorderConfig` and `Tracer` — each struct with every field, unexported ones included; `Recorder.Sink`, `Tracer.Resource`, `Tracer.Scope`, `OTLPRetryable`, `ParentBased` and `NewTracer`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `TracerConfig`, `OTLPHTTPConfig`, `Recorder`, `RecorderConfig` and `Tracer` — each struct with every field, unexported ones included; `Recorder.Sink`, `Tracer.Resource`, `Tracer.Scope` and `OTLPRetryable`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
 | `tracer.go` | `Tracer` + `NewTracer` + `Start` (the mint/sample/inherit sequence) |
 | `config.go` | `TracerConfig` + every clamp, applied once in `resolved()` |
 | `span.go` | the recording `span`: mutex-guarded attrs/events/status, idempotent `End`; `finish` TRANSFERS its slices to the exported value rather than cloning them, and `sortedIncoming` skips the clone `SortAttrs` makes when there is one attribute to merge — both in §Cost |

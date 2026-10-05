@@ -14,7 +14,7 @@ ADR 0026.
 
 | File | Policy | Notes |
 |---|---|---|
-| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `BreakerConfig`, `FallbackConfig`, `HedgeConfig`, `KeyedRateLimiterConfig`, `RateLimiterConfig` and `RetryConfig` — each struct with every field, unexported ones included; `NewCircuitBreaker`, `NewBulkhead`, `NewFallback` and `NewTimeout`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `BreakerConfig`, `FallbackConfig`, `HedgeConfig`, `KeyedRateLimiterConfig`, `RateLimiterConfig` and `RetryConfig` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `retry.go` | retry | capped exponential backoff (the `BackoffValue` curve), ctx-aware sleep on the injected `Clock`, `RetryExhausted` |
 | `backoff.go` | — | `BackoffValue` — an alias of `kernel/backoff.Value`, the layer that owns the curve (ADR 0074, ADR 0103); `retryRunner.backoff`/`jittered` delegate to its two halves, `kernel/backoff.Grow` (pure, bounded, never negative) and `Widen` (jitter) |
 | `keyed_ratelimit.go` | keyed rate-limit | one `tokenBucket` per `Key(ctx)`, at most `MaxKeys` (LRU), forgotten after `IdleTimeout` (sliding), no sweeper; `Rate`/`Key`/`MaxKeys`/`IdleTimeout` refused at zero (ADR 0031, ADR 0103) |

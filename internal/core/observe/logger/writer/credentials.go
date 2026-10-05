@@ -1,8 +1,8 @@
 package writer
 
-// newCredentialValue is NewCredentialValue's body: decl_gen.go writes NewCredentialValue, from the
-// design, as one call of it.
-func newCredentialValue(accessKeyID, secretAccessKey, sessionToken string) CredentialValue {
+// NewCredentialValue builds a CredentialValue from SigV4 material. An empty
+// sessionToken is valid for long-lived keys; supply it for STS / assumed roles.
+func NewCredentialValue(accessKeyID, secretAccessKey, sessionToken string) CredentialValue {
 	//: store the SigV4 material behind the redacting value.
 	return CredentialValue{
 		accessKeyID:     accessKeyID,

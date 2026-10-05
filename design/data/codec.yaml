@@ -68,6 +68,13 @@ packages:
       initialisers when the package is imported.
     functions:
       - doc: |-
+          Available returns the sorted list of registered Formats, or nil before any
+          Register.
+        impl: available
+        name: Available
+        out:
+          - type: "[]Format"
+      - doc: |-
           Register inserts c into the registry and returns it so callers can bind
           the singleton to a typed package-level variable like
           `var Codec codec.Codec = codec.Register(&jsonCodec{})`. Panics on nil
@@ -130,13 +137,6 @@ packages:
             type: Codec
           - name: ok
             type: bool
-      - doc: |-
-          Available returns the sorted list of registered Formats, or nil before any
-          Register.
-        name: Available
-        impl: available
-        out:
-          - type: "[]Format"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/data/codec
@@ -382,7 +382,6 @@ packages:
           - name: t
             type: reflect.Type
         name: Of
-        impl: of
         out:
           - type: "*ShapeValue"
       - doc: "For describes the values of T on the wire: Of(reflect.TypeFor[T]())."

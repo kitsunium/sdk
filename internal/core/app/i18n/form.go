@@ -52,9 +52,8 @@ func (f Form) String() string {
 	return formNames[f]
 }
 
-// valid is Form.Valid's body: decl_gen.go writes Form.Valid, from the
-// design, as one call of it.
-func (f Form) valid() bool {
+// Valid reports whether f is one of the six categories CLDR defines.
+func (f Form) Valid() bool {
 	//: the enum is dense from FormOther to FormMany.
 	return f < formCount
 }

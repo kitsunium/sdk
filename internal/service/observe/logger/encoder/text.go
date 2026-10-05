@@ -50,12 +50,12 @@ type textEncoder struct {
 	clk clock.Clock
 }
 
-// newText is NewText's body: decl_gen.go writes NewText, from the
-// design, as one call of it.
-//
+// NewText builds an Encoder bound to the supplied clock. Pass clock.System
+// for production use; tests inject a fake clock. A nil clock falls back to
+// the real wall clock so callers can pass clock.System or nil interchangeably.
 // IFACE-PLUGIN: returns the Encoder contract so callers depend on the
 // public surface; the concrete textEncoder is intentionally hidden.
-func newText(clk clock.Clock) Encoder {
+func NewText(clk clock.Clock) Encoder {
 	//: clock is mandatory — fall back to the real wall clock on nil.
 	if clk == nil {
 		//: defensive default avoids a nil-pointer panic in Append.
@@ -146,9 +146,19 @@ func appendTraceContext(dst []byte, r corelogger.RecordEvent) []byte {
 	return tc.AppendSpanIDHex(dst)
 }
 
-// appendSanitized is AppendSanitized's body: decl_gen.go writes AppendSanitized, from the
-// design, as one call of it.
-func appendSanitized(dst []byte, text string) []byte {
+// AppendSanitized copies text onto dst replacing '\n', '\r', and NUL
+// with a single space so the content can never inject a new frame in a
+// line-framed downstream sink. Other control characters are preserved to
+// keep the rendering faithful; only framing-sensitive bytes are stripped.
+// It scrubs every attacker-influenceable textual field — the Message, group
+// names, and attribute keys — not just the Message (V110).
+//
+// It is exported for one caller outside this package: the legacy
+// service/observe/logger.TextHandler, which renders the same line shape without going
+// through an Encoder. That handler once appended all three fields verbatim —
+// the scrub existed, but only here — so a line break in any of them forged a
+// log line. One function shared by both renderers cannot drift from itself.
+func AppendSanitized(dst []byte, text string) []byte {
 	//: walk text byte-by-byte; ASCII control-char check is cheap and the
 	//: allocation cost matches the existing append pattern in this file.
 	for i := range len(text) {

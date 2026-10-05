@@ -30,9 +30,16 @@ func get() *[]byte {
 	return bytePool.Get()
 }
 
-// put is Put's body: decl_gen.go writes Put, from the
-// design, as one call of it.
-func put(b *[]byte) {
+// Put returns a buffer to the pool after use; the recycler truncates its length
+// and drops it when cap exceeds maxRetain. A nil argument is a safe no-op so
+// call sites can always defer Put — the generic CappedPool cannot nil-check
+// a pointer-like T, so the guard lives here.
+//
+// Put ends the caller's ownership of b. Once it returns, neither *b nor the
+// bytes it points at may be read or written — not even len(*b) — and b must
+// not be Put again: the pool may already have handed b to another goroutine,
+// which writes both as its own. Copy out whatever is still needed before Put.
+func Put(b *[]byte) {
 	//: nil-safe no-op so callers can defer Put unconditionally.
 	if b == nil {
 		//: nothing to recycle; let any allocation fall to the GC.

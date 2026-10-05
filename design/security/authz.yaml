@@ -188,7 +188,6 @@ packages:
           - name: value
             type: string
         name: AttrString
-        impl: attrString
         out:
           - type: AttrValue
       - doc: |-
@@ -202,7 +201,6 @@ packages:
           - name: value
             type: int64
         name: AttrInt64
-        impl: attrInt64
         out:
           - type: AttrValue
       - doc: |-
@@ -215,7 +213,6 @@ packages:
           - name: value
             type: bool
         name: AttrBool
-        impl: attrBool
         out:
           - type: AttrValue
       - doc: |-
@@ -231,7 +228,6 @@ packages:
           - name: values
             type: string
         name: AttrStrings
-        impl: attrStrings
         out:
           - type: AttrValue
         variadic: true
@@ -258,7 +254,6 @@ packages:
           - name: attrs
             type: AttrValue
         name: NewRequestValue
-        impl: newRequestValue
         out:
           - type: RequestValue
         variadic: true
@@ -475,7 +470,6 @@ packages:
               share across goroutines: a caller that sorts or appends to the result cannot
               reach the attribute the next request will evaluate.
             name: StringsValue
-            impl: stringsValue
             out:
               - name: values
                 type: "[]string"
@@ -494,7 +488,6 @@ packages:
               - name: want
                 type: string
             name: Contains
-            impl: contains
             out:
               - name: found
               - name: ok
@@ -624,7 +617,6 @@ packages:
               true for [Abstain], so it authorizes every request no policy recognised, and
               it is true for a corrupt Decision value as well.
             name: Granted
-            impl: granted
             out:
               - type: bool
             recv: value
@@ -634,7 +626,6 @@ packages:
               zeroed struct field read as a Decision, a value from a future version of a
               caller's own code — and the SDK refuses on it rather than guessing.
             name: Valid
-            impl: valid
             out:
               - type: bool
             recv: value
@@ -712,7 +703,6 @@ packages:
               diagnostics and tests; no rule reads it, because "how many facts" never
               answers "which fact".
             name: AttrCount
-            impl: attrCount
             out:
               - type: int
             recv: value
@@ -898,35 +888,6 @@ packages:
         out:
           - type: error
       - doc: |-
-          Must unwraps a constructor pair for a package-level var, panicking on error.
-
-          It is the same shape internal/service/app/validation ships, and for the same
-          reason: a policy is built once at start-up, and a misconfiguration there is
-          a programming fault that must stop the process rather than be handled per
-          request. Never call it on data read at run time — that turns a bad
-          configuration file into a crash instead of an error.
-        in:
-          - name: policy
-            type: coreauthz.Policy
-          - name: err
-            type: error
-        name: Must
-        impl: must
-        out:
-          - type: coreauthz.Policy
-      - doc: |-
-          MustCondition unwraps a condition constructor pair for a package-level var,
-          panicking on error. Same contract as [Must].
-        in:
-          - name: condition
-            type: coreauthz.Condition
-          - name: err
-            type: error
-        name: MustCondition
-        impl: mustCondition
-        out:
-          - type: coreauthz.Condition
-      - doc: |-
           Not inverts a condition's answer and propagates its failure UNCHANGED.
 
           This is the negation trap, and it is worth stating as its own paragraph. If
@@ -1034,7 +995,6 @@ packages:
           - name: policies
             type: coreauthz.Policy
         name: DenyOverrides
-        impl: denyOverrides
         out:
           - type: coreauthz.Policy
         variadic: true
@@ -1121,6 +1081,35 @@ packages:
             type: coreauthz.Condition
           - name: err
             type: error
+      - doc: |-
+          Must unwraps a constructor pair for a package-level var, panicking on error.
+
+          It is the same shape internal/service/app/validation ships, and for the same
+          reason: a policy is built once at start-up, and a misconfiguration there is
+          a programming fault that must stop the process rather than be handled per
+          request. Never call it on data read at run time — that turns a bad
+          configuration file into a crash instead of an error.
+        impl: must
+        in:
+          - name: policy
+            type: coreauthz.Policy
+          - name: err
+            type: error
+        name: Must
+        out:
+          - type: coreauthz.Policy
+      - doc: |-
+          MustCondition unwraps a condition constructor pair for a package-level var,
+          panicking on error. Same contract as [Must].
+        impl: mustCondition
+        in:
+          - name: condition
+            type: coreauthz.Condition
+          - name: err
+            type: error
+        name: MustCondition
+        out:
+          - type: coreauthz.Condition
       - doc: |-
           NewRBAC builds a role-based [coreauthz.Policy] over a fixed grant table.
 

@@ -113,9 +113,8 @@ var (
 	}
 )
 
-// isEngine is IsEngine's body: decl_gen.go writes IsEngine, from the
-// design, as one call of it.
-func isEngine(backend string) bool {
+// IsEngine reports whether backend names an engine a database runs on.
+func IsEngine(backend string) bool {
 	return slices.ContainsFunc(engines, func(e AdapterMessage) bool { return e.ID == backend })
 }
 

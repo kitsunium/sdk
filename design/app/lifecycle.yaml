@@ -755,7 +755,6 @@ packages:
               as the component's Start, Stop as its Stop — so the Lifecycle budgets the
               wait for the function to return like any other shutdown.
             name: Component
-            impl: component
             out:
               - type: corelc.ComponentValue
             recv: pointer

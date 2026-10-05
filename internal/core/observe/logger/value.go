@@ -43,23 +43,22 @@ func StringValue(v string) Value {
 	return Value{kind: KindString, str: v}
 }
 
-// int64Value is Int64Value's body: decl_gen.go writes Int64Value, from the
-// design, as one call of it.
-func int64Value(v int64) Value {
+// Int64Value builds a Value of kind int64. int and int32 callers should widen
+// to int64 at the call site.
+func Int64Value(v int64) Value {
 	//: two's complement reinterpretation lets num hold any int64 without loss.
 	return Value{kind: KindInt64, bits: packedBits(uint64(v))}
 }
 
-// intValue is IntValue's body: decl_gen.go writes IntValue, from the
-// design, as one call of it.
-func intValue(v int) Value {
+// IntValue builds a Value of kind int64 from a plain int. Provided for caller
+// ergonomy so the most common integer type does not need an explicit cast.
+func IntValue(v int) Value {
 	//: delegate to Int64Value so the encoding contract has a single source.
 	return Int64Value(int64(v))
 }
 
-// uint64Value is Uint64Value's body: decl_gen.go writes Uint64Value, from the
-// design, as one call of it.
-func uint64Value(v uint64) Value {
+// Uint64Value builds a Value of kind uint64.
+func Uint64Value(v uint64) Value {
 	//: direct copy — uint64 already fits the bits field after alias conversion.
 	return Value{kind: KindUint64, bits: packedBits(v)}
 }
@@ -71,9 +70,8 @@ func float64Value(v float64) Value {
 	return Value{kind: KindFloat64, bits: packedBits(math.Float64bits(v))}
 }
 
-// boolValue is BoolValue's body: decl_gen.go writes BoolValue, from the
-// design, as one call of it.
-func boolValue(v bool) Value {
+// BoolValue builds a Value of kind bool.
+func BoolValue(v bool) Value {
 	//: avoid a branch per conversion via bool→uint64 lookup.
 	if v {
 		//: true encodes as boolOne so handlers can compare against the constant.
@@ -83,9 +81,9 @@ func boolValue(v bool) Value {
 	return Value{kind: KindBool, bits: 0}
 }
 
-// durationValue is DurationValue's body: decl_gen.go writes DurationValue, from the
-// design, as one call of it.
-func durationValue(v time.Duration) Value {
+// DurationValue builds a Value of kind duration. Storing the int64 nanosecond
+// count in bits keeps the hot path allocation-free.
+func DurationValue(v time.Duration) Value {
 	//: delegate the double-cast to durationBits so the intent is named.
 	return Value{kind: KindDuration, bits: packedBits(durationBits(v))}
 }
@@ -102,23 +100,26 @@ func durationBits(d time.Duration) uint64 {
 	return uint64(int64(d))
 }
 
-// timeValue is TimeValue's body: decl_gen.go writes TimeValue, from the
-// design, as one call of it.
-func timeValue(v time.Time) Value {
+// TimeValue builds a Value of kind time. The time.Time payload lives in the
+// any field because its locale + monotonic representation does not fit into
+// num without additional storage.
+func TimeValue(v time.Time) Value {
 	//: keep the time payload boxed for now; allocation-free packing is future work.
 	return Value{kind: KindTime, any: v}
 }
 
-// groupValue is GroupValue's body: decl_gen.go writes GroupValue, from the
-// design, as one call of it.
-func groupValue(attrs ...AttrValue) Value {
+// GroupValue builds a Value whose payload is a slice of AttrValue, modelling
+// a nested attribute group. The slice is stored verbatim — callers MUST NOT
+// mutate it after the Value is constructed.
+func GroupValue(attrs ...AttrValue) Value {
 	//: store the slice verbatim — handlers iterate it as needed.
 	return Value{kind: KindGroup, any: attrs}
 }
 
-// anyValue is AnyValue's body: decl_gen.go writes AnyValue, from the
-// design, as one call of it.
-func anyValue(v any) Value {
+// AnyValue builds a Value of KindAny carrying an arbitrary payload. Handlers
+// inspect the concrete type via type assertion and fall back to "?" when the
+// type is not in their format table.
+func AnyValue(v any) Value {
 	//: store the opaque payload verbatim so handlers can type-switch on it.
 	return Value{kind: KindAny, any: v}
 }
@@ -181,9 +182,10 @@ func (v Value) Bool() bool {
 	return v.bits != 0
 }
 
-// duration is Value.Duration's body: decl_gen.go writes Value.Duration, from the
-// design, as one call of it.
-func (v Value) duration() time.Duration {
+// Duration returns the time.Duration payload. The result is undefined when
+// Kind is not KindDuration; callers MUST guard with Kind() before calling
+// this accessor.
+func (v Value) Duration() time.Duration {
 	//: reverse the two's complement reinterpretation done by DurationValue.
 	return time.Duration(int64(uint64(v.bits)))
 }

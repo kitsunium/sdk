@@ -537,7 +537,7 @@ func (Attr) BoolValue() (value bool, ok bool)
 BoolValue returns the flag payload. ok is false when the attribute is not [KindBool](#KindBool) — and this is the accessor where ignoring ok is most expensive, since false is both "the flag is off" and "there is no flag".
 
 <a name="Attr.Contains"></a>
-### func \(Attr\) [Contains](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/authz/decl_gen.go>)
+### func \(Attr\) [Contains](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/authz/attr_value.go>)
 
 ```go
 func (Attr) Contains(want string) (found bool, ok bool)
@@ -584,7 +584,7 @@ func (Attr) StringValue() (value string, ok bool)
 StringValue returns the text payload. ok is false when the attribute is not [KindString](#KindString) — the caller MUST check it: the zero string is a legitimate text value, so the returned value alone cannot report a mismatch.
 
 <a name="Attr.StringsValue"></a>
-### func \(Attr\) [StringsValue](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/authz/decl_gen.go>)
+### func \(Attr\) [StringsValue](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/authz/attr_value.go>)
 
 ```go
 func (Attr) StringsValue() (values []string, ok bool)
@@ -638,7 +638,7 @@ type Decision uint8
 ```
 
 <a name="Decision.Granted"></a>
-### func \(Decision\) [Granted](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/authz/decl_gen.go>)
+### func \(Decision\) [Granted](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/authz/decision.go>)
 
 ```go
 func (Decision) Granted() bool
@@ -658,7 +658,7 @@ func (Decision) String() string
 String renders the decision in lower case for logs and test failures: "abstain", "allow", "deny". An out-of-contract value renders as "invalid", which is deliberately not one of the three: a log line must not be able to show a corrupt decision as if it were a real verdict.
 
 <a name="Decision.Valid"></a>
-### func \(Decision\) [Valid](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/authz/decl_gen.go>)
+### func \(Decision\) [Valid](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/authz/decision.go>)
 
 ```go
 func (Decision) Valid() bool
@@ -787,7 +787,7 @@ Attr resolves an attribute by name. ok is false when the request does not carry 
 This two-value shape is the whole reason the attribute bag is not exported as a map. "The subject has no department" and "nobody told us the subject's department" are different facts, and a rule that cannot tell them apart grants access to every request that simply omitted the attribute.
 
 <a name="Request.AttrCount"></a>
-### func \(Request\) [AttrCount](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/authz/decl_gen.go>)
+### func \(Request\) [AttrCount](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/authz/request_value.go>)
 
 ```go
 func (Request) AttrCount() int

@@ -189,4 +189,4 @@ target's 60 s.
 
 ## Declarations
 
-`decl_gen.go` is written by kit gen from the design (ADR 0170): the declarations of `LocalDate`, `LocalTime` and `LocalDateTime` — each struct with every field, unexported ones included; `LocalDate.AsTime`, `LocalDate.MarshalText`, `LocalTime.MarshalText` and `LocalDateTime.MarshalText`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name.
+`decl_gen.go` is written by kit gen from the design (ADR 0170): the declarations of `LocalDate`, `LocalTime` and `LocalDateTime` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names.

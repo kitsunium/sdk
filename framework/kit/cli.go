@@ -25,22 +25,26 @@ type CLI = ikit.CLI
 // CLIOption tunes a CLI command.
 type CLIOption = ikit.CommandLineConfigurer
 
-// defaultCommand is DefaultCommand's body: decl_gen.go writes DefaultCommand, from the
-// design, as one call of it.
+// DefaultCommand makes the command Main's default: it runs with every
+// argument when the first names no other command — neither one of the
+// product's nor one of Main's (serve, help…) —, and with none when there
+// is none. Main then never answers a usage error. One command of an app may
+// be its default.
 //
 // IFACE-OPAQUE: CLIOption is sealed — its one method is unexported — so
 // only this package makes one, and a caller only passes it to CLI.
-func defaultCommand() CLIOption {
+func DefaultCommand() CLIOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.DefaultCommand()
 }
 
-// failSafe is FailSafe's body: decl_gen.go writes FailSafe, from the
-// design, as one call of it.
+// FailSafe makes the command's status always 0: a status line, a prompt
+// hook, anything a shell runs on every keystroke must never fail the shell.
+// A non-zero status, a start that fails and a panic are logged instead.
 //
 // IFACE-OPAQUE: CLIOption is sealed — its one method is unexported — so
 // only this package makes one, and a caller only passes it to CLI.
-func failSafe() CLIOption {
+func FailSafe() CLIOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.FailSafe()
 }

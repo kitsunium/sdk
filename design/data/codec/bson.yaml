@@ -283,17 +283,6 @@ packages:
         out:
           - type: codec.Codec
       - doc: |-
-          NewDecimal128 returns the decimal whose BID encoding is high (the first
-          eight bytes, as a uint64) and low (the last eight).
-        in:
-          - name: high
-          - name: low
-            type: uint64
-        name: NewDecimal128
-        impl: newDecimal128
-        out:
-          - type: Decimal128
-      - doc: |-
           ParseDecimal128 parses the specification's string form: an optional sign, a
           decimal with or without a point, an optional exponent introduced by e or E,
           or one of NaN, Inf and Infinity in any case. A value that a decimal128
@@ -307,6 +296,17 @@ packages:
         out:
           - type: Decimal128
           - type: error
+      - doc: |-
+          NewDecimal128 returns the decimal whose BID encoding is high (the first
+          eight bytes, as a uint64) and low (the last eight).
+        impl: newDecimal128
+        in:
+          - name: high
+          - name: low
+            type: uint64
+        name: NewDecimal128
+        out:
+          - type: Decimal128
       - doc: |-
           ObjectIDFromHex parses the 24-digit hexadecimal form of an ObjectID, in
           either case. Anything else is refused with BSON_VALUE_INVALID.
@@ -324,7 +324,6 @@ packages:
           - name: t
             type: time.Time
         name: NewDateTimeFromTime
-        impl: newDateTimeFromTime
         out:
           - type: DateTime
     imports:
@@ -338,32 +337,10 @@ packages:
           The zero value is 0E-6176, the value whose sixteen bytes are all zero; it is
           what IsZero reports, and what omitempty leaves out.
         methods:
-          - doc: GetBytes returns the two halves NewDecimal128 takes.
-            name: GetBytes
-            impl: getBytes
-            out:
-              - name: high
-              - name: low
-                type: uint64
-            recv: value
-          - doc: IsNaN reports whether d is a NaN, quiet or signalling, whatever its sign.
-            name: IsNaN
-            impl: isNaN
-            out:
-              - type: bool
-            recv: value
           - doc: IsInf returns +1 for +Infinity, -1 for -Infinity, and 0 otherwise.
             name: IsInf
             out:
               - type: int
-            recv: value
-          - doc: |-
-              IsZero reports whether d is the zero value — all sixteen bytes zero. It is
-              not a numeric test: "0", "0E+3" and "-0" are zeros IsZero does not report.
-            name: IsZero
-            impl: isZero
-            out:
-              - type: bool
             recv: value
           - doc: |-
               String returns the specification's string form: "NaN", "Infinity",
@@ -389,6 +366,28 @@ packages:
             out:
               - type: error
             recv: pointer
+          - doc: GetBytes returns the two halves NewDecimal128 takes.
+            impl: getBytes
+            name: GetBytes
+            out:
+              - name: high
+              - name: low
+                type: uint64
+            recv: value
+          - doc: IsNaN reports whether d is a NaN, quiet or signalling, whatever its sign.
+            impl: isNaN
+            name: IsNaN
+            out:
+              - type: bool
+            recv: value
+          - doc: |-
+              IsZero reports whether d is the zero value — all sixteen bytes zero. It is
+              not a numeric test: "0", "0E+3" and "-0" are zeros IsZero does not report.
+            impl: isZero
+            name: IsZero
+            out:
+              - type: bool
+            recv: value
         name: Decimal128
         struct:
           fields:
@@ -405,7 +404,6 @@ packages:
         methods:
           - doc: Hex returns the 24-digit lowercase hexadecimal form of id.
             name: Hex
-            impl: hex
             out:
               - type: string
             recv: value
@@ -416,7 +414,6 @@ packages:
             recv: value
           - doc: IsZero reports whether id is NilObjectID — what omitempty leaves out.
             name: IsZero
-            impl: isZero
             out:
               - type: bool
             recv: value
@@ -498,19 +495,19 @@ packages:
           are. A []byte encodes as a Binary of subtype BinaryGeneric; a Binary of any
           other subtype keeps its subtype through a round trip.
         methods:
+          - doc: |-
+              IsZero reports whether b is the empty generic binary — what omitempty
+              leaves out.
+            impl: isZero
+            name: IsZero
+            out:
+              - type: bool
+            recv: value
           - doc: Equal reports whether b and other hold the same subtype and bytes.
             in:
               - name: other
                 type: Binary
             name: Equal
-            out:
-              - type: bool
-            recv: value
-          - doc: |-
-              IsZero reports whether b is the empty generic binary — what omitempty
-              leaves out.
-            name: IsZero
-            impl: isZero
             out:
               - type: bool
             recv: value
@@ -553,7 +550,6 @@ packages:
               Time returns the instant dt denotes, in the local time zone; call UTC on it
               for the zone BSON stores.
             name: Time
-            impl: time
             out:
               - type: time.Time
             recv: value
@@ -581,6 +577,12 @@ packages:
           contain a NUL byte. The codec writes the options in alphabetical order, as
           the specification requires, whatever order they were given in.
         methods:
+          - doc: IsZero reports whether r is the empty regex — what omitempty leaves out.
+            impl: isZero
+            name: IsZero
+            out:
+              - type: bool
+            recv: value
           - doc: String renders r for a log line or a test failure.
             name: String
             out:
@@ -591,13 +593,6 @@ packages:
               - name: other
                 type: Regex
             name: Equal
-            impl: equal
-            out:
-              - type: bool
-            recv: value
-          - doc: IsZero reports whether r is the empty regex — what omitempty leaves out.
-            name: IsZero
-            impl: isZero
             out:
               - type: bool
             recv: value
@@ -625,13 +620,11 @@ packages:
               - name: other
                 type: DBPointer
             name: Equal
-            impl: equal
             out:
               - type: bool
             recv: value
           - doc: IsZero reports whether p is the empty pointer — what omitempty leaves out.
             name: IsZero
-            impl: isZero
             out:
               - type: bool
             recv: value
@@ -679,6 +672,21 @@ packages:
           Timestamp is the BSON replication timestamp: seconds since the epoch and an
           ordinal within the second. It is not a date; encode a time.Time for one.
         methods:
+          - doc: Equal reports whether t and other are the same timestamp.
+            impl: equal
+            in:
+              - name: other
+                type: Timestamp
+            name: Equal
+            out:
+              - type: bool
+            recv: value
+          - doc: IsZero reports whether t is the zero timestamp — what omitempty leaves out.
+            impl: isZero
+            name: IsZero
+            out:
+              - type: bool
+            recv: value
           - doc: After reports whether t is later than other.
             in:
               - name: other
@@ -695,27 +703,11 @@ packages:
             out:
               - type: bool
             recv: value
-          - doc: Equal reports whether t and other are the same timestamp.
-            in:
-              - name: other
-                type: Timestamp
-            name: Equal
-            impl: equal
-            out:
-              - type: bool
-            recv: value
-          - doc: IsZero reports whether t is the zero timestamp — what omitempty leaves out.
-            name: IsZero
-            impl: isZero
-            out:
-              - type: bool
-            recv: value
           - doc: Compare returns -1 when t is before other, +1 when it is after, 0 when equal.
             in:
               - name: other
                 type: Timestamp
             name: Compare
-            impl: compare
             out:
               - type: int
             recv: value
@@ -1035,13 +1027,13 @@ packages:
       - doc: |-
           Unmarshal decodes one BSON document into v, a non-nil pointer or map. The
           input is checked whole before v is written.
+        impl: unmarshal
         in:
           - name: data
             type: "[]byte"
           - name: v
             type: any
         name: Unmarshal
-        impl: unmarshal
         out:
           - type: error
     imports:

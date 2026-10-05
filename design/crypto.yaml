@@ -226,45 +226,6 @@ packages:
       Package crypto — the process-wide StreamSealer registry + SealStream / OpenStream dispatch.
     functions:
       - doc: |-
-          RegisterAgreement inserts a under a.Algorithm() and returns it so callers can
-          bind the singleton to a typed package-level variable. Panics on a nil scheme
-          or when a distinct scheme already claims the same Algorithm.
-
-          IFACE-PLUGIN: the registry hands plug-in Agreement instances back to callers
-          so each scheme keeps its concrete type unexported; the contract is the
-          Agreement interface itself.
-
-          "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
-          plug-in whose type is not comparable both satisfy the port and neither can
-          serve one call (see internal/kernel/plugin).
-        in:
-          - name: a
-            type: Agreement
-        name: RegisterAgreement
-        impl: registerAgreement
-        out:
-          - type: Agreement
-      - doc: |-
-          LookupAgreement returns the Agreement scheme registered under name.
-
-          IFACE-PLUGIN: the registry stores plug-in Agreement instances behind the
-          Agreement interface — concrete types are intentionally unexported per scheme.
-        in:
-          - name: name
-            type: Algorithm
-        name: LookupAgreement
-        impl: lookupAgreement
-        out:
-          - name: a
-            type: Agreement
-          - name: ok
-            type: bool
-      - doc: AvailableAgreements returns the sorted list of registered agreement Algorithms.
-        name: AvailableAgreements
-        impl: availableAgreements
-        out:
-          - type: "[]Algorithm"
-      - doc: |-
           GenerateAgreementKey draws a fresh keypair from the Agreement scheme
           registered as name. A name with no registered scheme returns
           UnknownAgreementAlgorithm; an entropy fault from the scheme propagates
@@ -297,6 +258,45 @@ packages:
           - name: err
             type: error
       - doc: |-
+          RegisterAgreement inserts a under a.Algorithm() and returns it so callers can
+          bind the singleton to a typed package-level variable. Panics on a nil scheme
+          or when a distinct scheme already claims the same Algorithm.
+
+          IFACE-PLUGIN: the registry hands plug-in Agreement instances back to callers
+          so each scheme keeps its concrete type unexported; the contract is the
+          Agreement interface itself.
+
+          "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
+          plug-in whose type is not comparable both satisfy the port and neither can
+          serve one call (see internal/kernel/plugin).
+        impl: registerAgreement
+        in:
+          - name: a
+            type: Agreement
+        name: RegisterAgreement
+        out:
+          - type: Agreement
+      - doc: |-
+          LookupAgreement returns the Agreement scheme registered under name.
+
+          IFACE-PLUGIN: the registry stores plug-in Agreement instances behind the
+          Agreement interface — concrete types are intentionally unexported per scheme.
+        impl: lookupAgreement
+        in:
+          - name: name
+            type: Algorithm
+        name: LookupAgreement
+        out:
+          - name: a
+            type: Agreement
+          - name: ok
+            type: bool
+      - doc: AvailableAgreements returns the sorted list of registered agreement Algorithms.
+        impl: availableAgreements
+        name: AvailableAgreements
+        out:
+          - type: "[]Algorithm"
+      - doc: |-
           RegisterDeriver inserts d under d.Algorithm() and returns it so callers can
           bind the singleton to a typed package-level variable like
           `var Deriver = crypto.RegisterDeriver(hkdfSHA256{})`. Panics on a nil deriver
@@ -309,11 +309,11 @@ packages:
           "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
           plug-in whose type is not comparable both satisfy the port and neither can
           serve one call (see internal/kernel/plugin).
+        impl: registerDeriver
         in:
           - name: d
             type: Deriver
         name: RegisterDeriver
-        impl: registerDeriver
         out:
           - type: Deriver
       - doc: |-
@@ -321,19 +321,225 @@ packages:
 
           IFACE-PLUGIN: the registry stores plug-in Deriver instances behind the Deriver
           interface — concrete types are intentionally unexported per scheme.
+        impl: lookupDeriver
         in:
           - name: name
             type: Algorithm
         name: LookupDeriver
-        impl: lookupDeriver
         out:
           - name: d
             type: Deriver
           - name: ok
             type: bool
       - doc: AvailableDerivers returns the sorted list of registered KDF Algorithms.
-        name: AvailableDerivers
         impl: availableDerivers
+        name: AvailableDerivers
+        out:
+          - type: "[]Algorithm"
+      - doc: |-
+          RegisterHasher inserts h under h.Algorithm() and returns it so callers can
+          bind the singleton to a typed package-level variable like
+          `var Hasher = crypto.RegisterHasher(sha256Hasher{})`. Panics on a nil hasher
+          or when a distinct hasher already claims the same Algorithm.
+
+          IFACE-PLUGIN: the registry hands plug-in Hasher instances back to callers so
+          each scheme keeps its concrete type unexported; the stable contract is the
+          Hasher interface itself.
+
+          "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
+          plug-in whose type is not comparable both satisfy the port and neither can
+          serve one call (see internal/kernel/plugin).
+        impl: registerHasher
+        in:
+          - name: h
+            type: Hasher
+        name: RegisterHasher
+        out:
+          - type: Hasher
+      - doc: |-
+          LookupHasher returns the Hasher registered under name.
+
+          IFACE-PLUGIN: the registry stores plug-in Hasher instances behind the Hasher
+          interface — concrete types are intentionally unexported per scheme.
+        impl: lookupHasher
+        in:
+          - name: name
+            type: Algorithm
+        name: LookupHasher
+        out:
+          - name: h
+            type: Hasher
+          - name: ok
+            type: bool
+      - doc: AvailableHashers returns the sorted list of registered hash Algorithms.
+        impl: availableHashers
+        name: AvailableHashers
+        out:
+          - type: "[]Algorithm"
+      - doc: |-
+          RegisterMAC inserts m under m.Algorithm() and returns it so callers can bind
+          the singleton to a typed package-level variable. Panics on a nil MAC or when
+          a distinct MAC already claims the same Algorithm.
+
+          IFACE-PLUGIN: the registry hands plug-in MAC instances back to callers so each
+          scheme keeps its concrete type unexported; the contract is the MAC interface.
+
+          "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
+          plug-in whose type is not comparable both satisfy the port and neither can
+          serve one call (see internal/kernel/plugin).
+        impl: registerMAC
+        in:
+          - name: m
+            type: MAC
+        name: RegisterMAC
+        out:
+          - type: MAC
+      - doc: |-
+          LookupMAC returns the MAC registered under name.
+
+          IFACE-PLUGIN: the registry stores plug-in MAC instances behind the MAC
+          interface — concrete types are intentionally unexported per scheme.
+        impl: lookupMAC
+        in:
+          - name: name
+            type: Algorithm
+        name: LookupMAC
+        out:
+          - name: m
+            type: MAC
+          - name: ok
+            type: bool
+      - doc: AvailableMACs returns the sorted list of registered MAC Algorithms.
+        impl: availableMACs
+        name: AvailableMACs
+        out:
+          - type: "[]Algorithm"
+      - doc: |-
+          RegisterPasswordHasher inserts p under p.Algorithm() and returns it so callers
+          can bind the singleton to a typed package-level variable. Panics on a nil
+          hasher or when a distinct hasher already claims the same Algorithm.
+
+          IFACE-PLUGIN: the registry hands plug-in PasswordHasher instances back to
+          callers so each scheme keeps its concrete type unexported; the contract is the
+          PasswordHasher interface itself.
+
+          "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
+          plug-in whose type is not comparable both satisfy the port and neither can
+          serve one call (see internal/kernel/plugin).
+        impl: registerPasswordHasher
+        in:
+          - name: p
+            type: PasswordHasher
+        name: RegisterPasswordHasher
+        out:
+          - type: PasswordHasher
+      - doc: |-
+          LookupPasswordHasher returns the PasswordHasher registered under name.
+
+          IFACE-PLUGIN: the registry stores plug-in PasswordHasher instances behind the
+          PasswordHasher interface — concrete types are intentionally unexported per scheme.
+        impl: lookupPasswordHasher
+        in:
+          - name: name
+            type: Algorithm
+        name: LookupPasswordHasher
+        out:
+          - name: p
+            type: PasswordHasher
+          - name: ok
+            type: bool
+      - doc: |-
+          AvailablePasswordHashers returns the sorted list of registered password
+          Algorithms.
+        impl: availablePasswordHashers
+        name: AvailablePasswordHashers
+        out:
+          - type: "[]Algorithm"
+      - doc: |-
+          Available returns the sorted list of registered Algorithms, or nil before
+          any Register.
+        impl: available
+        name: Available
+        out:
+          - type: "[]Algorithm"
+      - doc: |-
+          RegisterSigner inserts s under s.Algorithm() and returns it so callers can
+          bind the singleton to a typed package-level variable. Panics on a nil signer
+          or when a distinct signer already claims the same Algorithm.
+
+          IFACE-PLUGIN: the registry hands plug-in Signer instances back to callers so
+          each scheme keeps its concrete type unexported; the contract is the Signer
+          interface itself.
+
+          "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
+          plug-in whose type is not comparable both satisfy the port and neither can
+          serve one call (see internal/kernel/plugin).
+        impl: registerSigner
+        in:
+          - name: s
+            type: Signer
+        name: RegisterSigner
+        out:
+          - type: Signer
+      - doc: |-
+          LookupSigner returns the Signer registered under name.
+
+          IFACE-PLUGIN: the registry stores plug-in Signer instances behind the Signer
+          interface — concrete types are intentionally unexported per scheme.
+        impl: lookupSigner
+        in:
+          - name: name
+            type: Algorithm
+        name: LookupSigner
+        out:
+          - name: s
+            type: Signer
+          - name: ok
+            type: bool
+      - doc: AvailableSigners returns the sorted list of registered signature Algorithms.
+        impl: availableSigners
+        name: AvailableSigners
+        out:
+          - type: "[]Algorithm"
+      - doc: |-
+          RegisterStreamSealer inserts s under s.Algorithm() and returns it so callers
+          can bind the singleton to a typed package-level variable. Panics on a nil
+          sealer or when a distinct sealer already claims the same Algorithm.
+
+          IFACE-PLUGIN: the registry hands plug-in StreamSealer instances back to
+          callers so each scheme keeps its concrete type unexported; the contract is the
+          StreamSealer interface itself.
+
+          "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
+          plug-in whose type is not comparable both satisfy the port and neither can
+          serve one call (see internal/kernel/plugin).
+        impl: registerStreamSealer
+        in:
+          - name: s
+            type: StreamSealer
+        name: RegisterStreamSealer
+        out:
+          - type: StreamSealer
+      - doc: |-
+          LookupStreamSealer returns the StreamSealer registered under name.
+
+          IFACE-PLUGIN: the registry stores plug-in StreamSealer instances behind the
+          StreamSealer interface — concrete types are intentionally unexported per scheme.
+        impl: lookupStreamSealer
+        in:
+          - name: name
+            type: Algorithm
+        name: LookupStreamSealer
+        out:
+          - name: s
+            type: StreamSealer
+          - name: ok
+            type: bool
+      - doc: |-
+          AvailableStreamSealers returns the sorted list of registered streaming-AEAD
+          Algorithms.
+        impl: availableStreamSealers
+        name: AvailableStreamSealers
         out:
           - type: "[]Algorithm"
       - doc: |-
@@ -357,46 +563,6 @@ packages:
             type: "[]byte"
           - name: err
             type: error
-      - doc: |-
-          RegisterHasher inserts h under h.Algorithm() and returns it so callers can
-          bind the singleton to a typed package-level variable like
-          `var Hasher = crypto.RegisterHasher(sha256Hasher{})`. Panics on a nil hasher
-          or when a distinct hasher already claims the same Algorithm.
-
-          IFACE-PLUGIN: the registry hands plug-in Hasher instances back to callers so
-          each scheme keeps its concrete type unexported; the stable contract is the
-          Hasher interface itself.
-
-          "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
-          plug-in whose type is not comparable both satisfy the port and neither can
-          serve one call (see internal/kernel/plugin).
-        in:
-          - name: h
-            type: Hasher
-        name: RegisterHasher
-        impl: registerHasher
-        out:
-          - type: Hasher
-      - doc: |-
-          LookupHasher returns the Hasher registered under name.
-
-          IFACE-PLUGIN: the registry stores plug-in Hasher instances behind the Hasher
-          interface — concrete types are intentionally unexported per scheme.
-        in:
-          - name: name
-            type: Algorithm
-        name: LookupHasher
-        impl: lookupHasher
-        out:
-          - name: h
-            type: Hasher
-          - name: ok
-            type: bool
-      - doc: AvailableHashers returns the sorted list of registered hash Algorithms.
-        name: AvailableHashers
-        impl: availableHashers
-        out:
-          - type: "[]Algorithm"
       - doc: |-
           Sum returns the digest of data under the Hasher registered as name. A name
           with no registered hasher returns UnknownHashAlgorithm (blank-import the
@@ -447,50 +613,11 @@ packages:
           - name: raw
             type: "[]byte"
         name: NewKey
-        impl: newKey
         out:
           - name: key
             type: Key
           - name: err
             type: error
-      - doc: |-
-          RegisterMAC inserts m under m.Algorithm() and returns it so callers can bind
-          the singleton to a typed package-level variable. Panics on a nil MAC or when
-          a distinct MAC already claims the same Algorithm.
-
-          IFACE-PLUGIN: the registry hands plug-in MAC instances back to callers so each
-          scheme keeps its concrete type unexported; the contract is the MAC interface.
-
-          "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
-          plug-in whose type is not comparable both satisfy the port and neither can
-          serve one call (see internal/kernel/plugin).
-        in:
-          - name: m
-            type: MAC
-        name: RegisterMAC
-        impl: registerMAC
-        out:
-          - type: MAC
-      - doc: |-
-          LookupMAC returns the MAC registered under name.
-
-          IFACE-PLUGIN: the registry stores plug-in MAC instances behind the MAC
-          interface — concrete types are intentionally unexported per scheme.
-        in:
-          - name: name
-            type: Algorithm
-        name: LookupMAC
-        impl: lookupMAC
-        out:
-          - name: m
-            type: MAC
-          - name: ok
-            type: bool
-      - doc: AvailableMACs returns the sorted list of registered MAC Algorithms.
-        name: AvailableMACs
-        impl: availableMACs
-        out:
-          - type: "[]Algorithm"
       - doc: |-
           MACTag returns the authentication tag over message under key for the MAC
           registered as name. It is named MACTag (not Tag) so the dispatch verb never
@@ -528,47 +655,6 @@ packages:
             type: bool
           - name: err
             type: error
-      - doc: |-
-          RegisterPasswordHasher inserts p under p.Algorithm() and returns it so callers
-          can bind the singleton to a typed package-level variable. Panics on a nil
-          hasher or when a distinct hasher already claims the same Algorithm.
-
-          IFACE-PLUGIN: the registry hands plug-in PasswordHasher instances back to
-          callers so each scheme keeps its concrete type unexported; the contract is the
-          PasswordHasher interface itself.
-
-          "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
-          plug-in whose type is not comparable both satisfy the port and neither can
-          serve one call (see internal/kernel/plugin).
-        in:
-          - name: p
-            type: PasswordHasher
-        name: RegisterPasswordHasher
-        impl: registerPasswordHasher
-        out:
-          - type: PasswordHasher
-      - doc: |-
-          LookupPasswordHasher returns the PasswordHasher registered under name.
-
-          IFACE-PLUGIN: the registry stores plug-in PasswordHasher instances behind the
-          PasswordHasher interface — concrete types are intentionally unexported per scheme.
-        in:
-          - name: name
-            type: Algorithm
-        name: LookupPasswordHasher
-        impl: lookupPasswordHasher
-        out:
-          - name: p
-            type: PasswordHasher
-          - name: ok
-            type: bool
-      - doc: |-
-          AvailablePasswordHashers returns the sorted list of registered password
-          Algorithms.
-        name: AvailablePasswordHashers
-        impl: availablePasswordHashers
-        out:
-          - type: "[]Algorithm"
       - doc: |-
           HashPassword returns a PHC-string hash of password using the PasswordHasher
           registered as name. A name with no registered hasher returns
@@ -644,13 +730,6 @@ packages:
           - name: ok
             type: bool
       - doc: |-
-          Available returns the sorted list of registered Algorithms, or nil before
-          any Register.
-        name: Available
-        impl: available
-        out:
-          - type: "[]Algorithm"
-      - doc: |-
           Seal encrypts plaintext under the AEAD registered as name, binding aad, and
           returns the self-framed box. A name with no registered scheme returns
           UnknownAlgorithm (blank-import the scheme's package to register it).
@@ -685,45 +764,6 @@ packages:
             type: "[]byte"
           - name: err
             type: error
-      - doc: |-
-          RegisterSigner inserts s under s.Algorithm() and returns it so callers can
-          bind the singleton to a typed package-level variable. Panics on a nil signer
-          or when a distinct signer already claims the same Algorithm.
-
-          IFACE-PLUGIN: the registry hands plug-in Signer instances back to callers so
-          each scheme keeps its concrete type unexported; the contract is the Signer
-          interface itself.
-
-          "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
-          plug-in whose type is not comparable both satisfy the port and neither can
-          serve one call (see internal/kernel/plugin).
-        in:
-          - name: s
-            type: Signer
-        name: RegisterSigner
-        impl: registerSigner
-        out:
-          - type: Signer
-      - doc: |-
-          LookupSigner returns the Signer registered under name.
-
-          IFACE-PLUGIN: the registry stores plug-in Signer instances behind the Signer
-          interface — concrete types are intentionally unexported per scheme.
-        in:
-          - name: name
-            type: Algorithm
-        name: LookupSigner
-        impl: lookupSigner
-        out:
-          - name: s
-            type: Signer
-          - name: ok
-            type: bool
-      - doc: AvailableSigners returns the sorted list of registered signature Algorithms.
-        name: AvailableSigners
-        impl: availableSigners
-        out:
-          - type: "[]Algorithm"
       - doc: |-
           GenerateKey draws a fresh keypair for the Signer registered as name. A name
           with no registered signer returns UnknownSignatureAlgorithm (blank-import the
@@ -772,47 +812,6 @@ packages:
             type: bool
           - name: err
             type: error
-      - doc: |-
-          RegisterStreamSealer inserts s under s.Algorithm() and returns it so callers
-          can bind the singleton to a typed package-level variable. Panics on a nil
-          sealer or when a distinct sealer already claims the same Algorithm.
-
-          IFACE-PLUGIN: the registry hands plug-in StreamSealer instances back to
-          callers so each scheme keeps its concrete type unexported; the contract is the
-          StreamSealer interface itself.
-
-          "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
-          plug-in whose type is not comparable both satisfy the port and neither can
-          serve one call (see internal/kernel/plugin).
-        in:
-          - name: s
-            type: StreamSealer
-        name: RegisterStreamSealer
-        impl: registerStreamSealer
-        out:
-          - type: StreamSealer
-      - doc: |-
-          LookupStreamSealer returns the StreamSealer registered under name.
-
-          IFACE-PLUGIN: the registry stores plug-in StreamSealer instances behind the
-          StreamSealer interface — concrete types are intentionally unexported per scheme.
-        in:
-          - name: name
-            type: Algorithm
-        name: LookupStreamSealer
-        impl: lookupStreamSealer
-        out:
-          - name: s
-            type: StreamSealer
-          - name: ok
-            type: bool
-      - doc: |-
-          AvailableStreamSealers returns the sorted list of registered streaming-AEAD
-          Algorithms.
-        name: AvailableStreamSealers
-        impl: availableStreamSealers
-        out:
-          - type: "[]Algorithm"
       - doc: |-
           SealStream wraps dst so writes are sealed under key with aad by the
           StreamSealer registered as name. Streaming extends the AEAD domain, so a name
@@ -1430,6 +1429,20 @@ packages:
           secret everywhere — call it when you are done with the key.
         methods:
           - doc: |-
+              Zeroize overwrites the key material with zeros. Because copies share one
+              backing array, this clears the secret for every copy of the Key.
+            impl: zeroize
+            name: Zeroize
+            recv: value
+          - doc: |-
+              GoString implements fmt.GoStringer so %#v stays redacted too — fmt bypasses
+              String for Go-syntax formatting and would otherwise dump the raw slice.
+            impl: goString
+            name: GoString
+            out:
+              - type: string
+            recv: value
+          - doc: |-
               Bytes returns a fresh copy of the raw key material for handoff to a cipher.
               Callers MUST NOT log the result; the redaction only covers String / GoString.
               A zero-value Key returns nil.
@@ -1438,23 +1451,9 @@ packages:
               - type: "[]byte"
             recv: value
           - doc: |-
-              Zeroize overwrites the key material with zeros. Because copies share one
-              backing array, this clears the secret for every copy of the Key.
-            name: Zeroize
-            impl: zeroize
-            recv: value
-          - doc: |-
               String implements fmt.Stringer and always redacts so the key never reaches a
               log line through %v / %s.
             name: String
-            out:
-              - type: string
-            recv: value
-          - doc: |-
-              GoString implements fmt.GoStringer so %#v stays redacted too — fmt bypasses
-              String for Go-syntax formatting and would otherwise dump the raw slice.
-            name: GoString
-            impl: goString
             out:
               - type: string
             recv: value
@@ -1624,6 +1623,14 @@ packages:
           content ID / cache key) — it is NOT authentication.
         methods:
           - doc: |-
+              Sum returns the digest of every byte written so far. Calling it does not reset
+              the hash, so subsequent Writes keep extending the same digest.
+            impl: sum
+            name: Sum
+            out:
+              - type: "[]byte"
+            recv: pointer
+          - doc: |-
               Write forwards p to the underlying writer and folds the same bytes into the
               running hash, returning the count the destination accepted.
             in:
@@ -1635,14 +1642,6 @@ packages:
                 type: int
               - name: err
                 type: error
-            recv: pointer
-          - doc: |-
-              Sum returns the digest of every byte written so far. Calling it does not reset
-              the hash, so subsequent Writes keep extending the same digest.
-            name: Sum
-            impl: sum
-            out:
-              - type: "[]byte"
             recv: pointer
           - doc: |-
               SumHex returns Sum rendered as canonical lowercase hex — the frozen string
@@ -1733,7 +1732,6 @@ packages:
           - name: master
             type: corecrypto.Key
         name: NewKeyTree
-        impl: newKeyTree
         out:
           - type: KeyTree
     imports:
@@ -1751,7 +1749,6 @@ packages:
               - name: segment
                 type: string
             name: Child
-            impl: child
             out:
               - type: KeyTree
             recv: value

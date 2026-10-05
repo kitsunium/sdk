@@ -1510,7 +1510,7 @@ func After(ctx context.Context, d time.Duration) <-chan time.Time
 After is time.After on the app's clock.
 
 <a name="AllowPeers"></a>
-## func [AllowPeers](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [AllowPeers](<https://github.com/kitsunium/sdk/blob/main/framework/kit/listener.go>)
 
 ```go
 func AllowPeers(uids []int, gids []int) ListenerOption
@@ -1521,7 +1521,7 @@ AllowPeers admits accounts besides the product's own: an on-call group declared 
 IFACE-OPAQUE: ListenerOption is sealed — its one method is unexported — so only this package makes one, and a caller only passes it to Listen.
 
 <a name="Analyze"></a>
-## func [Analyze](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [Analyze](<https://github.com/kitsunium/sdk/blob/main/framework/kit/config.go>)
 
 ```go
 func Analyze(on bool) AppOption
@@ -1530,7 +1530,7 @@ func Analyze(on bool) AppOption
 Analyze switches the in-process static analysis on or off in dev.
 
 <a name="Analyzer"></a>
-## func [Analyzer](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [Analyzer](<https://github.com/kitsunium/sdk/blob/main/framework/kit/app_analysis.go>)
 
 ```go
 func Analyzer(fn AnalyzeFunc) AppOption
@@ -1548,7 +1548,7 @@ func Anonymise[T any](fn func(*T)) StoreOption
 Anonymise says what an erased record keeps: fn runs first, and generalises into unclassified fields — a birth date to its year, an address to its region; then kit clears the rest. kit cannot prove that what remains identifies no one: by declaring the function, the product asserts it.
 
 <a name="AnyUser"></a>
-## func [AnyUser](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [AnyUser](<https://github.com/kitsunium/sdk/blob/main/framework/kit/expose.go>)
 
 ```go
 func AnyUser() ExposeOption
@@ -1563,7 +1563,7 @@ var MyOrders = Service.Query("my-orders", myOrders, kit.Auth()).Expose("GET /ord
 It adds no authentication of its own: an exposure authenticates as its operation asks, so the operation declares [Auth](#Auth).
 
 <a name="Anyone"></a>
-## func [Anyone](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [Anyone](<https://github.com/kitsunium/sdk/blob/main/framework/kit/expose.go>)
 
 ```go
 func Anyone() ExposeOption
@@ -1578,7 +1578,7 @@ var Report = Service.Command("report", file).Expose("POST /reports", kit.Anyone(
 It adds no authentication: an operation that asks for a user ([Auth](#Auth)) takes [AnyUser](#AnyUser) instead, and one with [AuthOptional](#AuthOptional) still knows the caller who signed in.
 
 <a name="Auth"></a>
-## func [Auth](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [Auth](<https://github.com/kitsunium/sdk/blob/main/framework/kit/auth.go>)
 
 ```go
 func Auth() OperationOption
@@ -1598,7 +1598,7 @@ func AuthData[D any](ctx context.Context) (D, bool)
 AuthData returns what the auth handler said about the caller, and whether there is a caller whose data has type D.
 
 <a name="AuthOptional"></a>
-## func [AuthOptional](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [AuthOptional](<https://github.com/kitsunium/sdk/blob/main/framework/kit/auth.go>)
 
 ```go
 func AuthOptional() OperationOption
@@ -1628,7 +1628,7 @@ app := kit.NewApp("shop", posts.Service).With(kit.Mount(moderation.Module, kit.B
 ```
 
 <a name="Bulkhead"></a>
-## func [Bulkhead](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [Bulkhead](<https://github.com/kitsunium/sdk/blob/main/framework/kit/endpoint.go>)
 
 ```go
 func Bulkhead(maxConcurrent int) OperationOption
@@ -1675,7 +1675,7 @@ func Clock(c clock.Timed) AppOption
 Clock makes the app read and wait on c instead of the system clock: a test drives timer transitions and jobs with a clock.ManualClock.
 
 <a name="ConfigFiles"></a>
-## func [ConfigFiles](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [ConfigFiles](<https://github.com/kitsunium/sdk/blob/main/framework/kit/setting.go>)
 
 ```go
 func ConfigFiles(fsys fs.FS) AppOption
@@ -1700,7 +1700,7 @@ func Conflict(message string) *Error
 Conflict reports a request the resource's current state refuses (409).
 
 <a name="DataDir"></a>
-## func [DataDir](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [DataDir](<https://github.com/kitsunium/sdk/blob/main/framework/kit/config.go>)
 
 ```go
 func DataDir(dir string) AppOption
@@ -1734,7 +1734,7 @@ var App = kit.NewApp("vigie", intake.Service, desk.Service, audit.Service).With(
 name is 1 to 49 lower-case letters, digits and dashes, not starting with "kit-", unique among the app's databases. It names the database's URL, the secret \<name>-url — the variable \<APP>\_\<NAME>\_URL, or \<APP>\_\<NAME>\_URL\_FILE naming a file that holds it, then the environment's secret store —, and its settings: \<name>-max-open (10), \<name>-max-idle (2), \<name>-max-lifetime (30m), \<name>-max-idle-time (0: none), \<name>-timeout (5s), \<name>-check-timeout (5s) and \<name>-migrate (start, or manual). Outside dev the URL is required and writes its TLS mode; in dev a database without one leaves its stores in the data directory, and a SQLite database without one is the file \<data>/\<name>.sqlite. [InMemory](#InMemory) on the app opens none.
 
 <a name="DefaultCommand"></a>
-## func [DefaultCommand](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [DefaultCommand](<https://github.com/kitsunium/sdk/blob/main/framework/kit/cli.go>)
 
 ```go
 func DefaultCommand() CLIOption
@@ -1772,7 +1772,7 @@ func DeleteOnErasure() StoreOption
 DeleteOnErasure makes a person's erasure (kit.Erase) delete the store's records instead of clearing them, as sessions and accounts want.
 
 <a name="DesignDigest"></a>
-## func [DesignDigest](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [DesignDigest](<https://github.com/kitsunium/sdk/blob/main/framework/kit/telemetry.go>)
 
 ```go
 func DesignDigest(digest string) AppOption
@@ -1830,7 +1830,7 @@ Export returns every record whose subject is one of ids, in every store of the a
 A person known under several identities — a user's ID in one store, an e-mail address in another — is found by giving all of them. ctx must run inside the app: an endpoint's, a job's, a loop's.
 
 <a name="FailSafe"></a>
-## func [FailSafe](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [FailSafe](<https://github.com/kitsunium/sdk/blob/main/framework/kit/cli.go>)
 
 ```go
 func FailSafe() CLIOption
@@ -1865,7 +1865,7 @@ func Forbidden(message string) *Error
 Forbidden reports a caller who may not do this (403).
 
 <a name="From"></a>
-## func [From](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [From](<https://github.com/kitsunium/sdk/blob/main/framework/kit/mailer.go>)
 
 ```go
 func From(name string, addr string) MailerOption
@@ -1876,7 +1876,7 @@ From sets the sender of every message that names none.
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
 <a name="Generated"></a>
-## func [Generated](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [Generated](<https://github.com/kitsunium/sdk/blob/main/framework/kit/secret.go>)
 
 ```go
 func Generated(bytes int) SecretOption
@@ -1905,7 +1905,7 @@ func HoldSubject(ctx context.Context, reason string, ids ...string) error
 HoldSubject places a legal hold on every record whose subject is one of ids, in every store of the app: an authority's request about a person. It holds the records they have now; a record written later is not held. reason is kept as Store.Hold keeps it.
 
 <a name="IdleStop"></a>
-## func [IdleStop](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [IdleStop](<https://github.com/kitsunium/sdk/blob/main/framework/kit/app_profiles.go>)
 
 ```go
 func IdleStop(d time.Duration) AppOption
@@ -1941,7 +1941,7 @@ func Invalid(message string) *Error
 Invalid reports a request the caller must change before retrying (400).
 
 <a name="KeepVersions"></a>
-## func [KeepVersions](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [KeepVersions](<https://github.com/kitsunium/sdk/blob/main/framework/kit/secret.go>)
 
 ```go
 func KeepVersions(n int) SecretOption
@@ -1952,7 +1952,7 @@ KeepVersions is how many versions of a generated secret a rotation leaves, the n
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
 <a name="Keeps"></a>
-## func [Keeps](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [Keeps](<https://github.com/kitsunium/sdk/blob/main/framework/kit/database.go>)
 
 ```go
 func Keeps(things ...Keepable) DatabaseOption
@@ -1961,7 +1961,7 @@ func Keeps(things ...Keepable) DatabaseOption
 Keeps says what the database keeps: a service's stores, a store, a module's stores. The most precise wins: a store kept by name, then its service, then its module, then the default database — the one declared without Keeps —, then the data directory, then memory. [InMemory](#InMemory) wins over all of them, on the app as on a store.
 
 <a name="Listen"></a>
-## func [Listen](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [Listen](<https://github.com/kitsunium/sdk/blob/main/framework/kit/config.go>)
 
 ```go
 func Listen(addr string) AppOption
@@ -1979,7 +1979,7 @@ func Log(ctx context.Context) logger.Logger
 Log returns the app's logger, for the node ctx runs inside. In dev, every record it writes inside a span is also kept beside that span, so the Studio shows a request's logs with its trace.
 
 <a name="Logs"></a>
-## func [Logs](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [Logs](<https://github.com/kitsunium/sdk/blob/main/framework/kit/config.go>)
 
 ```go
 func Logs(w io.Writer) AppOption
@@ -1988,7 +1988,7 @@ func Logs(w io.Writer) AppOption
 Logs sends the app's logs to w instead of standard error.
 
 <a name="MailAttempts"></a>
-## func [MailAttempts](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [MailAttempts](<https://github.com/kitsunium/sdk/blob/main/framework/kit/mailer.go>)
 
 ```go
 func MailAttempts(n int) MailerOption
@@ -1999,7 +1999,7 @@ MailAttempts is how many deliveries a message gets before it is dead-lettered. T
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
 <a name="MaxBody"></a>
-## func [MaxBody](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [MaxBody](<https://github.com/kitsunium/sdk/blob/main/framework/kit/endpoint.go>)
 
 ```go
 func MaxBody(bytes int64) EndpointOption
@@ -2008,7 +2008,7 @@ func MaxBody(bytes int64) EndpointOption
 MaxBody bounds the request body the endpoint reads. The default is [DefaultMaxBody](#DefaultMaxBody).
 
 <a name="MaxDeliveries"></a>
-## func [MaxDeliveries](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [MaxDeliveries](<https://github.com/kitsunium/sdk/blob/main/framework/kit/topic.go>)
 
 ```go
 func MaxDeliveries(n int) DeliveryOption
@@ -2030,7 +2030,7 @@ Migrations are migrations, values of the SDK's sql.Migration, run when the datab
 Given to [Database](#Database), they are the product's, under schema\_migrations. Given to [NewModule](#NewModule), they are the module's (ADR 0008), for the data it keeps outside kit's stores: run on the database that keeps the module, under \<module>\_migrations.
 
 <a name="MinLength"></a>
-## func [MinLength](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [MinLength](<https://github.com/kitsunium/sdk/blob/main/framework/kit/passwords.go>)
 
 ```go
 func MinLength(n int) PasswordOption
@@ -2128,7 +2128,7 @@ func NewTicker(ctx context.Context, d time.Duration) clock.Ticker
 NewTicker is a ticker of period d on the app's clock, for a loop written by hand ([Service](#Service).Go): a test's manual clock drives it like every timer kit runs itself, where a time.Ticker would tick on the wall clock whatever the test does. It panics on a non-positive d, as time.NewTicker does.
 
 <a name="NoTransaction"></a>
-## func [NoTransaction](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [NoTransaction](<https://github.com/kitsunium/sdk/blob/main/framework/kit/command.go>)
 
 ```go
 func NoTransaction() CommandOption
@@ -2137,7 +2137,7 @@ func NoTransaction() CommandOption
 NoTransaction runs a command outside a transaction of its own: its writes land as its handler makes them, and its effects leave when made — a failed command may have written or announced something. On the data directory and in memory, where a writing command's transaction takes the writer turn, it lets such commands run side by side. Dispatched inside another command, it still runs in that one's transaction.
 
 <a name="NotCommon"></a>
-## func [NotCommon](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [NotCommon](<https://github.com/kitsunium/sdk/blob/main/framework/kit/passwords.go>)
 
 ```go
 func NotCommon() PasswordOption
@@ -2155,7 +2155,7 @@ func NotFound(message string) *Error
 NotFound reports that the addressed resource does not exist (404).
 
 <a name="NotReused"></a>
-## func [NotReused](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [NotReused](<https://github.com/kitsunium/sdk/blob/main/framework/kit/passwords.go>)
 
 ```go
 func NotReused(n int) PasswordOption
@@ -2175,7 +2175,7 @@ func Now(ctx context.Context) time.Time
 Now returns the app's time: the system clock, or the clock a test gave with [Clock](#Clock). Product code that compares with a deadline reads it rather than time.Now, so that a test's manual clock reaches it.
 
 <a name="Optional"></a>
-## func [Optional](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [Optional](<https://github.com/kitsunium/sdk/blob/main/framework/kit/secret.go>)
 
 ```go
 func Optional() SecretOption
@@ -2184,7 +2184,7 @@ func Optional() SecretOption
 Optional makes a provided secret one the product can do without — the key of a feature that stays off while nobody gives it. A start where it is set nowhere goes on; [Secret](#Secret).Present says whether it is set now, and a use of it while it is absent — [Secret](#Secret).Value, Seal, Open, Sign or Verify — answers an error errs.HasCode matches with [CodeSecretMissing](#CodeSecretMissing). It is read where it lives at every use, as every provided secret is: given later — \`secrets set\` in the environment's store, a new content in the file its \_FILE variable names —, it is found at its next use. A generated secret is kit's to make and never absent: Optional with [Generated](#Generated) is refused.
 
 <a name="OwnStores"></a>
-## func [OwnStores](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [OwnStores](<https://github.com/kitsunium/sdk/blob/main/framework/kit/topic.go>)
 
 ```go
 func OwnStores() SubscriptionOption
@@ -2193,7 +2193,7 @@ func OwnStores() SubscriptionOption
 OwnStores lets a watch ([Service](#Service).Watch) hear the stores of its own module too — the product's own, for a watch of the product's —, which a watch never hears by default. Such a watch never hears the writes its own handler makes, in its handler's context — a handler that writes what it watches, a screening that stamps the record it screened, would otherwise hear itself forever —; a write the handler only causes, later and elsewhere — a queued command's handling, a topic's delivery — is heard. A subscription to a topic refuses it: a topic has no stores.
 
 <a name="Parallelism"></a>
-## func [Parallelism](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [Parallelism](<https://github.com/kitsunium/sdk/blob/main/framework/kit/topic.go>)
 
 ```go
 func Parallelism(n int) DeliveryOption
@@ -2222,7 +2222,7 @@ func Prefix(prefix string) MountOption
 Prefix serves a module's routes under prefix — "/trust/" — instead of "/\<module>/"; "/" shares the product's route space, where a route both declare is refused as any two are. A prefix starts and ends with '/', and never lies under /\_kit/.
 
 <a name="Profile"></a>
-## func [Profile](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [Profile](<https://github.com/kitsunium/sdk/blob/main/framework/kit/app_profiles.go>)
 
 ```go
 func Profile(p string) AppOption
@@ -2240,7 +2240,7 @@ func Purpose(text string) StoreOption
 Purpose says why the store keeps its records (GDPR art. 30(1)(b)): the register lists it, and a person's export carries it.
 
 <a name="Queued"></a>
-## func [Queued](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [Queued](<https://github.com/kitsunium/sdk/blob/main/framework/kit/command.go>)
 
 ```go
 func Queued() CommandOption
@@ -2251,7 +2251,7 @@ Queued sends a command to the background. Dispatch returns once the command's ow
 Delivery is at least once: Queued is the product's promise that the handler tolerates a redelivery, and a [Command](#Command).Key narrows the duplicates without removing them. The handler runs in the dispatcher's trace, as the user who dispatched it ([UserID](#UserID)); what the auth handler said about that user is not queued. A queued command's input is a contract with the messages already queued: add a field, never rename one.
 
 <a name="RateLimit"></a>
-## func [RateLimit](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [RateLimit](<https://github.com/kitsunium/sdk/blob/main/framework/kit/endpoint.go>)
 
 ```go
 func RateLimit(perSecond float64, burst int) OperationOption
@@ -2321,7 +2321,7 @@ app := App.With(kit.Replace(apps.AppAPI, func(ctx context.Context, in apps.IDInp
 ```
 
 <a name="Required"></a>
-## func [Required](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [Required](<https://github.com/kitsunium/sdk/blob/main/framework/kit/setting.go>)
 
 ```go
 func Required() SettingOption
@@ -2372,7 +2372,7 @@ page, err = Pages.Restore(ctx, id, revs[3].Number, "/title")     // the title on
 A store with Revisions(n) holds up to n+1 times its records: in memory with the store in the data directory, in the table \<table>\_\_\_vs on a database, which kit's migrations create.
 
 <a name="Root"></a>
-## func [Root](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [Root](<https://github.com/kitsunium/sdk/blob/main/framework/kit/static.go>)
 
 ```go
 func Root(dir string) StaticOption
@@ -2383,7 +2383,7 @@ Root serves the sub-directory dir of the file system rather than its root — "a
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
 <a name="RotateEvery"></a>
-## func [RotateEvery](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [RotateEvery](<https://github.com/kitsunium/sdk/blob/main/framework/kit/secret.go>)
 
 ```go
 func RotateEvery(d time.Duration) SecretOption
@@ -2403,7 +2403,7 @@ func ScopeKey(scopes ...Scope) (string, error)
 ScopeKey is the name the scopes give in this process: 16 hex digits of the SHA-256 of their values. A client computes the key the daemon computed from the same declaration, and so finds its lock or its socket.
 
 <a name="SecretStore"></a>
-## func [SecretStore](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [SecretStore](<https://github.com/kitsunium/sdk/blob/main/framework/kit/secretstore.go>)
 
 ```go
 func SecretStore(store secret.Store) AppOption
@@ -2432,7 +2432,7 @@ SetCookie adds a Set-Cookie header to the HTTP response of the endpoint ctx serv
 HttpOnly is always set, and Secure always outside dev (and in dev for SameSite=None, which browsers require): a boolean has no "unset" a default could fill, and kit chooses the hardened reading. A cookie set more than once in one response keeps its last value, and cookies set before an error are sent with the error — clearing a stale session on a 401 works.
 
 <a name="Singleton"></a>
-## func [Singleton](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [Singleton](<https://github.com/kitsunium/sdk/blob/main/framework/kit/app_profiles.go>)
 
 ```go
 func Singleton(scope string) AppOption
@@ -2441,7 +2441,7 @@ func Singleton(scope string) AppOption
 Singleton keeps one process of the app alive per scope on this machine: the start takes an exclusive file lock named after scope in the app's runtime directory (pkg/v1/app/lock: flock, LockFileEx) and holds it until the process ends. A second process refuses to start with CodeSingletonHeld — for a daemon's client, the sign to talk to the one that runs. The kernel drops the lock with a dead process.
 
 <a name="SingletonPer"></a>
-## func [SingletonPer](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [SingletonPer](<https://github.com/kitsunium/sdk/blob/main/framework/kit/app_profiles.go>)
 
 ```go
 func SingletonPer(scopes ...Scope) AppOption
@@ -2450,7 +2450,7 @@ func SingletonPer(scopes ...Scope) AppOption
 SingletonPer keeps one process of the app alive per value of scopes on this machine — per user, per installed executable, per configuration directory ([PerUID](#PerUID), [PerExecutable](#PerExecutable), [PerConfigDir](#PerConfigDir), [PerEnv](#PerEnv)) —: the lock is named after the scopes' key ([ScopeKey](#ScopeKey)), computed at the start, and held as Singleton's is. A client that must find the process computes the same key from the same scopes.
 
 <a name="SocketPath"></a>
-## func [SocketPath](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [SocketPath](<https://github.com/kitsunium/sdk/blob/main/framework/kit/listener.go>)
 
 ```go
 func SocketPath(path string) ListenerOption
@@ -2470,7 +2470,7 @@ func SocketPathFor(product string, service string, name string, scopes ...Scope)
 SocketPathFor is the socket of the listener name of service in product — the binary's name for a role of one, else the app's —, placed by default and named after scopes (SocketPer): the one rule, for a client of another process role that does not import the daemon's declarations (D22) — it names the three words and the scopes its contract states. The service is its qualified name for a module's.
 
 <a name="SocketPer"></a>
-## func [SocketPer](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [SocketPer](<https://github.com/kitsunium/sdk/blob/main/framework/kit/listener.go>)
 
 ```go
 func SocketPer(scopes ...Scope) ListenerOption
@@ -2490,7 +2490,7 @@ func Stop(ctx context.Context) bool
 Stop asks the app ctx runs in to end its run: Run returns as it does on a signal, its stop draining every component — a daemon told "stop" by its client, on its listener, ends itself so. It returns at once, before the stop; it reports false when ctx runs in no app — a handler's, a loop's, a command's context does — or the app does not run.
 
 <a name="Studio"></a>
-## func [Studio](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [Studio](<https://github.com/kitsunium/sdk/blob/main/framework/kit/config.go>)
 
 ```go
 func Studio(on bool) AppOption
@@ -2499,7 +2499,7 @@ func Studio(on bool) AppOption
 Studio switches the Studio on or off in dev. It is always off in production.
 
 <a name="Telemetry"></a>
-## func [Telemetry](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [Telemetry](<https://github.com/kitsunium/sdk/blob/main/framework/kit/telemetry.go>)
 
 ```go
 func Telemetry(path string, gids ...int) AppOption
@@ -2508,7 +2508,7 @@ func Telemetry(path string, gids ...int) AppOption
 Telemetry exports the app's telemetry on the private socket at path — absolute, and short enough for a Unix socket (pkg/v1/proc/ipc) — admitting the groups gids besides the product's own account. It wins over KIT\_TELEMETRY.
 
 <a name="Timeout"></a>
-## func [Timeout](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [Timeout](<https://github.com/kitsunium/sdk/blob/main/framework/kit/endpoint.go>)
 
 ```go
 func Timeout(d time.Duration) OperationOption
@@ -2519,7 +2519,7 @@ Timeout cancels the handler's context after d and answers 504. It is the SDK's r
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
 <a name="Transact"></a>
-## func [Transact](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [Transact](<https://github.com/kitsunium/sdk/blob/main/framework/kit/transact.go>)
 
 ```go
 func Transact(ctx context.Context, fn func(context.Context) error) error
@@ -2598,7 +2598,7 @@ func UserID(ctx context.Context) (UID, bool)
 UserID returns the authenticated caller of the request ctx serves, and whether there is one. An in-process [Endpoint](#Endpoint).Call carries its caller's user along.
 
 <a name="WakeAt"></a>
-## func [WakeAt](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [WakeAt](<https://github.com/kitsunium/sdk/blob/main/framework/kit/loop.go>)
 
 ```go
 func WakeAt(next func(context.Context) (time.Time, bool)) LoopOption
@@ -2609,7 +2609,7 @@ WakeAt wakes the loop at the time next returns, asked again after every run; fal
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
 <a name="WakeEvery"></a>
-## func [WakeEvery](<https://github.com/kitsunium/sdk/blob/main/framework/kit/decl_gen.go>)
+## func [WakeEvery](<https://github.com/kitsunium/sdk/blob/main/framework/kit/loop.go>)
 
 ```go
 func WakeEvery(d time.Duration) LoopOption
@@ -3364,7 +3364,7 @@ func (*Error) Unwrap() error
 Unwrap returns the cause, so errors.Is and errors.As see through an Error.
 
 <a name="Error.Wrap"></a>
-### func \(Error\) [Wrap](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
+### func \(Error\) [Wrap](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go>)
 
 ```go
 func (*Error) Wrap(cause error) *Error

@@ -678,7 +678,7 @@ String returns the CLDR spelling of the category, or "invalid" for a value outsi
 "invalid" rather than a number, and never a silent "other": a corrupt Form reaching a log must not read as if it were a category, which is the same rule internal/core/security/authz applies to a corrupt Decision.
 
 <a name="Form.Valid"></a>
-### func \(Form\) [Valid](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/i18n/decl_gen.go>)
+### func \(Form\) [Valid](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/i18n/form.go>)
 
 ```go
 func (Form) Valid() bool
@@ -772,7 +772,7 @@ HasForm reports whether the message carries a pattern for form.
 It is what internal/service/app/i18n's load-time completeness check reads: for each category the registered language's rules can produce, the message must answer true, or the catalogue is refused naming the key and the category.
 
 <a name="Message.IsPlural"></a>
-### func \(Message\) [IsPlural](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/i18n/decl_gen.go>)
+### func \(Message\) [IsPlural](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/i18n/message_value.go>)
 
 ```go
 func (Message) IsPlural() bool
@@ -980,7 +980,7 @@ Keys returns the keys held for tag, sorted, as a copy, or nil when the store doe
 It is the \[corei18n.KeyLister] sibling, and its purpose is a test rather than a request: compare a language's keys against the fallback's and fail the build when one is missing. See [Store.Missing](#Store.Missing), which does exactly that.
 
 <a name="Store.Lookup"></a>
-### func \(Store\) [Lookup](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/i18n/decl_gen.go>)
+### func \(Store\) [Lookup](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/i18n/store.go>)
 
 ```go
 func (*Store) Lookup(tag corei18n.TagValue, key corei18n.Key) (message corei18n.MessageValue, ok bool)
@@ -1056,7 +1056,7 @@ Language returns the lowercase language subtag, or "" for the zero tag.
 It is the key CLDR plural rules are resolved on — the rules of "fr-CA" are the rules of "fr" — with the handful of region-specific exceptions CLDR defines handled by an exact-tag entry in internal/service/app/i18n's table.
 
 <a name="Tag.Parent"></a>
-### func \(Tag\) [Parent](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/i18n/decl_gen.go>)
+### func \(Tag\) [Parent](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/i18n/tag_value.go>)
 
 ```go
 func (Tag) Parent() (parent TagValue, ok bool)
@@ -1078,7 +1078,7 @@ func (Tag) Region() string
 Region returns the UPPERCASE alpha-2 or numeric region subtag, or "" when the tag carries none.
 
 <a name="Tag.Script"></a>
-### func \(Tag\) [Script](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/i18n/decl_gen.go>)
+### func \(Tag\) [Script](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/i18n/tag_value.go>)
 
 ```go
 func (Tag) Script() string

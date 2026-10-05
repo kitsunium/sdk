@@ -19,7 +19,7 @@ Every code of the domain is in this package; the engine declares none.
 
 | File | Surface |
 |---|---|
-| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `AttrKind`, `AttrValue`, `Policy`, `Condition`, `Decision` and `RequestValue` — each struct with every field, unexported ones included; `AttrValue.StringsValue`, `AttrValue.Contains`, `Decision.Granted`, `Decision.Valid`, `RequestValue.AttrCount`, `AttrString`, `AttrInt64`, `AttrBool`, `AttrStrings` and `NewRequestValue`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `AttrKind`, `AttrValue`, `Policy`, `Condition`, `Decision` and `RequestValue` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `decision.go` | `Decision` + `Abstain` / `Allow` / `Deny` + `Granted` / `Valid` / `String` |
 | `request_value.go` | `RequestValue` + `NewRequestValue` + `Subject` / `Action` / `Resource` / `Attr` / `AttrCount` |
 | `attr_value.go` | `AttrKind` (`KindInvalid` / `KindString` / `KindInt64` / `KindBool` / `KindStrings`) + `AttrValue` + `AttrString` / `AttrInt64` / `AttrBool` / `AttrStrings` + `Key` / `Kind`, the `(value, ok)` accessors and `Contains` |

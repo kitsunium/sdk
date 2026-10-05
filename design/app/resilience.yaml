@@ -259,7 +259,6 @@ packages:
           - name: cfg
             type: BreakerConfig
         name: NewCircuitBreaker
-        impl: newCircuitBreaker
         out:
           - type: coreres.Runner
       - doc: |-
@@ -270,7 +269,6 @@ packages:
           - name: maxConcurrent
             type: int
         name: NewBulkhead
-        impl: newBulkhead
         out:
           - type: coreres.Runner
       - doc: |-
@@ -297,7 +295,6 @@ packages:
           - name: cfg
             type: FallbackConfig
         name: NewFallback
-        impl: newFallback
         out:
           - type: coreres.Runner
       - doc: |-
@@ -427,7 +424,6 @@ packages:
           - name: d
             type: time.Duration
         name: NewTimeout
-        impl: newTimeout
         out:
           - type: coreres.Runner
     imports:

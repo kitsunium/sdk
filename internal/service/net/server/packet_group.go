@@ -25,9 +25,8 @@ func (g *PacketGroup) handleFunc(f corenet.PacketHandlerFunc) *PacketGroup {
 	return g.Handle(f)
 }
 
-// use is PacketGroup.Use's body: decl_gen.go writes PacketGroup.Use, from the
-// design, as one call of it.
-func (g *PacketGroup) use(middlewares ...corenet.Middleware[corenet.PacketHandler]) *PacketGroup {
+// Use appends middlewares, outermost first.
+func (g *PacketGroup) Use(middlewares ...corenet.Middleware[corenet.PacketHandler]) *PacketGroup {
 	g.middlewares = append(g.middlewares, middlewares...)
 	//: returned for chaining.
 	return g

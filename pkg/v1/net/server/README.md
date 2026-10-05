@@ -573,7 +573,7 @@ func (*Group) HandleFunc(f corenet.ConnHandlerFunc) *StreamGroup
 HandleFunc sets the group's handler from a plain function. It exists because the overwhelmingly common case is one function, and making that case require a named type would be the papercut that decides whether the API feels light.
 
 <a name="Group.HandleHTTP"></a>
-### func \(Group\) [HandleHTTP](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/server/decl_gen.go>)
+### func \(Group\) [HandleHTTP](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/server/stream_group.go>)
 
 ```go
 func (*Group) HandleHTTP(h http.Handler) *StreamGroup
@@ -593,7 +593,7 @@ func (*Group) Name() string
 Name returns the group's name.
 
 <a name="Group.Use"></a>
-### func \(Group\) [Use](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/server/decl_gen.go>)
+### func \(Group\) [Use](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/server/stream_group.go>)
 
 ```go
 func (*Group) Use(middlewares ...corenet.Middleware[corenet.ConnHandler]) *StreamGroup
@@ -855,7 +855,7 @@ func (*PacketGroup) Name() string
 Name returns the group's name.
 
 <a name="PacketGroup.Use"></a>
-### func \(PacketGroup\) [Use](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/server/decl_gen.go>)
+### func \(PacketGroup\) [Use](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/server/packet_group.go>)
 
 ```go
 func (*PacketGroup) Use(middlewares ...corenet.Middleware[corenet.PacketHandler]) *PacketGroup
@@ -1074,7 +1074,7 @@ type State struct {
 ```
 
 <a name="State.Degraded"></a>
-### func \(State\) [Degraded](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/decl_gen.go>)
+### func \(State\) [Degraded](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/state.go>)
 
 ```go
 func (State) Degraded() bool

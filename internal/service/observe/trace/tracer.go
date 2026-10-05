@@ -7,9 +7,15 @@ import (
 	coretrace "github.com/kitsunium/sdk/internal/core/observe/trace"
 )
 
-// newTracer is NewTracer's body: decl_gen.go writes NewTracer, from the
-// design, as one call of it.
-func newTracer(cfg TracerConfig) *Tracer {
+// NewTracer builds a Tracer from cfg, applying every clamp once.
+//
+// It returns the concrete type rather than the core/observe/trace.Tracer interface so a
+// caller keeps reach to anything the concrete type grows later without the
+// interface having to (ADR 0039 §widening a returned value is safe). It cannot
+// fail: every field of TracerConfig has a resolved meaning, and the only inputs
+// that could be refused — a sampling ratio, an OTLP endpoint — are refused by
+// their own constructors, before they ever reach here.
+func NewTracer(cfg TracerConfig) *Tracer {
 	//: resolve once, so nothing on the per-span path tests a nil field.
 	return &Tracer{cfg: cfg.resolved()}
 }

@@ -15,9 +15,8 @@ const (
 	zeroPadWidth int = 2
 )
 
-// asTime is LocalDate.AsTime's body: decl_gen.go writes LocalDate.AsTime, from the
-// design, as one call of it.
-func (d LocalDate) asTime(zone *time.Location) time.Time {
+// AsTime returns the day at midnight in zone.
+func (d LocalDate) AsTime(zone *time.Location) time.Time {
 	//: midnight, in the zone the caller chose.
 	return time.Date(d.Year, time.Month(d.Month), d.Day, 0, 0, 0, 0, zone)
 }
@@ -28,9 +27,8 @@ func (d LocalDate) String() string {
 	return string(d.appendText(make([]byte, 0, localDateWidth)))
 }
 
-// marshalText is LocalDate.MarshalText's body: decl_gen.go writes LocalDate.MarshalText, from the
-// design, as one call of it.
-func (d LocalDate) marshalText() ([]byte, error) {
+// MarshalText returns the day as String writes it.
+func (d LocalDate) MarshalText() ([]byte, error) {
 	//: the text form.
 	return d.appendText(make([]byte, 0, localDateWidth)), nil
 }
@@ -66,9 +64,8 @@ func (t LocalTime) String() string {
 	return string(t.appendText(make([]byte, 0, localTimeWidth+1+nanoDigits)))
 }
 
-// marshalText is LocalTime.MarshalText's body: decl_gen.go writes LocalTime.MarshalText, from the
-// design, as one call of it.
-func (t LocalTime) marshalText() ([]byte, error) {
+// MarshalText returns the time as String writes it.
+func (t LocalTime) MarshalText() ([]byte, error) {
 	//: the text form.
 	return t.appendText(make([]byte, 0, localTimeWidth+1+nanoDigits)), nil
 }
@@ -110,9 +107,8 @@ func (dt LocalDateTime) String() string {
 	return string(dt.appendText(make([]byte, 0, localDateWidth+1+localTimeWidth+1+nanoDigits)))
 }
 
-// marshalText is LocalDateTime.MarshalText's body: decl_gen.go writes LocalDateTime.MarshalText, from the
-// design, as one call of it.
-func (dt LocalDateTime) marshalText() ([]byte, error) {
+// MarshalText returns the date-time as String writes it.
+func (dt LocalDateTime) MarshalText() ([]byte, error) {
 	//: the text form.
 	return dt.appendText(make([]byte, 0, localDateWidth+1+localTimeWidth+1+nanoDigits)), nil
 }

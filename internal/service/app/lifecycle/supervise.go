@@ -89,9 +89,10 @@ func (s *Supervisor) Stop(ctx context.Context) error {
 	}
 }
 
-// component is Supervisor.Component's body: decl_gen.go writes Supervisor.Component, from the
-// design, as one call of it.
-func (s *Supervisor) component() corelc.ComponentValue {
+// Component returns the supervisor as a Lifecycle component: its name, Start
+// as the component's Start, Stop as its Stop — so the Lifecycle budgets the
+// wait for the function to return like any other shutdown.
+func (s *Supervisor) Component() corelc.ComponentValue {
 	//: the three fields a component is.
 	return corelc.ComponentValue{Name: s.name, Start: s.Start, Stop: s.Stop}
 }

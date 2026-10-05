@@ -20,22 +20,25 @@ type UID = ikit.UID
 // about the user; endpoints read it with [AuthData].
 type Authenticator[P, D any] = ikit.AuthenticatorHandler[P, D]
 
-// auth is Auth's body: decl_gen.go writes Auth, from the
-// design, as one call of it.
+// Auth makes an endpoint require an authenticated caller: the app's auth
+// handler runs first, and a request without valid credentials is answered
+// 401 before the handler runs. A command or a query that asks for one is
+// refused 401 when its caller carries no user: an in-process dispatch
+// carries its caller's, and is not authenticated again.
 //
 // IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
 // only hands it to the declaration it configures.
-func auth() OperationOption {
+func Auth() OperationOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.Auth()
 }
 
-// authOptional is AuthOptional's body: decl_gen.go writes AuthOptional, from the
-// design, as one call of it.
+// AuthOptional runs the app's auth handler when the request carries
+// credentials, and serves anonymous callers too: [UserID] tells which.
 //
 // IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
 // only hands it to the declaration it configures.
-func authOptional() OperationOption {
+func AuthOptional() OperationOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.AuthOptional()
 }

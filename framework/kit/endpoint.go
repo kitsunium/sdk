@@ -31,39 +31,40 @@ func Name(name string) EndpointOption {
 	return ikit.Name(name)
 }
 
-// maxBody is MaxBody's body: decl_gen.go writes MaxBody, from the
-// design, as one call of it.
-func maxBody(bytes int64) EndpointOption {
+// MaxBody bounds the request body the endpoint reads. The default is
+// [DefaultMaxBody].
+func MaxBody(bytes int64) EndpointOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.MaxBody(bytes)
 }
 
-// rateLimit is RateLimit's body: decl_gen.go writes RateLimit, from the
-// design, as one call of it.
+// RateLimit puts a token bucket in front of the handler: perSecond tokens a
+// second, up to burst at once. An empty bucket answers 429 at once. It is the
+// SDK's resilience rate limiter.
 //
 // IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
 // only hands it to the declaration it configures.
-func rateLimit(perSecond float64, burst int) OperationOption {
+func RateLimit(perSecond float64, burst int) OperationOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.RateLimit(perSecond, burst)
 }
 
-// timeout is Timeout's body: decl_gen.go writes Timeout, from the
-// design, as one call of it.
+// Timeout cancels the handler's context after d and answers 504. It is the
+// SDK's resilience timeout.
 //
 // IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
 // only hands it to the declaration it configures.
-func timeout(d time.Duration) OperationOption {
+func Timeout(d time.Duration) OperationOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.Timeout(d)
 }
 
-// bulkhead is Bulkhead's body: decl_gen.go writes Bulkhead, from the
-// design, as one call of it.
+// Bulkhead caps how many requests the handler serves at once; the overflow
+// answers 503. It is the SDK's resilience bulkhead.
 //
 // IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
 // only hands it to the declaration it configures.
-func bulkhead(maxConcurrent int) OperationOption {
+func Bulkhead(maxConcurrent int) OperationOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.Bulkhead(maxConcurrent)
 }

@@ -22,9 +22,11 @@ const IDLen int = 32
 // encoding on every call.
 var canonicalEncoding = base64.RawURLEncoding.Strict()
 
-// newID is NewID's body: decl_gen.go writes NewID, from the
-// design, as one call of it.
-func newID(raw []byte) (id ID, err error) {
+// NewID builds an ID from raw, which MUST be exactly [IDLen] bytes. A wrong
+// length returns [InvalidID] rather than padding or truncating — a truncated
+// identifier is a weaker secret that would still work. The bytes are copied so
+// a later mutation of raw cannot reach the ID.
+func NewID(raw []byte) (id ID, err error) {
 	//: refuse any length but the one; never silently reshape a secret.
 	if len(raw) != IDLen {
 		//: typed refusal — callers match errs.HasCode(err, CodeInvalidID).

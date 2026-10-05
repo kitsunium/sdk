@@ -190,7 +190,7 @@ func (Identity) GoString() string
 GoString implements fmt.GoStringer so %#v stays redacted too — fmt bypasses String for Go-syntax formatting and would otherwise dump the unexported fields.
 
 <a name="Identity.IsZero"></a>
-### func \(Identity\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/decl_gen.go>)
+### func \(Identity\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/identity.go>)
 
 ```go
 func (Identity) IsZero() bool

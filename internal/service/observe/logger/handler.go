@@ -32,9 +32,10 @@ type genericHandler struct {
 	clk clock.Clock
 }
 
-// newHandler is NewHandler's body: decl_gen.go writes NewHandler, from the
-// design, as one call of it.
-func newHandler(enc encoder.Encoder, sink corelogger.Sink, min level.Level) (h corelogger.Handler, err error) {
+// NewHandler composes enc with sink and gates emission on the supplied
+// minimum level. A nil enc OR sink is rejected so callers cannot
+// accidentally construct a dead handler.
+func NewHandler(enc encoder.Encoder, sink corelogger.Sink, min level.Level) (h corelogger.Handler, err error) {
 	//: reject nil encoder so the format step never panics on the hot path.
 	if enc == nil {
 		//: caller supplied no encoder — return the documented sentinel.

@@ -21,7 +21,7 @@ This package declares no code and raises the core's.
 
 | File | What lives there |
 |---|---|
-| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `Composer`, `ComposerConfig`, `TLSMode` and `SMTPConfig` — each struct with every field, unexported ones included; `NewComposer`, `NewMemory` and `NewCapture`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `Composer`, `ComposerConfig`, `TLSMode` and `SMTPConfig` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `validate.go` | `Validate` — the one whole-message guard both transports and the spool run; it stops at the first refusal |
 | `header.go` | the reserved set and `IsReservedHeader`, and the INJECTION GATE — `ValidateHeaderName`, `ValidateHeaderValue`, and `ValidateHeader`, which runs both and refuses a reserved name |
 | `address.go` | `ValidateAddress`, `NeedsQuotedDisplayName`, and `IsDotAtom` — the dot-atom grammar, exported because a Message-ID's id-left is written in it too (the spool checks its identifiers with it) — plus the octet bounds the grammars are written in |

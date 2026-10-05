@@ -9,9 +9,8 @@ import (
 	"strings"
 )
 
-// moduleOf is GraphMessage.ModuleOf's body: decl_gen.go writes GraphMessage.ModuleOf, from the
-// design, as one call of it.
-func (g *GraphMessage) moduleOf(name string) *ModuleMessage {
+// ModuleOf returns the module named name, or nil.
+func (g *GraphMessage) ModuleOf(name string) *ModuleMessage {
 	for i := range g.Modules {
 		if g.Modules[i].Name == name {
 			return &g.Modules[i]
@@ -37,9 +36,10 @@ func QualifiedService(module, service string) string {
 // design, as one call of it.
 func modulePrefix(name string) string { return "/" + name + "/" }
 
-// underPrefix is UnderPrefix's body: decl_gen.go writes UnderPrefix, from the
-// design, as one call of it.
-func underPrefix(prefix, path string) string {
+// UnderPrefix is a route declared at path, served under a module's mount
+// prefix: "/reports" under "/moderation/" is "/moderation/reports", and
+// under "/" it stays "/reports".
+func UnderPrefix(prefix, path string) string {
 	if prefix == "" || prefix == "/" {
 		return path
 	}

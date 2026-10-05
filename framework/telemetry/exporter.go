@@ -66,9 +66,9 @@ func nodeRefs(nodes []string) (map[string]NodeRef, error) {
 	return refs, nil
 }
 
-// ref is Exporter.Ref's body: decl_gen.go writes Exporter.Ref, from the
-// design, as one call of it.
-func (e *Exporter) ref(id string) NodeRef { return e.refs[id] }
+// Ref is the reference of node id in the handshake's table; zero when the
+// table does not hold it.
+func (e *Exporter) Ref(id string) NodeRef { return e.refs[id] }
 
 // Instance is the process's instance identifier, in the handshake.
 func (e *Exporter) Instance() string { return e.instance }

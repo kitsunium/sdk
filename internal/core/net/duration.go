@@ -16,9 +16,8 @@ const (
 	minQuotedLen int = 2
 )
 
-// duration is DurationValue.Duration's body: decl_gen.go writes DurationValue.Duration, from the
-// design, as one call of it.
-func (d DurationValue) duration() time.Duration {
+// Duration returns the value as a plain time.Duration.
+func (d DurationValue) Duration() time.Duration {
 	//: DurationValue is a defined type over time.Duration — the conversion is free.
 	return time.Duration(d)
 }

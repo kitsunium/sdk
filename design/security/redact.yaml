@@ -329,7 +329,6 @@ packages:
               - name: maxBytes
                 type: int
             name: Attrs
-            impl: attrs
             out:
               - type: iter.Seq2[string, string]
             recv: pointer

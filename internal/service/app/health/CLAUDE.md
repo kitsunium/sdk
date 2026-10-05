@@ -11,7 +11,7 @@ panic recovery, the staleness bound, the drain latch, and the HTTP handler
 
 | File | Role |
 |---|---|
-| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `AskConfig`, `Config` and `HandlerConfig` — each struct with every field, unexported ones included; `Component`, `NewStartupHandler`, `NewReadinessHandler` and `NewLivenessHandler`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `AskConfig`, `Config` and `HandlerConfig` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `health.go`, `entry.go` | the registry and one registered check |
 | `inflight.go` | one execution of a check, shared by every probe waiting on it |
 | `runner.go` | runs a check under its timeout, recovers a panic; a caller whose own context ends stops waiting WITHOUT cancelling the shared run (`departed`), while the run's own budget (`boundRun`) cancels it whether or not anyone is still waiting |

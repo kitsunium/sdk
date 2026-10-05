@@ -29,7 +29,7 @@ Code range: **none**, deliberately — see §The refusal is the caller's.
 | File | Surface |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
-| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `AttrKind`, `AttrValue`, `ResourceValue` and `ScopeValue` — each struct with every field, unexported ones included; `AttrValue.AppendIdentity`, `CompareAttrKey` and `NormalizeScope`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `AttrKind`, `AttrValue`, `ResourceValue` and `ScopeValue` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `attr_value.go` | `AttrKind` (+ the five kinds) + `AttrValue` + the four constructors (`String`/`Bool`/`Int64`/`Float64`) + accessors + `AppendIdentity`/`AppendText` + `CompareAttrKey`/`CompareAttrValue` + `ValidateAttrs`/`SortAttrs`, both taking the caller's refusal |
 | `resource_value.go` | `ResourceValue` + `NormalizeResource` (taking the caller's refusal) + `ServiceNameKey`/`UnknownService` |
 | `scope_value.go` | `ScopeValue` + `NormalizeScope` (taking the signal's default name) |

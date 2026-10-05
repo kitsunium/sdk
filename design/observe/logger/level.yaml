@@ -65,7 +65,6 @@ packages:
           - name: initial
             type: Level
         name: NewVar
-        impl: newVar
         out:
           - type: "*Var"
     imports:
@@ -124,17 +123,17 @@ packages:
               Set replaces the current threshold with lvl. The store is atomic, so a
               concurrent Level caller observes either the old or the new value, never a
               torn read.
+            impl: set
             in:
               - name: lvl
                 type: Level
             name: Set
-            impl: set
             recv: pointer
           - doc: |-
               Level reports the current threshold. The load is atomic and lock-free,
               keeping it cheap enough for a per-record gate to call on the hot path.
-            name: Level
             impl: level
+            name: Level
             out:
               - type: Level
             recv: pointer

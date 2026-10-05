@@ -212,6 +212,58 @@ packages:
         name: Pack
         out:
           - type: Code
+      - doc: |-
+          NewError is a tooling-friendly alias for Define. Prefer Define at call
+          sites for consistency; NewError exists so code generators and lints
+          expecting a NewXxx constructor on exported types find one.
+        impl: newError
+        in:
+          - name: code
+            type: Code
+          - name: reason
+          - name: public
+          - name: private
+            type: string
+          - name: opts
+            type: DefineOption
+        name: NewError
+        out:
+          - type: "*Error"
+        variadic: true
+      - doc: |-
+          NewFieldValue builds a string-typed FieldValue. Provided as a generic
+          constructor for tooling that expects a New-prefixed factory; for common
+          cases prefer the dedicated String/Int/Bool/Float helpers.
+        impl: newFieldValue
+        in:
+          - name: key
+          - name: val
+            type: string
+        name: NewFieldValue
+        out:
+          - type: FieldValue
+      - doc: |-
+          NewPrefixMatcher constructs a PrefixMatcher usable with errors.Is to
+          match all Codes sharing a given bit-prefix (defined by the mask).
+          Example: all codes originating from pkg/v1/* →
+
+          	errors.Is(err, errs.NewPrefixMatcher(0x01_00_00_00, errs.MaskByMajor))
+        impl: newPrefixMatcher
+        in:
+          - name: prefix
+          - name: mask
+            type: Code
+        name: NewPrefixMatcher
+        out:
+          - type: "*PrefixMatcher"
+      - doc: |-
+          RegistryMarker returns the registry sentinel so external callers (and
+          the audit test itself) can confirm the package is the one expected to
+          own the SDK-wide code allocation audit.
+        impl: registryMarker
+        name: RegistryMarker
+        out:
+          - type: string
       - doc: WithHTTPStatus overrides the default HTTP status (500) for an Error.
         in:
           - name: status
@@ -226,24 +278,6 @@ packages:
         name: WithExitCode
         out:
           - type: DefineOption
-      - doc: |-
-          NewError is a tooling-friendly alias for Define. Prefer Define at call
-          sites for consistency; NewError exists so code generators and lints
-          expecting a NewXxx constructor on exported types find one.
-        in:
-          - name: code
-            type: Code
-          - name: reason
-          - name: public
-          - name: private
-            type: string
-          - name: opts
-            type: DefineOption
-        name: NewError
-        impl: newError
-        out:
-          - type: "*Error"
-        variadic: true
       - doc: |-
           NewRuntime constructs an *Error at RUNTIME without panicking. It is the
           counterpart to Define for callers that get no build-time AST audit —
@@ -323,18 +357,6 @@ packages:
         name: HasCode
         out:
           - type: bool
-      - doc: |-
-          NewFieldValue builds a string-typed FieldValue. Provided as a generic
-          constructor for tooling that expects a New-prefixed factory; for common
-          cases prefer the dedicated String/Int/Bool/Float helpers.
-        in:
-          - name: key
-          - name: val
-            type: string
-        name: NewFieldValue
-        impl: newFieldValue
-        out:
-          - type: FieldValue
       - doc: String builds a FieldValue holding a string value.
         in:
           - name: key
@@ -385,7 +407,6 @@ packages:
           - name: val
             type: float64
         name: Float
-        impl: float
         out:
           - type: FieldValue
       - doc: |-
@@ -408,28 +429,6 @@ packages:
             type: Code
           - name: err
             type: error
-      - doc: |-
-          NewPrefixMatcher constructs a PrefixMatcher usable with errors.Is to
-          match all Codes sharing a given bit-prefix (defined by the mask).
-          Example: all codes originating from pkg/v1/* →
-
-          	errors.Is(err, errs.NewPrefixMatcher(0x01_00_00_00, errs.MaskByMajor))
-        in:
-          - name: prefix
-          - name: mask
-            type: Code
-        name: NewPrefixMatcher
-        impl: newPrefixMatcher
-        out:
-          - type: "*PrefixMatcher"
-      - doc: |-
-          RegistryMarker returns the registry sentinel so external callers (and
-          the audit test itself) can confirm the package is the one expected to
-          own the SDK-wide code allocation audit.
-        name: RegistryMarker
-        impl: registryMarker
-        out:
-          - type: string
       - doc: |-
           TrailOf returns the wrap-trail codes of the deepest *Error in err's chain,
           newest wrap last, or nil when err carries no *Error.
@@ -475,13 +474,11 @@ packages:
         methods:
           - doc: Major returns the top octet (SemVer major byte).
             name: Major
-            impl: major
             out:
               - type: Major
             recv: value
           - doc: Layer returns the second-highest octet.
             name: Layer
-            impl: layer
             out:
               - type: Layer
             recv: value
@@ -492,7 +489,6 @@ packages:
             recv: value
           - doc: Serial returns the bottom octet.
             name: Serial
-            impl: serial
             out:
               - type: Serial
             recv: value
@@ -608,19 +604,16 @@ packages:
               can walk the chain. The nil-guard also makes this slightly more than a
               pure field getter, which matters for callers storing errors by value.
             name: Unwrap
-            impl: unwrap
             out:
               - type: error
             recv: pointer
           - doc: HTTPStatus returns the per-error override if set, otherwise 500.
             name: HTTPStatus
-            impl: httpStatus
             out:
               - type: int
             recv: pointer
           - doc: ExitCode returns the per-error override if set, otherwise 70 EX_SOFTWARE.
             name: ExitCode
-            impl: exitCode
             out:
               - type: int
             recv: pointer
@@ -1402,7 +1395,6 @@ packages:
           - name: fields
             type: Field
         name: Wrap
-        impl: wrap
         out:
           - type: error
         variadic: true

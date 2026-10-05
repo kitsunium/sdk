@@ -256,8 +256,8 @@ packages:
           - doc: |-
               OK reports whether the value satisfied every constraint. It is the question
               to ask; comparing len(report) to zero says the same thing less clearly.
-            name: OK
             impl: ok
+            name: OK
             out:
               - type: bool
             recv: value
@@ -277,7 +277,6 @@ packages:
               the shape an HTTP layer wants when it maps a report onto a form: the caller
               already knows its own field names, and needs the SDK to say which ones.
             name: Paths
-            impl: paths
             out:
               - type: "[]string"
             recv: value

@@ -379,7 +379,6 @@ packages:
               construction, so it answers the same on a CommandValue the caller has just
               written and on one the engine has already validated.
             name: IsGroup
-            impl: isGroup
             out:
               - type: bool
             recv: value
@@ -935,7 +934,6 @@ packages:
           - name: err
             type: error
         name: Status
-        impl: status
         out:
           - type: int
       - doc: |-

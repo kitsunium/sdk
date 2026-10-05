@@ -62,9 +62,8 @@ func (e *Error) Error() string { return e.Code + ": " + e.Message }
 // design, as one call of it.
 func (e *Error) unwrap() error { return e.cause }
 
-// wrap is Error.Wrap's body: decl_gen.go writes Error.Wrap, from the
-// design, as one call of it.
-func (e *Error) wrap(cause error) *Error {
+// Wrap attaches the underlying cause, for the logs. It returns a copy.
+func (e *Error) Wrap(cause error) *Error {
 	c := *e
 	c.cause = cause
 	return &c
@@ -169,8 +168,8 @@ func describeSDK(err error, reason string) (int, wireBody) {
 	return status, wireBody{Code: strings.ToLower(reason), Message: errs.PublicOf(err)}
 }
 
-// newError is NewError's body: decl_gen.go writes NewError, from the
-// design, as one call of it.
-func newError(status int, code, message string) *Error {
+// NewError is an error answered with the HTTP status, carrying the wire code
+// and the message a caller reads.
+func NewError(status int, code, message string) *Error {
 	return &Error{Status: status, Code: code, Message: message}
 }

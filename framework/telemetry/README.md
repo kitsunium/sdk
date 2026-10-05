@@ -351,7 +351,7 @@ func NewExporter(cfg *ExporterConfig) (*Exporter, error)
 NewExporter checks cfg and builds an exporter that listens nowhere yet: Start opens its socket.
 
 <a name="OpOf"></a>
-## func [OpOf](<https://github.com/kitsunium/sdk/blob/main/framework/telemetry/decl_gen.go>)
+## func [OpOf](<https://github.com/kitsunium/sdk/blob/main/framework/telemetry/telemetry.go>)
 
 ```go
 func OpOf(name string) Op
@@ -440,7 +440,7 @@ func (*Exporter) Instance() string
 Instance is the process's instance identifier, in the handshake.
 
 <a name="Exporter.Ref"></a>
-### func \(Exporter\) [Ref](<https://github.com/kitsunium/sdk/blob/main/framework/telemetry/decl_gen.go>)
+### func \(Exporter\) [Ref](<https://github.com/kitsunium/sdk/blob/main/framework/telemetry/exporter.go>)
 
 ```go
 func (*Exporter) Ref(id string) NodeRef

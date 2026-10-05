@@ -579,7 +579,7 @@ func (Signal) Known() bool
 Known reports whether s names a signal in the platform table.
 
 <a name="Signal.OS"></a>
-### func \(Signal\) [OS](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/decl_gen.go>)
+### func \(Signal\) [OS](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/signal.go>)
 
 ```go
 func (Signal) OS() os.Signal
@@ -706,7 +706,7 @@ type Supervisor struct{}
 ```
 
 <a name="Supervisor.Component"></a>
-### func \(Supervisor\) [Component](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/lifecycle/decl_gen.go>)
+### func \(Supervisor\) [Component](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/lifecycle/supervise.go>)
 
 ```go
 func (*Supervisor) Component() corelc.ComponentValue

@@ -627,8 +627,8 @@ packages:
           size cap, a starting tree — would be a knob a consumer's test has to set
           before it can assert anything, and the value of this type is that a test
           double costs one line.
-        name: NewMem
         impl: newMem
+        name: NewMem
         out:
           - type: corevfs.FullFS
       - doc: |-

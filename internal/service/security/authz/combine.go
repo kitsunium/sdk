@@ -8,9 +8,52 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// denyOverrides is DenyOverrides's body: decl_gen.go writes DenyOverrides, from the
-// design, as one call of it.
-func denyOverrides(policies ...coreauthz.Policy) coreauthz.Policy {
+// DenyOverrides composes policies into one. A refusal from any member wins; an
+// [coreauthz.Allow] is returned only when at least one member permitted and no
+// member refused; otherwise the composition abstains.
+//
+// # Why refusal wins, and why that is not configurable
+//
+// When one rule permits and another refuses, one of them has to lose, and the
+// choice is a security property rather than a preference. Under deny-overrides
+// the failure mode of a wrong rule set is a request that should have been
+// allowed and was not — visible, reported, fixed within the hour. Under
+// permit-overrides it is a request that should have been refused and was not
+// — invisible, and discovered by whoever exploits it.
+//
+// XACML's permit-overrides, first-applicable and only-one-applicable are
+// therefore REFUSED BY NAME: this package ships one combining algorithm and no
+// setting that selects another. A caller who genuinely needs a grant that
+// beats a refusal — a break-glass path — writes it as a Go `if` around the
+// composition, where the exception is visible at the call site instead of
+// hidden in the semantics of a combiner. See ADR 0057 §D2.
+//
+// # It evaluates every member, and that is what makes it deny-overrides
+//
+// An [coreauthz.Allow] does NOT short-circuit. A composition that returned on
+// the first grant would be first-applicable wearing this function's name, and
+// it would produce a different answer depending on the order the policies were
+// listed in — the defect being ruled out here. Only a refusal short-circuits,
+// because refusal is absorbing: once one member has said Deny, nothing any
+// other member can say changes the result.
+//
+// The composition is therefore commutative and associative, which is why
+// nesting is invisible: DenyOverrides(a, DenyOverrides(b, c)) and
+// DenyOverrides(a, b, c) agree, and so does any permutation of them.
+//
+// # The empty and nil cases
+//
+// DenyOverrides() with no members abstains — the identity of the combiner —
+// and [Check] then refuses. An authorizer with no policy grants nothing, which
+// is the exact opposite of internal/service/app/validation, where a validator with
+// no constraint passes. Both are the safe direction for their domain, and the
+// contrast is the reason ADR 0031 is about SAFE defaults rather than permissive
+// or restrictive ones.
+//
+// A nil member REFUSES rather than being skipped. Skipping it would silently
+// shrink the policy set, which is the single most valuable edit an attacker
+// could make to a wiring file.
+func DenyOverrides(policies ...coreauthz.Policy) coreauthz.Policy {
 	//: clone so a later append by the caller cannot rewrite a live policy.
 	members := slices.Clone(policies)
 	//: the returned closure is the Policy; it holds no mutable state.

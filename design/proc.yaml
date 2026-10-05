@@ -769,7 +769,6 @@ packages:
         methods:
           - doc: Success reports whether the process exited normally with status zero.
             name: Success
-            impl: success
             out:
               - type: bool
             recv: value
@@ -852,8 +851,8 @@ packages:
               exactly one source, and it is the predicate a caller wants rather than a
               comparison against Limit — a zero Limit and "no limit applied" are the same
               state today, and tying call sites to that coincidence would be fragile.
-            name: Applied
             impl: applied
+            name: Applied
             out:
               - type: bool
             recv: value
@@ -883,25 +882,21 @@ packages:
         methods:
           - doc: Ready reports whether the datagram carried READY=1.
             name: Ready
-            impl: ready
             out:
               - type: bool
             recv: value
           - doc: Reloading reports whether the datagram carried RELOADING=1.
             name: Reloading
-            impl: reloading
             out:
               - type: bool
             recv: value
           - doc: Stopping reports whether the datagram carried STOPPING=1.
             name: Stopping
-            impl: stopping
             out:
               - type: bool
             recv: value
           - doc: Watchdog reports whether the datagram carried WATCHDOG=1 (a keep-alive ping).
             name: Watchdog
-            impl: watchdog
             out:
               - type: bool
             recv: value
@@ -932,6 +927,12 @@ packages:
           platform's RLIMIT_* constant. The zero value ResourceUnknown is the reserved
           invalid sentinel.
         methods:
+          - doc: Known reports whether r is a defined resource other than the zero value.
+            impl: known
+            name: Known
+            out:
+              - type: bool
+            recv: value
           - doc: |-
               String reports the canonical lowercase name of r (e.g. "nofile"), or
               "unknown" for an unrecognised value. The names match the suffix of the
@@ -939,12 +940,6 @@ packages:
             name: String
             out:
               - type: string
-            recv: value
-          - doc: Known reports whether r is a defined resource other than the zero value.
-            name: Known
-            impl: known
-            out:
-              - type: bool
             recv: value
         name: Resource
         underlying: int
@@ -954,11 +949,16 @@ packages:
           platform signal number, so Signal(syscall.SIGTERM) and a Signal parsed from
           "SIGTERM" compare equal. The zero value is the reserved invalid signal.
         methods:
+          - doc: Known reports whether s names a signal in the platform table.
+            impl: known
+            name: Known
+            out:
+              - type: bool
+            recv: value
           - doc: |-
               OS bridges s to the os.Signal expected by os/signal and Process.Signal. It is
               a zero-cost conversion to syscall.Signal — the canonical os.Signal carrier.
             name: OS
-            impl: os
             out:
               - type: os.Signal
             recv: value
@@ -973,12 +973,6 @@ packages:
             name: String
             out:
               - type: string
-            recv: value
-          - doc: Known reports whether s names a signal in the platform table.
-            name: Known
-            impl: known
-            out:
-              - type: bool
             recv: value
         name: Signal
         underlying: int
@@ -1110,19 +1104,19 @@ packages:
           is the analogue, but the choice is generic to anything that spawns processes).
         methods:
           - doc: |-
+              Known reports whether m is one of the defined StdioInherit/StdioNull/StdioCapture
+              modes (i.e. m <= StdioCapture).
+            impl: known
+            name: Known
+            out:
+              - type: bool
+            recv: value
+          - doc: |-
               String returns the lowercase mode name ("inherit", "null", "capture"), or
               "stdiomode(N)" for an out-of-range value.
             name: String
             out:
               - type: string
-            recv: value
-          - doc: |-
-              Known reports whether m is one of the defined StdioInherit/StdioNull/StdioCapture
-              modes (i.e. m <= StdioCapture).
-            name: Known
-            impl: known
-            out:
-              - type: bool
             recv: value
         name: StdioMode
         underlying: uint8
@@ -1690,8 +1684,8 @@ packages:
           applied — when the operator set GOMEMLIMIT to a non-empty value, when no
           cgroup file is readable (any non-Linux host) or none declares a cap, or when
           the derived limit is implausibly small.
-        name: Apply
         impl: apply
+        name: Apply
         out:
           - type: coreproc.MemoryLimitValue
     imports:
@@ -1879,13 +1873,13 @@ packages:
           needs CAP_SYS_RESOURCE. An unmapped Resource yields UnknownResource and a
           failing syscall yields RlimitFailed; off Linux every call yields
           UnsupportedPlatform.
+        impl: apply
         in:
           - name: pid
             type: int
           - name: limits
             type: map[coreproc.Resource]coreproc.LimitValue
         name: Apply
-        impl: apply
         out:
           - type: error
       - doc: |-
@@ -1896,11 +1890,11 @@ packages:
           than declaratively through SysProcAttr. Use it to fail fast — at Spec
           construction time — on a Resource this platform cannot honour, before a
           process is ever spawned.
+        impl: prepareSysProcAttr
         in:
           - name: limits
             type: map[coreproc.Resource]coreproc.LimitValue
         name: PrepareSysProcAttr
-        impl: prepareSysProcAttr
         out:
           - type: error
     imports:
@@ -1975,7 +1969,6 @@ packages:
               - name: path
                 type: string
             name: Module
-            impl: module
             out:
               - name: found
                 type: ModuleValue
@@ -2161,7 +2154,6 @@ packages:
         methods:
           - doc: Count returns how many observations the distribution holds.
             name: Count
-            impl: count
             out:
               - type: uint64
             recv: value
@@ -2413,6 +2405,14 @@ packages:
       every other platform Listen returns coreproc.UnsupportedPlatform while the
       notifier remains fully portable.
     functions:
+      - doc: ReadyContext is [Ready] bounded by ctx — see [NotifyContext].
+        impl: readyContext
+        in:
+          - name: ctx
+            type: context.Context
+        name: ReadyContext
+        out:
+          - type: error
       - build: linux
         doc: |-
           Listen creates a supervisor-side sd_notify datagram socket, enables SO_PASSCRED
@@ -2483,14 +2483,6 @@ packages:
         name: Ready
         out:
           - type: error
-      - doc: ReadyContext is [Ready] bounded by ctx — see [NotifyContext].
-        in:
-          - name: ctx
-            type: context.Context
-        name: ReadyContext
-        impl: readyContext
-        out:
-          - type: error
       - doc: StatusContext is [Status] bounded by ctx — see [NotifyContext].
         in:
           - name: ctx
@@ -2498,7 +2490,6 @@ packages:
           - name: msg
             type: string
         name: StatusContext
-        impl: statusContext
         out:
           - type: error
       - doc: |-
@@ -2650,7 +2641,6 @@ packages:
           - name: c
             type: Capability
         name: Supported
-        impl: supported
         out:
           - type: bool
       - doc: |-
@@ -2660,7 +2650,6 @@ packages:
           - name: caps
             type: Capability
         name: MissingCapabilities
-        impl: missingCapabilities
         out:
           - type: "[]Capability"
         variadic: true

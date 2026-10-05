@@ -185,9 +185,8 @@ func readyContext(ctx context.Context) error {
 	return NotifyContext(ctx, map[string]string{"READY": "1"})
 }
 
-// statusContext is StatusContext's body: decl_gen.go writes StatusContext, from the
-// design, as one call of it.
-func statusContext(ctx context.Context, msg string) error {
+// StatusContext is [Status] bounded by ctx — see [NotifyContext].
+func StatusContext(ctx context.Context, msg string) error {
 	//: STATUS carries human-readable progress; the value is sent verbatim.
 	return NotifyContext(ctx, map[string]string{"STATUS": msg})
 }

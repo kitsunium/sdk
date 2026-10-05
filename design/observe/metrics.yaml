@@ -263,23 +263,43 @@ packages:
           twice. It is the check every instrument fetch runs, on the already sorted
           set; the rules are the shared model's (internal/core/observe/otel.ValidateAttrs), the
           code is this signal's.
+        impl: validateAttrs
         in:
           - name: sorted
             type: "[]coreotel.AttrValue"
         name: ValidateAttrs
-        impl: validateAttrs
       - doc: |-
           NormalizeResource returns the ResourceValue a Meter publishes: attributes
           sorted, validated, owned, and carrying ServiceNameKey whether or not the
           caller supplied it. An unusable attribute set panics with InvalidAttribute,
           at construction, rather than at the first export.
+        impl: normalizeResource
         in:
           - name: resource
             type: coreotel.ResourceValue
         name: NormalizeResource
-        impl: normalizeResource
         out:
           - type: coreotel.ResourceValue
+      - doc: |-
+          LookupExporter returns the Exporter registered under name.
+
+          IFACE-PLUGIN: the registry stores plug-in exporters behind the Exporter
+          interface — concrete backend types stay unexported.
+        impl: lookupExporter
+        in:
+          - name: name
+            type: ExporterName
+        name: LookupExporter
+        out:
+          - name: e
+            type: Exporter
+          - name: ok
+            type: bool
+      - doc: AvailableExporters returns the sorted list of registered ExporterNames.
+        impl: availableExporters
+        name: AvailableExporters
+        out:
+          - type: "[]ExporterName"
       - doc: |-
           RegisterExporter inserts e under e.Name() and returns it for singleton
           binding. Panics on a nil exporter or a distinct exporter on a taken Name.
@@ -296,26 +316,6 @@ packages:
         name: RegisterExporter
         out:
           - type: Exporter
-      - doc: |-
-          LookupExporter returns the Exporter registered under name.
-
-          IFACE-PLUGIN: the registry stores plug-in exporters behind the Exporter
-          interface — concrete backend types stay unexported.
-        in:
-          - name: name
-            type: ExporterName
-        name: LookupExporter
-        impl: lookupExporter
-        out:
-          - name: e
-            type: Exporter
-          - name: ok
-            type: bool
-      - doc: AvailableExporters returns the sorted list of registered ExporterNames.
-        name: AvailableExporters
-        impl: availableExporters
-        out:
-          - type: "[]ExporterName"
       - doc: |-
           Export ships snap through the Exporter registered as name. A missing exporter
           returns UnknownExporter; an exporter failure wraps as ExportFailed.
@@ -1041,7 +1041,6 @@ packages:
               programming error and panics with InvalidTemporality rather than being
               quietly folded into the default, which would hide the cast forever.
             name: Resolved
-            impl: resolved
             out:
               - type: Temporality
             recv: value
@@ -1165,6 +1164,42 @@ packages:
       Cross-OS: 100% portable.
     functions:
       - doc: |-
+          OTLPRetryable reports whether err is an OTLP/HTTP failure the specification
+          says may be replayed: a transport fault, or one of HTTP 429 / 502 / 503 /
+          504. Everything else — a rejected payload, a partial success, an
+          unrepresentable snapshot — is false, because replaying identical bytes at a
+          collector that already refused them only costs the retry budget.
+
+          Its signature is exactly resilience.RetryConfig.Retryable's, so it drops
+          straight into a retry policy without an adapter. That is the whole reason
+          this exporter classifies instead of looping.
+        impl: otlpRetryable
+        in:
+          - name: err
+            type: error
+        name: OTLPRetryable
+        out:
+          - type: bool
+      - doc: |-
+          NewMeter returns a fresh in-memory Meter with every MeterConfig knob at its
+          resolved default: bounded at DefaultMaxSeriesPerInstrument, cumulative,
+          service.name=unknown_service, this SDK as the scope, and the system clock.
+        impl: newMeter
+        name: NewMeter
+        out:
+          - type: coremetrics.FullMeter
+      - doc: |-
+          NewMeterWithConfig returns a fresh in-memory Meter honouring cfg. Every unset
+          field resolves to a working value and none of them to an inert one — see
+          MeterConfig for each knob's rule.
+        impl: newMeterWithConfig
+        in:
+          - name: cfg
+            type: MeterConfig
+        name: NewMeterWithConfig
+        out:
+          - type: coremetrics.FullMeter
+      - doc: |-
           NewOTLPHTTPExporter returns an Exporter that encodes each snapshot as
           OTLP/JSON and POSTs it to cfg.Endpoint.
 
@@ -1206,23 +1241,6 @@ packages:
             type: coremetrics.Exporter
           - name: err
             type: error
-      - doc: |-
-          OTLPRetryable reports whether err is an OTLP/HTTP failure the specification
-          says may be replayed: a transport fault, or one of HTTP 429 / 502 / 503 /
-          504. Everything else — a rejected payload, a partial success, an
-          unrepresentable snapshot — is false, because replaying identical bytes at a
-          collector that already refused them only costs the retry budget.
-
-          Its signature is exactly resilience.RetryConfig.Retryable's, so it drops
-          straight into a retry policy without an adapter. That is the whole reason
-          this exporter classifies instead of looping.
-        in:
-          - name: err
-            type: error
-        name: OTLPRetryable
-        impl: otlpRetryable
-        out:
-          - type: bool
       - doc: |-
           EncodeOTLPJSON renders snap as ONE OTLP/JSON ExportMetricsServiceRequest —
           exactly the bytes that go in the body of a POST to /v1/metrics under
@@ -1303,25 +1321,6 @@ packages:
         name: NewTextExporter
         out:
           - type: coremetrics.Exporter
-      - doc: |-
-          NewMeter returns a fresh in-memory Meter with every MeterConfig knob at its
-          resolved default: bounded at DefaultMaxSeriesPerInstrument, cumulative,
-          service.name=unknown_service, this SDK as the scope, and the system clock.
-        name: NewMeter
-        impl: newMeter
-        out:
-          - type: coremetrics.FullMeter
-      - doc: |-
-          NewMeterWithConfig returns a fresh in-memory Meter honouring cfg. Every unset
-          field resolves to a working value and none of them to an inert one — see
-          MeterConfig for each knob's rule.
-        in:
-          - name: cfg
-            type: MeterConfig
-        name: NewMeterWithConfig
-        impl: newMeterWithConfig
-        out:
-          - type: coremetrics.FullMeter
     imports:
       clock: github.com/kitsunium/sdk/internal/kernel/clock
       coremetrics: github.com/kitsunium/sdk/internal/core/observe/metrics

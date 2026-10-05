@@ -10,9 +10,12 @@ import (
 // password, never a parameter.
 type DatabaseURL = ikit.DatabaseURLValue
 
-// keeps is Keeps's body: decl_gen.go writes Keeps, from the
-// design, as one call of it.
-func keeps(things ...Keepable) DatabaseOption {
+// Keeps says what the database keeps: a service's stores, a store, a
+// module's stores. The most precise wins: a store kept by name, then its
+// service, then its module, then the default database — the one declared
+// without Keeps —, then the data directory, then memory. [InMemory] wins
+// over all of them, on the app as on a store.
+func Keeps(things ...Keepable) DatabaseOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.Keeps(things...)
 }

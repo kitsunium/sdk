@@ -428,40 +428,6 @@ packages:
       Package trace — one list member of a tracestate header.
     functions:
       - doc: |-
-          ValidateAttrs panics with InvalidAttribute (0.2.20.7) when sorted cannot name
-          a dimension set: an empty Key, a value no constructor ever set, or the same
-          Key twice. The rules are the shared model's (internal/core/observe/otel); the code is
-          this signal's own.
-        in:
-          - name: sorted
-            type: "[]coreotel.AttrValue"
-        name: ValidateAttrs
-        impl: validateAttrs
-      - doc: |-
-          SortAttrs returns a sorted, validated, owned copy of attrs — what a span, an
-          event and a link record, so the caller's slice cannot be mutated afterwards
-          through the span. An unusable set panics with InvalidAttribute, at the call
-          site that wrote it rather than at the first export.
-        in:
-          - name: attrs
-            type: "[]coreotel.AttrValue"
-        name: SortAttrs
-        impl: sortAttrs
-        out:
-          - type: "[]coreotel.AttrValue"
-      - doc: |-
-          NormalizeResource returns the ResourceValue a Tracer publishes: attributes
-          sorted, validated, owned, and carrying ServiceNameKey whether or not the
-          caller supplied it. An unusable attribute set panics with InvalidAttribute,
-          at construction, rather than at the first export.
-        in:
-          - name: resource
-            type: coreotel.ResourceValue
-        name: NormalizeResource
-        impl: normalizeResource
-        out:
-          - type: coreotel.ResourceValue
-      - doc: |-
           ContextWithSpanContext returns a copy of parent carrying context.
 
           An INVALID context is still stored rather than skipped. Storing it is what
@@ -474,7 +440,6 @@ packages:
           - name: context
             type: SpanContextValue
         name: ContextWithSpanContext
-        impl: contextWithSpanContext
         out:
           - type: context.Context
       - doc: |-
@@ -489,6 +454,45 @@ packages:
         name: SpanContextFromContext
         out:
           - type: SpanContextValue
+      - doc: |-
+          ValidateAttrs panics with InvalidAttribute (0.2.20.7) when sorted cannot name
+          a dimension set: an empty Key, a value no constructor ever set, or the same
+          Key twice. The rules are the shared model's (internal/core/observe/otel); the code is
+          this signal's own.
+        impl: validateAttrs
+        in:
+          - name: sorted
+            type: "[]coreotel.AttrValue"
+        name: ValidateAttrs
+      - doc: |-
+          SortAttrs returns a sorted, validated, owned copy of attrs — what a span, an
+          event and a link record, so the caller's slice cannot be mutated afterwards
+          through the span. An unusable set panics with InvalidAttribute, at the call
+          site that wrote it rather than at the first export.
+        impl: sortAttrs
+        in:
+          - name: attrs
+            type: "[]coreotel.AttrValue"
+        name: SortAttrs
+        out:
+          - type: "[]coreotel.AttrValue"
+      - doc: |-
+          NormalizeResource returns the ResourceValue a Tracer publishes: attributes
+          sorted, validated, owned, and carrying ServiceNameKey whether or not the
+          caller supplied it. An unusable attribute set panics with InvalidAttribute,
+          at construction, rather than at the first export.
+        impl: normalizeResource
+        in:
+          - name: resource
+            type: coreotel.ResourceValue
+        name: NormalizeResource
+        out:
+          - type: coreotel.ResourceValue
+      - doc: AvailableExporters returns the sorted list of registered ExporterNames.
+        impl: availableExporters
+        name: AvailableExporters
+        out:
+          - type: "[]ExporterName"
       - doc: |-
           RegisterExporter inserts e under e.Name() and returns it for singleton
           binding. Panics on a nil exporter or a distinct exporter on a taken Name.
@@ -519,11 +523,6 @@ packages:
             type: SpanExporter
           - name: ok
             type: bool
-      - doc: AvailableExporters returns the sorted list of registered ExporterNames.
-        name: AvailableExporters
-        impl: availableExporters
-        out:
-          - type: "[]ExporterName"
       - doc: |-
           Export ships spans through the SpanExporter registered as name. A missing
           exporter returns UnknownExporter; an exporter failure wraps as ExportFailed.
@@ -583,7 +582,6 @@ packages:
           - name: size
             type: int
         name: NewStateBuilder
-        impl: newStateBuilder
         out:
           - type: StateBuilder
     imports:
@@ -929,8 +927,8 @@ packages:
           MASKS on output rather than trusting what it was handed — see Sanitized.
         methods:
           - doc: IsSampled reports whether the sampled bit is set.
-            name: IsSampled
             impl: isSampled
+            name: IsSampled
             out:
               - type: bool
             recv: value
@@ -941,7 +939,6 @@ packages:
               - name: sampled
                 type: bool
             name: WithSampled
-            impl: withSampled
             out:
               - type: TraceFlags
             recv: value
@@ -956,7 +953,6 @@ packages:
               destroy information a future version defines. Keeping the received byte and
               masking at format time satisfies both halves at once.
             name: Sanitized
-            impl: sanitized
             out:
               - type: TraceFlags
             recv: value
@@ -981,7 +977,6 @@ packages:
               Normalized returns the link a span actually records: attributes sorted,
               validated and owned.
             name: Normalized
-            impl: normalized
             out:
               - type: LinkValue
             recv: value
@@ -1137,7 +1132,6 @@ packages:
               IsValid reports whether the context names a joinable span: both identifiers
               present and non-zero.
             name: IsValid
-            impl: isValid
             out:
               - type: bool
             recv: value
@@ -1149,7 +1143,6 @@ packages:
               span produces a trace with holes in the middle, which is worse than no trace
               at all because it looks complete.
             name: IsSampled
-            impl: isSampled
             out:
               - type: bool
             recv: value
@@ -1160,7 +1153,6 @@ packages:
               - name: state
                 type: StateValue
             name: WithState
-            impl: withState
             out:
               - type: SpanContextValue
             recv: value
@@ -1210,7 +1202,6 @@ packages:
               changes only how a span is drawn, and the specification itself names the
               default. A clamp is right exactly when the SDK is not substituting judgement.
             name: Resolved
-            impl: resolved
             out:
               - type: SpanKind
             recv: value
@@ -1255,7 +1246,6 @@ packages:
             recv: value
           - doc: IsRoot reports whether the span has no parent.
             name: IsRoot
-            impl: isRoot
             out:
               - type: bool
             recv: value
@@ -1326,7 +1316,6 @@ packages:
               IsEmpty reports whether the payload carries no span. An exporter uses it to
               skip a POST that would carry nothing.
             name: IsEmpty
-            impl: isEmpty
             out:
               - type: bool
             recv: value
@@ -1367,6 +1356,16 @@ packages:
           concurrent use.
         methods:
           - doc: |-
+              State returns the list built so far, leftmost first, and leaves the builder
+              empty. The builder hands its storage to the value rather than copying it, so
+              it lets go of that storage too: a later Add starts a new list instead of
+              writing into one that is meant to be immutable.
+            impl: state
+            name: State
+            out:
+              - type: StateValue
+            recv: pointer
+          - doc: |-
               Add appends key=value at the right end of the list, reporting whether it
               did. It adds nothing and reports false when the key or the value is not one
               the grammar can spell, when the key is already in the list, or when the list
@@ -1379,16 +1378,6 @@ packages:
             name: Add
             out:
               - type: bool
-            recv: pointer
-          - doc: |-
-              State returns the list built so far, leftmost first, and leaves the builder
-              empty. The builder hands its storage to the value rather than copying it, so
-              it lets go of that storage too: a later Add starts a new list instead of
-              writing into one that is meant to be immutable.
-            name: State
-            impl: state
-            out:
-              - type: StateValue
             recv: pointer
         name: StateBuilder
         struct:
@@ -1526,7 +1515,6 @@ packages:
               IsUnset reports whether the status carries no judgement at all. It is what the
               OTLP encoder asks before deciding whether the `status` field is worth a line.
             name: IsUnset
-            impl: isUnset
             out:
               - type: bool
             recv: value
@@ -1776,6 +1764,23 @@ packages:
       mechanism (ADR 0160 §4).
     functions:
       - doc: |-
+          OTLPRetryable reports whether err is an OTLP/HTTP failure the specification
+          says may be replayed: a transport fault, or one of HTTP 429 / 502 / 503 / 504.
+          Everything else — a rejected payload, a partial success, an unencodable span —
+          is false, because replaying identical bytes at a collector that already refused
+          them only costs the retry budget.
+
+          Its signature is exactly resilience.RetryConfig.Retryable's, so it drops
+          straight into a retry policy without an adapter. That is the whole reason this
+          exporter classifies instead of looping.
+        impl: otlpRetryable
+        in:
+          - name: err
+            type: error
+        name: OTLPRetryable
+        out:
+          - type: bool
+      - doc: |-
           NewOTLPHTTPExporter builds a SpanExporter that POSTs each batch to an OTLP
           collector as OTLP/JSON.
 
@@ -1819,23 +1824,6 @@ packages:
             type: coretrace.SpanExporter
           - name: err
             type: error
-      - doc: |-
-          OTLPRetryable reports whether err is an OTLP/HTTP failure the specification
-          says may be replayed: a transport fault, or one of HTTP 429 / 502 / 503 / 504.
-          Everything else — a rejected payload, a partial success, an unencodable span —
-          is false, because replaying identical bytes at a collector that already refused
-          them only costs the retry budget.
-
-          Its signature is exactly resilience.RetryConfig.Retryable's, so it drops
-          straight into a retry policy without an adapter. That is the whole reason this
-          exporter classifies instead of looping.
-        in:
-          - name: err
-            type: error
-        name: OTLPRetryable
-        impl: otlpRetryable
-        out:
-          - type: bool
       - doc: |-
           EncodeOTLPJSON renders spans as ONE OTLP/JSON ExportTraceServiceRequest —
           exactly the bytes that go in the body of a POST to /v1/traces under
@@ -2129,7 +2117,6 @@ packages:
           - name: root
             type: coretrace.Sampler
         name: ParentBased
-        impl: parentBased
         out:
           - type: coretrace.Sampler
       - doc: |-
@@ -2243,7 +2230,6 @@ packages:
           - name: cfg
             type: TracerConfig
         name: NewTracer
-        impl: newTracer
         out:
           - type: "*Tracer"
       - doc: |-
@@ -2383,6 +2369,18 @@ packages:
           telemetry looks exactly like a service that is quiet.
         methods:
           - doc: |-
+              Sink returns the core/observe/trace.SpanSink to hand to a TracerConfig.
+
+              It is a method returning a bound method value rather than the Recorder
+              implementing an interface, because SpanSink is a FUNC port — which is the
+              point of a func port: there is no interface for a caller to satisfy, so there
+              is nothing for a future version to widen (ADR 0041).
+            impl: sink
+            name: Sink
+            out:
+              - type: coretrace.SpanSink
+            recv: pointer
+          - doc: |-
               Resource returns the producing resource this Recorder stamps on every payload,
               already normalised. It exists so a Tracer and its Recorder can be given ONE
               resource literal rather than two that a later edit could let drift apart.
@@ -2394,18 +2392,6 @@ packages:
             name: Scope
             out:
               - type: coreotel.ScopeValue
-            recv: pointer
-          - doc: |-
-              Sink returns the core/observe/trace.SpanSink to hand to a TracerConfig.
-
-              It is a method returning a bound method value rather than the Recorder
-              implementing an interface, because SpanSink is a FUNC port — which is the
-              point of a func port: there is no interface for a caller to satisfy, so there
-              is nothing for a future version to widen (ADR 0041).
-            name: Sink
-            impl: sink
-            out:
-              - type: coretrace.SpanSink
             recv: pointer
           - doc: |-
               Collect DRAINS the recorder and returns everything it held.
@@ -2520,14 +2506,14 @@ packages:
           where its cost is visible.
         methods:
           - doc: Resource returns the producing resource this Tracer stamps on its payloads.
-            name: Resource
             impl: resource
+            name: Resource
             out:
               - type: coreotel.ResourceValue
             recv: pointer
           - doc: Scope returns the instrumentation scope this Tracer stamps on its payloads.
-            name: Scope
             impl: scope
+            name: Scope
             out:
               - type: coreotel.ScopeValue
             recv: pointer

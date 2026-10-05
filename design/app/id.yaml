@@ -118,6 +118,13 @@ packages:
       (no init()), mirroring core/data/codec, core/crypto, and core/data/transform.
     functions:
       - doc: |-
+          Available returns the sorted list of registered Schemes, or nil before any
+          Register.
+        impl: available
+        name: Available
+        out:
+          - type: "[]Scheme"
+      - doc: |-
           New generates a fresh identifier using the Generator registered under scheme.
           A scheme with no registered generator returns UnknownScheme (blank-import the
           scheme's package to register it); a generator entropy/clock fault propagates
@@ -164,13 +171,6 @@ packages:
             type: Generator
           - name: ok
             type: bool
-      - doc: |-
-          Available returns the sorted list of registered Schemes, or nil before any
-          Register.
-        name: Available
-        impl: available
-        out:
-          - type: "[]Scheme"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/app/id

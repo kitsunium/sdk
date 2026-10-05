@@ -325,22 +325,6 @@ packages:
       never the NUMBER of verifiers that will accept it at once.
     functions:
       - doc: |-
-          New returns a verifier for the given identity, vendor key and product.
-
-          One anchor, which is the one-element list NewWithAnchors takes — not a second
-          representation of the same thing, so no path can disagree with the multi-anchor
-          one about what a single key means.
-        in:
-          - name: identity
-            type: Identity
-          - name: vendor
-            type: "[]byte"
-          - name: product
-            type: "*Product"
-        name: New
-        out:
-          - type: "*Service"
-      - doc: |-
           NewWithAnchors returns a verifier that accepts SEVERAL vendor keys, in the
           order given, so a signing key can be rotated in band.
 
@@ -367,6 +351,7 @@ packages:
 
           Service.WithAnchors sets the same list on a verifier already built, which is
           what a test or a build assembling its anchors from elsewhere reaches for.
+        impl: newWithAnchors
         in:
           - name: identity
             type: Identity
@@ -375,7 +360,6 @@ packages:
           - name: product
             type: "*Product"
         name: NewWithAnchors
-        impl: newWithAnchors
         out:
           - type: "*Service"
       - doc: |-
@@ -385,6 +369,7 @@ packages:
           machine's half of the proof; vendor, the ed25519 public key the binary links
           in; and product, the vendor-specific facts — a nil product uses the
           documented fallbacks.
+        impl: newWithGetter
         in:
           - name: client
             type: Getter
@@ -395,7 +380,6 @@ packages:
           - name: product
             type: "*Product"
         name: NewWithGetter
-        impl: newWithGetter
         out:
           - type: "*Service"
       - doc: |-
@@ -403,14 +387,30 @@ packages:
 
           It takes the running build's version and the minimum the roster requires —
           an empty floor requires nothing — and reports whether the build is below it.
+        impl: requiresUpdate
         in:
           - name: current
           - name: floor
             type: string
         name: RequiresUpdate
-        impl: requiresUpdate
         out:
           - type: bool
+      - doc: |-
+          New returns a verifier for the given identity, vendor key and product.
+
+          One anchor, which is the one-element list NewWithAnchors takes — not a second
+          representation of the same thing, so no path can disagree with the multi-anchor
+          one about what a single key means.
+        in:
+          - name: identity
+            type: Identity
+          - name: vendor
+            type: "[]byte"
+          - name: product
+            type: "*Product"
+        name: New
+        out:
+          - type: "*Service"
       - doc: |-
           UpdateRefusal builds the typed refusal for a build below the roster's floor.
 
@@ -1997,6 +1997,33 @@ packages:
           - name: err
             type: error
       - doc: |-
+          NewService builds a verifier over the caller's ssh directory.
+
+          One anchor, which is the single-key form every caller had before rotation was
+          possible: it is the one-element list and not a second representation, so no
+          path in this package can disagree with the multi-anchor one about what a
+          single key means.
+        impl: newService
+        in:
+          - name: identity
+            type: coreent.Identity
+          - name: vendor
+            type: "[]byte"
+          - name: product
+            type: "*ProductValue"
+        name: NewService
+        out:
+          - type: "*Service"
+      - doc: UpdateRefusal builds the error a caller reports when the floor is not met.
+        impl: updateRefusal
+        in:
+          - name: current
+          - name: floor
+            type: string
+        name: UpdateRefusal
+        out:
+          - type: error
+      - doc: |-
           ParseJWKS decodes a key set and builds the usable RSA keys from it.
 
           Unusable entries are skipped rather than fatal: GitHub may publish a key
@@ -2076,24 +2103,6 @@ packages:
             type: time.Duration
           - name: err
             type: error
-      - doc: |-
-          NewService builds a verifier over the caller's ssh directory.
-
-          One anchor, which is the single-key form every caller had before rotation was
-          possible: it is the one-element list and not a second representation, so no
-          path in this package can disagree with the multi-anchor one about what a
-          single key means.
-        in:
-          - name: identity
-            type: coreent.Identity
-          - name: vendor
-            type: "[]byte"
-          - name: product
-            type: "*ProductValue"
-        name: NewService
-        impl: newService
-        out:
-          - type: "*Service"
       - doc: |-
           NewServiceWithAnchors builds a verifier that accepts several vendor keys, in
           the order given.
@@ -2186,15 +2195,6 @@ packages:
         name: RequiresUpdate
         out:
           - type: bool
-      - doc: UpdateRefusal builds the error a caller reports when the floor is not met.
-        in:
-          - name: current
-          - name: floor
-            type: string
-        name: UpdateRefusal
-        impl: updateRefusal
-        out:
-          - type: error
     imports:
       coreent: github.com/kitsunium/sdk/framework/internal/core/entitlement
       ed25519: crypto/ed25519
@@ -2428,7 +2428,6 @@ packages:
 
               It returns the product's name, or "entitlement" when there is none.
             name: Label
-            impl: label
             out:
               - type: string
             recv: pointer
@@ -2445,7 +2444,6 @@ packages:
               It returns the product's publication points, or nil when there is no
               product.
             name: PublishedOrigins
-            impl: publishedOrigins
             out:
               - type: "[]coreent.OriginValue"
             recv: pointer
@@ -2570,11 +2568,11 @@ packages:
               Only NewService sets this in production, and only the test constructors leave
               it empty: a Service built with an injected getter must not touch a real
               filesystem unless the test asked it to.
+            impl: withCache
             in:
               - name: dir
                 type: string
             name: WithCache
-            impl: withCache
             out:
               - type: "*Service"
             recv: pointer
@@ -2585,11 +2583,11 @@ packages:
               Separate from the constructor because it is off by default and because the
               list is a trust decision — each entry pins a public key — that belongs to
               whoever assembled the binary rather than to this package.
+            impl: withTimeServers
             in:
               - name: servers
                 type: "[]RoughtimeServerValue"
             name: WithTimeServers
-            impl: withTimeServers
             out:
               - type: "*Service"
             recv: pointer
@@ -2599,11 +2597,11 @@ packages:
               Only a test should need this. The default refuses redirects, which is what
               keeps the runner's credential from being forwarded to a destination
               checkTokenURL never vouched for.
+            impl: withBearerFetch
             in:
               - name: fetch
                 type: BearerFetch
             name: WithBearerFetch
-            impl: withBearerFetch
             out:
               - type: "*Service"
             recv: pointer
@@ -2619,11 +2617,11 @@ packages:
               An empty list is a construction error rather than a way to disable the fetch,
               and currentRoster says so rather than reporting an unreachable roster nobody
               asked for.
+            impl: withOrigins
             in:
               - name: origins
                 type: "[]coreent.OriginValue"
             name: WithOrigins
-            impl: withOrigins
             out:
               - type: "*Service"
             recv: pointer
@@ -2635,11 +2633,11 @@ packages:
               pkg/license must not import the command package that owns the version
               string, and because a caller with nothing to declare — a test, a tool
               embedding the check — should not have to invent one.
+            impl: withVersion
             in:
               - name: version
                 type: string
             name: WithVersion
-            impl: withVersion
             out:
               - type: "*Service"
             recv: pointer
@@ -2660,11 +2658,11 @@ packages:
               An empty list is not a way to disable authentication: parseBundleAnyAnchor
               refuses every document with coreent.ErrRosterUnsigned, because with no anchor
               no signature can be valid.
+            impl: withAnchors
             in:
               - name: anchors
                 type: "[][]byte"
             name: WithAnchors
-            impl: withAnchors
             out:
               - type: "*Service"
             recv: pointer
@@ -2808,19 +2806,19 @@ packages:
           existed.
         methods:
           - doc: |-
+              Unwrap ties the typed error to the sentinel so errors.Is keeps working
+              through the exit-code dispatch.
+            impl: unwrap
+            name: Unwrap
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
               Error renders both versions: "from what, to what" is the only question
               anyone asks at that point.
             name: Error
             out:
               - type: string
-            recv: pointer
-          - doc: |-
-              Unwrap ties the typed error to the sentinel so errors.Is keeps working
-              through the exit-code dispatch.
-            name: Unwrap
-            impl: unwrap
-            out:
-              - type: error
             recv: pointer
         name: UpdateRequiredError
         struct:

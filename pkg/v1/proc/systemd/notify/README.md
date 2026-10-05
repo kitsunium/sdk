@@ -230,7 +230,7 @@ type Notification struct {
 ```
 
 <a name="Notification.Ready"></a>
-### func \(Notification\) [Ready](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/decl_gen.go>)
+### func \(Notification\) [Ready](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/notification.go>)
 
 ```go
 func (Notification) Ready() bool
@@ -239,7 +239,7 @@ func (Notification) Ready() bool
 Ready reports whether the datagram carried READY=1.
 
 <a name="Notification.Reloading"></a>
-### func \(Notification\) [Reloading](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/decl_gen.go>)
+### func \(Notification\) [Reloading](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/notification.go>)
 
 ```go
 func (Notification) Reloading() bool
@@ -248,7 +248,7 @@ func (Notification) Reloading() bool
 Reloading reports whether the datagram carried RELOADING=1.
 
 <a name="Notification.Stopping"></a>
-### func \(Notification\) [Stopping](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/decl_gen.go>)
+### func \(Notification\) [Stopping](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/notification.go>)
 
 ```go
 func (Notification) Stopping() bool
@@ -257,7 +257,7 @@ func (Notification) Stopping() bool
 Stopping reports whether the datagram carried STOPPING=1.
 
 <a name="Notification.Watchdog"></a>
-### func \(Notification\) [Watchdog](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/decl_gen.go>)
+### func \(Notification\) [Watchdog](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/notification.go>)
 
 ```go
 func (Notification) Watchdog() bool

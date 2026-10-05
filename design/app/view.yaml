@@ -284,6 +284,33 @@ packages:
       and {{template}}, which this package neither extends nor conventionalises.
     functions:
       - doc: |-
+          Available returns every registered [Engine], sorted, so a caller can print
+          what its imports actually wired up. It is nil before any Register.
+        impl: available
+        name: Available
+        out:
+          - type: "[]Engine"
+      - doc: |-
+          TrustHTML marks s as HTML that is already safe to write unescaped.
+
+          Every call is an assertion that s was produced by the server and sanitised —
+          a Markdown renderer's output, a fragment from a template the same program
+          authored. It is never correct to hand it a string that arrived from a
+          request, a database field a user controls, or a third-party API.
+
+          The function exists because the conversion it performs needs a NAME. A
+          reviewer scanning a diff for `template.HTML(` has to know that identifier
+          matters; a reviewer scanning for `TrustHTML` is reading the word "trust" in
+          the SDK's own vocabulary, at the call site where the decision was actually
+          made.
+        impl: trustHTML
+        in:
+          - name: s
+            type: string
+        name: TrustHTML
+        out:
+          - type: TrustedHTML
+      - doc: |-
           Register inserts f under f.Engine() and returns it, so an engine package can
           bind the singleton to a typed package-level variable:
 
@@ -321,13 +348,6 @@ packages:
           - name: found
             type: bool
       - doc: |-
-          Available returns every registered [Engine], sorted, so a caller can print
-          what its imports actually wired up. It is nil before any Register.
-        name: Available
-        impl: available
-        out:
-          - type: "[]Engine"
-      - doc: |-
           Open resolves name and builds a [Renderer] from cfg.
 
           It is the config-driven entry point, and it fails loudly on a name nobody
@@ -348,26 +368,6 @@ packages:
             type: Renderer
           - name: err
             type: error
-      - doc: |-
-          TrustHTML marks s as HTML that is already safe to write unescaped.
-
-          Every call is an assertion that s was produced by the server and sanitised —
-          a Markdown renderer's output, a fragment from a template the same program
-          authored. It is never correct to hand it a string that arrived from a
-          request, a database field a user controls, or a third-party API.
-
-          The function exists because the conversion it performs needs a NAME. A
-          reviewer scanning a diff for `template.HTML(` has to know that identifier
-          matters; a reviewer scanning for `TrustHTML` is reading the word "trust" in
-          the SDK's own vocabulary, at the call site where the decision was actually
-          made.
-        in:
-          - name: s
-            type: string
-        name: TrustHTML
-        impl: trustHTML
-        out:
-          - type: TrustedHTML
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       fs: io/fs

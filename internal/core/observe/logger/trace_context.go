@@ -50,9 +50,19 @@ func (c TraceContextValue) IsValid() bool {
 	return c.TraceID != unsetTrace && c.SpanID != unsetSpan
 }
 
-// appendTraceIDHex is TraceContextValue.AppendTraceIDHex's body: decl_gen.go writes TraceContextValue.AppendTraceIDHex, from the
-// design, as one call of it.
-func (c TraceContextValue) appendTraceIDHex(dst []byte) []byte {
+// AppendTraceIDHex appends the trace identifier to dst as 32 LOWERCASE hex
+// digits and returns the extended buffer.
+//
+// The spelling is normative — "Trace IDs and span IDs must be lowercase and
+// hex-encoded" (specification/compatibility/logging_trace_context.md) — and
+// three formatters (the text encoder, the JSON encoder and the legacy text
+// handler) have to agree on it byte for byte, which is why it lives beside the
+// value rather than three times over in internal/service/observe/logger.
+//
+// It appends and never returns a string: a string would be one heap allocation
+// per emitted record, and the logger's one-allocation-per-emit contract has no
+// room for a second. See ADR 0062 and pkg/v1/observe/logger/BENCH.md.
+func (c TraceContextValue) AppendTraceIDHex(dst []byte) []byte {
 	//: encode through a stack array — hex.Encode does not retain src or dst,
 	//: so nothing here escapes and the append is the only buffer growth.
 	var buf [TraceIDHexLen]byte
@@ -61,9 +71,9 @@ func (c TraceContextValue) appendTraceIDHex(dst []byte) []byte {
 	return append(dst, buf[:]...)
 }
 
-// appendSpanIDHex is TraceContextValue.AppendSpanIDHex's body: decl_gen.go writes TraceContextValue.AppendSpanIDHex, from the
-// design, as one call of it.
-func (c TraceContextValue) appendSpanIDHex(dst []byte) []byte {
+// AppendSpanIDHex appends the span identifier to dst as 16 lowercase hex
+// digits and returns the extended buffer. Same contract as AppendTraceIDHex.
+func (c TraceContextValue) AppendSpanIDHex(dst []byte) []byte {
 	//: same stack-array encode; 8 bytes in, 16 hex digits out.
 	var buf [SpanIDHexLen]byte
 	hex.Encode(buf[:], c.SpanID[:])

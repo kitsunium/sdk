@@ -73,9 +73,8 @@ func Bool(key string, val bool) FieldValue {
 	return FieldValue{key: key, kind: fieldBool, bl: val}
 }
 
-// float is Float's body: decl_gen.go writes Float, from the
-// design, as one call of it.
-func float(key string, val float64) FieldValue {
+// Float builds a FieldValue holding a float64 value.
+func Float(key string, val float64) FieldValue {
 	//: 64-bit only — callers of float32 widen on call.
 	return FieldValue{key: key, kind: fieldFloat, fl: val}
 }

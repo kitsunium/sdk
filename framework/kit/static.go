@@ -12,12 +12,12 @@ type Frontend = ikit.Frontend
 // StaticOption configures a frontend.
 type StaticOption = ikit.StaticConfigurer
 
-// root is Root's body: decl_gen.go writes Root, from the
-// design, as one call of it.
+// Root serves the sub-directory dir of the file system rather than its root —
+// "assets" for a //go:embed assets directive.
 //
 // IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
 // only hands it to the declaration it configures.
-func root(dir string) StaticOption {
+func Root(dir string) StaticOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.Root(dir)
 }
