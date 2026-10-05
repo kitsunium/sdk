@@ -16,17 +16,6 @@ import (
 const frontendCSP = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; " +
 	"frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
 
-// Frontend is static assets the product serves: a single page application,
-// a documentation site. Requests the page makes to the product's endpoints
-// are attributed to it in the diagram.
-type Frontend struct {
-	nodeBase
-	prefix string
-	root   string
-	fsys   fs.FS
-	files  int
-}
-
 // StaticConfigurer configures a frontend.
 type StaticConfigurer interface {
 	staticConfigure(o *staticOptions)

@@ -85,19 +85,6 @@ var (
 	refusedRestore = []string{"3:1", "2:2", "1:1"}
 )
 
-// BackendConfig is where Run runs kit's stores: a name for the subtests and
-// the options that place the stores there.
-type BackendConfig struct {
-	// Name names the backend in the subtests.
-	Name string
-	// Options place the stores of the app named app on the backend —
-	// kit.InMemory(), kit.DataDir, a kit.Database whose URL the environment
-	// holds —, once per case. A database is named "database": the suite
-	// gives its calls a minute, as 32 writers of one entity queue on a
-	// server's lock.
-	Options func(t *testing.T, app string) []kit.AppOption
-}
-
 // doc is what the suite stores.
 type doc struct {
 	ID    string          `json:"id"`

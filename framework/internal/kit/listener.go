@@ -9,38 +9,12 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"slices"
-	"sync"
 
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 	"github.com/kitsunium/sdk/pkg/v1/proc/ipc"
 )
-
-// ListenHandler serves one connection of a [Listener] until it returns; the
-// connection is closed after it. conn.Peer says who connected, as the kernel
-// says where it can (pkg/v1/proc/ipc).
-type ListenHandler func(ctx context.Context, conn *ipc.Conn) error
-
-// Listener is an inbound port that is not HTTP: a private socket on this
-// machine — a Unix socket in a directory only the product's account can
-// reach, the kernel naming the peer on Linux (ADR 0148) — speaking a
-// versioned contract. It is how a daemon profile serves its clients, and how
-// two process roles of one binary talk (D22): through the contract, never
-// through each other's code.
-type Listener struct {
-	nodeBase
-	contract string
-	handler  ListenHandler
-	opts     listenerOptions
-
-	mu     sync.Mutex
-	ln     ipc.Listener
-	path   string
-	cancel context.CancelFunc
-	open   map[*ipc.Conn]bool
-	conns  sync.WaitGroup
-}
 
 // ListenerConfigurer tunes a listener.
 type ListenerConfigurer interface {

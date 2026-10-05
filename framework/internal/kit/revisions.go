@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
-	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
@@ -87,20 +86,6 @@ func (s *StoreService[T]) declareRevisions(svc *Service, o storeOptions) {
 		return
 	}
 	s.revisions = o.revisions
-}
-
-// RevisionEvent is one version of a record a store with [Revisions] keeps: its
-// number — from 1, never given twice while the record exists —, when the
-// write that made it ran, on the app's clock, zero for a record stored before
-// its store kept revisions; who made it — the caller's [UserID], empty for a
-// write with no user —; which command made it — its node ID, empty outside a
-// command —; and the record as it was, its secret members zeroed.
-type RevisionEvent[T any] struct {
-	Number  uint64
-	At      time.Time
-	By      string
-	Command string
-	Value   T
 }
 
 // Edit is one change between two versions of a record, in RFC 6902's words:

@@ -21,6 +21,7 @@ reaches the SDK only through `pkg/v1/*` and `internal/kernel/errs`
 
 | File | Role |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `BundleValue`, `JWKValue`, `JWKSValue`, `ActionsClaimsValue`, `ProductValue`, `RoughtimeServerValue`, `Getter`, `BearerFetch`, `Service` and `UpdateRequiredError` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `service.go` | the `Service` handle, `Verify`, the origin fallback, `matchSubject` |
 | `anchors.go` | the ORDERED list of vendor keys this verifier accepts, its bound, and the two readers |
 | `roster_parse.go` | `ParseRoster` — two documents, raw + detached signature |

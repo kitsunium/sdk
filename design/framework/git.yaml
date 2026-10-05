@@ -311,7 +311,8 @@ packages:
             public: the path does not exist at that commit
             reason: PATH_ABSENT
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           ChangedSet reports what a branch changed, at the three granularities a caller
           can ask about. It is FROZEN at four methods.
 
@@ -370,7 +371,8 @@ packages:
               out:
                 - type: bool
         name: ChangedSet
-      - doc: |-
+      - decl: true
+        doc: |-
           ResolutionValue is the outcome of resolving what a branch changed.
 
           It has exactly two readable shapes and the zero value is neither, which is
@@ -435,7 +437,8 @@ packages:
                 rather than swallowed. Empty when not degraded.
               name: Reason
               type: string
-      - doc: |-
+      - decl: true
+        doc: |-
           LineRangeValue is an inclusive, 1-based range of source lines taken from a
           diff hunk's "+"-side, i.e. post-edit line numbers.
 
@@ -620,12 +623,15 @@ packages:
       coregit: github.com/kitsunium/sdk/framework/internal/core/git
     path: github.com/kitsunium/sdk/framework/internal/service/git
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           ChangedSetValue holds the files, line ranges, and directories that a
           branch changed versus its merge-base. All paths are absolute and normalised
           through filepath.Clean so membership tests match the engine's resolved issue
           positions. Build it with NewChangedSetValue and the add* methods; query it
           with the Contains* methods.
+        implements:
+          - coregit.ChangedSet
         methods:
           - doc: ContainsLine reports whether line on absFile is within a changed hunk.
             in:
@@ -666,8 +672,33 @@ packages:
             recv: pointer
         name: ChangedSetValue
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - doc: repoRoot is the absolute repository top-level, retained for diagnostics.
+              name: repoRoot
+              type: string
+            - doc: |-
+                lineRangesByFile maps an absolute file path to its changed "+"-side line
+                ranges. Empty for a pure rename or a deletion (file touched, no lines).
+              name: lineRangesByFile
+              type: map[string][]coregit.LineRangeValue
+            - doc: touchedFiles is the set of absolute file paths that appear in the diff.
+              name: touchedFiles
+              type: map[string]struct{}
+            - doc: |-
+                touchedDirs is the set of absolute directories enclosing touched files,
+                the predicate for directory-scoped queries.
+              name: touchedDirs
+              type: map[string]struct{}
+            - doc: |-
+                aliasRoot is a second spelling of repoRoot — the one the caller used to
+                reach the repository, when that path traverses a symbolic link git
+                resolved away. Empty when the caller's spelling already is git's. It is
+                read only while the set is being built: every entry is recorded under
+                both spellings, so no query pays for it.
+              name: aliasRoot
+              type: string
+      - decl: true
+        doc: |-
           Config is what Resolve needs to know: where the repository is, and which files
           the caller considers part of the change.
 
@@ -692,7 +723,8 @@ packages:
                 that wants everything passes nil.
               name: Include
               type: IncludeFunc
-      - doc: |-
+      - decl: true
+        doc: |-
           IncludeFunc reports whether the file at absPath belongs in the changed set.
 
           It replaces what the source implementation hard-coded: a ".go" suffix test
@@ -706,7 +738,8 @@ packages:
           one answer this package must never give.
         name: IncludeFunc
         underlying: func(absPath string) bool
-      - doc: |-
+      - decl: true
+        doc: |-
           HeadValue is what a working tree is at: the commit HEAD names, that
           commit's time, and whether any tracked file differs from it.
 

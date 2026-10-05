@@ -91,7 +91,7 @@ RepositoryUnresolved is returned when a path is not inside a readable repository
 Code `0.2.33.1` · reason `REPOSITORY_UNRESOLVED` · public "the path is not inside a readable repository"
 
 <a name="ChangedSet"></a>
-## type [ChangedSet](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/git.go>)
+## type [ChangedSet](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/decl_gen.go>)
 
 ChangedSet reports what a branch changed, at the three granularities a caller can ask about. It is FROZEN at four methods.
 
@@ -118,7 +118,7 @@ type ChangedSet interface {
 ```
 
 <a name="ChangedSet.ContainsDir"></a>
-### func \(ChangedSet\) [ContainsDir](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/git.go>)
+### func \(ChangedSet\) [ContainsDir](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/decl_gen.go>)
 
 ```go
 func (ChangedSet) ContainsDir(absDir string) bool
@@ -127,7 +127,7 @@ func (ChangedSet) ContainsDir(absDir string) bool
 ContainsDir reports whether absDir directly encloses any touched file. It is not recursive: a parent of a touched directory is not itself touched.
 
 <a name="ChangedSet.ContainsFile"></a>
-### func \(ChangedSet\) [ContainsFile](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/git.go>)
+### func \(ChangedSet\) [ContainsFile](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/decl_gen.go>)
 
 ```go
 func (ChangedSet) ContainsFile(absFile string) bool
@@ -136,7 +136,7 @@ func (ChangedSet) ContainsFile(absFile string) bool
 ContainsFile reports whether absFile appears anywhere in the diff, including as the old side of a rename or a deletion.
 
 <a name="ChangedSet.ContainsLine"></a>
-### func \(ChangedSet\) [ContainsLine](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/git.go>)
+### func \(ChangedSet\) [ContainsLine](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/decl_gen.go>)
 
 ```go
 func (ChangedSet) ContainsLine(absFile string, line int) bool
@@ -145,7 +145,7 @@ func (ChangedSet) ContainsLine(absFile string, line int) bool
 ContainsLine reports whether line on absFile falls inside a changed hunk. Lines are 1-based and the bounds are inclusive.
 
 <a name="ChangedSet.IsEmpty"></a>
-### func \(ChangedSet\) [IsEmpty](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/git.go>)
+### func \(ChangedSet\) [IsEmpty](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/decl_gen.go>)
 
 ```go
 func (ChangedSet) IsEmpty() bool
@@ -154,7 +154,7 @@ func (ChangedSet) IsEmpty() bool
 IsEmpty reports whether nothing at all was touched — a clean branch, or one whose every change the caller's own filter excluded.
 
 <a name="LineRangeValue"></a>
-## type [LineRangeValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/line_range.go>)
+## type [LineRangeValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/decl_gen.go>)
 
 LineRangeValue is an inclusive, 1-based range of source lines taken from a diff hunk's "+"-side, i.e. post-edit line numbers.
 
@@ -179,7 +179,7 @@ func (LineRangeValue) Contains(line int) bool
 Contains reports whether line falls inside the range. Both bounds are inclusive, which is what makes a single-line hunk (Start == End) match.
 
 <a name="ResolutionValue"></a>
-## type [ResolutionValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/git.go>)
+## type [ResolutionValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/decl_gen.go>)
 
 ResolutionValue is the outcome of resolving what a branch changed.
 

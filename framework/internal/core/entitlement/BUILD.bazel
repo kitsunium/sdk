@@ -6,10 +6,9 @@ go_library(
     name = "entitlement",
     srcs = [
         "codes_gen.go",
+        "decl_gen.go",
         "doc.go",
-        "entitlement.go",
         "grant.go",
-        "origin.go",
         "roster.go",
     ],
     importpath = "github.com/kitsunium/sdk/framework/internal/core/entitlement",

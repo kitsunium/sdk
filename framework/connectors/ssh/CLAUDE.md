@@ -39,8 +39,8 @@ has recorded for this package since ADR 0078.
 | File | Role |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declaration of `SSHIdentity` — each struct with every field, unexported ones included; the assertions `SSHIdentity → entitlement.Identity` and `SSHIdentity → entitlement.BoundProver`. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `sshidentity.go` | `SSHIdentity` — the three port methods over a key directory, plus the `BoundProver` sibling |
-| `sshidentity_compliance.go` | the compile-time proof that it still satisfies the port |
 | `discover.go` | which subject this machine is enrolled as, and the refusal to guess |
 | `key.go` / `key_unix.go` / `key_windows.go` | load, fingerprint, prove possession, permission checks |
 | `enroll.go` | `NewSubjectID`, `GenerateKeyPair`, `IssueURL` |

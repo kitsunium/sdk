@@ -74,7 +74,7 @@ var StudioProfiler atomic.Pointer[ProfilerConfig]
 StudioProfiler is the Studio's profiler; nil until framework/kit/studio is imported.
 
 <a name="EventStream"></a>
-## type [EventStream](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/plug.go>)
+## type [EventStream](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/decl_gen.go>)
 
 EventStream is one Server-Sent Events stream: the Studio's live events.
 
@@ -90,7 +90,7 @@ type EventStream interface {
 ```
 
 <a name="EventStream.Close"></a>
-### func \(EventStream\) [Close](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/plug.go>)
+### func \(EventStream\) [Close](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/decl_gen.go>)
 
 ```go
 func (EventStream) Close() error
@@ -99,7 +99,7 @@ func (EventStream) Close() error
 Close ends the stream.
 
 <a name="EventStream.Done"></a>
-### func \(EventStream\) [Done](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/plug.go>)
+### func \(EventStream\) [Done](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/decl_gen.go>)
 
 ```go
 func (EventStream) Done() <-chan struct{}
@@ -108,7 +108,7 @@ func (EventStream) Done() <-chan struct{}
 Done is closed when the client left.
 
 <a name="EventStream.Send"></a>
-### func \(EventStream\) [Send](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/plug.go>)
+### func \(EventStream\) [Send](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/decl_gen.go>)
 
 ```go
 func (EventStream) Send(data string) error
@@ -117,7 +117,7 @@ func (EventStream) Send(data string) error
 Send writes one event's data.
 
 <a name="HTTPConfig"></a>
-## type [HTTPConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/plug.go>)
+## type [HTTPConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/decl_gen.go>)
 
 HTTPConfig is what kit asks of the HTTP engine: where to listen, its one socket, its bounds, and the handler.
 
@@ -143,7 +143,7 @@ type HTTPConfig struct {
 ```
 
 <a name="HTTPServer"></a>
-## type [HTTPServer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/plug.go>)
+## type [HTTPServer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/decl_gen.go>)
 
 HTTPServer is the HTTP engine kit starts, reads and stops.
 
@@ -159,7 +159,7 @@ type HTTPServer interface {
 ```
 
 <a name="HTTPServer.Shutdown"></a>
-### func \(HTTPServer\) [Shutdown](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/plug.go>)
+### func \(HTTPServer\) [Shutdown](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/decl_gen.go>)
 
 ```go
 func (HTTPServer) Shutdown(ctx context.Context) error
@@ -168,7 +168,7 @@ func (HTTPServer) Shutdown(ctx context.Context) error
 Shutdown drains the engine within ctx.
 
 <a name="HTTPServer.Start"></a>
-### func \(HTTPServer\) [Start](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/plug.go>)
+### func \(HTTPServer\) [Start](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/decl_gen.go>)
 
 ```go
 func (HTTPServer) Start(ctx context.Context) error
@@ -177,7 +177,7 @@ func (HTTPServer) Start(ctx context.Context) error
 Start binds the address and serves, returning once bound.
 
 <a name="HTTPServer.State"></a>
-### func \(HTTPServer\) [State](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/plug.go>)
+### func \(HTTPServer\) [State](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/decl_gen.go>)
 
 ```go
 func (HTTPServer) State() HTTPState
@@ -186,7 +186,7 @@ func (HTTPServer) State() HTTPState
 State says what the engine binds and serves.
 
 <a name="HTTPState"></a>
-## type [HTTPState](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/plug.go>)
+## type [HTTPState](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/decl_gen.go>)
 
 HTTPState is what the HTTP engine says of itself once it runs: the address it bound, and its connections.
 
@@ -205,7 +205,7 @@ type HTTPState struct {
 ```
 
 <a name="ProfilerConfig"></a>
-## type [ProfilerConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/plug.go>)
+## type [ProfilerConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/decl_gen.go>)
 
 ProfilerConfig is the Studio's profiler: the live heap folded onto the graph's nodes, and every goroutine grouped.
 
@@ -220,7 +220,7 @@ type ProfilerConfig struct {
 ```
 
 <a name="SourceFunc"></a>
-## type [SourceFunc](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/plug.go>)
+## type [SourceFunc](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/decl_gen.go>)
 
 SourceFunc says where the function fn, at file:line, lies in the product, nil when it knows none.
 

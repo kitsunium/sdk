@@ -47,10 +47,3 @@ const (
 	// EdgeRenders goes from a presentation to what it renders. Declared.
 	EdgeRenders EdgeKind = "renders"
 )
-
-// EdgeKind says how two nodes relate.
-// It is a wire format — the graph's JSON and the Studio's TypeScript unions
-// carry these names —, so it stays a string.
-//
-//ktn:wire-format
-type EdgeKind string

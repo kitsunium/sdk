@@ -20,14 +20,46 @@ else (framework/CLAUDE.md rule 1).
 | File | Role |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
-| `entitlement.go` | the `Identity` port and its `BoundProver` sibling |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `Identity`, `BoundProver`, `GrantValue`, `OriginValue`, `RosterValue`, `CIEntitlementValue` and `SubjectValue` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `roster.go` | `RosterValue` (+ its lookups `SubjectFor` / `CIEntitlementFor`), `SubjectValue`, `CIEntitlementValue`, `RosterLifetime` |
 | `grant.go` | `GrantValue` (+ `Deadline` / `Expired`) — what a successful verification hands back — and `GrantDeadline` |
-| `origin.go` | `OriginValue` — one place a roster is published |
 | `codes_gen.go` | the range (fifteen codes) and its fourteen sentinels — written by kit gen from `design/framework/entitlement.yaml` (ADR 0164) |
 | `grant_internal_test.go` | the three dates a grant is bounded by |
 | `roster_internal_test.go` | the public/private split of both roster lookups |
 | `port_internal_test.go` | the freeze, guarded by a compile rather than by a comment |
+
+## A product's origins
+
+(This note sat below `OriginValue` in `origin.go` until kit came to declare the type in `decl_gen.go` — ADR 0170 — and the file went with it.)
+
+A product's Origins list every place its roster is published, in the order they are
+tried. Adding one costs nothing in safety: a hostile endpoint can serve
+whatever it likes and still cannot forge the vendor signature, which is
+the only thing that authorises anything.
+
+What it buys is availability. A single origin makes GitHub a hard
+dependency of starting the linter at all, and the roster's own 24h window
+means an outage that outlasts a daemon's grant blocks everyone. These
+three fail independently:
+
+  - The `licenses` branch is where the signing workflow publishes. It is
+    deliberately NOT the default branch: the default branch carries a
+    required-status ruleset, which refuses the bot's hourly push outright
+    ("Required status check post-commit is expected"). That is not a
+    hypothetical — it silently stopped every re-signature for a day and a
+    half, the roster's window closed, and every licensed binary refused to
+    start. A data branch under no such rule cannot be blocked that way.
+  - The Pages mirror is served by different infrastructure from
+    raw.githubusercontent.com, so it survives an outage of that one host.
+
+`main` is deliberately NOT listed. It served the roster until the state
+moved off it, and keeping a dead path in the list would cost a round trip
+on every fallback to reach a location nothing publishes to any more.
+
+Deliberately NOT included: jsDelivr. It mirrors the same repository and
+answers quickly, but caches a branch reference for hours — it would serve
+a roster whose window had already closed, turning an availability
+mechanism into the very refusal it exists to prevent.
 
 ## Why-this-shape
 

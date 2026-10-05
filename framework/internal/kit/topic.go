@@ -6,25 +6,12 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
-	"sync"
 
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/data/queue"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/observe/trace"
 )
-
-// TopicService is an asynchronous channel of messages of type T. Every subscription
-// receives every message, at least once: a subscription's handler must
-// tolerate a redelivery.
-type TopicService[T any] struct {
-	nodeBase
-	mu   sync.Mutex
-	subs []*SubscriptionWorker[T]
-	// wakers are the declared loops woken by a publish (loop.go).
-	wakers map[int]func()
-	nextID int
-}
 
 // Topic declares a topic carrying messages of type T.
 //
@@ -124,20 +111,6 @@ func (t *TopicService[T]) describe(a *App, out *model.Node) []model.Edge {
 	return edges
 }
 
-// SubscriptionWorker consumes a topic: its handler runs once per message, at least
-// once, retried on error, and dead-lettered after MaxDeliveries attempts.
-type SubscriptionWorker[T any] struct {
-	nodeBase
-	topic       *TopicService[T]
-	handler     func(context.Context, T) error
-	maxDeliver  int
-	parallelism int
-
-	broker queue.Broker
-	cancel context.CancelFunc
-	done   chan struct{}
-}
-
 // SubscriptionConfigurer configures a subscription.
 type SubscriptionConfigurer interface {
 	subscriptionConfigure(o *subscriptionOptions)
@@ -172,13 +145,6 @@ func OwnStores() SubscriptionConfigurer {
 type deliveryOptions struct {
 	maxDeliveries int
 	parallelism   int
-}
-
-// DeliveryOption configures a queue's deliveries: a subscription's, or a
-// queued command's ([MaxDeliveries], [Parallelism]).
-type DeliveryOption interface {
-	SubscriptionConfigurer
-	CommandConfigurer
 }
 
 // deliveryOption is a DeliveryOption.

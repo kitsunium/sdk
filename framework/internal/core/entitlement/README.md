@@ -361,7 +361,7 @@ Variadic rather than a fourth parameter so the two existing call sites compile u
 checkTiming allows clockSkew when ADMITTING an Actions token, which is the permissive direction and the right one there: refusing a genuine token over two minutes of drift would break a working runner. Adding the same allowance to a BOUND would run the opposite way — it would extend the grant past the proof — so the bound is the claim as written.
 
 <a name="BoundProver"></a>
-## type [BoundProver](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/entitlement.go>)
+## type [BoundProver](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/decl_gen.go>)
 
 BoundProver is Identity's sibling for the one claim the three methods cannot make: possession of the key the ROSTER authorised, rather than of whatever this machine holds at the moment it is asked.
 
@@ -396,7 +396,7 @@ type BoundProver interface {
 ```
 
 <a name="BoundProver.ProvePossessionFor"></a>
-### func \(BoundProver\) [ProvePossessionFor](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/entitlement.go>)
+### func \(BoundProver\) [ProvePossessionFor](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/decl_gen.go>)
 
 ```go
 func (BoundProver) ProvePossessionFor(subject string, authorised string) error
@@ -409,7 +409,7 @@ A nil error is the proof, for the same reason it is on ProvePossession. An imple
 authorised is compared however the implementation compares fingerprints — byte equality, in the roster's spelling, is what Fingerprint's own contract already requires.
 
 <a name="CIEntitlementValue"></a>
-## type [CIEntitlementValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/roster.go>)
+## type [CIEntitlementValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/decl_gen.go>)
 
 CIEntitlementValue is what the roster grants one account's CI.
 
@@ -424,7 +424,7 @@ type CIEntitlementValue struct {
 ```
 
 <a name="GrantValue"></a>
-## type [GrantValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/grant.go>)
+## type [GrantValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/decl_gen.go>)
 
 GrantValue records a verification that succeeded, and how long that verification may be remembered.
 
@@ -509,7 +509,7 @@ A POINTER receiver on a read-only method, which is unusual and deliberate: the s
 It is a method-set change and therefore a source-level API change, named here rather than left to be discovered: Expired is no longer in GrantValue's VALUE method set, so a NON-ADDRESSABLE grant — a map entry, a composite literal used inline — stops compiling against it. Every caller in this repository holds an addressable grant, and pkg/license has no consumer outside the module, which is what makes the trade payable; a released SDK would not.
 
 <a name="Identity"></a>
-## type [Identity](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/entitlement.go>)
+## type [Identity](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/decl_gen.go>)
 
 Identity is the machine's half of the proof: which subject this machine claims to be, and evidence that it holds the private key the roster publishes a fingerprint for.
 
@@ -544,7 +544,7 @@ type Identity interface {
 ```
 
 <a name="Identity.Discover"></a>
-### func \(Identity\) [Discover](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/entitlement.go>)
+### func \(Identity\) [Discover](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/decl_gen.go>)
 
 ```go
 func (Identity) Discover() (subject string, err error)
@@ -555,7 +555,7 @@ Discover returns the subject identifier this machine is enrolled as.
 It refuses rather than choosing when more than one identity is present: picking one silently would make revocation unverifiable, since the operator could not tell which identity was checked.
 
 <a name="Identity.Fingerprint"></a>
-### func \(Identity\) [Fingerprint](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/entitlement.go>)
+### func \(Identity\) [Fingerprint](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/decl_gen.go>)
 
 ```go
 func (Identity) Fingerprint(subject string) (fingerprint string, err error)
@@ -564,7 +564,7 @@ func (Identity) Fingerprint(subject string) (fingerprint string, err error)
 Fingerprint returns the published fingerprint of the subject's public key, in whatever spelling the roster uses. It is compared by byte equality against the roster's entry and never parsed.
 
 <a name="Identity.ProvePossession"></a>
-### func \(Identity\) [ProvePossession](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/entitlement.go>)
+### func \(Identity\) [ProvePossession](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/decl_gen.go>)
 
 ```go
 func (Identity) ProvePossession(subject string) error
@@ -575,7 +575,7 @@ ProvePossession demonstrates that this machine holds the private half of the key
 It proves possession of whatever material this implementation holds NOW, which is not the same claim as "possession of the key the roster authorised" — nothing the roster said reaches this method. BoundProver is the sibling that carries the missing half; an implementation that can make the stronger claim implements it, and the engine prefers it when present.
 
 <a name="OriginValue"></a>
-## type [OriginValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/origin.go>)
+## type [OriginValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/decl_gen.go>)
 
 OriginValue is one publication point for the roster pair.
 
@@ -596,7 +596,7 @@ type OriginValue struct {
 ```
 
 <a name="RosterValue"></a>
-## type [RosterValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/roster.go>)
+## type [RosterValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/decl_gen.go>)
 
 RosterValue is the signed statement of who may run the linter. It carries no secret: every field is publishable, which is why it can live in a public repository. Authority comes from the detached signature, never from the origin that served the bytes.
 
@@ -689,7 +689,7 @@ The refused subject travels as a FIELD and not in the sentence. A revocation tha
 It is total on a nil receiver, which its sibling CIEntitlementFor has always been. Reachable through the Roster alias in framework/entitlement, where a consumer holding a nil roster got a panic from one method and a refusal from the other.
 
 <a name="SubjectValue"></a>
-## type [SubjectValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/roster.go>)
+## type [SubjectValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/decl_gen.go>)
 
 SubjectValue is one enrolled client's entry: the fingerprint that proves which key is theirs, and the date past which their own entitlement closes regardless of how fresh the roster itself is.
 

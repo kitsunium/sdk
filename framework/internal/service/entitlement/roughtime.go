@@ -68,22 +68,6 @@ const (
 // into refusals for machines that are perfectly fine.
 const maxClockSkew time.Duration = 5 * time.Minute
 
-// RoughtimeServerValue is one server this client will ask, and the key it must
-// answer with.
-//
-// The public key is the whole trust decision: a server is not trusted because
-// of where it is, it is trusted because a statement carries its signature. That
-// is the same rule the roster follows, with a different anchor.
-type RoughtimeServerValue struct {
-	// Name identifies the server in diagnostics.
-	Name string
-	// Address is "host:port", reached over UDP.
-	Address string
-	// PublicKey is the server's long-term ed25519 public half, which signs
-	// the delegation that in turn signs each response.
-	PublicKey ed25519.PublicKey
-}
-
 // RoughtimeServers is the list this client queries, EMPTY in committed source.
 //
 // Empty means the network-time check does nothing, which is the correct state

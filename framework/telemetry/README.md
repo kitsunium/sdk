@@ -360,7 +360,7 @@ func OpOf(name string) Op
 OpOf is the Op named name, or OpNone.
 
 <a name="Emitter"></a>
-## type [Emitter](<https://github.com/kitsunium/sdk/blob/main/framework/telemetry/telemetry_interface.go>)
+## type [Emitter](<https://github.com/kitsunium/sdk/blob/main/framework/telemetry/decl_gen.go>)
 
 Emitter is where a product reports: the telemetry port. Emit copies e and never keeps it; it must not block and must not allocate.
 
@@ -371,14 +371,14 @@ type Emitter interface {
 ```
 
 <a name="Emitter.Emit"></a>
-### func \(Emitter\) [Emit](<https://github.com/kitsunium/sdk/blob/main/framework/telemetry/telemetry_interface.go>)
+### func \(Emitter\) [Emit](<https://github.com/kitsunium/sdk/blob/main/framework/telemetry/decl_gen.go>)
 
 ```go
 func (Emitter) Emit(e *Event)
 ```
 
 <a name="Event"></a>
-## type [Event](<https://github.com/kitsunium/sdk/blob/main/framework/telemetry/telemetry.go>)
+## type [Event](<https://github.com/kitsunium/sdk/blob/main/framework/telemetry/decl_gen.go>)
 
 Event is one report. Its fields are numbers only — see the package comment: there is no field a person's data could travel in, in any environment.
 
@@ -404,7 +404,7 @@ type Event struct {
 ```
 
 <a name="Exporter"></a>
-## type [Exporter](<https://github.com/kitsunium/sdk/blob/main/framework/telemetry/telemetry.go>)
+## type [Exporter](<https://github.com/kitsunium/sdk/blob/main/framework/telemetry/decl_gen.go>)
 
 Exporter is an Emitter that hands events to the clients attached to its socket. It never blocks a producer: a full ring drops the event and counts it.
 
@@ -476,7 +476,7 @@ func (*Exporter) Stop(ctx context.Context) error
 Stop closes the socket and every client, and waits for the goroutines.
 
 <a name="ExporterConfig"></a>
-## type [ExporterConfig](<https://github.com/kitsunium/sdk/blob/main/framework/telemetry/telemetry.go>)
+## type [ExporterConfig](<https://github.com/kitsunium/sdk/blob/main/framework/telemetry/decl_gen.go>)
 
 ExporterConfig is where the exporter listens, who may attach, and how much it holds for a slow reader.
 
@@ -499,7 +499,7 @@ type ExporterConfig struct {
 ```
 
 <a name="HelloValue"></a>
-## type [HelloValue](<https://github.com/kitsunium/sdk/blob/main/framework/telemetry/telemetry.go>)
+## type [HelloValue](<https://github.com/kitsunium/sdk/blob/main/framework/telemetry/decl_gen.go>)
 
 HelloValue is what the handshake says about the process, besides the operations and the record size: which product, binary and role run, from which revision and design, and the node table events refer to.
 
@@ -524,7 +524,7 @@ type HelloValue struct {
 ```
 
 <a name="Kind"></a>
-## type [Kind](<https://github.com/kitsunium/sdk/blob/main/framework/telemetry/telemetry.go>)
+## type [Kind](<https://github.com/kitsunium/sdk/blob/main/framework/telemetry/decl_gen.go>)
 
 Kind says what an event reports.
 
@@ -533,7 +533,7 @@ type Kind uint8
 ```
 
 <a name="NodeRef"></a>
-## type [NodeRef](<https://github.com/kitsunium/sdk/blob/main/framework/telemetry/telemetry.go>)
+## type [NodeRef](<https://github.com/kitsunium/sdk/blob/main/framework/telemetry/decl_gen.go>)
 
 NodeRef is a node's index in the handshake's node table, from 1; zero is "no node".
 
@@ -542,7 +542,7 @@ type NodeRef uint32
 ```
 
 <a name="Op"></a>
-## type [Op](<https://github.com/kitsunium/sdk/blob/main/framework/telemetry/telemetry.go>)
+## type [Op](<https://github.com/kitsunium/sdk/blob/main/framework/telemetry/decl_gen.go>)
 
 Op is what the work was: the span operations of framework/model.
 
@@ -551,7 +551,7 @@ type Op uint8
 ```
 
 <a name="Outcome"></a>
-## type [Outcome](<https://github.com/kitsunium/sdk/blob/main/framework/telemetry/telemetry.go>)
+## type [Outcome](<https://github.com/kitsunium/sdk/blob/main/framework/telemetry/decl_gen.go>)
 
 Outcome says how the work ended.
 

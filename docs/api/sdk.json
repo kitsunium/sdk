@@ -3473,7 +3473,7 @@
       "spelled": "interface{ProvePossessionFor(subject string, authorised string) error}",
       "canonical": "interface{ProvePossessionFor(subject string, authorised string) error}",
       "doc": "BoundProver is Identity's sibling for the one claim the three methods cannot\nmake: possession of the key the ROSTER authorised, rather than of whatever\nthis machine holds at the moment it is asked.\n\n# The gap it closes\n\nThe verification engine asks Fingerprint what this machine presents, compares\nthe answer ITSELF against the roster's entry, and then asks ProvePossession\nfor a proof. The authorised fingerprint never traverses the port, so an\nimplementation cannot bind the proof to it: between the two calls the material\nmay be replaced — a rotation, a mounted volume remounted, a deliberate swap —\nand the implementation signs with what it finds on the second call. A consumer\ncan DETECT that by remembering the key object across the two calls and\nrefusing a proof with nothing remembered, which is as far as the three methods\nreach; it cannot be told which key it was supposed to be holding.\n\n# Why a sibling and not a fourth parameter\n\nIdentity is reachable through a pkg/v1 type alias, so ADR 0039's rule binds\nand ADR 0040 §4 says the version does not matter: a published interface is\nextended by a sibling, never by widening, because Go satisfies interfaces\nSTRUCTURALLY and every downstream implementation breaks at compile time with\nno deprecation window. Widening ProvePossession would be worse than adding a\nmethod — it invalidates a method implementers have already written — and it\nwould not even buy the guarantee that tempts it: an implementation can satisfy\na two-parameter signature and ignore the second argument, so binding is the\nimplementation's choice under either shape. The sibling buys the same real\nproperty and breaks nobody.\n\n# What its ABSENCE means, stated rather than left to be discovered\n\nAn Identity that does not implement this keeps the three-method behaviour\nexactly: the engine falls back to ProvePossession and the window between the\ntwo calls stays open. That is not a mechanism this package can close from\nhere, and pretending otherwise would be the claim that outruns the code.\n",
-      "file": "framework/internal/core/entitlement/entitlement.go",
+      "file": "framework/internal/core/entitlement/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -3485,7 +3485,7 @@
       "spelled": "func(subject string, authorised string) error",
       "canonical": "func(subject string, authorised string) error",
       "doc": "ProvePossessionFor demonstrates that this machine holds the private half\nof the key whose PUBLISHED fingerprint is authorised — the value the\nroster records for this subject, in the roster's own spelling.\n\nA nil error is the proof, for the same reason it is on ProvePossession.\nAn implementation that finds it holds different material refuses with\nErrKeyMismatch: that is what \"a local key that does not match the\npublished fingerprint\" means, so the refusal taxonomy does not grow.\n\nauthorised is compared however the implementation compares fingerprints —\nbyte equality, in the roster's spelling, is what Fingerprint's own\ncontract already requires.\n",
-      "file": "framework/internal/core/entitlement/entitlement.go",
+      "file": "framework/internal/core/entitlement/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -3504,7 +3504,7 @@
         }
       ],
       "doc": "CIEntitlementValue is what the roster grants one account's CI.\n",
-      "file": "framework/internal/core/entitlement/roster.go",
+      "file": "framework/internal/core/entitlement/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -3997,7 +3997,7 @@
         }
       ],
       "doc": "GrantValue records a verification that succeeded, and how long that\nverification may be remembered.\n\nThe timestamp alone is not enough to age against, which is the defect this\ntype carried until NotAfter existed. A grant used to expire at\nVerifiedAt+RosterLifetime and nothing else, so a daemon that happened to\nverify late in a roster's window kept serving for a further 24 hours after\nthat window closed — up to 47 hours after the vendor last signed anything,\nin a scheme whose single dial is a 24-hour bound. It outlived the subject's\nOWN term too: a licence expiring at noon left a daemon that verified at\n11:59 serving until the following day.\n",
-      "file": "framework/internal/core/entitlement/grant.go",
+      "file": "framework/internal/core/entitlement/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -4032,7 +4032,7 @@
       "spelled": "interface{Discover() (subject string, err error); Fingerprint(subject string) (fingerprint string, err error); ProvePossession(subject string) error}",
       "canonical": "interface{Discover() (subject string, err error); Fingerprint(subject string) (fingerprint string, err error); ProvePossession(subject string) error}",
       "doc": "Identity is the machine's half of the proof: which subject this machine\nclaims to be, and evidence that it holds the private key the roster publishes\na fingerprint for.\n\nIt is FROZEN at three methods, and the split is what makes the refusals\ndistinguishable. Discover answers \"who are we\", Fingerprint answers \"what do\nwe present\", ProvePossession answers \"can we back it up\" — and a caller that\nfails the third after passing the second has key material it cannot use,\nwhich is a different operator situation from having none at all.\n\nFrozen means frozen: it is reachable through a pkg/v1 type alias, so ADR 0039\nbinds and ADR 0040 §4 removes the v0 licence from it — the version does not\nmatter, because structural satisfaction breaks downstream implementations at\nany version. It is extended by a SIBLING, and BoundProver below is the first\none.\n",
-      "file": "framework/internal/core/entitlement/entitlement.go",
+      "file": "framework/internal/core/entitlement/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -4044,7 +4044,7 @@
       "spelled": "func() (subject string, err error)",
       "canonical": "func() (subject string, err error)",
       "doc": "Discover returns the subject identifier this machine is enrolled as.\n\nIt refuses rather than choosing when more than one identity is present:\npicking one silently would make revocation unverifiable, since the\noperator could not tell which identity was checked.\n",
-      "file": "framework/internal/core/entitlement/entitlement.go",
+      "file": "framework/internal/core/entitlement/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -4056,7 +4056,7 @@
       "spelled": "func(subject string) (fingerprint string, err error)",
       "canonical": "func(subject string) (fingerprint string, err error)",
       "doc": "Fingerprint returns the published fingerprint of the subject's public\nkey, in whatever spelling the roster uses. It is compared by byte\nequality against the roster's entry and never parsed.\n",
-      "file": "framework/internal/core/entitlement/entitlement.go",
+      "file": "framework/internal/core/entitlement/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -4068,7 +4068,7 @@
       "spelled": "func(subject string) error",
       "canonical": "func(subject string) error",
       "doc": "ProvePossession demonstrates that this machine holds the private half of\nthe key whose fingerprint Fingerprint returned. A nil error is the proof;\nthere is deliberately no value to inspect, because anything returned here\nwould be a second thing to verify.\n\nIt proves possession of whatever material this implementation holds NOW,\nwhich is not the same claim as \"possession of the key the roster\nauthorised\" — nothing the roster said reaches this method. BoundProver is\nthe sibling that carries the missing half; an implementation that can make\nthe stronger claim implements it, and the engine prefers it when present.\n",
-      "file": "framework/internal/core/entitlement/entitlement.go",
+      "file": "framework/internal/core/entitlement/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -4091,7 +4091,7 @@
         }
       ],
       "doc": "OriginValue is one publication point for the roster pair.\n\nIt carries no trust of its own: the vendor signature over the bytes is\nwhat authorises anything, so an origin is only ever an availability\nchoice. That is precisely why the list can be extended freely — a hostile\nentry gains nothing, and a dead one is skipped.\n",
-      "file": "framework/internal/core/entitlement/origin.go",
+      "file": "framework/internal/core/entitlement/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -4152,7 +4152,7 @@
         }
       ],
       "doc": "RosterValue is the signed statement of who may run the linter. It carries\nno secret: every field is publishable, which is why it can live in a public\nrepository. Authority comes from the detached signature, never from the\norigin that served the bytes.\n",
-      "file": "framework/internal/core/entitlement/roster.go",
+      "file": "framework/internal/core/entitlement/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -4201,7 +4201,7 @@
         }
       ],
       "doc": "SubjectValue is one enrolled client's entry: the fingerprint that proves\nwhich key is theirs, and the date past which their own entitlement closes\nregardless of how fresh the roster itself is.\n",
-      "file": "framework/internal/core/entitlement/roster.go",
+      "file": "framework/internal/core/entitlement/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -4249,7 +4249,7 @@
         }
       ],
       "doc": "DecisionValue is what the gate concluded about one invocation.\n\nIt is a value and carries no method that acts: the caller performs whatever\nOutcome names. Nothing here ends a process, opens a socket or writes a file.\n",
-      "file": "framework/internal/core/gate/decision.go",
+      "file": "framework/internal/core/gate/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -4260,7 +4260,7 @@
       "spelled": "uint8",
       "canonical": "uint8",
       "doc": "Outcome is what the caller should do with an invocation.\n\nThe zero value is unclaimed for the same reason UpdateAction's is: a decision\nnobody made must not read as \"allow\". A caller switching on this and falling\nthrough its cases gets OutcomeUnset, which is the refusing direction.\n",
-      "file": "framework/internal/core/gate/decision.go",
+      "file": "framework/internal/core/gate/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -4341,7 +4341,7 @@
         }
       ],
       "doc": "PolicyValue is one product's gate policy: the commands that run unchecked,\nthe commands that must never be gated, and what happens when the vendor\nmandates a newer build.\n\nIt is a VALUE, copied by the caller and never mutated by this package. The\nzero value is not usable — see Validate — because none of its three fields\nhas a safe default: an empty exemption list locks out recovery, and neither\n\"refuse\" nor \"upgrade\" is a guess this package may make on a vendor's behalf.\n",
-      "file": "framework/internal/core/gate/policy.go",
+      "file": "framework/internal/core/gate/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -4376,7 +4376,7 @@
       "spelled": "uint8",
       "canonical": "uint8",
       "doc": "UpdateAction is what the gate does when the entitlement verifies but the\nvendor mandates a newer build than the running one.\n\nThe zero value is deliberately unclaimed. Every other field of PolicyValue\nhas a defensible empty meaning — no exemptions, no recovery paths — but this\none does not: refusing and upgrading are opposite answers, and a product that\nsilently picked either on a vendor's behalf would be wrong for half of them.\nA binary distributed to machines an operator does not own must not replace\nitself uninvited; one distributed to a fleet that expects to track the floor\nmust not stop working instead. Validate refuses the unset value rather than\nguessing (ADR 0031).\n",
-      "file": "framework/internal/core/gate/update_action.go",
+      "file": "framework/internal/core/gate/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -4447,7 +4447,7 @@
       "spelled": "interface{ContainsDir(absDir string) bool; ContainsFile(absFile string) bool; ContainsLine(absFile string, line int) bool; IsEmpty() bool}",
       "canonical": "interface{ContainsDir(absDir string) bool; ContainsFile(absFile string) bool; ContainsLine(absFile string, line int) bool; IsEmpty() bool}",
       "doc": "ChangedSet reports what a branch changed, at the three granularities a caller\ncan ask about. It is FROZEN at four methods.\n\nEvery path argument is absolute. Implementations normalise through\nfilepath.Clean before comparing, so a caller need not — but Clean is LEXICAL\nand resolves no symbolic link, so two spellings of one file do not match each\nother. There is exactly one exception, and it exists because it is the one\nspelling a caller cannot choose: THE ROOT IT NAMED. An implementation whose\nbackend canonicalises that root away still answers for paths spelled through\nthe caller's root, and for paths spelled the backend's way — the two roots a\ncaller actually has in hand. An indirection anywhere else in a queried path\nis still lexical, and still does not match.\n\nThe three Contains methods are not interchangeable and none implies another in\nthe direction a caller might assume: a pure rename or a deletion touches a\nFILE and its DIRECTORY while contributing no line range at all, so\nContainsFile can be true where ContainsLine is false for every line of it.\nThat is the point — a check that only looks at lines silently ignores a\ndeleted file.\n",
-      "file": "framework/internal/core/git/git.go",
+      "file": "framework/internal/core/git/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -4459,7 +4459,7 @@
       "spelled": "func(absDir string) bool",
       "canonical": "func(absDir string) bool",
       "doc": "ContainsDir reports whether absDir directly encloses any touched file.\nIt is not recursive: a parent of a touched directory is not itself\ntouched.\n",
-      "file": "framework/internal/core/git/git.go",
+      "file": "framework/internal/core/git/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -4471,7 +4471,7 @@
       "spelled": "func(absFile string) bool",
       "canonical": "func(absFile string) bool",
       "doc": "ContainsFile reports whether absFile appears anywhere in the diff,\nincluding as the old side of a rename or a deletion.\n",
-      "file": "framework/internal/core/git/git.go",
+      "file": "framework/internal/core/git/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -4483,7 +4483,7 @@
       "spelled": "func(absFile string, line int) bool",
       "canonical": "func(absFile string, line int) bool",
       "doc": "ContainsLine reports whether line on absFile falls inside a changed hunk.\nLines are 1-based and the bounds are inclusive.\n",
-      "file": "framework/internal/core/git/git.go",
+      "file": "framework/internal/core/git/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -4495,7 +4495,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "IsEmpty reports whether nothing at all was touched — a clean branch, or\none whose every change the caller's own filter excluded.\n",
-      "file": "framework/internal/core/git/git.go",
+      "file": "framework/internal/core/git/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -4579,7 +4579,7 @@
         }
       ],
       "doc": "LineRangeValue is an inclusive, 1-based range of source lines taken from a\ndiff hunk's \"+\"-side, i.e. post-edit line numbers.\n\nA whole-file change — a new or untracked file — is represented by a range\nstarting at 1 and ending at a synthetic upper bound, so a membership test\nmatches any line without the parser needing to know the file's true length.\n",
-      "file": "framework/internal/core/git/line_range.go",
+      "file": "framework/internal/core/git/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -4666,7 +4666,7 @@
         }
       ],
       "doc": "ResolutionValue is the outcome of resolving what a branch changed.\n\nIt has exactly two readable shapes and the zero value is neither, which is\ndeliberate: a ResolutionValue nobody produced carries a nil Set AND\nFullFallback false, a combination no constructor mints, so a caller that\nforgot to check reads \"nothing changed\" from no code path that ever ran.\nCheck Degraded first.\n\n  - Resolved: Set is non-nil and BaseRef / BaseSHA / HeadSHA name the\n    comparison that produced it.\n  - Degraded: FullFallback is true and Reason says why. Set is nil. The\n    caller must treat EVERYTHING as in scope.\n\nThe degraded shape is the whole reason this is a value rather than\n(ChangedSet, error). A resolver that cannot be trusted must never answer with\nan empty set: \"nothing changed\" and \"I could not tell what changed\" are\nopposite instructions, and conflating them is how a review silently passes on\na branch it never looked at.\n",
-      "file": "framework/internal/core/git/git.go",
+      "file": "framework/internal/core/git/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -4770,7 +4770,7 @@
         }
       ],
       "doc": "CandidateValue is one release candidate: a developer channel entry that is\nnever what a stable check returns.\n\nAll three fields are carried VERBATIM as the release host reported them. They\nare displayed to an operator choosing a candidate, never parsed and never\ncompared — the ordering decision is made on Tag by semver, elsewhere.\n",
-      "file": "framework/internal/core/selfupdate/update_value.go",
+      "file": "framework/internal/core/selfupdate/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -5083,7 +5083,7 @@
       "spelled": "interface{Copy(dst io.Writer, src io.Reader) (written int64, err error)}",
       "canonical": "interface{Copy(dst io.Writer, src io.Reader) (written int64, err error)}",
       "doc": "Copier streams the verified archive to its temporary destination. It is a port\nso a test can fail the copy midway — the case where a partially written binary\nmust never be renamed into place.\n",
-      "file": "framework/internal/core/selfupdate/selfupdate_interface.go",
+      "file": "framework/internal/core/selfupdate/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -5095,7 +5095,7 @@
       "spelled": "func(dst io.Writer, src io.Reader) (written int64, err error)",
       "canonical": "func(dst io.Writer, src io.Reader) (written int64, err error)",
       "doc": "Copy copies from src to dst, returning the number of bytes written.\n",
-      "file": "framework/internal/core/selfupdate/selfupdate_interface.go",
+      "file": "framework/internal/core/selfupdate/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -5170,7 +5170,7 @@
       "spelled": "interface{Chmod(name string, mode os.FileMode) error; CreateTemp(dir string, pattern string) (file *os.File, err error); EvalSymlinks(path string) (resolved string, err error); Executable() (path string, err error); Remove(name string) error; Rename(oldpath string, newpath string) error}",
       "canonical": "interface{Chmod(name string, mode os.FileMode) error; CreateTemp(dir string, pattern string) (file *os.File, err error); EvalSymlinks(path string) (resolved string, err error); Executable() (path string, err error); Remove(name string) error; Rename(oldpath string, newpath string) error}",
       "doc": "FileSystem is the disk half of replacing a running binary.\n\nEvalSymlinks is not optional decoration: an executable reached through a\nsymlink must be replaced at its REAL path, or the update writes over the link\nand the next run still executes the old binary.\n",
-      "file": "framework/internal/core/selfupdate/selfupdate_interface.go",
+      "file": "framework/internal/core/selfupdate/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -5182,7 +5182,7 @@
       "spelled": "func(name string, mode os.FileMode) error",
       "canonical": "func(name string, mode os.FileMode) error",
       "doc": "Chmod changes file permissions.\n",
-      "file": "framework/internal/core/selfupdate/selfupdate_interface.go",
+      "file": "framework/internal/core/selfupdate/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -5194,7 +5194,7 @@
       "spelled": "func(dir string, pattern string) (file *os.File, err error)",
       "canonical": "func(dir string, pattern string) (file *os.File, err error)",
       "doc": "CreateTemp creates a temporary file.\n",
-      "file": "framework/internal/core/selfupdate/selfupdate_interface.go",
+      "file": "framework/internal/core/selfupdate/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -5206,7 +5206,7 @@
       "spelled": "func(path string) (resolved string, err error)",
       "canonical": "func(path string) (resolved string, err error)",
       "doc": "EvalSymlinks resolves symlinks in the given path.\n",
-      "file": "framework/internal/core/selfupdate/selfupdate_interface.go",
+      "file": "framework/internal/core/selfupdate/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -5218,7 +5218,7 @@
       "spelled": "func() (path string, err error)",
       "canonical": "func() (path string, err error)",
       "doc": "Executable returns the path of the current executable.\n",
-      "file": "framework/internal/core/selfupdate/selfupdate_interface.go",
+      "file": "framework/internal/core/selfupdate/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -5230,7 +5230,7 @@
       "spelled": "func(name string) error",
       "canonical": "func(name string) error",
       "doc": "Remove removes a file.\n",
-      "file": "framework/internal/core/selfupdate/selfupdate_interface.go",
+      "file": "framework/internal/core/selfupdate/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -5242,7 +5242,7 @@
       "spelled": "func(oldpath string, newpath string) error",
       "canonical": "func(oldpath string, newpath string) error",
       "doc": "Rename renames a file. It is the atomic half of the replacement and must\nhappen on the same filesystem as the target.\n",
-      "file": "framework/internal/core/selfupdate/selfupdate_interface.go",
+      "file": "framework/internal/core/selfupdate/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -5253,7 +5253,7 @@
       "spelled": "interface{Get(url string) (resp *http.Response, err error)}",
       "canonical": "interface{Get(url string) (resp *net/http.Response, err error)}",
       "doc": "Getter performs the HTTP GETs a self-update needs: the release metadata, the\narchive, the checksum manifest and its signature.\n\nIt is one method because that is all the domain needs, and a caller supplying\na policy-carrying client (timeouts, redirect rules, proxies) is supplying it\nonce for all four.\n",
-      "file": "framework/internal/core/selfupdate/selfupdate_interface.go",
+      "file": "framework/internal/core/selfupdate/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -5265,7 +5265,7 @@
       "spelled": "func(url string) (resp *http.Response, err error)",
       "canonical": "func(url string) (resp *net/http.Response, err error)",
       "doc": "Get performs an HTTP GET request.\n",
-      "file": "framework/internal/core/selfupdate/selfupdate_interface.go",
+      "file": "framework/internal/core/selfupdate/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -5421,7 +5421,7 @@
         }
       ],
       "doc": "UpdateValue is the outcome of a version check or an install: whether a newer\nrelease exists, and the two versions that were compared.\n\nAvailable is reported separately from a version comparison the caller could\nredo, because the comparison is semver-aware and a string compare of the two\nfields would disagree with it on a prerelease.\n",
-      "file": "framework/internal/core/selfupdate/update_value.go",
+      "file": "framework/internal/core/selfupdate/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -5432,7 +5432,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "ActivityHandler is a declared activity of a service: a function that says\nwhether the product is busy. A daemon's IdleStop waits until every\nactivity of its mounted services says false AND no connection is open on\nits listeners.\n",
-      "file": "framework/internal/kit/activity.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -5476,7 +5476,7 @@
       "spelled": "func(ctx context.Context, dir string, modules []string) (*model.Graph, error)",
       "canonical": "func(ctx context.Context, dir string, modules []string) (*github.com/kitsunium/sdk/framework/model.Graph, error)",
       "doc": "AnalyzeFunc reads the product's source — the Go module rooted at dir, and\nthe packages that declare the modules it mounts — into a graph the runtime\nmerges into its own: the edges found in handler bodies, each function's\nsteps. The framework links no analyzer (ADR 0147 §1): the platform's kit\ntool gives one, in dev, through [Analyzer].\n",
-      "file": "framework/internal/kit/app_analysis.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -5531,7 +5531,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "App is the whole product: the services it mounts, served by one process.\nThe same services can be mounted by several apps — one binary per service,\nor all of them in one — and each app draws exactly what it runs.\n",
-      "file": "framework/internal/kit/app.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -5685,7 +5685,7 @@
       "spelled": "interface{Attrs() []authz.Attr}",
       "canonical": "interface{Attrs() []github.com/kitsunium/sdk/pkg/v1/security/authz.Attr}",
       "doc": "AttrsProvider is what the app's auth data says about the caller to the\nSDK's authz: the attributes [Command.Allow] and [Query.Allow] hand a\npolicy — the caller's roles, its groups. Auth data that does not\nimplement it gives none, and every Allow refuses: the start warns of it.\n\n\ttype Me struct{ Roles []string }\n\n\tfunc (m Me) Attrs() []authz.Attr { return []authz.Attr{authz.AttrStrings(\"roles\", m.Roles...)} }\n\nkit calls the caller a principal: in kit, a subject is the person\npersonal data is about (ADR 0006).\n",
-      "file": "framework/internal/kit/access.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -5696,7 +5696,7 @@
       "recv": "AttrsProvider",
       "spelled": "func() []authz.Attr",
       "canonical": "func() []github.com/kitsunium/sdk/pkg/v1/security/authz.Attr",
-      "file": "framework/internal/kit/access.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -5740,7 +5740,7 @@
       "spelled": "[P, D any] struct{}",
       "canonical": "[P, D any] struct{}",
       "doc": "AuthenticatorHandler is the app's authentication handler: it turns the\ncredentials of a request — a session cookie, a bearer token — into a user,\nin front of every endpoint declared with [Auth] or [AuthOptional]. An app\nhas at most one.\n\nP is the credentials: a struct whose fields are tagged cookie:\"…\" or\nheader:\"…\", decoded like an endpoint's request. D is what the handler says\nabout the user; endpoints read it with [AuthData].\n",
-      "file": "framework/internal/kit/auth.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -5751,7 +5751,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Binary is one executable the product ships, made of process roles: a\nstatus line and its daemon are two roles of one binary, \"statusline\" and\n\"statusline daemon\". Each role is an App — its own services, its own\nprofile — and two roles talk only through a declared, versioned contract\n(D22): a listener one serves and the other dials, never each other's code.\n\n\tvar Binary = kit.NewBinary(\"statusline\", \"The status line of a Claude session.\").\n\t\tRole(\"render\", RenderApp).                // statusline ...\n\t\tRole(\"daemon\", DaemonApp, \"daemon\").      // statusline daemon ...\n\t\tTalks(\"render\", \"daemon\", \"render/v1\")\n\n\tfunc main() { os.Exit(Binary.Main(context.Background(), os.Args[1:])) }\n\nThe package that declares a binary and its roles is wiring, generated from\nthe design (D22).\n",
-      "file": "framework/internal/kit/roles.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -5820,7 +5820,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "CLI is a short command-line command of the product: it runs once, in the\nCLI profile, and exits with its status. Main runs it when the process's\nfirst argument is its name.\n",
-      "file": "framework/internal/kit/cli.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -5831,7 +5831,7 @@
       "spelled": "func(ctx context.Context, args []string, std StdioValue) int",
       "canonical": "func(ctx context.Context, args []string, std github.com/kitsunium/sdk/framework/internal/kit.StdioValue) int",
       "doc": "CLIFunc is a CLI command's body: its arguments after its name, and the\nstreams; it returns the process exit status (0 success, 64 usage, 70\nsoftware — the sysexits a shell script branches on).\n",
-      "file": "framework/internal/kit/cli.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -5895,7 +5895,7 @@
         }
       ],
       "doc": "ChangeEvent describes one transition, for [WorkflowService.OnTransition] hooks: the\nentity, the event, and the states it left and entered.\n",
-      "file": "framework/internal/kit/workflow.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -7064,7 +7064,7 @@
       "spelled": "[C, R any] struct{}",
       "canonical": "[C, R any] struct{}",
       "doc": "Command changes something: a typed input, a typed result, and one handler\n— the one declared with it. Declare it with [Service.Command]; dispatch it\nwith [Command.Dispatch] from any building block, which draws a dispatches\nedge from the caller; give it a route with [Command.Expose]. A command is\ninternal until it is exposed: how one service has another change\nsomething.\n\nA dispatch runs, in this order: the caller's user when the command asks\nfor one ([Auth], implied by [Command.Allow]) — an in-process dispatch\ncarries its caller's and is not authenticated again —, the input's\nvalidate tags, the policies ([RateLimit], [RateLimitPerClient],\n[Timeout], [Bulkhead]), the key ([Command.Key]), the transaction, the\nauthorization ([Command.Allow], then [Command.Authorize]), then the\nhandler. A queued command ([Queued]) is checked at its dispatch, as its\ncaller — its validate tags, its authorization, its key —, and handled by\nits queue's consumer, the policies around the handling, its key then its\ntransaction around the handler.\n\nA command is its unit of work (ADR 0004): its authorization and its\nhandler run in one transaction ([Transact]), opened once its key is held,\nwhich holds its effects — a publish, a mail, a queued command's dispatch\n— until the commit. A failed command changes nothing and announces\nnothing; one dispatched inside another runs in its transaction.\n[NoTransaction] opts a command out.\n",
-      "file": "framework/internal/kit/command.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -7244,7 +7244,7 @@
         }
       ],
       "doc": "DatabaseURLValue is what a database's URL points at, as its engine describes it\nfor the graph, the Studio, the logs and every error: never a user, never a\npassword, never a parameter.\n",
-      "file": "framework/internal/kit/database.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -7278,7 +7278,7 @@
       "spelled": "interface{time.Duration | *SettingService[time.Duration]}",
       "canonical": "interface{time.Duration | *github.com/kitsunium/sdk/framework/internal/kit.SettingService[time.Duration]}",
       "doc": "Delay is how long a timer transition waits: a duration, or a setting that\nholds one — read when the delay is needed, so each environment can give\nits own.\n",
-      "file": "framework/internal/kit/workflow.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -7322,7 +7322,7 @@
       "spelled": "interface{SubscriptionConfigurer; CommandConfigurer}",
       "canonical": "interface{github.com/kitsunium/sdk/framework/internal/kit.SubscriptionConfigurer; github.com/kitsunium/sdk/framework/internal/kit.CommandConfigurer}",
       "doc": "DeliveryOption configures a queue's deliveries: a subscription's, or a\nqueued command's ([MaxDeliveries], [Parallelism]).\n",
-      "file": "framework/internal/kit/topic.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -7350,7 +7350,7 @@
         }
       ],
       "doc": "DiagnosticsError is returned by Start when declarations are wrong. It lists\nevery problem at once, each with its position.\n",
-      "file": "framework/internal/kit/app.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -7385,7 +7385,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "EmptyValue is the request or the response of an endpoint that has none. An\nendpoint answering EmptyValue replies 204 No Content.\n",
-      "file": "framework/internal/kit/endpoint.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -7429,7 +7429,7 @@
       "spelled": "[Req, Resp any] struct{}",
       "canonical": "[Req, Resp any] struct{}",
       "doc": "EndpointService is an HTTP endpoint with a typed request and a typed response:\nwhat HTTP itself is about — a webhook a third party calls, say —, the\nexposure of a command or a query ([Command.Expose], [Query.Expose]), or\nthe implementation of a port ([Service.Implement]). A business operation\nis a command or a query, which other code runs with [Command.Dispatch]\nand [Query.Ask] and HTTP reaches through its exposure.\n",
-      "file": "framework/internal/kit/endpoint.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -7452,7 +7452,7 @@
       "spelled": "interface{Describe(url secret.Value) (DatabaseURLValue, error); Dialect() sql.Dialect; Open(url secret.Value, current func(context.Context) (secret.Value, error)) (*stdsql.DB, error)}",
       "canonical": "interface{Describe(url github.com/kitsunium/sdk/pkg/v1/security/secret.Value) (github.com/kitsunium/sdk/framework/internal/kit.DatabaseURLValue, error); Dialect() github.com/kitsunium/sdk/pkg/v1/data/sql.Dialect; Open(url github.com/kitsunium/sdk/pkg/v1/security/secret.Value, current func(context.Context) (github.com/kitsunium/sdk/pkg/v1/security/secret.Value, error)) (*database/sql.DB, error)}",
       "doc": "Engine is an SQL engine a database runs on. An engine module returns one —\ngithub.com/kitsunium/sdk/framework/connectors/postgres, …/mysql, …/sqlite —;\nkit calls it when the database starts. Like an SDK port, it grows by\nsibling interfaces, never by a method.\n",
-      "file": "framework/internal/kit/database_interface.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -7464,7 +7464,7 @@
       "spelled": "func(url secret.Value) (DatabaseURLValue, error)",
       "canonical": "func(url github.com/kitsunium/sdk/pkg/v1/security/secret.Value) (github.com/kitsunium/sdk/framework/internal/kit.DatabaseURLValue, error)",
       "doc": "Describe says what url points at — the driver, host and port, the\ndatabase, the TLS mode as written — for the graph and the logs: never\na user, never a password.\n",
-      "file": "framework/internal/kit/database_interface.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -7476,7 +7476,7 @@
       "spelled": "func() sql.Dialect",
       "canonical": "func() github.com/kitsunium/sdk/pkg/v1/data/sql.Dialect",
       "doc": "Dialect is the SQL the SDK speaks to it.\n",
-      "file": "framework/internal/kit/database_interface.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -7488,7 +7488,7 @@
       "spelled": "func(url secret.Value, current func(context.Context) (secret.Value, error)) (*stdsql.DB, error)",
       "canonical": "func(url github.com/kitsunium/sdk/pkg/v1/security/secret.Value, current func(context.Context) (github.com/kitsunium/sdk/pkg/v1/security/secret.Value, error)) (*database/sql.DB, error)",
       "doc": "Open opens the pool url names. Before each new connection it asks\ncurrent for the URL as it is now.\n",
-      "file": "framework/internal/kit/database_interface.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -7601,7 +7601,7 @@
         }
       ],
       "doc": "Error is an error a product returns to its callers. Message travels on the\nwire; the cause attached with [Error.Wrap] is logged and never sent.\n\nReturn one from a handler to choose the HTTP status and the message the\ncaller reads. Any other error becomes a 500 whose body says nothing about\nit: an error message is the classic place a secret leaks from.\n",
-      "file": "framework/internal/kit/errors.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -7718,7 +7718,7 @@
         }
       ],
       "doc": "FieldRefValue is one field of one store that carries a mark: where the field\nis, and what its tag says of it.\n",
-      "file": "framework/internal/kit/watch.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -7763,7 +7763,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Frontend is static assets the product serves: a single page application,\na documentation site. Requests the page makes to the product's endpoints\nare attributed to it in the diagram.\n",
-      "file": "framework/internal/kit/static.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -7851,7 +7851,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Job is scheduled work: a piece of the daemon's internal loop. It runs on\nthe SDK scheduler, whose decisions about time are documented rather than\nemergent: a fire that is due while the previous run of the same job is\nstill going is skipped and counted, and a missed deadline is skipped and\ncounted, never caught up.\n",
-      "file": "framework/internal/kit/job.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -7906,7 +7906,7 @@
       "spelled": "func(ctx context.Context, conn *ipc.Conn) error",
       "canonical": "func(ctx context.Context, conn *github.com/kitsunium/sdk/pkg/v1/proc/ipc.Conn) error",
       "doc": "ListenHandler serves one connection of a [Listener] until it returns; the\nconnection is closed after it. conn.Peer says who connected, as the kernel\nsays where it can (pkg/v1/proc/ipc).\n",
-      "file": "framework/internal/kit/listener.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -7917,7 +7917,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Listener is an inbound port that is not HTTP: a private socket on this\nmachine — a Unix socket in a directory only the product's account can\nreach, the kernel naming the peer on Linux (ADR 0148) — speaking a\nversioned contract. It is how a daemon profile serves its clients, and how\ntwo process roles of one binary talk (D22): through the contract, never\nthrough each other's code.\n",
-      "file": "framework/internal/kit/listener.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -8009,7 +8009,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Loop is a declared loop of the daemon: kit owns the wait, the product owns\nthe work. Its wake sources — a period, a deadline the product computes, a\ntopic — are data, so the diagram draws exactly what wakes it; kit runs it on\nits own goroutine, one run at a time, observes every run, and restarts it\nafter a panic.\n",
-      "file": "framework/internal/kit/loop.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -8054,7 +8054,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Mailer is outbound mail: a durable outbox and the transport that empties\nit. [Mailer.Send] only queues — it returns once the message is safely in\nthe outbox — and the mailer's own loop hands each message to the transport,\nretrying a failure and dead-lettering a message after its last attempt.\n\nThe transport is the SDK's mail package: SMTP when the mail connector's\nsecret smtp-url is set — KIT_SMTP_URL, smtp://user:password@host:587?tls=\nstarttls|implicit|none — and otherwise the capture transport, which keeps\nevery message for the Studio's mailbox and for tests ([Mailer.Captured])\nand delivers nothing. Outside dev, the capture transport is reported as a\nwarning. The URL is read again before every delivery: replacing it where\nit lives — a new version in the store, a new file behind\nKIT_SMTP_URL_FILE — takes effect at the next mail.\n",
-      "file": "framework/internal/kit/mailer.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -8100,7 +8100,7 @@
       "spelled": "string",
       "canonical": "string",
       "doc": "Mark is what a module looks for in the product's fields: kit.Personal,\nkit.Special or kit.Moderated. There is no mark for public or secret:\nthere is nothing to find in the first, and nothing may watch the second.\n",
-      "file": "framework/internal/kit/watch.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -8167,7 +8167,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Module is a set of services a product mounts as one: [NewModule] declares\nit, [App.With] or [Mount] mounts it.\n",
-      "file": "framework/internal/kit/module.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -8532,7 +8532,7 @@
       "spelled": "interface{EndpointConfigurer; CommandConfigurer; QueryConfigurer}",
       "canonical": "interface{github.com/kitsunium/sdk/framework/internal/kit.EndpointConfigurer; github.com/kitsunium/sdk/framework/internal/kit.CommandConfigurer; github.com/kitsunium/sdk/framework/internal/kit.QueryConfigurer}",
       "doc": "OperationOption configures an endpoint, a command or a query alike: the\nauthentication it asks for ([Auth], [AuthOptional]) and the policies in\nfront of its handler ([RateLimit], [RateLimitPerClient], [Timeout],\n[Bulkhead]).\n",
-      "file": "framework/internal/kit/endpoint.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -8587,7 +8587,7 @@
       "spelled": "[T any] struct{}",
       "canonical": "[T any] struct{}",
       "doc": "PasswordPolicyService is the policy of one secret field that holds a password's\nhash: how long a password is at least, and how many former passwords it\nrefuses. [StoreService.Passwords] declares it; Set, Change and Verify apply it.\n",
-      "file": "framework/internal/kit/passwords.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -8713,7 +8713,7 @@
       "spelled": "[Req, Resp any] struct{}",
       "canonical": "[Req, Resp any] struct{}",
       "doc": "PortService is an operation a service needs and does not implement: a typed\nrequest, a typed response, a name. Declare it with [Service.Port], and\ncall it with [PortService.Call] as an endpoint is called: validated, observed,\ndrawn.\n\nWhat a port calls is decided when the app starts, by one rule the static\nanalysis shares: the app's [Bind], else the one [Service.Implement] among\nthe services the app mounts, else the port's own [Fallback]. The start\nrefuses a port it cannot bind, with every other problem at once.\n\nA port is how a service reaches what it cannot import — a module its\nhost's content, a service another that imports it — the consumer owning\nthe contract.\n",
-      "file": "framework/internal/kit/port.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -8780,7 +8780,7 @@
       "spelled": "[Q, R any] struct{}",
       "canonical": "[Q, R any] struct{}",
       "doc": "Query reads and changes nothing: a typed input, a typed result, and one\nhandler — the one declared with it. Declare it with [Service.Query]; ask it\nwith [Query.Ask] from any building block, which draws an asks edge from\nthe caller; give it a route with [Query.Expose]. A query is internal until\nit is exposed: how one service reads what another keeps. The static\nanalysis warns of a query whose code writes a store, fires a workflow,\npublishes, sends a mail or dispatches a command.\n\nA question runs, in this order: the caller's user when the query asks for\none ([Auth], implied by [Query.Allow]), the input's validate tags, the\npolicies, the authorization ([Query.Allow], then [Query.Authorize]), then\nthe handler, on the caller's goroutine.\n",
-      "file": "framework/internal/kit/query.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -8905,7 +8905,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "RecordsService is one store's records without their type. Get returns a record\nwithout its secret members; EraseFields and Delete take a reason and are\nrefused on a held record. Each call is a span on the store's node and an\nentry in the privacy journal.\n",
-      "file": "framework/internal/kit/records.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -9029,7 +9029,7 @@
         }
       ],
       "doc": "RevisionEvent is one version of a record a store with [Revisions] keeps: its\nnumber — from 1, never given twice while the record exists —, when the\nwrite that made it ran, on the app's clock, zero for a record stored before\nits store kept revisions; who made it — the caller's [UserID], empty for a\nwrite with no user —; which command made it — its node ID, empty outside a\ncommand —; and the record as it was, its secret members zeroed.\n",
-      "file": "framework/internal/kit/revisions.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -9073,7 +9073,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Routine is a loop written by hand: a function that runs until its context\nends. kit starts it with the app, cancels its context on shutdown and waits\nfor it, restarts it after an error or a panic — backing off from one second\nto one minute — and reads its select statements to draw what it waits on.\n",
-      "file": "framework/internal/kit/loop.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -9095,7 +9095,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "ScopeValue is one part of a path computed at the start: the user, the\nexecutable, a configuration directory. Two processes share a singleton or\na socket when every scope gives them the same value.\n",
-      "file": "framework/internal/kit/scope.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -9106,7 +9106,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Secret is a secret the product declares: provided by the operator — an SMTP\nURL, an API token — or generated by kit — a signing or sealing key — and\nrotated on its schedule.\n",
-      "file": "framework/internal/kit/secret.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -9211,7 +9211,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Service is a bounded context of the product: it owns its building blocks —\nendpoints, stores, topics, subscriptions, workflows, jobs, frontends — and\nis the unit an App mounts. Declare one per package, as a package-level\nvariable, and declare its building blocks through its methods:\n\n\tvar Service = kit.NewService(\"todos\", \"The todo list.\")\n\tvar Todos = Service.Store(\"todos\", func(t Todo) string { return t.ID })\n\tvar _ = Service.Endpoint(\"GET /todos\", List)\n\nDeclaring never fails: a mistake — a malformed route, a duplicate name — is\nrecorded with its source position and reported, all at once, when the App\nstarts. The diagram shows it too.\n",
-      "file": "framework/internal/kit/service.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -9531,7 +9531,7 @@
       "spelled": "[T SettingValue] struct{}",
       "canonical": "[T github.com/kitsunium/sdk/framework/internal/kit.SettingValue] struct{}",
       "doc": "SettingService is a value the environment gives a service, declared with\n[Service.Setting].\n",
-      "file": "framework/internal/kit/setting.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -9566,7 +9566,7 @@
       "spelled": "interface{string | bool | int | int64 | float64 | time.Duration | []string}",
       "canonical": "interface{string | bool | int | int64 | float64 | time.Duration | []string}",
       "doc": "SettingValue is what a setting may hold.\n",
-      "file": "framework/internal/kit/setting_interface.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -9677,7 +9677,7 @@
         }
       ],
       "doc": "StdioValue is where a CLI command reads and writes: the process's own streams\nunder Main, buffers in a test.\n",
-      "file": "framework/internal/kit/cli.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -9710,7 +9710,7 @@
       "spelled": "[T any] struct{}",
       "canonical": "[T any] struct{}",
       "doc": "StoreService is a typed, keyed collection of entities. Every read returns a copy\nand every write stores one: an entity is kept as its JSON encoding, so what\na handler holds can never alias what the store holds, and the memory and\nfile backends behave identically.\n\nWith a data directory (KIT_DATA_DIR; \".kit/data\" in dev) the store persists\nevery write before returning, atomically — a crash never leaves a torn\nfile — and a write costs one entity, whatever the store holds. Without one,\nit lives in memory. A store a database keeps ([Database], [Keeps]) lives\nin a table of it, and every call is a round trip. A store is a port (ADR\n0004): what it runs on is its engine (store_engine.go) — the SDK's\ndocument store, in memory, in files or over SQL —; kit makes it a node of\nthe graph, observes every call, and speaks for its refusals. Its writes\njoin the transaction their context carries ([Transact]).\n",
-      "file": "framework/internal/kit/store.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -9971,7 +9971,7 @@
       "spelled": "[T any] struct{}",
       "canonical": "[T any] struct{}",
       "doc": "SubscriptionWorker consumes a topic: its handler runs once per message, at least\nonce, retried on error, and dead-lettered after MaxDeliveries attempts.\n",
-      "file": "framework/internal/kit/topic.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -10004,7 +10004,7 @@
       "spelled": "[T any] struct{}",
       "canonical": "[T any] struct{}",
       "doc": "TopicService is an asynchronous channel of messages of type T. Every subscription\nreceives every message, at least once: a subscription's handler must\ntolerate a redelivery.\n",
-      "file": "framework/internal/kit/topic.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -10038,7 +10038,7 @@
       "spelled": "string",
       "canonical": "string",
       "doc": "UID identifies an authenticated user. It is what the auth handler returns\nand what every endpoint reads with [UserID].\n",
-      "file": "framework/internal/kit/auth.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -10124,7 +10124,7 @@
         }
       ],
       "doc": "ViolationMessage is one validation rule a request failed: where, which rule, and\nwhy — never the value.\n",
-      "file": "framework/internal/kit/errors.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -10163,7 +10163,7 @@
         }
       ],
       "doc": "WakeEvent says why a declared loop runs: the reason, the instant, and the\ntopic that woke it when one did.\n",
-      "file": "framework/internal/kit/loop.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -10196,7 +10196,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Watch is a subscription fed by stores instead of a topic: its handler is\ntold of every write kit confirms on a store whose entity holds a field\nwith its mark. [Service.Watch] declares one.\n",
-      "file": "framework/internal/kit/watch.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -10362,7 +10362,7 @@
       "spelled": "[E any, S comparable] struct{}",
       "canonical": "[E any, S comparable] struct{}",
       "doc": "WorkflowService is a state machine over the entities of one store: the states an\nentity goes through, and the arrows between them. It is declared as data —\nwhich is why the diagram can draw it exactly — and it runs four kinds of\ntransitions:\n\n  - event transitions ([WorkflowService.On]), fired by code with [WorkflowService.Fire];\n  - timer transitions ([WorkflowService.After]), fired by the workflow's own loop\n    once an entity has spent a duration in a state;\n  - timer transitions at an instant the entity carries ([WorkflowService.At]) — a\n    due date, a deadline — fired by the same loop when it comes;\n  - guard transitions ([WorkflowService.When]), fired by the same loop as soon as\n    a condition on the entity holds.\n\nThe SDK's state-machine engine runs it (statemachine). Its loop never\npolls: it keeps an agenda of the transitions due, sleeps until the\nearliest, and a write of the store — which may bring one forward — wakes\nit. A workflow with nothing due does not run at all. Transitions of one\nentity run one at a time, of different entities at once.\n\nThe entity's state lives in the entity itself (the state function returns\na pointer to it), so the store stays the single source of truth; the\nengine keeps, beside it, when each entity entered its state and the\nhistory of its transitions — in the workflow's file under the data\ndirectory, so a timer keeps counting across a restart.\n",
-      "file": "framework/internal/kit/workflow.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -10531,7 +10531,7 @@
         }
       ],
       "doc": "WrittenEvent is what a watch is told of a write: which store, which record, and\nwhether it was deleted — never a value. The watch reads the record itself\n([RecordsOf]): without its secret members, and journaled.\n",
-      "file": "framework/internal/kit/watch.go",
+      "file": "framework/internal/kit/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -10542,7 +10542,7 @@
       "spelled": "interface{Close() error; Done() <-chan struct{}; Send(data string) error}",
       "canonical": "interface{Close() error; Done() <-chan struct{}; Send(data string) error}",
       "doc": "EventStream is one Server-Sent Events stream: the Studio's live events.\n",
-      "file": "framework/internal/kit/plug/plug.go",
+      "file": "framework/internal/kit/plug/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -10554,7 +10554,7 @@
       "spelled": "func() error",
       "canonical": "func() error",
       "doc": "Close ends the stream.\n",
-      "file": "framework/internal/kit/plug/plug.go",
+      "file": "framework/internal/kit/plug/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -10566,7 +10566,7 @@
       "spelled": "func() <-chan struct{}",
       "canonical": "func() <-chan struct{}",
       "doc": "Done is closed when the client left.\n",
-      "file": "framework/internal/kit/plug/plug.go",
+      "file": "framework/internal/kit/plug/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -10578,7 +10578,7 @@
       "spelled": "func(data string) error",
       "canonical": "func(data string) error",
       "doc": "Send writes one event's data.\n",
-      "file": "framework/internal/kit/plug/plug.go",
+      "file": "framework/internal/kit/plug/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -10631,7 +10631,7 @@
         }
       ],
       "doc": "HTTPConfig is what kit asks of the HTTP engine: where to listen, its one\nsocket, its bounds, and the handler.\n",
-      "file": "framework/internal/kit/plug/plug.go",
+      "file": "framework/internal/kit/plug/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -10642,7 +10642,7 @@
       "spelled": "interface{Shutdown(ctx context.Context) error; Start(ctx context.Context) error; State() HTTPState}",
       "canonical": "interface{Shutdown(ctx context.Context) error; Start(ctx context.Context) error; State() github.com/kitsunium/sdk/framework/internal/kit/plug.HTTPState}",
       "doc": "HTTPServer is the HTTP engine kit starts, reads and stops.\n",
-      "file": "framework/internal/kit/plug/plug.go",
+      "file": "framework/internal/kit/plug/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -10654,7 +10654,7 @@
       "spelled": "func(ctx context.Context) error",
       "canonical": "func(ctx context.Context) error",
       "doc": "Shutdown drains the engine within ctx.\n",
-      "file": "framework/internal/kit/plug/plug.go",
+      "file": "framework/internal/kit/plug/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -10666,7 +10666,7 @@
       "spelled": "func(ctx context.Context) error",
       "canonical": "func(ctx context.Context) error",
       "doc": "Start binds the address and serves, returning once bound.\n",
-      "file": "framework/internal/kit/plug/plug.go",
+      "file": "framework/internal/kit/plug/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -10678,7 +10678,7 @@
       "spelled": "func() HTTPState",
       "canonical": "func() github.com/kitsunium/sdk/framework/internal/kit/plug.HTTPState",
       "doc": "State says what the engine binds and serves.\n",
-      "file": "framework/internal/kit/plug/plug.go",
+      "file": "framework/internal/kit/plug/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -10714,7 +10714,7 @@
         }
       ],
       "doc": "HTTPState is what the HTTP engine says of itself once it runs: the\naddress it bound, and its connections.\n",
-      "file": "framework/internal/kit/plug/plug.go",
+      "file": "framework/internal/kit/plug/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -10794,7 +10794,7 @@
         }
       ],
       "doc": "ProfilerConfig is the Studio's profiler: the live heap folded onto the graph's\nnodes, and every goroutine grouped.\n",
-      "file": "framework/internal/kit/plug/plug.go",
+      "file": "framework/internal/kit/plug/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -10805,7 +10805,7 @@
       "spelled": "func(file string, line int, fn string) *model.Source",
       "canonical": "func(file string, line int, fn string) *github.com/kitsunium/sdk/framework/model.Source",
       "doc": "SourceFunc says where the function fn, at file:line, lies in the product,\nnil when it knows none.\n",
-      "file": "framework/internal/kit/plug/plug.go",
+      "file": "framework/internal/kit/plug/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -10917,7 +10917,7 @@
         }
       ],
       "doc": "ActionsClaimsValue is what a verified GitHub Actions token asserts.\n\nOnly the claims this package acts on are decoded. Everything else GitHub\nputs in the token is deliberately ignored: a field that is not read cannot\nbe relied on by accident.\n",
-      "file": "framework/internal/service/entitlement/oidc.go",
+      "file": "framework/internal/service/entitlement/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -10952,7 +10952,7 @@
       "spelled": "func(url string, bearer string) (resp *http.Response, err error)",
       "canonical": "func(url string, bearer string) (resp *net/http.Response, err error)",
       "doc": "BearerFetch performs the one request in this package that carries a\ncredential.\n\nA function rather than an interface: only this request needs an\nAuthorization header, and widening Getter would put a bearer parameter on\nthe roster fetch, which must never send one. Naming it as a single-method\ninterface would also force the -er form of GetWithBearer, which is not a\nword.\n",
-      "file": "framework/internal/service/entitlement/service.go",
+      "file": "framework/internal/service/entitlement/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -10977,7 +10977,7 @@
         }
       ],
       "doc": "BundleValue is what a publication point actually serves: the roster's exact\nbytes and the vendor's signature over them, in a single object.\n\nIt exists because the roster and its detached signature used to be two\nfiles, and two files cannot be fetched atomically. raw.githubusercontent.com\ncaches each object independently with max-age=300, so for up to five minutes\nafter every re-signature a client could receive a NEW signature over an OLD\nroster — measured on the live endpoints, not hypothesised. That mismatch is\nindistinguishable from forgery, so the client refused with the most alarming\nerror the scheme has (coreent.ErrRosterUnsigned, the spoofing case) while nothing\nwas wrong. With hourly signing that is roughly 8% of all wall-clock time.\n\nOne object cannot desynchronise with itself. It also halves the cold-start\ncost, since there is now one round trip instead of two.\n",
-      "file": "framework/internal/service/entitlement/bundle.go",
+      "file": "framework/internal/service/entitlement/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -11042,7 +11042,7 @@
       "spelled": "interface{Get(url string) (*http.Response, error)}",
       "canonical": "interface{Get(url string) (*net/http.Response, error)}",
       "doc": "Getter performs the roster HTTP GETs. Injected so tests exercise the\nadmission logic without a network.\n",
-      "file": "framework/internal/service/entitlement/service.go",
+      "file": "framework/internal/service/entitlement/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -11054,7 +11054,7 @@
       "spelled": "func(url string) (*http.Response, error)",
       "canonical": "func(url string) (*net/http.Response, error)",
       "doc": "Get retrieves a URL.\n",
-      "file": "framework/internal/service/entitlement/service.go",
+      "file": "framework/internal/service/entitlement/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -11084,7 +11084,7 @@
         }
       ],
       "doc": "JWKSValue is a published key set.\n",
-      "file": "framework/internal/service/entitlement/jwks.go",
+      "file": "framework/internal/service/entitlement/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -11133,7 +11133,7 @@
         }
       ],
       "doc": "JWKValue is one published signing key, in the JWK shape.\n\nOnly the fields needed to rebuild an RSA public key and to decide whether it\nmay verify a signature are declared. Anything else GitHub publishes is\nignored on purpose: a field that is not read cannot be relied on by\naccident.\n",
-      "file": "framework/internal/service/entitlement/jwks.go",
+      "file": "framework/internal/service/entitlement/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -11243,7 +11243,7 @@
         }
       ],
       "doc": "ProductValue names the product whose entitlement is being verified, and where\nits roster is published.\n\nIt is the whole of what the source implementation kept as package constants:\nthe publication origins, the cache directory name, the OIDC audience, and the\nenrolment issue URL. Every one is a property of one vendor's distribution\nrather than of the verification mechanism, and together they are the only\nreason a correct implementation served exactly one binary.\n\nThe zero value is usable and inert in the safe direction: no origins means\nnothing to fetch, so Verify refuses with RosterUnreachable rather than\nsilently trusting anything.\n",
-      "file": "framework/internal/service/entitlement/product.go",
+      "file": "framework/internal/service/entitlement/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -11352,7 +11352,7 @@
         }
       ],
       "doc": "RoughtimeServerValue is one server this client will ask, and the key it must\nanswer with.\n\nThe public key is the whole trust decision: a server is not trusted because\nof where it is, it is trusted because a statement carries its signature. That\nis the same rule the roster follows, with a different anchor.\n",
-      "file": "framework/internal/service/entitlement/roughtime.go",
+      "file": "framework/internal/service/entitlement/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -11374,7 +11374,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Service verifies entitlement.\n\nIt DOES keep the last bundle it authenticated, which reverses half of an\nearlier decision — \"it holds no cached roster on purpose: a disk cache able\nto authorize would let a frozen file (or a frozen clock) keep a revoked\nsubject running forever\". The frozen file is answered: the cached bytes go\nback through ParseBundle on every read, so a frozen copy stops authorising\nat its own ExpiresAt, at most coreent.RosterLifetime after it was signed. The frozen\nclock is not answered and cannot be, here or anywhere else in an offline\nbinary — it was not answered before the cache existed either. cache.go\ncarries the full argument, next to the code it justifies.\n",
-      "file": "framework/internal/service/entitlement/service.go",
+      "file": "framework/internal/service/entitlement/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -11492,7 +11492,7 @@
         }
       ],
       "doc": "UpdateRequiredError is the refusal raised when a binary sits below the\nroster's floor. It carries both versions as FIELDS, not just in its\nmessage, because the caller has to act on the floor and not merely print\nit: after upgrading it must check that the newly installed build actually\nclears the bar.\n\nWithout that, a floor the published release cannot satisfy — a roster\nasking for v9.9.9 while the mirror still serves v1.5.10 — makes the gate\nupgrade to no effect, re-execute, refuse again, and loop forever. That is\nnot hypothetical: it is what the end-to-end test did before this type\nexisted.\n",
-      "file": "framework/internal/service/entitlement/version.go",
+      "file": "framework/internal/service/entitlement/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -11560,7 +11560,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "ChangedSetValue holds the files, line ranges, and directories that a\nbranch changed versus its merge-base. All paths are absolute and normalised\nthrough filepath.Clean so membership tests match the engine's resolved issue\npositions. Build it with NewChangedSetValue and the add* methods; query it\nwith the Contains* methods.\n",
-      "file": "framework/internal/service/git/changed_set.go",
+      "file": "framework/internal/service/git/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -11631,7 +11631,7 @@
         }
       ],
       "doc": "Config is what Resolve needs to know: where the repository is, and which files\nthe caller considers part of the change.\n\nBoth fields have a meaningful zero and neither is refused (ADR 0031): an empty\nRoot resolves from the process working directory, which is what a tool run\ninside the repository wants, and a nil Include admits every file, which is the\nsafe direction — a filter defaulting to \"exclude\" would under-report a diff.\n",
-      "file": "framework/internal/service/git/config.go",
+      "file": "framework/internal/service/git/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -11681,7 +11681,7 @@
         }
       ],
       "doc": "HeadValue is what a working tree is at: the commit HEAD names, that\ncommit's time, and whether any tracked file differs from it.\n\nIt is the engine's own value (ADR 0074): the core git port answers what a branch\nCHANGED and deliberately models no commit, so a second implementation of\nthat port would have no reason to produce this.\n",
-      "file": "framework/internal/service/git/head.go",
+      "file": "framework/internal/service/git/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -11692,7 +11692,7 @@
       "spelled": "func(absPath string) bool",
       "canonical": "func(absPath string) bool",
       "doc": "IncludeFunc reports whether the file at absPath belongs in the changed set.\n\nIt replaces what the source implementation hard-coded: a \".go\" suffix test\nplus a generated-file probe. Those are one caller's policy, not the domain's —\na changed set over Markdown, or one that keeps generated files, is just as\nlegitimate — so the policy is the caller's to state.\n\nA nil IncludeFunc includes everything. That is the safe default in the ADR\n0031 sense: the failure mode of including too much is a wider scope, while a\ndefault that silently dropped files would under-report a diff, which is the\none answer this package must never give.\n",
-      "file": "framework/internal/service/git/config.go",
+      "file": "framework/internal/service/git/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -12050,7 +12050,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Service replaces the running binary with a newer signed release of the\nproduct its SourceValue names.\nIt manages version checking via GitHub API and binary replacement.\ngoos/goarch are captured at construction time so the per-platform asset\nresolution (`getBinaryName`, `getArchiveSuffix`, `innerBinaryName`) is\nstable per-instance — tests can construct a literal with explicit values\ninstead of mutating package-level `runtimeGOOS`/`runtimeGOARCH` (which\nwould race under t.Parallel).\n",
-      "file": "framework/internal/service/selfupdate/updater.go",
+      "file": "framework/internal/service/selfupdate/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -12215,7 +12215,7 @@
         }
       ],
       "doc": "SourceValue says where releases come from and what they are called.\n\nIt is the whole of what the source implementation hard-coded. Every field is a\nproperty of one product's distribution, not of the update mechanism, so\nkeeping them as constants is what made that implementation un-reusable.\n\nStableRepo and DevRepo can differ, and the reason is worth stating: a project\nwhose source repository goes private still has to serve already-installed\nbinaries their update path, which means a public mirror for stable releases\nwhile candidates stay in the source repository behind credentials the public\nbinary does not carry. When DevRepo is empty, StableRepo serves both.\n",
-      "file": "framework/internal/service/selfupdate/source.go",
+      "file": "framework/internal/service/selfupdate/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -15885,7 +15885,7 @@
         }
       ],
       "doc": "BackendConfig is where Run runs kit's stores: a name for the subtests and\nthe options that place the stores there.\n",
-      "file": "framework/kit/storetest/storetest.go",
+      "file": "framework/kit/storetest/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -20786,7 +20786,7 @@
         }
       ],
       "doc": "AdapterMessage is a module a connector plugs a product in through: an engine,\nimported by the product's main to reach a database, and the only code of\nthe product that imports its driver.\n",
-      "file": "framework/model/internal/core/connector.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -20829,7 +20829,7 @@
         }
       ],
       "doc": "AnalysisResult reports the status of static analysis.\nIt says whether the analyzer ran, how long it took, and the error that\nstopped it.\n",
-      "file": "framework/model/internal/core/model.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -20890,7 +20890,7 @@
         }
       ],
       "doc": "AppMessage identifies the product and the machine that described it.\nIt names the module, the environment and the build the graph was taken\nfrom.\n",
-      "file": "framework/model/internal/core/model.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -20927,7 +20927,7 @@
         }
       ],
       "doc": "ArchitectureMessage is the product at the two outer levels of the C4 model.\n\nContext (level 1) is the product as one box, the people who use it and the\nsystems it depends on. Containers (level 2) is what the product is\ndeployed as: the process, the frontend its browser runs, the volume its\ndata lives on. Components (level 3) are the nodes, grouped by service; code\n(level 4) is each node's [CodeResult].\n\nkit derives all of it from the declarations — a frontend implies a person\nwith a browser, a mailer an SMTP relay, a data directory a volume, a\ndatabase its own container — so it is exactly as true as the rest of the\ngraph.\n",
-      "file": "framework/model/internal/core/architecture.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -20982,7 +20982,7 @@
         }
       ],
       "doc": "AuthSpec describes the app's authentication handler.\nCredentials says what it reads from a request; Endpoints are the ones\nbehind it.\n",
-      "file": "framework/model/internal/core/node_info.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -21030,7 +21030,7 @@
         }
       ],
       "doc": "BinarySpec is one executable the product ships: the [NodeEntity.Binary] of a\n[KindBinary] node, naming its roles.\n",
-      "file": "framework/model/internal/core/node_process.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -21283,7 +21283,7 @@
         }
       ],
       "doc": "BootStepMessage is one step of the start, as it ran.\nIt carries when it began, how long it took and, when it failed, its error.\n",
-      "file": "framework/model/internal/core/runtime.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -21314,7 +21314,7 @@
         }
       ],
       "doc": "BuildMessage is what a binary was built from, at its three levels.\nIts three levels are the Go toolchain, the main module and the modules it\ndepends on.\n",
-      "file": "framework/model/internal/core/model.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -21339,7 +21339,7 @@
         }
       ],
       "doc": "CLISpec is a short command-line command: the [NodeEntity.CLI] of a [KindCLI]\nnode, the words that run it.\n",
-      "file": "framework/model/internal/core/node_process.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -21364,7 +21364,7 @@
         }
       ],
       "doc": "CensusMessage is a workflow's population per state.\nIt counts the instances in each state when the census was taken.\n",
-      "file": "framework/model/internal/core/runtime.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -21455,7 +21455,7 @@
         }
       ],
       "doc": "CodeBlockMessage is a block of a function that decides whether, or how many\ntimes, the steps under it run.\n",
-      "file": "framework/model/internal/core/code.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -21498,7 +21498,7 @@
         }
       ],
       "doc": "CodeEffectMessage is one call on a building block, inside a function.\nIt names the node it reaches and the edge kind that call draws.\n",
-      "file": "framework/model/internal/core/code.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -21553,7 +21553,7 @@
         }
       ],
       "doc": "CodeFuncMessage is one function of the module a node's code reaches.\nIts steps are listed in the order they run, under the blocks that guard\nthem.\n",
-      "file": "framework/model/internal/core/code.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -21605,7 +21605,7 @@
         }
       ],
       "doc": "CodeResult is the code a node runs, as the static analysis read it: the\nfourth and innermost level of the C4 model. The entry is the function the\nnode runs — an endpoint's handler, a subscription's, a loop's — and Funcs\nare the functions of the module it reaches, each with what it calls and\nwhat it does to other nodes.\n",
-      "file": "framework/model/internal/core/code.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -21648,7 +21648,7 @@
         }
       ],
       "doc": "CodeStepMessage is one thing a function does: a call to another function of the\nmodule, a call on a building block, or a call into the SDK — under the\ninnermost block that guards it.\n",
-      "file": "framework/model/internal/core/code.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -21679,7 +21679,7 @@
         }
       ],
       "doc": "CodeUseMessage is one SDK function a node's code calls.\nSites are where the node's code calls it, so a reader sees what it leans\non.\n",
-      "file": "framework/model/internal/core/code.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -21764,7 +21764,7 @@
         }
       ],
       "doc": "CommandSpec describes a command: an operation that changes something.\nIt carries its input and result schemas, its handler, its queue and who may\ndispatch it.\n",
-      "file": "framework/model/internal/core/node_info.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -21848,7 +21848,7 @@
         }
       ],
       "doc": "ComponentMessage is one lifecycle component: brought up in order, taken down in\nreverse.\n",
-      "file": "framework/model/internal/core/runtime.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -21954,7 +21954,7 @@
       "spelled": "string",
       "canonical": "string",
       "doc": "ConnectorKind groups connectors by what they are for.\n",
-      "file": "framework/model/internal/core/connector.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -22021,7 +22021,7 @@
         }
       ],
       "doc": "ConnectorMessage is something a product plugs into, as the product declares it:\nhow it is reached, what it reaches out to, where it keeps its data. The\nStudio shows a connector's pages and widgets only when the product has\none: a command-line tool has no requests to list, a service without a\nmailer no mailbox.\n\nA connector says what the code declares, never what an environment\nsupplies. The relay a mailer delivers through, the directory a store\nwrites to, the address kit listens on are facts of the running\nenvironment — [MailerSpec], [StoreSpec], the [ArchitectureMessage] and [RuntimeMessage]\ncarry those. So a connector is a pure function of the nodes\n([ConnectorsOf]), and never moves a graph's revision.\n",
-      "file": "framework/model/internal/core/connector.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -22100,7 +22100,7 @@
         }
       ],
       "doc": "ConnectorSpec is a connector kit can plug a product into, whether the\nproduct uses it or not: what it is, and the building blocks that bring it.\n",
-      "file": "framework/model/internal/core/connector.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -22238,7 +22238,7 @@
         }
       ],
       "doc": "ContainerMessage is one runnable or storage unit of the product.\nIts ID starts with \"container:\"; Nodes are the nodes that live in it.\n",
-      "file": "framework/model/internal/core/architecture.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -22394,7 +22394,7 @@
         }
       ],
       "doc": "DatabaseMessage is one database the app declares (kit.Database), as the running\nprocess found it. Its URL is never shown: where it was found, the engine,\nthe address and the TLS mode are.\n",
-      "file": "framework/model/internal/core/runtime.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -22461,7 +22461,7 @@
         }
       ],
       "doc": "DevBuildMessage is one build of `kit dev`: when, how long, and why.\nIt lets the Studio say what changed and how long the reload took.\n",
-      "file": "framework/model/internal/core/runtime.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -22504,7 +22504,7 @@
         }
       ],
       "doc": "DiagnosticMessage is a problem found while building the graph.\nIt names the node or the file it is about, and how serious it is.\n",
-      "file": "framework/model/internal/core/model.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -22598,7 +22598,7 @@
       "spelled": "string",
       "canonical": "string",
       "doc": "EdgeKind says how two nodes relate.\nIt is a wire format — the graph's JSON and the Studio's TypeScript unions\ncarry these names —, so it stays a string.\n",
-      "file": "framework/model/internal/core/edge_kind.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -22665,7 +22665,7 @@
         }
       ],
       "doc": "EdgeMessage is one relation, with the evidence for it.\nDeclared, Static and Observed say whether construction, the code or the\nruntime knows it.\n",
-      "file": "framework/model/internal/core/model.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -22818,7 +22818,7 @@
         }
       ],
       "doc": "EditMessage is one change between two versions of a record, in RFC 6902's\nwords: Op is add, remove or replace, Path the RFC 6901 JSON pointer of the\nmember it changes, From its value before and To its value after, as JSON.\nA member whose value is not given — a secret's, or in the Studio a\npersonal or special one — says it changed, never what: From and To are\nabsent.\n",
-      "file": "framework/model/internal/core/history.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -22891,7 +22891,7 @@
         }
       ],
       "doc": "EndpointSpec describes an HTTP endpoint, or the implementation of a port.\nIt carries the method and path, the request and response schemas, and its\nauth.\n",
-      "file": "framework/model/internal/core/node_info.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -22946,7 +22946,7 @@
         }
       ],
       "doc": "ErasureMessage is what kit.Erase did, store by store.\nStores lists, store by store, what the erasure did there.\n",
-      "file": "framework/model/internal/core/privacy.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -23030,7 +23030,7 @@
         }
       ],
       "doc": "Event is one live event. Exactly one of the payload fields matching Type is\nset.\n",
-      "file": "framework/model/internal/core/runtime.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -23149,7 +23149,7 @@
       "spelled": "string",
       "canonical": "string",
       "doc": "EventType names the kind of a live event.\nIt is a wire format — the graph's JSON and the Studio's TypeScript unions\ncarry these names —, so it stays a string.\n",
-      "file": "framework/model/internal/core/event_type.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -23174,7 +23174,7 @@
         }
       ],
       "doc": "ExportedVersionsMessage are the versions of one exported record, as a\nStoreDataMessage carries them beside its records.\n",
-      "file": "framework/model/internal/core/privacy.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -23295,7 +23295,7 @@
         }
       ],
       "doc": "FieldMessage is one member of an object schema.\nIt carries the JSON name, the schema of its value and the classes of its\ndata.\n",
-      "file": "framework/model/internal/core/node_info.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -23319,7 +23319,7 @@
         }
       ],
       "doc": "FileMessage is one file a graph points at: its path, relative to its root — the\nproduct's module, or the Go module [SourceMessage.GoModule] names.\n",
-      "file": "framework/model/internal/core/module.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -23356,7 +23356,7 @@
         }
       ],
       "doc": "FlameNodeMessage is one frame of a flame graph.\nIts children are the frames it called; its value is the samples under it.\n",
-      "file": "framework/model/internal/core/profile.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -23387,7 +23387,7 @@
         }
       ],
       "doc": "FormerMessage is one former value of a field that keeps its history: what it\nwas, until when, and who replaced it.\n",
-      "file": "framework/model/internal/core/history.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -23412,7 +23412,7 @@
         }
       ],
       "doc": "FrontendSpec describes static assets served by the product.\nIt carries the path the assets are served under and where they are read\nfrom.\n",
-      "file": "framework/model/internal/core/node_info.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -23454,7 +23454,7 @@
         }
       ],
       "doc": "FuncCostMessage is what one function cost.\nIt carries the flat and cumulative samples of the function and where it\nlives.\n",
-      "file": "framework/model/internal/core/profile.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -23539,7 +23539,7 @@
         }
       ],
       "doc": "GoroutineGroup is goroutines doing the same thing.\nThey share one stack; Count says how many run it.\n",
-      "file": "framework/model/internal/core/profile.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -23570,7 +23570,7 @@
         }
       ],
       "doc": "GoroutinesResult is every goroutine of the process, grouped by what it runs.\nEach group names the node its stack runs in, when one does.\n",
-      "file": "framework/model/internal/core/profile.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -23661,7 +23661,7 @@
         }
       ],
       "doc": "GraphMessage is the whole product.\nIt is the JSON document the runtime serves and the analyzer writes; Version\nnames its shape.\n",
-      "file": "framework/model/internal/core/model.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -23782,7 +23782,7 @@
         }
       ],
       "doc": "HTTPServer is the product's HTTP server, and whose loop serves it.\nIts address is the one it listens on; its loop is the node that runs it.\n",
-      "file": "framework/model/internal/core/runtime.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -23807,7 +23807,7 @@
         }
       ],
       "doc": "HeldUntilSpec is the hold a store declares on each of its records, until an\ninstant the record carries.\n",
-      "file": "framework/model/internal/core/node_info.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -23850,7 +23850,7 @@
         }
       ],
       "doc": "HoldEvent is one record a legal hold keeps. It carries references only: never\nthe record's key, its subject's identity, or the hold's reason, which kit\nkeeps apart.\n",
-      "file": "framework/model/internal/core/privacy.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -23899,7 +23899,7 @@
         }
       ],
       "doc": "IDValue is a node's identity, parsed: the one grammar of [IDPattern]. Its\nString is the ID it was parsed from.\n",
-      "file": "framework/model/internal/core/id.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -23948,7 +23948,7 @@
         }
       ],
       "doc": "IndexSpec is one secondary index of a store.\nIts name is unique in the store; Unique says whether two records may share\na key.\n",
-      "file": "framework/model/internal/core/node_info.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -23985,7 +23985,7 @@
         }
       ],
       "doc": "InstanceMessage is one entity's journey through a workflow.\nIt carries the entity's key, its current state and the steps that brought\nit there.\n",
-      "file": "framework/model/internal/core/runtime.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -24037,7 +24037,7 @@
         }
       ],
       "doc": "JobSpec describes a scheduled job.\nIt carries the fixed interval or the cron expression that schedules it.\n",
-      "file": "framework/model/internal/core/node_info.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -24062,7 +24062,7 @@
         }
       ],
       "doc": "JournalCheckMessage is what verifying the journal's chain found.\nA broken chain names the first entry whose hash does not follow.\n",
-      "file": "framework/model/internal/core/privacy.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -24140,7 +24140,7 @@
         }
       ],
       "doc": "JournalEntryEvent is one operation of the privacy journal: what was done,\nwhere, by whom and when, with references only — never an identity, a\nvalue or a key. Each entry is chained to the previous one by SHA-256.\n",
-      "file": "framework/model/internal/core/privacy.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -24530,7 +24530,7 @@
         }
       ],
       "doc": "LibrarySpec is a package shared between components (D19): the\n[NodeEntity.Library] of a [KindLibrary] node.\n",
-      "file": "framework/model/internal/core/node_process.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -24579,7 +24579,7 @@
         }
       ],
       "doc": "LinkMessage is a relationship between two elements of the architecture. The\nprocess's link to a database, \"Reads and writes\", carries the database\nconnector, and the store connector once stores live on it.\n",
-      "file": "framework/model/internal/core/architecture.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -24616,7 +24616,7 @@
         }
       ],
       "doc": "ListenerSpec is a listener that is not HTTP: the [NodeEntity.Listener] of a\n[KindListener] node — its network, its contract, who may connect.\n",
-      "file": "framework/model/internal/core/node_process.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -24676,7 +24676,7 @@
         }
       ],
       "doc": "LogRecordMessage is one log record written by product code through kit.Log, kept\nin dev so the Studio can show a request's logs beside its spans.\n",
-      "file": "framework/model/internal/core/runtime.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -24851,7 +24851,7 @@
         }
       ],
       "doc": "LoopMessage is one recurring piece of the daemon's internal loop: a job, a\nworkflow's timer sweep, a subscription's consumer, the HTTP accept loop, a\ndeclared or hand-written loop.\n",
-      "file": "framework/model/internal/core/runtime.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -24960,7 +24960,7 @@
         }
       ],
       "doc": "LoopSpec describes a loop node.\nStyle says whether it is declared (kit owns the wait) or hand-written.\n",
-      "file": "framework/model/internal/core/node_info.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -25062,7 +25062,7 @@
         }
       ],
       "doc": "MailMessage is a whole captured mail, for the Studio's mailbox.\nIt is kept by the capture transport of dev and tests only, never in\nproduction.\n",
-      "file": "framework/model/internal/core/devtools.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -25193,7 +25193,7 @@
         }
       ],
       "doc": "MailSummaryMessage is one mail as the outbox sees it.\nIt carries no body: the Studio lists summaries and reads a whole mail on\ndemand.\n",
-      "file": "framework/model/internal/core/runtime.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -25260,7 +25260,7 @@
         }
       ],
       "doc": "MailerSpec describes outbound mail.\nIt carries the transport that empties the outbox and the outbox's counters.\n",
-      "file": "framework/model/internal/core/node_info.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -25381,7 +25381,7 @@
         }
       ],
       "doc": "MechanicMessage is a generic building block, backed by an SDK package, that a node\ncomposes. The catalog lists every mechanic kit offers; an endpoint's\npipeline lists the ones it uses.\n",
-      "file": "framework/model/internal/core/node_info.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -25428,7 +25428,7 @@
         }
       ],
       "doc": "MigrationMessage is one versioned migration.\nIts Version orders it among the others; Name says what it does.\n",
-      "file": "framework/model/internal/core/runtime.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -25470,7 +25470,7 @@
         }
       ],
       "doc": "MigrationSetMessage is one set of migrations on a database — kit's own, the\nproduct's (kit.Migrations), a module's — with its own version table, and\nso its own lock.\n",
-      "file": "framework/model/internal/core/runtime.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -25501,7 +25501,7 @@
         }
       ],
       "doc": "MockMessage is the replacement a test gave the app ([MockReplace]).\nIt is set by a test only; the Studio shows it and never sets one (D13).\n",
-      "file": "framework/model/internal/core/runtime.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -25615,7 +25615,7 @@
         }
       ],
       "doc": "ModuleMessage is a module the app mounts: a Go module's services, released and\nmounted together like a bundle (ADR 0008). Everything a module declares is\nqualified with its name: its services are \"<module>.<service>\" — the one\nnamed like the module is \"<module>\" —, so its nodes are\n\"<module>.<service>/<kind>/<name>\" and carry [NodeEntity.Module].\n",
-      "file": "framework/model/internal/core/module.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -25675,7 +25675,7 @@
         }
       ],
       "doc": "ModuleVersionMessage identifies one module of a build.\nLocal and Modified say when the code that ran is not the published version.\n",
-      "file": "framework/model/internal/core/model.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -25760,7 +25760,7 @@
         }
       ],
       "doc": "NodeCostMessage is what one node cost.\nIt is the share of the profile's samples spent in the node's code.\n",
-      "file": "framework/model/internal/core/profile.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -25939,7 +25939,7 @@
         }
       ],
       "doc": "NodeEntity is one building block.\nIts ID is its identity; exactly one of the kind-specific fields matching\nKind is set.\n",
-      "file": "framework/model/internal/core/node.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -25961,7 +25961,7 @@
       "spelled": "string",
       "canonical": "string",
       "doc": "NodeKind is the closed set of building blocks a kit product is made of.\nIt is a wire format — the graph's JSON and the Studio's TypeScript unions\ncarry these names —, so it stays a string.\n",
-      "file": "framework/model/internal/core/node_kind.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -26255,7 +26255,7 @@
         }
       ],
       "doc": "PasswordPolicyMessage is the policy of one secret field that holds a password's\nhash (Store.Passwords).\n",
-      "file": "framework/model/internal/core/history.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -26286,7 +26286,7 @@
         }
       ],
       "doc": "Payload is the request and the response of a span, as JSON, in dev only.\nEvery member whose name says it is a secret — password, token, secret,\nauthorization, cookie… — or whose Go field is tagged kit:\"secret\" is\nreplaced by \"[redacted]\", and each side is cut at 8 KiB.\n",
-      "file": "framework/model/internal/core/runtime.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -26311,7 +26311,7 @@
         }
       ],
       "doc": "PermissionMessage is what a caller needs to dispatch a command or to ask a\nquery: that the app's policy lets it do Action to Resource (Allow).\n",
-      "file": "framework/model/internal/core/node_info.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -26342,7 +26342,7 @@
         }
       ],
       "doc": "PersonMessage is a human user of the product.\nIt is drawn at the edge of the C4 context view, outside every container.\n",
-      "file": "framework/model/internal/core/architecture.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -26361,7 +26361,7 @@
         }
       ],
       "doc": "PersonalDataMessage is a person's data as kit.Export gives it (GDPR art. 15 and\n20): their records, store by store, with what art. 15(1) asks beside them.\n",
-      "file": "framework/model/internal/core/privacy.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -26392,7 +26392,7 @@
         }
       ],
       "doc": "PhaseChangeEvent is one step of the daemon's life.\nIt carries the phase entered, when it was entered, and why.\n",
-      "file": "framework/model/internal/core/runtime.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -26504,7 +26504,7 @@
         }
       ],
       "doc": "Pool is a database's connection pool, as database/sql counts it.\nIt is sampled when the runtime state is read; its counters never move a\nrevision.\n",
-      "file": "framework/model/internal/core/runtime.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -26541,7 +26541,7 @@
         }
       ],
       "doc": "PortMessage is an address a process listens on.\nOwner is the container that listens on it; Serves names what is reached\nthrough it.\n",
-      "file": "framework/model/internal/core/architecture.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -26596,7 +26596,7 @@
         }
       ],
       "doc": "PortSpec describes a port: an operation a service needs and another\nimplements.\n",
-      "file": "framework/model/internal/core/node_info.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -26615,7 +26615,7 @@
         }
       ],
       "doc": "PresentationSpec is what turns results into what a reader sees: the\n[NodeEntity.Presentation] of a [KindPresentation] node.\n",
-      "file": "framework/model/internal/core/node_process.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -26658,7 +26658,7 @@
         }
       ],
       "doc": "PrivacyMessage is what a running app says of the personal data it keeps.\nIt is the Privacy page's data: the register, the holds and the journal's\nstate.\n",
-      "file": "framework/model/internal/core/privacy.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -26782,7 +26782,7 @@
         }
       ],
       "doc": "ProcessSpec is the Go process a product runs in.\nIt carries the runtime's figures — goroutines, heap, GC, CPU — taken at At.\n",
-      "file": "framework/model/internal/core/runtime.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -26801,7 +26801,7 @@
         }
       ],
       "doc": "ProductRetentionSpec is a retention the product keeps itself, as it says\nit.\n",
-      "file": "framework/model/internal/core/node_info.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -26916,7 +26916,7 @@
         }
       ],
       "doc": "ProfileResult is a pprof profile of the running product, folded onto its graph:\nevery sample is attributed to the node whose code was running — through\nthe pprof label kit puts on every handler, subscription, job and loop run,\nor, for the heap, which carries no label, through the node's code functions\non the sample's stack.\n",
-      "file": "framework/model/internal/core/profile.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -27024,7 +27024,7 @@
         }
       ],
       "doc": "QuerySpec describes a query: an operation that reads and changes\nnothing.\n",
-      "file": "framework/model/internal/core/node_info.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -27049,7 +27049,7 @@
         }
       ],
       "doc": "RecordFormerMessage is the former values of one exported record's fields.\nA personal or special field's former values are redacted, never exported in\nclear.\n",
-      "file": "framework/model/internal/core/privacy.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -27067,7 +27067,7 @@
         }
       ],
       "doc": "RecordHistoryMessage is what kit remembers of one record, as the Studio's data\nview shows it (GET /_kit/api/former): each field's former values, newest\nfirst, by the field's JSON pointer — a secret field's without their\nvalues, a personal or special one's redacted.\n",
-      "file": "framework/model/internal/core/history.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -27109,7 +27109,7 @@
         }
       ],
       "doc": "RecordVersionMessage is one version of a record whose store keeps\nrevisions (ADR 0007 §3): its number — from 1, never given twice while the\nrecord exists —, when the write that made it ran — zero for a record\nstored before its store kept revisions —, who made it and which command,\nand the record as it was.\n",
-      "file": "framework/model/internal/core/history.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -27143,7 +27143,7 @@
         }
       ],
       "doc": "RecordVersionsMessage is a record's versions as the Studio's data view\nshows them (GET /_kit/api/revisions): newest first, each as the data\nbrowser shows a record — a member sealed at rest sealed, a personal,\nspecial or secret one redacted —, and, when two were asked for, what\nchanged from one to the other, a value given only where the data browser\nwould show it.\n",
-      "file": "framework/model/internal/core/history.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -27174,7 +27174,7 @@
         }
       ],
       "doc": "RegisterMessage is the record of processing of GDPR art. 30(1), as far as the\ncode knows it.\n",
-      "file": "framework/model/internal/core/privacy.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -27267,7 +27267,7 @@
         }
       ],
       "doc": "RegisterStoreMessage is one store's line in the register.\nIt names the classes the store keeps, their purposes and their retention.\n",
-      "file": "framework/model/internal/core/privacy.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -27340,7 +27340,7 @@
         }
       ],
       "doc": "RetentionSpec is when kit erases or deletes a record: after a delay counted\nfrom an instant the record carries (After or Setting, and Since), or at an\ninstant a function gives (At).\n",
-      "file": "framework/model/internal/core/node_info.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -27418,7 +27418,7 @@
         }
       ],
       "doc": "RoleSpec is one process role of a binary: the [NodeEntity.Role] of a\n[KindRole] node — its profile, arguments, singleton and idle stop.\n",
-      "file": "framework/model/internal/core/node_process.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -27527,7 +27527,7 @@
         }
       ],
       "doc": "RuntimeMessage is what a running process says about itself: the daemon's own state\nand its internal loop.\n",
-      "file": "framework/model/internal/core/runtime.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -27594,7 +27594,7 @@
         }
       ],
       "doc": "SchemaMessage describes a Go type as it appears on the wire.\nIt is a JSON-Schema-like shape: a kind, its fields or elements, and its Go\ntype.\n",
-      "file": "framework/model/internal/core/node_info.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -27775,7 +27775,7 @@
         }
       ],
       "doc": "SecretSpec describes a declared secret: how it is made, where it lives,\nits versions — never its value.\n",
-      "file": "framework/model/internal/core/node_info.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -27818,7 +27818,7 @@
         }
       ],
       "doc": "SelectCaseMessage is one case of a select statement in a hand-written loop.\nThe analyzer reads it from the loop's body; Kind says what the case waits\non.\n",
-      "file": "framework/model/internal/core/node_info.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -28052,7 +28052,7 @@
         }
       ],
       "doc": "SettingMessage is one configuration value kit read when the product started:\nkit's own, or one a service of the product declares.\n",
-      "file": "framework/model/internal/core/runtime.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -28125,7 +28125,7 @@
         }
       ],
       "doc": "SnippetMessage is source code served to a reader of the graph.\nFocus and FocusEnd mark the lines a reader asked for, inside the lines\nserved.\n",
-      "file": "framework/model/internal/core/runtime.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -28168,7 +28168,7 @@
         }
       ],
       "doc": "SourceMessage locates code.\nFile is relative to its module's root; Line and EndLine bound the\ndeclaration.\n",
-      "file": "framework/model/internal/core/model.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -28283,7 +28283,7 @@
         }
       ],
       "doc": "SpanMessage is a finished unit of work, attributed to a node. Only allow-listed,\nwire-safe fields travel: no URL, no query string, no private error text.\n",
-      "file": "framework/model/internal/core/runtime.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -28331,7 +28331,7 @@
         }
       ],
       "doc": "StateSpec is one state of a workflow.\nTerminal marks a state an instance stays in; Count is how many instances\nare in it.\n",
-      "file": "framework/model/internal/core/node_info.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -28374,7 +28374,7 @@
         }
       ],
       "doc": "StatsMessage are observed counters for a node or an edge.\nThey are counters: they never move a graph's revision.\n",
-      "file": "framework/model/internal/core/model.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -28447,7 +28447,7 @@
         }
       ],
       "doc": "StepEvent is one transition in an instance's history.\nIt carries the event, the states it went from and to, and when it fired.\n",
-      "file": "framework/model/internal/core/runtime.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -28502,7 +28502,7 @@
         }
       ],
       "doc": "StoreDataMessage is one store's records about a person.\nIt is one part of what kit.Export gives a person about themselves.\n",
-      "file": "framework/model/internal/core/privacy.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -28539,7 +28539,7 @@
         }
       ],
       "doc": "StoreErasureMessage is one store's part of an erasure: the keys of the records\nerased, deleted, and held — left in place, as a legal hold asks. A key\nmay be personal data, which the Studio and the logs never show.\n",
-      "file": "framework/model/internal/core/privacy.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -28581,7 +28581,7 @@
         }
       ],
       "doc": "StoreHistoryMessage is what a store remembers of its records.\nFields names the fields it keeps former values of; Kept and Bytes weigh\nthem.\n",
-      "file": "framework/model/internal/core/history.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -28664,7 +28664,7 @@
         }
       ],
       "doc": "StorePrivacyMessage is what a store keeps of people: whom each record is about,\nwhy, for how long, and — on a runtime graph — what is held and due.\n",
-      "file": "framework/model/internal/core/node_info.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -28737,7 +28737,7 @@
         }
       ],
       "doc": "StoreSpec describes a store.\nIt carries the entity's schema, its backend, its indexes, its privacy and\nits history.\n",
-      "file": "framework/model/internal/core/node_info.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -28792,7 +28792,7 @@
         }
       ],
       "doc": "SubscriptionSpec describes a subscription — or a watch (ADR 0008), a\nsubscription whose deliveries come from stores instead of a topic.\n",
-      "file": "framework/model/internal/core/node_info.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -28841,7 +28841,7 @@
         }
       ],
       "doc": "SystemMessage is a software system outside the product.\nNodes are the product's nodes that talk to it; Technology says what it runs\non.\n",
-      "file": "framework/model/internal/core/architecture.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -28883,7 +28883,7 @@
         }
       ],
       "doc": "TopicSpec describes a topic.\nIt carries the message's schema; its subscriptions are the nodes it\ndelivers to.\n",
-      "file": "framework/model/internal/core/node_info.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -28938,7 +28938,7 @@
         }
       ],
       "doc": "TraceMessage is the spans sharing one trace ID, root first.\nThe root span is the one with no parent in the trace; the others follow it.\n",
-      "file": "framework/model/internal/core/runtime.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -28993,7 +28993,7 @@
         }
       ],
       "doc": "TransitionEvent is one workflow instance moving between states.\nIt names the workflow, the entity, the event and the states it went from\nand to.\n",
-      "file": "framework/model/internal/core/runtime.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -29066,7 +29066,7 @@
         }
       ],
       "doc": "TransitionSpec is one arrow of a workflow.\nIt names the event that fires it and the states it goes from and to.\n",
-      "file": "framework/model/internal/core/node_info.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -29471,7 +29471,7 @@
         }
       ],
       "doc": "WakeSourceMessage is one thing that wakes a declared loop.\nKind says whether a topic, a period (Every) or a function wakes the loop.\n",
-      "file": "framework/model/internal/core/node_info.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -29538,7 +29538,7 @@
         }
       ],
       "doc": "WorkflowSpec describes a state machine bound to a store.\nIt carries the states and the transitions between them, and the store it\nlives in.\n",
-      "file": "framework/model/internal/core/node_info.go",
+      "file": "framework/model/internal/core/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -30590,7 +30590,7 @@
       "spelled": "interface{Emit(e *Event)}",
       "canonical": "interface{Emit(e *github.com/kitsunium/sdk/framework/telemetry.Event)}",
       "doc": "Emitter is where a product reports: the telemetry port. Emit copies e and\nnever keeps it; it must not block and must not allocate.\n",
-      "file": "framework/telemetry/telemetry_interface.go",
+      "file": "framework/telemetry/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -30601,7 +30601,7 @@
       "recv": "Emitter",
       "spelled": "func(e *Event)",
       "canonical": "func(e *github.com/kitsunium/sdk/framework/telemetry.Event)",
-      "file": "framework/telemetry/telemetry_interface.go",
+      "file": "framework/telemetry/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -30660,7 +30660,7 @@
         }
       ],
       "doc": "Event is one report. Its fields are numbers only — see the package comment:\nthere is no field a person's data could travel in, in any environment.\n",
-      "file": "framework/telemetry/telemetry.go",
+      "file": "framework/telemetry/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -30671,7 +30671,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Exporter is an Emitter that hands events to the clients attached to its\nsocket. It never blocks a producer: a full ring drops the event and counts\nit.\n",
-      "file": "framework/telemetry/telemetry.go",
+      "file": "framework/telemetry/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -30793,7 +30793,7 @@
         }
       ],
       "doc": "ExporterConfig is where the exporter listens, who may attach, and how much\nit holds for a slow reader.\n",
-      "file": "framework/telemetry/telemetry.go",
+      "file": "framework/telemetry/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -30836,7 +30836,7 @@
         }
       ],
       "doc": "HelloValue is what the handshake says about the process, besides the\noperations and the record size: which product, binary and role run, from\nwhich revision and design, and the node table events refer to.\n",
-      "file": "framework/telemetry/telemetry.go",
+      "file": "framework/telemetry/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -30847,7 +30847,7 @@
       "spelled": "uint8",
       "canonical": "uint8",
       "doc": "Kind says what an event reports.\n",
-      "file": "framework/telemetry/telemetry.go",
+      "file": "framework/telemetry/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -30933,7 +30933,7 @@
       "spelled": "uint32",
       "canonical": "uint32",
       "doc": "NodeRef is a node's index in the handshake's node table, from 1; zero is\n\"no node\".\n",
-      "file": "framework/telemetry/telemetry.go",
+      "file": "framework/telemetry/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -30955,7 +30955,7 @@
       "spelled": "uint8",
       "canonical": "uint8",
       "doc": "Op is what the work was: the span operations of framework/model.\n",
-      "file": "framework/telemetry/telemetry.go",
+      "file": "framework/telemetry/decl_gen.go",
       "layer": "framework"
     },
     {
@@ -31264,7 +31264,7 @@
       "spelled": "uint8",
       "canonical": "uint8",
       "doc": "Outcome says how the work ended.\n",
-      "file": "framework/telemetry/telemetry.go",
+      "file": "framework/telemetry/decl_gen.go",
       "layer": "framework"
     },
     {

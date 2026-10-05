@@ -30,26 +30,6 @@ const (
 	int64Bits   int = 64
 )
 
-// HeadValue is what a working tree is at: the commit HEAD names, that
-// commit's time, and whether any tracked file differs from it.
-//
-// It is the engine's own value (ADR 0074): the core git port answers what a branch
-// CHANGED and deliberately models no commit, so a second implementation of
-// that port would have no reason to produce this.
-type HeadValue struct {
-	// Time is the commit's committer date, in the offset it was recorded
-	// with — what `git log --format=%cI` prints.
-	Time time.Time
-	// Revision is the full object name of the commit HEAD resolves to.
-	Revision string
-	// Modified reports that a TRACKED file differs from HEAD, staged or not.
-	// An untracked file does not count: it is not part of what the commit
-	// describes, and a build stamp that turned dirty whenever an editor left
-	// a swap file would say nothing. This is narrower than the vcs.modified
-	// Go stamps into a binary, which counts untracked files too.
-	Modified bool
-}
-
 // Head reports what the working tree containing dir is at: the commit HEAD
 // names, its time, and whether tracked files differ from it.
 //

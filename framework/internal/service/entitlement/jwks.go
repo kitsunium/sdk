@@ -33,34 +33,6 @@ const maxJWKSBytes int = 1 << 20
 // this runs before anything has authenticated the key set.
 const maxRSAModulusBits int = 8192
 
-// JWKValue is one published signing key, in the JWK shape.
-//
-// Only the fields needed to rebuild an RSA public key and to decide whether it
-// may verify a signature are declared. Anything else GitHub publishes is
-// ignored on purpose: a field that is not read cannot be relied on by
-// accident.
-type JWKValue struct {
-	// KeyType must be RSA for anything this package can verify.
-	KeyType string `json:"kty"`
-	// KeyID is what a token's `kid` header selects.
-	KeyID string `json:"kid"`
-	// Use, when present, must be "sig": a key published for encryption is
-	// being repurposed if it verifies signatures.
-	Use string `json:"use"`
-	// Algorithm, when present, must be RS256.
-	Algorithm string `json:"alg"`
-	// Modulus is the RSA modulus, base64url, minimally encoded.
-	Modulus string `json:"n"`
-	// Exponent is the RSA public exponent, base64url, minimally encoded.
-	Exponent string `json:"e"`
-}
-
-// JWKSValue is a published key set.
-type JWKSValue struct {
-	// Keys are the published signing keys.
-	Keys []JWKValue `json:"keys"`
-}
-
 // decodeJWKS decodes a published key set, refusing what is not one before any
 // of it is trusted.
 //

@@ -11,6 +11,7 @@ product tested in memory sees what its database does.
 
 | File | Holds |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declaration of `BackendConfig` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `storetest.go` | `Run` and `BackendConfig` — where the stores run, the options that place them —, `CodeRolledBack` (`0.4.4.1`, the code of `errRolled`, the error a case returns to roll its transaction back), and the cases: write modes, one insert of a key winning, atomic updates, a unique index naming itself, key order, keys as bytes, documents as written, transactions and savepoints, a publish and a write's hooks held until the commit, revisions (kept, pruned, stamped, diffed, restored, rolled back) |
 | `README.md` | written by `tools/genindex` from `docs/api` (`make docs-readme`, ADR 0167) |
 

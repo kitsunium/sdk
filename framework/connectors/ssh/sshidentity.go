@@ -8,26 +8,6 @@ import (
 	"github.com/kitsunium/sdk/framework/entitlement"
 )
 
-// SSHIdentity proves a machine's identity from the ssh key material already in
-// a user's key directory.
-//
-// It is a module of its own, framework/connectors/ssh, because
-// golang.org/x/crypto/ssh brings golang.org/x/term and through it
-// golang.org/x/sys, which the SDK and its framework ban (ADR 0078, ADR 0158). A
-// consumer that wants it requires this module and its dependency graph; one
-// that already handles its own key material implements the three-method port
-// instead and inherits nothing.
-//
-// Why ssh key material rather than a keypair this package would mint: the whole
-// point is that possession is proven against something the user ALREADY has and
-// already protects. A file this package invented would need a lifecycle — where
-// it lives, who may read it, what happens on rotation — that the user's own key
-// directory already has.
-type SSHIdentity struct {
-	// dir is the key directory, conventionally ~/.ssh.
-	dir string
-}
-
 // NewSSHIdentity returns an Identity reading from dir. An empty dir resolves to
 // the user's conventional key directory.
 func NewSSHIdentity(dir string) *SSHIdentity {

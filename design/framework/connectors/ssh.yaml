@@ -279,7 +279,8 @@ packages:
             public: the entitlement key pair could not be created
             reason: ENROLMENT_FAILED
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           SSHIdentity proves a machine's identity from the ssh key material already in
           a user's key directory.
 
@@ -295,6 +296,9 @@ packages:
           already protects. A file this package invented would need a lifecycle — where
           it lives, who may read it, what happens on rotation — that the user's own key
           directory already has.
+        implements:
+          - entitlement.Identity
+          - entitlement.BoundProver
         methods:
           - doc: |-
               Discover returns the subject this machine is enrolled as, refusing rather
@@ -364,4 +368,7 @@ packages:
             recv: pointer
         name: SSHIdentity
         struct:
-          unexported: true
+          fields:
+            - doc: dir is the key directory, conventionally ~/.ssh.
+              name: dir
+              type: string

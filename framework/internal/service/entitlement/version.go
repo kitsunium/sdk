@@ -85,24 +85,6 @@ func normaliseTag(version string) string {
 	return trimmed
 }
 
-// UpdateRequiredError is the refusal raised when a binary sits below the
-// roster's floor. It carries both versions as FIELDS, not just in its
-// message, because the caller has to act on the floor and not merely print
-// it: after upgrading it must check that the newly installed build actually
-// clears the bar.
-//
-// Without that, a floor the published release cannot satisfy — a roster
-// asking for v9.9.9 while the mirror still serves v1.5.10 — makes the gate
-// upgrade to no effect, re-execute, refuse again, and loop forever. That is
-// not hypothetical: it is what the end-to-end test did before this type
-// existed.
-type UpdateRequiredError struct {
-	// Current is the version of the binary that was refused.
-	Current string
-	// Required is the lowest version the roster accepts.
-	Required string
-}
-
 // Error renders both versions: "from what, to what" is the only question
 // anyone asks at that point.
 func (e *UpdateRequiredError) Error() string {

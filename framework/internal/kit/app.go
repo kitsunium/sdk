@@ -20,11 +20,9 @@ import (
 
 	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/framework/telemetry"
 	"github.com/kitsunium/sdk/pkg/v1/app/health"
 	"github.com/kitsunium/sdk/pkg/v1/app/lifecycle"
 	"github.com/kitsunium/sdk/pkg/v1/app/scheduler"
-	"github.com/kitsunium/sdk/pkg/v1/clock"
 	"github.com/kitsunium/sdk/pkg/v1/data/vfs"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
@@ -54,106 +52,6 @@ const (
 
 // serverPackage is the package a server imports to serve HTTP.
 const serverPackage = "github.com/kitsunium/sdk/framework/kit/server"
-
-// App is the whole product: the services it mounts, served by one process.
-// The same services can be mounted by several apps — one binary per service,
-// or all of them in one — and each app draws exactly what it runs.
-type App struct {
-	name string
-	// own are the services the product lists (NewApp); services every one
-	// it runs, in start order: the modules' (module.go), then its own.
-	own      []*Service
-	services []*Service
-	// modules are the modules it mounts, in start order (mount.go).
-	modules []*mountedModule
-	decl    pos
-	opts    appOptions
-
-	// Resolved when the app starts or describes itself.
-	cfg     config
-	clock   clock.Timed
-	log     logger.Logger
-	tracer  trace.Tracer
-	hub     *hub
-	data    vfs.FullFS
-	dataDir string
-	root    string
-	module  string
-	// build is what the binary was built from; devBuild, what kit dev said
-	// about the build it launched (dev only).
-	build    *model.Build
-	devBuild *model.DevBuild
-	baseCtx  context.Context
-
-	mu         sync.Mutex
-	phase      string
-	startedAt  time.Time
-	components []*model.Component
-	loops      []*loopState
-	problems   []model.Diagnostic
-	frontends  []*Frontend
-	static     *model.Graph
-	analysis   *model.Analysis
-	graphDirty *time.Timer
-	revision   string
-	// stopping is set, under mu, when Stop begins: no new graph notice may
-	// start after it.
-	stopping bool
-
-	lc     lifecycle.Lifecycle
-	health health.Health
-	// streams ends every live event stream when the app starts draining: an
-	// open Studio must not hold the HTTP shutdown for its whole budget.
-	streams    context.Context
-	endStreams context.CancelFunc
-	// server is kit's listener on the SDK's engine — an interface, so a
-	// product that serves no HTTP links none of the engine —; addr the
-	// address it bound.
-	server  httpEngine
-	addr    string
-	handler http.Handler
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
-
-	// rt is the daemon's view of itself and the Studio's tools (daemon.go).
-	rt runtimeState
-	// secrets are the environment's secret stores, open while the app runs
-	// (secretstore.go).
-	secrets atomic.Pointer[secretStores]
-	// settingValues are the settings the start resolved, by setting ID, and
-	// settingProblems what it found wrong with them (setting.go).
-	settingValues   atomic.Pointer[map[string]any]
-	settingProblems []model.Diagnostic
-	// wired is what the start decided each port calls (port.go), while the
-	// services are mounted.
-	wired atomic.Pointer[wiring]
-	// privacy is what the app keeps for personal data: kit's own service,
-	// the reference keys, the journal's chain (privacy.go).
-	privacy privacyRun
-	// turn is the data's writer turn: a transaction on the data directory
-	// or in memory holds it alone (transact_turn.go).
-	turn writerTurn
-	// roots are where the modules' Go modules lie on this machine, for the
-	// source endpoint (gomodule.go).
-	roots moduleRoots
-	// prof is what the process profiles keep while the app runs, and cliRun
-	// says Main runs a CLI command (profiles.go).
-	prof   profileState
-	cliRun bool
-	// binary is the binary a Role put the app in, and role its name there
-	// (roles.go).
-	binary *Binary
-	role   string
-	// tel is the telemetry exporter while the app runs with one
-	// (telemetry.go).
-	tel atomic.Pointer[telemetry.Exporter]
-}
-
-// DiagnosticsError is returned by Start when declarations are wrong. It lists
-// every problem at once, each with its position.
-type DiagnosticsError struct {
-	Diagnostics []model.Diagnostic
-}
 
 // routes is a ServeMux that remembers which node owns which pattern.
 type routes struct {

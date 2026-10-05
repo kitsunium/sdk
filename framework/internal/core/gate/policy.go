@@ -11,51 +11,6 @@ import (
 // joined path can be compared by byte equality.
 const pathSeparator string = " "
 
-// PolicyValue is one product's gate policy: the commands that run unchecked,
-// the commands that must never be gated, and what happens when the vendor
-// mandates a newer build.
-//
-// It is a VALUE, copied by the caller and never mutated by this package. The
-// zero value is not usable — see Validate — because none of its three fields
-// has a safe default: an empty exemption list locks out recovery, and neither
-// "refuse" nor "upgrade" is a guess this package may make on a vendor's behalf.
-type PolicyValue struct {
-	// ExemptExact lists command paths, relative to the root, that run without
-	// the check — matched WHOLE, so a same-named command elsewhere in the tree
-	// is not silently exempted with them.
-	//
-	// The empty string is the bare root invocation: a binary run with no
-	// subcommand shows its help, and showing help must not require an
-	// entitlement any more than `help` itself does.
-	//
-	// Paths are space-joined, e.g. "skill install". A command name cannot
-	// contain a space, so the joining is lossless.
-	ExemptExact []string
-	// ExemptSubtree lists command paths whose whole subtree runs without the
-	// check — the path itself and every command under it.
-	//
-	// Use it when the exemption is about a CAPABILITY rather than a command:
-	// everything under `license` repairs the licence, so gating any of it would
-	// be gating the repair. Use ExemptExact when a parent and its children
-	// differ, which they usually do.
-	ExemptSubtree []string
-	// RecoveryPaths lists the commands an operator runs to repair a refused
-	// entitlement. Every one of them MUST be exempt, and Validate refuses a
-	// policy where one is not.
-	//
-	// It exists because the failure it prevents is silent and total: a policy
-	// that gates its own repair command leaves a machine whose licence lapsed
-	// with no path back short of reinstalling the binary, and nothing about the
-	// policy LOOKS wrong — the exemption list is simply missing an entry.
-	// Naming them separately turns that into a construction-time refusal.
-	RecoveryPaths []string
-	// OnUpdateRequired is what happens when the entitlement verifies but the
-	// vendor mandates a newer build than this one.
-	//
-	// It has no default. See UpdateAction.
-	OnUpdateRequired UpdateAction
-}
-
 // Exempt reports whether the command at path runs without the check.
 //
 // It takes the command path relative to the root, with the root itself NOT

@@ -20,6 +20,7 @@ semver that ADR 0158 §2 routes every version through.
 
 | File | Role |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `SourceValue` and `Service` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `updater.go` | `Service`, the update flow, the atomic replacement |
 | `source.go` | `SourceValue` — the whole of what the original hard-coded |
 | `signature.go` | authenticity: detached ed25519 over the manifest, `WithVendorKey`; the check itself is `keys.go`'s, through `pkg/v1/crypto/sign` |

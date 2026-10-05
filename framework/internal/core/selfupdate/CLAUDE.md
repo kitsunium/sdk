@@ -17,8 +17,7 @@ value when it moves (ADR 0160). Imports: the standard library and
 | File | Role |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167): why the ORDER of the trust chain is the contract |
-| `selfupdate_interface.go` | `Getter` (network), `FileSystem` (disk), `Copier` (the stream between) |
-| `update_value.go` | `UpdateValue`, `CandidateValue` |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `Getter`, `FileSystem`, `Copier`, `UpdateValue` and `CandidateValue` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `codes_gen.go` | the range and its eighteen sentinels — written by kit gen from `design/framework/selfupdate.yaml` (ADR 0164) |
 
 ## Why-this-shape

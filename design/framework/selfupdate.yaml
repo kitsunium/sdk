@@ -299,7 +299,8 @@ packages:
             public: replacing this binary needs privilege that was not authorised
             reason: ELEVATION_NOT_AUTHORISED
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Getter performs the HTTP GETs a self-update needs: the release metadata, the
           archive, the checksum manifest and its signature.
 
@@ -319,7 +320,8 @@ packages:
                 - name: err
                   type: error
         name: Getter
-      - doc: |-
+      - decl: true
+        doc: |-
           FileSystem is the disk half of replacing a running binary.
 
           EvalSymlinks is not optional decoration: an executable reached through a
@@ -382,7 +384,8 @@ packages:
               out:
                 - type: error
         name: FileSystem
-      - doc: |-
+      - decl: true
+        doc: |-
           Copier streams the verified archive to its temporary destination. It is a port
           so a test can fail the copy midway — the case where a partially written binary
           must never be renamed into place.
@@ -401,7 +404,8 @@ packages:
                 - name: err
                   type: error
         name: Copier
-      - doc: |-
+      - decl: true
+        doc: |-
           UpdateValue is the outcome of a version check or an install: whether a newer
           release exists, and the two versions that were compared.
 
@@ -422,7 +426,8 @@ packages:
             - doc: Available reports whether LatestVersion is newer than CurrentVersion.
               name: Available
               type: bool
-      - doc: |-
+      - decl: true
+        doc: |-
           CandidateValue is one release candidate: a developer channel entry that is
           never what a stable check returns.
 
@@ -805,7 +810,9 @@ packages:
         out:
           - type: "*Service"
     imports:
+      clock: github.com/kitsunium/sdk/pkg/v1/clock
       coreupd: github.com/kitsunium/sdk/framework/internal/core/selfupdate
+      ed25519: crypto/ed25519
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/framework/internal/service/selfupdate
     sentinels:
@@ -920,7 +927,8 @@ packages:
             public: the new binary did not answer its probe and was not kept
             reason: PROBE_FAILED
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           SourceValue says where releases come from and what they are called.
 
           It is the whole of what the source implementation hard-coded. Every field is a
@@ -1030,7 +1038,8 @@ packages:
                 variable prefix for the two opt-ins.
               name: Product
               type: string
-      - doc: |-
+      - decl: true
+        doc: |-
           Service replaces the running binary with a newer signed release of the
           product its SourceValue names.
           It manages version checking via GitHub API and binary replacement.
@@ -1183,7 +1192,60 @@ packages:
             recv: pointer
         name: Service
         struct:
-          unexported: true
+          fields:
+            - name: version
+              type: string
+            - name: goos
+              type: string
+            - name: goarch
+              type: string
+            - name: client
+              type: Getter
+            - name: fs
+              type: FileSystem
+            - name: copier
+              type: Copier
+            - doc: |-
+                elevate replaces execPath with tmpPath when the plain rename in
+                finalizeReplacement fails with a permission error — the same
+                non-interactive sudo escalation the devcontainer installer scripts
+                use for a root-owned install directory. Swappable so tests can
+                exercise both outcomes without shelling out to a real sudo.
+
+                The default is guardedSudoMove, NOT sudoMove: escalation requires an
+                explicit opt-in (see elevation.go).
+              name: elevate
+              type: func(tmpPath, execPath string) error
+            - doc: |-
+                src says which project's releases this binary updates itself from. It
+                carries what the source implementation kept as package constants, which
+                is precisely what made that implementation serve exactly one product.
+              name: src
+              type: SourceValue
+            - doc: |-
+                vendorKey is the ed25519 public half every release must be signed
+                with, set via WithVendorKey. Empty by default, and an empty key
+                refuses every install rather than skipping verification — see
+                signature.go for why that direction is the only safe one.
+              name: vendorKey
+              type: ed25519.PublicKey
+            - doc: |-
+                vendorKeys are the keys a release may be signed with, in order, the
+                first of them vendorKey (keys.go, ADR 0150); domain is the signature
+                domain; clock is what the signed expiry is read against — pkg/v1/clock's
+                system clock when nil, a manual one in a suite (ADR 0158 §2).
+              name: vendorKeys
+              type: "[]ed25519.PublicKey"
+            - name: domain
+              type: string
+            - name: clock
+              type: clock.Clock
+            - doc: probe is what a replacement must answer before it stands (probe.go).
+              name: probe
+              type: probeSpec
+            - doc: automatic is WithAutomaticConsent's (consent_product.go).
+              name: automatic
+              type: bool
   - aliases:
       - doc: Getter performs the HTTP GETs a self-update needs. It aliases the core port.
         name: Getter

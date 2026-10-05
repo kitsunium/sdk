@@ -48,28 +48,6 @@ const maxDatabaseName int = secret.MaxNameLen - len("-"+dbCheckTimeout)
 // stores on SQL, which needs the SDK's SQL document store (ADR 0004, step 2);
 // the start says so.
 
-// DatabaseURLValue is what a database's URL points at, as its engine describes it
-// for the graph, the Studio, the logs and every error: never a user, never a
-// password, never a parameter.
-type DatabaseURLValue struct {
-	// Driver is the Go driver the engine speaks through: "pgx".
-	Driver string
-	// Address is where the server listens, host:port; a local socket's
-	// path; empty for a file.
-	Address string
-	// Database is the database on the server, or the file.
-	Database string
-	// TLS is the TLS mode as the URL writes it — "verify-full", "true" —,
-	// empty when the URL leaves it to the driver.
-	TLS string
-	// Plaintext says the mode the URL writes turns TLS off — sslmode=disable,
-	// tls=false —: accepted, for a private network, and drawn "no TLS".
-	Plaintext bool
-	// Networked says the connection crosses a network, over TCP: outside
-	// dev, its URL must write its TLS mode.
-	Networked bool
-}
-
 type databaseOptions struct {
 	// keeps are what Keeps named; keepsGiven says Keeps was given, even
 	// with nothing: the database is then not the default.

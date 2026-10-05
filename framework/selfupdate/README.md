@@ -763,7 +763,7 @@ type Copier interface {
 ```
 
 <a name="Copier.Copy"></a>
-### func \(Copier\) [Copy](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/selfupdate_interface.go>)
+### func \(Copier\) [Copy](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/decl_gen.go>)
 
 ```go
 func (Copier) Copy(dst io.Writer, src io.Reader) (written int64, err error)
@@ -801,7 +801,7 @@ type FileSystem interface {
 ```
 
 <a name="FileSystem.Chmod"></a>
-### func \(FileSystem\) [Chmod](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/selfupdate_interface.go>)
+### func \(FileSystem\) [Chmod](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/decl_gen.go>)
 
 ```go
 func (FileSystem) Chmod(name string, mode os.FileMode) error
@@ -810,7 +810,7 @@ func (FileSystem) Chmod(name string, mode os.FileMode) error
 Chmod changes file permissions.
 
 <a name="FileSystem.CreateTemp"></a>
-### func \(FileSystem\) [CreateTemp](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/selfupdate_interface.go>)
+### func \(FileSystem\) [CreateTemp](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/decl_gen.go>)
 
 ```go
 func (FileSystem) CreateTemp(dir string, pattern string) (file *os.File, err error)
@@ -819,7 +819,7 @@ func (FileSystem) CreateTemp(dir string, pattern string) (file *os.File, err err
 CreateTemp creates a temporary file.
 
 <a name="FileSystem.EvalSymlinks"></a>
-### func \(FileSystem\) [EvalSymlinks](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/selfupdate_interface.go>)
+### func \(FileSystem\) [EvalSymlinks](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/decl_gen.go>)
 
 ```go
 func (FileSystem) EvalSymlinks(path string) (resolved string, err error)
@@ -828,7 +828,7 @@ func (FileSystem) EvalSymlinks(path string) (resolved string, err error)
 EvalSymlinks resolves symlinks in the given path.
 
 <a name="FileSystem.Executable"></a>
-### func \(FileSystem\) [Executable](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/selfupdate_interface.go>)
+### func \(FileSystem\) [Executable](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/decl_gen.go>)
 
 ```go
 func (FileSystem) Executable() (path string, err error)
@@ -837,7 +837,7 @@ func (FileSystem) Executable() (path string, err error)
 Executable returns the path of the current executable.
 
 <a name="FileSystem.Remove"></a>
-### func \(FileSystem\) [Remove](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/selfupdate_interface.go>)
+### func \(FileSystem\) [Remove](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/decl_gen.go>)
 
 ```go
 func (FileSystem) Remove(name string) error
@@ -846,7 +846,7 @@ func (FileSystem) Remove(name string) error
 Remove removes a file.
 
 <a name="FileSystem.Rename"></a>
-### func \(FileSystem\) [Rename](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/selfupdate_interface.go>)
+### func \(FileSystem\) [Rename](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/decl_gen.go>)
 
 ```go
 func (FileSystem) Rename(oldpath string, newpath string) error
@@ -873,7 +873,7 @@ type Getter interface {
 ```
 
 <a name="Getter.Get"></a>
-### func \(Getter\) [Get](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/selfupdate_interface.go>)
+### func \(Getter\) [Get](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/decl_gen.go>)
 
 ```go
 func (Getter) Get(url string) (resp *http.Response, err error)

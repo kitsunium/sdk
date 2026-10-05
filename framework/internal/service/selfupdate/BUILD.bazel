@@ -10,6 +10,7 @@ go_library(
         "codes_gen.go",
         "consent.go",
         "consent_product.go",
+        "decl_gen.go",
         "diagnose.go",
         "doc.go",
         "elevation.go",

@@ -11,25 +11,6 @@ import (
 	"github.com/kitsunium/sdk/framework/model"
 )
 
-// PortService is an operation a service needs and does not implement: a typed
-// request, a typed response, a name. Declare it with [Service.Port], and
-// call it with [PortService.Call] as an endpoint is called: validated, observed,
-// drawn.
-//
-// What a port calls is decided when the app starts, by one rule the static
-// analysis shares: the app's [Bind], else the one [Service.Implement] among
-// the services the app mounts, else the port's own [Fallback]. The start
-// refuses a port it cannot bind, with every other problem at once.
-//
-// A port is how a service reaches what it cannot import — a module its
-// host's content, a service another that imports it — the consumer owning
-// the contract.
-type PortService[Req, Resp any] struct {
-	nodeBase
-	// fallback is the port's kit.Fallback, nil without one.
-	fallback Operation[Req, Resp]
-}
-
 // PortConfigurer configures a port: [Fallback].
 type PortConfigurer[Req, Resp any] interface {
 	portConfigure(p *PortService[Req, Resp])

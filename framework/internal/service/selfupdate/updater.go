@@ -5,7 +5,6 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
-	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"io"
@@ -19,7 +18,6 @@ import (
 
 	coreupd "github.com/kitsunium/sdk/framework/internal/core/selfupdate"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/pkg/v1/clock"
 	"github.com/kitsunium/sdk/pkg/v1/data/semver"
 )
 
@@ -51,52 +49,6 @@ var (
 	//: Enable platform-specific binary name selection at download time.
 	runtimeGOARCH stringFunc = func() string { return runtime.GOARCH }
 )
-
-// Service replaces the running binary with a newer signed release of the
-// product its SourceValue names.
-// It manages version checking via GitHub API and binary replacement.
-// goos/goarch are captured at construction time so the per-platform asset
-// resolution (`getBinaryName`, `getArchiveSuffix`, `innerBinaryName`) is
-// stable per-instance — tests can construct a literal with explicit values
-// instead of mutating package-level `runtimeGOOS`/`runtimeGOARCH` (which
-// would race under t.Parallel).
-type Service struct {
-	version string
-	goos    string
-	goarch  string
-	client  Getter
-	fs      FileSystem
-	copier  Copier
-	// elevate replaces execPath with tmpPath when the plain rename in
-	// finalizeReplacement fails with a permission error — the same
-	// non-interactive sudo escalation the devcontainer installer scripts
-	// use for a root-owned install directory. Swappable so tests can
-	// exercise both outcomes without shelling out to a real sudo.
-	//
-	// The default is guardedSudoMove, NOT sudoMove: escalation requires an
-	// explicit opt-in (see elevation.go).
-	elevate func(tmpPath, execPath string) error
-	// src says which project's releases this binary updates itself from. It
-	// carries what the source implementation kept as package constants, which
-	// is precisely what made that implementation serve exactly one product.
-	src SourceValue
-	// vendorKey is the ed25519 public half every release must be signed
-	// with, set via WithVendorKey. Empty by default, and an empty key
-	// refuses every install rather than skipping verification — see
-	// signature.go for why that direction is the only safe one.
-	vendorKey ed25519.PublicKey
-	// vendorKeys are the keys a release may be signed with, in order, the
-	// first of them vendorKey (keys.go, ADR 0150); domain is the signature
-	// domain; clock is what the signed expiry is read against — pkg/v1/clock's
-	// system clock when nil, a manual one in a suite (ADR 0158 §2).
-	vendorKeys []ed25519.PublicKey
-	domain     string
-	clock      clock.Clock
-	// probe is what a replacement must answer before it stands (probe.go).
-	probe probeSpec
-	// automatic is WithAutomaticConsent's (consent_product.go).
-	automatic bool
-}
 
 // NewService creates a new updater instance.
 //

@@ -192,7 +192,7 @@ type ChangedSet interface {
 ```
 
 <a name="ChangedSet.ContainsDir"></a>
-### func \(ChangedSet\) [ContainsDir](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/git.go>)
+### func \(ChangedSet\) [ContainsDir](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/decl_gen.go>)
 
 ```go
 func (ChangedSet) ContainsDir(absDir string) bool
@@ -201,7 +201,7 @@ func (ChangedSet) ContainsDir(absDir string) bool
 ContainsDir reports whether absDir directly encloses any touched file. It is not recursive: a parent of a touched directory is not itself touched.
 
 <a name="ChangedSet.ContainsFile"></a>
-### func \(ChangedSet\) [ContainsFile](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/git.go>)
+### func \(ChangedSet\) [ContainsFile](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/decl_gen.go>)
 
 ```go
 func (ChangedSet) ContainsFile(absFile string) bool
@@ -210,7 +210,7 @@ func (ChangedSet) ContainsFile(absFile string) bool
 ContainsFile reports whether absFile appears anywhere in the diff, including as the old side of a rename or a deletion.
 
 <a name="ChangedSet.ContainsLine"></a>
-### func \(ChangedSet\) [ContainsLine](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/git.go>)
+### func \(ChangedSet\) [ContainsLine](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/decl_gen.go>)
 
 ```go
 func (ChangedSet) ContainsLine(absFile string, line int) bool
@@ -219,7 +219,7 @@ func (ChangedSet) ContainsLine(absFile string, line int) bool
 ContainsLine reports whether line on absFile falls inside a changed hunk. Lines are 1-based and the bounds are inclusive.
 
 <a name="ChangedSet.IsEmpty"></a>
-### func \(ChangedSet\) [IsEmpty](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/git.go>)
+### func \(ChangedSet\) [IsEmpty](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/decl_gen.go>)
 
 ```go
 func (ChangedSet) IsEmpty() bool

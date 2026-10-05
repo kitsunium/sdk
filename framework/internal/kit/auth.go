@@ -21,24 +21,6 @@ import (
 // What the handler does — a session looked up in a store — is drawn from the
 // auth node like any other code.
 
-// UID identifies an authenticated user. It is what the auth handler returns
-// and what every endpoint reads with [UserID].
-type UID string
-
-// AuthenticatorHandler is the app's authentication handler: it turns the
-// credentials of a request — a session cookie, a bearer token — into a user,
-// in front of every endpoint declared with [Auth] or [AuthOptional]. An app
-// has at most one.
-//
-// P is the credentials: a struct whose fields are tagged cookie:"…" or
-// header:"…", decoded like an endpoint's request. D is what the handler says
-// about the user; endpoints read it with [AuthData].
-type AuthenticatorHandler[P, D any] struct {
-	nodeBase
-	handler func(context.Context, P) (UID, D, error)
-	dec     *decoder
-}
-
 // AuthHandler declares the app's authentication handler. The handler returns
 // the user's ID and data; an empty UID with a nil error means "no
 // credentials", which [Auth] endpoints answer 401 and [AuthOptional]

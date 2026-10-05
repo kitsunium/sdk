@@ -24,10 +24,3 @@ const (
 	// EventMail reports a mail entering the outbox or changing status.
 	EventMail EventType = "mail"
 )
-
-// EventType names the kind of a live event.
-// It is a wire format — the graph's JSON and the Studio's TypeScript unions
-// carry these names —, so it stays a string.
-//
-//ktn:wire-format
-type EventType string

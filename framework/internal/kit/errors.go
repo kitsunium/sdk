@@ -44,36 +44,6 @@ var sdkCodes = map[string]string{
 	"TIMEOUT_EXCEEDED": WireTimeout,
 }
 
-// Error is an error a product returns to its callers. Message travels on the
-// wire; the cause attached with [Error.Wrap] is logged and never sent.
-//
-// Return one from a handler to choose the HTTP status and the message the
-// caller reads. Any other error becomes a 500 whose body says nothing about
-// it: an error message is the classic place a secret leaks from.
-type Error struct {
-	// Status is the HTTP status.
-	Status int
-	// Code is a stable, snake_case identifier a client can branch on.
-	Code string
-	// Message is wire-safe text for the caller.
-	Message string
-	// Violations detail an invalid request, one per failed rule.
-	Violations []ViolationMessage
-
-	cause error
-}
-
-// ViolationMessage is one validation rule a request failed: where, which rule, and
-// why — never the value.
-type ViolationMessage struct {
-	// Path locates the value: "title", "items[2].zip".
-	Path string `json:"path"`
-	// Rule names the failed rule: "required", "maxlen".
-	Rule string `json:"rule"`
-	// Message explains it without echoing the value.
-	Message string `json:"message"`
-}
-
 // wireError is what a caller receives for any error.
 type wireError struct {
 	Error wireBody `json:"error"`

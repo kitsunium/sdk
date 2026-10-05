@@ -2336,22 +2336,34 @@ packages:
           - constraint: comparable
             name: S
     imports:
+      atomic: sync/atomic
       authz: github.com/kitsunium/sdk/pkg/v1/security/authz
       clock: github.com/kitsunium/sdk/pkg/v1/clock
       errs: github.com/kitsunium/sdk/pkg/v1/errs
       fs: io/fs
+      health: github.com/kitsunium/sdk/pkg/v1/app/health
       http: net/http
       ipc: github.com/kitsunium/sdk/pkg/v1/proc/ipc
       json: encoding/json
+      lifecycle: github.com/kitsunium/sdk/pkg/v1/app/lifecycle
       logger: github.com/kitsunium/sdk/pkg/v1/observe/logger
       mail: github.com/kitsunium/sdk/pkg/v1/app/mail
+      mailspool: github.com/kitsunium/sdk/pkg/v1/app/mail/spool
       model: github.com/kitsunium/sdk/framework/model
+      queue: github.com/kitsunium/sdk/pkg/v1/data/queue
+      scheduler: github.com/kitsunium/sdk/pkg/v1/app/scheduler
       secret: github.com/kitsunium/sdk/pkg/v1/security/secret
+      snapshot: github.com/kitsunium/sdk/pkg/v1/concur/snapshot
       sql: github.com/kitsunium/sdk/pkg/v1/data/sql
+      statemachine: github.com/kitsunium/sdk/pkg/v1/app/statemachine
       stdsql: database/sql
+      telemetry: github.com/kitsunium/sdk/framework/telemetry
+      trace: github.com/kitsunium/sdk/pkg/v1/observe/trace
+      vfs: github.com/kitsunium/sdk/pkg/v1/data/vfs
     path: github.com/kitsunium/sdk/framework/internal/kit
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           AttrsProvider is what the app's auth data says about the caller to the
           SDK's authz: the attributes [Command.Allow] and [Query.Allow] hand a
           policy — the caller's roles, its groups. Auth data that does not
@@ -2369,15 +2381,23 @@ packages:
               out:
                 - type: "[]authz.Attr"
         name: AttrsProvider
-      - doc: |-
+      - decl: true
+        doc: |-
           ActivityHandler is a declared activity of a service: a function that says
           whether the product is busy. A daemon's IdleStop waits until every
           activity of its mounted services says false AND no connection is open on
           its listeners.
         name: ActivityHandler
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - name: svc
+              type: "*Service"
+            - name: fn
+              type: func(context.Context) bool
+            - name: decl
+              type: pos
+      - decl: true
+        doc: |-
           App is the whole product: the services it mounts, served by one process.
           The same services can be mounted by several apps — one binary per service,
           or all of them in one — and each app draws exactly what it runs.
@@ -2518,8 +2538,159 @@ packages:
             recv: pointer
         name: App
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - name: name
+              type: string
+            - doc: |-
+                own are the services the product lists (NewApp); services every one
+                it runs, in start order: the modules' (module.go), then its own.
+              name: own
+              type: "[]*Service"
+            - name: services
+              type: "[]*Service"
+            - doc: modules are the modules it mounts, in start order (mount.go).
+              name: modules
+              type: "[]*mountedModule"
+            - name: decl
+              type: pos
+            - name: opts
+              type: appOptions
+            - doc: Resolved when the app starts or describes itself.
+              name: cfg
+              type: config
+            - name: clock
+              type: clock.Timed
+            - name: log
+              type: logger.Logger
+            - name: tracer
+              type: trace.Tracer
+            - name: hub
+              type: "*hub"
+            - name: data
+              type: vfs.FullFS
+            - name: dataDir
+              type: string
+            - name: root
+              type: string
+            - name: module
+              type: string
+            - doc: |-
+                build is what the binary was built from; devBuild, what kit dev said
+                about the build it launched (dev only).
+              name: build
+              type: "*model.Build"
+            - name: devBuild
+              type: "*model.DevBuild"
+            - name: baseCtx
+              type: context.Context
+            - name: mu
+              type: sync.Mutex
+            - name: phase
+              type: string
+            - name: startedAt
+              type: time.Time
+            - name: components
+              type: "[]*model.Component"
+            - name: loops
+              type: "[]*loopState"
+            - name: problems
+              type: "[]model.Diagnostic"
+            - name: frontends
+              type: "[]*Frontend"
+            - name: static
+              type: "*model.Graph"
+            - name: analysis
+              type: "*model.Analysis"
+            - name: graphDirty
+              type: "*time.Timer"
+            - name: revision
+              type: string
+            - doc: |-
+                stopping is set, under mu, when Stop begins: no new graph notice may
+                start after it.
+              name: stopping
+              type: bool
+            - name: lc
+              type: lifecycle.Lifecycle
+            - name: health
+              type: health.Health
+            - doc: |-
+                streams ends every live event stream when the app starts draining: an
+                open Studio must not hold the HTTP shutdown for its whole budget.
+              name: streams
+              type: context.Context
+            - name: endStreams
+              type: context.CancelFunc
+            - doc: |-
+                server is kit's listener on the SDK's engine — an interface, so a
+                product that serves no HTTP links none of the engine —; addr the
+                address it bound.
+              name: server
+              type: httpEngine
+            - name: addr
+              type: string
+            - name: handler
+              type: http.Handler
+            - name: cancel
+              type: context.CancelFunc
+            - name: wg
+              type: sync.WaitGroup
+            - doc: rt is the daemon's view of itself and the Studio's tools (daemon.go).
+              name: rt
+              type: runtimeState
+            - doc: |-
+                secrets are the environment's secret stores, open while the app runs
+                (secretstore.go).
+              name: secrets
+              type: atomic.Pointer[secretStores]
+            - doc: |-
+                settingValues are the settings the start resolved, by setting ID, and
+                settingProblems what it found wrong with them (setting.go).
+              name: settingValues
+              type: atomic.Pointer[map[string]any]
+            - name: settingProblems
+              type: "[]model.Diagnostic"
+            - doc: |-
+                wired is what the start decided each port calls (port.go), while the
+                services are mounted.
+              name: wired
+              type: atomic.Pointer[wiring]
+            - doc: |-
+                privacy is what the app keeps for personal data: kit's own service,
+                the reference keys, the journal's chain (privacy.go).
+              name: privacy
+              type: privacyRun
+            - doc: |-
+                turn is the data's writer turn: a transaction on the data directory
+                or in memory holds it alone (transact_turn.go).
+              name: turn
+              type: writerTurn
+            - doc: |-
+                roots are where the modules' Go modules lie on this machine, for the
+                source endpoint (gomodule.go).
+              name: roots
+              type: moduleRoots
+            - doc: |-
+                prof is what the process profiles keep while the app runs, and cliRun
+                says Main runs a CLI command (profiles.go).
+              name: prof
+              type: profileState
+            - name: cliRun
+              type: bool
+            - doc: |-
+                binary is the binary a Role put the app in, and role its name there
+                (roles.go).
+              name: binary
+              type: "*Binary"
+            - name: role
+              type: string
+            - doc: |-
+                tel is the telemetry exporter while the app runs with one
+                (telemetry.go).
+              name: tel
+              type: atomic.Pointer[telemetry.Exporter]
+      - decl: true
+        doc: |-
           DiagnosticsError is returned by Start when declarations are wrong. It lists
           every problem at once, each with its position.
         methods:
@@ -2533,7 +2704,8 @@ packages:
           fields:
             - name: Diagnostics
               type: "[]model.Diagnostic"
-      - doc: |-
+      - decl: true
+        doc: |-
           AnalyzeFunc reads the product's source — the Go module rooted at dir, and
           the packages that declare the modules it mounts — into a graph the runtime
           merges into its own: the edges found in handler bodies, each function's
@@ -2541,12 +2713,14 @@ packages:
           tool gives one, in dev, through [Analyzer].
         name: AnalyzeFunc
         underlying: func(ctx context.Context, dir string, modules []string) (*model.Graph, error)
-      - doc: |-
+      - decl: true
+        doc: |-
           UID identifies an authenticated user. It is what the auth handler returns
           and what every endpoint reads with [UserID].
         name: UID
         underlying: string
-      - doc: |-
+      - decl: true
+        doc: |-
           AuthenticatorHandler is the app's authentication handler: it turns the
           credentials of a request — a session cookie, a bearer token — into a user,
           in front of every endpoint declared with [Auth] or [AuthOptional]. An app
@@ -2557,12 +2731,19 @@ packages:
           about the user; endpoints read it with [AuthData].
         name: AuthenticatorHandler
         struct:
-          unexported: true
+          fields:
+            - embedded: true
+              type: nodeBase
+            - name: handler
+              type: func(context.Context, P) (UID, D, error)
+            - name: dec
+              type: "*decoder"
         typeParams:
           - name: P
           - constraint: any
             name: D
-      - doc: |-
+      - decl: true
+        doc: |-
           StdioValue is where a CLI command reads and writes: the process's own streams
           under Main, buffers in a test.
         name: StdioValue
@@ -2579,24 +2760,37 @@ packages:
             - doc: Interactive reports whether In is a terminal.
               name: Interactive
               type: bool
-      - doc: |-
+      - decl: true
+        doc: |-
           CLIFunc is a CLI command's body: its arguments after its name, and the
           streams; it returns the process exit status (0 success, 64 usage, 70
           software — the sysexits a shell script branches on).
         name: CLIFunc
         underlying: func(ctx context.Context, args []string, std StdioValue) int
-      - doc: |-
+      - decl: true
+        doc: |-
           CLI is a short command-line command of the product: it runs once, in the
           CLI profile, and exits with its status. Main runs it when the process's
           first argument is its name.
         name: CLI
         struct:
-          unexported: true
+          fields:
+            - embedded: true
+              type: nodeBase
+            - name: fn
+              type: CLIFunc
+            - name: doc
+              type: string
+            - name: path
+              type: "[]string"
+            - name: opts
+              type: cliOptions
       - doc: CommandLineConfigurer tunes a CLI command.
         interface:
           unexported: true
         name: CommandLineConfigurer
-      - doc: |-
+      - decl: true
+        doc: |-
           Command changes something: a typed input, a typed result, and one handler
           — the one declared with it. Declare it with [Service.Command]; dispatch it
           with [Command.Dispatch] from any building block, which draws a dispatches
@@ -2720,7 +2914,25 @@ packages:
             recv: pointer
         name: Command
         struct:
-          unexported: true
+          fields:
+            - embedded: true
+              type: nodeBase
+            - name: pipe
+              type: pipeline[C, R]
+            - name: opts
+              type: commandOptions
+            - embedded: true
+              type: access[C]
+            - doc: |-
+                key names the entity a run is about (Key); keys holds it while a run
+                lasts.
+              name: key
+              type: func(C) string
+            - name: keys
+              type: keyed
+            - doc: queue is a queued command's queue while the app runs (queued.go).
+              name: queue
+              type: atomic.Pointer[commandQueue]
         typeParams:
           - name: C
           - constraint: any
@@ -2737,7 +2949,8 @@ packages:
         interface:
           unexported: true
         name: AppConfigurer
-      - doc: |-
+      - decl: true
+        doc: |-
           DatabaseURLValue is what a database's URL points at, as its engine describes it
           for the graph, the Studio, the logs and every error: never a user, never a
           password, never a parameter.
@@ -2770,7 +2983,8 @@ packages:
                 dev, its URL must write its TLS mode.
               name: Networked
               type: bool
-      - doc: |-
+      - decl: true
+        doc: |-
           Engine is an SQL engine a database runs on. An engine module returns one —
           github.com/kitsunium/sdk/framework/connectors/postgres, …/mysql, …/sqlite —;
           kit calls it when the database starts. Like an SDK port, it grows by
@@ -2815,12 +3029,14 @@ packages:
         interface:
           unexported: true
         name: Keeper
-      - doc: |-
+      - decl: true
+        doc: |-
           EmptyValue is the request or the response of an endpoint that has none. An
           endpoint answering EmptyValue replies 204 No Content.
         name: EmptyValue
         struct: {}
-      - doc: |-
+      - decl: true
+        doc: |-
           EndpointService is an HTTP endpoint with a typed request and a typed response:
           what HTTP itself is about — a webhook a third party calls, say —, the
           exposure of a command or a query ([Command.Expose], [Query.Expose]), or
@@ -2847,7 +3063,39 @@ packages:
             recv: pointer
         name: EndpointService
         struct:
-          unexported: true
+          fields:
+            - embedded: true
+              type: nodeBase
+            - name: method
+              type: string
+            - name: path
+              type: string
+            - name: opts
+              type: endpointOptions
+            - name: dec
+              type: "*decoder"
+            - doc: pipe is what every run of the endpoint goes through (operation.go).
+              name: pipe
+              type: pipeline[Req, Resp]
+            - doc: authn is the app's auth handler, resolved when the endpoint is mounted.
+              name: authn
+              type: authenticator
+            - doc: |-
+                impl is the port the endpoint implements (Service.Implement); nil for
+                an endpoint with a route. routeless is set for every implementation,
+                even one of a nil port: it has no route, and the port reaches it.
+              name: impl
+              type: node
+            - name: routeless
+              type: bool
+            - doc: |-
+                exposes is the command or the query the endpoint exposes (Expose):
+                its authentication is the operation's. accepted answers 202 for a
+                queued command.
+              name: exposes
+              type: exposed
+            - name: accepted
+              type: bool
         typeParams:
           - name: Req
           - constraint: any
@@ -2858,7 +3106,8 @@ packages:
             - ExposeConfigurer
           unexported: true
         name: EndpointConfigurer
-      - doc: |-
+      - decl: true
+        doc: |-
           OperationOption configures an endpoint, a command or a query alike: the
           authentication it asks for ([Auth], [AuthOptional]) and the policies in
           front of its handler ([RateLimit], [RateLimitPerClient], [Timeout],
@@ -2869,7 +3118,8 @@ packages:
             - CommandConfigurer
             - QueryConfigurer
         name: OperationOption
-      - doc: |-
+      - decl: true
+        doc: |-
           Error is an error a product returns to its callers. Message travels on the
           wire; the cause attached with [Error.Wrap] is logged and never sent.
 
@@ -2910,8 +3160,10 @@ packages:
             - doc: Violations detail an invalid request, one per failed rule.
               name: Violations
               type: "[]ViolationMessage"
-          unexported: true
-      - doc: |-
+            - name: cause
+              type: error
+      - decl: true
+        doc: |-
           ViolationMessage is one validation rule a request failed: where, which rule, and
           why — never the value.
         name: ViolationMessage
@@ -2937,7 +3189,8 @@ packages:
         interface:
           unexported: true
         name: ExposeConfigurer
-      - doc: |-
+      - decl: true
+        doc: |-
           Job is scheduled work: a piece of the daemon's internal loop. It runs on
           the SDK scheduler, whose decisions about time are documented rather than
           emergent: a fire that is due while the previous run of the same job is
@@ -2945,20 +3198,34 @@ packages:
           counted, never caught up.
         name: Job
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - embedded: true
+              type: nodeBase
+            - name: fn
+              type: func(context.Context) error
+            - name: sched
+              type: scheduler.Schedule
+            - name: schedule
+              type: string
+            - name: jobKind
+              type: string
+      - decl: true
+        doc: |-
           ListenHandler serves one connection of a [Listener] until it returns; the
           connection is closed after it. conn.Peer says who connected, as the kernel
           says where it can (pkg/v1/proc/ipc).
         name: ListenHandler
         underlying: func(ctx context.Context, conn *ipc.Conn) error
-      - doc: |-
+      - decl: true
+        doc: |-
           Listener is an inbound port that is not HTTP: a private socket on this
           machine — a Unix socket in a directory only the product's account can
           reach, the kernel naming the peer on Linux (ADR 0148) — speaking a
           versioned contract. It is how a daemon profile serves its clients, and how
           two process roles of one binary talk (D22): through the contract, never
           through each other's code.
+        implements:
+          - starter
         methods:
           - doc: |-
               SocketPathIn is where the listener's socket lies in product — the
@@ -3006,17 +3273,40 @@ packages:
             recv: pointer
         name: Listener
         struct:
-          unexported: true
+          fields:
+            - embedded: true
+              type: nodeBase
+            - name: contract
+              type: string
+            - name: handler
+              type: ListenHandler
+            - name: opts
+              type: listenerOptions
+            - name: mu
+              type: sync.Mutex
+            - name: ln
+              type: ipc.Listener
+            - name: path
+              type: string
+            - name: cancel
+              type: context.CancelFunc
+            - name: open
+              type: map[*ipc.Conn]bool
+            - name: conns
+              type: sync.WaitGroup
       - doc: ListenerConfigurer tunes a listener.
         interface:
           unexported: true
         name: ListenerConfigurer
-      - doc: |-
+      - decl: true
+        doc: |-
           Loop is a declared loop of the daemon: kit owns the wait, the product owns
           the work. Its wake sources — a period, a deadline the product computes, a
           topic — are data, so the diagram draws exactly what wakes it; kit runs it on
           its own goroutine, one run at a time, observes every run, and restarts it
           after a panic.
+        implements:
+          - starter
         methods:
           - doc: |-
               Nudge wakes the loop now, as if its deadline had come. The run's reason
@@ -3026,8 +3316,23 @@ packages:
             recv: pointer
         name: Loop
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - embedded: true
+              type: nodeBase
+            - name: run
+              type: func(context.Context, WakeEvent) error
+            - name: opts
+              type: loopOptions
+            - doc: deadlineAt is where the WakeAt function is, for the diagram.
+              name: deadlineAt
+              type: "*pos"
+            - doc: running is the loop's goroutine in the app that runs it, guarded by mu.
+              name: mu
+              type: sync.Mutex
+            - name: running
+              type: "*loopRun"
+      - decl: true
+        doc: |-
           WakeEvent says why a declared loop runs: the reason, the instant, and the
           topic that woke it when one did.
         name: WakeEvent
@@ -3048,15 +3353,26 @@ packages:
         interface:
           unexported: true
         name: LoopConfigurer
-      - doc: |-
+      - decl: true
+        doc: |-
           Routine is a loop written by hand: a function that runs until its context
           ends. kit starts it with the app, cancels its context on shutdown and waits
           for it, restarts it after an error or a panic — backing off from one second
           to one minute — and reads its select statements to draw what it waits on.
         name: Routine
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - embedded: true
+              type: nodeBase
+            - name: run
+              type: func(context.Context) error
+            - name: mu
+              type: sync.Mutex
+            - doc: "sup runs the function while the app runs: the SDK's supervisor."
+              name: sup
+              type: "*lifecycle.Supervisor"
+      - decl: true
+        doc: |-
           Mailer is outbound mail: a durable outbox and the transport that empties
           it. [Mailer.Send] only queues — it returns once the message is safely in
           the outbox — and the mailer's own loop hands each message to the transport,
@@ -3070,6 +3386,9 @@ packages:
           warning. The URL is read again before every delivery: replacing it where
           it lives — a new version in the store, a new file behind
           KIT_SMTP_URL_FILE — takes effect at the next mail.
+        implements:
+          - mailbox
+          - starter
         methods:
           - doc: |-
               Send validates msg with the SDK's mail rules — a header carrying a line
@@ -3102,14 +3421,52 @@ packages:
             recv: pointer
         name: Mailer
         struct:
-          unexported: true
+          fields:
+            - embedded: true
+              type: nodeBase
+            - name: opts
+              type: mailerOptions
+            - doc: What the running app resolved, guarded by mu.
+              name: mu
+              type: sync.Mutex
+            - name: transport
+              type: mail.Transport
+            - comment: the capture transport; nil with SMTP
+              name: capture
+              type: mail.FullTransport
+            - doc: |-
+                relay is what the SMTP transport was built from; problem, the last
+                problem found with the URL since, logged once.
+              name: relay
+              type: smtpRelay
+            - name: problem
+              type: string
+            - name: spool
+              type: "*mailspool.Spool"
+            - name: cancel
+              type: context.CancelFunc
+            - name: done
+              type: chan struct{}
+            - name: loop
+              type: "*loopState"
+            - name: ring
+              type: mailRing
+            - doc: |-
+                composed holds what the capture transport composed for a mail, from
+                the attempt that sent it to the spool's report that it was sent.
+              name: composed
+              type: map[string][]byte
       - doc: MailerConfigurer configures a mailer.
         interface:
           unexported: true
         name: MailerConfigurer
-      - doc: |-
+      - decl: true
+        doc: |-
           Module is a set of services a product mounts as one: [NewModule] declares
           it, [App.With] or [Mount] mounts it.
+        implements:
+          - AppConfigurer
+          - Keeper
         methods:
           - doc: Name returns the module's name.
             name: Name
@@ -3126,7 +3483,33 @@ packages:
             recv: pointer
         name: Module
         struct:
-          unexported: true
+          fields:
+            - name: name
+              type: string
+            - name: doc
+              type: string
+            - name: decl
+              type: pos
+            - doc: |-
+                services are the services it lists, in their order; requires the
+                modules it needs (Requires).
+              name: services
+              type: "[]*Service"
+            - name: requires
+              type: "[]*Module"
+            - doc: migrations are its kit.Migrations (module_database.go).
+              name: migrations
+              type: "[]sql.Migration"
+            - doc: |-
+                diags are what is wrong with its declaration, reported when an app
+                mounts it.
+              name: diags
+              type: "[]diagnostic"
+            - doc: |-
+                prefix is where the app that runs it serves its routes, while one
+                does.
+              name: prefix
+              type: atomic.Pointer[string]
       - doc: |-
           ModuleConfigurer is what a module is made of: its services, the modules it
           requires ([Requires]), and the migrations of the data it keeps outside
@@ -3157,7 +3540,8 @@ packages:
           - name: Req
           - constraint: any
             name: Resp
-      - doc: |-
+      - decl: true
+        doc: |-
           PasswordPolicyService is the policy of one secret field that holds a password's
           hash: how long a password is at least, and how many former passwords it
           refuses. [StoreService.Passwords] declares it; Set, Change and Verify apply it.
@@ -3218,7 +3602,20 @@ packages:
             recv: pointer
         name: PasswordPolicyService
         struct:
-          unexported: true
+          fields:
+            - name: s
+              type: "*StoreService[T]"
+            - name: decl
+              type: pos
+            - doc: member is the field, nil when the declaration is refused.
+              name: member
+              type: "*member"
+            - name: minLength
+            - name: notReused
+              type: int
+            - doc: notCommon refuses the most common passwords (NotCommon).
+              name: notCommon
+              type: bool
         typeParams:
           - constraint: any
             name: T
@@ -3228,7 +3625,8 @@ packages:
         interface:
           unexported: true
         name: PasswordConfigurer
-      - doc: |-
+      - decl: true
+        doc: |-
           PortService is an operation a service needs and does not implement: a typed
           request, a typed response, a name. Declare it with [Service.Port], and
           call it with [PortService.Call] as an endpoint is called: validated, observed,
@@ -3259,7 +3657,12 @@ packages:
             recv: pointer
         name: PortService
         struct:
-          unexported: true
+          fields:
+            - embedded: true
+              type: nodeBase
+            - doc: fallback is the port's kit.Fallback, nil without one.
+              name: fallback
+              type: Operation[Req, Resp]
         typeParams:
           - name: Req
           - constraint: any
@@ -3272,7 +3675,8 @@ packages:
           - name: Req
           - constraint: any
             name: Resp
-      - doc: |-
+      - decl: true
+        doc: |-
           Query reads and changes nothing: a typed input, a typed result, and one
           handler — the one declared with it. Declare it with [Service.Query]; ask it
           with [Query.Ask] from any building block, which draws an asks edge from
@@ -3354,7 +3758,15 @@ packages:
             recv: pointer
         name: Query
         struct:
-          unexported: true
+          fields:
+            - embedded: true
+              type: nodeBase
+            - name: pipe
+              type: pipeline[Q, R]
+            - name: opts
+              type: queryOptions
+            - embedded: true
+              type: access[Q]
         typeParams:
           - name: Q
           - constraint: any
@@ -3366,7 +3778,8 @@ packages:
         interface:
           unexported: true
         name: QueryConfigurer
-      - doc: |-
+      - decl: true
+        doc: |-
           RecordsService is one store's records without their type. Get returns a record
           without its secret members; EraseFields and Delete take a reason and are
           refused on a held record. Each call is a span on the store's node and an
@@ -3414,8 +3827,11 @@ packages:
             recv: value
         name: RecordsService
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - name: port
+              type: recordsPort
+      - decl: true
+        doc: |-
           RevisionEvent is one version of a record a store with [Revisions] keeps: its
           number — from 1, never given twice while the record exists —, when the
           write that made it ran, on the app's clock, zero for a record stored before
@@ -3438,7 +3854,8 @@ packages:
         typeParams:
           - constraint: any
             name: T
-      - doc: |-
+      - decl: true
+        doc: |-
           Binary is one executable the product ships, made of process roles: a
           status line and its daemon are two roles of one binary, "statusline" and
           "statusline daemon". Each role is an App — its own services, its own
@@ -3498,18 +3915,39 @@ packages:
             recv: pointer
         name: Binary
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - name: name
+            - name: doc
+              type: string
+            - name: decl
+              type: pos
+            - name: roles
+              type: "[]*role"
+            - name: contracts
+              type: "[]contract"
+            - name: problems
+              type: "[]phrase"
+      - decl: true
+        doc: |-
           ScopeValue is one part of a path computed at the start: the user, the
           executable, a configuration directory. Two processes share a singleton or
           a socket when every scope gives them the same value.
         name: ScopeValue
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - doc: "label names the scope in the graph: \"uid\", \"executable\", \"env-<name>\"."
+              name: label
+              type: string
+            - doc: read is the scope's value in this process.
+              name: read
+              type: func() (string, error)
+      - decl: true
+        doc: |-
           Secret is a secret the product declares: provided by the operator — an SMTP
           URL, an API token — or generated by kit — a signing or sealing key — and
           rotated on its schedule.
+        implements:
+          - starter
         methods:
           - doc: |-
               Value returns the secret's current version. A provided secret is read
@@ -3597,12 +4035,30 @@ packages:
             recv: pointer
         name: Secret
         struct:
-          unexported: true
+          fields:
+            - embedded: true
+              type: nodeBase
+            - name: opts
+              type: secretOptions
+            - doc: |-
+                inUse and afterRotation are kit's own data-key's (seal.go): the
+                oldest version something still needs, which a rotation does not
+                prune, and what runs after a rotation — the data keys re-wrapped. nil
+                for a product's secret.
+              name: inUse
+              type: func(ctx context.Context) (int, error)
+            - name: afterRotation
+              type: func(ctx context.Context)
+            - name: mu
+              type: sync.Mutex
+            - name: run
+              type: "*secretRun"
       - doc: SecretConfigurer configures a secret.
         interface:
           unexported: true
         name: SecretConfigurer
-      - doc: |-
+      - decl: true
+        doc: |-
           Service is a bounded context of the product: it owns its building blocks —
           endpoints, stores, topics, subscriptions, workflows, jobs, frontends — and
           is the unit an App mounts. Declare one per package, as a package-level
@@ -3615,6 +4071,9 @@ packages:
           Declaring never fails: a mistake — a malformed route, a duplicate name — is
           recorded with its source position and reported, all at once, when the App
           starts. The diagram shows it too.
+        implements:
+          - Keeper
+          - ModuleConfigurer
         methods:
           - doc: |-
               Activity declares that the service is busy while fn returns true: a daemon
@@ -4064,8 +4523,40 @@ packages:
                 name: S
         name: Service
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - name: name
+              type: string
+            - name: doc
+              type: string
+            - name: decl
+              type: pos
+            - doc: |-
+                module is the module that lists it (module.go), nil for the product's
+                own: its name is then qualified with the module's.
+              name: module
+              type: "*Module"
+            - name: mu
+              type: sync.Mutex
+            - name: nodes
+              type: "[]node"
+            - name: ids
+              type: map[string]bool
+            - name: diags
+              type: "[]diagnostic"
+            - doc: |-
+                settings are what it declares with Setting (setting.go): not nodes of
+                the graph, but the configuration's.
+              name: settings
+              type: "[]settingDecl"
+            - doc: |-
+                activities are what it declares with Activity (activity.go): what a
+                daemon's idle stop waits for besides its connections.
+              name: activities
+              type: "[]*ActivityHandler"
+            - name: app
+              type: atomic.Pointer[App]
+      - decl: true
+        doc: |-
           SettingService is a value the environment gives a service, declared with
           [Service.Setting].
         methods:
@@ -4085,11 +4576,16 @@ packages:
             recv: pointer
         name: SettingService
         struct:
-          unexported: true
+          fields:
+            - embedded: true
+              type: settingBase
+            - name: def
+              type: T
         typeParams:
           - constraint: SettingValue
             name: T
-      - doc: SettingValue is what a setting may hold.
+      - decl: true
+        doc: SettingValue is what a setting may hold.
         interface:
           embeds:
             - string | bool | int | int64 | float64 | time.Duration | []string
@@ -4098,18 +4594,30 @@ packages:
         interface:
           unexported: true
         name: SettingConfigurer
-      - doc: |-
+      - decl: true
+        doc: |-
           Frontend is static assets the product serves: a single page application,
           a documentation site. Requests the page makes to the product's endpoints
           are attributed to it in the diagram.
         name: Frontend
         struct:
-          unexported: true
+          fields:
+            - embedded: true
+              type: nodeBase
+            - name: prefix
+              type: string
+            - name: root
+              type: string
+            - name: fsys
+              type: fs.FS
+            - name: files
+              type: int
       - doc: StaticConfigurer configures a frontend.
         interface:
           unexported: true
         name: StaticConfigurer
-      - doc: |-
+      - decl: true
+        doc: |-
           StoreService is a typed, keyed collection of entities. Every read returns a copy
           and every write stores one: an entity is kept as its JSON encoding, so what
           a handler holds can never alias what the store holds, and the memory and
@@ -4407,7 +4915,74 @@ packages:
             recv: pointer
         name: StoreService
         struct:
-          unexported: true
+          fields:
+            - embedded: true
+              type: nodeBase
+            - name: key
+              type: func(T) string
+            - name: inMemory
+              type: bool
+            - doc: readModel marks the store as derived from others (ReadModel).
+              name: readModel
+              type: bool
+            - doc: decls are the secondary indexes the declaration asked for (index.go).
+              name: decls
+              type: "[]indexDecl[T]"
+            - name: mu
+              type: sync.RWMutex
+            - doc: eng is the engine the store runs on, nil while the app is not running.
+              name: eng
+              type: storeEngine[T]
+            - doc: |-
+                onWrite is told the key of every entity written, once it is stored,
+                and onDelete the key of every entity deleted: a workflow over the store
+                hears of what it did not write itself (watch).
+              name: onWrite
+            - doc: |-
+                onWrite is told the key of every entity written, once it is stored,
+                and onDelete the key of every entity deleted: a workflow over the store
+                hears of what it did not write itself (watch).
+              name: onDelete
+              type: "[]*storeHook"
+            - doc: |-
+                privacy is what the store declares about personal data, its retention
+                included (retention.go); nil when it declares nothing.
+              name: privacy
+              type: "*storePrivacy[T]"
+            - doc: passwords are the password policies of its fields (passwords.go).
+              name: passwords
+              type: "[]*PasswordPolicyService[T]"
+            - doc: |-
+                feeds are the watches (Service.Watch, watch.go) its writes are told
+                of, with the write's context — which the engine's announcements to
+                onWrite and onDelete do not carry —; nil while none hears it: the one
+                load a write pays for them. Copy-on-write, the SDK's snapshot.Value: a
+                write reads them with no lock, and a watch that starts or stops
+                publishes a new list, serialised with every other.
+              name: feeds
+              type: snapshot.Value[[]*Watch]
+            - doc: |-
+                started runs once the store is open: kit's own store of data keys
+                finishes the re-wrap a stop interrupted (seal.go). nil for a product's
+                store.
+              name: started
+              type: func(ctx context.Context)
+            - doc: |-
+                role says whether the store is kit's own store of data keys (seal.go):
+                apart from every transaction, and so never on SQLite (placementOf).
+              name: role
+              type: storeRole
+            - doc: |-
+                revisions is how many former versions each record keeps
+                (kit.Revisions, revisions.go): none when zero.
+              name: revisions
+              type: int
+            - doc: |-
+                states name the state field of each workflow over the store: a
+                restore keeps them as they are, and a transition that changes only
+                one makes no version (revisions.go).
+              name: states
+              type: "[]func() string"
         typeParams:
           - constraint: any
             name: T
@@ -4415,7 +4990,8 @@ packages:
         interface:
           unexported: true
         name: StoreConfigurer
-      - doc: |-
+      - decl: true
+        doc: |-
           TopicService is an asynchronous channel of messages of type T. Every subscription
           receives every message, at least once: a subscription's handler must
           tolerate a redelivery.
@@ -4436,16 +5012,44 @@ packages:
             recv: pointer
         name: TopicService
         struct:
-          unexported: true
+          fields:
+            - embedded: true
+              type: nodeBase
+            - name: mu
+              type: sync.Mutex
+            - name: subs
+              type: "[]*SubscriptionWorker[T]"
+            - doc: wakers are the declared loops woken by a publish (loop.go).
+              name: wakers
+              type: map[int]func()
+            - name: nextID
+              type: int
         typeParams:
           - constraint: any
             name: T
-      - doc: |-
+      - decl: true
+        doc: |-
           SubscriptionWorker consumes a topic: its handler runs once per message, at least
           once, retried on error, and dead-lettered after MaxDeliveries attempts.
         name: SubscriptionWorker
         struct:
-          unexported: true
+          fields:
+            - embedded: true
+              type: nodeBase
+            - name: topic
+              type: "*TopicService[T]"
+            - name: handler
+              type: func(context.Context, T) error
+            - name: maxDeliver
+              type: int
+            - name: parallelism
+              type: int
+            - name: broker
+              type: queue.Broker
+            - name: cancel
+              type: context.CancelFunc
+            - name: done
+              type: chan struct{}
         typeParams:
           - constraint: any
             name: T
@@ -4453,7 +5057,8 @@ packages:
         interface:
           unexported: true
         name: SubscriptionConfigurer
-      - doc: |-
+      - decl: true
+        doc: |-
           DeliveryOption configures a queue's deliveries: a subscription's, or a
           queued command's ([MaxDeliveries], [Parallelism]).
         interface:
@@ -4461,7 +5066,8 @@ packages:
             - SubscriptionConfigurer
             - CommandConfigurer
         name: DeliveryOption
-      - doc: |-
+      - decl: true
+        doc: |-
           WrittenEvent is what a watch is told of a write: which store, which record, and
           whether it was deleted — never a value. The watch reads the record itself
           ([RecordsOf]): without its secret members, and journaled.
@@ -4489,20 +5095,41 @@ packages:
               name: Fields
               tag: json:"fields,omitempty"
               type: "[]FieldRefValue"
-      - doc: |-
+      - decl: true
+        doc: |-
           Watch is a subscription fed by stores instead of a topic: its handler is
           told of every write kit confirms on a store whose entity holds a field
           with its mark. [Service.Watch] declares one.
         name: Watch
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - embedded: true
+              type: nodeBase
+            - name: mark
+              type: Mark
+            - name: handler
+              type: func(context.Context, WrittenEvent) error
+            - name: maxDeliver
+              type: int
+            - name: parallelism
+              type: int
+            - doc: |-
+                ownStores: it hears its own module's stores too, and never the
+                writes of its own handler (OwnStores).
+              name: ownStores
+              type: bool
+            - doc: run is the watch in its app's current run, or its last one.
+              name: run
+              type: atomic.Pointer[watchRun]
+      - decl: true
+        doc: |-
           Mark is what a module looks for in the product's fields: kit.Personal,
           kit.Special or kit.Moderated. There is no mark for public or secret:
           there is nothing to find in the first, and nothing may watch the second.
         name: Mark
         underlying: string
-      - doc: |-
+      - decl: true
+        doc: |-
           FieldRefValue is one field of one store that carries a mark: where the field
           is, and what its tag says of it.
         name: FieldRefValue
@@ -4529,7 +5156,8 @@ packages:
               name: Subject
               tag: json:"subject,omitempty"
               type: string
-      - doc: |-
+      - decl: true
+        doc: |-
           WorkflowService is a state machine over the entities of one store: the states an
           entity goes through, and the arrows between them. It is declared as data —
           which is why the diagram can draw it exactly — and it runs four kinds of
@@ -4711,13 +5339,43 @@ packages:
             recv: pointer
         name: WorkflowService
         struct:
-          unexported: true
+          fields:
+            - embedded: true
+              type: nodeBase
+            - name: store
+              type: "*StoreService[E]"
+            - name: state
+              type: func(*E) *S
+            - name: initial
+              type: S
+            - name: hasInit
+              type: bool
+            - name: order
+              type: "[]S"
+            - name: arrows
+              type: "[]arrow[E, S]"
+            - name: enter
+              type: map[S][]hook[E]
+            - name: after
+              type: "[]changeHook[E, S]"
+            - doc: |-
+                mu guards what the running app built: the engine, its loop, and the
+                function that takes the workflow's hooks off its store.
+              name: mu
+              type: sync.Mutex
+            - name: machine
+              type: "*statemachine.Machine[E, S]"
+            - name: running
+              type: "*autoRun"
+            - name: unwatch
+              type: func()
         typeParams:
           - constraint: any
             name: E
           - constraint: comparable
             name: S
-      - doc: |-
+      - decl: true
+        doc: |-
           Delay is how long a timer transition waits: a duration, or a setting that
           holds one — read when the delay is needed, so each environment can give
           its own.
@@ -4725,7 +5383,8 @@ packages:
           embeds:
             - time.Duration | *SettingService[time.Duration]
         name: Delay
-      - doc: |-
+      - decl: true
+        doc: |-
           ChangeEvent describes one transition, for [WorkflowService.OnTransition] hooks: the
           entity, the event, and the states it left and entered.
         name: ChangeEvent
@@ -4816,7 +5475,8 @@ packages:
       model: github.com/kitsunium/sdk/framework/model
     path: github.com/kitsunium/sdk/framework/internal/kit/plug
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           HTTPConfig is what kit asks of the HTTP engine: where to listen, its one
           socket, its bounds, and the handler.
         name: HTTPConfig
@@ -4843,7 +5503,8 @@ packages:
             - doc: Handler answers every request.
               name: Handler
               type: http.Handler
-      - doc: |-
+      - decl: true
+        doc: |-
           HTTPState is what the HTTP engine says of itself once it runs: the
           address it bound, and its connections.
         name: HTTPState
@@ -4863,7 +5524,8 @@ packages:
             - name: Total
             - name: Rejected
               type: uint64
-      - doc: |-
+      - decl: true
+        doc: |-
           ProfilerConfig is the Studio's profiler: the live heap folded onto the graph's
           nodes, and every goroutine grouped.
         name: ProfilerConfig
@@ -4877,12 +5539,14 @@ packages:
             - doc: Goroutines groups every goroutine of the process, read at at.
               name: Goroutines
               type: func(at time.Time) (*model.Goroutines, error)
-      - doc: |-
+      - decl: true
+        doc: |-
           SourceFunc says where the function fn, at file:line, lies in the product,
           nil when it knows none.
         name: SourceFunc
         underlying: func(file string, line int, fn string) *model.Source
-      - doc: HTTPServer is the HTTP engine kit starts, reads and stops.
+      - decl: true
+        doc: HTTPServer is the HTTP engine kit starts, reads and stops.
         interface:
           methods:
             - doc: Start binds the address and serves, returning once bound.
@@ -4904,7 +5568,8 @@ packages:
               out:
                 - type: error
         name: HTTPServer
-      - doc: "EventStream is one Server-Sent Events stream: the Studio's live events."
+      - decl: true
+        doc: "EventStream is one Server-Sent Events stream: the Studio's live events."
         interface:
           methods:
             - doc: Send writes one event's data.
@@ -7690,7 +8355,8 @@ packages:
       kit: github.com/kitsunium/sdk/framework/kit
     path: github.com/kitsunium/sdk/framework/kit/storetest
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           BackendConfig is where Run runs kit's stores: a name for the subtests and
           the options that place the stores there.
         name: BackendConfig

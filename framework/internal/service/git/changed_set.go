@@ -16,30 +16,6 @@ const wholeFileEnd int = 1 << 30
 // handful of files; this avoids the first few rehashes without over-allocating.
 const changedFilesHint int = 16
 
-// ChangedSetValue holds the files, line ranges, and directories that a
-// branch changed versus its merge-base. All paths are absolute and normalised
-// through filepath.Clean so membership tests match the engine's resolved issue
-// positions. Build it with NewChangedSetValue and the add* methods; query it
-// with the Contains* methods.
-type ChangedSetValue struct {
-	// repoRoot is the absolute repository top-level, retained for diagnostics.
-	repoRoot string
-	// lineRangesByFile maps an absolute file path to its changed "+"-side line
-	// ranges. Empty for a pure rename or a deletion (file touched, no lines).
-	lineRangesByFile map[string][]coregit.LineRangeValue
-	// touchedFiles is the set of absolute file paths that appear in the diff.
-	touchedFiles map[string]struct{}
-	// touchedDirs is the set of absolute directories enclosing touched files,
-	// the predicate for directory-scoped queries.
-	touchedDirs map[string]struct{}
-	// aliasRoot is a second spelling of repoRoot — the one the caller used to
-	// reach the repository, when that path traverses a symbolic link git
-	// resolved away. Empty when the caller's spelling already is git's. It is
-	// read only while the set is being built: every entry is recorded under
-	// both spellings, so no query pays for it.
-	aliasRoot string
-}
-
 // NewChangedSetValue returns an empty changed-set rooted at the given absolute
 // repository top-level.
 func NewChangedSetValue(repoRoot string) *ChangedSetValue {

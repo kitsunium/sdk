@@ -108,7 +108,7 @@ The content is returned VERBATIM. It deliberately does not go through runGitOutp
 A failure is one of two refusals and never the same one twice. PathAbsent says the commit is there and holds no object at that path, which is what a caller reconstructing history needs in order to tell "deleted" from "emptied" — an empty file is a successful read of "". CommandFailed says anything else: an unreachable commit, an unreadable object store, no git.
 
 <a name="ChangedSetValue"></a>
-## type [ChangedSetValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/git/changed_set.go>)
+## type [ChangedSetValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/git/decl_gen.go>)
 
 ChangedSetValue holds the files, line ranges, and directories that a branch changed versus its merge-base. All paths are absolute and normalised through filepath.Clean so membership tests match the engine's resolved issue positions. Build it with NewChangedSetValue and the add\* methods; query it with the Contains\* methods.
 
@@ -153,7 +153,7 @@ func (*ChangedSetValue) IsEmpty() bool
 IsEmpty reports whether the changed-set contains no touched files at all (clean branch, or a branch whose every change the caller's filter excluded).
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/git/config.go>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/git/decl_gen.go>)
 
 Config is what Resolve needs to know: where the repository is, and which files the caller considers part of the change.
 
@@ -175,7 +175,7 @@ type Config struct {
 ```
 
 <a name="HeadValue"></a>
-## type [HeadValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/git/head.go>)
+## type [HeadValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/git/decl_gen.go>)
 
 HeadValue is what a working tree is at: the commit HEAD names, that commit's time, and whether any tracked file differs from it.
 
@@ -198,7 +198,7 @@ type HeadValue struct {
 ```
 
 <a name="IncludeFunc"></a>
-## type [IncludeFunc](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/git/config.go>)
+## type [IncludeFunc](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/git/decl_gen.go>)
 
 IncludeFunc reports whether the file at absPath belongs in the changed set.
 

@@ -2,45 +2,9 @@ package kit
 
 import (
 	"slices"
-	"sync"
-	"sync/atomic"
 
 	"github.com/kitsunium/sdk/framework/model"
 )
-
-// Service is a bounded context of the product: it owns its building blocks —
-// endpoints, stores, topics, subscriptions, workflows, jobs, frontends — and
-// is the unit an App mounts. Declare one per package, as a package-level
-// variable, and declare its building blocks through its methods:
-//
-//	var Service = kit.NewService("todos", "The todo list.")
-//	var Todos = Service.Store("todos", func(t Todo) string { return t.ID })
-//	var _ = Service.Endpoint("GET /todos", List)
-//
-// Declaring never fails: a mistake — a malformed route, a duplicate name — is
-// recorded with its source position and reported, all at once, when the App
-// starts. The diagram shows it too.
-type Service struct {
-	name string
-	doc  string
-	decl pos
-	// module is the module that lists it (module.go), nil for the product's
-	// own: its name is then qualified with the module's.
-	module *Module
-
-	mu    sync.Mutex
-	nodes []node
-	ids   map[string]bool
-	diags []diagnostic
-	// settings are what it declares with Setting (setting.go): not nodes of
-	// the graph, but the configuration's.
-	settings []settingDecl
-	// activities are what it declares with Activity (activity.go): what a
-	// daemon's idle stop waits for besides its connections.
-	activities []*ActivityHandler
-
-	app atomic.Pointer[App]
-}
 
 // diagnostic is a declaration problem, kept with its position until the App
 // can relativize it.

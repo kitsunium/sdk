@@ -3275,7 +3275,7 @@ type Engine interface {
 ```
 
 <a name="Engine.Describe"></a>
-### func \(Engine\) [Describe](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/database_interface.go>)
+### func \(Engine\) [Describe](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func (Engine) Describe(url secret.Value) (DatabaseURLValue, error)
@@ -3284,7 +3284,7 @@ func (Engine) Describe(url secret.Value) (DatabaseURLValue, error)
 Describe says what url points at — the driver, host and port, the database, the TLS mode as written — for the graph and the logs: never a user, never a password.
 
 <a name="Engine.Dialect"></a>
-### func \(Engine\) [Dialect](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/database_interface.go>)
+### func \(Engine\) [Dialect](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func (Engine) Dialect() sql.Dialect
@@ -3293,7 +3293,7 @@ func (Engine) Dialect() sql.Dialect
 Dialect is the SQL the SDK speaks to it.
 
 <a name="Engine.Open"></a>
-### func \(Engine\) [Open](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/database_interface.go>)
+### func \(Engine\) [Open](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func (Engine) Open(url secret.Value, current func(context.Context) (secret.Value, error)) (*stdsql.DB, error)
@@ -3935,7 +3935,7 @@ type Principal interface {
 ```
 
 <a name="Principal.Attrs"></a>
-### func \(Principal\) [Attrs](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/access.go>)
+### func \(Principal\) [Attrs](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func (Principal) Attrs() []authz.Attr

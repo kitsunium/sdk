@@ -13,6 +13,7 @@ nor initialises them.
 
 | File | Holds |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `HTTPConfig`, `HTTPState`, `ProfilerConfig`, `SourceFunc`, `HTTPServer` and `EventStream` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `plug.go` | the hooks (`NewHTTPServer`, `NewStaticFiles`, `OpenEventStream`, `StudioProfiler`), what they take and return (`HTTPConfig`, `HTTPState`, `HTTPServer`, `EventStream`, `ProfilerConfig`, `SourceFunc`), the pprof labels kit and the profiler share (`LabelNode`, `LabelLoop`) |
 | `README.md` | written by `tools/genindex` from `docs/api` (`make docs-readme`, ADR 0167) |
 

@@ -12,6 +12,7 @@ go_library(
     name = "ssh",
     srcs = [
         "codes_gen.go",
+        "decl_gen.go",
         "discover.go",
         "doc.go",
         "enroll.go",
@@ -20,7 +21,6 @@ go_library(
         "key_unix.go",
         "key_windows.go",
         "sshidentity.go",
-        "sshidentity_compliance.go",
         "wrap.go",
     ],
     importpath = "github.com/kitsunium/sdk/framework/connectors/ssh",

@@ -217,7 +217,7 @@ func SignerFromFile(sshDir string, uuid string) (signer ssh.Signer, err error)
 SignerFromFile loads an unencrypted private key. Passphrase-protected keys deliberately fail here: the linter never prompts for a passphrase, they are meant to be exercised through ssh-agent instead.
 
 <a name="SSHIdentity"></a>
-## type [SSHIdentity](<https://github.com/kitsunium/sdk/blob/main/framework/connectors/ssh/sshidentity.go>)
+## type [SSHIdentity](<https://github.com/kitsunium/sdk/blob/main/framework/connectors/ssh/decl_gen.go>)
 
 SSHIdentity proves a machine's identity from the ssh key material already in a user's key directory.
 

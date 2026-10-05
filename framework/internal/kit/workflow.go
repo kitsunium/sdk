@@ -9,7 +9,6 @@ import (
 	"runtime/debug"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
@@ -26,49 +25,6 @@ const maxHistory int = 20
 // autoSchedule is the human text of what wakes a workflow's own loop.
 const autoSchedule = "at the next transition due · on every write"
 
-// WorkflowService is a state machine over the entities of one store: the states an
-// entity goes through, and the arrows between them. It is declared as data —
-// which is why the diagram can draw it exactly — and it runs four kinds of
-// transitions:
-//
-//   - event transitions ([WorkflowService.On]), fired by code with [WorkflowService.Fire];
-//   - timer transitions ([WorkflowService.After]), fired by the workflow's own loop
-//     once an entity has spent a duration in a state;
-//   - timer transitions at an instant the entity carries ([WorkflowService.At]) — a
-//     due date, a deadline — fired by the same loop when it comes;
-//   - guard transitions ([WorkflowService.When]), fired by the same loop as soon as
-//     a condition on the entity holds.
-//
-// The SDK's state-machine engine runs it (statemachine). Its loop never
-// polls: it keeps an agenda of the transitions due, sleeps until the
-// earliest, and a write of the store — which may bring one forward — wakes
-// it. A workflow with nothing due does not run at all. Transitions of one
-// entity run one at a time, of different entities at once.
-//
-// The entity's state lives in the entity itself (the state function returns
-// a pointer to it), so the store stays the single source of truth; the
-// engine keeps, beside it, when each entity entered its state and the
-// history of its transitions — in the workflow's file under the data
-// directory, so a timer keeps counting across a restart.
-type WorkflowService[E any, S comparable] struct {
-	nodeBase
-	store   *StoreService[E]
-	state   func(*E) *S
-	initial S
-	hasInit bool
-	order   []S
-	arrows  []arrow[E, S]
-	enter   map[S][]hook[E]
-	after   []changeHook[E, S]
-
-	// mu guards what the running app built: the engine, its loop, and the
-	// function that takes the workflow's hooks off its store.
-	mu      sync.Mutex
-	machine *statemachine.Machine[E, S]
-	running *autoRun
-	unwatch func()
-}
-
 // arrow is one declared transition. Its trigger says which of delay or
 // delaySetting (After), instant (At) and guard (When) is set.
 type arrow[E any, S comparable] struct {
@@ -84,13 +40,6 @@ type arrow[E any, S comparable] struct {
 	at   pos
 }
 
-// Delay is how long a timer transition waits: a duration, or a setting that
-// holds one — read when the delay is needed, so each environment can give
-// its own.
-type Delay interface {
-	time.Duration | *SettingService[time.Duration]
-}
-
 type hook[E any] struct {
 	fn func(context.Context, *E) error
 	at *pos
@@ -99,27 +48,6 @@ type hook[E any] struct {
 type changeHook[E any, S comparable] struct {
 	fn func(context.Context, ChangeEvent[E, S]) error
 	at *pos
-}
-
-// ChangeEvent describes one transition, for [WorkflowService.OnTransition] hooks: the
-// entity, the event, and the states it left and entered.
-type ChangeEvent[E any, S comparable] struct {
-	// Key is the entity's key in the store.
-	Key string
-	// Entity is the entity, as stored after the transition.
-	Entity E
-	// Event is the transition's name; "create" for [WorkflowService.Start].
-	Event string
-	// From is the state left; the zero S on creation.
-	From S
-	// To is the state entered.
-	To S
-	// Trigger is "create", "event", "timer" or "guard".
-	Trigger string
-	// Caller is the node that fired it, when code did.
-	Caller string
-	// At is when it happened.
-	At time.Time
 }
 
 // transitionOf keys, in the context handed to the engine, who fired a

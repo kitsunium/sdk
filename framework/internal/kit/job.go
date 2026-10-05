@@ -8,19 +8,6 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/app/scheduler"
 )
 
-// Job is scheduled work: a piece of the daemon's internal loop. It runs on
-// the SDK scheduler, whose decisions about time are documented rather than
-// emergent: a fire that is due while the previous run of the same job is
-// still going is skipped and counted, and a missed deadline is skipped and
-// counted, never caught up.
-type Job struct {
-	nodeBase
-	fn       func(context.Context) error
-	sched    scheduler.Schedule
-	schedule string
-	jobKind  string
-}
-
 // Every declares a job that runs every period, first one period after the
 // app starts.
 //

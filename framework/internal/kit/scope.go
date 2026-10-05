@@ -14,16 +14,6 @@ import (
 // socket: 16 hex digits keep a socket path under sun_path.
 const scopeKeyBytes int = 8
 
-// ScopeValue is one part of a path computed at the start: the user, the
-// executable, a configuration directory. Two processes share a singleton or
-// a socket when every scope gives them the same value.
-type ScopeValue struct {
-	// label names the scope in the graph: "uid", "executable", "env-<name>".
-	label string
-	// read is the scope's value in this process.
-	read func() (string, error)
-}
-
 var (
 	// PerUID is the current user: one process per user of the machine (its
 	// UID on Unix, its SID on Windows).

@@ -2091,7 +2091,7 @@ func ValidSegment(s string) bool
 ValidSegment reports whether s is a legal service, module, binary, role or library name.
 
 <a name="AdapterMessage"></a>
-## type [AdapterMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/connector.go>)
+## type [AdapterMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 AdapterMessage is a module a connector plugs a product in through: an engine, imported by the product's main to reach a database, and the only code of the product that imports its driver.
 
@@ -2110,7 +2110,7 @@ type AdapterMessage struct {
 ```
 
 <a name="AnalysisResult"></a>
-## type [AnalysisResult](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/model.go>)
+## type [AnalysisResult](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 AnalysisResult reports the status of static analysis. It says whether the analyzer ran, how long it took, and the error that stopped it.
 
@@ -2130,7 +2130,7 @@ type AnalysisResult struct {
 ```
 
 <a name="AppMessage"></a>
-## type [AppMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/model.go>)
+## type [AppMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 AppMessage identifies the product and the machine that described it. It names the module, the environment and the build the graph was taken from.
 
@@ -2159,7 +2159,7 @@ type AppMessage struct {
 ```
 
 <a name="ArchitectureMessage"></a>
-## type [ArchitectureMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/architecture.go>)
+## type [ArchitectureMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 ArchitectureMessage is the product at the two outer levels of the C4 model.
 
@@ -2182,7 +2182,7 @@ type ArchitectureMessage struct {
 ```
 
 <a name="AuthSpec"></a>
-## type [AuthSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_info.go>)
+## type [AuthSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 AuthSpec describes the app's authentication handler. Credentials says what it reads from a request; Endpoints are the ones behind it.
 
@@ -2200,7 +2200,7 @@ type AuthSpec struct {
 ```
 
 <a name="BinarySpec"></a>
-## type [BinarySpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_process.go>)
+## type [BinarySpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 BinarySpec is one executable the product ships: the \[NodeEntity.Binary] of a [KindBinary](#KindBinary) node, naming its roles.
 
@@ -2215,7 +2215,7 @@ type BinarySpec struct {
 ```
 
 <a name="BootStepMessage"></a>
-## type [BootStepMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/runtime.go>)
+## type [BootStepMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 BootStepMessage is one step of the start, as it ran. It carries when it began, how long it took and, when it failed, its error.
 
@@ -2238,7 +2238,7 @@ type BootStepMessage struct {
 ```
 
 <a name="BuildMessage"></a>
-## type [BuildMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/model.go>)
+## type [BuildMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 BuildMessage is what a binary was built from, at its three levels. Its three levels are the Go toolchain, the main module and the modules it depends on.
 
@@ -2256,7 +2256,7 @@ type BuildMessage struct {
 ```
 
 <a name="CLISpec"></a>
-## type [CLISpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_process.go>)
+## type [CLISpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 CLISpec is a short command-line command: the \[NodeEntity.CLI] of a [KindCLI](#KindCLI) node, the words that run it.
 
@@ -2271,7 +2271,7 @@ type CLISpec struct {
 ```
 
 <a name="CensusMessage"></a>
-## type [CensusMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/runtime.go>)
+## type [CensusMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 CensusMessage is a workflow's population per state. It counts the instances in each state when the census was taken.
 
@@ -2285,7 +2285,7 @@ type CensusMessage struct {
 ```
 
 <a name="CodeBlockMessage"></a>
-## type [CodeBlockMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/code.go>)
+## type [CodeBlockMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 CodeBlockMessage is a block of a function that decides whether, or how many times, the steps under it run.
 
@@ -2309,7 +2309,7 @@ type CodeBlockMessage struct {
 ```
 
 <a name="CodeEffectMessage"></a>
-## type [CodeEffectMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/code.go>)
+## type [CodeEffectMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 CodeEffectMessage is one call on a building block, inside a function. It names the node it reaches and the edge kind that call draws.
 
@@ -2329,7 +2329,7 @@ type CodeEffectMessage struct {
 ```
 
 <a name="CodeFuncMessage"></a>
-## type [CodeFuncMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/code.go>)
+## type [CodeFuncMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 CodeFuncMessage is one function of the module a node's code reaches. Its steps are listed in the order they run, under the blocks that guard them.
 
@@ -2357,7 +2357,7 @@ type CodeFuncMessage struct {
 ```
 
 <a name="CodeResult"></a>
-## type [CodeResult](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/code.go>)
+## type [CodeResult](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 CodeResult is the code a node runs, as the static analysis read it: the fourth and innermost level of the C4 model. The entry is the function the node runs — an endpoint's handler, a subscription's, a loop's — and Funcs are the functions of the module it reaches, each with what it calls and what it does to other nodes.
 
@@ -2377,7 +2377,7 @@ type CodeResult struct {
 ```
 
 <a name="CodeStepMessage"></a>
-## type [CodeStepMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/code.go>)
+## type [CodeStepMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 CodeStepMessage is one thing a function does: a call to another function of the module, a call on a building block, or a call into the SDK — under the innermost block that guards it.
 
@@ -2399,7 +2399,7 @@ type CodeStepMessage struct {
 ```
 
 <a name="CodeUseMessage"></a>
-## type [CodeUseMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/code.go>)
+## type [CodeUseMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 CodeUseMessage is one SDK function a node's code calls. Sites are where the node's code calls it, so a reader sees what it leans on.
 
@@ -2415,7 +2415,7 @@ type CodeUseMessage struct {
 ```
 
 <a name="CommandSpec"></a>
-## type [CommandSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_info.go>)
+## type [CommandSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 CommandSpec describes a command: an operation that changes something. It carries its input and result schemas, its handler, its queue and who may dispatch it.
 
@@ -2456,7 +2456,7 @@ type CommandSpec struct {
 ```
 
 <a name="ComponentMessage"></a>
-## type [ComponentMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/runtime.go>)
+## type [ComponentMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 ComponentMessage is one lifecycle component: brought up in order, taken down in reverse.
 
@@ -2478,7 +2478,7 @@ type ComponentMessage struct {
 ```
 
 <a name="ConnectorKind"></a>
-## type [ConnectorKind](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/connector.go>)
+## type [ConnectorKind](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 ConnectorKind groups connectors by what they are for.
 
@@ -2487,7 +2487,7 @@ type ConnectorKind string
 ```
 
 <a name="ConnectorMessage"></a>
-## type [ConnectorMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/connector.go>)
+## type [ConnectorMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 ConnectorMessage is something a product plugs into, as the product declares it: how it is reached, what it reaches out to, where it keeps its data. The Studio shows a connector's pages and widgets only when the product has one: a command-line tool has no requests to list, a service without a mailer no mailbox.
 
@@ -2521,7 +2521,7 @@ type ConnectorMessage struct {
 ```
 
 <a name="ConnectorSpec"></a>
-## type [ConnectorSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/connector.go>)
+## type [ConnectorSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 ConnectorSpec is a connector kit can plug a product into, whether the product uses it or not: what it is, and the building blocks that bring it.
 
@@ -2547,7 +2547,7 @@ type ConnectorSpec struct {
 ```
 
 <a name="ContainerMessage"></a>
-## type [ContainerMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/architecture.go>)
+## type [ContainerMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 ContainerMessage is one runnable or storage unit of the product. Its ID starts with "container:"; Nodes are the nodes that live in it.
 
@@ -2584,7 +2584,7 @@ type ContainerMessage struct {
 ```
 
 <a name="DatabaseMessage"></a>
-## type [DatabaseMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/runtime.go>)
+## type [DatabaseMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 DatabaseMessage is one database the app declares (kit.Database), as the running process found it. Its URL is never shown: where it was found, the engine, the address and the TLS mode are.
 
@@ -2620,7 +2620,7 @@ type DatabaseMessage struct {
 ```
 
 <a name="DevBuildMessage"></a>
-## type [DevBuildMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/runtime.go>)
+## type [DevBuildMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 DevBuildMessage is one build of \`kit dev\`: when, how long, and why. It lets the Studio say what changed and how long the reload took.
 
@@ -2642,7 +2642,7 @@ type DevBuildMessage struct {
 ```
 
 <a name="DiagnosticMessage"></a>
-## type [DiagnosticMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/model.go>)
+## type [DiagnosticMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 DiagnosticMessage is a problem found while building the graph. It names the node or the file it is about, and how serious it is.
 
@@ -2663,7 +2663,7 @@ type DiagnosticMessage struct {
 ```
 
 <a name="EdgeKind"></a>
-## type [EdgeKind](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/edge_kind.go>)
+## type [EdgeKind](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 EdgeKind says how two nodes relate. It is a wire format — the graph's JSON and the Studio's TypeScript unions carry these names —, so it stays a string.
 
@@ -2672,7 +2672,7 @@ type EdgeKind string
 ```
 
 <a name="EdgeMessage"></a>
-## type [EdgeMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/model.go>)
+## type [EdgeMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 EdgeMessage is one relation, with the evidence for it. Declared, Static and Observed say whether construction, the code or the runtime knows it.
 
@@ -2702,7 +2702,7 @@ type EdgeMessage struct {
 ```
 
 <a name="EditMessage"></a>
-## type [EditMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/history.go>)
+## type [EditMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 EditMessage is one change between two versions of a record, in RFC 6902's words: Op is add, remove or replace, Path the RFC 6901 JSON pointer of the member it changes, From its value before and To its value after, as JSON. A member whose value is not given — a secret's, or in the Studio a personal or special one — says it changed, never what: From and To are absent.
 
@@ -2716,7 +2716,7 @@ type EditMessage struct {
 ```
 
 <a name="EndpointSpec"></a>
-## type [EndpointSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_info.go>)
+## type [EndpointSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 EndpointSpec describes an HTTP endpoint, or the implementation of a port. It carries the method and path, the request and response schemas, and its auth.
 
@@ -2756,7 +2756,7 @@ type EndpointSpec struct {
 ```
 
 <a name="ErasureMessage"></a>
-## type [ErasureMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/privacy.go>)
+## type [ErasureMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 ErasureMessage is what kit.Erase did, store by store. Stores lists, store by store, what the erasure did there.
 
@@ -2768,7 +2768,7 @@ type ErasureMessage struct {
 ```
 
 <a name="Event"></a>
-## type [Event](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/runtime.go>)
+## type [Event](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 Event is one live event. Exactly one of the payload fields matching Type is set.
 
@@ -2799,7 +2799,7 @@ type Event struct {
 ```
 
 <a name="EventType"></a>
-## type [EventType](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/event_type.go>)
+## type [EventType](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 EventType names the kind of a live event. It is a wire format — the graph's JSON and the Studio's TypeScript unions carry these names —, so it stays a string.
 
@@ -2808,7 +2808,7 @@ type EventType string
 ```
 
 <a name="ExportedVersionsMessage"></a>
-## type [ExportedVersionsMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/privacy.go>)
+## type [ExportedVersionsMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 ExportedVersionsMessage are the versions of one exported record, as a StoreDataMessage carries them beside its records.
 
@@ -2823,7 +2823,7 @@ type ExportedVersionsMessage struct {
 ```
 
 <a name="FieldMessage"></a>
-## type [FieldMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_info.go>)
+## type [FieldMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 FieldMessage is one member of an object schema. It carries the JSON name, the schema of its value and the classes of its data.
 
@@ -2863,7 +2863,7 @@ type FieldMessage struct {
 ```
 
 <a name="FileMessage"></a>
-## type [FileMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/module.go>)
+## type [FileMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 FileMessage is one file a graph points at: its path, relative to its root — the product's module, or the Go module \[SourceMessage.GoModule] names.
 
@@ -2876,7 +2876,7 @@ type FileMessage struct {
 ```
 
 <a name="FlameNodeMessage"></a>
-## type [FlameNodeMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/profile.go>)
+## type [FlameNodeMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 FlameNodeMessage is one frame of a flame graph. Its children are the frames it called; its value is the samples under it.
 
@@ -2894,7 +2894,7 @@ type FlameNodeMessage struct {
 ```
 
 <a name="FormerMessage"></a>
-## type [FormerMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/history.go>)
+## type [FormerMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 FormerMessage is one former value of a field that keeps its history: what it was, until when, and who replaced it.
 
@@ -2912,7 +2912,7 @@ type FormerMessage struct {
 ```
 
 <a name="FrontendSpec"></a>
-## type [FrontendSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_info.go>)
+## type [FrontendSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 FrontendSpec describes static assets served by the product. It carries the path the assets are served under and where they are read from.
 
@@ -2926,7 +2926,7 @@ type FrontendSpec struct {
 ```
 
 <a name="FuncCostMessage"></a>
-## type [FuncCostMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/profile.go>)
+## type [FuncCostMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 FuncCostMessage is what one function cost. It carries the flat and cumulative samples of the function and where it lives.
 
@@ -2945,7 +2945,7 @@ type FuncCostMessage struct {
 ```
 
 <a name="GoroutineGroup"></a>
-## type [GoroutineGroup](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/profile.go>)
+## type [GoroutineGroup](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 GoroutineGroup is goroutines doing the same thing. They share one stack; Count says how many run it.
 
@@ -2968,7 +2968,7 @@ type GoroutineGroup struct {
 ```
 
 <a name="GoroutinesResult"></a>
-## type [GoroutinesResult](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/profile.go>)
+## type [GoroutinesResult](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 GoroutinesResult is every goroutine of the process, grouped by what it runs. Each group names the node its stack runs in, when one does.
 
@@ -2985,7 +2985,7 @@ type GoroutinesResult struct {
 ```
 
 <a name="GraphMessage"></a>
-## type [GraphMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/model.go>)
+## type [GraphMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 GraphMessage is the whole product. It is the JSON document the runtime serves and the analyzer writes; Version names its shape.
 
@@ -3070,7 +3070,7 @@ func (*GraphMessage) Normalize()
 Normalize sorts nodes, edges and call sites into their canonical order, fills each workflow transition's callers from the edges, derives the connectors from the nodes, and recomputes Revision. Two graphs describing the same structure normalize to the same bytes, whatever order they were built in.
 
 <a name="HTTPServer"></a>
-## type [HTTPServer](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/runtime.go>)
+## type [HTTPServer](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 HTTPServer is the product's HTTP server, and whose loop serves it. Its address is the one it listens on; its loop is the node that runs it.
 
@@ -3102,7 +3102,7 @@ type HTTPServer struct {
 ```
 
 <a name="HeldUntilSpec"></a>
-## type [HeldUntilSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_info.go>)
+## type [HeldUntilSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 HeldUntilSpec is the hold a store declares on each of its records, until an instant the record carries.
 
@@ -3117,7 +3117,7 @@ type HeldUntilSpec struct {
 ```
 
 <a name="HoldEvent"></a>
-## type [HoldEvent](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/privacy.go>)
+## type [HoldEvent](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 HoldEvent is one record a legal hold keeps. It carries references only: never the record's key, its subject's identity, or the hold's reason, which kit keeps apart.
 
@@ -3138,7 +3138,7 @@ type HoldEvent struct {
 ```
 
 <a name="IDValue"></a>
-## type [IDValue](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/id.go>)
+## type [IDValue](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 IDValue is a node's identity, parsed: the one grammar of [IDPattern](#IDPattern). Its String is the ID it was parsed from.
 
@@ -3180,7 +3180,7 @@ func (*IDValue) String() string
 String renders the ID; ParseID(id.String()) is id for every ID ParseID returned.
 
 <a name="IndexSpec"></a>
-## type [IndexSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_info.go>)
+## type [IndexSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 IndexSpec is one secondary index of a store. Its name is unique in the store; Unique says whether two records may share a key.
 
@@ -3195,7 +3195,7 @@ type IndexSpec struct {
 ```
 
 <a name="InstanceMessage"></a>
-## type [InstanceMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/runtime.go>)
+## type [InstanceMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 InstanceMessage is one entity's journey through a workflow. It carries the entity's key, its current state and the steps that brought it there.
 
@@ -3213,7 +3213,7 @@ type InstanceMessage struct {
 ```
 
 <a name="JobSpec"></a>
-## type [JobSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_info.go>)
+## type [JobSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 JobSpec describes a scheduled job. It carries the fixed interval or the cron expression that schedules it.
 
@@ -3227,7 +3227,7 @@ type JobSpec struct {
 ```
 
 <a name="JournalCheckMessage"></a>
-## type [JournalCheckMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/privacy.go>)
+## type [JournalCheckMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 JournalCheckMessage is what verifying the journal's chain found. A broken chain names the first entry whose hash does not follow.
 
@@ -3242,7 +3242,7 @@ type JournalCheckMessage struct {
 ```
 
 <a name="JournalEntryEvent"></a>
-## type [JournalEntryEvent](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/privacy.go>)
+## type [JournalEntryEvent](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 JournalEntryEvent is one operation of the privacy journal: what was done, where, by whom and when, with references only — never an identity, a value or a key. Each entry is chained to the previous one by SHA-256.
 
@@ -3272,7 +3272,7 @@ type JournalEntryEvent struct {
 ```
 
 <a name="LibrarySpec"></a>
-## type [LibrarySpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_process.go>)
+## type [LibrarySpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 LibrarySpec is a package shared between components (D19): the \[NodeEntity.Library] of a [KindLibrary](#KindLibrary) node.
 
@@ -3284,7 +3284,7 @@ type LibrarySpec struct {
 ```
 
 <a name="LinkMessage"></a>
-## type [LinkMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/architecture.go>)
+## type [LinkMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 LinkMessage is a relationship between two elements of the architecture. The process's link to a database, "Reads and writes", carries the database connector, and the store connector once stores live on it.
 
@@ -3308,7 +3308,7 @@ type LinkMessage struct {
 ```
 
 <a name="ListenerSpec"></a>
-## type [ListenerSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_process.go>)
+## type [ListenerSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 ListenerSpec is a listener that is not HTTP: the \[NodeEntity.Listener] of a [KindListener](#KindListener) node — its network, its contract, who may connect.
 
@@ -3327,7 +3327,7 @@ type ListenerSpec struct {
 ```
 
 <a name="LogRecordMessage"></a>
-## type [LogRecordMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/runtime.go>)
+## type [LogRecordMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 LogRecordMessage is one log record written by product code through kit.Log, kept in dev so the Studio can show a request's logs beside its spans.
 
@@ -3352,7 +3352,7 @@ type LogRecordMessage struct {
 ```
 
 <a name="LoopMessage"></a>
-## type [LoopMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/runtime.go>)
+## type [LoopMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 LoopMessage is one recurring piece of the daemon's internal loop: a job, a workflow's timer sweep, a subscription's consumer, the HTTP accept loop, a declared or hand-written loop.
 
@@ -3399,7 +3399,7 @@ type LoopMessage struct {
 ```
 
 <a name="LoopSpec"></a>
-## type [LoopSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_info.go>)
+## type [LoopSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 LoopSpec describes a loop node. Style says whether it is declared (kit owns the wait) or hand-written.
 
@@ -3418,7 +3418,7 @@ type LoopSpec struct {
 ```
 
 <a name="MailMessage"></a>
-## type [MailMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/devtools.go>)
+## type [MailMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 MailMessage is a whole captured mail, for the Studio's mailbox. It is kept by the capture transport of dev and tests only, never in production.
 
@@ -3476,7 +3476,7 @@ type MailSummary struct {
 ```
 
 <a name="MailSummaryMessage"></a>
-## type [MailSummaryMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/runtime.go>)
+## type [MailSummaryMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 MailSummaryMessage is one mail as the outbox sees it. It carries no body: the Studio lists summaries and reads a whole mail on demand.
 
@@ -3508,7 +3508,7 @@ type MailSummaryMessage struct {
 ```
 
 <a name="MailerSpec"></a>
-## type [MailerSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_info.go>)
+## type [MailerSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 MailerSpec describes outbound mail. It carries the transport that empties the outbox and the outbox's counters.
 
@@ -3537,7 +3537,7 @@ type MailerSpec struct {
 ```
 
 <a name="MechanicMessage"></a>
-## type [MechanicMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_info.go>)
+## type [MechanicMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 MechanicMessage is a generic building block, backed by an SDK package, that a node composes. The catalog lists every mechanic kit offers; an endpoint's pipeline lists the ones it uses.
 
@@ -3559,7 +3559,7 @@ type MechanicMessage struct {
 ```
 
 <a name="MigrationMessage"></a>
-## type [MigrationMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/runtime.go>)
+## type [MigrationMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 MigrationMessage is one versioned migration. Its Version orders it among the others; Name says what it does.
 
@@ -3573,7 +3573,7 @@ type MigrationMessage struct {
 ```
 
 <a name="MigrationSetMessage"></a>
-## type [MigrationSetMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/runtime.go>)
+## type [MigrationSetMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 MigrationSetMessage is one set of migrations on a database — kit's own, the product's (kit.Migrations), a module's — with its own version table, and so its own lock.
 
@@ -3593,7 +3593,7 @@ type MigrationSetMessage struct {
 ```
 
 <a name="MockMessage"></a>
-## type [MockMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/runtime.go>)
+## type [MockMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 MockMessage is the replacement a test gave the app ([MockReplace](#MockReplace)). It is set by a test only; the Studio shows it and never sets one (D13).
 
@@ -3609,7 +3609,7 @@ type MockMessage struct {
 ```
 
 <a name="ModuleMessage"></a>
-## type [ModuleMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/module.go>)
+## type [ModuleMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 ModuleMessage is a module the app mounts: a Go module's services, released and mounted together like a bundle (ADR 0008). Everything a module declares is qualified with its name: its services are "\<module>.\<service>" — the one named like the module is "\<module>" —, so its nodes are "\<module>.\<service>/\<kind>/\<name>" and carry \[NodeEntity.Module].
 
@@ -3643,7 +3643,7 @@ type ModuleMessage struct {
 ```
 
 <a name="ModuleVersionMessage"></a>
-## type [ModuleVersionMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/model.go>)
+## type [ModuleVersionMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 ModuleVersionMessage identifies one module of a build. Local and Modified say when the code that ran is not the published version.
 
@@ -3667,7 +3667,7 @@ type ModuleVersionMessage struct {
 ```
 
 <a name="NodeCostMessage"></a>
-## type [NodeCostMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/profile.go>)
+## type [NodeCostMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 NodeCostMessage is what one node cost. It is the share of the profile's samples spent in the node's code.
 
@@ -3685,7 +3685,7 @@ type NodeCostMessage struct {
 ```
 
 <a name="NodeEntity"></a>
-## type [NodeEntity](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node.go>)
+## type [NodeEntity](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 NodeEntity is one building block. Its ID is its identity; exactly one of the kind-specific fields matching Kind is set.
 
@@ -3744,7 +3744,7 @@ type NodeEntity struct {
 ```
 
 <a name="NodeKind"></a>
-## type [NodeKind](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_kind.go>)
+## type [NodeKind](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 NodeKind is the closed set of building blocks a kit product is made of. It is a wire format — the graph's JSON and the Studio's TypeScript unions carry these names —, so it stays a string.
 
@@ -3753,7 +3753,7 @@ type NodeKind string
 ```
 
 <a name="PasswordPolicyMessage"></a>
-## type [PasswordPolicyMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/history.go>)
+## type [PasswordPolicyMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 PasswordPolicyMessage is the policy of one secret field that holds a password's hash (Store.Passwords).
 
@@ -3775,7 +3775,7 @@ type PasswordPolicyMessage struct {
 ```
 
 <a name="Payload"></a>
-## type [Payload](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/runtime.go>)
+## type [Payload](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 Payload is the request and the response of a span, as JSON, in dev only. Every member whose name says it is a secret — password, token, secret, authorization, cookie… — or whose Go field is tagged kit:"secret" is replaced by "\[redacted]", and each side is cut at 8 KiB.
 
@@ -3791,7 +3791,7 @@ type Payload struct {
 ```
 
 <a name="PermissionMessage"></a>
-## type [PermissionMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_info.go>)
+## type [PermissionMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 PermissionMessage is what a caller needs to dispatch a command or to ask a query: that the app's policy lets it do Action to Resource (Allow).
 
@@ -3805,7 +3805,7 @@ type PermissionMessage struct {
 ```
 
 <a name="PersonMessage"></a>
-## type [PersonMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/architecture.go>)
+## type [PersonMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 PersonMessage is a human user of the product. It is drawn at the edge of the C4 context view, outside every container.
 
@@ -3821,7 +3821,7 @@ type PersonMessage struct {
 ```
 
 <a name="PersonalDataMessage"></a>
-## type [PersonalDataMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/privacy.go>)
+## type [PersonalDataMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 PersonalDataMessage is a person's data as kit.Export gives it (GDPR art. 15 and 20): their records, store by store, with what art. 15(1) asks beside them.
 
@@ -3833,7 +3833,7 @@ type PersonalDataMessage struct {
 ```
 
 <a name="PhaseChangeEvent"></a>
-## type [PhaseChangeEvent](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/runtime.go>)
+## type [PhaseChangeEvent](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 PhaseChangeEvent is one step of the daemon's life. It carries the phase entered, when it was entered, and why.
 
@@ -3850,7 +3850,7 @@ type PhaseChangeEvent struct {
 ```
 
 <a name="Pool"></a>
-## type [Pool](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/runtime.go>)
+## type [Pool](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 Pool is a database's connection pool, as database/sql counts it. It is sampled when the runtime state is read; its counters never move a revision.
 
@@ -3873,7 +3873,7 @@ type Pool struct {
 ```
 
 <a name="PortMessage"></a>
-## type [PortMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/architecture.go>)
+## type [PortMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 PortMessage is an address a process listens on. Owner is the container that listens on it; Serves names what is reached through it.
 
@@ -3892,7 +3892,7 @@ type PortMessage struct {
 ```
 
 <a name="PortSpec"></a>
-## type [PortSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_info.go>)
+## type [PortSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 PortSpec describes a port: an operation a service needs and another implements.
 
@@ -3916,7 +3916,7 @@ type PortSpec struct {
 ```
 
 <a name="PresentationSpec"></a>
-## type [PresentationSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_process.go>)
+## type [PresentationSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 PresentationSpec is what turns results into what a reader sees: the \[NodeEntity.Presentation] of a [KindPresentation](#KindPresentation) node.
 
@@ -3928,7 +3928,7 @@ type PresentationSpec struct {
 ```
 
 <a name="PrivacyMessage"></a>
-## type [PrivacyMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/privacy.go>)
+## type [PrivacyMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 PrivacyMessage is what a running app says of the personal data it keeps. It is the Privacy page's data: the register, the holds and the journal's state.
 
@@ -3948,7 +3948,7 @@ type PrivacyMessage struct {
 ```
 
 <a name="ProcessSpec"></a>
-## type [ProcessSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/runtime.go>)
+## type [ProcessSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 ProcessSpec is the Go process a product runs in. It carries the runtime's figures — goroutines, heap, GC, CPU — taken at At.
 
@@ -3994,7 +3994,7 @@ type ProcessSpec struct {
 ```
 
 <a name="ProductRetentionSpec"></a>
-## type [ProductRetentionSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_info.go>)
+## type [ProductRetentionSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 ProductRetentionSpec is a retention the product keeps itself, as it says it.
 
@@ -4008,7 +4008,7 @@ type ProductRetentionSpec struct {
 ```
 
 <a name="ProfileResult"></a>
-## type [ProfileResult](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/profile.go>)
+## type [ProfileResult](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 ProfileResult is a pprof profile of the running product, folded onto its graph: every sample is attributed to the node whose code was running — through the pprof label kit puts on every handler, subscription, job and loop run, or, for the heap, which carries no label, through the node's code functions on the sample's stack.
 
@@ -4037,7 +4037,7 @@ type ProfileResult struct {
 ```
 
 <a name="QuerySpec"></a>
-## type [QuerySpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_info.go>)
+## type [QuerySpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 QuerySpec describes a query: an operation that reads and changes nothing.
 
@@ -4062,7 +4062,7 @@ type QuerySpec struct {
 ```
 
 <a name="RecordFormerMessage"></a>
-## type [RecordFormerMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/privacy.go>)
+## type [RecordFormerMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 RecordFormerMessage is the former values of one exported record's fields. A personal or special field's former values are redacted, never exported in clear.
 
@@ -4077,7 +4077,7 @@ type RecordFormerMessage struct {
 ```
 
 <a name="RecordHistoryMessage"></a>
-## type [RecordHistoryMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/history.go>)
+## type [RecordHistoryMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 RecordHistoryMessage is what kit remembers of one record, as the Studio's data view shows it (GET /\_kit/api/former): each field's former values, newest first, by the field's JSON pointer — a secret field's without their values, a personal or special one's redacted.
 
@@ -4088,7 +4088,7 @@ type RecordHistoryMessage struct {
 ```
 
 <a name="RecordVersionMessage"></a>
-## type [RecordVersionMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/history.go>)
+## type [RecordVersionMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 RecordVersionMessage is one version of a record whose store keeps revisions (ADR 0007 §3): its number — from 1, never given twice while the record exists —, when the write that made it ran — zero for a record stored before its store kept revisions —, who made it and which command, and the record as it was.
 
@@ -4110,7 +4110,7 @@ type RecordVersionMessage struct {
 ```
 
 <a name="RecordVersionsMessage"></a>
-## type [RecordVersionsMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/history.go>)
+## type [RecordVersionsMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 RecordVersionsMessage is a record's versions as the Studio's data view shows them (GET /\_kit/api/revisions): newest first, each as the data browser shows a record — a member sealed at rest sealed, a personal, special or secret one redacted —, and, when two were asked for, what changed from one to the other, a value given only where the data browser would show it.
 
@@ -4126,7 +4126,7 @@ type RecordVersionsMessage struct {
 ```
 
 <a name="RegisterMessage"></a>
-## type [RegisterMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/privacy.go>)
+## type [RegisterMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 RegisterMessage is the record of processing of GDPR art. 30(1), as far as the code knows it.
 
@@ -4144,7 +4144,7 @@ type RegisterMessage struct {
 ```
 
 <a name="RegisterStoreMessage"></a>
-## type [RegisterStoreMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/privacy.go>)
+## type [RegisterStoreMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 RegisterStoreMessage is one store's line in the register. It names the classes the store keeps, their purposes and their retention.
 
@@ -4184,7 +4184,7 @@ type RegisterStoreMessage struct {
 ```
 
 <a name="RetentionSpec"></a>
-## type [RetentionSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_info.go>)
+## type [RetentionSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 RetentionSpec is when kit erases or deletes a record: after a delay counted from an instant the record carries (After or Setting, and Since), or at an instant a function gives (At).
 
@@ -4205,7 +4205,7 @@ type RetentionSpec struct {
 ```
 
 <a name="RoleSpec"></a>
-## type [RoleSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_process.go>)
+## type [RoleSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 RoleSpec is one process role of a binary: the \[NodeEntity.Role] of a [KindRole](#KindRole) node — its profile, arguments, singleton and idle stop.
 
@@ -4228,7 +4228,7 @@ type RoleSpec struct {
 ```
 
 <a name="RuntimeMessage"></a>
-## type [RuntimeMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/runtime.go>)
+## type [RuntimeMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 RuntimeMessage is what a running process says about itself: the daemon's own state and its internal loop.
 
@@ -4267,7 +4267,7 @@ type RuntimeMessage struct {
 ```
 
 <a name="SchemaMessage"></a>
-## type [SchemaMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_info.go>)
+## type [SchemaMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 SchemaMessage describes a Go type as it appears on the wire. It is a JSON-Schema-like shape: a kind, its fields or elements, and its Go type.
 
@@ -4297,7 +4297,7 @@ type SchemaMessage struct {
 ```
 
 <a name="SecretSpec"></a>
-## type [SecretSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_info.go>)
+## type [SecretSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 SecretSpec describes a declared secret: how it is made, where it lives, its versions — never its value.
 
@@ -4345,7 +4345,7 @@ type SecretSpec struct {
 ```
 
 <a name="SelectCaseMessage"></a>
-## type [SelectCaseMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_info.go>)
+## type [SelectCaseMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 SelectCaseMessage is one case of a select statement in a hand-written loop. The analyzer reads it from the loop's body; Kind says what the case waits on.
 
@@ -4361,7 +4361,7 @@ type SelectCaseMessage struct {
 ```
 
 <a name="SettingMessage"></a>
-## type [SettingMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/runtime.go>)
+## type [SettingMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 SettingMessage is one configuration value kit read when the product started: kit's own, or one a service of the product declares.
 
@@ -4402,7 +4402,7 @@ type SettingMessage struct {
 ```
 
 <a name="SnippetMessage"></a>
-## type [SnippetMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/runtime.go>)
+## type [SnippetMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 SnippetMessage is source code served to a reader of the graph. Focus and FocusEnd mark the lines a reader asked for, inside the lines served.
 
@@ -4424,7 +4424,7 @@ type SnippetMessage struct {
 ```
 
 <a name="SourceMessage"></a>
-## type [SourceMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/model.go>)
+## type [SourceMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 SourceMessage locates code. File is relative to its module's root; Line and EndLine bound the declaration.
 
@@ -4447,7 +4447,7 @@ type SourceMessage struct {
 ```
 
 <a name="SpanMessage"></a>
-## type [SpanMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/runtime.go>)
+## type [SpanMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 SpanMessage is a finished unit of work, attributed to a node. Only allow-listed, wire-safe fields travel: no URL, no query string, no private error text.
 
@@ -4494,7 +4494,7 @@ type SpanMessage struct {
 ```
 
 <a name="StateSpec"></a>
-## type [StateSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_info.go>)
+## type [StateSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 StateSpec is one state of a workflow. Terminal marks a state an instance stays in; Count is how many instances are in it.
 
@@ -4512,7 +4512,7 @@ type StateSpec struct {
 ```
 
 <a name="StatsMessage"></a>
-## type [StatsMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/model.go>)
+## type [StatsMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 StatsMessage are observed counters for a node or an edge. They are counters: they never move a graph's revision.
 
@@ -4532,7 +4532,7 @@ type StatsMessage struct {
 ```
 
 <a name="StepEvent"></a>
-## type [StepEvent](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/runtime.go>)
+## type [StepEvent](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 StepEvent is one transition in an instance's history. It carries the event, the states it went from and to, and when it fired.
 
@@ -4554,7 +4554,7 @@ type StepEvent struct {
 ```
 
 <a name="StoreDataMessage"></a>
-## type [StoreDataMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/privacy.go>)
+## type [StoreDataMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 StoreDataMessage is one store's records about a person. It is one part of what kit.Export gives a person about themselves.
 
@@ -4582,7 +4582,7 @@ type StoreDataMessage struct {
 ```
 
 <a name="StoreErasureMessage"></a>
-## type [StoreErasureMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/privacy.go>)
+## type [StoreErasureMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 StoreErasureMessage is one store's part of an erasure: the keys of the records erased, deleted, and held — left in place, as a legal hold asks. A key may be personal data, which the Studio and the logs never show.
 
@@ -4600,7 +4600,7 @@ type StoreErasureMessage struct {
 ```
 
 <a name="StoreHistoryMessage"></a>
-## type [StoreHistoryMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/history.go>)
+## type [StoreHistoryMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 StoreHistoryMessage is what a store remembers of its records. Fields names the fields it keeps former values of; Kept and Bytes weigh them.
 
@@ -4623,7 +4623,7 @@ type StoreHistoryMessage struct {
 ```
 
 <a name="StorePrivacyMessage"></a>
-## type [StorePrivacyMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_info.go>)
+## type [StorePrivacyMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 StorePrivacyMessage is what a store keeps of people: whom each record is about, why, for how long, and — on a runtime graph — what is held and due.
 
@@ -4664,7 +4664,7 @@ type StorePrivacyMessage struct {
 ```
 
 <a name="StoreSpec"></a>
-## type [StoreSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_info.go>)
+## type [StoreSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 StoreSpec describes a store. It carries the entity's schema, its backend, its indexes, its privacy and its history.
 
@@ -4709,7 +4709,7 @@ type StoreSpec struct {
 ```
 
 <a name="SubscriptionSpec"></a>
-## type [SubscriptionSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_info.go>)
+## type [SubscriptionSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 SubscriptionSpec describes a subscription — or a watch (ADR 0008), a subscription whose deliveries come from stores instead of a topic.
 
@@ -4740,7 +4740,7 @@ type SubscriptionSpec struct {
 ```
 
 <a name="SystemMessage"></a>
-## type [SystemMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/architecture.go>)
+## type [SystemMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 SystemMessage is a software system outside the product. Nodes are the product's nodes that talk to it; Technology says what it runs on.
 
@@ -4762,7 +4762,7 @@ type SystemMessage struct {
 ```
 
 <a name="TopicSpec"></a>
-## type [TopicSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_info.go>)
+## type [TopicSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 TopicSpec describes a topic. It carries the message's schema; its subscriptions are the nodes it delivers to.
 
@@ -4778,7 +4778,7 @@ type TopicSpec struct {
 ```
 
 <a name="TraceMessage"></a>
-## type [TraceMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/runtime.go>)
+## type [TraceMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 TraceMessage is the spans sharing one trace ID, root first. The root span is the one with no parent in the trace; the others follow it.
 
@@ -4802,7 +4802,7 @@ type TraceMessage struct {
 ```
 
 <a name="TransitionEvent"></a>
-## type [TransitionEvent](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/runtime.go>)
+## type [TransitionEvent](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 TransitionEvent is one workflow instance moving between states. It names the workflow, the entity, the event and the states it went from and to.
 
@@ -4826,7 +4826,7 @@ type TransitionEvent struct {
 ```
 
 <a name="TransitionSpec"></a>
-## type [TransitionSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_info.go>)
+## type [TransitionSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 TransitionSpec is one arrow of a workflow. It names the event that fires it and the states it goes from and to.
 
@@ -4858,7 +4858,7 @@ type TransitionSpec struct {
 ```
 
 <a name="WakeSourceMessage"></a>
-## type [WakeSourceMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_info.go>)
+## type [WakeSourceMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 WakeSourceMessage is one thing that wakes a declared loop. Kind says whether a topic, a period (Every) or a function wakes the loop.
 
@@ -4876,7 +4876,7 @@ type WakeSourceMessage struct {
 ```
 
 <a name="WorkflowSpec"></a>
-## type [WorkflowSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_info.go>)
+## type [WorkflowSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/decl_gen.go>)
 
 WorkflowSpec describes a state machine bound to a store. It carries the states and the transitions between them, and the store it lives in.
 

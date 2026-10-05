@@ -6,8 +6,7 @@ go_library(
     name = "git",
     srcs = [
         "changed_set.go",
-        "changed_set_compliance.go",
-        "config.go",
+        "decl_gen.go",
         "diff_parse.go",
         "doc.go",
         "exec.go",

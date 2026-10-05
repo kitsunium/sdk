@@ -11,31 +11,6 @@ import (
 	coreent "github.com/kitsunium/sdk/framework/internal/core/entitlement"
 )
 
-// BundleValue is what a publication point actually serves: the roster's exact
-// bytes and the vendor's signature over them, in a single object.
-//
-// It exists because the roster and its detached signature used to be two
-// files, and two files cannot be fetched atomically. raw.githubusercontent.com
-// caches each object independently with max-age=300, so for up to five minutes
-// after every re-signature a client could receive a NEW signature over an OLD
-// roster — measured on the live endpoints, not hypothesised. That mismatch is
-// indistinguishable from forgery, so the client refused with the most alarming
-// error the scheme has (coreent.ErrRosterUnsigned, the spoofing case) while nothing
-// was wrong. With hourly signing that is roughly 8% of all wall-clock time.
-//
-// One object cannot desynchronise with itself. It also halves the cold-start
-// cost, since there is now one round trip instead of two.
-type BundleValue struct {
-	// Payload is the roster document, base64. Carrying the bytes rather than
-	// a nested object is what keeps the signature verifiable: it covers this
-	// exact byte sequence, and re-serialising a decoded struct would not
-	// reproduce it.
-	Payload string `json:"payload"`
-	// Signature is the vendor's detached ed25519 signature over the decoded
-	// payload, base64.
-	Signature string `json:"sig"`
-}
-
 // ParseBundle decodes a published bundle and authenticates the roster inside
 // it. It is the only entry point production uses; ParseRoster remains for
 // callers that already hold the two byte slices.

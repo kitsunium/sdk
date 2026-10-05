@@ -22,19 +22,3 @@ const MockReplace = "replace"
 // a caller sets and reads is MailMessage.MailSummary, its JSON members
 // promoted beside the body's.
 type MailSummary = MailSummaryMessage
-
-// MailMessage is a whole captured mail, for the Studio's mailbox.
-// It is kept by the capture transport of dev and tests only, never in
-// production.
-type MailMessage struct {
-	MailSummary
-	// Text is the plain text body.
-	Text string `json:"text,omitempty"`
-	// HTML is the HTML body. The Studio renders it in a sandboxed frame
-	// that runs no script.
-	HTML string `json:"html,omitempty"`
-	// Headers are the extra headers, rendered.
-	Headers map[string]string `json:"headers,omitempty"`
-	// Raw is the composed message, as the transport received it.
-	Raw string `json:"raw,omitempty"`
-}

@@ -2720,7 +2720,7 @@ func WithUser[D any](ctx context.Context, uid UID, data D) context.Context
 WithUser returns ctx acting as the given user, with data: what a job, a loop or a test uses to call an [Auth](#Auth) endpoint in-process on someone's behalf.
 
 <a name="ActivityHandler"></a>
-## type [ActivityHandler](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/activity.go>)
+## type [ActivityHandler](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ActivityHandler is a declared activity of a service: a function that says whether the product is busy. A daemon's IdleStop waits until every activity of its mounted services says false AND no connection is open on its listeners.
 
@@ -2729,7 +2729,7 @@ type ActivityHandler struct{}
 ```
 
 <a name="AnalyzeFunc"></a>
-## type [AnalyzeFunc](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/app_analysis.go>)
+## type [AnalyzeFunc](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 AnalyzeFunc reads the product's source — the Go module rooted at dir, and the packages that declare the modules it mounts — into a graph the runtime merges into its own: the edges found in handler bodies, each function's steps. The framework links no analyzer (ADR 0147 §1): the platform's kit tool gives one, in dev, through [Analyzer](#Analyzer).
 
@@ -2738,7 +2738,7 @@ type AnalyzeFunc func(ctx context.Context, dir string, modules []string) (*model
 ```
 
 <a name="App"></a>
-## type [App](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/app.go>)
+## type [App](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 App is the whole product: the services it mounts, served by one process. The same services can be mounted by several apps — one binary per service, or all of them in one — and each app draws exactly what it runs.
 
@@ -2881,7 +2881,7 @@ type AppConfigurer interface {
 ```
 
 <a name="AttrsProvider"></a>
-## type [AttrsProvider](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/access.go>)
+## type [AttrsProvider](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 AttrsProvider is what the app's auth data says about the caller to the SDK's authz: the attributes [Command.Allow](#Command.Allow) and [Query.Allow](#Query.Allow) hand a policy — the caller's roles, its groups. Auth data that does not implement it gives none, and every Allow refuses: the start warns of it.
 
@@ -2900,14 +2900,14 @@ type AttrsProvider interface {
 ```
 
 <a name="AttrsProvider.Attrs"></a>
-### func \(AttrsProvider\) [Attrs](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/access.go>)
+### func \(AttrsProvider\) [Attrs](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func (AttrsProvider) Attrs() []authz.Attr
 ```
 
 <a name="AuthenticatorHandler"></a>
-## type [AuthenticatorHandler](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/auth.go>)
+## type [AuthenticatorHandler](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 AuthenticatorHandler is the app's authentication handler: it turns the credentials of a request — a session cookie, a bearer token — into a user, in front of every endpoint declared with [Auth](#Auth) or [AuthOptional](#AuthOptional). An app has at most one.
 
@@ -2918,7 +2918,7 @@ type AuthenticatorHandler[P, D any] struct{}
 ```
 
 <a name="Binary"></a>
-## type [Binary](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/roles.go>)
+## type [Binary](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 Binary is one executable the product ships, made of process roles: a status line and its daemon are two roles of one binary, "statusline" and "statusline daemon". Each role is an App — its own services, its own profile — and two roles talk only through a declared, versioned contract (D22): a listener one serves and the other dials, never each other's code.
 
@@ -2965,7 +2965,7 @@ func (*Binary) Talks(from string, to string, contractName string) *Binary
 Talks declares that role from talks to role to through contract — "\<name>/v\<major>". It is the only edge two roles may have.
 
 <a name="CLI"></a>
-## type [CLI](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/cli.go>)
+## type [CLI](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 CLI is a short command-line command of the product: it runs once, in the CLI profile, and exits with its status. Main runs it when the process's first argument is its name.
 
@@ -2974,7 +2974,7 @@ type CLI struct{}
 ```
 
 <a name="CLIFunc"></a>
-## type [CLIFunc](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/cli.go>)
+## type [CLIFunc](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 CLIFunc is a CLI command's body: its arguments after its name, and the streams; it returns the process exit status (0 success, 64 usage, 70 software — the sysexits a shell script branches on).
 
@@ -2983,7 +2983,7 @@ type CLIFunc func(ctx context.Context, args []string, std StdioValue) int
 ```
 
 <a name="ChangeEvent"></a>
-## type [ChangeEvent](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/workflow.go>)
+## type [ChangeEvent](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ChangeEvent describes one transition, for [WorkflowService.OnTransition](#WorkflowService.OnTransition) hooks: the entity, the event, and the states it left and entered.
 
@@ -3009,7 +3009,7 @@ type ChangeEvent[E any, S comparable] struct {
 ```
 
 <a name="Command"></a>
-## type [Command](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/command.go>)
+## type [Command](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 Command changes something: a typed input, a typed result, and one handler — the one declared with it. Declare it with [Service.Command](#Service.Command); dispatch it with [Command.Dispatch](#Command.Dispatch) from any building block, which draws a dispatches edge from the caller; give it a route with [Command.Expose](#Command.Expose). A command is internal until it is exposed: how one service has another change something.
 
@@ -3108,7 +3108,7 @@ type DatabaseConfigurer interface {
 ```
 
 <a name="DatabaseURLValue"></a>
-## type [DatabaseURLValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/database.go>)
+## type [DatabaseURLValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 DatabaseURLValue is what a database's URL points at, as its engine describes it for the graph, the Studio, the logs and every error: never a user, never a password, never a parameter.
 
@@ -3134,7 +3134,7 @@ type DatabaseURLValue struct {
 ```
 
 <a name="Delay"></a>
-## type [Delay](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/workflow.go>)
+## type [Delay](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 Delay is how long a timer transition waits: a duration, or a setting that holds one — read when the delay is needed, so each environment can give its own.
 
@@ -3145,7 +3145,7 @@ type Delay interface {
 ```
 
 <a name="DeliveryOption"></a>
-## type [DeliveryOption](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/topic.go>)
+## type [DeliveryOption](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 DeliveryOption configures a queue's deliveries: a subscription's, or a queued command's ([MaxDeliveries](#MaxDeliveries), [Parallelism](#Parallelism)).
 
@@ -3157,7 +3157,7 @@ type DeliveryOption interface {
 ```
 
 <a name="DiagnosticsError"></a>
-## type [DiagnosticsError](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/app.go>)
+## type [DiagnosticsError](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 DiagnosticsError is returned by Start when declarations are wrong. It lists every problem at once, each with its position.
 
@@ -3197,7 +3197,7 @@ type Edit struct {
 ```
 
 <a name="EmptyValue"></a>
-## type [EmptyValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/endpoint.go>)
+## type [EmptyValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 EmptyValue is the request or the response of an endpoint that has none. An endpoint answering EmptyValue replies 204 No Content.
 
@@ -3218,7 +3218,7 @@ type EndpointConfigurer interface {
 ```
 
 <a name="EndpointService"></a>
-## type [EndpointService](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/endpoint.go>)
+## type [EndpointService](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 EndpointService is an HTTP endpoint with a typed request and a typed response: what HTTP itself is about — a webhook a third party calls, say —, the exposure of a command or a query ([Command.Expose](#Command.Expose), [Query.Expose](#Query.Expose)), or the implementation of a port ([Service.Implement](#Service.Implement)). A business operation is a command or a query, which other code runs with [Command.Dispatch](#Command.Dispatch) and [Query.Ask](#Query.Ask) and HTTP reaches through its exposure.
 
@@ -3236,7 +3236,7 @@ func (*EndpointService) Call(ctx context.Context, req Req) (Resp, error)
 Call runs the endpoint in-process, from another building block: the same validation, the same policies, the same handler, and a calls edge in the diagram from the caller to this endpoint. A port calls its implementation so. Services run each other's operations as commands and queries ([Command.Dispatch](#Command.Dispatch), [Query.Ask](#Query.Ask)); calling a handler function directly works, but the product cannot see it.
 
 <a name="Engine"></a>
-## type [Engine](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/database_interface.go>)
+## type [Engine](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 Engine is an SQL engine a database runs on. An engine module returns one — github.com/kitsunium/sdk/framework/connectors/postgres, …/mysql, …/sqlite —; kit calls it when the database starts. Like an SDK port, it grows by sibling interfaces, never by a method.
 
@@ -3255,7 +3255,7 @@ type Engine interface {
 ```
 
 <a name="Engine.Describe"></a>
-### func \(Engine\) [Describe](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/database_interface.go>)
+### func \(Engine\) [Describe](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func (Engine) Describe(url secret.Value) (DatabaseURLValue, error)
@@ -3264,7 +3264,7 @@ func (Engine) Describe(url secret.Value) (DatabaseURLValue, error)
 Describe says what url points at — the driver, host and port, the database, the TLS mode as written — for the graph and the logs: never a user, never a password.
 
 <a name="Engine.Dialect"></a>
-### func \(Engine\) [Dialect](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/database_interface.go>)
+### func \(Engine\) [Dialect](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func (Engine) Dialect() sql.Dialect
@@ -3273,7 +3273,7 @@ func (Engine) Dialect() sql.Dialect
 Dialect is the SQL the SDK speaks to it.
 
 <a name="Engine.Open"></a>
-### func \(Engine\) [Open](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/database_interface.go>)
+### func \(Engine\) [Open](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ```go
 func (Engine) Open(url secret.Value, current func(context.Context) (secret.Value, error)) (*stdsql.DB, error)
@@ -3300,7 +3300,7 @@ type Erasure struct {
 ```
 
 <a name="Error"></a>
-## type [Error](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go>)
+## type [Error](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 Error is an error a product returns to its callers. Message travels on the wire; the cause attached with [Error.Wrap](#Error.Wrap) is logged and never sent.
 
@@ -3358,7 +3358,7 @@ type ExposeConfigurer interface {
 ```
 
 <a name="FieldRefValue"></a>
-## type [FieldRefValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/watch.go>)
+## type [FieldRefValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 FieldRefValue is one field of one store that carries a mark: where the field is, and what its tag says of it.
 
@@ -3403,7 +3403,7 @@ type Former struct {
 ```
 
 <a name="Frontend"></a>
-## type [Frontend](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/static.go>)
+## type [Frontend](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 Frontend is static assets the product serves: a single page application, a documentation site. Requests the page makes to the product's endpoints are attributed to it in the diagram.
 
@@ -3412,7 +3412,7 @@ type Frontend struct{}
 ```
 
 <a name="Job"></a>
-## type [Job](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/job.go>)
+## type [Job](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 Job is scheduled work: a piece of the daemon's internal loop. It runs on the SDK scheduler, whose decisions about time are documented rather than emergent: a fire that is due while the previous run of the same job is still going is skipped and counted, and a missed deadline is skipped and counted, never caught up.
 
@@ -3432,7 +3432,7 @@ type Keeper interface {
 ```
 
 <a name="ListenHandler"></a>
-## type [ListenHandler](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/listener.go>)
+## type [ListenHandler](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ListenHandler serves one connection of a [Listener](#Listener) until it returns; the connection is closed after it. conn.Peer says who connected, as the kernel says where it can (pkg/v1/proc/ipc).
 
@@ -3441,7 +3441,7 @@ type ListenHandler func(ctx context.Context, conn *ipc.Conn) error
 ```
 
 <a name="Listener"></a>
-## type [Listener](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/listener.go>)
+## type [Listener](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 Listener is an inbound port that is not HTTP: a private socket on this machine — a Unix socket in a directory only the product's account can reach, the kernel naming the peer on Linux (ADR 0148) — speaking a versioned contract. It is how a daemon profile serves its clients, and how two process roles of one binary talk (D22): through the contract, never through each other's code.
 
@@ -3497,7 +3497,7 @@ type ListenerConfigurer interface {
 ```
 
 <a name="Loop"></a>
-## type [Loop](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/loop.go>)
+## type [Loop](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 Loop is a declared loop of the daemon: kit owns the wait, the product owns the work. Its wake sources — a period, a deadline the product computes, a topic — are data, so the diagram draws exactly what wakes it; kit runs it on its own goroutine, one run at a time, observes every run, and restarts it after a panic.
 
@@ -3526,7 +3526,7 @@ type LoopConfigurer interface {
 ```
 
 <a name="Mailer"></a>
-## type [Mailer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/mailer.go>)
+## type [Mailer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 Mailer is outbound mail: a durable outbox and the transport that empties it. [Mailer.Send](#Mailer.Send) only queues — it returns once the message is safely in the outbox — and the mailer's own loop hands each message to the transport, retrying a failure and dead-lettering a message after its last attempt.
 
@@ -3568,7 +3568,7 @@ type MailerConfigurer interface {
 ```
 
 <a name="Mark"></a>
-## type [Mark](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/watch.go>)
+## type [Mark](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 Mark is what a module looks for in the product's fields: kit.Personal, kit.Special or kit.Moderated. There is no mark for public or secret: there is nothing to find in the first, and nothing may watch the second.
 
@@ -3577,7 +3577,7 @@ type Mark string
 ```
 
 <a name="Module"></a>
-## type [Module](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/module.go>)
+## type [Module](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 Module is a set of services a product mounts as one: [NewModule](#NewModule) declares it, [App.With](#App.With) or [Mount](#Mount) mounts it.
 
@@ -3641,7 +3641,7 @@ type Operation[Req, Resp any] interface {
 ```
 
 <a name="OperationOption"></a>
-## type [OperationOption](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/endpoint.go>)
+## type [OperationOption](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 OperationOption configures an endpoint, a command or a query alike: the authentication it asks for ([Auth](#Auth), [AuthOptional](#AuthOptional)) and the policies in front of its handler ([RateLimit](#RateLimit), [RateLimitPerClient](#RateLimitPerClient), [Timeout](#Timeout), [Bulkhead](#Bulkhead)).
 
@@ -3665,7 +3665,7 @@ type PasswordConfigurer interface {
 ```
 
 <a name="PasswordPolicyService"></a>
-## type [PasswordPolicyService](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/passwords.go>)
+## type [PasswordPolicyService](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 PasswordPolicyService is the policy of one secret field that holds a password's hash: how long a password is at least, and how many former passwords it refuses. [StoreService.Passwords](#StoreService.Passwords) declares it; Set, Change and Verify apply it.
 
@@ -3730,7 +3730,7 @@ type PortConfigurer[Req, Resp any] interface {
 ```
 
 <a name="PortService"></a>
-## type [PortService](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/port.go>)
+## type [PortService](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 PortService is an operation a service needs and does not implement: a typed request, a typed response, a name. Declare it with [Service.Port](#Service.Port), and call it with [PortService.Call](#PortService.Call) as an endpoint is called: validated, observed, drawn.
 
@@ -3752,7 +3752,7 @@ func (*PortService) Call(ctx context.Context, req Req) (Resp, error)
 Call runs what the port is bound to: in a span on the port — the caller's calls edge — then in the bound operation's own span, through its whole pipeline, carrying the caller's user as [EndpointService.Call](#EndpointService.Call) does.
 
 <a name="Query"></a>
-## type [Query](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/query.go>)
+## type [Query](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 Query reads and changes nothing: a typed input, a typed result, and one handler — the one declared with it. Declare it with [Service.Query](#Service.Query); ask it with [Query.Ask](#Query.Ask) from any building block, which draws an asks edge from the caller; give it a route with [Query.Expose](#Query.Expose). A query is internal until it is exposed: how one service reads what another keeps. The static analysis warns of a query whose code writes a store, fires a workflow, publishes, sends a mail or dispatches a command.
 
@@ -3812,7 +3812,7 @@ type QueryConfigurer interface {
 ```
 
 <a name="RecordsService"></a>
-## type [RecordsService](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/records.go>)
+## type [RecordsService](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 RecordsService is one store's records without their type. Get returns a record without its secret members; EraseFields and Delete take a reason and are refused on a held record. Each call is a span on the store's node and an entry in the privacy journal.
 
@@ -3848,7 +3848,7 @@ func (RecordsService) Get(ctx context.Context, key string) (json.RawMessage, err
 Get returns the record under key as JSON, its secret members left out.
 
 <a name="RevisionEvent"></a>
-## type [RevisionEvent](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/revisions.go>)
+## type [RevisionEvent](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 RevisionEvent is one version of a record a store with [Revisions](#Revisions) keeps: its number — from 1, never given twice while the record exists —, when the write that made it ran, on the app's clock, zero for a record stored before its store kept revisions; who made it — the caller's [UserID](#UserID), empty for a write with no user —; which command made it — its node ID, empty outside a command —; and the record as it was, its secret members zeroed.
 
@@ -3863,7 +3863,7 @@ type RevisionEvent[T any] struct {
 ```
 
 <a name="Routine"></a>
-## type [Routine](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/loop.go>)
+## type [Routine](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 Routine is a loop written by hand: a function that runs until its context ends. kit starts it with the app, cancels its context on shutdown and waits for it, restarts it after an error or a panic — backing off from one second to one minute — and reads its select statements to draw what it waits on.
 
@@ -3872,7 +3872,7 @@ type Routine struct{}
 ```
 
 <a name="ScopeValue"></a>
-## type [ScopeValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/scope.go>)
+## type [ScopeValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ScopeValue is one part of a path computed at the start: the user, the executable, a configuration directory. Two processes share a singleton or a socket when every scope gives them the same value.
 
@@ -3881,7 +3881,7 @@ type ScopeValue struct{}
 ```
 
 <a name="Secret"></a>
-## type [Secret](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/secret.go>)
+## type [Secret](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 Secret is a secret the product declares: provided by the operator — an SMTP URL, an API token — or generated by kit — a signing or sealing key — and rotated on its schedule.
 
@@ -3961,7 +3961,7 @@ type SecretConfigurer interface {
 ```
 
 <a name="Service"></a>
-## type [Service](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/service.go>)
+## type [Service](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 Service is a bounded context of the product: it owns its building blocks — endpoints, stores, topics, subscriptions, workflows, jobs, frontends — and is the unit an App mounts. Declare one per package, as a package-level variable, and declare its building blocks through its methods:
 
@@ -4239,7 +4239,7 @@ type SettingConfigurer interface {
 ```
 
 <a name="SettingService"></a>
-## type [SettingService](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/setting.go>)
+## type [SettingService](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 SettingService is a value the environment gives a service, declared with [Service.Setting](#Service.Setting).
 
@@ -4266,7 +4266,7 @@ func (*SettingService) Name() string
 Name is the setting's name, its key in a configuration file — in its module's section, for a module's setting.
 
 <a name="SettingValue"></a>
-## type [SettingValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/setting_interface.go>)
+## type [SettingValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 SettingValue is what a setting may hold.
 
@@ -4288,7 +4288,7 @@ type StaticConfigurer interface {
 ```
 
 <a name="StdioValue"></a>
-## type [StdioValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/cli.go>)
+## type [StdioValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 StdioValue is where a CLI command reads and writes: the process's own streams under Main, buffers in a test.
 
@@ -4317,7 +4317,7 @@ type StoreConfigurer interface {
 ```
 
 <a name="StoreService"></a>
-## type [StoreService](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/store.go>)
+## type [StoreService](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 StoreService is a typed, keyed collection of entities. Every read returns a copy and every write stores one: an entity is kept as its JSON encoding, so what a handler holds can never alias what the store holds, and the memory and file backends behave identically.
 
@@ -4512,7 +4512,7 @@ type SubscriptionConfigurer interface {
 ```
 
 <a name="SubscriptionWorker"></a>
-## type [SubscriptionWorker](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/topic.go>)
+## type [SubscriptionWorker](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 SubscriptionWorker consumes a topic: its handler runs once per message, at least once, retried on error, and dead-lettered after MaxDeliveries attempts.
 
@@ -4521,7 +4521,7 @@ type SubscriptionWorker[T any] struct{}
 ```
 
 <a name="TopicService"></a>
-## type [TopicService](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/topic.go>)
+## type [TopicService](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 TopicService is an asynchronous channel of messages of type T. Every subscription receives every message, at least once: a subscription's handler must tolerate a redelivery.
 
@@ -4539,7 +4539,7 @@ func (*TopicService) Publish(ctx context.Context, msg T) error
 Publish sends msg to every subscription. It returns once every subscription's queue has accepted the message; delivery happens later. Inside a transaction ([Transact](#Transact), a command's) the message is encoded now and queued once the transaction commits: a rollback drops it.
 
 <a name="UID"></a>
-## type [UID](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/auth.go>)
+## type [UID](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 UID identifies an authenticated user. It is what the auth handler returns and what every endpoint reads with [UserID](#UserID).
 
@@ -4548,7 +4548,7 @@ type UID string
 ```
 
 <a name="ViolationMessage"></a>
-## type [ViolationMessage](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go>)
+## type [ViolationMessage](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 ViolationMessage is one validation rule a request failed: where, which rule, and why — never the value.
 
@@ -4564,7 +4564,7 @@ type ViolationMessage struct {
 ```
 
 <a name="WakeEvent"></a>
-## type [WakeEvent](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/loop.go>)
+## type [WakeEvent](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 WakeEvent says why a declared loop runs: the reason, the instant, and the topic that woke it when one did.
 
@@ -4581,7 +4581,7 @@ type WakeEvent struct {
 ```
 
 <a name="Watch"></a>
-## type [Watch](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/watch.go>)
+## type [Watch](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 Watch is a subscription fed by stores instead of a topic: its handler is told of every write kit confirms on a store whose entity holds a field with its mark. [Service.Watch](#Service.Watch) declares one.
 
@@ -4590,7 +4590,7 @@ type Watch struct{}
 ```
 
 <a name="WorkflowService"></a>
-## type [WorkflowService](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/workflow.go>)
+## type [WorkflowService](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 WorkflowService is a state machine over the entities of one store: the states an entity goes through, and the arrows between them. It is declared as data — which is why the diagram can draw it exactly — and it runs four kinds of transitions:
 
@@ -4707,7 +4707,7 @@ func (*WorkflowService) When(event string, from S, to S, guard func(E) bool) *Wo
 When declares a guard transition: an entity in state from moves to state to as soon as guard holds. The guard sees the entity only: kit checks it each time the entity is written, never on a clock — a condition that depends on the time is an instant, declared with [WorkflowService.At](#WorkflowService.At).
 
 <a name="WrittenEvent"></a>
-## type [WrittenEvent](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/watch.go>)
+## type [WrittenEvent](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
 
 WrittenEvent is what a watch is told of a write: which store, which record, and whether it was deleted — never a value. The watch reads the record itself ([RecordsOf](#RecordsOf)): without its secret members, and journaled.
 

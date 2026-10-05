@@ -16,31 +16,6 @@ const envSuffixAutoUpgrade string = "_AUTO_UPGRADE"
 // escalation opt-in.
 const envSuffixAllowSudo string = "_ALLOW_SUDO"
 
-// SourceValue says where releases come from and what they are called.
-//
-// It is the whole of what the source implementation hard-coded. Every field is a
-// property of one product's distribution, not of the update mechanism, so
-// keeping them as constants is what made that implementation un-reusable.
-//
-// StableRepo and DevRepo can differ, and the reason is worth stating: a project
-// whose source repository goes private still has to serve already-installed
-// binaries their update path, which means a public mirror for stable releases
-// while candidates stay in the source repository behind credentials the public
-// binary does not carry. When DevRepo is empty, StableRepo serves both.
-type SourceValue struct {
-	// Owner is the release host account, e.g. "kodflow".
-	Owner string
-	// StableRepo is the repository serving stable releases.
-	StableRepo string
-	// DevRepo is the repository serving release candidates. Empty means
-	// candidates come from StableRepo too.
-	DevRepo string
-	// Product is the binary's name. It is both the archive-asset stem
-	// ("<product>_<goos>_<goarch>.tar.gz") and, uppercased, the environment
-	// variable prefix for the two opt-ins.
-	Product string
-}
-
 // candidateRepo returns the repository that serves release candidates: DevRepo
 // when set, StableRepo otherwise.
 func (s SourceValue) candidateRepo() string {

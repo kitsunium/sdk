@@ -162,13 +162,6 @@ var (
 // config.FSSource; a file never holds a secret. A value holds for the run: a
 // new one takes a restart. ADR 0003.
 
-// SettingService is a value the environment gives a service, declared with
-// [Service.Setting].
-type SettingService[T SettingValue] struct {
-	settingBase
-	def T
-}
-
 // settingBase is what kit knows of a setting, whatever it holds.
 type settingBase struct {
 	// svc declares it; nil for one kit declares for a database, which

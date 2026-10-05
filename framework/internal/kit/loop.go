@@ -7,7 +7,6 @@ import (
 	"runtime/debug"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
@@ -43,35 +42,6 @@ var loopBackoff = resilience.Backoff{BaseDelay: loopBackoffFirst, MaxDelay: loop
 // kit — and which library, when one did.
 type loopOrigin struct {
 	provenance, library string
-}
-
-// Loop is a declared loop of the daemon: kit owns the wait, the product owns
-// the work. Its wake sources — a period, a deadline the product computes, a
-// topic — are data, so the diagram draws exactly what wakes it; kit runs it on
-// its own goroutine, one run at a time, observes every run, and restarts it
-// after a panic.
-type Loop struct {
-	nodeBase
-	run  func(context.Context, WakeEvent) error
-	opts loopOptions
-	// deadlineAt is where the WakeAt function is, for the diagram.
-	deadlineAt *pos
-
-	// running is the loop's goroutine in the app that runs it, guarded by mu.
-	mu      sync.Mutex
-	running *loopRun
-}
-
-// WakeEvent says why a declared loop runs: the reason, the instant, and the
-// topic that woke it when one did.
-type WakeEvent struct {
-	// Reason is model.WakeInterval, WakeDeadline, WakeTopic, WakeStart or
-	// WakeManual.
-	Reason string
-	// At is when the wake happened, on the app's clock.
-	At time.Time
-	// Topic is the topic node that woke the loop, for a topic wake.
-	Topic string
 }
 
 // LoopConfigurer configures a declared loop.
@@ -119,19 +89,6 @@ type nextWake struct {
 	at     time.Time
 	reason string
 	floor  time.Time
-}
-
-// Routine is a loop written by hand: a function that runs until its context
-// ends. kit starts it with the app, cancels its context on shutdown and waits
-// for it, restarts it after an error or a panic — backing off from one second
-// to one minute — and reads its select statements to draw what it waits on.
-type Routine struct {
-	nodeBase
-	run func(context.Context) error
-
-	mu sync.Mutex
-	// sup runs the function while the app runs: the SDK's supervisor.
-	sup *lifecycle.Supervisor
 }
 
 // loopConfigure sets the option on what it configures.

@@ -32,19 +32,6 @@ const (
 	minimumLength int = 8
 )
 
-// PasswordPolicyService is the policy of one secret field that holds a password's
-// hash: how long a password is at least, and how many former passwords it
-// refuses. [StoreService.Passwords] declares it; Set, Change and Verify apply it.
-type PasswordPolicyService[T any] struct {
-	s    *StoreService[T]
-	decl pos
-	// member is the field, nil when the declaration is refused.
-	member               *member
-	minLength, notReused int
-	// notCommon refuses the most common passwords (NotCommon).
-	notCommon bool
-}
-
 // PasswordConfigurer configures a password policy: [MinLength], [NotReused],
 // [NotCommon].
 type PasswordConfigurer interface {

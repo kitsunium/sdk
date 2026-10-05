@@ -52,7 +52,7 @@ func Run(t *testing.T, b BackendConfig)
 Run runs every case of the suite on b.
 
 <a name="BackendConfig"></a>
-## type [BackendConfig](<https://github.com/kitsunium/sdk/blob/main/framework/kit/storetest/storetest.go>)
+## type [BackendConfig](<https://github.com/kitsunium/sdk/blob/main/framework/kit/storetest/decl_gen.go>)
 
 BackendConfig is where Run runs kit's stores: a name for the subtests and the options that place the stores there.
 

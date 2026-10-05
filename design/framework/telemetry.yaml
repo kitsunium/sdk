@@ -227,6 +227,7 @@ packages:
             type: bool
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
+      ipc: github.com/kitsunium/sdk/pkg/v1/proc/ipc
     path: github.com/kitsunium/sdk/framework/telemetry
     sentinels:
       - var:
@@ -247,21 +248,26 @@ packages:
             public: The telemetry exporter is already running
             reason: RUNNING
     types:
-      - doc: Kind says what an event reports.
+      - decl: true
+        doc: Kind says what an event reports.
         name: Kind
         underlying: uint8
-      - doc: "Op is what the work was: the span operations of framework/model."
+      - decl: true
+        doc: "Op is what the work was: the span operations of framework/model."
         name: Op
         underlying: uint8
-      - doc: Outcome says how the work ended.
+      - decl: true
+        doc: Outcome says how the work ended.
         name: Outcome
         underlying: uint8
-      - doc: |-
+      - decl: true
+        doc: |-
           NodeRef is a node's index in the handshake's node table, from 1; zero is
           "no node".
         name: NodeRef
         underlying: uint32
-      - doc: |-
+      - decl: true
+        doc: |-
           Event is one report. Its fields are numbers only — see the package comment:
           there is no field a person's data could travel in, in any environment.
         name: Event
@@ -291,7 +297,8 @@ packages:
               type: "[16]byte"
             - name: SpanID
               type: "[8]byte"
-      - doc: |-
+      - decl: true
+        doc: |-
           HelloValue is what the handshake says about the process, besides the
           operations and the record size: which product, binary and role run, from
           which revision and design, and the node table events refer to.
@@ -320,7 +327,8 @@ packages:
             - doc: "Nodes are the node IDs events refer to: Nodes[i] is NodeRef(i+1)."
               name: Nodes
               type: "[]string"
-      - doc: |-
+      - decl: true
+        doc: |-
           ExporterConfig is where the exporter listens, who may attach, and how much
           it holds for a slow reader.
         name: ExporterConfig
@@ -346,10 +354,13 @@ packages:
             - doc: Hello is what the handshake says.
               name: Hello
               type: HelloValue
-      - doc: |-
+      - decl: true
+        doc: |-
           Exporter is an Emitter that hands events to the clients attached to its
           socket. It never blocks a producer: a full ring drops the event and counts
           it.
+        implements:
+          - Emitter
         methods:
           - doc: |-
               Ref is the reference of node id in the handshake's table; zero when the
@@ -404,8 +415,43 @@ packages:
             recv: pointer
         name: Exporter
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - name: cfg
+              type: ExporterConfig
+            - name: refs
+              type: map[string]NodeRef
+            - name: instance
+              type: string
+            - name: ring
+              type: ring
+            - name: mask
+              type: uint64
+            - name: tail
+              type: counter
+            - name: head
+              type: uint64
+            - name: wake
+              type: chan struct{}
+            - name: dropped
+              type: counter
+            - name: sent
+              type: counter
+            - name: seq
+              type: uint64
+            - name: mu
+              type: sync.Mutex
+            - name: ln
+              type: ipc.Listener
+            - name: clients
+              type: "[]*ipc.Conn"
+            - name: cancel
+              type: context.CancelFunc
+            - name: done
+              type: sync.WaitGroup
+            - name: buf
+              type: "[]byte"
+      - decl: true
+        doc: |-
           Emitter is where a product reports: the telemetry port. Emit copies e and
           never keeps it; it must not block and must not allocate.
         interface:

@@ -1,18 +1,5 @@
 package gate
 
-// UpdateAction is what the gate does when the entitlement verifies but the
-// vendor mandates a newer build than the running one.
-//
-// The zero value is deliberately unclaimed. Every other field of PolicyValue
-// has a defensible empty meaning — no exemptions, no recovery paths — but this
-// one does not: refusing and upgrading are opposite answers, and a product that
-// silently picked either on a vendor's behalf would be wrong for half of them.
-// A binary distributed to machines an operator does not own must not replace
-// itself uninvited; one distributed to a fleet that expects to track the floor
-// must not stop working instead. Validate refuses the unset value rather than
-// guessing (ADR 0031).
-type UpdateAction uint8
-
 const (
 	// UpdateRefuse stops the invocation and reports the floor. The caller
 	// tells the operator which version is required; nothing is downloaded and

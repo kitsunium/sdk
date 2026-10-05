@@ -14,6 +14,7 @@ the importers spell it `coregit`.
 
 | File | Role |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `ChangedSet`, `ResolutionValue` and `LineRangeValue` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `git.go` | the `ChangedSet` port, FROZEN at four methods, and `ResolutionValue` + `Degraded` |
 | `line_range.go` | `LineRangeValue` + its inclusive `Contains` |
 | `codes_gen.go` | the `0.2.33.*` range and its three sentinels — written by kit gen from `design/framework/git.yaml` (ADR 0164) |

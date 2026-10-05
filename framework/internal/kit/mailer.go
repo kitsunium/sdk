@@ -11,7 +11,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
@@ -77,41 +76,6 @@ var mailRetry = resilience.Backoff{BaseDelay: mailBackoffFirst, MaxDelay: mailBa
 // the transport is built and nowhere else; the graph, the Studio and the logs
 // see the relay's host and port, the TLS mode and the sender — never the user
 // or the password, and never the URL.
-
-// Mailer is outbound mail: a durable outbox and the transport that empties
-// it. [Mailer.Send] only queues — it returns once the message is safely in
-// the outbox — and the mailer's own loop hands each message to the transport,
-// retrying a failure and dead-lettering a message after its last attempt.
-//
-// The transport is the SDK's mail package: SMTP when the mail connector's
-// secret smtp-url is set — KIT_SMTP_URL, smtp://user:password@host:587?tls=
-// starttls|implicit|none — and otherwise the capture transport, which keeps
-// every message for the Studio's mailbox and for tests ([Mailer.Captured])
-// and delivers nothing. Outside dev, the capture transport is reported as a
-// warning. The URL is read again before every delivery: replacing it where
-// it lives — a new version in the store, a new file behind
-// KIT_SMTP_URL_FILE — takes effect at the next mail.
-type Mailer struct {
-	nodeBase
-	opts mailerOptions
-
-	// What the running app resolved, guarded by mu.
-	mu        sync.Mutex
-	transport mail.Transport
-	capture   mail.FullTransport // the capture transport; nil with SMTP
-	// relay is what the SMTP transport was built from; problem, the last
-	// problem found with the URL since, logged once.
-	relay   smtpRelay
-	problem string
-	spool   *mailspool.Spool
-	cancel  context.CancelFunc
-	done    chan struct{}
-	loop    *loopState
-	ring    mailRing
-	// composed holds what the capture transport composed for a mail, from
-	// the attempt that sent it to the spool's report that it was sent.
-	composed map[string][]byte
-}
 
 // MailerConfigurer configures a mailer.
 type MailerConfigurer interface {

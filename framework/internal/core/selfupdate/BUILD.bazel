@@ -6,9 +6,8 @@ go_library(
     name = "selfupdate",
     srcs = [
         "codes_gen.go",
+        "decl_gen.go",
         "doc.go",
-        "selfupdate_interface.go",
-        "update_value.go",
     ],
     importpath = "github.com/kitsunium/sdk/framework/internal/core/selfupdate",
     visibility = [

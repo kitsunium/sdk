@@ -8,16 +8,6 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
 
-// ActivityHandler is a declared activity of a service: a function that says
-// whether the product is busy. A daemon's IdleStop waits until every
-// activity of its mounted services says false AND no connection is open on
-// its listeners.
-type ActivityHandler struct {
-	svc  *Service
-	fn   func(context.Context) bool
-	decl pos
-}
-
 // Activity declares that the service is busy while fn returns true: a daemon
 // whose clients are sessions, not connections, stops once the last session
 // ended rather than once the last connection closed. fn is called on the

@@ -13,10 +13,10 @@ span and phase change on it when `KIT_TELEMETRY` names a socket at the start
 | File | Role |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `Kind`, `Op`, `Outcome`, `NodeRef`, `Event`, `HelloValue`, `ExporterConfig`, `Exporter` and `Emitter` — each struct with every field, unexported ones included; the assertion `Exporter → Emitter`. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `telemetry.go` | `Kind`, `Op` + `OpNames` + `OpOf`, `Outcome`, `NodeRef`, `Event`, `Nop`, `RecordSize`, `encode` / `Decode` (64 bytes, little-endian, fixed offsets); the exporter's constants and types — `Protocol`, the buffer bounds, `HelloValue`, `ExporterConfig`, `Exporter`, the ring (`slot`, `ring`) and the padded `counter` — live here too, next to `Event`, as ktn-linter's co-location rule asks |
 | `exporter.go` | the exporter's behaviour: `NewExporter(*ExporterConfig)`, `Ref`, `Instance`, `Emit` — the bounded ring, one CAS per event, drop and count when full —, `Start`, `Stop`, `Dropped`, `Sent`, the handshake line; a client whose close fails is logged, never returned |
 | `telemetry_interface.go` | `Emitter` (the port a product emits to), and the exporter's narrow views of its listener (`accepter`) and of a client (`writer`) |
-| `exporter_compliance.go` | `var _ Emitter = (*Exporter)(nil)` |
 | `codes_gen.go` | `0.4.3.1` `MISCONFIGURED`, `0.4.3.2` `RUNNING` — written by kit gen from `design/framework/telemetry.yaml` (ADR 0164) |
 | `BENCH.md` | `Emit` 11 ns / 0 allocs, `Nop` 3 ns |
 

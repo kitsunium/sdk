@@ -1131,7 +1131,8 @@ packages:
             public: a newer version is required
             reason: UPDATE_REQUIRED
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Identity is the machine's half of the proof: which subject this machine
           claims to be, and evidence that it holds the private key the roster publishes
           a fingerprint for.
@@ -1192,7 +1193,8 @@ packages:
               out:
                 - type: error
         name: Identity
-      - doc: |-
+      - decl: true
+        doc: |-
           BoundProver is Identity's sibling for the one claim the three methods cannot
           make: possession of the key the ROSTER authorised, rather than of whatever
           this machine holds at the moment it is asked.
@@ -1251,7 +1253,8 @@ packages:
               out:
                 - type: error
         name: BoundProver
-      - doc: |-
+      - decl: true
+        doc: |-
           GrantValue records a verification that succeeded, and how long that
           verification may be remembered.
 
@@ -1375,7 +1378,8 @@ packages:
                 come apart, and the operator is the only party who can act on that.
               name: Offline
               type: bool
-      - doc: |-
+      - decl: true
+        doc: |-
           OriginValue is one publication point for the roster pair.
 
           It carries no trust of its own: the vendor signature over the bytes is
@@ -1398,7 +1402,8 @@ packages:
                 a correct client refuse a correct roster.
               name: BundleURL
               type: string
-      - doc: |-
+      - decl: true
+        doc: |-
           RosterValue is the signed statement of who may run the linter. It carries
           no secret: every field is publishable, which is why it can live in a public
           repository. Authority comes from the detached signature, never from the
@@ -1532,7 +1537,8 @@ packages:
               name: CIRelaxed
               tag: json:"cilax,omitempty"
               type: bool
-      - doc: CIEntitlementValue is what the roster grants one account's CI.
+      - decl: true
+        doc: CIEntitlementValue is what the roster grants one account's CI.
         name: CIEntitlementValue
         struct:
           fields:
@@ -1544,7 +1550,8 @@ packages:
               name: ExpiresAt
               tag: json:"exp"
               type: time.Time
-      - doc: |-
+      - decl: true
+        doc: |-
           SubjectValue is one enrolled client's entry: the fingerprint that proves
           which key is theirs, and the date past which their own entitlement closes
           regardless of how fresh the roster itself is.
@@ -2188,6 +2195,7 @@ packages:
       ed25519: crypto/ed25519
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       http: net/http
+      lock: github.com/kitsunium/sdk/pkg/v1/app/lock
       rsa: crypto/rsa
     path: github.com/kitsunium/sdk/framework/internal/service/entitlement
     sentinels:
@@ -2207,7 +2215,8 @@ packages:
             public: the offline entitlement cache could not be written
             reason: CACHE_UNWRITABLE
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           BundleValue is what a publication point actually serves: the roster's exact
           bytes and the vendor's signature over them, in a single object.
 
@@ -2239,7 +2248,8 @@ packages:
               name: Signature
               tag: json:"sig"
               type: string
-      - doc: |-
+      - decl: true
+        doc: |-
           JWKValue is one published signing key, in the JWK shape.
 
           Only the fields needed to rebuild an RSA public key and to decide whether it
@@ -2275,7 +2285,8 @@ packages:
               name: Exponent
               tag: json:"e"
               type: string
-      - doc: JWKSValue is a published key set.
+      - decl: true
+        doc: JWKSValue is a published key set.
         name: JWKSValue
         struct:
           fields:
@@ -2283,7 +2294,8 @@ packages:
               name: Keys
               tag: json:"keys"
               type: "[]JWKValue"
-      - doc: |-
+      - decl: true
+        doc: |-
           ActionsClaimsValue is what a verified GitHub Actions token asserts.
 
           Only the claims this package acts on are decoded. Everything else GitHub
@@ -2371,7 +2383,8 @@ packages:
               name: NotBefore
               tag: json:"nbf"
               type: int64
-      - doc: |-
+      - decl: true
+        doc: |-
           ProductValue names the product whose entitlement is being verified, and where
           its roster is published.
 
@@ -2481,7 +2494,8 @@ packages:
                 means the product offers no self-service path.
               name: EnrolURL
               type: string
-      - doc: |-
+      - decl: true
+        doc: |-
           RoughtimeServerValue is one server this client will ask, and the key it must
           answer with.
 
@@ -2502,7 +2516,8 @@ packages:
                 the delegation that in turn signs each response.
               name: PublicKey
               type: ed25519.PublicKey
-      - doc: |-
+      - decl: true
+        doc: |-
           Getter performs the roster HTTP GETs. Injected so tests exercise the
           admission logic without a network.
         interface:
@@ -2516,7 +2531,8 @@ packages:
                 - type: "*http.Response"
                 - type: error
         name: Getter
-      - doc: |-
+      - decl: true
+        doc: |-
           BearerFetch performs the one request in this package that carries a
           credential.
 
@@ -2527,7 +2543,8 @@ packages:
           word.
         name: BearerFetch
         underlying: func(url, bearer string) (resp *http.Response, err error)
-      - doc: |-
+      - decl: true
+        doc: |-
           Service verifies entitlement.
 
           It DOES keep the last bundle it authenticated, which reverses half of an
@@ -2670,8 +2687,101 @@ packages:
             recv: pointer
         name: Service
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - doc: client performs the roster fetches.
+              name: client
+              type: Getter
+            - doc: |-
+                identity is how this machine proves who it is. A port, because the one
+                implementation that reads ssh key material needs a vendor dependency
+                this module bans — see core/entitlement's package comment.
+              name: identity
+              type: coreent.Identity
+            - doc: |-
+                anchors are the vendor keys this verifier accepts, in the order the
+                build declared them. A roster is authentic when it verifies against ANY
+                of them, which is what gives a key rotation a path in band; the list is
+                bounded and nothing at runtime can extend it, which is what keeps the
+                surface it costs a decision rather than a default. anchors.go carries
+                the argument, next to the code that applies it.
+              name: anchors
+              type: "[][]byte"
+            - doc: |-
+                origins is where the roster is looked for, in order. Held on the
+                Service rather than read from the package global so a test can point
+                it at a stub server without touching process-wide state.
+              name: origins
+              type: "[]coreent.OriginValue"
+            - doc: |-
+                product names the vendor whose roster this Service trusts, and scopes
+                the cache, the CI audience and the enrolment URL. It carries what the
+                source implementation kept as package constants.
+              name: product
+              type: "*ProductValue"
+            - doc: |-
+                version is this binary's own version, compared against the roster's
+                mandatory-update floor. Empty disables the check, which is what a
+                caller that has no version to declare gets.
+              name: version
+              type: string
+            - doc: |-
+                bearerFetch performs the one request that carries a credential: the
+                Actions token mint. Held on the Service so a test can exercise the CI
+                path without a network, and so the redirect-refusing default is what
+                production gets without every caller having to remember it.
+              name: bearerFetch
+              type: BearerFetch
+            - doc: |-
+                cacheDir is where the last authenticated bundle is kept, or "" to
+                disable the offline fallback entirely. Only NewService fills it: a
+                Service built around an injected getter must not reach a real
+                filesystem unless a test says so.
+              name: cacheDir
+              type: string
+            - doc: |-
+                cacheLockMu serialises the construction of cacheLock, which several
+                goroutines can reach at once through the first verification.
+              name: cacheLockMu
+              type: sync.Mutex
+            - doc: |-
+                cacheLockFor is the directory cacheLock was built for, so retargeting a
+                Service with WithCache rebuilds the guard instead of keeping one scoped
+                to a directory nobody is using. The empty string means "never built".
+              name: cacheLockFor
+              type: string
+            - doc: |-
+                cacheLock serialises the cache directory against every other goroutine
+                here and every other process on this machine, or is nil when no such
+                lock is available. See cache_lock.go for what nil costs.
+              name: cacheLock
+              type: lock.Locker
+            - doc: |-
+                markFloorMu guards markFloor. Separate from cacheLockMu because the two
+                are held for different reasons and one of them wraps a constructor.
+              name: markFloorMu
+              type: sync.Mutex
+            - doc: |-
+                markFloor is the newest document THIS PROCESS has authenticated, whether
+                or not it managed to install it. The cached bundle is still the durable
+                mark; this bounds it from below for as long as the process lives,
+                because an install that stood down or failed does not un-authenticate
+                the bytes that got it here. See raiseMarkFloor.
+
+                A full markRecord and not an instant: the digest is what separates two
+                statements signed at the same moment, and without it the floor could
+                only refuse a document that is strictly older — leaving the case the
+                disk comparison already refuses unrefused here.
+              name: markFloor
+              type: markRecord
+            - doc: |-
+                timeServers are the Roughtime servers consulted to corroborate the
+                local clock. Empty disables the check, which is what committed source
+                ships and what every test constructor gets: a Service must not reach
+                the network for time unless somebody asked it to.
+              name: timeServers
+              type: "[]RoughtimeServerValue"
+      - decl: true
+        doc: |-
           UpdateRequiredError is the refusal raised when a binary sits below the
           roster's floor. It carries both versions as FIELDS, not just in its
           message, because the caller has to act on the floor and not merely print

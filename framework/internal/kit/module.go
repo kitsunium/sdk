@@ -2,10 +2,8 @@ package kit
 
 import (
 	"strings"
-	"sync/atomic"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 )
 
 // Modules (ADR 0008). A module is a Go module's services, released together
@@ -22,28 +20,6 @@ import (
 // secrets are "<module>.<name>" (the variable <APP>_<MODULE>_<NAME>, the
 // section "<module>:" of a configuration file); its routes are served under
 // its prefix, "/<module>/" unless [Mount] says otherwise ([Prefix]).
-
-// Module is a set of services a product mounts as one: [NewModule] declares
-// it, [App.With] or [Mount] mounts it.
-type Module struct {
-	name string
-	doc  string
-	decl pos
-
-	// services are the services it lists, in their order; requires the
-	// modules it needs (Requires).
-	services []*Service
-	requires []*Module
-	// migrations are its kit.Migrations (module_database.go).
-	migrations []sql.Migration
-	// diags are what is wrong with its declaration, reported when an app
-	// mounts it.
-	diags []diagnostic
-
-	// prefix is where the app that runs it serves its routes, while one
-	// does.
-	prefix atomic.Pointer[string]
-}
 
 // ModuleConfigurer is what a module is made of: its services, the modules it
 // requires ([Requires]), and the migrations of the data it keeps outside

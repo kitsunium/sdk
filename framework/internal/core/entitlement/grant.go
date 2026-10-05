@@ -2,53 +2,6 @@ package entitlement
 
 import "time"
 
-// GrantValue records a verification that succeeded, and how long that
-// verification may be remembered.
-//
-// The timestamp alone is not enough to age against, which is the defect this
-// type carried until NotAfter existed. A grant used to expire at
-// VerifiedAt+RosterLifetime and nothing else, so a daemon that happened to
-// verify late in a roster's window kept serving for a further 24 hours after
-// that window closed — up to 47 hours after the vendor last signed anything,
-// in a scheme whose single dial is a 24-hour bound. It outlived the subject's
-// OWN term too: a licence expiring at noon left a daemon that verified at
-// 11:59 serving until the following day.
-type GrantValue struct {
-	// Subject is the client UUID that was verified.
-	Subject string
-	// VerifiedAt is when the roster was last successfully authenticated.
-	VerifiedAt time.Time
-	// NotAfter is the instant this grant stops authorising anything: the
-	// EARLIEST of the verification's own lifetime and every document the
-	// verification rested on — the roster's expiry, the subject's term, and
-	// for a CI seat the expiry of the Actions token that proved the run.
-	// Each bounds something different, so the tightest is the only correct
-	// answer — a grant may not outlive the document that authorised it.
-	//
-	// The zero value means "no deadline was computed", which is how a grant
-	// seeded from a bare timestamp behaves: serve.go does exactly that at
-	// start-up, from the root gate's verification, with no roster in scope.
-	// The fallback is the verification's own lifetime rather than reading a
-	// zero deadline as already-past, which would refuse a daemon at the very
-	// instant it starts.
-	//
-	// Which is why a caller that wants to ACT on the deadline should read
-	// Deadline() and not this field: the method resolves that fallback and the
-	// field cannot. Honouring either is the consumer's job — nothing in this
-	// SDK revokes anything when the instant passes. See Expired.
-	NotAfter time.Time
-	// Offline records that no origin answered and the decision rested on the
-	// last bundle this machine authenticated.
-	//
-	// It changes nothing about the grant's authority: an offline roster
-	// passed the identical signature and window checks, and NotAfter above
-	// already bounds it by that roster's own expiry. It exists so the fact can
-	// be SAID. A binary quietly running on a copy of a document it can no
-	// longer fetch is the one state where "it worked" and "it is still true"
-	// come apart, and the operator is the only party who can act on that.
-	Offline bool
-}
-
 // GrantDeadline computes NotAfter from the verification's own lifetime and
 // however many further bounds the caller can name.
 //

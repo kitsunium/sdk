@@ -8,10 +8,8 @@ import (
 	"reflect"
 	"slices"
 	"strings"
-	"sync"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/concur/snapshot"
 	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
@@ -21,64 +19,6 @@ const (
 	insertOnly                   // nothing: a Conflict otherwise
 	replaceOnly                  // an entity: a NotFound otherwise, never a resurrection
 )
-
-// StoreService is a typed, keyed collection of entities. Every read returns a copy
-// and every write stores one: an entity is kept as its JSON encoding, so what
-// a handler holds can never alias what the store holds, and the memory and
-// file backends behave identically.
-//
-// With a data directory (KIT_DATA_DIR; ".kit/data" in dev) the store persists
-// every write before returning, atomically — a crash never leaves a torn
-// file — and a write costs one entity, whatever the store holds. Without one,
-// it lives in memory. A store a database keeps ([Database], [Keeps]) lives
-// in a table of it, and every call is a round trip. A store is a port (ADR
-// 0004): what it runs on is its engine (store_engine.go) — the SDK's
-// document store, in memory, in files or over SQL —; kit makes it a node of
-// the graph, observes every call, and speaks for its refusals. Its writes
-// join the transaction their context carries ([Transact]).
-type StoreService[T any] struct {
-	nodeBase
-	key      func(T) string
-	inMemory bool
-	// readModel marks the store as derived from others (ReadModel).
-	readModel bool
-	// decls are the secondary indexes the declaration asked for (index.go).
-	decls []indexDecl[T]
-
-	mu sync.RWMutex
-	// eng is the engine the store runs on, nil while the app is not running.
-	eng storeEngine[T]
-	// onWrite is told the key of every entity written, once it is stored,
-	// and onDelete the key of every entity deleted: a workflow over the store
-	// hears of what it did not write itself (watch).
-	onWrite, onDelete []*storeHook
-	// privacy is what the store declares about personal data, its retention
-	// included (retention.go); nil when it declares nothing.
-	privacy *storePrivacy[T]
-	// passwords are the password policies of its fields (passwords.go).
-	passwords []*PasswordPolicyService[T]
-	// feeds are the watches (Service.Watch, watch.go) its writes are told
-	// of, with the write's context — which the engine's announcements to
-	// onWrite and onDelete do not carry —; nil while none hears it: the one
-	// load a write pays for them. Copy-on-write, the SDK's snapshot.Value: a
-	// write reads them with no lock, and a watch that starts or stops
-	// publishes a new list, serialised with every other.
-	feeds snapshot.Value[[]*Watch]
-	// started runs once the store is open: kit's own store of data keys
-	// finishes the re-wrap a stop interrupted (seal.go). nil for a product's
-	// store.
-	started func(ctx context.Context)
-	// role says whether the store is kit's own store of data keys (seal.go):
-	// apart from every transaction, and so never on SQLite (placementOf).
-	role storeRole
-	// revisions is how many former versions each record keeps
-	// (kit.Revisions, revisions.go): none when zero.
-	revisions int
-	// states name the state field of each workflow over the store: a
-	// restore keeps them as they are, and a transition that changes only
-	// one makes no version (revisions.go).
-	states []func() string
-}
 
 // storeRole is what a store is kept for: a product's data, or kit's own
 // data keys.

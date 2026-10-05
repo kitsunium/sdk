@@ -5,13 +5,11 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"sync"
 	"time"
 
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 
 	coreent "github.com/kitsunium/sdk/framework/internal/core/entitlement"
-	"github.com/kitsunium/sdk/pkg/v1/app/lock"
 )
 
 // maxArtefactBytes caps each roster artefact. The endpoint is untrusted by
@@ -25,102 +23,6 @@ const maxArtefactBytes int64 = 4 << 20
 // better abandoned than waited on. The overall bound is this times the
 // number of origins, which is what makes adding an origin cheap.
 const fetchTimeout time.Duration = 3 * time.Second
-
-// Getter performs the roster HTTP GETs. Injected so tests exercise the
-// admission logic without a network.
-type Getter interface {
-	// Get retrieves a URL.
-	Get(url string) (*http.Response, error)
-}
-
-// BearerFetch performs the one request in this package that carries a
-// credential.
-//
-// A function rather than an interface: only this request needs an
-// Authorization header, and widening Getter would put a bearer parameter on
-// the roster fetch, which must never send one. Naming it as a single-method
-// interface would also force the -er form of GetWithBearer, which is not a
-// word.
-type BearerFetch func(url, bearer string) (resp *http.Response, err error)
-
-// Service verifies entitlement.
-//
-// It DOES keep the last bundle it authenticated, which reverses half of an
-// earlier decision — "it holds no cached roster on purpose: a disk cache able
-// to authorize would let a frozen file (or a frozen clock) keep a revoked
-// subject running forever". The frozen file is answered: the cached bytes go
-// back through ParseBundle on every read, so a frozen copy stops authorising
-// at its own ExpiresAt, at most coreent.RosterLifetime after it was signed. The frozen
-// clock is not answered and cannot be, here or anywhere else in an offline
-// binary — it was not answered before the cache existed either. cache.go
-// carries the full argument, next to the code it justifies.
-type Service struct {
-	// client performs the roster fetches.
-	client Getter
-	// identity is how this machine proves who it is. A port, because the one
-	// implementation that reads ssh key material needs a vendor dependency
-	// this module bans — see core/entitlement's package comment.
-	identity coreent.Identity
-	// anchors are the vendor keys this verifier accepts, in the order the
-	// build declared them. A roster is authentic when it verifies against ANY
-	// of them, which is what gives a key rotation a path in band; the list is
-	// bounded and nothing at runtime can extend it, which is what keeps the
-	// surface it costs a decision rather than a default. anchors.go carries
-	// the argument, next to the code that applies it.
-	anchors [][]byte
-	// origins is where the roster is looked for, in order. Held on the
-	// Service rather than read from the package global so a test can point
-	// it at a stub server without touching process-wide state.
-	origins []coreent.OriginValue
-	// product names the vendor whose roster this Service trusts, and scopes
-	// the cache, the CI audience and the enrolment URL. It carries what the
-	// source implementation kept as package constants.
-	product *ProductValue
-	// version is this binary's own version, compared against the roster's
-	// mandatory-update floor. Empty disables the check, which is what a
-	// caller that has no version to declare gets.
-	version string
-	// bearerFetch performs the one request that carries a credential: the
-	// Actions token mint. Held on the Service so a test can exercise the CI
-	// path without a network, and so the redirect-refusing default is what
-	// production gets without every caller having to remember it.
-	bearerFetch BearerFetch
-	// cacheDir is where the last authenticated bundle is kept, or "" to
-	// disable the offline fallback entirely. Only NewService fills it: a
-	// Service built around an injected getter must not reach a real
-	// filesystem unless a test says so.
-	cacheDir string
-	// cacheLockMu serialises the construction of cacheLock, which several
-	// goroutines can reach at once through the first verification.
-	cacheLockMu sync.Mutex
-	// cacheLockFor is the directory cacheLock was built for, so retargeting a
-	// Service with WithCache rebuilds the guard instead of keeping one scoped
-	// to a directory nobody is using. The empty string means "never built".
-	cacheLockFor string
-	// cacheLock serialises the cache directory against every other goroutine
-	// here and every other process on this machine, or is nil when no such
-	// lock is available. See cache_lock.go for what nil costs.
-	cacheLock lock.Locker
-	// markFloorMu guards markFloor. Separate from cacheLockMu because the two
-	// are held for different reasons and one of them wraps a constructor.
-	markFloorMu sync.Mutex
-	// markFloor is the newest document THIS PROCESS has authenticated, whether
-	// or not it managed to install it. The cached bundle is still the durable
-	// mark; this bounds it from below for as long as the process lives,
-	// because an install that stood down or failed does not un-authenticate
-	// the bytes that got it here. See raiseMarkFloor.
-	//
-	// A full markRecord and not an instant: the digest is what separates two
-	// statements signed at the same moment, and without it the floor could
-	// only refuse a document that is strictly older — leaving the case the
-	// disk comparison already refuses unrefused here.
-	markFloor markRecord
-	// timeServers are the Roughtime servers consulted to corroborate the
-	// local clock. Empty disables the check, which is what committed source
-	// ships and what every test constructor gets: a Service must not reach
-	// the network for time unless somebody asked it to.
-	timeServers []RoughtimeServerValue
-}
 
 // WithTimeServers points the clock corroboration at a set of Roughtime servers,
 // or disables it with an empty list.

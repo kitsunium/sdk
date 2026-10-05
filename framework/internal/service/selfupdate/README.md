@@ -390,7 +390,7 @@ type Copier interface {
 ```
 
 <a name="Copier.Copy"></a>
-### func \(Copier\) [Copy](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/selfupdate_interface.go>)
+### func \(Copier\) [Copy](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/decl_gen.go>)
 
 ```go
 func (Copier) Copy(dst io.Writer, src io.Reader) (written int64, err error)
@@ -428,7 +428,7 @@ type FileSystem interface {
 ```
 
 <a name="FileSystem.Chmod"></a>
-### func \(FileSystem\) [Chmod](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/selfupdate_interface.go>)
+### func \(FileSystem\) [Chmod](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/decl_gen.go>)
 
 ```go
 func (FileSystem) Chmod(name string, mode os.FileMode) error
@@ -437,7 +437,7 @@ func (FileSystem) Chmod(name string, mode os.FileMode) error
 Chmod changes file permissions.
 
 <a name="FileSystem.CreateTemp"></a>
-### func \(FileSystem\) [CreateTemp](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/selfupdate_interface.go>)
+### func \(FileSystem\) [CreateTemp](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/decl_gen.go>)
 
 ```go
 func (FileSystem) CreateTemp(dir string, pattern string) (file *os.File, err error)
@@ -446,7 +446,7 @@ func (FileSystem) CreateTemp(dir string, pattern string) (file *os.File, err err
 CreateTemp creates a temporary file.
 
 <a name="FileSystem.EvalSymlinks"></a>
-### func \(FileSystem\) [EvalSymlinks](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/selfupdate_interface.go>)
+### func \(FileSystem\) [EvalSymlinks](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/decl_gen.go>)
 
 ```go
 func (FileSystem) EvalSymlinks(path string) (resolved string, err error)
@@ -455,7 +455,7 @@ func (FileSystem) EvalSymlinks(path string) (resolved string, err error)
 EvalSymlinks resolves symlinks in the given path.
 
 <a name="FileSystem.Executable"></a>
-### func \(FileSystem\) [Executable](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/selfupdate_interface.go>)
+### func \(FileSystem\) [Executable](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/decl_gen.go>)
 
 ```go
 func (FileSystem) Executable() (path string, err error)
@@ -464,7 +464,7 @@ func (FileSystem) Executable() (path string, err error)
 Executable returns the path of the current executable.
 
 <a name="FileSystem.Remove"></a>
-### func \(FileSystem\) [Remove](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/selfupdate_interface.go>)
+### func \(FileSystem\) [Remove](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/decl_gen.go>)
 
 ```go
 func (FileSystem) Remove(name string) error
@@ -473,7 +473,7 @@ func (FileSystem) Remove(name string) error
 Remove removes a file.
 
 <a name="FileSystem.Rename"></a>
-### func \(FileSystem\) [Rename](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/selfupdate_interface.go>)
+### func \(FileSystem\) [Rename](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/decl_gen.go>)
 
 ```go
 func (FileSystem) Rename(oldpath string, newpath string) error
@@ -500,7 +500,7 @@ type Getter interface {
 ```
 
 <a name="Getter.Get"></a>
-### func \(Getter\) [Get](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/selfupdate_interface.go>)
+### func \(Getter\) [Get](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/decl_gen.go>)
 
 ```go
 func (Getter) Get(url string) (resp *http.Response, err error)
@@ -509,7 +509,7 @@ func (Getter) Get(url string) (resp *http.Response, err error)
 Get performs an HTTP GET request.
 
 <a name="Service"></a>
-## type [Service](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/updater.go>)
+## type [Service](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/decl_gen.go>)
 
 Service replaces the running binary with a newer signed release of the product its SourceValue names. It manages version checking via GitHub API and binary replacement. goos/goarch are captured at construction time so the per-platform asset resolution (\`getBinaryName\`, \`getArchiveSuffix\`, \`innerBinaryName\`) is stable per-instance — tests can construct a literal with explicit values instead of mutating package-level \`runtimeGOOS\`/\`runtimeGOARCH\` (which would race under t.Parallel).
 
@@ -626,7 +626,7 @@ func (*Service) WithoutElevation() *Service
 WithoutElevation forbids the privileged replacement outright, whatever \<PREFIX>\_ALLOW\_SUDO says: a binary installed where its user cannot write is reported (ElevationNotAuthorised), never replaced through sudo.
 
 <a name="SourceValue"></a>
-## type [SourceValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/source.go>)
+## type [SourceValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/decl_gen.go>)
 
 SourceValue says where releases come from and what they are called.
 

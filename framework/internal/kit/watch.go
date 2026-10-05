@@ -3,7 +3,6 @@ package kit
 import (
 	"context"
 	"slices"
-	"sync/atomic"
 
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/data/queue"
@@ -39,40 +38,6 @@ import (
 // queue keeps it: on disk under a data directory, in memory without one. A
 // store no watch hears pays one atomic load per write, and a product that
 // mounts no watch nothing else.
-
-// WrittenEvent is what a watch is told of a write: which store, which record, and
-// whether it was deleted — never a value. The watch reads the record itself
-// ([RecordsOf]): without its secret members, and journaled.
-type WrittenEvent struct {
-	// Store is the store's node ID: "shop/store/reviews".
-	Store string `json:"store"`
-	// Key is the record's key in the store.
-	Key string `json:"key"`
-	// Deleted is set when the write deleted the record: there is nothing
-	// left to read.
-	Deleted bool `json:"deleted,omitempty"`
-	// Fields are the store's fields that carry the watch's mark, as
-	// [App.Fields] lists them. Which of them the write changed, the notice
-	// does not say.
-	Fields []FieldRefValue `json:"fields,omitempty"`
-}
-
-// Watch is a subscription fed by stores instead of a topic: its handler is
-// told of every write kit confirms on a store whose entity holds a field
-// with its mark. [Service.Watch] declares one.
-type Watch struct {
-	nodeBase
-	mark        Mark
-	handler     func(context.Context, WrittenEvent) error
-	maxDeliver  int
-	parallelism int
-	// ownStores: it hears its own module's stores too, and never the
-	// writes of its own handler (OwnStores).
-	ownStores bool
-
-	// run is the watch in its app's current run, or its last one.
-	run atomic.Pointer[watchRun]
-}
 
 // marks are the marks a watch may hear.
 var marks = []Mark{Personal, Special, Moderated}
@@ -139,27 +104,6 @@ type feeder interface {
 	// feed puts w among the watches the store's writes are told to, and
 	// returns what takes exactly it off.
 	feed(w *Watch) (unfeed func())
-}
-
-// Mark is what a module looks for in the product's fields: kit.Personal,
-// kit.Special or kit.Moderated. There is no mark for public or secret:
-// there is nothing to find in the first, and nothing may watch the second.
-type Mark string
-
-// FieldRefValue is one field of one store that carries a mark: where the field
-// is, and what its tag says of it.
-type FieldRefValue struct {
-	// Store is the store's node ID.
-	Store string `json:"store"`
-	// Path is the field's JSON pointer in the entity: "/body". A "*"
-	// stands for every element of an array or every value of a map:
-	// "/replies/*/body".
-	Path string `json:"path"`
-	// Class is the field's class; "" when it is unclassified.
-	Class string `json:"class,omitempty"`
-	// Subject is the pointer of the store's subject — for moderated
-	// content, its author — or "" when the store has none.
-	Subject string `json:"subject,omitempty"`
 }
 
 // watchRun is a watch in one run of its app: its queue and its consumer, and

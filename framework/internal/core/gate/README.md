@@ -121,7 +121,7 @@ UpdateWarn runs the invocation anyway and reports the floor alongside it.
 It trades enforcement for availability on purpose, and it is the only action here that lets an out-of-date build keep working. Choose it when the floor is advice; choose UpdateRefuse when it is a requirement.
 
 <a name="DecisionValue"></a>
-## type [DecisionValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/gate/decision.go>)
+## type [DecisionValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/gate/decl_gen.go>)
 
 DecisionValue is what the gate concluded about one invocation.
 
@@ -160,7 +160,7 @@ type DecisionValue struct {
 ```
 
 <a name="Outcome"></a>
-## type [Outcome](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/gate/decision.go>)
+## type [Outcome](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/gate/decl_gen.go>)
 
 Outcome is what the caller should do with an invocation.
 
@@ -180,7 +180,7 @@ func (Outcome) String() string
 String names the outcome for a diagnostic, spelling the unclaimed zero value "unset" rather than inventing a name for it.
 
 <a name="PolicyValue"></a>
-## type [PolicyValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/gate/policy.go>)
+## type [PolicyValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/gate/decl_gen.go>)
 
 PolicyValue is one product's gate policy: the commands that run unchecked, the commands that must never be gated, and what happens when the vendor mandates a newer build.
 
@@ -252,7 +252,7 @@ It returns ONE error naming them all rather than an errors.Join of several, and 
 It returns one typed refusal whose private detail names every fault, or nil.
 
 <a name="UpdateAction"></a>
-## type [UpdateAction](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/gate/update_action.go>)
+## type [UpdateAction](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/gate/decl_gen.go>)
 
 UpdateAction is what the gate does when the entitlement verifies but the vendor mandates a newer build than the running one.
 

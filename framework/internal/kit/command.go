@@ -3,48 +3,10 @@ package kit
 import (
 	"context"
 	"reflect"
-	"sync/atomic"
 
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/security/authz"
 )
-
-// Command changes something: a typed input, a typed result, and one handler
-// — the one declared with it. Declare it with [Service.Command]; dispatch it
-// with [Command.Dispatch] from any building block, which draws a dispatches
-// edge from the caller; give it a route with [Command.Expose]. A command is
-// internal until it is exposed: how one service has another change
-// something.
-//
-// A dispatch runs, in this order: the caller's user when the command asks
-// for one ([Auth], implied by [Command.Allow]) — an in-process dispatch
-// carries its caller's and is not authenticated again —, the input's
-// validate tags, the policies ([RateLimit], [RateLimitPerClient],
-// [Timeout], [Bulkhead]), the key ([Command.Key]), the transaction, the
-// authorization ([Command.Allow], then [Command.Authorize]), then the
-// handler. A queued command ([Queued]) is checked at its dispatch, as its
-// caller — its validate tags, its authorization, its key —, and handled by
-// its queue's consumer, the policies around the handling, its key then its
-// transaction around the handler.
-//
-// A command is its unit of work (ADR 0004): its authorization and its
-// handler run in one transaction ([Transact]), opened once its key is held,
-// which holds its effects — a publish, a mail, a queued command's dispatch
-// — until the commit. A failed command changes nothing and announces
-// nothing; one dispatched inside another runs in its transaction.
-// [NoTransaction] opts a command out.
-type Command[C, R any] struct {
-	nodeBase
-	pipe pipeline[C, R]
-	opts commandOptions
-	access[C]
-	// key names the entity a run is about (Key); keys holds it while a run
-	// lasts.
-	key  func(C) string
-	keys keyed
-	// queue is a queued command's queue while the app runs (queued.go).
-	queue atomic.Pointer[commandQueue]
-}
 
 // CommandConfigurer configures a command: [Queued]; the options every operation
 // takes — [Auth], [AuthOptional], [RateLimit], [RateLimitPerClient],

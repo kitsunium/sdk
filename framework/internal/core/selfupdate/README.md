@@ -369,7 +369,7 @@ UnknownArchive is returned for an asset whose container format is not handled.
 Code `0.2.34.17` · reason `UNKNOWN_ARCHIVE` · public "the release archive format is not supported"
 
 <a name="CandidateValue"></a>
-## type [CandidateValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/update_value.go>)
+## type [CandidateValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/decl_gen.go>)
 
 CandidateValue is one release candidate: a developer channel entry that is never what a stable check returns.
 
@@ -387,7 +387,7 @@ type CandidateValue struct {
 ```
 
 <a name="Copier"></a>
-## type [Copier](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/selfupdate_interface.go>)
+## type [Copier](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/decl_gen.go>)
 
 Copier streams the verified archive to its temporary destination. It is a port so a test can fail the copy midway — the case where a partially written binary must never be renamed into place.
 
@@ -399,7 +399,7 @@ type Copier interface {
 ```
 
 <a name="Copier.Copy"></a>
-### func \(Copier\) [Copy](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/selfupdate_interface.go>)
+### func \(Copier\) [Copy](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/decl_gen.go>)
 
 ```go
 func (Copier) Copy(dst io.Writer, src io.Reader) (written int64, err error)
@@ -408,7 +408,7 @@ func (Copier) Copy(dst io.Writer, src io.Reader) (written int64, err error)
 Copy copies from src to dst, returning the number of bytes written.
 
 <a name="FileSystem"></a>
-## type [FileSystem](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/selfupdate_interface.go>)
+## type [FileSystem](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/decl_gen.go>)
 
 FileSystem is the disk half of replacing a running binary.
 
@@ -433,7 +433,7 @@ type FileSystem interface {
 ```
 
 <a name="FileSystem.Chmod"></a>
-### func \(FileSystem\) [Chmod](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/selfupdate_interface.go>)
+### func \(FileSystem\) [Chmod](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/decl_gen.go>)
 
 ```go
 func (FileSystem) Chmod(name string, mode os.FileMode) error
@@ -442,7 +442,7 @@ func (FileSystem) Chmod(name string, mode os.FileMode) error
 Chmod changes file permissions.
 
 <a name="FileSystem.CreateTemp"></a>
-### func \(FileSystem\) [CreateTemp](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/selfupdate_interface.go>)
+### func \(FileSystem\) [CreateTemp](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/decl_gen.go>)
 
 ```go
 func (FileSystem) CreateTemp(dir string, pattern string) (file *os.File, err error)
@@ -451,7 +451,7 @@ func (FileSystem) CreateTemp(dir string, pattern string) (file *os.File, err err
 CreateTemp creates a temporary file.
 
 <a name="FileSystem.EvalSymlinks"></a>
-### func \(FileSystem\) [EvalSymlinks](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/selfupdate_interface.go>)
+### func \(FileSystem\) [EvalSymlinks](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/decl_gen.go>)
 
 ```go
 func (FileSystem) EvalSymlinks(path string) (resolved string, err error)
@@ -460,7 +460,7 @@ func (FileSystem) EvalSymlinks(path string) (resolved string, err error)
 EvalSymlinks resolves symlinks in the given path.
 
 <a name="FileSystem.Executable"></a>
-### func \(FileSystem\) [Executable](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/selfupdate_interface.go>)
+### func \(FileSystem\) [Executable](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/decl_gen.go>)
 
 ```go
 func (FileSystem) Executable() (path string, err error)
@@ -469,7 +469,7 @@ func (FileSystem) Executable() (path string, err error)
 Executable returns the path of the current executable.
 
 <a name="FileSystem.Remove"></a>
-### func \(FileSystem\) [Remove](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/selfupdate_interface.go>)
+### func \(FileSystem\) [Remove](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/decl_gen.go>)
 
 ```go
 func (FileSystem) Remove(name string) error
@@ -478,7 +478,7 @@ func (FileSystem) Remove(name string) error
 Remove removes a file.
 
 <a name="FileSystem.Rename"></a>
-### func \(FileSystem\) [Rename](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/selfupdate_interface.go>)
+### func \(FileSystem\) [Rename](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/decl_gen.go>)
 
 ```go
 func (FileSystem) Rename(oldpath string, newpath string) error
@@ -487,7 +487,7 @@ func (FileSystem) Rename(oldpath string, newpath string) error
 Rename renames a file. It is the atomic half of the replacement and must happen on the same filesystem as the target.
 
 <a name="Getter"></a>
-## type [Getter](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/selfupdate_interface.go>)
+## type [Getter](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/decl_gen.go>)
 
 Getter performs the HTTP GETs a self-update needs: the release metadata, the archive, the checksum manifest and its signature.
 
@@ -501,7 +501,7 @@ type Getter interface {
 ```
 
 <a name="Getter.Get"></a>
-### func \(Getter\) [Get](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/selfupdate_interface.go>)
+### func \(Getter\) [Get](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/decl_gen.go>)
 
 ```go
 func (Getter) Get(url string) (resp *http.Response, err error)
@@ -510,7 +510,7 @@ func (Getter) Get(url string) (resp *http.Response, err error)
 Get performs an HTTP GET request.
 
 <a name="UpdateValue"></a>
-## type [UpdateValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/update_value.go>)
+## type [UpdateValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/selfupdate/decl_gen.go>)
 
 UpdateValue is the outcome of a version check or an install: whether a newer release exists, and the two versions that were compared.
 

@@ -22,34 +22,6 @@ const unusableHost string = "\x00unusable"
 // while being a single point of failure.
 const minRedundantHosts int = 2
 
-// ProductValue names the product whose entitlement is being verified, and where
-// its roster is published.
-//
-// It is the whole of what the source implementation kept as package constants:
-// the publication origins, the cache directory name, the OIDC audience, and the
-// enrolment issue URL. Every one is a property of one vendor's distribution
-// rather than of the verification mechanism, and together they are the only
-// reason a correct implementation served exactly one binary.
-//
-// The zero value is usable and inert in the safe direction: no origins means
-// nothing to fetch, so Verify refuses with RosterUnreachable rather than
-// silently trusting anything.
-type ProductValue struct {
-	// Name is the product's binary name. It scopes the cache directory and
-	// labels generated key material.
-	Name string
-	// Origins are the roster publication locations, tried in order. The first
-	// that answers with an authentic bundle wins.
-	Origins []coreent.OriginValue
-	// CIAudience is the OIDC audience a CI provenance token must carry. It must
-	// be unique to this product: a token minted for one audience must not
-	// satisfy another's gate.
-	CIAudience string
-	// EnrolURL is where a new subject is directed to request enrolment. Empty
-	// means the product offers no self-service path.
-	EnrolURL string
-}
-
 // Label is the name this product is known by, falling back to the package name
 // when no product was configured.
 //

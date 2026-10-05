@@ -19,38 +19,6 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/observe/trace"
 )
 
-// EmptyValue is the request or the response of an endpoint that has none. An
-// endpoint answering EmptyValue replies 204 No Content.
-type EmptyValue struct{}
-
-// EndpointService is an HTTP endpoint with a typed request and a typed response:
-// what HTTP itself is about — a webhook a third party calls, say —, the
-// exposure of a command or a query ([Command.Expose], [Query.Expose]), or
-// the implementation of a port ([Service.Implement]). A business operation
-// is a command or a query, which other code runs with [Command.Dispatch]
-// and [Query.Ask] and HTTP reaches through its exposure.
-type EndpointService[Req, Resp any] struct {
-	nodeBase
-	method string
-	path   string
-	opts   endpointOptions
-	dec    *decoder
-	// pipe is what every run of the endpoint goes through (operation.go).
-	pipe pipeline[Req, Resp]
-	// authn is the app's auth handler, resolved when the endpoint is mounted.
-	authn authenticator
-	// impl is the port the endpoint implements (Service.Implement); nil for
-	// an endpoint with a route. routeless is set for every implementation,
-	// even one of a nil port: it has no route, and the port reaches it.
-	impl      node
-	routeless bool
-	// exposes is the command or the query the endpoint exposes (Expose):
-	// its authentication is the operation's. accepted answers 202 for a
-	// queued command.
-	exposes  exposed
-	accepted bool
-}
-
 // EndpointConfigurer configures an endpoint; each is an [ExposeConfigurer] too.
 type EndpointConfigurer interface {
 	ExposeConfigurer
@@ -74,16 +42,6 @@ type callOptions struct {
 	// auth is model.AuthRequired, model.AuthOptional or "".
 	auth     string
 	policies []policy
-}
-
-// OperationOption configures an endpoint, a command or a query alike: the
-// authentication it asks for ([Auth], [AuthOptional]) and the policies in
-// front of its handler ([RateLimit], [RateLimitPerClient], [Timeout],
-// [Bulkhead]).
-type OperationOption interface {
-	EndpointConfigurer
-	CommandConfigurer
-	QueryConfigurer
 }
 
 // callOption is an OperationOption.

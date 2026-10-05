@@ -26,33 +26,6 @@ var reservedCommands = map[string]bool{
 	"migrate": true, "privacy": true, "revisions": true, "help": true,
 }
 
-// StdioValue is where a CLI command reads and writes: the process's own streams
-// under Main, buffers in a test.
-type StdioValue struct {
-	// In is the command's standard input.
-	In io.Reader
-	// Out and Err are its standard output and error.
-	Out, Err io.Writer
-	// Interactive reports whether In is a terminal.
-	Interactive bool
-}
-
-// CLIFunc is a CLI command's body: its arguments after its name, and the
-// streams; it returns the process exit status (0 success, 64 usage, 70
-// software — the sysexits a shell script branches on).
-type CLIFunc func(ctx context.Context, args []string, std StdioValue) int
-
-// CLI is a short command-line command of the product: it runs once, in the
-// CLI profile, and exits with its status. Main runs it when the process's
-// first argument is its name.
-type CLI struct {
-	nodeBase
-	fn   CLIFunc
-	doc  string
-	path []string
-	opts cliOptions
-}
-
 // CommandLineConfigurer tunes a CLI command.
 type CommandLineConfigurer interface {
 	// commandLineConfigure sets the option on o.

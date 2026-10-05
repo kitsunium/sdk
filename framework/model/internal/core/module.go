@@ -9,46 +9,6 @@ import (
 	"strings"
 )
 
-// ModuleMessage is a module the app mounts: a Go module's services, released and
-// mounted together like a bundle (ADR 0008). Everything a module declares is
-// qualified with its name: its services are "<module>.<service>" — the one
-// named like the module is "<module>" —, so its nodes are
-// "<module>.<service>/<kind>/<name>" and carry [NodeEntity.Module].
-type ModuleMessage struct {
-	// Name is the name kit.NewModule gives it.
-	Name string `json:"name"`
-	// Doc is its description in the product's default language; Docs the
-	// same in other languages, by tag, as a node's.
-	Doc  string            `json:"doc,omitempty"`
-	Docs map[string]string `json:"docs,omitempty"`
-	// Package is the Go package that declares it: the one a product imports.
-	Package string `json:"package,omitempty"`
-	// Build is the Go module it comes from, and its version.
-	Build *ModuleVersionMessage `json:"build,omitempty"`
-	// Services are its services' IDs, in the order it lists them.
-	Services []string `json:"services"`
-	// Requires are the modules it requires (kit.Requires), by name.
-	Requires []string `json:"requires,omitempty"`
-	// RequiredBy are the mounted modules that require it, by name, sorted.
-	RequiredBy []string `json:"requiredBy,omitempty"`
-	// Prefix is where its routes are served: "/<name>/" unless the mount
-	// says otherwise (kit.Prefix); "/" shares the product's route space.
-	Prefix string `json:"prefix"`
-	// Source is where kit.NewModule declares it.
-	Source *SourceMessage `json:"source,omitempty"`
-	// Mount is where the app mounts it — App.With or kit.Mount —; absent
-	// when only another module's kit.Requires mounted it, at its defaults.
-	Mount *SourceMessage `json:"mount,omitempty"`
-}
-
-// FileMessage is one file a graph points at: its path, relative to its root — the
-// product's module, or the Go module [SourceMessage.GoModule] names.
-type FileMessage struct {
-	// GoModule is empty for a file of the product's own module.
-	GoModule string `json:"goModule,omitempty"`
-	File     string `json:"file"`
-}
-
 // ModuleOf returns the module named name, or nil.
 func (g *GraphMessage) ModuleOf(name string) *ModuleMessage {
 	for i := range g.Modules {

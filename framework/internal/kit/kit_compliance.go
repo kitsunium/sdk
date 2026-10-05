@@ -50,20 +50,9 @@ var (
 	_ DatabaseConfigurer = migrations(nil)
 	_ ModuleConfigurer   = migrations(nil)
 
-	_ AppConfigurer = (*Module)(nil)
-	_ Keeper        = (*Module)(nil)
-
-	_ Keeper           = (*Service)(nil)
-	_ ModuleConfigurer = (*Service)(nil)
-
-	_ starter = (*Loop)(nil)
 	_ starter = (*Routine)(nil)
-	_ starter = (*Secret)(nil)
 	_ starter = (*Watch)(nil)
 	_ starter = (*SubscriptionWorker[struct{}])(nil)
-
-	_ mailbox = (*Mailer)(nil)
-	_ starter = (*Mailer)(nil)
 
 	_ settingDecl = (*SettingService[string])(nil)
 

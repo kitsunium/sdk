@@ -568,7 +568,7 @@ type BoundProver interface {
 ```
 
 <a name="BoundProver.ProvePossessionFor"></a>
-### func \(BoundProver\) [ProvePossessionFor](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/entitlement.go>)
+### func \(BoundProver\) [ProvePossessionFor](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/decl_gen.go>)
 
 ```go
 func (BoundProver) ProvePossessionFor(subject string, authorised string) error
@@ -644,7 +644,7 @@ type Getter interface {
 ```
 
 <a name="Getter.Get"></a>
-### func \(Getter\) [Get](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/service.go>)
+### func \(Getter\) [Get](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/decl_gen.go>)
 
 ```go
 func (Getter) Get(url string) (*http.Response, error)
@@ -783,7 +783,7 @@ type Identity interface {
 ```
 
 <a name="Identity.Discover"></a>
-### func \(Identity\) [Discover](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/entitlement.go>)
+### func \(Identity\) [Discover](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/decl_gen.go>)
 
 ```go
 func (Identity) Discover() (subject string, err error)
@@ -794,7 +794,7 @@ Discover returns the subject identifier this machine is enrolled as.
 It refuses rather than choosing when more than one identity is present: picking one silently would make revocation unverifiable, since the operator could not tell which identity was checked.
 
 <a name="Identity.Fingerprint"></a>
-### func \(Identity\) [Fingerprint](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/entitlement.go>)
+### func \(Identity\) [Fingerprint](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/decl_gen.go>)
 
 ```go
 func (Identity) Fingerprint(subject string) (fingerprint string, err error)
@@ -803,7 +803,7 @@ func (Identity) Fingerprint(subject string) (fingerprint string, err error)
 Fingerprint returns the published fingerprint of the subject's public key, in whatever spelling the roster uses. It is compared by byte equality against the roster's entry and never parsed.
 
 <a name="Identity.ProvePossession"></a>
-### func \(Identity\) [ProvePossession](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/entitlement.go>)
+### func \(Identity\) [ProvePossession](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/decl_gen.go>)
 
 ```go
 func (Identity) ProvePossession(subject string) error

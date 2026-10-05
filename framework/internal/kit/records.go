@@ -79,14 +79,6 @@ func RecordsOf(ctx context.Context, store string) (RecordsService, error) {
 	return a.Records(store)
 }
 
-// RecordsService is one store's records without their type. Get returns a record
-// without its secret members; EraseFields and Delete take a reason and are
-// refused on a held record. Each call is a span on the store's node and an
-// entry in the privacy journal.
-type RecordsService struct {
-	port recordsPort
-}
-
 // recordsPort is a store's side of Records.
 type recordsPort interface {
 	recordGet(ctx context.Context, key string) (json.RawMessage, error)

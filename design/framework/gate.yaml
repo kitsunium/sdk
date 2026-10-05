@@ -262,7 +262,8 @@ packages:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/framework/internal/core/gate
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Outcome is what the caller should do with an invocation.
 
           The zero value is unclaimed for the same reason UpdateAction's is: a decision
@@ -278,7 +279,8 @@ packages:
             recv: value
         name: Outcome
         underlying: uint8
-      - doc: |-
+      - decl: true
+        doc: |-
           DecisionValue is what the gate concluded about one invocation.
 
           It is a value and carries no method that acts: the caller performs whatever
@@ -320,7 +322,8 @@ packages:
                 the caller still has to say so. Reading Outcome alone would lose that.
               name: FloorUnmet
               type: bool
-      - doc: |-
+      - decl: true
+        doc: |-
           PolicyValue is one product's gate policy: the commands that run unchecked,
           the commands that must never be gated, and what happens when the vendor
           mandates a newer build.
@@ -405,7 +408,8 @@ packages:
                 It has no default. See UpdateAction.
               name: OnUpdateRequired
               type: UpdateAction
-      - doc: |-
+      - decl: true
+        doc: |-
           UpdateAction is what the gate does when the entitlement verifies but the
           vendor mandates a newer build than the running one.
 

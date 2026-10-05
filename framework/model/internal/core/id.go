@@ -66,25 +66,6 @@ var (
 	}
 )
 
-// IDValue is a node's identity, parsed: the one grammar of [IDPattern]. Its
-// String is the ID it was parsed from.
-type IDValue struct {
-	// Module qualifies Service when a module lists it; empty for the
-	// product's own services, and for a module's service named like it.
-	Module string
-	// Service is the service's own name, unqualified; empty for a binary, a
-	// role, a library and [ExternalID].
-	Service string
-	// Scope is the name of the binary of a binary or a role, or of the
-	// library of a library; empty otherwise.
-	Scope string
-	// Kind is the node's kind.
-	Kind NodeKind
-	// Name is the node's name: the service's for a service, the binary's for
-	// a binary.
-	Name string
-}
-
 // kindAlternatives is the service kinds as a regular-expression alternation,
 // sorted so the pattern is the same string on every run.
 func kindAlternatives() string {

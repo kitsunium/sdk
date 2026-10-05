@@ -394,7 +394,7 @@ keys are the published JWKS entries; roster is the already-authenticated roster.
 audience is the product's own OIDC audience. It is a parameter rather than a constant because an audience shared between two products lets a token minted for one satisfy the other's gate — see ProductValue.CIAudience.
 
 <a name="ActionsClaimsValue"></a>
-## type [ActionsClaimsValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/oidc.go>)
+## type [ActionsClaimsValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/decl_gen.go>)
 
 ActionsClaimsValue is what a verified GitHub Actions token asserts.
 
@@ -457,7 +457,7 @@ type ActionsClaimsValue struct {
 ```
 
 <a name="BearerFetch"></a>
-## type [BearerFetch](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/service.go>)
+## type [BearerFetch](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/decl_gen.go>)
 
 BearerFetch performs the one request in this package that carries a credential.
 
@@ -468,7 +468,7 @@ type BearerFetch func(url string, bearer string) (resp *http.Response, err error
 ```
 
 <a name="BundleValue"></a>
-## type [BundleValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/bundle.go>)
+## type [BundleValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/decl_gen.go>)
 
 BundleValue is what a publication point actually serves: the roster's exact bytes and the vendor's signature over them, in a single object.
 
@@ -490,7 +490,7 @@ type BundleValue struct {
 ```
 
 <a name="Getter"></a>
-## type [Getter](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/service.go>)
+## type [Getter](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/decl_gen.go>)
 
 Getter performs the roster HTTP GETs. Injected so tests exercise the admission logic without a network.
 
@@ -502,7 +502,7 @@ type Getter interface {
 ```
 
 <a name="Getter.Get"></a>
-### func \(Getter\) [Get](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/service.go>)
+### func \(Getter\) [Get](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/decl_gen.go>)
 
 ```go
 func (Getter) Get(url string) (*http.Response, error)
@@ -511,7 +511,7 @@ func (Getter) Get(url string) (*http.Response, error)
 Get retrieves a URL.
 
 <a name="JWKSValue"></a>
-## type [JWKSValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/jwks.go>)
+## type [JWKSValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/decl_gen.go>)
 
 JWKSValue is a published key set.
 
@@ -523,7 +523,7 @@ type JWKSValue struct {
 ```
 
 <a name="JWKValue"></a>
-## type [JWKValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/jwks.go>)
+## type [JWKValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/decl_gen.go>)
 
 JWKValue is one published signing key, in the JWK shape.
 
@@ -548,7 +548,7 @@ type JWKValue struct {
 ```
 
 <a name="ProductValue"></a>
-## type [ProductValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/product.go>)
+## type [ProductValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/decl_gen.go>)
 
 ProductValue names the product whose entitlement is being verified, and where its roster is published.
 
@@ -634,7 +634,7 @@ Four things are checked, and the last is the one that is easy to get wrong:
 It returns a joined error naming every failure rather than the first, because a caller fixing an origin list wants the whole list.
 
 <a name="RoughtimeServerValue"></a>
-## type [RoughtimeServerValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/roughtime.go>)
+## type [RoughtimeServerValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/decl_gen.go>)
 
 RoughtimeServerValue is one server this client will ask, and the key it must answer with.
 
@@ -653,7 +653,7 @@ type RoughtimeServerValue struct {
 ```
 
 <a name="Service"></a>
-## type [Service](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/service.go>)
+## type [Service](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/decl_gen.go>)
 
 Service verifies entitlement.
 
@@ -747,7 +747,7 @@ WithVersion records the binary's own version so Verify can apply the roster's ma
 It is a separate call rather than a constructor parameter because pkg/license must not import the command package that owns the version string, and because a caller with nothing to declare — a test, a tool embedding the check — should not have to invent one.
 
 <a name="UpdateRequiredError"></a>
-## type [UpdateRequiredError](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/version.go>)
+## type [UpdateRequiredError](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/decl_gen.go>)
 
 UpdateRequiredError is the refusal raised when a binary sits below the roster's floor. It carries both versions as FIELDS, not just in its message, because the caller has to act on the floor and not merely print it: after upgrading it must check that the newly installed build actually clears the bar.
 

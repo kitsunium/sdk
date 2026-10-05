@@ -1,14 +1,5 @@
 package kit
 
-import (
-	"time"
-)
-
-// SettingValue is what a setting may hold.
-type SettingValue interface {
-	string | bool | int | int64 | float64 | time.Duration | []string
-}
-
 // SettingConfigurer configures a setting.
 type SettingConfigurer interface {
 	settingConfigure(o *settingBase)

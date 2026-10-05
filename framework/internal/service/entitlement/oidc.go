@@ -80,65 +80,6 @@ const maxRSAExponent int64 = 1<<31 - 1
 // with every Euler totient, so it cannot be a valid public exponent.
 const evenDivisor int64 = 2
 
-// ActionsClaimsValue is what a verified GitHub Actions token asserts.
-//
-// Only the claims this package acts on are decoded. Everything else GitHub
-// puts in the token is deliberately ignored: a field that is not read cannot
-// be relied on by accident.
-type ActionsClaimsValue struct {
-	// Issuer must be ActionsIssuer; anything else is another identity
-	// provider entirely.
-	Issuer string `json:"iss"`
-	// Subject identifies the workflow context. It is recorded for diagnostics
-	// and policy, never parsed for ownership: its format varies with
-	// environments, customisation and GitHub's immutable-subject rollout, so
-	// reading an owner out of it would break silently.
-	Subject string `json:"sub"`
-	// Audience is who the token was minted for. GitHub emits a single string;
-	// the JWT spec allows an array, so both are accepted on decode.
-	Audience audienceClaim `json:"aud"`
-	// RepositoryOwnerID is the entitlement key: the account id, which survives
-	// renames and cannot be reused. RepositoryOwner is the display name for
-	// the same account and must never be what a licence matches on — a freed
-	// handle can be claimed by someone else.
-	//
-	// GitHub sends a decimal string and nothing here VALIDATES that: the only
-	// check is that it is non-empty, and the value is compared to the roster's
-	// keys by string equality. "Numeric" therefore describes what the issuer
-	// emits, not a property this package enforces — and it does not need to,
-	// because a value that is not one of the roster's keys is not entitled
-	// whatever its shape. A decimal check would be a second syntax for a
-	// comparison that is already exact.
-	RepositoryOwnerID string `json:"repository_owner_id"`
-	// RepositoryOwner is the account's current login, for diagnostics only.
-	RepositoryOwner string `json:"repository_owner"`
-	// Repository is "owner/name", for diagnostics and optional narrowing.
-	Repository string `json:"repository"`
-	// EventName is the workflow trigger, DECODED AND READ BY NOTHING. It is
-	// carried so a diagnostic can print it and so a future policy would not
-	// have to change the wire shape to see it.
-	//
-	// It used to say pull_request_target "runs with the base repository's
-	// identity while potentially executing code from a fork, so a policy may
-	// want to refuse it" — which is true of Actions and describes no
-	// behaviour of this package. Four lines above, this type's own doc
-	// comment says a field that is not read cannot be relied on by accident;
-	// a field whose comment describes a policy is exactly how that gets
-	// relied on. Test_VerifyActionsToken_ignoresTheClaimsNothingReads makes
-	// the silence mechanical.
-	EventName string `json:"event_name"`
-	// RunnerEnvironment distinguishes "github-hosted" from "self-hosted",
-	// DECODED AND READ BY NOTHING, for the same reason and with the same
-	// warning as EventName above.
-	RunnerEnvironment string `json:"runner_environment"`
-	// ExpiresAt, IssuedAt and NotBefore are NumericDate seconds.
-	ExpiresAt int64 `json:"exp"`
-	// IssuedAt is when GitHub minted the token.
-	IssuedAt int64 `json:"iat"`
-	// NotBefore is when the token becomes usable.
-	NotBefore int64 `json:"nbf"`
-}
-
 // audienceClaim decodes an `aud` that may be a string or an array of strings.
 type audienceClaim []string
 

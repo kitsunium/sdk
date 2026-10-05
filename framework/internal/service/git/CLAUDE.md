@@ -15,12 +15,11 @@ code of its own: it emits the core's `0.2.33.*` sentinels.
 
 | File | Role |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `ChangedSetValue`, `Config`, `IncludeFunc` and `HeadValue` — each struct with every field, unexported ones included; the assertion `ChangedSetValue → coregit.ChangedSet`. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `exec.go` | the hardened runner — `runGitOutput`, `runGitBlob`, `gitProbe`, `hardenedGitConfig`, `extDiffGuard` |
 | `resolve.go` | `Resolve`, the four diff sources it folds together, `shallowState`, `spelledTopLevel` |
 | `diff_parse.go` | unified-diff and `--name-status -z` parsing, each path filtered through `IncludeFunc` |
 | `changed_set.go` | `ChangedSetValue`, the concrete `core/git.ChangedSet`, and its `spelledAs` rewrite |
-| `changed_set_compliance.go` | the compile-time proof that `ChangedSetValue` satisfies `core/git.ChangedSet` |
-| `config.go` | `Config` — where the repository is, and the caller's file filter (`IncludeFunc`) |
 | `gitdir.go` | `GitDir`, memoized per root and re-validated on every call |
 | `show.go` | `ShowFile` — a blob at a commit, or the two refusals |
 | `head.go` | `Head` + `HeadValue` — HEAD's commit, its committer date, tracked changes; `committerTime` reads the raw commit object (ADR 0100) |
