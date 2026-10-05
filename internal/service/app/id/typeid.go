@@ -1,4 +1,3 @@
-// Package id — TypeID generator (type prefix + UUIDv7 in lowercase base32).
 package id
 
 import (

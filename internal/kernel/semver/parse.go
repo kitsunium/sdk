@@ -1,5 +1,3 @@
-// Package semver — the parser: a version cut into what precedence reads, in
-// one pass over its bytes and without a copy of any of them.
 package semver
 
 import "strings"

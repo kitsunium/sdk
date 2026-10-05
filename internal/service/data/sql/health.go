@@ -1,4 +1,3 @@
-// Package sql — hosts the liveness probe and the budget that bounds it.
 package sql
 
 import (

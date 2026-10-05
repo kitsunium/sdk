@@ -1,6 +1,3 @@
-// Package docstore — a document's versions: the current one, which is the
-// document itself, and the former ones kept beside it, recorded and pruned in
-// the write that stores the document (ADR 0143).
 package docstore
 
 import (

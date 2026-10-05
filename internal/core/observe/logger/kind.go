@@ -1,11 +1,3 @@
-// Package logger — declares the Handler interface that concrete
-// implementations in sdk/internal/service satisfy. Handlers format
-// RecordEvent values and write them to the backing sink.
-//
-// Package logger — declares the Kind enum that discriminates the union
-// payload carried by Value. Handlers switch on Kind to select the matching
-// accessor (String, Int64, Float64, …) instead of paying the cost of an
-// `any` type assertion at every render call.
 package logger
 
 // KindAny tags a Value whose payload is an unconstrained interface; handlers

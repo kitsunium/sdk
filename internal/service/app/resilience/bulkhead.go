@@ -1,4 +1,3 @@
-// Package resilience — bulkhead (bounded-concurrency) policy.
 package resilience
 
 import (

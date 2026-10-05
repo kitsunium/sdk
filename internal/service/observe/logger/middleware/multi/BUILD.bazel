@@ -4,7 +4,10 @@ package(default_visibility = ["//internal/service:service_consumers"])
 
 go_library(
     name = "multi",
-    srcs = ["multi.go"],
+    srcs = [
+        "doc.go",
+        "multi.go",
+    ],
     importpath = "github.com/kitsunium/sdk/internal/service/observe/logger/middleware/multi",
     visibility = [
         "//:__subpackages__",

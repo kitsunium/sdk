@@ -1,5 +1,3 @@
-// Package secret — a keyring read once: the root view a pass over many
-// wrapped keys uses.
 package secret
 
 import (

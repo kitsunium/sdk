@@ -1,4 +1,3 @@
-// Package cache — the New constructor configuration.
 package cache
 
 import (

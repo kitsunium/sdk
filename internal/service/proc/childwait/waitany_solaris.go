@@ -1,7 +1,5 @@
 //go:build solaris
 
-// Package childwait — the pid that means "any child" to wait4 on illumos and
-// Solaris (the solaris build tag selects both).
 package childwait
 
 // anyChildPID is the pid argument that makes wait4 collect ANY child here: 0.

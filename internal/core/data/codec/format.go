@@ -1,6 +1,3 @@
-// Package codec — declares the typed Format string and its helpers.
-// The zero Format ("") is invalid — consumers obtain a Format via the
-// pkg/v1/data/codec constants or via the FromMIME / FromExtension helpers.
 package codec
 
 // Format is the typed string identifier of a codec.

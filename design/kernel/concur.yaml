@@ -13,8 +13,48 @@ packages:
             name: CodeBatcherDeliverFailed
             value: "0x00_01_05_02"
         type: errs.Code
+    doc: |-
+      Package batcher provides a generic coalescing buffer: items are appended via
+      Add and handed to a deliver closure in batches — flushed eagerly when an
+      item-count or weight cap is reached, on an optional background ticker, or on
+      an explicit Flush / Close.
+
+      The primitive is stdlib-only and domain-neutral (ADR 0014). It owns its own
+      ticker — built on Config.Clock, the wall clock by default — and does not
+      depend on any other kernel lifecycle primitive. The deliver closure carries
+      every domain-specific concern: a
+      pre-delivery reorder, a per-batch key, or a byte-vs-count weight all live in
+      the caller's Sink and WeightOf, never in the batcher.
+
+      Concurrency: Add, Flush and Close are safe to call from multiple goroutines;
+      a mutex guards the pending batch. The batch is swapped out under the lock and
+      the deliver closure runs outside it, so a slow delivery never blocks a
+      producer. Add returns BatcherClosed once Close has run.
+
+      Sink serialization (V6): the deliver closure is invoked under a dedicated
+      delivery mutex held only across the call, so two flush paths (a cap-triggered
+      Add racing the FlushEvery ticker, or two cap-triggered Adds) never enter the
+      Sink concurrently. A Sink may therefore assume serial invocation — it can
+      append to a shared slice or write to one connection without its own locking.
+      Cross-batch ordering is still NOT guaranteed: serialization bounds concurrency
+      but not the arrival order of the racing batches. The delivery mutex is
+      separate from the pending-batch mutex, so a slow Sink never blocks a producer
+      from appending into the next batch.
+
+      Package batcher — range 0.1.5.* (ADR 0014 kernel/concur/batcher block).
+
+      Package batcher — the Config value type, in its own file per the
+      one-exported-struct-per-file convention.
+
+      Package batcher — declares the sentinels returned by the Batcher operations.
+      Each var's name equals its errs.Define Reason in SCREAMING_SNAKE form.
     functions:
-      - in:
+      - doc: |-
+          NewBatcher builds a Batcher over deliver with cfg. When cfg.FlushEvery > 0 it
+          spawns a ticker goroutine that flushes on the interval, ticking on cfg.Clock
+          (the wall clock when nil); the goroutine is joined by Close. A nil
+          cfg.OnError is degraded to a no-op so the flush paths stay branch-free.
+        in:
           - name: deliver
             type: Sink[T]
           - name: cfg
@@ -48,13 +88,25 @@ packages:
             public: Batcher delivery failed
             reason: BATCHER_DELIVER_FAILED
     types:
-      - name: Sink
+      - doc: |-
+          Sink delivers one coalesced batch. A non-nil error fails the batch: it is
+          returned to the caller of Flush / Close and routed to Config.OnError on the
+          background ticker path.
+        name: Sink
         typeParams:
           - constraint: any
             name: T
         underlying: func(ctx context.Context, batch []T) error
-      - methods:
-          - in:
+      - doc: |-
+          Batcher coalesces Add'd items into batches delivered through its Sink.
+          It owns its own flush ticker and guards the pending batch with a mutex, so
+          Add / Flush / Close are safe under concurrent callers (ADR 0014).
+        methods:
+          - doc: |-
+              Add appends item to the pending batch and eagerly flushes when the batch
+              reaches MaxItems or MaxWeight. It returns BatcherClosed if Close has run; a
+              cap-triggered deliver failure is returned wrapped as DeliverFailed.
+            in:
               - name: ctx
                 type: context.Context
               - name: item
@@ -63,14 +115,22 @@ packages:
             out:
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Flush delivers the pending batch synchronously, returning any deliver error.
+              It returns BatcherClosed if Close has run.
+            in:
               - name: ctx
                 type: context.Context
             name: Flush
             out:
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Close stops the ticker (if any), delivers the final batch with ctx — the
+              caller's context, which bounds that last delivery — and marks the batcher
+              closed. It is idempotent: a second Close returns nil after the first has
+              drained the buffer.
+            in:
               - name: ctx
                 type: context.Context
             name: Close
@@ -83,44 +143,184 @@ packages:
         typeParams:
           - constraint: any
             name: T
-      - name: Config
+      - doc: |-
+          Config tunes a Batcher: the item / weight caps that trigger an eager flush,
+          the per-item weight function, the background flush interval and the clock it
+          ticks on, and the background-error observer. The zero Config is usable — it
+          batches by item count only (each item weighs 1, MaxWeight is ignored) with no
+          caps and no ticker, so items accumulate until an explicit Flush or Close.
+        name: Config
         struct:
           fields:
-            - name: MaxItems
+            - doc: |-
+                MaxItems forces a flush once the pending batch reaches this many items;
+                a non-positive value disables the item-count trigger.
+              name: MaxItems
               type: int
-            - name: MaxWeight
+            - doc: |-
+                MaxWeight forces a flush once the pending batch's summed WeightOf reaches
+                it; ignored when WeightOf is nil or MaxWeight is non-positive.
+              name: MaxWeight
               type: int64
-            - name: WeightOf
+            - doc: |-
+                WeightOf reports an item's weight (e.g. its byte size). A nil WeightOf
+                means count-only batching: every item weighs 1 and MaxWeight is ignored.
+              name: WeightOf
               type: func(item T) int64
-            - name: FlushEvery
+            - doc: |-
+                FlushEvery, when positive, spawns a ticker goroutine that flushes the
+                pending batch on the interval; Close joins it.
+              name: FlushEvery
               type: time.Duration
-            - name: Clock
+            - doc: |-
+                Clock is what the FlushEvery ticker is built on. Nil means
+                clock.System; a clock.ManualClock lets a test flush by advancing time
+                past FlushEvery instead of sleeping through it. Ignored without a
+                FlushEvery.
+              name: Clock
               type: clock.Waiter
-            - name: OnError
+            - doc: |-
+                OnError observes deliver failures seen by the background ticker. A nil
+                hook degrades to a no-op so the flush paths stay branch-free.
+              name: OnError
               type: func(err error)
         typeParams:
           - constraint: any
             name: T
-  - functions:
-      - name: Get
+  - doc: |-
+      Package buffer provides a pooled *[]byte for zero-alloc formatting in hot
+      paths. Consumers acquire a reusable buffer via Get and return it via Put so
+      steady-state allocations tend toward zero. A buffer is its caller's from
+      [Get] until [Put] and must not be touched after Put. It is a thin byte-slice
+      specialisation over internal/kernel/concur/recycler.CappedPool (ADR 0010): the
+      recycling mechanism lives in recycler, the 64-KiB capacity threshold and the
+      *[]byte type live here.
+    functions:
+      - doc: Get borrows a reusable byte buffer with zero length and capacity >= initialCap.
+        name: Get
         out:
           - type: "*[]byte"
-      - in:
+      - doc: |-
+          Put returns a buffer to the pool after use; the recycler truncates its length
+          and drops it when cap exceeds maxRetain. A nil argument is a safe no-op so
+          call sites can always defer Put — the generic CappedPool cannot nil-check
+          a pointer-like T, so the guard lives here.
+
+          Put ends the caller's ownership of b. Once it returns, neither *b nor the
+          bytes it points at may be read or written — not even len(*b) — and b must
+          not be Put again: the pool may already have handed b to another goroutine,
+          which writes both as its own. Copy out whatever is still needed before Put.
+        in:
           - name: b
             type: "*[]byte"
         name: Put
     path: github.com/kitsunium/sdk/internal/kernel/concur/buffer
   - constants:
       - build: "!(386 || arm)"
+        doc: |-
+          Unlimited is the concurrency limit that bounds nothing: a slot is always
+          free, so [Group.Go] never waits for one.
+
+          It has to be written out. A zero that silently meant "no limit" would be a
+          value the caller never chose doing something they never asked for, and a
+          zero that meant "no task may run" is the deadlock ADR 0031 exists to remove
+          from this SDK — errgroup's SetLimit(0) parks every Go call forever. Naming
+          the case leaves neither reading available to a typo.
         name: Unlimited
         type: int
         value: "9223372036854775807"
       - build: 386 || arm
+        doc: |-
+          Unlimited is the concurrency limit that bounds nothing: a slot is always
+          free, so [Group.Go] never waits for one.
+
+          It has to be written out. A zero that silently meant "no limit" would be a
+          value the caller never chose doing something they never asked for, and a
+          zero that meant "no task may run" is the deadlock ADR 0031 exists to remove
+          from this SDK — errgroup's SetLimit(0) parks every Go call forever. Naming
+          the case leaves neither reading available to a typo.
         name: Unlimited
         type: int
         value: "2147483647"
+    doc: |-
+      Package group — the typed fan-out built on the Group.
+
+      Package group runs a set of tasks concurrently and gives their caller one
+      place to wait: one first error — or, from [NewJoined], every error — one
+      bounded degree of parallelism, and — the part the familiar shape leaves out —
+      the panic that a child goroutine would otherwise take the whole process down
+      with. It is a kernel primitive (stdlib-only, fully domain-neutral: Group, Go,
+      Wait, Collect; no Job, no Task, no Worker appears in a signature).
+
+      # One error, or every error
+
+      A group from [New] reports the FIRST error, because almost every error after
+      it is a consequence of the cancellation the first one caused. A group from
+      [NewJoined] reports EVERY task's error, joined with errors.Join in submission
+      order — for tasks whose failures are independent facts, such as workers
+      polling one medium, where the second failure is not an echo of the first.
+      Both cancel the siblings on the first failure, and in both the first failure
+      is the context's cause.
+
+      # A panic in a child is delivered, not fatal
+
+      A goroutine that panics and is not recovered ON ITS OWN STACK kills the
+      process. No amount of recover() in the parent helps, which is why the common
+      "spawn N goroutines, collect errors" helper turns one bad input into a crash
+      with a stack pointing at a goroutine the reader has never seen. Here the
+      recovery happens inside the child, together with the stack of the goroutine
+      that actually failed, and is re-raised in [Group.Wait] as a [PanicValue].
+
+      The re-raise happens AFTER every other task has returned, so the structured
+      guarantee survives the fault: when Wait leaves — by return or by panic — the
+      group owns no running goroutine.
+
+      # What Wait guarantees, and what it cannot
+
+      Wait returns when every task started by [Group.Go] has RETURNED. It does not
+      return when the context is cancelled, because cancellation is a request and
+      Go has no way to force a goroutine to honour one.
+
+      So a task that ignores its context keeps Wait blocked for as long as it
+      runs, and that is the contract rather than a defect: the alternative —
+      returning while goroutines are still live — is precisely the leak structured
+      concurrency exists to prevent, and it would hand the caller a "finished"
+      group that is still writing to their memory. Bound such a task from the
+      inside (a deadline on the I/O it performs). A group cannot bound it from the
+      outside without abandoning it.
+
+      # Limits
+
+      The concurrency limit is a real bound taken before the goroutine is created,
+      so N submissions against a limit of L hold L goroutines, not N. A
+      non-positive limit is clamped to 1 and [Unlimited] must be spelled out —
+      see [New].
+
+      Package group — the panic carried off a task's goroutine and re-raised in
+      the waiter.
     functions:
-      - in:
+      - doc: |-
+          Collect runs every function in fns concurrently under a [Group] and returns
+          their results in SUBMISSION order: index i of the result is fns[i]'s value,
+          whatever order the tasks actually finished in.
+
+          limit is [New]'s, with the same clamp and the same [Unlimited] spelling.
+
+          It is a function rather than a method because Go's methods take no type
+          parameters of their own: a Group that both bounded concurrency and carried a
+          result type would have to fix that type at construction, forcing
+          Group[struct{}] on every caller who only wants to wait. Keeping the result
+          type here leaves the common shape untyped and this one exact.
+
+          On the first error the remaining tasks see a cancelled context and Collect
+          returns (nil, err). No partial slice is handed back: a half-filled result is
+          indistinguishable at the call site from a complete one, and the zero values
+          in it would read as answers.
+
+          A panic in any fn propagates out of Collect exactly as it does out of
+          [Group.Wait] — after every other task has returned, carrying the failing
+          goroutine's stack.
+        in:
           - name: parent
             type: context.Context
           - name: limit
@@ -136,7 +336,22 @@ packages:
         typeParams:
           - constraint: any
             name: T
-      - in:
+      - doc: |-
+          New returns a Group and the context every task submitted to it receives.
+
+          limit bounds how many tasks run at once. A non-positive limit is CLAMPED to
+          1 — one task at a time, slow but correct — and is read neither as "no limit"
+          nor as "no task may run"; pass [Unlimited] for the former, and note that the
+          latter is what makes a zero limit a deadlock elsewhere. The clamp follows the
+          SDK's own bulkhead precedent (ADR 0031 §"Why not extend this to the other
+          clamps"): a concurrency floor of one still runs the caller's work under a
+          meaningful, if minimal, policy, so it is a floor rather than a guess at
+          intent.
+
+          The returned context is cancelled when the first task fails, when a task
+          panics, or when [Group.Wait] returns — whichever happens first. On a task
+          failure that task's error is the context's [context.Cause].
+        in:
           - name: parent
             type: context.Context
           - name: limit
@@ -145,7 +360,23 @@ packages:
         out:
           - type: "*Group"
           - type: context.Context
-      - in:
+      - doc: |-
+          NewJoined returns a Group whose [Group.Wait] reports EVERY task's error,
+          joined with errors.Join in the order the tasks were submitted, rather than
+          the first one. Everything else is [New]'s: the limit and its clamp, the
+          returned context, the siblings cancelled on the first failure — whose error
+          is still the context's [context.Cause] — and a panic re-raised in Wait,
+          which still outranks every error.
+
+          It is for tasks whose failures are independent facts: N workers polling one
+          broken medium each report their own failure, and dropping all but one would
+          hide which of them saw what. When later failures are mostly the echo of the
+          cancellation the first one caused, [New] is the right group.
+
+          The joined error is matchable as each of its parts — errors.Is, errors.As,
+          and the SDK's errs.HasCode all walk Unwrap() []error — and Wait returns nil,
+          not an empty join, when no task failed.
+        in:
           - name: parent
             type: context.Context
           - name: limit
@@ -156,33 +387,122 @@ packages:
           - type: context.Context
     path: github.com/kitsunium/sdk/internal/kernel/concur/group
     types:
-      - methods:
-          - in:
+      - doc: |-
+          Group runs tasks concurrently under one context and one wait point.
+
+          The zero value is NOT usable — construct with [New] or [NewJoined], which
+          hand back the context the tasks receive alongside it. A Group is used once: after
+          [Group.Wait] has returned, submit to a new one.
+
+          [Group.Go] may be called from any goroutine. [Group.Wait] may not run
+          concurrently with [Group.Go] — "have all submissions been made" is a
+          question only the submitter can answer, and a Group that guessed would
+          report a total that was true for an instant.
+        methods:
+          - doc: |-
+              Go starts fn on a goroutine of its own, blocking while the group already has
+              its limit of tasks running.
+
+              fn receives the group's context. A task submitted after the group has
+              already failed still RUNS, with an already-cancelled context that a
+              cooperative task returns from at once. Skipping it silently would be the
+              worse half of the trade — a task that never ran and never said so.
+
+              Go must not be called after [Group.Wait].
+            in:
               - name: fn
                 type: func(ctx context.Context) error
             name: Go
             recv: pointer
-          - name: Wait
+          - doc: |-
+              Wait blocks until every task started by [Group.Go] has returned, releases the
+              group context, and returns the first error any task reported — or, for a
+              group from [NewJoined], every one of them, joined in submission order.
+
+              If a task panicked, Wait re-raises it as a [PanicValue] carrying the stack of
+              the goroutine that failed — after every other task has finished, so no task
+              outlives Wait on the panic path either. A panic outranks an error: an error
+              is an outcome the caller can handle, a panic says the result is not one.
+
+              Wait does NOT return early on cancellation. See the package documentation
+              for what that guarantees and what it costs.
+            name: Wait
             out:
               - type: error
             recv: pointer
         name: Group
         struct:
           unexported: true
-      - methods:
-          - name: String
+      - doc: |-
+          PanicValue carries a panic raised inside a task across the goroutine
+          boundary to whoever is waiting on the group.
+
+          It is deliberately NOT an error. A panic is a programming fault, and turning
+          one into a value the caller may ignore is how a broken invariant becomes a
+          silent wrong answer — the same position kernel/concur/singleflight takes, and the
+          reason neither type carries an error code.
+
+          The stack is captured at the moment of recovery, inside the goroutine that
+          ran the task. Without it a re-raised panic would point at the waiter's
+          stack — code that did nothing wrong — and the frame that actually failed
+          would be gone, which is the failure mode that makes a crashed worker pool so
+          expensive to debug.
+
+          It is a separate type from singleflight's namesake rather than a shared one:
+          each names its own package in the message a crash prints, and hoisting the
+          two into a fourth kernel package would add a primitive whose entire content
+          is two fields.
+        methods:
+          - doc: |-
+              String renders the original panic followed by the stack of the goroutine
+              that raised it. The Go runtime prints a panic value through String when the
+              value has one, so an uncaught re-raise shows the task's stack rather than
+              only the waiter's.
+            name: String
             out:
               - type: string
             recv: value
         name: PanicValue
         struct:
           fields:
-            - name: Raised
+            - doc: Raised is the value the original panic carried, verbatim.
+              name: Raised
               type: any
-            - name: Stack
+            - doc: |-
+                Stack is the stack of the goroutine that ran the task, captured at
+                recovery.
+              name: Stack
               type: "[]byte"
-  - functions:
-      - in:
+  - doc: |-
+      Package recycler — CappedPool[T] layers a reset-on-Put + cap-discard
+      policy on top of the plain Pool[T] declared in recycler.go.
+
+      Package recycler provides Pool[T any], a generic typed object pool
+      backed by sync.Pool. Callers recycle ANY pointer-sized object (event
+      records, attribute slices, scratch structs) without paying the boxing cost
+      on Get/Put. Stdlib-only and domain-neutral: any byte buffer, codec stream,
+      HTTP body encoder, or metrics line writer can reuse it.
+
+      "Pointer-sized" is load-bearing, not decoration. sync.Pool stores any, and
+      only a value that fits in an interface word is boxed for free — so a
+      *[]byte costs nothing to Put while a bare []byte, being a three-word
+      header, heap-allocates 24 B on every single Put. Measured in BENCH.md at
+      25.70 ns and 0 allocs against 51.36 ns and 1 alloc for the same workload,
+      and 3.496 ns against 19.82 ns under b.RunParallel. Pool a pointer. Every
+      consumer in this repository already does.
+
+      The byte-slice pool (internal/kernel/concur/buffer) and the codec scratch buffer
+      pool (internal/core/data/codec/scratch) are built ON this primitive; Pool[T]
+      is the shared mechanism, the capacity thresholds stay with the consumers.
+    functions:
+      - doc: |-
+          NewCappedPool returns a CappedPool[T]. newFn builds fresh values,
+          resetFn returns a value to its reusable state, and capOfFn reports a value's
+          capacity for the discard decision. All three functions are required and a
+          nil one panics. maxCap must be positive: a non-positive threshold would
+          orphan every value, silently turning the pool into a never-recycling
+          allocator, so it panics rather than degrade.
+        in:
           - name: newFn
             type: func() T
           - name: resetFn
@@ -197,7 +517,12 @@ packages:
         typeParams:
           - constraint: any
             name: T
-      - in:
+      - doc: |-
+          NewPool returns a Pool[T] whose factory fires on every cache miss.
+          A nil factory is a programmer error and panics at construction rather than
+          deferring the panic to sync.Pool.Get on the first cache miss, far from the
+          offending call site.
+        in:
           - name: newFn
             type: func() T
         name: NewPool
@@ -208,12 +533,31 @@ packages:
             name: T
     path: github.com/kitsunium/sdk/internal/kernel/concur/recycler
     types:
-      - methods:
-          - name: Get
+      - doc: |-
+          CappedPool wraps a concrete *Pool[T] and layers a cap-discard policy
+          on top: on Put, a value whose reported capacity exceeds maxCap is orphaned
+          (never reset, never repooled), otherwise it is reset then repooled.
+
+          Discard happens BEFORE reset on purpose: it preserves the codec scratch
+          detach contract, where an over-cap buffer's backing bytes have been handed
+          to the caller and must not be touched. Reset is NOT a memory wipe — a
+          consumer recycling sensitive bytes must zero them itself before Put.
+
+          Always used behind a pointer: the embedded *Pool owns a non-copyable
+          sync.Pool.
+        methods:
+          - doc: |-
+              Get borrows a value of type T from the underlying recycler, invoking the
+              factory on a cache miss. Callers own it until they hand it back via Put.
+            name: Get
             out:
               - type: T
             recv: pointer
-          - in:
+          - doc: |-
+              Put returns v for reuse unless its capacity exceeds maxCap, in which case v
+              is orphaned (discard-before-reset: never reset, never repooled). Otherwise v
+              is reset then repooled. Callers MUST NOT touch v after Put returns.
+            in:
               - name: v
                 type: T
             name: Put
@@ -224,12 +568,26 @@ packages:
         typeParams:
           - constraint: any
             name: T
-      - methods:
-          - name: Get
+      - doc: |-
+          Pool is a concrete generic object pool over sync.Pool. It performs NO
+          reset — consumers that need cleanup either reset before Put (logger
+          Builder.Send, async data[:0]) or use CappedPool. Safe for concurrent
+          use. Always used behind a pointer: sync.Pool must not be copied.
+        methods:
+          - doc: |-
+              Get borrows a value of type T, invoking the factory on a cache miss. The
+              returned value MAY be a previously Put value or a freshly built one. The
+              comma-ok assertion is fail-loud: the pool only ever holds T (both New and
+              Put are typed), so a wrong-typed entry is an internal invariant break that
+              panics rather than silently masking it (mirrors core/data/codec/scratch.poolGet).
+            name: Get
             out:
               - type: T
             recv: pointer
-          - in:
+          - doc: |-
+              Put returns v to the pool for future reuse. Callers MUST NOT touch v after
+              Put returns; the pool may hand it to another goroutine immediately.
+            in:
               - name: v
                 type: T
             name: Put
@@ -240,22 +598,120 @@ packages:
         typeParams:
           - constraint: any
             name: T
-  - path: github.com/kitsunium/sdk/internal/kernel/concur/singleflight
+  - doc: |-
+      Package singleflight — the in-flight call record shared by every caller of
+      one key.
+
+      Package singleflight — the panic carried out of the shared call into every
+      waiter.
+
+      Package singleflight deduplicates concurrent work that names the same key:
+      of N goroutines asking for the same thing at the same time, exactly one does
+      the work and all N receive its result. It is a kernel primitive — stdlib
+      only, fully generic, and free of domain vocabulary (Group, Do, Forget; no
+      Cache, no Request, no Key that means something).
+
+      # The shared call outlives any single caller
+
+      The obvious implementation runs fn on the first caller's goroutine with the
+      first caller's context. It has a defect that only shows up under load: the
+      caller who arrived first is also the one most likely to give up first — it
+      has been waiting longest — and when it does, every other caller inherits its
+      cancellation. One abandoned request fails ten that were still willing to
+      wait.
+
+      So fn runs on a goroutine of its own, under a context derived from the first
+      caller's with cancellation removed (context.WithoutCancel), and that context
+      is cancelled only when the LAST caller has left. A caller that abandons
+      stops waiting and gets its own ctx.Err(); the call keeps running for
+      everyone else. When nobody is left, the work stops — nothing is computed for
+      an audience of zero.
+
+      Two consequences are worth stating rather than discovering:
+
+        - The shared call inherits the FIRST caller's context VALUES, and no
+          caller's deadline. A follower that expected its own request-scoped
+          values (a trace id, a tenant) will not see them; it sees the leader's.
+          Deduplication means one execution, and one execution can carry only one
+          set of values.
+        - Because fn runs on its own goroutine, a Do that has returned has not
+          necessarily stopped fn. Abandonment is a departure, not a kill.
+
+      # A panic is delivered, never swallowed
+
+      If fn panics, the recovered value and its stack are captured and re-raised
+      in EVERY waiter as a [PanicValue]. The alternative — recover and report an
+      error — turns a programming fault into a runtime condition and loses the
+      original stack; the other alternative — let it escape the goroutine — takes
+      the process down while the waiters are still blocked on a channel that will
+      never close. One panic becoming N is the honest arithmetic: N callers asked
+      for a result, and none of them can have one.
+
+      # What this is NOT
+
+      It is not a cache: nothing is remembered once the call completes, so two
+      SEQUENTIAL Do calls run fn twice. It is not a lock: two DIFFERENT keys never
+      wait for each other. And it is per-PROCESS — N replicas of a service each
+      running this primitive still send N concurrent calls to whatever is behind
+      them.
+    path: github.com/kitsunium/sdk/internal/kernel/concur/singleflight
     types:
-      - methods:
-          - name: String
+      - doc: |-
+          PanicValue carries a panic raised inside a deduplicated call across the
+          goroutine boundary to every caller waiting on it.
+
+          It is deliberately NOT an error. A panic is a programming fault, and
+          converting one into a value the caller may ignore is how a broken invariant
+          becomes a silent wrong answer; it is also why this type carries no error
+          code (the kernel's cache and clock primitives take the same position — a
+          programmer error is not a runtime condition with a dotted quad).
+
+          The stack is captured at the moment of recovery, inside the goroutine that
+          ran fn. Without it a re-raised panic would point at the waiter's stack —
+          code that did nothing wrong — and the frame that actually failed would be
+          gone.
+        methods:
+          - doc: |-
+              String renders the original panic followed by the stack of the goroutine
+              that raised it. The Go runtime prints a panic value through String when the
+              value has one, so an uncaught re-raise shows fn's stack rather than only the
+              waiter's.
+            name: String
             out:
               - type: string
             recv: value
         name: PanicValue
         struct:
           fields:
-            - name: Raised
+            - doc: Raised is the value the original panic carried, verbatim.
+              name: Raised
               type: any
-            - name: Stack
+            - doc: Stack is the stack of the goroutine that ran fn, captured at recovery.
+              name: Stack
               type: "[]byte"
-      - methods:
-          - in:
+      - doc: |-
+          Group deduplicates concurrent [Group.Do] calls that name the same key. The
+          zero value is ready to use; a Group must not be copied after first use.
+
+          Safe for concurrent use by any number of goroutines.
+        methods:
+          - doc: |-
+              Do runs fn for key unless an identical key is already in flight, in which
+              case it waits for that call instead of starting a second one. shared reports
+              whether the result came from a call this goroutine did not start.
+
+              fn does NOT receive ctx. It receives the shared call's context: the first
+              caller's values with every deadline and cancellation removed, cancelled only
+              once every caller has stopped waiting. See the package documentation.
+
+              A ctx that is done while this goroutine is still waiting returns
+              (zero, shared, ctx.Err()) and leaves the call running for whoever else is
+              waiting. A result that is already available is delivered even if ctx is also
+              done — cancellation preempts waiting, not delivery.
+
+              If fn panics, Do panics with a [PanicValue] carrying the original value and
+              fn's stack.
+            in:
               - name: ctx
                 type: context.Context
               - name: key
@@ -271,12 +727,32 @@ packages:
               - name: err
                 type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Forget retires key so the NEXT Do starts a fresh call. Callers already
+              waiting on the in-flight call keep waiting and still receive its result —
+              forgetting a key drops the dedup entry, it does not abandon the work.
+
+              It exists for the case where the in-flight call is known to be answering a
+              question that has since changed: without it, a caller arriving one
+              microsecond later would be handed a result computed from stale inputs and
+              would have no way to tell.
+            in:
               - name: key
                 type: K
             name: Forget
             recv: pointer
-          - name: InFlight
+          - doc: |-
+              InFlight reports how many keys a [Group.Do] arriving now would JOIN rather
+              than start — the deduplication entries currently registered. It is a
+              point-in-time reading, useful for a gauge or a test — never for a decision,
+              since the number can change between the read and the next statement.
+
+              It is NOT a count of running calls. A key that was Forgotten, or whose every
+              caller abandoned it, stops being counted while its fn may still be running —
+              Forget drops the entry and not the work, and abandonment is a departure and
+              not a kill — so a forgotten key that a later Do re-issued counts ONCE while
+              two calls for it run.
+            name: InFlight
             out:
               - type: int
             recv: pointer
@@ -288,8 +764,26 @@ packages:
             name: K
           - constraint: any
             name: V
-  - functions:
-      - in:
+  - doc: |-
+      Package snapshot provides Value[T any], a copy-on-write container for
+      read-mostly shared state. Load is lock-free and allocation-free (a single
+      atomic.Pointer load); writers (Store / Swap / Update) serialise on a mutex
+      so a read-modify-write publish never loses a concurrent update. Stdlib-only
+      and domain-neutral: any frozen-after-init or rarely-mutated table — a codec
+      registry, a routing table, a feature-flag map, a hot-reloaded config — can
+      reuse it.
+
+      The core registries (internal/core/data/codec and the others) are built ON
+      this primitive through kernel/plugin.Registry: the three atomic.Pointer[map]
+      fields with hand-rolled CAS-loop writers the codec registry once carried are
+      three tables of it. The container lives here, the map clone in plugin, and
+      each domain's refusal with its registry (ADR 0011, ADR 0159).
+    functions:
+      - doc: |-
+          NewValue returns a Value holding initial. A nil initial is valid and leaves
+          the container empty (Load returns nil), the same state as the zero value —
+          offered as call-site sugar when an initial value is already known.
+        in:
           - name: initial
             type: "*T"
         name: NewValue
@@ -300,24 +794,50 @@ packages:
             name: T
     path: github.com/kitsunium/sdk/internal/kernel/concur/snapshot
     types:
-      - methods:
-          - name: Load
+      - doc: |-
+          Value is a copy-on-write container for a *T. Readers call Load with no lock;
+          writers replace the whole pointer under a mutex so concurrent
+          read-modify-write publishes cannot lose updates. The zero value is ready to
+          use — Load returns nil until the first Store. Always used behind a pointer:
+          the embedded mutex and atomic.Pointer must not be copied.
+        methods:
+          - doc: |-
+              Load returns the current value pointer without taking the lock — a single
+              atomic load, zero allocation. This is the hot path. The returned *T is
+              shared with every other reader and MUST be treated as immutable: mutate a
+              clone and publish it via Store or Update instead.
+            name: Load
             out:
               - type: "*T"
             recv: pointer
-          - in:
+          - doc: |-
+              Store atomically replaces the current value with next. It takes the writer
+              lock so a Store cannot interleave with an in-flight Update's
+              read-modify-write and clobber it.
+            in:
               - name: next
                 type: "*T"
             name: Store
             recv: pointer
-          - in:
+          - doc: |-
+              Swap atomically replaces the current value with next and returns the
+              previous value pointer (nil when the container was empty). Takes the writer
+              lock for the same reason as Store.
+            in:
               - name: next
                 type: "*T"
             name: Swap
             out:
               - type: "*T"
             recv: pointer
-          - in:
+          - doc: |-
+              Update runs fn under the writer lock and publishes its result. fn receives
+              the current value (nil when empty) and returns the replacement; it MUST NOT
+              mutate the value it is handed — other goroutines may be reading it — and
+              should build and return a fresh *T. fn MUST NOT call Store / Swap / Update
+              on the same Value, which would deadlock. Returning the unchanged current
+              pointer is a no-op publish, which lets fn abort a conditional update.
+            in:
               - name: fn
                 type: func(current *T) (next *T)
             name: Update
@@ -328,20 +848,66 @@ packages:
         typeParams:
           - constraint: any
             name: T
-  - functions:
-      - in:
+  - doc: |-
+      Package worker — Every layers a ticker loop on top of the LoopDaemon
+      lifecycle. Held in its own file so worker.go stays focused on the LoopDaemon
+      surface.
+
+      Package worker provides LoopDaemon, a generic goroutine lifecycle primitive.
+      A LoopDaemon spawns a single background goroutine running a Loop, exposes an
+      idempotent Stop that signals the loop to exit and joins it, and a Done
+      channel closed once the loop has returned. Stdlib-only and domain-neutral:
+      any background drainer, batcher, ticker, or watch loop can reuse it.
+
+      Three real consumers collapse onto this primitive — the async middleware
+      drainer and the s3/cloudwatch batching sinks — each previously carried a
+      byte-identical stop/stopOnce/done/doneOnce scaffold. The mechanism lives
+      here; the loop body stays with the consumer (ADR 0014 §D6).
+
+      The "Daemon" role suffix (the linter requires a recognized role suffix on
+      every exported struct, and the bare noun is rejected); Start / Every are the
+      idiomatic constructors, with NewLoopDaemon as the New-prefixed alias the
+      struct-constructor lint expects.
+    functions:
+      - doc: |-
+          WithClock makes [Every] tick on w instead of the wall clock. Its use is a
+          test's: a clock.ManualClock advanced past the interval delivers a tick
+          exactly then, so a cadence is asserted by moving time rather than by
+          sleeping and hoping. A nil w is the wall clock.
+        in:
           - name: w
             type: clock.Waiter
         name: WithClock
         out:
           - type: EveryOption
-      - in:
+      - doc: |-
+          WithDone ends the loop as soon as done is closed, without waiting for Stop.
+
+          It is for an owner whose work can end on its own — a stream the peer closed,
+          a connection a tick found dead — so the ticking stops at that end rather
+          than at the owner's later Stop. Stop is still the join: it returns at once
+          on a loop that has already left. A nil done never fires.
+        in:
           - name: done
             type: <-chan struct{}
         name: WithDone
         out:
           - type: EveryOption
-      - in:
+      - doc: |-
+          Every starts a LoopDaemon whose loop fires tick on each interval until Stop
+          is called — or until the channel given by [WithDone] is closed. The daemon
+          owns the ticker and stops it when the loop exits, so Stop both ends the
+          ticking and joins the goroutine.
+
+          The ticker is built on the wall clock unless [WithClock] names another. A
+          tick that comes due while the previous one is still running is dropped, not
+          queued: the clock.Ticker contract, which is time.Ticker's.
+
+          A nil tick and a non-positive interval panic HERE, at the caller: a ticker
+          that does nothing is a bug, and clock.Waiter.NewTicker panics on a
+          non-positive period, which would otherwise happen inside the spawned
+          goroutine and take the process with it.
+        in:
           - name: interval
             type: time.Duration
           - name: tick
@@ -352,13 +918,21 @@ packages:
         out:
           - type: "*LoopDaemon"
         variadic: true
-      - in:
+      - doc: |-
+          Start spawns loop in a new goroutine and returns the LoopDaemon controlling
+          it. The returned daemon's Done channel closes when loop returns; Stop signals
+          loop to exit and blocks until it has. A nil loop is a programmer error and
+          panics at construction rather than spawning a goroutine that does nothing.
+        in:
           - name: loop
             type: Loop
         name: Start
         out:
           - type: "*LoopDaemon"
-      - in:
+      - doc: |-
+          NewLoopDaemon is the New-prefixed constructor alias mandated by the
+          struct-constructor lint; it delegates to Start, which is the idiomatic verb.
+        in:
           - name: loop
             type: Loop
         name: NewLoopDaemon
@@ -368,21 +942,106 @@ packages:
       clock: github.com/kitsunium/sdk/internal/kernel/clock
     path: github.com/kitsunium/sdk/internal/kernel/concur/worker
     types:
-      - name: EveryOption
+      - doc: |-
+          EveryOption tunes [Every]. Options apply in order, so a later one wins; a nil
+          option is skipped.
+
+          An option takes the option set by value and returns the amended copy rather
+          than writing through a pointer: handing an unknown function a pointer to the
+          set would move the set to the heap on every Every call, and Every is built
+          once per stream or connection by the network domains.
+        name: EveryOption
         underlying: func(everyConfig) everyConfig
-      - name: Loop
+      - doc: |-
+          Loop is the goroutine body run by a LoopDaemon. It receives a stop channel
+          that is closed when Stop is called and MUST return promptly once stop is
+          closed — a Loop that ignores stop deadlocks Stop, which blocks on the join.
+          A Loop MUST NOT panic: it runs in a bare goroutine, so a panic crashes the
+          process. Callers that run risky work recover inside their own Loop.
+        name: Loop
         underlying: func(stop <-chan struct{})
-      - methods:
-          - name: Stop
+      - doc: |-
+          LoopDaemon is a running background goroutine with an idempotent Stop and a
+          join. It is a concrete struct (not an interface) by deliberate choice,
+          mirroring recycler.Pool / snapshot.Value — a single-impl interface would be
+          over-abstraction. Always used behind a pointer returned by Start: the
+          embedded sync.Once and channels must not be copied.
+        methods:
+          - doc: |-
+              Stop signals the loop to exit and blocks until it has returned. It is
+              idempotent and safe to call concurrently: the sync.Once guards close(stop),
+              and the join on done is a receive on a closed channel after the first call.
+            name: Stop
             recv: pointer
-          - name: Done
+          - doc: |-
+              Done returns the channel closed when the loop has returned. Callers that
+              want to react to loop exit without joining (which Stop does) select on it.
+            name: Done
             out:
               - type: <-chan struct{}
             recv: pointer
         name: LoopDaemon
         struct:
           unexported: true
-  - facade:
+  - doc: |-
+      Package batcher coalesces items into batches: Add appends, and a deliver
+      function you supply receives them a batch at a time — when a count or a
+      weight cap is reached, on a ticker, or when you Flush or Close.
+
+      	b := batcher.NewBatcher(func(ctx context.Context, batch []Event) error {
+      	    return store.InsertMany(ctx, batch) // one round trip for many events
+      	}, batcher.Config[Event]{
+      	    MaxItems:   500,
+      	    FlushEvery: time.Second,
+      	    WeightOf:   func(e Event) int64 { return int64(len(e.Body)) },
+      	    MaxWeight:  1 << 20,
+      	})
+      	err := b.Add(ctx, evt) // flushes at once when a cap is reached
+      	err = b.Close(ctx)     // stops the ticker, delivers what is pending
+
+      It is the batching primitive under the SDK's database and cloud log
+      writers, published as an alias of that kernel package (ADR 0159 §4).
+
+      # When to use it
+
+      When each item costs a round trip that many items could share — a bulk
+      insert, a log shipment, a metrics push — and a bounded delay is an
+      acceptable price. It is not a queue: nothing is durable, a batch that fails
+      is returned to whoever triggered it rather than retried, and a process that
+      dies loses what is pending (the SDK's queue domain is the durable one).
+
+      # When a batch is delivered
+
+        - Add delivers eagerly, on the caller's goroutine, once the pending batch
+          reaches [Config].MaxItems items or [Config].MaxWeight — the sum of
+          [Config].WeightOf over the batch; a nil WeightOf weighs every item 1 and
+          ignores MaxWeight.
+        - A positive [Config].FlushEvery starts one ticker goroutine that delivers
+          whatever is pending on each tick, on [Config].Clock — the wall clock
+          when nil, a pkg/v1/clock.ManualClock in a test. A failure on that path
+          has no caller to return to and goes to [Config].OnError.
+        - Flush delivers what is pending now; Close stops the ticker and delivers
+          what is pending with the context it is given, then refuses every later
+          Add and Flush with [BatcherClosed].
+
+      The zero [Config] is usable: no cap, no ticker, so items wait for an
+      explicit Flush or Close.
+
+      # Concurrency
+
+      Add, Flush and Close are safe from any number of goroutines. The pending
+      batch is swapped out under a lock and delivered outside it, so a slow
+      delivery never blocks a producer appending to the next batch. The deliver
+      function is never entered concurrently — it may append to a shared slice or
+      write to one connection without a lock of its own — but two batches racing
+      to it are not ordered.
+
+      # Errors
+
+      [BatcherClosed] answers an Add or a Flush after Close. A deliver function's
+      error comes back wrapped as [BatcherDeliverFailed], its cause still reachable
+      with errors.Is and errors.As.
+    facade:
       - alias:
           - doc: |-
               Batcher coalesces added items into batches delivered through its [Sink].
@@ -460,13 +1119,87 @@ packages:
     path: github.com/kitsunium/sdk/pkg/v1/concur/batcher
   - constants:
       - build: "!(386 || arm)"
+        doc: |-
+          Unlimited is the concurrency limit that bounds nothing: a slot is always
+          free, so [Group].Go never waits for one. It has to be written out — a zero
+          limit is clamped to one, never read as "no limit".
         name: Unlimited
         type: int
         value: "9223372036854775807"
       - build: 386 || arm
+        doc: |-
+          Unlimited is the concurrency limit that bounds nothing: a slot is always
+          free, so [Group].Go never waits for one. It has to be written out — a zero
+          limit is clamped to one, never read as "no limit".
         name: Unlimited
         type: int
         value: "2147483647"
+    doc: |-
+      Package group runs a set of tasks concurrently and gives their caller one
+      place to wait: one bounded degree of parallelism, one error — the first, or
+      every one of them — and the panic a child goroutine would otherwise take the
+      whole process down with, delivered to the waiter instead.
+
+      	g, ctx := group.New(ctx, 8) // at most eight tasks at once
+      	for _, url := range urls {
+      	    g.Go(func(ctx context.Context) error { return fetch(ctx, url) })
+      	}
+      	err := g.Wait() // every task has returned; the first failure, or nil
+
+      It is the SDK's own structured-concurrency primitive, published as an alias
+      of the kernel package its services run on (ADR 0159 §4): the type a program
+      holds is the type the SDK holds.
+
+      # When to use it
+
+      Reach for it wherever you would write a sync.WaitGroup together with an
+      error variable, a mutex and a semaphore channel: N tasks, one wait, at most L
+      at a time. It does the job of golang.org/x/sync/errgroup with no module
+      outside the standard library, and says what it does where a default would
+      otherwise decide: a zero limit, a task's panic, and more than one failure.
+
+      # One error, or every error
+
+      A group from [New] reports the FIRST error, because almost every error after
+      it is a consequence of the cancellation the first one caused. A group from
+      [NewJoined] reports EVERY task's error, joined with errors.Join in
+      submission order — for tasks whose failures are independent facts, such as
+      workers polling one broken medium. Both cancel the siblings on the first
+      failure, and in both the first failure is the context's context.Cause.
+
+      [Collect] is the typed fan-out: each task returns a value, and the results
+      come back in SUBMISSION order whatever order the tasks finished in.
+
+      # A panic in a task is delivered, not fatal
+
+      A goroutine that panics and is not recovered on its own stack kills the
+      process, and no recover in the parent can see it. Here the recovery happens
+      inside the task's goroutine, with that goroutine's stack, and
+      [Group].Wait re-raises it as a [PanicValue] — after every other task has
+      returned, so when Wait leaves, by return or by panic, the group owns no
+      running goroutine. A PanicValue is deliberately not an error: a panic says
+      the result is not one.
+
+      # What Wait guarantees, and what it cannot
+
+      Wait returns when every task has RETURNED, not when the context is
+      cancelled: cancellation is a request, and a goroutine cannot be forced to
+      honour it. A task that ignores its context keeps Wait blocked for as long as
+      it runs — bound it from the inside, with a deadline on the I/O it performs.
+      A task submitted after the group failed still runs, with a cancelled
+      context, rather than being skipped without a word.
+
+      # Limits
+
+      The limit is taken on the submitting goroutine before a goroutine exists, so
+      N submissions against a limit of L hold L goroutines, not N. A non-positive
+      limit is clamped to 1 — one task at a time, slow but correct — and no limit
+      at all is spelled [Unlimited]: a zero read as "unbounded" would be a value
+      nobody chose, and a zero read as "nothing may run" is the deadlock
+      errgroup's SetLimit(0) produces.
+
+      A [Group] is used once: after Wait has returned, submit to a new one. Go may
+      be called from any goroutine, but not concurrently with Wait.
     facade:
       - alias:
           - doc: |-
@@ -569,7 +1302,56 @@ packages:
     imports:
       kgroup: github.com/kitsunium/sdk/internal/kernel/concur/group
     path: github.com/kitsunium/sdk/pkg/v1/concur/group
-  - facade:
+  - doc: |-
+      Package recycler pools objects for reuse, typed: Get borrows one, Put hands
+      it back, and the pool never hands out a value of the wrong type.
+
+      	buffers := recycler.NewCappedPool(
+      	    func() *bytes.Buffer { return new(bytes.Buffer) },
+      	    (*bytes.Buffer).Reset,                            // before it is reused
+      	    func(b *bytes.Buffer) int { return b.Cap() },
+      	    64<<10,                                           // a bigger one is dropped
+      	)
+
+      	b := buffers.Get()
+      	defer buffers.Put(b)
+
+      It is the pool the SDK's logger, codecs and network server recycle their
+      buffers through, published as an alias of that kernel package (ADR 0159
+      §4).
+
+      # When to use it
+
+      On a hot path that allocates the same kind of object per call — a buffer per
+      request, a scratch slice per record — where the garbage collector's work
+      shows in a profile. It is sync.Pool with the type checked by the compiler
+      rather than asserted at every Get, which is all [Pool] adds; [CappedPool]
+      adds the two things a pool of growable buffers needs, a reset on Put and a
+      capacity past which a value is dropped rather than kept.
+
+      Like sync.Pool, it is a cache and not an allocator you can count on: a
+      pooled value may be collected at any garbage collection, and Get builds a
+      new one when the pool is empty.
+
+      # Pool a pointer
+
+      sync.Pool stores an interface, and only a value that fits in one machine word
+      is boxed for free. A *[]byte costs nothing to Put; a []byte, a three-word
+      header, allocates on every Put — measured in the kernel package's BENCH.md
+      at twice the time and one allocation per call. Pool *T, never T.
+
+      # Why a cap, and why it drops before it resets
+
+      A buffer that grew to hold one huge request would otherwise stay in the pool
+      for good, and every later Get would hand that memory out again. [CappedPool]
+      asks capOf on each Put and orphans a value whose capacity is past maxCap —
+      without resetting it, because a caller may have handed that value's backing
+      bytes to someone else. Reset is not a wipe: a pool recycling secrets zeroes
+      them itself before Put.
+
+      A nil factory, a nil reset or capacity function, and a non-positive cap
+      panic at construction, at the line that made the mistake.
+    facade:
       - alias:
           - doc: |-
               Pool is a typed object pool over sync.Pool. [Pool].Get borrows a value,
@@ -637,7 +1419,56 @@ packages:
     imports:
       krecycler: github.com/kitsunium/sdk/internal/kernel/concur/recycler
     path: github.com/kitsunium/sdk/pkg/v1/concur/recycler
-  - facade:
+  - doc: |-
+      Package singleflight deduplicates concurrent work that names the same key:
+      of N goroutines asking for the same thing at the same time, exactly one does
+      the work and all N receive its result.
+
+      	var profiles singleflight.Group[string, Profile] // the zero value is ready
+
+      	p, shared, err := profiles.Do(ctx, id, func(ctx context.Context) (Profile, error) {
+      	    return db.Profile(ctx, id) // one query, however many callers arrived
+      	})
+
+      It is the primitive the SDK's cache domain collapses a stampede of misses
+      with, published as an alias of that kernel package (ADR 0159 §4).
+
+      # When to use it
+
+      When a burst of identical requests would each hit the same origin — a hot
+      key expiring in front of a database, a token refresh, a configuration
+      fetch — and one answer serves them all. It does the job of
+      golang.org/x/sync/singleflight with no module outside the standard library,
+      typed by the key and the value, and with a context — which raises the
+      question the next section answers: whose.
+
+      # The shared call outlives any single caller
+
+      The call runs on a goroutine of its own, under the FIRST caller's context
+      with its cancellation removed, and that context is cancelled only when the
+      LAST caller has left. A caller that gives up gets its own ctx.Err() and
+      stops waiting; the call keeps running for everyone else. When nobody is
+      left, the work stops — nothing is computed for an audience of zero.
+
+      Two consequences follow. The call sees the first caller's context VALUES and
+      no caller's deadline — one execution carries one set of values. And a Do that
+      has returned has not necessarily stopped fn: abandonment is a departure, not
+      a kill.
+
+      # A panic is delivered to every waiter
+
+      If fn panics, the value and fn's stack are re-raised in EVERY waiting caller
+      as a [PanicValue] — never swallowed into an error, and never left to take the
+      process down while the waiters block forever.
+
+      # What this is not
+
+      It is not a cache: nothing is remembered once the call completes, so two
+      SEQUENTIAL calls run fn twice — the SDK's cache domain is the remembering
+      layer above it. It is not a lock: two DIFFERENT keys never wait for each
+      other. And it is per PROCESS: N replicas each running it still send N calls
+      to whatever is behind them.
+    facade:
       - alias:
           - doc: |-
               Group deduplicates concurrent calls that name the same key. The zero value is
@@ -682,7 +1513,52 @@ packages:
     imports:
       ksingleflight: github.com/kitsunium/sdk/internal/kernel/concur/singleflight
     path: github.com/kitsunium/sdk/pkg/v1/concur/singleflight
-  - facade:
+  - doc: |-
+      Package snapshot holds read-mostly shared state copy-on-write: readers Load
+      the current value with one atomic load — no lock, no allocation — and
+      writers publish a whole new value, serialised so that a read-modify-write
+      never loses a concurrent one.
+
+      	routes := snapshot.NewValue(&map[string]Handler{})
+
+      	// The hot path: one atomic load, no lock.
+      	h := (*routes.Load())[path]
+
+      	// A writer clones, changes the clone and publishes it, serialised with
+      	// every other writer.
+      	routes.Update(func(cur *map[string]Handler) *map[string]Handler {
+      	    next := maps.Clone(*cur)
+      	    next[path] = handler
+      	    return &next
+      	})
+
+      It is the container the SDK's registries — codecs, writers, exporters — are
+      built on, published as an alias of that kernel package (ADR 0159 §4).
+
+      # When to use it
+
+      For a table read on every request and changed rarely: a registry, a routing
+      table, a feature-flag map, a configuration reloaded on a signal. A bare
+      sync/atomic.Pointer gives the lock-free read too, but leaves the writer to
+      choose between a compare-and-swap loop and a lock of its own; forgetting
+      both is the bug — two writers clone the same value and the second publish
+      drops the first's change. [Value].Update makes the read-modify-write one
+      serialised step.
+
+      Not for write-heavy state: every write copies the value. A map written as
+      often as it is read wants a lock, or sync.Map.
+
+      # The rules a caller keeps
+
+        - The pointer Load returns is shared with every other reader and MUST be
+          treated as immutable: change a clone, then publish it.
+        - An Update function receives the current value (nil while empty), returns
+          the next one, and must not call Store, Swap or Update on the same Value,
+          which would deadlock. Returning the current pointer unchanged publishes
+          nothing, which is how an update aborts.
+        - A Value must not be copied after first use: hold it in a struct used
+          behind a pointer, or behind a pointer itself.
+    facade:
       - alias:
           - doc: |-
               Value is a copy-on-write container for a *T. The zero value is ready to use
@@ -716,7 +1592,67 @@ packages:
     imports:
       ksnapshot: github.com/kitsunium/sdk/internal/kernel/concur/snapshot
     path: github.com/kitsunium/sdk/pkg/v1/concur/snapshot
-  - facade:
+  - doc: |-
+      Package worker starts a background goroutine you can stop and join: one
+      loop, an idempotent Stop that signals it and waits for it to return, and a
+      Done channel closed once it has.
+
+      	d := worker.Start(func(stop <-chan struct{}) {
+      	    for {
+      	        select {
+      	        case <-stop:
+      	            return
+      	        case job := <-jobs:
+      	            handle(job)
+      	        }
+      	    }
+      	})
+      	defer d.Stop() // signals the loop, then waits for it to return
+
+      [Every] is the same daemon with a ticker in it, built on the clock you give
+      it:
+
+      	d := worker.Every(30*time.Second, flushMetrics)
+      	defer d.Stop() // ends the ticking and joins the goroutine
+
+      It is the loop primitive the SDK's own drainers, batching sinks and stream
+      heartbeats run on, published as an alias of that kernel package (ADR 0159
+      §4).
+
+      # When to use it
+
+      Wherever a component owns one background goroutine for its lifetime and
+      would otherwise carry a stop channel, a sync.Once to close it, a done
+      channel and a second Once — the scaffold this package exists to stop being
+      copied. Use [Every] for a periodic task: it owns the ticker and stops it
+      when the loop ends.
+
+      For N tasks that run to completion and report errors, use concur/group
+      instead: a [LoopDaemon] runs ONE loop, returns nothing, and lives until it
+      is stopped.
+
+      # The contract a loop keeps
+
+      A [Loop] receives a stop channel and MUST return promptly once it is closed:
+      Stop blocks on the join, so a loop that ignores stop deadlocks Stop. A Loop
+      MUST NOT panic — it runs in a bare goroutine, where a panic ends the process;
+      a loop running risky work recovers inside itself.
+
+      # Ticking on an injected clock
+
+      [WithClock] makes [Every] tick on any [clock.Waiter], the SDK's
+      [clock.ManualClock] included, so a test asserts a cadence by moving time
+      rather than by sleeping. The ticker is armed on the daemon's own goroutine:
+      wait for it — ManualClock.BlockUntil(1) — before advancing the clock. A tick
+      that comes due while the previous one still runs is dropped, not queued,
+      as time.Ticker drops it. [WithDone] ends the loop when its owner's work ends
+      on its own — a stream the peer closed — rather than at the owner's later
+      Stop.
+
+      A nil loop, a nil tick and a non-positive interval panic at the call that
+      passed them, not later inside the spawned goroutine where they would take
+      the process with them.
+    facade:
       - alias:
           - doc: |-
               Loop is the goroutine body a [LoopDaemon] runs. It receives a stop channel,

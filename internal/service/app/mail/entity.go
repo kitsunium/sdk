@@ -1,16 +1,3 @@
-// Package mail — the MIME entity tree and the writer that renders it.
-//
-// The renderer emits the multipart delimiters itself rather than using
-// mime/multipart.Writer, and the reason is one measured line of that package:
-// Writer.CreatePart formats header values VERBATIM, so a Content-Disposition
-// carrying "a\r\nBcc: x@y" is emitted with the injected header intact. Every
-// header written here goes through writeHeader, which runs the injection gate
-// at the point of writing.
-//
-// The parser is the standard library's and always will be — mime/multipart's
-// Reader is what the tests reparse composed messages with, because a test that
-// decodes with the same code that encoded preserves exactly the bug it exists
-// to catch.
 package mail
 
 import (

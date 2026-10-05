@@ -1,5 +1,3 @@
-// Package events — hosts the dispatch: the ordered walk, the halt, the panic
-// guard, and the aggregate.
 package events
 
 import (

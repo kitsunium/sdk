@@ -12,6 +12,7 @@ go_library(
     name = "transform",
     srcs = [
         "codes_gen.go",
+        "doc.go",
         "errors.go",
         "s2.go",
         "transform.go",

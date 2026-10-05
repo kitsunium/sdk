@@ -1,18 +1,3 @@
-// Package selfupdate — privilege escalation: the second, separate opt-in that a
-// replacement into a directory this user cannot write requires.
-// Package updater — privilege escalation, and the explicit consent it now
-// requires.
-//
-// finalizeReplacement falls back to `sudo -n mv` when the plain rename over
-// the running executable is refused for permissions. That fallback used to
-// fire unconditionally, which meant an ordinary gated command — a
-// command nobody asked to install anything — could end up executing a
-// privileged move of a file it had just downloaded. Where sudoers grants
-// NOPASSWD (devcontainers, CI images, plenty of laptops) that completes
-// silently and writes an attacker-chosen file into a root-owned directory.
-//
-// Escalation is now opt-in. Not asking is the default, and the refusal names
-// the two ways forward so it is never a dead end.
 package selfupdate
 
 import (

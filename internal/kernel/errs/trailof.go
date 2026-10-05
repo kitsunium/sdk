@@ -1,6 +1,3 @@
-// Package errs — TrailOf exposes the wrap-trail codes of the deepest *Error in
-// a chain, the read-side companion to the Of-family accessors, enabling
-// structured log decomposition without reparsing the rendered bracket header.
 package errs
 
 import "errors"

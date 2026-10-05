@@ -1,10 +1,3 @@
-// Package validation — compiling the `dive` descent.
-//
-// Descent is EXPLICIT. A nested struct is walked only when its field says
-// dive, never automatically: automatic recursion would walk into time.Time,
-// net.IP and every other struct that happens to be a field, and a rule engine
-// that silently reaches places the author did not name is a rule engine whose
-// report cannot be trusted.
 package validation
 
 import (

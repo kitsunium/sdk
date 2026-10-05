@@ -1,5 +1,3 @@
-// Package health — hosts the opt-in sd_notify wiring. It WIRES the notifier
-// the SDK already ships; it does not reimplement one.
 package health
 
 import (

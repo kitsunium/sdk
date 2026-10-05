@@ -1,11 +1,3 @@
-// Package entitlement - the published keys GitHub signs its OIDC tokens with.
-//
-// Unlike the roster, this set carries no vendor signature: it is authenticated
-// by TLS to a fixed host and nothing else. That is weaker, and it is why a
-// token verified against it grants only a free CI seat — never a licence. The
-// worst a substituted JWKS can do is hand out seats it should not; it cannot
-// make an unlicensed machine licensed, because the device path does not
-// consult it at all.
 package entitlement
 
 import (

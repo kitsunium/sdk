@@ -1,6 +1,3 @@
-// Package proc — the Signal value type: a typed, platform-portable OS signal
-// with Parse / String / OS bridging. The name table is platform-specific and
-// lives in signal_unix.go / signal_other.go.
 package proc
 
 import (

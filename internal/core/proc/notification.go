@@ -1,4 +1,3 @@
-// Package proc — the NotificationValue value type: a parsed sd_notify datagram.
 package proc
 
 // NotificationValue is a parsed sd_notify(3) datagram received by a Listener: the

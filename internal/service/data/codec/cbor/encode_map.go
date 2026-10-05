@@ -1,8 +1,3 @@
-// Package cbor — maps on the encoding side. Pairs are written in the bytewise
-// lexicographic order of their encoded keys, the order RFC 8949 §4.2.1 gives
-// deterministic encoding, so a map encodes to the same bytes on every run;
-// two keys that encode alike — 1 and uint(1) in a map[any]any, two NaNs —
-// are refused rather than written as an invalid map.
 package cbor
 
 import (

@@ -1,4 +1,3 @@
-// Package kit — a watch in a running app: its queue and its consumer.
 package kit
 
 import (

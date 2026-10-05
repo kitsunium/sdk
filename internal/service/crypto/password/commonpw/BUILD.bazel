@@ -4,7 +4,10 @@ package(default_visibility = ["//internal/service:service_consumers"])
 
 go_library(
     name = "commonpw",
-    srcs = ["commonpw.go"],
+    srcs = [
+        "commonpw.go",
+        "doc.go",
+    ],
     embedsrcs = ["xato-net-10-million-passwords-10000.txt"],
     importpath = "github.com/kitsunium/sdk/internal/service/crypto/password/commonpw",
     visibility = [

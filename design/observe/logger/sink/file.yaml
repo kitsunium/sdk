@@ -43,6 +43,15 @@ packages:
             name: CodeCloseFailed
             value: "0x00_03_0E_28"
         type: errs.Code
+    doc: |-
+      Package file declares the codes and sentinels of the logger's file sink,
+      internal/service/observe/logger/sink/file: range 0.3.14.*, allocated to that
+      engine (ADR 0005 service/observe/logger/sink/file block) and declared here
+      since ADR 0160, so the engine declares none.
+
+      Package file — declares the sentinels the file sink's constructor and its
+      Write / Flush / Close methods return. Each var's name equals its errs.Define
+      Reason in SCREAMING_SNAKE form.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/observe/logger/sink/file
@@ -92,8 +101,19 @@ packages:
             private: service/observe/logger/sink/file.Close underlying *os.File.Close returned an error
             public: File close failed
             reason: CLOSE_FAILED
-  - functions:
-      - in:
+  - doc: |-
+      Package file implements a Sink that appends formatted records to an
+      on-disk file. Opens with O_APPEND|O_CREATE|O_WRONLY so concurrent
+      goroutines (and other processes appending to the same file) emit atomic
+      records as long as the payload stays under PIPE_BUF on POSIX systems.
+
+      Rotation is intentionally out of scope for this commit — callers needing
+      rolling files compose this sink with a future sink/rotate wrapper, or
+      with a third-party rotator like lumberjack.v2 in their own application
+      code.
+    functions:
+      - doc: New opens path in append mode and wraps the resulting *os.File as a Sink.
+        in:
           - name: path
             type: string
         name: New

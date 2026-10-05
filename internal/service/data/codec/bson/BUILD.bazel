@@ -12,6 +12,7 @@ go_library(
         "decode_container.go",
         "decode_scalar.go",
         "decode_special.go",
+        "doc.go",
         "encode.go",
         "encode_document.go",
         "encode_primitive.go",

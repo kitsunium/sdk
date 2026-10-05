@@ -1,8 +1,3 @@
-// Package clickhouse — the client seam: the ONLY file that imports the database
-// driver. newClient validates the config, optionally resolves credentials, and
-// builds a lazy database/sql handle via clickhouse-go's OpenDB (no connection
-// until the first INSERT). It returns the handle plus the execBatch closure that
-// delivers a coalesced batch as one multi-row INSERT, confining the driver here.
 package clickhouse
 
 import (

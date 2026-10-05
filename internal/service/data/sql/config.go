@@ -1,5 +1,3 @@
-// Package sql — hosts Config, the parameters every port in this package is
-// built from, and the pool policy it applies.
 package sql
 
 import (

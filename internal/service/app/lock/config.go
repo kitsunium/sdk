@@ -1,6 +1,3 @@
-// Package lock provides the concrete lockers implementing internal/core/app/lock:
-// an in-process locker whose leases really expire, and a file locker whose
-// leases really do not. Stdlib-only. ADR 0052.
 package lock
 
 import (

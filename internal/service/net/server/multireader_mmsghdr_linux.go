@@ -1,6 +1,5 @@
 //go:build linux
 
-// Package server — the recvmmsg message header layout.
 package server
 
 import (

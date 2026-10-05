@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T05:55:00Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # internal/service/data/codec/cbor/
 
 ## Purpose
@@ -42,7 +42,8 @@ input. No new code was needed: every failure is one of the two.
 
 | File | What it holds |
 |---|---|
-| `codec.go` | the `Codec` singleton, `Marshal` (pooled `scratch` buffer, one exact-size copy), `Unmarshal`, `Append`, the stream constructors, the package doc |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `codec.go` | the `Codec` singleton, `Marshal` (pooled `scratch` buffer, one exact-size copy), `Unmarshal`, `Append`, the stream constructors |
 | `errors.go` | the four failure constructors; the two codes and the two sentinels are `internal/core/data/codec/cbor`'s (ADR 0160) |
 | `wire.go` | major types, additional information, simple values, tags 0–3, `appendHead`/`readHead`, the binary16 decoder |
 | `validate.go` | the validator: one resumable, explicit-stack pass accepting exactly one well-formed and valid item within the bounds |

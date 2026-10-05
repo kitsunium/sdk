@@ -1,4 +1,3 @@
-// Package kit — what the privacy command prints.
 package kit
 
 import (

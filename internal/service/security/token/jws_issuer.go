@@ -1,4 +1,3 @@
-// Package token — the JWS compact issuer.
 package token
 
 import (

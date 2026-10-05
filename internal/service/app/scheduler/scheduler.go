@@ -1,4 +1,3 @@
-// Package scheduler — hosts the engine: registration, and the state Run needs.
 package scheduler
 
 import (

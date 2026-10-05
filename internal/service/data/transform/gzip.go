@@ -1,6 +1,3 @@
-// Package transform wraps the stdlib compress/gzip and compress/flate codecs as
-// core/data/transform.Compressor implementations. Blank-importing this package is
-// enough to make "gzip" and "flate" resolvable via the core/data/transform registry.
 package transform
 
 import (

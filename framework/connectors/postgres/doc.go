@@ -1,0 +1,23 @@
+// Package postgres — the credentials a new connection is opened with, read
+// again from the URL each time.
+//
+// Package postgres is kit's PostgreSQL engine (ADR 0004): the one module a
+// kit product imports to keep a database on PostgreSQL, and the only code of
+// the product that imports a PostgreSQL driver — pgx, through database/sql.
+// The product's main declares the database with it:
+//
+//	import "github.com/kitsunium/sdk/framework/connectors/postgres"
+//
+//	var App = kit.NewApp("vigie", intake.Service, desk.Service).With(
+//		kit.Database("database", postgres.Engine()),
+//	)
+//
+// The database's URL is libpq's, as pgx reads it —
+// postgres://user:password@host:5432/database?sslmode=verify-full, or
+// host=… user=… key=value pairs — in the variable <APP>_<NAME>_URL. Outside
+// dev kit refuses one that does not write its sslmode: pgx's default,
+// prefer, falls back to plaintext, and the weak modes let a network attacker
+// impersonate the server. sslmode=disable is accepted when written, for a
+// private network. The engine reads the URL again before each new
+// connection, so a password rotated where it lives is used by the next one.
+package postgres

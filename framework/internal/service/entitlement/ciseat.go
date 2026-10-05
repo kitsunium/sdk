@@ -1,10 +1,3 @@
-// Package entitlement - authorising a CI run instead of a device.
-//
-// A proven CI run costs no device seat, so it is tried before the device path.
-// Every failure here is silent and falls through: not being in CI, having no
-// token, not being covered are all ordinary situations, and the device check
-// is what answers next. Only a device failure is ever reported to a human,
-// because only a device failure is something they can act on.
 package entitlement
 
 import (

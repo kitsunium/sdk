@@ -1,5 +1,3 @@
-// Package session — the AEAD sealer that renders an identifier as a cookie
-// value.
 package session
 
 import (

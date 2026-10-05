@@ -1,7 +1,3 @@
-// Package authz — declares the sentinel *errs.Error outcomes: the four
-// verdicts of the port, and the three construction refusals of the engine in
-// internal/service/security/authz (ADR 0160). Each var's name equals its
-// errs.Define Reason in SCREAMING_SNAKE form.
 package authz
 
 // httpForbidden is RFC 9110 403 — the request was understood and the server

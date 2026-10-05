@@ -1,4 +1,3 @@
-// Package kit — nodes: what every declaration shares, and its source position.
 package kit
 
 import (

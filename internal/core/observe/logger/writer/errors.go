@@ -1,8 +1,3 @@
-// Package writer — declares the sentinels returned by the registry and shared
-// across factories. Each var's name equals its errs.Define Reason in
-// SCREAMING_SNAKE form. DuplicateRegistration is never returned: Register
-// panics at boot with conflictText of it. CodeWriterNil and CodeWriterNameEmpty
-// label boot panics too, spelled in the message (see registry.go).
 package writer
 
 import (

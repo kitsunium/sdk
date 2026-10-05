@@ -1,5 +1,3 @@
-// Package queue — the consumer engine: the pull loop that runs a Handler on a
-// CONSUMER'S goroutine, which is the third axis of ADR 0053's frontier.
 package queue
 
 import (

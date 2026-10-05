@@ -1,5 +1,3 @@
-// Package bson — the encoder's primitive writes: the fixed-width numbers, the
-// strings, the binaries, each little-endian as BSON stores them.
 package bson
 
 import (

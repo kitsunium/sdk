@@ -4,7 +4,10 @@ package(default_visibility = ["//internal/service:service_consumers"])
 
 go_library(
     name = "keytree",
-    srcs = ["keytree.go"],
+    srcs = [
+        "doc.go",
+        "keytree.go",
+    ],
     importpath = "github.com/kitsunium/sdk/internal/service/crypto/kdf/keytree",
     visibility = ["//:__subpackages__"],
     deps = [

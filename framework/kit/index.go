@@ -1,4 +1,3 @@
-// Package kit — secondary indexes of a store.
 package kit
 
 import (

@@ -1,4 +1,3 @@
-// Package kit — the graph: the product as a diagram of what it mounts.
 package kit
 
 import (

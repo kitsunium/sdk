@@ -11,6 +11,7 @@ go_library(
     name = "sqlite",
     srcs = [
         "codes_gen.go",
+        "doc.go",
         "driver.go",
         "driver_none.go",
         "sqlite.go",

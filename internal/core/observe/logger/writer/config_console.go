@@ -1,14 +1,3 @@
-// Package writer — ConsoleConfig value type for the "console" writer.
-//
-// Package writer — declares the optional config Decoder extension that a
-// Factory MAY implement to translate a raw, parsed config map into its typed
-// Config. It mirrors codec's Appender optional-extension convention: consumers
-// detect support with a runtime type assertion and fall back to a default
-// mapping that passes the raw map straight through when the extension is absent.
-//
-// A Factory that parses credentials or other sensitive material out of the raw
-// map MUST NOT echo any option value into an error it returns; callers that
-// surface a Decoder failure name only the writer and the failure kind.
 package writer
 
 import "github.com/kitsunium/sdk/internal/core/observe/logger/level"

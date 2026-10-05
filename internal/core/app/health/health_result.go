@@ -1,5 +1,3 @@
-// Package health — hosts ResultValue and ReportValue, what a probe answers
-// with.
 package health
 
 import "time"

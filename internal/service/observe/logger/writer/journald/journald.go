@@ -1,12 +1,3 @@
-// Package journald registers the "journald" writer factory (ADR 0015): a
-// stdlib unix-datagram sink that ships records to the systemd journal. Importing
-// the package self-registers the factory (no init()), so
-// writer.Open("journald", journald.Config{…}) and YAML FromConfig
-// topologies resolve. Linux-only in practice (the socket is systemd's), but the
-// code is plain stdlib net and builds everywhere; on a host without journald the
-// Open simply fails with JournaldOpenFailed. On Windows, whose AF_UNIX sockets
-// are stream-only, the default dialer cannot connect a datagram socket at all
-// and Open refuses it with UNSUPPORTED_PLATFORM before trying (ADR 0018).
 package journald
 
 import (

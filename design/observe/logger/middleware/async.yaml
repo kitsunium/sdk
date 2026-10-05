@@ -26,6 +26,15 @@ packages:
             name: CodeAsyncCtxCancelled
             value: "0x00_03_11_03"
         type: errs.Code
+    doc: |-
+      Package async declares the codes and sentinels of the logger's asynchronous
+      middleware, internal/service/observe/logger/middleware/async: range 0.3.17.*,
+      allocated to that engine (ADR 0005 service/observe/logger/middleware/async
+      block) and declared here since ADR 0160, so the engine declares none.
+
+      Package async — declares the sentinels returned by the async
+      Sink. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE
+      form.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/observe/logger/middleware/async
@@ -57,14 +66,57 @@ packages:
             public: Async sink aborted due to cancellation
             reason: ASYNC_CTX_CANCELLED
   - constants:
-      - name: DropNewest
+      - doc: |-
+          DropNewest discards the new entry when the ring is full and surfaces
+          BufferFull to the caller. The OnDrop callback fires for the dropped entry.
+        name: DropNewest
         type: DropPolicy
         value: "0"
-      - name: DropOldest
+      - doc: |-
+          DropOldest discards the oldest queued entry to make room for the new one.
+          The OnDrop callback fires for the dropped entry; Write returns nil.
+        name: DropOldest
         type: DropPolicy
         value: "1"
+    doc: |-
+      Package async wraps any corelogger.Sink with a non-blocking ring buffer
+      and a single drainer goroutine, decoupling the producer hot path from
+      the (potentially slow) downstream sink. Producers call Write synchronously
+      but never block on I/O — entries land in the ring and the drainer sips
+      them out.
+
+      When the ring saturates, the configured DropPolicy decides:
+        - DropNewest: the new Write returns BufferFull; the OnDrop callback fires.
+        - DropOldest: the oldest queued entry is silently discarded; the new
+          entry takes its slot. OnDrop fires for the dropped entry.
+
+      Use case: wrap CloudWatch / S3 / HTTP sinks so a slow remote drain never
+      stalls the application's hot path.
+
+      Package async — declares the DropPolicy enum used by the async Sink to
+      decide what happens when the ring buffer saturates. Held as a sibling of
+      async_sink.go so the sink file stays focused on the Sink contract.
+
+      Package async — holds the Config struct consumed by New. Pulled
+      into its own file so async_sink.go stays focused on the Sink contract.
+
+      Package async — declares the goroutine loop that consumes the
+      ring buffer and forwards entries to the downstream sink. Pulled into its
+      own file so async_sink.go stays focused on the Sink contract.
+
+      Package async — holds the recycled payload struct that travels
+      through the ring buffer between the producer (Write) and the consumer
+      (drain goroutine).
+
+      Package async — gathers the small runtime helpers used by the
+      async drainer (yield primitive, channel-closed probe, error swallowers).
+      Pulled out of async_sink.go to keep that file focused on the Sink contract.
     functions:
-      - in:
+      - doc: |-
+          New wraps downstream with a ring + drainer goroutine. cfg is consulted
+          for the buffer size, drop policy and OnDrop callback; zero-value Config
+          is valid and yields the documented defaults.
+        in:
           - name: downstream
             type: corelogger.Sink
           - name: cfg
@@ -76,16 +128,35 @@ packages:
       corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
     path: github.com/kitsunium/sdk/internal/service/observe/logger/middleware/async
     types:
-      - name: DropPolicy
+      - doc: DropPolicy selects how a saturated ring buffer behaves on Write.
+        name: DropPolicy
         underlying: uint8
-      - name: Config
+      - doc: |-
+          Config tunes the async sink at construction time. Every field is optional
+          — the zero-value Config produces a sink with the documented defaults
+          (defaultBufferSize ring, DropNewest policy, no callbacks).
+        name: Config
         struct:
           fields:
-            - name: BufferSize
+            - doc: |-
+                BufferSize is the ring buffer capacity; non-positive falls back to
+                defaultBufferSize (1024 slots).
+              name: BufferSize
               type: int
-            - name: Policy
+            - doc: Policy selects DropNewest (default) or DropOldest behaviour on saturation.
+              name: Policy
               type: DropPolicy
-            - name: OnDrop
+            - doc: |-
+                OnDrop is invoked for every entry the policy discards because the ring
+                is saturated. Useful for wiring a metric counter; nil disables the
+                callback. Fires for producer-side drops (ring full under Write).
+              name: OnDrop
               type: func(missed int)
-            - name: OnError
+            - doc: |-
+                OnError is invoked for every downstream Write failure seen by the
+                drainer goroutine. Async cannot block the producer on a failing
+                downstream, so without this hook those errors are silently lost;
+                the callback gives operators a path to emit a counter or log to a
+                fallback sink. nil disables the callback. Finding #24.
+              name: OnError
               type: func(err error)

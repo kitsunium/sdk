@@ -1,6 +1,3 @@
-// Package statemachine — hosts what a store's owner tells a machine about
-// writes it did not make, and how the machine brings its records and its
-// agenda in line with them.
 package statemachine
 
 import "context"

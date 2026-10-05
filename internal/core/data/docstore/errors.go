@@ -1,15 +1,3 @@
-// Package docstore — declares the sentinel *errs.Error outcomes both engines
-// answer. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE
-// form.
-//
-// No Public and no Private below carries a key or a document. A store key is
-// routinely an e-mail address or the hash of a token, and an index key is
-// usually exactly the value a caller must not learn back from a refusal: the
-// fields name the index and the operation, never what was looked up.
-//
-// The HTTP statuses are spelled as the integers errs.WithHTTPStatus takes,
-// each named after its status: the core imports no net/http to read five
-// numbers (ADR 0160).
 package docstore
 
 // exitConfig matches sysexits EX_CONFIG (78): the store was wired wrong.

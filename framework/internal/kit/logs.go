@@ -1,4 +1,3 @@
-// Package kit — the product's logger and the logs the Studio shows.
 package kit
 
 import (

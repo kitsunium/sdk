@@ -4,7 +4,10 @@ package(default_visibility = ["//internal/service:service_consumers"])
 
 go_library(
     name = "sample",
-    srcs = ["sample_sink.go"],
+    srcs = [
+        "doc.go",
+        "sample_sink.go",
+    ],
     importpath = "github.com/kitsunium/sdk/internal/service/observe/logger/middleware/sample",
     visibility = [
         "//:__subpackages__",

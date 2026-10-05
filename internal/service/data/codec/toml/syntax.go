@@ -1,5 +1,3 @@
-// Package toml — the lexical tables the parser reads bytes through, and the
-// fixed sentences a refusal is made of.
 package toml
 
 // Byte classes, one bit each: a byte may belong to several.

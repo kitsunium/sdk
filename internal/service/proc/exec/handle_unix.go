@@ -1,10 +1,5 @@
 //go:build unix
 
-// Package exec — the process-handle value: a Unix supervision handle
-// implementing the coreproc.Process port over an *os.Process, with group-aware
-// Signal/Stop and a once-only Wait that captures exit status plus wait4 rusage.
-// The concrete type is unexported; Start returns it as the coreproc.Process
-// interface.
 package exec
 
 import (

@@ -1,4 +1,3 @@
-// Package yaml — encoding: collections in flow style, for the flow tag.
 package yaml
 
 import (

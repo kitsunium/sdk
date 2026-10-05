@@ -1,4 +1,3 @@
-// Package resilience — fallback (secondary-operation) policy.
 package resilience
 
 import (

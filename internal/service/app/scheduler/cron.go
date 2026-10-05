@@ -1,14 +1,3 @@
-// Package scheduler provides the concrete half of the scheduling domain: a
-// five-field POSIX cron parser, a fixed-interval schedule, and the engine that
-// fires core/app/scheduler.Job values through core/app/scheduler.Schedule. ADR 0041.
-//
-// The engine depends on internal/kernel/clock.Timed, never on package time
-// directly, so a test drives cadence, missed deadlines and overlap by moving a
-// ManualClock instead of sleeping (ADR 0039).
-//
-// Cross-OS: 100% portable Go (time, context, sync, sync/atomic, strconv,
-// strings). Cron's finest field is the minute, which is deliberately coarser
-// than any platform's timer resolution — see CLAUDE.md §What is guaranteed.
 package scheduler
 
 import (

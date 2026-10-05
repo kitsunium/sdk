@@ -1,4 +1,3 @@
-// Package kit — a store's personal data as the graph shows it.
 package kit
 
 import (

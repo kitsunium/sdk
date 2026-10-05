@@ -1,5 +1,3 @@
-// Package view — the plug-in contract an engine implements to enter the
-// registry.
 package view
 
 // Engine names a registered template engine.

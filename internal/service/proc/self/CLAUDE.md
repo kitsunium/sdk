@@ -18,7 +18,8 @@ outside the SDK.
 
 | File | Role |
 |---|---|
-| `build.go` | package doc, `BuildValue` + `Module(path)`, `ModuleValue`, `ReadBuild`, `ParseBuild`, and the three readings of a recorded version (`fromVersion`, `mainModule`, `dependency`) |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `build.go` | `BuildValue` + `Module(path)`, `ModuleValue`, `ReadBuild`, `ParseBuild`, and the three readings of a recorded version (`fromVersion`, `mainModule`, `dependency`) |
 | `stats.go` | `StatsValue`, `DistributionValue` + `Count` / `Quantile`, `ReadStats`, the runtime/metrics names, `lastGC`, `runtimeCPU` |
 | `cputime_unix.go` | `cpuTime` from `getrusage(RUSAGE_SELF)` — user plus system, every thread |
 | `cputime_other.go` | `cpuTime` as the runtime's estimate, flagged — Windows, Plan 9, wasm |

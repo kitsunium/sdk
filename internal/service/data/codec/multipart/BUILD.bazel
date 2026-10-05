@@ -10,6 +10,7 @@ go_library(
         "counter.go",
         "decoder.go",
         "disposition.go",
+        "doc.go",
         "encoder.go",
         "form.go",
         "limits.go",

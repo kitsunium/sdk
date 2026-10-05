@@ -1,4 +1,3 @@
-// Package server — the net/http adapter.
 package server
 
 import (

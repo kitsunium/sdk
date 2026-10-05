@@ -1,8 +1,5 @@
 //go:build unix
 
-// Package exec — the Unix spellings of a PATH search: one candidate per
-// directory, executable when any execute bit is set, variable names
-// case-sensitive.
 package exec
 
 import (

@@ -1,6 +1,3 @@
-// Package bson — the BSON 1.1 wire vocabulary (bsonspec.org): the element type
-// bytes, the binary subtypes, the bounds every reader and writer shares, and
-// the little-endian reads they are built from.
 package bson
 
 import (

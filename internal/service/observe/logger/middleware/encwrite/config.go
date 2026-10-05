@@ -1,5 +1,3 @@
-// Package encwrite — declares the Config value type consumed by
-// NewEncWriter. Kept in its own file per the one-exported-struct rule.
 package encwrite
 
 import (

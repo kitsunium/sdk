@@ -1,7 +1,3 @@
-// Package view — ranges 0.2.27.* (ADR 0058 core/app/view block) and 0.3.57.*
-// (ADR 0058 service/app/view block, declared here since ADR 0160).
-//
-// Package view — the engine-neutral construction parameters.
 package view
 
 import "io/fs"

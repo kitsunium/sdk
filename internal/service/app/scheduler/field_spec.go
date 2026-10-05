@@ -1,5 +1,3 @@
-// Package scheduler — hosts fieldSpec, the description of one cron field and
-// the parser that turns its text into a membership set.
 package scheduler
 
 import (

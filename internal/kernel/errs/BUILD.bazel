@@ -8,6 +8,7 @@ go_library(
         "accessors.go",
         "code.go",
         "codes.go",
+        "doc.go",
         "error.go",
         "field.go",
         "parse.go",

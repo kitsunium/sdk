@@ -1,11 +1,3 @@
-// Package tlv — shared reflection helpers used by both encoder and decoder.
-//
-// reflectView is the local wrapper that lets package-internal helpers
-// accept reflect values without exposing the concrete reflect.Value type
-// across the encode/decode boundary. bytesFromReflectValue is the only
-// reflection helper currently shared by both sides — the decoder uses
-// the slice fast-path when reconstructing []byte targets, the encoder
-// uses the array fallback when emitting `tagBytes` from an array source.
 package tlv
 
 import "reflect"

@@ -1,6 +1,3 @@
-// Package tlv — reflection-driven encoder shared by Marshal, Append, and
-// the streaming Encoder. Every helper returns the (possibly re-allocated)
-// destination slice plus a wrapped *errs.Error on failure.
 package tlv
 
 import (

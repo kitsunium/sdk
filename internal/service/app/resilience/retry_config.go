@@ -1,4 +1,3 @@
-// Package resilience — retry policy configuration.
 package resilience
 
 import (

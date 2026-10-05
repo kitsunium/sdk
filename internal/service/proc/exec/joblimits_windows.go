@@ -1,15 +1,5 @@
 //go:build windows
 
-// Package exec — spawn-time resource confinement via a Win32 Job Object: the
-// Windows realisation of a Spec's rlimits. A child requesting a mappable Resource
-// is assigned, right after spawn, to a Job Object carrying the limit, so the
-// rlimit "grafts onto" the spawn (the cgroup port is the standalone equivalent).
-// kernel32 is bound directly (syscall.NewLazyDLL, ABI cited, no x/sys).
-//
-// Mappable: ResourceAS/ResourceData → ProcessMemoryLimit; ResourceNProc →
-// ActiveProcessLimit. Every other Resource (NoFile/Core/FSize/Stack/MemLock) has
-// no Job Object analogue and is rejected with UnknownResource before the spawn,
-// honouring the no-silent-field-loss rule.
 package exec
 
 import (

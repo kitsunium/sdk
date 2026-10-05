@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T05:45:00Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # internal/service/data/codec/yaml/
 
 ## Purpose
@@ -214,7 +214,8 @@ decoding failure through the trail.
 
 | File | Role |
 |---|---|
-| `codec.go` | package doc, the registered singleton, `Marshal`/`Unmarshal`/`Append`, the byte cap |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `codec.go` | the registered singleton, `Marshal`/`Unmarshal`/`Append`, the byte cap |
 | `failed.go` | `at`, `syntaxError`, `refused`, `marshalError`; the eleven codes and sentinels are `internal/core/data/codec/yaml`'s (ADR 0160) |
 | `node.go` | the node arena (one slice per document, children by index) and the bounds |
 | `parse.go` | the parser's state and cursor, document markers, directives, duplicate keys |

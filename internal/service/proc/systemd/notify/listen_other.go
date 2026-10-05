@@ -1,6 +1,5 @@
 //go:build !linux
 
-// Package notify — the supervisor (listener) side off Linux: unsupported.
 package notify
 
 import coreproc "github.com/kitsunium/sdk/internal/core/proc"

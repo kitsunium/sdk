@@ -6,6 +6,7 @@ go_library(
     name = "validation",
     srcs = [
         "codes_gen.go",
+        "doc.go",
         "errors.go",
         "path.go",
         "report.go",

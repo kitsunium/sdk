@@ -1,5 +1,3 @@
-// Package secret — the machine-local key file: one crypto.Key, created on
-// first use, the same key for every process that asks at once.
 package secret
 
 import (

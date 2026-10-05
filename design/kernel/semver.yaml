@@ -1,48 +1,224 @@
 apiVersion: kit.kitsunium/design/v2
 domain: kernel/semver
 packages:
-  - functions:
-      - in:
+  - doc: |-
+      Package semver — the parser: a version cut into what precedence reads, in
+      one pass over its bytes and without a copy of any of them.
+
+      Package semver — Go pseudo-versions: the three shapes the modules reference
+      defines, recognised by where their stamp sits, and the revision and time
+      that stamp carries.
+
+      Package semver orders and reads version strings under Semantic Versioning
+      2.0.0, written the way Go writes them: with a leading "v". It is a kernel
+      primitive — stdlib-only, and domain-neutral down to the signatures: every
+      function takes a version string and answers about it, with no release, no
+      update and no product anywhere in the API.
+
+      # The grammar
+
+      A version is
+
+      	vMAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]
+
+      where MAJOR, MINOR and PATCH are decimal numbers without a leading zero,
+      PRERELEASE and BUILD are non-empty lists of dot-separated identifiers made of
+      ASCII letters, digits and hyphens, and a pre-release identifier made of
+      digits only carries no leading zero either. That is SemVer 2.0.0 with Go's
+      two departures from it, the same two golang.org/x/mod/semver makes: the "v"
+      is required, and "vMAJOR" and "vMAJOR.MINOR" are accepted as shorthands for
+      "vMAJOR.0.0" and "vMAJOR.MINOR.0" — with neither a pre-release nor build
+      metadata, which only a full version may carry.
+
+      # Precedence
+
+      [Compare] orders two versions as SemVer §11 does: by MAJOR, MINOR and PATCH
+      numerically, then a release above every one of its pre-releases, then
+      pre-release identifiers left to right — numbers numerically, other
+      identifiers in ASCII order, a number below any other identifier, and a
+      longer list above a shorter one it extends. Build metadata takes no part, so
+      two versions differing only in it compare equal while remaining two strings.
+
+      Numbers are compared as decimal strings — the longer is the larger, then
+      digit by digit — so a component past the range of uint64 still orders
+      exactly, and nothing is converted.
+
+      # Invalid input is an answer, not an error
+
+      No function here returns an error. [IsValid] says whether a string is a
+      version; [Prerelease] of a string that is not one is "", as it is of a
+      release; and [Compare] places every invalid string below every valid one and
+      equal to every other invalid one, so a list sorted with it is totally
+      ordered and the strings it cannot read come first. That is x/mod's contract,
+      kept so a call site moves from one package to the other unchanged.
+
+      # What is not here
+
+      The six functions the SDK calls, and nothing else. There is no Sort:
+      slices.SortFunc(list, semver.Compare) is one, and slices.SortStableFunc keeps
+      versions of equal precedence — one version with different build metadata —
+      in the order they came. There is no Max, which x/mod itself deprecated. And
+      there is no Canonical, Major, MajorMinor or Build: nothing calls them, and
+      each is an addition the day something does.
+
+      # Pseudo-versions
+
+      A Go pseudo-version names a commit rather than a release, in one of the
+      three shapes the Go modules reference defines, each optionally followed by
+      build metadata such as "+incompatible":
+
+      	vX.0.0-yyyymmddhhmmss-abcdefabcdef         no earlier tag
+      	vX.Y.Z-0.yyyymmddhhmmss-abcdefabcdef       after the release vX.Y.(Z-1)
+      	vX.Y.Z-pre.0.yyyymmddhhmmss-abcdefabcdef   after the pre-release vX.Y.Z-pre
+
+      [IsPseudoVersion] recognises one, [PseudoVersionRev] reads the revision it
+      names and [PseudoVersionTime] the commit time it carries. To [Compare], a
+      pseudo-version is an ordinary pre-release, which is what places it between
+      the tags around it.
+
+      # Cost
+
+      Every reading is a substring of its input, found in one pass over its bytes,
+      so nothing here allocates; BENCH.md has the figures, and a race-off
+      allocation gate pins the claim.
+    functions:
+      - doc: |-
+          IsPseudoVersion reports whether v is a Go pseudo-version: a valid version
+          whose pre-release ends in "yyyymmddhhmmss-REVISION", immediately preceded
+          either by nothing, when the version is vX.0.0, or by an identifier "0" —
+          the three shapes of the Go modules reference, with or without build
+          metadata such as "+incompatible".
+
+          It recognises the SHAPE, as the toolchain's own pattern does: a stamp whose
+          fourteen digits are not a real instant still makes a pseudo-version, and
+          [PseudoVersionTime] is what reports that the time does not read.
+        in:
           - name: v
             type: string
         name: IsPseudoVersion
         out:
           - type: bool
-      - in:
+      - doc: |-
+          PseudoVersionRev returns the revision a pseudo-version names — by the
+          toolchain's convention a commit's first twelve hexadecimal digits — and
+          reports whether v is a pseudo-version at all. The revision is returned as
+          written: the grammar admits any ASCII letters and digits.
+        in:
           - name: v
             type: string
         name: PseudoVersionRev
         out:
           - type: string
           - type: bool
-      - in:
+      - doc: |-
+          PseudoVersionTime returns the commit time a pseudo-version carries, in UTC
+          and to the second, and reports whether it could be read: false when v is
+          not a pseudo-version, or when its fourteen digits are not a real instant —
+          a thirteenth month, say — which [IsPseudoVersion] does not judge.
+        in:
           - name: v
             type: string
         name: PseudoVersionTime
         out:
           - type: time.Time
           - type: bool
-      - in:
+      - doc: |-
+          IsValid reports whether v is a version: SemVer 2.0.0 with a leading "v",
+          or one of the shorthands "vMAJOR" and "vMAJOR.MINOR".
+        in:
           - name: v
             type: string
         name: IsValid
         out:
           - type: bool
-      - in:
+      - doc: |-
+          Compare returns -1, 0 or +1 as v orders before, equal to or after w under
+          SemVer precedence. Build metadata is ignored, so v1.0.0+a and v1.0.0+b
+          compare equal.
+
+          An invalid string orders below every valid version and equal to every
+          other invalid string, so Compare is a total order over all strings and
+          slices.SortFunc(list, Compare) puts the unreadable ones first.
+        in:
           - name: v
           - name: w
             type: string
         name: Compare
         out:
           - type: int
-      - in:
+      - doc: |-
+          Prerelease returns the pre-release part of v with its leading hyphen —
+          "-rc.1" for "v1.0.0-rc.1+build" — or "" when v has none: a release, a
+          shorthand, or a string that is not a version, which [IsValid] tells apart.
+        in:
           - name: v
             type: string
         name: Prerelease
         out:
           - type: string
     path: github.com/kitsunium/sdk/internal/kernel/semver
-  - facade:
+  - doc: |-
+      Package semver orders and reads version strings under Semantic Versioning
+      2.0.0, written the way Go writes them — with a leading "v" — and recognises
+      Go pseudo-versions. It is the SDK's replacement for golang.org/x/mod/semver
+      and the pseudo-version functions of golang.org/x/mod/module, with the same
+      names and the same answers, and no module outside the standard library
+      (ADR 0156 §4, published by ADR 0159 §4).
+
+      	semver.IsValid("v1.2.3-rc.1+build.5")             // true
+      	semver.Compare("v1.9.12", "v1.10.0")              // -1: numbers, not text
+      	semver.Compare("v1.0.0-beta.11", "v1.0.0-beta.2") // 1: 11 > 2
+      	semver.Prerelease("v1.0.0-rc.1+build")            // "-rc.1"
+      	slices.SortFunc(tags, semver.Compare)             // unreadable strings first
+
+      # The grammar
+
+      A version is vMAJOR.MINOR.PATCH, optionally followed by -PRERELEASE and then
+      +BUILD: numbers without a leading zero, and dot-separated identifiers of
+      ASCII letters, digits and hyphens, a pre-release identifier made of digits
+      only carrying no leading zero either. As in x/mod, the "v" is required, and
+      "vMAJOR" and "vMAJOR.MINOR" are shorthands for "vMAJOR.0.0" and
+      "vMAJOR.MINOR.0" — with neither a pre-release nor build metadata.
+
+      # Precedence
+
+      [Compare] follows SemVer §11: MAJOR, MINOR and PATCH numerically, a release
+      above every one of its pre-releases, then pre-release identifiers left to
+      right — numbers numerically, other identifiers in ASCII order, a number
+      below any other identifier, a longer list above a shorter one it extends.
+      Build metadata takes no part. Numbers are compared as decimal strings, so a
+      component past the range of uint64 still orders exactly.
+
+      # Invalid input is an answer, not an error
+
+      Nothing here returns an error. [IsValid] says whether a string is a version.
+      [Compare] places every invalid string below every version and equal to every
+      other invalid string, so it is a total order slices.SortFunc can use, and
+      [Prerelease] of an invalid string is "", as it is of a release.
+
+      # Pseudo-versions
+
+      A Go pseudo-version names a commit rather than a release:
+
+      	vX.0.0-yyyymmddhhmmss-abcdefabcdef         no earlier tag
+      	vX.Y.Z-0.yyyymmddhhmmss-abcdefabcdef       after the release vX.Y.(Z-1)
+      	vX.Y.Z-pre.0.yyyymmddhhmmss-abcdefabcdef   after the pre-release vX.Y.Z-pre
+
+      each optionally followed by build metadata such as "+incompatible".
+      [IsPseudoVersion] recognises one; [PseudoVersionRev] and [PseudoVersionTime]
+      read the revision and the commit time it carries, answering false where
+      x/mod answered an error. To [Compare] a pseudo-version is an ordinary
+      pre-release, which is what places it between the tags around it.
+
+      # What is not here
+
+      Six functions, the ones the SDK uses. There is no Sort —
+      slices.SortFunc(list, semver.Compare) is one — no Max, which x/mod itself
+      deprecated, and no Canonical, Major, MajorMinor or Build: each is an
+      addition the day something needs it.
+
+      Nothing here allocates.
+    facade:
       - func:
           doc: |-
             IsValid reports whether v is a version: SemVer 2.0.0 with a leading "v",

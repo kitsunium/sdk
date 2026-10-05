@@ -1,4 +1,3 @@
-// Package kit — a record's version written back.
 package kit
 
 import (

@@ -1,16 +1,3 @@
-// Package redis registers the "redis" writer factory (ADR 0015): a log sink that
-// appends records to a Redis Stream via pipelined XADD over a Unix-domain socket
-// (local-protocol). Importing the package self-registers the factory (no
-// init()), so writer.Open("redis", writer.RedisStreamConfig{…}) resolves. It is a
-// dep-light third-party integration: the github.com/redis/go-redis/v9 import is
-// confined to client.go, in a module of its own (ADR 0157), so pkg/v1 consumers
-// never pull the driver into their graph and a consumer of this writer pulls no
-// other vendor.
-//
-// Credentials: RedisStreamConfig.Credentials is OPTIONAL (a socket-local Redis
-// may have no AUTH) and, when set, supplied programmatically — like the AWS
-// writers, there is no config-file Decoder because a live credential cannot be
-// expressed safely in YAML.
 package redis
 
 import (

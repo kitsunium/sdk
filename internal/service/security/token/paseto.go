@@ -1,14 +1,3 @@
-// Package token — PASETO v4.public: the constructors and the scheme gate.
-//
-// PASETO is the format that answers the question "what if the algorithm were
-// not negotiable". Its header is a version and a purpose — "v4.public." —
-// baked into the signed bytes through the pre-authentication encoding, so
-// there is no "alg" field to substitute and algorithm confusion has nothing to
-// grip. This implementation still binds the key type at construction, because
-// the property should hold for the same reason on both formats rather than by
-// accident on one of them.
-//
-// Only v4.public ships. See the package CLAUDE.md §PASETO for v4.local.
 package token
 
 import (

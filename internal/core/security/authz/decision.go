@@ -1,7 +1,3 @@
-// Package authz — ranges 0.2.26.* (the domain's verdicts) and 0.3.56.* (the
-// engine's construction refusals) — ADR 0057, declared here since ADR 0160.
-//
-// Package authz — hosts Decision, the three-valued verdict a Policy returns.
 package authz
 
 // Decision is what a [Policy] answers: it permits, it refuses, or it has no

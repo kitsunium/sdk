@@ -4,7 +4,10 @@ package(default_visibility = ["//internal/service:service_consumers"])
 
 go_library(
     name = "x25519",
-    srcs = ["x25519.go"],
+    srcs = [
+        "doc.go",
+        "x25519.go",
+    ],
     importpath = "github.com/kitsunium/sdk/internal/service/crypto/agree/x25519",
     visibility = [
         "//:__subpackages__",

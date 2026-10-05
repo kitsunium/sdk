@@ -16,6 +16,16 @@ packages:
             name: CodeRecoverDownstreamNil
             value: "0x00_03_15_02"
         type: errs.Code
+    doc: |-
+      Package recover declares the codes and sentinels of the logger's
+      panic-recovering middleware,
+      internal/service/observe/logger/middleware/recover: range 0.3.21.*, allocated
+      to that engine (ADR 0005 service/observe/logger/middleware/recover block) and
+      declared here since ADR 0160, so the engine declares none.
+
+      Package recover — declares the sentinels returned by the
+      recover Sink. Each var's name equals its errs.Define Reason in
+      SCREAMING_SNAKE form.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/observe/logger/middleware/recover
@@ -37,8 +47,30 @@ packages:
             private: service/observe/logger/middleware/recover.New called with nil downstream
             public: Recover sink requires a non-nil downstream
             reason: RECOVER_DOWNSTREAM_NIL
-  - functions:
-      - in:
+  - doc: |-
+      Package recover — holds the Config struct consumed by NewWithConfig.
+      Pulled into its own file so recover_sink.go stays focused on the Sink
+      contract.
+
+      Package recover — declares the panicValue adapter that
+      converts a recover() return value (any) into the error interface so
+      errs.Wrap can carry it without losing the original Stringer behaviour.
+
+      Package recover wraps a downstream Sink with panic recovery so a buggy
+      downstream cannot bring down the producer's goroutine. Recovered panics
+      surface as Panicked errors so the caller can react without losing the
+      stack trace context.
+
+      Use case: defensive guard around third-party sinks (HTTP clients, AWS
+      SDKs, custom user code) where a panic in Write would otherwise unwind
+      the application's hot path.
+    functions:
+      - doc: |-
+          New wraps downstream with panic recovery. Panics in Write / Flush /
+          Close are converted into Panicked sentinels so the caller stays alive.
+          The absorbed panic is otherwise invisible under a Logger that swallows
+          handler errors — wire NewWithConfig's OnPanic hook to observe it.
+        in:
           - name: downstream
             type: corelogger.Sink
         name: New
@@ -47,7 +79,13 @@ packages:
             type: corelogger.Sink
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NewWithConfig wraps downstream with panic recovery and the supplied
+          Config. A zero-value cfg is equivalent to New: panics in Write / Flush /
+          Close become Panicked sentinels and no callback fires. Setting
+          cfg.OnPanic makes each absorbed panic observable without changing the
+          returned error — see Finding V34.
+        in:
           - name: downstream
             type: corelogger.Sink
           - name: cfg
@@ -62,8 +100,23 @@ packages:
       corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
     path: github.com/kitsunium/sdk/internal/service/observe/logger/middleware/recover
     types:
-      - name: Config
+      - doc: |-
+          Config tunes the recover sink at construction time. Every field is
+          optional — the zero-value Config produces a sink with the documented
+          defaults (no callback), so the panic-absorption behaviour is byte-for-byte
+          identical to New until OnPanic is wired.
+        name: Config
         struct:
           fields:
-            - name: OnPanic
+            - doc: |-
+                OnPanic is invoked for every downstream panic the recover block
+                absorbs in Write / Flush / Close. Because this middleware converts a
+                panic into a typed Panicked error and a Logger that swallows handler
+                errors then discards it, an absorbed runtime bug (nil-deref, slice
+                OOB) is otherwise invisible — no crash, no log line, no signal. This
+                hook mirrors async's OnError and gives operators a path to emit a
+                metric or fall back to a secondary sink. The argument is the Panicked
+                error that was returned to the caller. nil disables the callback.
+                Finding V34.
+              name: OnPanic
               type: func(err error)

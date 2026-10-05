@@ -9,6 +9,7 @@ go_library(
         "compile.go",
         "descend.go",
         "dive.go",
+        "doc.go",
         "element_plan.go",
         "json_level.go",
         "json_reach.go",

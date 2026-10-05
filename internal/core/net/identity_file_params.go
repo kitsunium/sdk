@@ -1,4 +1,3 @@
-// Package net — the on-disk TLS material description.
 package net
 
 // IdentityFileParams names TLS material to read from the filesystem. Every path

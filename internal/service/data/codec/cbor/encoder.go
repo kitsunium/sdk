@@ -1,6 +1,3 @@
-// Package cbor — the streaming encoder: one data item per Encode, written in
-// one Write once it is completely encoded, so a value that cannot be encoded
-// writes nothing.
 package cbor
 
 import (

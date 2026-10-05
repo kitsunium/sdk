@@ -1,6 +1,3 @@
-// Package entitlement - the signed roster: the only statement the binary trusts,
-// and only because the vendor signed it. Origin is irrelevant here; a
-// substituted endpoint can serve any bytes but cannot forge the signature.
 package entitlement
 
 import (

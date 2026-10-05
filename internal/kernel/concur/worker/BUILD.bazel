@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/kernel:kernel_consumers"])
 go_library(
     name = "worker",
     srcs = [
+        "doc.go",
         "every.go",
         "worker.go",
     ],

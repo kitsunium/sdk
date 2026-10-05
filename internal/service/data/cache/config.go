@@ -1,7 +1,3 @@
-// Package cache provides the concrete cache stores implementing
-// internal/core/data/cache: a tagged, stampede-protected memory store over the
-// kernel LRU+TTL primitive, and the chain that puts one store in front of
-// another. Stdlib-only, cross-OS. ADR 0049.
 package cache
 
 import (

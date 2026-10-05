@@ -1,6 +1,3 @@
-// Package redact — hosts the compile-time interface assertion, keeping it out
-// of the production source so the runtime binary carries no diagnostic-only
-// declaration.
 package redact
 
 import coreredact "github.com/kitsunium/sdk/internal/core/security/redact"

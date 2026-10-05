@@ -1,4 +1,3 @@
-// Package multipart — the running tally a LimitsConfig is checked against.
 package multipart
 
 // counter tracks the running part count and aggregate byte total against a

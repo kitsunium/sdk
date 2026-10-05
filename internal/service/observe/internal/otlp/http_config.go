@@ -1,5 +1,3 @@
-// Package otlp — the OTLP/HTTP sender's configuration, which each signal
-// publishes under its own name.
 package otlp
 
 import (

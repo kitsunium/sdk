@@ -1,16 +1,3 @@
-// Package entitlement — the three shapes every error in this package is built
-// with, so the choice at a call site is which sentinel rather than which
-// spelling.
-//
-// The split between the first two is whether this package DECIDED the failure
-// or was TOLD about one. A decision has no cause to carry — nothing failed, a
-// rule was applied to a document — and the sentinel itself is the whole of it.
-// A report from outside has a cause that must survive, because
-// errors.Is(err, fs.ErrNotExist) and the text the operating system wrote are
-// the two things a wrapper most often destroys.
-//
-// The third, annotate, adds a field to an error whose identity belongs to
-// somebody else.
 package entitlement
 
 import (

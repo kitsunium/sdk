@@ -1,4 +1,3 @@
-// Package server — the listener that hands out close-tracking sockets.
 package server
 
 import (

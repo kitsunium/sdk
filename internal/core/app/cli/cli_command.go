@@ -1,5 +1,3 @@
-// Package cli — the declared command: a name, what it says about itself, its
-// flags, and EITHER what it does OR what it contains.
 package cli
 
 // CommandValue declares one command. The tree it forms is the whole

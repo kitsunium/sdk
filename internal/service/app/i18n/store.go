@@ -1,4 +1,3 @@
-// Package i18n — the concrete catalogue, and everything it refuses at load.
 package i18n
 
 import (

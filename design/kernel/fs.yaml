@@ -3,19 +3,156 @@ domain: kernel/fs
 packages:
   - constants:
       - build: "!(linux || darwin || freebsd || openbsd || netbsd || dragonfly || windows)"
+        doc: |-
+          Native reports that this GOOS has no file lock. A caller reads it and
+          refuses where it is wired, rather than at the first contended section.
         name: Native
         type: bool
         value: "false"
       - build: linux || darwin || freebsd || openbsd || netbsd || dragonfly
+        doc: "Native reports that this GOOS has a file lock: flock(2), here."
         name: Native
         type: bool
         value: "true"
       - build: windows
+        doc: "Native reports that this GOOS has a file lock: LockFileEx, here."
         name: Native
         type: bool
         value: "true"
+    doc: |-
+      Package flock takes an exclusive lock on a whole file WITHOUT waiting for it,
+      and gives it back: flock(2) on the Unix kernels that have it, LockFileEx over
+      every byte of the file on Windows (ADR 0081, ADR 0159).
+
+      # Never a blocking call
+
+      [TryLock] answers at once — held, held elsewhere, or a failure of the call —
+      and there is no blocking variant. That is the point of the package rather
+      than a gap in it. A blocking flock(2), and a LockFileEx without
+      LOCKFILE_FAIL_IMMEDIATELY, park the calling thread inside a syscall no
+      context cancellation can reach: a caller whose deadline expired would keep
+      waiting for a lock it no longer wants, and its goroutine would not come back
+      until some other process let go. A caller that must wait polls TryLock on a
+      clock of its own, which is how every file lock in the SDK waits (ADR 0052,
+      ADR 0073).
+
+      # One contract over two primitives, and the row where they are opposites
+
+      Both kernels give the same answer where exclusion between PROCESSES is
+      decided: a second open description of the file — another process, or a
+      second os.OpenFile of the same path in this one — is refused while the first
+      holds the lock, and the holder's death releases it. They give OPPOSITE
+      answers to a second lock taken through the SAME description: flock(2)
+      converts it and returns at once, LockFileEx refuses it. So neither kernel
+      excludes the goroutines of one process that share a descriptor in a way a
+      caller could rely on everywhere, and this package does not pretend to: a
+      caller that shares one descriptor between goroutines puts a gate of its own
+      in front of TryLock. TestTheSameDescriptionIsConvertedOnUnixAndRefusedOnWindows
+      pins both answers.
+
+      The Windows lock is also MANDATORY where flock(2) is advisory, and it covers
+      a byte range — here every byte of the file. flock_windows.go states each
+      difference and what it was measured on; what a caller builds on them is the
+      caller's to say.
+
+      # Where neither exists
+
+      [Native] is false on every GOOS with neither primitive — js, wasip1, plan9,
+      aix, solaris, illumos — and there TryLock and Unlock return
+      errors.ErrUnsupported. A caller reads Native where it is wired and refuses
+      there, under its own code (ADR 0018 §(a)); the package compiles on every
+      GOOS so that the refusal can be written at all.
+
+      # What it returns
+
+      The kernel's own answer. Contention is (false, nil), never an error; any
+      other failure is the errno itself, unwrapped, so a caller wraps it once in
+      its own vocabulary — the convention pathchain set for this family. The
+      package owns no error code.
+
+      Package flock — the honest answer on the platforms with no file lock at all
+      (ADR 0018 §(a): a uniform typed answer where a platform has no native
+      mechanic, never a silent drop and never a build break).
+
+      This set used to include Windows, on the argument that LockFileEx is not
+      flock(2): it locks a byte range rather than a file, its locks are mandatory
+      rather than advisory, and its rules for a second lock inside one process
+      differ again. All three are true, and all three are measured on a real
+      Windows kernel rather than recited. What was wrong was the conclusion — that
+      a primitive behaving *almost* like flock is worth less than none. One whose
+      every difference is measured, written down, and pinned by a test that fails
+      when it changes is not an approximation; it is a second implementation of the
+      same contract, and it is flock_windows.go (ADR 0081).
+
+      What is left here is the set of GOOS values with no equivalent primitive in
+      Go's syscall package — js, wasip1, plan9, aix, solaris and illumos. They get
+      errors.ErrUnsupported from every call, and a caller that read [Native] at
+      construction never makes one.
+
+      Package flock — flock(2), on the kernels that have it.
+
+      flock(2) is not POSIX. It exists on Linux and on every BSD (macOS included)
+      with the same shape, and the tag set above is exactly where Go's syscall
+      package declares it — android and ios reach this file through the linux and
+      darwin tags. The lock belongs to the open file DESCRIPTION: a dup(2)'d
+      descriptor shares it, a second open(2) of the same path does not, and the
+      kernel drops it when the last descriptor on the description closes — which a
+      process's death does. It is ADVISORY: it binds every process that takes it,
+      and nothing else.
+
+      Package flock — LockFileEx, on the kernel that has no flock(2) (ADR 0081).
+
+      LockFileEx is the nearest primitive and it is genuinely a different one, so
+      this file states every difference rather than smoothing it over. A lock is
+      the one primitive whose failures are invisible at the moment they happen and
+      expensive at every later moment, and an emulation that behaves almost like
+      flock(2) is worth less than none, because its caller stops looking. Each row
+      was measured on a real windows-latest kernel before the first backend over it
+      was written (ADR 0081):
+
+      	                                       flock(2)                 LockFileEx
+      	two separate opens, one process        excludes                 excludes
+      	the SAME description locked again      succeeds — a conversion  refused — ERROR_LOCK_VIOLATION
+      	another process while held             excludes                 excludes
+      	enforced against unrelated I/O         no — advisory            yes — mandatory
+      	scope                                  the whole file           a byte range: here, every byte
+
+      # It locks a byte RANGE, so the range is the whole file
+
+      Offset zero, 2^64-1 bytes, spelled MAXDWORD in both length halves — the
+      documented idiom for "everything", and legal past end-of-file ("Locking a
+      region that goes beyond the current end-of-file position is not an error").
+      Any smaller range leaves the bytes outside it readable and writable by every
+      other handle while the lock is held, which is a decision about the file's
+      contents and so the caller's, not this package's.
+
+      # Its locks are MANDATORY, not advisory
+
+      The kernel enforces them against ordinary reads and writes: while the lock
+      is held, another handle's read or write of the file fails with
+      ERROR_LOCK_VIOLATION — a foreign `type` of a held file included. The holder
+      is exempt: the documented rule is per HANDLE, and the handle that placed the
+      lock keeps full access to the range, so the holder reads and writes the file
+      through the very descriptor that carries the lock.
+
+      # A second lock through the same handle is REFUSED, where flock(2) CONVERTS
+
+      This is the row where the two kernels are opposites. flock(LOCK_EX) on a
+      description that already holds LOCK_EX succeeds immediately; LockFileEx on a
+      range an overlapping lock already covers is refused, whichever handle asks
+      and whichever process owns it. Exclusion between the goroutines of one
+      process therefore falls out of the kernel here and does not on Unix, and a
+      caller that wants the same behaviour on both keeps a gate of its own.
     functions:
-      - in:
+      - doc: |-
+          TryLock takes an exclusive lock on the whole of file without waiting.
+
+          It reports (true, nil) when the lock is now held through file, (false, nil)
+          when another open description holds it, and (false, err) when the call
+          itself failed: the kernel's errno, or errors.ErrUnsupported where [Native] is
+          false. Contention is an answer and never an error, so a caller cannot mistake
+          a busy lock for a broken one, nor the reverse.
+        in:
           - name: file
             type: "*os.File"
         name: TryLock
@@ -24,15 +161,104 @@ packages:
             type: bool
           - name: err
             type: error
-      - in:
+      - doc: |-
+          Unlock releases the lock [TryLock] took through file.
+
+          Closing the descriptor would release it too. Unlocking explicitly first
+          keeps the two events apart on purpose: the lock is given up while the
+          descriptor is still valid, so a failure to release is reportable rather than
+          hidden behind a close that "worked".
+        in:
           - name: file
             type: "*os.File"
         name: Unlock
         out:
           - type: error
     path: github.com/kitsunium/sdk/internal/kernel/fs/flock
-  - functions:
-      - in:
+  - doc: |-
+      Package pathchain resolves a path one component at a time and reports what
+      each component IS, instead of only what the whole path finally names.
+
+      # The question os.Stat cannot be asked
+
+      os.Stat answers "what is at the end of this path". os.Lstat answers the same
+      question without following the LAST component. Neither can say whether the
+      path arrived where it did by going through somebody else's redirection, and
+      that is the question a program asks when the path names a resource whose
+      identity is a security property — a lock file, a state directory, a socket.
+
+      O_NOFOLLOW has the same limit and it is a kernel limit, not a Go one: it
+      governs the final component only. A link planted at a PARENT component is
+      traversed by every open, whatever flags it carries.
+
+      # What this package does instead
+
+      [Resolve] walks the path from the filesystem root, holding an open directory
+      handle at every step, and asks each component's own directory what that
+      component is — lstat relative to a descriptor, never a fresh lookup of a
+      path string. It returns one [StepValue] per component, in order, each
+      carrying the mode of the directory it was found in.
+
+      It does not refuse anything. A refusal needs a policy, a policy needs a
+      domain, and this package has neither; what it has is the measurement a
+      policy cannot be written without. The two callers this was built for want
+      opposite verdicts on the same shape — /var/run being a symbolic link is a
+      distribution's decision, /tmp/myapp being one may be an attack — and the
+      difference is in StepValue.Container, not in the link.
+
+      # What it rests on, and what that costs
+
+      The directory handles are [os.Root], whose Unix implementation is
+      openat(dirfd, name, O_NOFOLLOW|O_CLOEXEC|O_DIRECTORY) and whose Windows
+      implementation passes O_NOFOLLOW_ANY — read in go1.27's src/os/root_unix.go
+      and src/os/root_windows.go rather than assumed. That matters because
+      syscall.Openat, the obvious primitive, exists in go1.27's syscall package
+      for linux, aix and wasip1 ONLY: darwin reaches the kernel through libc
+      trampolines that are internal to the standard library and does not even
+      define SYS_OPENAT, so a hand-rolled walk would have served five kernels and
+      silently skipped the sixth. os.Root is the standard library's own openat
+      walk and it is available on every platform the SDK builds for.
+
+      The cost of borrowing it is that os.Root resolves a symbolic link whose
+      target stays inside the root and refuses one whose target leaves it, and
+      neither behaviour is what a walk wants. So this package never asks os.Root
+      to traverse an indirection: it detects one with Lstat, reads it with
+      Readlink, and restarts the walk itself at the target. os.Root is used for
+      exactly one thing — descending into a component already known to be a real
+      directory.
+
+      Package pathchain — the walk's POSITION: one open directory handle per
+      component already entered, so every question is asked of a descriptor this
+      process holds rather than of a path string that could resolve elsewhere.
+
+      Package pathchain — one COMPONENT of a resolved path, described rather than
+      traversed, with the mode of the directory it was found in beside it.
+    functions:
+      - doc: |-
+          Resolve walks path from the filesystem root and returns one [StepValue] per
+          component, in the order they were traversed.
+
+          A relative path is made absolute against the working directory first, so the
+          chain always starts at a root and a caller never has to.
+
+          # It stops where the path stops existing, and that is not an error
+
+          A component that does not exist ends the walk and returns the steps taken so
+          far with a nil error. That is deliberate: the caller this was built for
+          audits a directory it is ABOUT to create, and "the last two components are
+          not there yet" is the ordinary case rather than a fault. Every other
+          failure — a permission denied, a component that is not a directory, an
+          indirection loop — is returned as the *os.PathError the filesystem produced,
+          unwrapped, so the caller's own error vocabulary can wrap it once.
+
+          # The chain describes where resolution WENT
+
+          A step's Path reflects the indirections already followed. Given
+          /pub/app -> /srv/app and a walk of /pub/app/locks, the third step's Path is
+          /srv/app/locks and not /pub/app/locks, because the third component genuinely
+          lives in /srv/app and a caller deciding who could have replaced it must ask
+          about that directory.
+        in:
           - name: path
             type: string
         name: Resolve
@@ -45,53 +271,292 @@ packages:
       fs: io/fs
     path: github.com/kitsunium/sdk/internal/kernel/fs/pathchain
     types:
-      - name: StepValue
+      - doc: |-
+          StepValue describes one component of a resolved path: what that component
+          IS, and who could have put it there.
+
+          The second half is the reason this type exists. Knowing that a component is
+          a symbolic link answers almost nothing on its own, because the answer is
+          "yes" for /tmp on macOS, for /var/run on most Linux distributions, and for
+          C:\Users\All Users on Windows — all of them legitimate, all of them planted
+          by the operating system's installer. What separates those from an attack is
+          not the link, it is the DIRECTORY THE LINK LIVES IN: a link in a directory
+          only root can write was put there by root, and a link in a world-writable
+          directory was put there by anybody at all.
+
+          So every step carries Container, the mode of the directory the component was
+          looked up in, read by fstat on a handle this package held open rather than
+          by a second path lookup that could resolve somewhere else.
+        name: StepValue
         struct:
           fields:
-            - name: Path
+            - doc: |-
+                Path is the path as resolved up to and including this component. It
+                reflects the indirections already followed, so it is where the component
+                actually lives rather than what the caller typed.
+              name: Path
               type: string
-            - name: Name
+            - doc: Name is this component alone, with no separator.
+              name: Name
               type: string
-            - name: Container
+            - doc: |-
+                Container is the mode of the directory this component was looked up in.
+
+                On Unix its permission bits answer "who could have created this entry".
+                On Windows os.Stat synthesises the bits from one read-only attribute, so
+                they answer nothing there and a caller needing that answer must get it
+                from the platform's own access-control model. This package reports what
+                it read and takes no position on what it means.
+              name: Container
               type: fs.FileMode
-            - name: Mode
+            - doc: |-
+                Mode is the mode of the component itself, as lstat reports it: an
+                indirection is described here, never traversed to describe its target.
+              name: Mode
               type: fs.FileMode
-            - name: Info
+            - doc: |-
+                Info is the whole of that lstat answer — Mode is Info.Mode() — for what
+                a mode does not say. On Unix, Info.Sys() is the *syscall.Stat_t naming
+                the component's OWNER, which is how a policy tells a component this
+                account or root created from one another account did. It is read the
+                way Container is, relative to the handle of the directory the component
+                was found in, never by a second lookup of Path; and like Mode it
+                describes an indirection itself, never its target.
+              name: Info
               type: fs.FileInfo
-            - name: Target
+            - doc: |-
+                Target is where the indirection points, exactly as the filesystem stores
+                it — relative or absolute, unresolved. It is empty unless Indirect.
+              name: Target
               type: string
-            - name: Indirect
+            - doc: |-
+                Indirect records that this component is a symbolic link on Unix or a
+                reparse point on Windows, so resolving the path CONTINUED somewhere the
+                component's own name does not say.
+              name: Indirect
               type: bool
   - constants:
-      - name: RightAddFile
+      - blockDoc: |-
+          Access rights (winnt.h), in the vocabulary GrantsAnyone takes. Each carries
+          the name it has on a DIRECTORY; where the same bit means something else on a
+          FILE — which onFilesWithin asks about — that name is given too, and the
+          duality is the point: an inherited entry granting 0x0002 lets an account
+          create entries in the directory AND write the data of every file created
+          there.
+        doc: |-
+          RightAddFile is FILE_ADD_FILE: create a file at a free name. On a file
+          the same bit is FILE_WRITE_DATA.
+        name: RightAddFile
         type: uint32
         value: "0x0002"
-      - name: RightAddSubdirectory
+      - blockDoc: |-
+          Access rights (winnt.h), in the vocabulary GrantsAnyone takes. Each carries
+          the name it has on a DIRECTORY; where the same bit means something else on a
+          FILE — which onFilesWithin asks about — that name is given too, and the
+          duality is the point: an inherited entry granting 0x0002 lets an account
+          create entries in the directory AND write the data of every file created
+          there.
+        doc: |-
+          RightAddSubdirectory is FILE_ADD_SUBDIRECTORY: create a directory — or a
+          junction — at a free name. On a file the same bit is FILE_APPEND_DATA.
+        name: RightAddSubdirectory
         type: uint32
         value: "0x0004"
-      - name: RightDeleteChild
+      - blockDoc: |-
+          Access rights (winnt.h), in the vocabulary GrantsAnyone takes. Each carries
+          the name it has on a DIRECTORY; where the same bit means something else on a
+          FILE — which onFilesWithin asks about — that name is given too, and the
+          duality is the point: an inherited entry granting 0x0002 lets an account
+          create entries in the directory AND write the data of every file created
+          there.
+        doc: |-
+          RightDeleteChild is FILE_DELETE_CHILD: unlink an entry of this directory
+          WITHOUT owning it — the one right that turns an entry somebody created
+          into an entry somebody else may replace.
+        name: RightDeleteChild
         type: uint32
         value: "0x0040"
-      - name: RightDelete
+      - blockDoc: |-
+          Access rights (winnt.h), in the vocabulary GrantsAnyone takes. Each carries
+          the name it has on a DIRECTORY; where the same bit means something else on a
+          FILE — which onFilesWithin asks about — that name is given too, and the
+          duality is the point: an inherited entry granting 0x0002 lets an account
+          create entries in the directory AND write the data of every file created
+          there.
+        doc: |-
+          RightDelete is DELETE, the standard right that removes the object it is
+          held on — a FILE, when it is asked of what files inherit, rather than an
+          entry of the directory.
+        name: RightDelete
         type: uint32
         value: "0x00010000"
-      - name: RightWriteDAC
+      - blockDoc: |-
+          Access rights (winnt.h), in the vocabulary GrantsAnyone takes. Each carries
+          the name it has on a DIRECTORY; where the same bit means something else on a
+          FILE — which onFilesWithin asks about — that name is given too, and the
+          duality is the point: an inherited entry granting 0x0002 lets an account
+          create entries in the directory AND write the data of every file created
+          there.
+        doc: |-
+          RightWriteDAC is WRITE_DAC: rewrite the list, and so grant itself the
+          rest.
+        name: RightWriteDAC
         type: uint32
         value: "0x00040000"
-      - name: RightWriteOwner
+      - blockDoc: |-
+          Access rights (winnt.h), in the vocabulary GrantsAnyone takes. Each carries
+          the name it has on a DIRECTORY; where the same bit means something else on a
+          FILE — which onFilesWithin asks about — that name is given too, and the
+          duality is the point: an inherited entry granting 0x0002 lets an account
+          create entries in the directory AND write the data of every file created
+          there.
+        doc: "RightWriteOwner is WRITE_OWNER: take ownership, and so rewrite the list."
+        name: RightWriteOwner
         type: uint32
         value: "0x00080000"
-      - name: ReplaceRights
+      - blockDoc: |-
+          The three questions the SDK's directory rules ask, as masks. RightWriteDAC
+          and RightWriteOwner are in every one of them: an account that can rewrite
+          the list, or take ownership and then rewrite it, can grant itself the rest —
+          a right to become writable is a right to write.
+        doc: |-
+          ReplaceRights is what lets its holder take away an entry it did not
+          create — the Windows spelling of the Unix rule that refuses 0777 and
+          accepts 0777|sticky. RightAddFile is deliberately not in it: creating an
+          entry at a free name is exactly what the sticky bit permits.
+        name: ReplaceRights
         type: uint32
         value: "786496"
-      - name: CreateRights
+      - blockDoc: |-
+          The three questions the SDK's directory rules ask, as masks. RightWriteDAC
+          and RightWriteOwner are in every one of them: an account that can rewrite
+          the list, or take ownership and then rewrite it, can grant itself the rest —
+          a right to become writable is a right to write.
+        doc: |-
+          CreateRights is what lets its holder put a DIRECTORY at a name nobody has
+          taken. A path component is always a directory — a junction and a
+          directory symbolic link are both created with FILE_ADD_SUBDIRECTORY, and
+          a file cannot be a component of a longer path — so this is the question
+          to ask of the directory HOLDING a component.
+        name: CreateRights
         type: uint32
         value: "786436"
-      - name: ContentRights
+      - blockDoc: |-
+          The three questions the SDK's directory rules ask, as masks. RightWriteDAC
+          and RightWriteOwner are in every one of them: an account that can rewrite
+          the list, or take ownership and then rewrite it, can grant itself the rest —
+          a right to become writable is a right to write.
+        doc: |-
+          ContentRights is what lets its holder alter or remove a FILE created in
+          the directory, read off the entries such a file inherits: write or
+          append its data, delete it, or rewrite its list. It is asked through
+          onFilesWithin.
+        name: ContentRights
         type: uint32
         value: "851974"
+    doc: |-
+      Package winacl — the reader: a directory's discretionary list, fetched with
+      GetNamedSecurityInfoW and walked entry by entry with GetAce.
+
+      # The cost estimate that deferred it three times, re-checked
+
+      ADR 0081 §Alternatives priced a DACL check at roughly 250 lines of ABI and
+      deferred it; ADR 0082 §Deferred carried that forward unchanged. Reading
+      go1.27's syscall package rather than assuming shrinks it to two entry points,
+      because the standard library already exports everything else this needs:
+
+        - syscall.StringToSid builds a SID from its string form, so the well-known
+          identifiers cost nothing (security_windows.go, ConvertStringSidToSidW);
+        - (*syscall.SID).String renders one back, so the comparison is a string
+          comparison and EqualSid is not needed at all;
+        - syscall.LocalFree releases the security descriptor.
+
+      What is left is GetNamedSecurityInfoW and GetAce, bound from advapi32.dll
+      with syscall.NewLazyDLL — the same discipline ADR 0081 used to bind
+      LockFileEx from kernel32 (internal/kernel/fs/flock), and for the same
+      reason: golang.org/x/sys is banned SDK-wide (ADR 0018), and binding two
+      stable exports adds no module, no go.sum entry and no MODULE.bazel change.
+
+      # Every way to the end of the list is named
+
+      The walk reaches a verdict only by reading the whole list. Every failure on
+      the way — a path that cannot be converted, an object whose security
+      information cannot be read, an ACE that cannot be fetched — answers "no
+      grant found" AND names what stopped it, so a caller can tell it from the
+      verdict. Neither answer is a refusal: the reader decides nothing (see the
+      package comment), and the SDK's two callers resolve "could not look" in
+      opposite directions, each for a reason of its own.
+
+      Package winacl — the hypothetical accounts a DACL is evaluated against, and
+      why one map keyed by SID is the wrong shape.
+
+      Package winacl reads a Windows directory's discretionary access control list
+      and answers one question of it: does an identifier meaning ANYBODY —
+      Everyone, Authenticated Users, BUILTIN\Users — hold a right, on the directory
+      itself or on the files that will be created in it?
+
+      # Why a list and not a mode
+
+      On Windows os.Stat has no permission bits to read. It SYNTHESISES a mode
+      from FILE_ATTRIBUTE_READONLY, so every writable directory reports 0777 with
+      no sticky bit and every read-only one 0555, and a rule written against the
+      mode — "other-write and not sticky", "other-write at all" — refuses every
+      directory a caller could name. The question such a rule asks is perfectly
+      answerable on this platform; it is just not a mode. It is the directory's
+      DACL, and this package is the one reader of it the SDK has: a second reader
+      would be a second place to get eight ACE shapes, the deny subtraction and the
+      NULL DACL wrong (ADR 0084, ADR 0086, ADR 0095).
+
+      # Two masks, because one list answers two questions with different bits
+
+      GrantsAnyone takes onDirectory, asked of the entries that apply to the
+      directory itself, and onFilesWithin, asked of the entries the FILES created
+      in it will inherit. The second has no Unix counterpart: a file created 0600
+      on Unix is 0600 whatever its directory allows, while on Windows the mode
+      passed to os.OpenFile means nothing and a new file takes the directory's
+      inheritable entries instead. [ReplaceRights], [CreateRights] and
+      [ContentRights] name the three questions the SDK's directory rules ask, and
+      the single rights they are built from are exported beside them; WHICH mask a
+      caller asks, of which directory, is the caller's rule.
+
+      # It measures and never decides
+
+      GrantsAnyone reports a grant FOUND, or no grant found, and names in observed
+      what it found or what stopped it — and observed is empty only when the list
+      was read to the end and grants nothing asked about. "Could not look" is
+      therefore never "looked, and nobody may write", and what a caller does with
+      the first is the caller's decision: the SDK's two callers make opposite ones
+      on purpose (ADR 0084 §D5, ADR 0095). That is the rule of this kernel family:
+      measure here, refuse in the domain.
+
+      # Bound with no dependency
+
+      The reader is two advapi32 exports, GetNamedSecurityInfoW and GetAce, bound
+      with syscall.NewLazyDLL — golang.org/x/sys is banned SDK-wide (ADR 0018) —
+      and the standard library supplies the rest: syscall.StringToSid,
+      (*syscall.SID).String and syscall.LocalFree. A SID is compared by byte
+      equality on its rendered string, so EqualSid is never bound. The reader is
+      in dacl_windows.go and tokens_windows.go; this file, which every platform
+      compiles, holds only the vocabulary, so a rule can name its masks in a file
+      of its own without a build tag.
     functions:
       - build: windows
+        doc: |-
+          GrantsAnyone reports whether dir's DACL grants a right in onDirectory to an
+          identifier meaning anybody — Everyone, Authenticated Users, BUILTIN\Users —
+          or a right in onFilesWithin through the entries the files created in dir
+          inherit. A zero mask asks nothing of its half.
+
+          Every discretionary ACE shape is decoded, denials are subtracted in list
+          order and per modelled account, and a NULL DACL is read as the full grant it
+          is; an EMPTY one, the opposite, grants nobody anything and falls out of the
+          walk as no grant. observed names the grant found ("S-1-1-0=0x40"), or — with
+          granted false — what kept a verdict from being reached: the Win32 status
+          ("GetNamedSecurityInfoW=5"), a path that is not one
+          ("UTF16PtrFromString=…"), or the entry the walk could not fetch
+          ("GetAce#3"). It is EMPTY only when the list was read to the end and grants
+          nothing asked about. What a caller does with "no verdict" is the caller's
+          decision — the reader takes none.
         in:
           - name: dir
             type: string

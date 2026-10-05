@@ -1,5 +1,3 @@
-// Package view — the cycle detection the trust-type scan needs, kept in its own
-// file so scan.go holds the walk and nothing else.
 package view
 
 import "reflect"

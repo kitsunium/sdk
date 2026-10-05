@@ -1,8 +1,3 @@
-// Package msgpack — the MessagePack wire vocabulary: every format byte of the
-// specification (github.com/msgpack/msgpack/blob/master/spec.md), the width of
-// the length or value field that follows each one, and the 256-entry table
-// that turns a header byte into a description both the decoder and the stream
-// framer read, so the two cannot disagree about where a value ends.
 package msgpack
 
 // Fix-form prefixes, masks and bounds (spec.md §Formats). A fix form carries

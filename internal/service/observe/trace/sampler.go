@@ -1,4 +1,3 @@
-// Package trace — the three samplers, and the fraction that is refused.
 package trace
 
 import (

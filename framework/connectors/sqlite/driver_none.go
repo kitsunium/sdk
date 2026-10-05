@@ -1,7 +1,5 @@
 //go:build dragonfly || illumos || solaris
 
-// Package sqlite — no driver on dragonfly, illumos and solaris, which
-// modernc.org/sqlite has no port to.
 package sqlite
 
 // driverLinked is false where modernc.org/sqlite has no port (its libc

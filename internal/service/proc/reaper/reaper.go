@@ -1,10 +1,3 @@
-// Package reaper — the PID1 / subreaper zombie collector backing pkg/v1/proc/reaper.
-//
-// New returns a coreproc.Reaper whose concrete behaviour is selected at build
-// time: a real SIGCHLD-driven waitpid loop on Unix (reaper_unix.go) and a
-// degrade-to-no-op stub elsewhere (reaper_other.go). SetChildSubreaper and
-// IsPID1 are likewise platform-split. This file holds only the cross-platform
-// Option surface so the option type is declared once.
 package reaper
 
 // Option configures a reaper returned by New. Options are applied in order; an

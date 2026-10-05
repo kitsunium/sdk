@@ -1,16 +1,3 @@
-// Package async wraps any corelogger.Sink with a non-blocking ring buffer
-// and a single drainer goroutine, decoupling the producer hot path from
-// the (potentially slow) downstream sink. Producers call Write synchronously
-// but never block on I/O — entries land in the ring and the drainer sips
-// them out.
-//
-// When the ring saturates, the configured DropPolicy decides:
-//   - DropNewest: the new Write returns BufferFull; the OnDrop callback fires.
-//   - DropOldest: the oldest queued entry is silently discarded; the new
-//     entry takes its slot. OnDrop fires for the dropped entry.
-//
-// Use case: wrap CloudWatch / S3 / HTTP sinks so a slow remote drain never
-// stalls the application's hot path.
 package async
 
 import (

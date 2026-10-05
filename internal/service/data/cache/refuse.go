@@ -1,5 +1,3 @@
-// Package cache — the refusals every store shares, and the wrapping rule for
-// a caller's fill error.
 package cache
 
 import (

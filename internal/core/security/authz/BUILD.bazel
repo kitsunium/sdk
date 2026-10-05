@@ -9,6 +9,7 @@ go_library(
         "authz.go",
         "codes_gen.go",
         "decision.go",
+        "doc.go",
         "errors.go",
         "request_value.go",
     ],

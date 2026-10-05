@@ -1,4 +1,3 @@
-// Package proc — the ExitValue value type: the outcome of a finished process.
 package proc
 
 import "time"

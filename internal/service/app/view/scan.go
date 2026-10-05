@@ -1,4 +1,3 @@
-// Package view — the trust-type scan that runs BEFORE the template does.
 package view
 
 import (

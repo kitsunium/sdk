@@ -2,38 +2,119 @@ apiVersion: kit.kitsunium/design/v2
 domain: framework/gate
 packages:
   - aliases:
-      - name: Policy
+      - doc: |-
+          Policy is one product's gate policy: what runs unchecked, what must never be
+          gated, and what a mandated upgrade does. Its zero value is refused by
+          Validate.
+        name: Policy
         target: coregate.PolicyValue
-      - name: Decision
+      - doc: |-
+          Decision is what the gate concluded about one invocation. It carries no
+          method that acts.
+        name: Decision
         target: coregate.DecisionValue
-      - name: UpdateAction
+      - doc: |-
+          UpdateAction is what happens when the vendor mandates a newer build. Its zero
+          value is unclaimed, because refusing and upgrading are opposite answers.
+        name: UpdateAction
         target: coregate.UpdateAction
-      - name: Outcome
+      - doc: |-
+          Outcome is what the caller should do with an invocation. Its zero value is
+          unclaimed, so a decision nobody made never reads as "allow".
+        name: Outcome
         target: coregate.Outcome
     constants:
-      - name: CodePolicyInvalid
+      - doc: CodePolicyInvalid identifies a gate policy that could not be used as written.
+        name: CodePolicyInvalid
         type: errs.Code
         value: "0x00_02_24_01"
-      - name: UpdateRefuse
+      - doc: UpdateRefuse stops the invocation and reports the floor.
+        name: UpdateRefuse
         type: UpdateAction
         value: "1"
-      - name: UpdateApply
+      - doc: UpdateApply asks the caller to upgrade and re-run the invocation.
+        name: UpdateApply
         type: UpdateAction
         value: "2"
-      - name: UpdateWarn
+      - doc: UpdateWarn runs the invocation anyway and reports the floor alongside it.
+        name: UpdateWarn
         type: UpdateAction
         value: "3"
-      - name: OutcomeAllow
+      - doc: OutcomeAllow runs the invocation.
+        name: OutcomeAllow
         type: Outcome
         value: "1"
-      - name: OutcomeRefuse
+      - doc: OutcomeRefuse stops the invocation; Decision.Cause says why.
+        name: OutcomeRefuse
         type: Outcome
         value: "2"
-      - name: OutcomeUpgrade
+      - doc: OutcomeUpgrade asks the caller to upgrade and re-run.
+        name: OutcomeUpgrade
         type: Outcome
         value: "3"
+    doc: |-
+      Package gate decides whether one invocation of a distributed binary may run.
+
+      A product that verifies an entitlement at start-up answers three questions
+      before it does any work, and they are usually answered by hand, in a root
+      command, in code nobody revisits:
+
+        - Is THIS invocation subject to the check at all?
+        - The vendor mandates a newer build. Refuse, upgrade, or warn?
+        - When the answer is no, what should the process do about it?
+
+      This package owns the first two as values and leaves the third to you.
+
+      # It performs nothing
+
+      [Decide] does not verify — that is framework/entitlement. It does not upgrade —
+      that is framework/selfupdate. And it never ends your process. It reads what your
+      verifier returned and says what to do; the effects stay in your control flow,
+      where they can be refused, logged or tested.
+
+      	decision := gate.Decide(policy, invocation.Path[1:], func() error {
+      		_, err := service.Verify(time.Now())
+      		return err
+      	})
+      	switch decision.Outcome {
+      	case gate.OutcomeAllow:
+      		// run the command; decision.FloorUnmet may still want reporting
+      	case gate.OutcomeUpgrade:
+      		// upgrade AT MOST ONCE, then re-run
+      	default:
+      		fmt.Fprintln(os.Stderr, decision.Cause)
+      		os.Exit(errs.ExitCodeOf(decision.Cause))
+      	}
+
+      # The policy refuses to be unsafe
+
+      [Policy].Validate reports every fault at once rather than the first, and two
+      of them are lockouts rather than typos: a policy that exempts nothing cannot
+      be repaired from inside the binary, and a policy that gates its own recovery
+      command leaves a machine whose entitlement lapsed with no path back short of
+      reinstalling. [Policy].RecoveryPaths is what turns the second from a comment
+      into a construction-time refusal.
     functions:
-      - in:
+      - doc: |-
+          Decide classifies one invocation.
+
+          Exemption is checked FIRST, and verify is not CALLED when it holds — which
+          is why this takes a function rather than an error. A shell-completion hook or
+          a `license status` on a machine whose licence is broken must not pay for a
+          network round trip, and neither should have to remember not to run one.
+
+          The version floor is checked BEFORE a refusal is propagated, because an
+          out-of-date binary must be told to upgrade whether or not its entitlement is
+          also in order.
+
+          It takes policy, your gate policy — a nil one refuses everything, including a
+          verification that would have passed; path, the command path relative to the
+          root with the root itself NOT included, where nil is the bare root
+          invocation; and verify, your entitlement verification, CALLED AT MOST ONCE
+          and only when the invocation is not exempt, with a nil verify refusing.
+
+          It returns what to do, and everything the verifier said.
+        in:
           - name: policy
             type: "*Policy"
           - name: path
@@ -58,82 +139,340 @@ packages:
             value: "0x00_02_24_01"
         type: errs.Code
     constants:
-      - name: OutcomeAllow
+      - doc: |-
+          OutcomeAllow runs the invocation. Either it was exempt, or the
+          entitlement verified and no floor stood in the way.
+        name: OutcomeAllow
         type: Outcome
         value: "1"
-      - name: OutcomeRefuse
+      - doc: |-
+          OutcomeRefuse stops the invocation. DecisionValue.Cause carries the
+          refusal the verifier produced, so the caller maps it to an exit status
+          and an operator-facing sentence with errs.CodeOf or errors.Is.
+        name: OutcomeRefuse
         type: Outcome
         value: "2"
-      - name: OutcomeUpgrade
+      - doc: |-
+          OutcomeUpgrade asks the caller to upgrade and re-run this invocation.
+
+          Reached only when the entitlement verified, the vendor mandates a newer
+          build, and the policy said UpdateApply. A caller that cannot upgrade
+          treats it as OutcomeRefuse with the same Cause.
+        name: OutcomeUpgrade
         type: Outcome
         value: "3"
-      - name: UpdateRefuse
+      - doc: |-
+          UpdateRefuse stops the invocation and reports the floor. The caller
+          tells the operator which version is required; nothing is downloaded and
+          nothing is replaced.
+
+          This is the conservative answer and the right one when the binary may be
+          running somewhere the operator did not put it.
+        name: UpdateRefuse
         type: UpdateAction
         value: "1"
-      - name: UpdateApply
+      - doc: |-
+          UpdateApply asks the caller to upgrade and re-run the invocation.
+
+          The gate does NOT perform the upgrade — see the package doc. It reports
+          that the caller should, which keeps the network access, the signature
+          verification and the process replacement in the caller's own control
+          flow where they can be refused, logged or tested.
+
+          A caller acting on it must upgrade AT MOST ONCE per invocation: a floor
+          no published release satisfies — a roster asking for v9.9.9 while the
+          mirror serves v1.5.10 — otherwise upgrades to no effect, re-runs, is
+          refused again and loops forever.
+        name: UpdateApply
         type: UpdateAction
         value: "2"
-      - name: UpdateWarn
+      - doc: |-
+          UpdateWarn runs the invocation anyway and reports the floor alongside it.
+
+          It trades enforcement for availability on purpose, and it is the only
+          action here that lets an out-of-date build keep working. Choose it when
+          the floor is advice; choose UpdateRefuse when it is a requirement.
+        name: UpdateWarn
         type: UpdateAction
         value: "3"
+    doc: |-
+      Package gate — the dotted-quad code range this domain owns.
+
+      Package gate — what the gate decided, and why.
+
+      Package gate — the one refusal this domain mints.
+
+      It is one rather than several on purpose. Every fault a policy can carry is
+      the same kind of fault — somebody wrote a policy that cannot do its job — and
+      Validate joins them so a caller fixing one sees all of them. Splitting the
+      range would give a caller several codes to branch on for a condition with a
+      single response: fix the policy and restart.
+
+      Package gate decides whether one invocation of a distributed binary may run.
+
+      A product that verifies an entitlement at start-up has three questions to
+      answer before it does any work, and they are usually answered by hand, in a
+      root command, in code nobody revisits:
+
+        - Is THIS invocation subject to the check at all? `version` and `help`
+          carry nothing to protect, and a command that repairs the licence must
+          stay reachable when the licence is what is broken.
+        - The vendor mandates a newer build. Refuse, upgrade, or warn?
+        - When the answer is no, what should the process do about it?
+
+      This package owns the first two as VALUES and leaves the third entirely to
+      the caller.
+
+      # What it does not do
+
+      It does not verify anything — that is `entitlement`. It does not upgrade
+      anything — that is `selfupdate`. And it never ends your process: a library
+      that decides on your behalf whether the process should still be alive makes
+      the decision untestable and skips every deferred function, which is the same
+      reason `cli` refuses [flag.ExitOnError].
+
+      The service's Decide is a pure classification. The caller runs the verifier,
+      reads the decision, and performs whatever the decision names.
+
+      # The exemption list is the security-relevant part
+
+      An exemption is a command that runs WITHOUT the check, so the list is an
+      attack surface and a lockout risk at the same time — too wide and the gate is
+      decoration, too narrow and a machine whose licence lapsed has no way back.
+
+      Two failure modes follow, and the shapes here address them separately.
+
+      A name-only match is too coarse. `skill` on its own prints install guidance
+      and must not require a licence; `skill install` does real work and must. One
+      list cannot express both, so there are two: [PolicyValue.ExemptExact] matches
+      a whole path, [PolicyValue.ExemptSubtree] matches a path and everything under
+      it.
+
+      And the recovery hatch is easy to lose. A policy that gates the very command
+      an operator would run to repair a lapsed licence locks the machine out with
+      no path back — reachable only by reinstalling the binary. That is not left to
+      a comment: [PolicyValue.RecoveryPaths] names those commands, and
+      [PolicyValue.Validate] REFUSES a policy in which any of them is gated.
+
+      Package gate — the policy value: which invocations are exempt, and what a
+      mandated upgrade does.
+
+      Package gate — what a mandated upgrade does.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/framework/internal/core/gate
     types:
-      - methods:
-          - name: String
+      - doc: |-
+          Outcome is what the caller should do with an invocation.
+
+          The zero value is unclaimed for the same reason UpdateAction's is: a decision
+          nobody made must not read as "allow". A caller switching on this and falling
+          through its cases gets OutcomeUnset, which is the refusing direction.
+        methods:
+          - doc: |-
+              String names the outcome for a diagnostic, spelling the unclaimed zero value
+              "unset" rather than inventing a name for it.
+            name: String
             out:
               - type: string
             recv: value
         name: Outcome
         underlying: uint8
-      - name: DecisionValue
+      - doc: |-
+          DecisionValue is what the gate concluded about one invocation.
+
+          It is a value and carries no method that acts: the caller performs whatever
+          Outcome names. Nothing here ends a process, opens a socket or writes a file.
+        name: DecisionValue
         struct:
           fields:
-            - name: Outcome
+            - doc: Outcome is what to do.
+              name: Outcome
               type: Outcome
-            - name: Cause
+            - doc: |-
+                Cause is the refusal the verifier produced, or nil.
+
+                It is carried rather than re-labelled so the caller keeps everything the
+                domain said: errors.Is answers on entitlement's sentinels and
+                errs.CodeOf on its codes, through this field, exactly as if the caller
+                had held the verifier's error itself. A gate that summarised the cause
+                would force every consumer to match on text.
+
+                Non-nil with OutcomeUpgrade too: the floor refusal is what SAYS which
+                version is required, and a caller that upgrades needs to read it.
+              name: Cause
               type: error
-            - name: Exempt
+            - doc: |-
+                Exempt records that this invocation was never checked, as opposed to
+                checked and allowed.
+
+                The two are the same Outcome and a very different fact. A daemon that
+                seeds a watchdog from a verification must not seed it from an exemption:
+                no verification happened, so there is no grant, no deadline and nothing
+                to age against.
+              name: Exempt
               type: bool
-            - name: FloorUnmet
+            - doc: |-
+                FloorUnmet records that the vendor mandates a newer build, whatever the
+                policy decided to do about it.
+
+                It is separate from Outcome because UpdateWarn allows the invocation and
+                the caller still has to say so. Reading Outcome alone would lose that.
+              name: FloorUnmet
               type: bool
-      - methods:
-          - in:
+      - doc: |-
+          PolicyValue is one product's gate policy: the commands that run unchecked,
+          the commands that must never be gated, and what happens when the vendor
+          mandates a newer build.
+
+          It is a VALUE, copied by the caller and never mutated by this package. The
+          zero value is not usable — see Validate — because none of its three fields
+          has a safe default: an empty exemption list locks out recovery, and neither
+          "refuse" nor "upgrade" is a guess this package may make on a vendor's behalf.
+        methods:
+          - doc: |-
+              Exempt reports whether the command at path runs without the check.
+
+              It takes the command path relative to the root, with the root itself NOT
+              included. A nil path, an empty one, and a single empty element — which is what
+              splitting an empty string yields — are all the bare root invocation.
+            in:
               - name: path
                 type: "[]string"
             name: Exempt
             out:
               - type: bool
             recv: pointer
-          - name: Validate
+          - doc: |-
+              Validate reports every way this policy is unusable, rather than the first.
+
+              A caller fixing a policy wants the whole list: the checks are independent,
+              and a policy corrected one refusal at a time takes as many start-ups as it
+              has faults.
+
+              It returns ONE error naming them all rather than an errors.Join of several,
+              and that is the difference between a promise and a delivered one: a joined
+              error has no single Private detail, so errs.PrivateOf reports the first
+              fault's and a structured-logging caller would still see them one at a time.
+
+              It returns one typed refusal whose private detail names every fault, or nil.
+            name: Validate
             out:
               - type: error
             recv: pointer
         name: PolicyValue
         struct:
           fields:
-            - name: ExemptExact
+            - doc: |-
+                ExemptExact lists command paths, relative to the root, that run without
+                the check — matched WHOLE, so a same-named command elsewhere in the tree
+                is not silently exempted with them.
+
+                The empty string is the bare root invocation: a binary run with no
+                subcommand shows its help, and showing help must not require an
+                entitlement any more than `help` itself does.
+
+                Paths are space-joined, e.g. "skill install". A command name cannot
+                contain a space, so the joining is lossless.
+              name: ExemptExact
               type: "[]string"
-            - name: ExemptSubtree
+            - doc: |-
+                ExemptSubtree lists command paths whose whole subtree runs without the
+                check — the path itself and every command under it.
+
+                Use it when the exemption is about a CAPABILITY rather than a command:
+                everything under `license` repairs the licence, so gating any of it would
+                be gating the repair. Use ExemptExact when a parent and its children
+                differ, which they usually do.
+              name: ExemptSubtree
               type: "[]string"
-            - name: RecoveryPaths
+            - doc: |-
+                RecoveryPaths lists the commands an operator runs to repair a refused
+                entitlement. Every one of them MUST be exempt, and Validate refuses a
+                policy where one is not.
+
+                It exists because the failure it prevents is silent and total: a policy
+                that gates its own repair command leaves a machine whose licence lapsed
+                with no path back short of reinstalling the binary, and nothing about the
+                policy LOOKS wrong — the exemption list is simply missing an entry.
+                Naming them separately turns that into a construction-time refusal.
+              name: RecoveryPaths
               type: "[]string"
-            - name: OnUpdateRequired
+            - doc: |-
+                OnUpdateRequired is what happens when the entitlement verifies but the
+                vendor mandates a newer build than this one.
+
+                It has no default. See UpdateAction.
+              name: OnUpdateRequired
               type: UpdateAction
-      - methods:
-          - name: Valid
+      - doc: |-
+          UpdateAction is what the gate does when the entitlement verifies but the
+          vendor mandates a newer build than the running one.
+
+          The zero value is deliberately unclaimed. Every other field of PolicyValue
+          has a defensible empty meaning — no exemptions, no recovery paths — but this
+          one does not: refusing and upgrading are opposite answers, and a product that
+          silently picked either on a vendor's behalf would be wrong for half of them.
+          A binary distributed to machines an operator does not own must not replace
+          itself uninvited; one distributed to a fleet that expects to track the floor
+          must not stop working instead. Validate refuses the unset value rather than
+          guessing (ADR 0031).
+        methods:
+          - doc: |-
+              Valid reports whether this action was set to one of the three answers. It is
+              false for the unclaimed zero value, and false for anything past the last
+              action — a value from a newer build of this package that this one cannot
+              honour.
+            name: Valid
             out:
               - type: bool
             recv: value
-          - name: String
+          - doc: |-
+              String names the action for a diagnostic, spelling the unclaimed zero value
+              "unset" rather than inventing a name for it.
+            name: String
             out:
               - type: string
             recv: value
         name: UpdateAction
         underlying: uint8
-  - functions:
-      - in:
+  - doc: |-
+      Package gate — the classifier behind framework/gate.
+
+      One exported function, and it performs no effect: it reads a policy, a
+      command path and whatever the caller's verifier returned, and says what the
+      caller should do. The network access, the upgrade and the process exit all
+      stay in the caller's own control flow, where they can be refused, logged or
+      tested.
+    functions:
+      - doc: |-
+          Decide classifies one invocation.
+
+          The ORDER is the contract, and it is the part worth reading twice.
+
+          Exemption is checked FIRST, and verify is not CALLED at all when it holds.
+          That is why this takes a function rather than an error: a caller handed an
+          already-computed result has already paid for it, and an exempt command must
+          not pay. `completion` runs from a shell hook where a network round trip would
+          be hostile, and `license status` must work on exactly the machine whose
+          licence is broken — neither can afford a verification, and neither should
+          have to remember not to run one.
+
+          The floor is checked BEFORE the refusal is propagated, because an
+          out-of-date binary must be told to upgrade whether or not its entitlement is
+          also in order: the upgrade is the same action either way, and reporting
+          "your licence is broken" to somebody whose answer is "run upgrade" sends them
+          to the wrong place.
+
+          It takes policy, the product's gate policy — a nil one refuses everything,
+          including a verification that would have passed; path, the command path
+          relative to the root with the root itself NOT included, where nil is the bare
+          root invocation; and verify, the caller's entitlement verification, CALLED AT
+          MOST ONCE and only when the invocation is not exempt, with a nil verify
+          refusing because nothing vouched for the invocation.
+
+          It returns what the caller should do, and everything the verifier said.
+        in:
           - name: policy
             type: "*coregate.PolicyValue"
           - name: path

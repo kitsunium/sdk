@@ -6,6 +6,7 @@ go_library(
     name = "syslog",
     srcs = [
         "config.go",
+        "doc.go",
         "priority.go",
         "syslog_sink.go",
     ],

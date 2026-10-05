@@ -1,6 +1,5 @@
 //go:build dragonfly
 
-// Package reaper — DragonFly BSD procctl(2) ABI constants for SetChildSubreaper.
 package reaper
 
 // sysProcctl is the procctl(2) syscall number on DragonFly BSD. Unlike FreeBSD,

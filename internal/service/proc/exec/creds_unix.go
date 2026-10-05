@@ -1,8 +1,5 @@
 //go:build unix
 
-// Package exec — Unix credential resolution: maps Spec.User/Group/Groups (names
-// or numeric ids) to a syscall.Credential via os/user, the systemd
-// User=/Group=/SupplementaryGroups= analogue.
 package exec
 
 import (

@@ -1,28 +1,3 @@
-// Package jwk implements the RFC 7517 JSON Web Key representation for the key
-// types the SDK's crypto domain already ships: EC (NIST P-256/P-384/P-521),
-// OKP (Ed25519) and oct (symmetric). It is stdlib-only — a JWK is JSON plus
-// base64url plus curve arithmetic, all of which crypto/ecdh, crypto/ed25519,
-// crypto/x509 and encoding/json already provide — so it adds no dependency to
-// internal/service.
-//
-// It is a FORMAT, not a connector: nothing here fetches a JWK Set over HTTP,
-// caches one, or follows an OpenID discovery document. Bytes in, bytes out.
-//
-// # Exporting a private key is opt-in, never the default
-//
-// core/crypto.Key redacts itself precisely so key material cannot fall out of a
-// log line, and a JWK serialiser is by construction a function that turns
-// protected material into JSON. So the two paths are named, not flagged:
-// MarshalPublic emits public members only and is what MarshalJSON — the path
-// encoding/json takes by itself — delegates to, while MarshalPrivate is the
-// only call that can emit "d" or "k", and reads as such at the call site. A
-// symmetric key has no public half at all, so MarshalPublic refuses it with
-// NoPublicForm rather than quietly publishing the secret (ADR 0030: the default
-// must not be the dangerous one).
-//
-// KeyValue redacts under %v / %s / %#v the same way core/crypto.Key does: the
-// rendering names kty, crv, kid and whether private material is present, and
-// never a byte of the material itself.
 package jwk
 
 import (

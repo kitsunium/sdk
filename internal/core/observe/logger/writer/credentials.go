@@ -1,6 +1,3 @@
-// Package writer — credential value + provider port shared by the network
-// writers (s3, cloudwatch). Carries no AWS types; the redacting CredentialValue
-// keeps secrets out of any accidental log emission (rule 4 Public/Private).
 package writer
 
 // CredentialValue is an opaque, redacting AWS SigV4 credential set. Its String

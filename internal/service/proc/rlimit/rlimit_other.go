@@ -1,9 +1,5 @@
 //go:build !unix
 
-// Package rlimit — non-Unix stub returning UnsupportedPlatform. setrlimit(2) is
-// a Unix mechanic (Linux via rlimit_linux.go, Darwin and the BSDs via
-// rlimit_unix.go); the remaining targets (Windows, plan9, js/wasm) have no
-// equivalent, so every entry point degrades to the typed sentinel.
 package rlimit
 
 import (

@@ -1,16 +1,3 @@
-// Package vfs — range 0.2.25.* (ADR 0056 core/data/vfs block), and the
-// concrete filesystem's 0.3.55.* (ADR 0056 service/data/vfs block, declared
-// here since ADR 0160).
-//
-// Package vfs — declares the sentinel *errs.Error port outcomes, and the two
-// a concrete filesystem in internal/service/data/vfs can produce and an
-// abstract one cannot (ADR 0160: every code is declared in the core, at the
-// service's path). Each var's name equals its errs.Define Reason in
-// SCREAMING_SNAKE form.
-//
-// No Public string here names a path. A Public is read by third parties, and a
-// path is the one piece of caller data a filesystem error is guaranteed to
-// hold; it travels as a log-only field instead, reachable through errs.FieldsOf.
 package vfs
 
 // exitDataErr matches sysexits EX_DATAERR (65). The caller handed the domain

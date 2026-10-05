@@ -162,20 +162,116 @@ packages:
             value: "0x00_03_36_11"
         type: errs.Code
     constants:
-      - name: DialectUnknown
+      - doc: DialectUnknown is the unusable zero value.
+        name: DialectUnknown
         type: Dialect
         value: "0"
-      - name: DialectPostgres
+      - doc: |-
+          DialectPostgres is PostgreSQL 9.1+ (and wire-compatible engines that
+          implement pg_advisory_lock, e.g. CockroachDB advertises the function
+          but the caller must verify it is a real lock before claiming this).
+        name: DialectPostgres
         type: Dialect
         value: "1"
-      - name: DialectMySQL
+      - doc: DialectMySQL is MySQL 5.7+ / MariaDB 10.x with InnoDB.
+        name: DialectMySQL
         type: Dialect
         value: "2"
-      - name: DialectSQLite
+      - doc: DialectSQLite is SQLite 3.6.8+.
+        name: DialectSQLite
         type: Dialect
         value: "3"
+    doc: |-
+      Package sql — range 0.2.24.* (ADR 0055 core/data/sql block), and the
+      transaction manager's, health probe's and migration runner's 0.3.54.* (ADR
+      0055 service/data/sql block, declared here since ADR 0160).
+
+      Package sql — declares the sentinel *errs.Error port outcomes, and the run
+      outcomes of the transaction manager, the health probe and the migration
+      runner in internal/service/data/sql (ADR 0160: every code is declared in the
+      core, at the service's path). Each var's name equals its errs.Define Reason
+      in SCREAMING_SNAKE form.
+
+      # Public never carries infrastructure
+
+      Driver errors are the SDK's worst leak risk: a failed connection reports the
+      host, the port, the user and sometimes the password; a failed statement
+      reports the statement. Every Public below is a fixed literal that names the
+      CLASS of failure and nothing else, and no call site in this domain ever puts
+      a DSN or a SQL fragment into one. Where the detail matters it goes in a
+      Private or a field, both of which are log-only; and the run outcomes the
+      service emits travel beside the driver's own error under errors.Join —
+      reachable from a log, never from errs.PublicOf (ADR 0055 §D9).
+
+      Package sql declares the SDK's relational-database domain: a small set of
+      PORTS above database/sql. It is deliberately NOT an ORM, and that refusal is
+      the design, not an omission — see ADR 0055.
+
+      # What this domain is
+
+      Four things, and nothing else:
+
+        - [Executor] — the read/write surface a query runs against. *sql.DB,
+          *sql.Tx and *sql.Conn all satisfy it AS THEY ARE, with no adapter.
+        - [Transactor] — the transaction manager: it owns Begin, Commit and
+          Rollback, and it never hands any of the three to the code running
+          inside the transaction.
+        - [Checker] — a bounded liveness probe.
+        - [Migrator] — an ordered, versioned, mutually-exclusive schema runner.
+
+      # What this domain refuses to be
+
+      No entity mapping, no query builder, no lazy loading, no identity map, no
+      change tracking, no repository generation, no schema reflection. A framework
+      that needs those integrates a library that provides them; it does not grow
+      them (ADR 0055 §D1). The SDK's job here is the part every application needs
+      and nobody enjoys writing correctly: transaction ownership, savepoints,
+      pool policy, and a migration runner that two processes can start at once.
+
+      It also ships NO DRIVER. pgx, go-sql-driver/mysql and the sqlite bindings
+      are connectors to a third-party system, so they belong under third-party/
+      by the same rule that put the AWS writers there (ADR 0012). The consumer
+      imports the driver it wants and hands this domain a *sql.DB.
+
+      # The ports do not hide database/sql
+
+      [Executor] speaks *sql.Rows, *sql.Row and sql.Result — the stdlib's own
+      types, not re-declared equivalents. Re-declaring them would be the first
+      step of the ORM this domain refuses to become: once Rows is ours, scanning
+      is ours, and once scanning is ours, mapping is a small step. Organising the
+      stdlib is the whole ambition.
+
+      # There is no registry
+
+      Like proc (ADR 0016), resilience (ADR 0026), net (ADR 0029), scheduler
+      (ADR 0041), token (ADR 0042), session (ADR 0045) and lifecycle (ADR 0050),
+      this domain has no name->implementation registry. There is one Transactor
+      and one Migrator; a registry would have one entry and would add a way to
+      select a database engine from a configuration string — which is precisely
+      the mistake [Dialect] exists to prevent, since a dialect the SDK cannot
+      spell must be refused at construction and not resolved at runtime.
+
+      Package sql — hosts Dialect, the closed set of SQL engines this domain can
+      spell, the vocabulary each one spells statements with, and the two refusals
+      that keep the set closed.
+
+      Package sql — hosts the four ports themselves. Kept apart from sql.go so
+      the package's contract is one file: what a caller may implement, and what
+      the SDK promises to accept.
+
+      Package sql — hosts MigrationValue and the Step both of its halves are.
+
+      Package sql — hosts TxOptionsValue, the per-transaction options a
+      Transactor honours.
     functions:
-      - in:
+      - doc: |-
+          ParseDialect resolves a dialect name. It never guesses.
+
+          A name in the accepted set resolves. A name in the refused set returns
+          [DialectRefused] carrying WHY, so the caller learns their engine is known
+          and declined rather than unrecognised. Anything else returns
+          [UnknownDialect].
+        in:
           - name: name
             type: string
         name: ParseDialect
@@ -184,7 +280,15 @@ packages:
             type: Dialect
           - name: err
             type: error
-      - in:
+      - doc: |-
+          Irreversible is the [Step] a caller assigns to [MigrationValue.Down] to
+          declare that the migration cannot be reversed. It always fails, with a typed
+          error naming the version.
+
+          It is a value rather than a nil convention so the claim appears in the diff
+          and in the version-table review, and so `Down` reports a refusal the caller
+          wrote rather than a nil dereference the SDK discovered.
+        in:
           - name: ctx
             type: context.Context
           - name: ex
@@ -711,106 +815,504 @@ packages:
             public: Two migrations declare the same version
             reason: DUPLICATE_MIGRATION
     types:
-      - name: TxFunc
+      - doc: |-
+          TxFunc is the unit of work a [Transactor] runs inside a transaction.
+
+          It is a FUNCTION port, the shape internal/core/CLAUDE.md already admits for
+          resilience.Operation, scheduler.Job and lifecycle.Start: one behaviour, so a
+          named func IS the contract. ADR 0039 is satisfied structurally — a func type
+          cannot grow a method at all.
+
+          ctx is the transaction-scoped context. Passing it on is what lets a callee
+          join THIS transaction rather than open a second one, and what lets a nested
+          [Transactor.Transact] become a savepoint instead of a deadlock against the
+          transaction its own caller is holding.
+
+          Returning nil commits (or releases the savepoint). Returning an error rolls
+          back (or rolls back to the savepoint) and the error is returned to the
+          caller VERBATIM, so errors.Is keeps working across the boundary.
+
+          ex is valid ONLY for the duration of the call. Using it afterwards is
+          refused with a typed error rather than left to database/sql's ErrTxDone.
+        name: TxFunc
         underlying: func(ctx context.Context, ex Executor) error
-      - methods:
-          - name: String
+      - doc: |-
+          Dialect names a SQL engine whose savepoint grammar, placeholder syntax,
+          identifier quoting, row-lock clauses and advisory-lock mechanism this SDK
+          knows exactly.
+
+          The set is CLOSED and small on purpose. Every feature this domain adds — a
+          savepoint, a `CREATE TABLE IF NOT EXISTS`, an advisory lock — is spelled
+          differently by each engine, and there is no portable subset that covers all
+          three. So the domain refuses a dialect it cannot spell AT CONSTRUCTION,
+          by name, rather than generating SQL that will fail at the first savepoint of
+          the first nested transaction on a production database (ADR 0055 §D4).
+
+          The zero value is [DialectUnknown] and is not usable: it is what an unset
+          configuration field looks like, and reading it as "probably Postgres" is how
+          a MySQL deployment discovers the difference in production (ADR 0031).
+        methods:
+          - doc: String returns the dialect's canonical lowercase name.
+            name: String
             out:
               - type: string
             recv: value
-          - name: Valid
+          - doc: Valid reports whether d is a dialect this domain can actually spell.
+            name: Valid
             out:
               - type: bool
             recv: value
-          - name: SupportsAdvisoryLock
+          - doc: |-
+              SupportsAdvisoryLock reports whether the engine offers a SESSION-SCOPED
+              advisory lock — one the server releases when the connection holding it
+              drops.
+
+              SQLite does not: it has no advisory-lock function, only the file lock that
+              serialises writers. That distinction decides HOW [Migrator] promises mutual
+              exclusion across processes, so it is a property of the dialect and not a
+              runtime discovery (ADR 0055 §D7). On SQLite the runner holds the database
+              file's write lock for the whole run instead, which the operating system
+              releases when its holder dies, as a server releases an advisory lock
+              (ADR 0140).
+            name: SupportsAdvisoryLock
             out:
               - type: bool
             recv: value
-          - in:
+          - doc: |-
+              Placeholder renders the bind marker of a statement's n-th argument, counted
+              from 1.
+
+              This is the divergence that makes a "portable" hand-written query a fiction:
+              PostgreSQL numbers its markers — $1, $2 — while MySQL and SQLite share the
+              positional ?, whose position is the argument's order. Every statement the SDK
+              binds an argument to takes its markers from here, so a fourth engine is
+              spelled in one place or not at all.
+
+              A dialect that is not [Dialect.Valid] — an unset field — has no marker and
+              renders the empty string, so a statement built from it parses on no engine
+              rather than on whichever one a guess favoured (ADR 0031).
+            in:
               - name: "n"
                 type: int
             name: Placeholder
             out:
               - type: string
             recv: value
-          - in:
+          - doc: |-
+              QuoteIdent renders name as an identifier of the dialect: delimited, so a
+              table called "order" or "user" is a name rather than a keyword, and with the
+              delimiter doubled wherever the name holds it, which is how every engine
+              spells a delimiter inside a delimited identifier. MySQL delimits with
+              backticks, whatever its ANSI_QUOTES mode says; PostgreSQL and SQLite with
+              the standard's double quotes.
+
+              It validates nothing. An identifier cannot be a bound argument, so the SDK
+              interpolates only names it validated at construction, and that check is the
+              whole defence: what a name may hold, and how long it may be — PostgreSQL
+              TRUNCATES a longer one, into what may be another table's name — is the
+              caller's to refuse before quoting it. A dialect that is not [Dialect.Valid]
+              renders the empty string, for the reason [Dialect.Placeholder] gives.
+            in:
               - name: name
                 type: string
             name: QuoteIdent
             out:
               - type: string
             recv: value
-          - name: ForUpdate
+          - doc: |-
+              ForUpdate renders the clause that ends a read by locking the rows it returns
+              until the transaction ends, leading space included: " FOR UPDATE" on
+              PostgreSQL and MySQL. On MySQL it is also a locking read, which reads the
+              latest committed rows rather than a REPEATABLE READ transaction's snapshot.
+
+              SQLite has no row lock and no such clause, and renders the empty string: a
+              SQLite transaction excludes every other writer with the database's one write
+              lock, which it takes at its first WRITE, so a transaction that must read
+              under exclusion writes first (ADR 0140). A dialect that is not
+              [Dialect.Valid] renders the clause: an engine without one refuses the
+              statement, which is louder than a lock dropped in silence.
+            name: ForUpdate
             out:
               - type: string
             recv: value
-          - name: ForUpdateSkipLocked
+          - doc: |-
+              ForUpdateSkipLocked renders the clause that ends a read by locking the rows
+              it returns and SKIPPING those another transaction holds, leading space
+              included: " FOR UPDATE SKIP LOCKED" on PostgreSQL and MySQL. Two readers
+              then never wait on each other's rows and never take the same one.
+
+              It needs PostgreSQL 9.5, MySQL 8.0.1 or MariaDB 10.6 — later than the
+              floors [DialectPostgres] and [DialectMySQL] name — and an older server
+              refuses the statement. SQLite renders the empty string and a dialect that is
+              not [Dialect.Valid] the clause, for the reasons [Dialect.ForUpdate] gives: a
+              SQLite transaction that has written holds the database's only write lock,
+              so no row it reads is held by anybody else.
+            name: ForUpdateSkipLocked
             out:
               - type: string
             recv: value
         name: Dialect
         underlying: uint8
-      - name: Step
+      - doc: |-
+          Step is one direction of a migration: the statements that move the schema.
+
+          A FUNCTION port, for the same reason [TxFunc] is: one behaviour, so a named
+          func IS the contract, and a func type cannot grow a method (ADR 0039).
+
+          It receives the SAME [Executor] the surrounding transaction runs on, which
+          is what makes a migration and its version-table row commit together.
+        name: Step
         underlying: func(ctx context.Context, ex Executor) error
-      - methods:
-          - name: Validate
+      - doc: |-
+          MigrationValue is one versioned schema change and its reversal.
+
+          The SDK does NOT own a migration FILE FORMAT, a directory layout, or a
+          naming convention, and it ships no example directory. A migration is a value
+          the consumer constructs, because the moment the SDK reads a directory it has
+          invented a convention every consumer must adopt and no consumer asked for
+          (ADR 0055 §D8). Where the statements come from — a Go literal, an embed.FS,
+          a generator — is the caller's decision and none of the SDK's business.
+
+          The zero value is not runnable and is refused at construction.
+        methods:
+          - doc: |-
+              Validate reports why the migration could never run, or nil.
+
+              It is a method on the value rather than a check inside the runner so a
+              caller can validate a set at start-up — before any connection exists —
+              which is where a wiring fault should be found.
+            name: Validate
             out:
               - type: error
             recv: value
         name: MigrationValue
         struct:
           fields:
-            - name: Version
+            - doc: |-
+                Version orders the migration. It must be non-zero and unique within one
+                set: zero is reserved as "before every migration", the value Down takes
+                to reverse everything.
+
+                Any strictly-increasing scheme works; a UTC timestamp (20260910143000)
+                is the conventional one because two branches developed in parallel then
+                merge without colliding.
+              name: Version
               type: uint64
-            - name: Name
+            - doc: |-
+                Name is the human label recorded in the version table. It must be
+                non-empty: a schema history whose rows say only "42" is a schema
+                history nobody can read during an incident.
+              name: Name
               type: string
-            - name: Up
+            - doc: Up applies the change. Required.
+              name: Up
               type: Step
-            - name: Down
+            - doc: |-
+                Down reverses it. Required — and [Irreversible] is how a caller says
+                "this one cannot be reversed" OUT LOUD.
+
+                A nil Down is refused rather than accepted as "irreversible", because
+                "I forgot the reversal" and "there is no reversal" are the same nil and
+                only one of them is a defect. The same rule core/app/lifecycle applies to a
+                nil Stop, for the same reason.
+              name: Down
               type: Step
-      - methods:
-          - name: IsZero
+      - doc: |-
+          TxOptionsValue parameterises ONE transaction. It is a value, not a manager
+          setting, because isolation is a property of the unit of work and not of the
+          pool it runs on.
+
+          The zero value is a working configuration: the driver's default isolation
+          level, read-write. That is the only non-arbitrary default available — every
+          engine defines its own default level and picking one here would silently
+          change the semantics of an existing application on migration (ADR 0031's
+          clamp side, where the default needs no explanation because it is the
+          database's own).
+
+          It is deliberately a struct rather than two extra method parameters so
+          [Transactor] stays frozen at one method: a new option is a new FIELD, which
+          breaks nobody, where a new method breaks every downstream double (ADR 0039).
+        methods:
+          - doc: |-
+              IsZero reports whether the options ask for nothing beyond the driver's
+              defaults.
+
+              It exists because a NESTED scope is a savepoint, and a savepoint can change
+              neither the isolation level nor the read-only-ness of the transaction it
+              sits inside. Non-zero options on a nested call are therefore refused with
+              [NestedIsolation] rather than ignored — silently downgrading a caller's
+              explicit `Serializable` to whatever the outer transaction happened to use is
+              the kind of "helpful" behaviour that produces a data race nobody can find
+              (ADR 0055 §D5).
+            name: IsZero
             out:
               - type: bool
             recv: value
-          - name: StdOptions
+          - doc: |-
+              StdOptions renders the value as the stdlib's own option struct, ready for
+              (*sql.DB).BeginTx.
+            name: StdOptions
             out:
               - type: "*stdsql.TxOptions"
             recv: value
         name: TxOptionsValue
         struct:
           fields:
-            - name: Isolation
+            - doc: |-
+                Isolation is the transaction isolation level. The zero value
+                (sql.LevelDefault) defers to the driver.
+              name: Isolation
               type: stdsql.IsolationLevel
-            - name: ReadOnly
+            - doc: |-
+                ReadOnly asks the engine to refuse writes. Not every driver enforces
+                it; those that do not report an error at Begin rather than accepting
+                writes silently, which is why this is passed through rather than
+                emulated.
+              name: ReadOnly
               type: bool
   - constants:
-      - name: DefaultMaxLifetime
+      - doc: |-
+          DefaultMaxLifetime is the connection lifetime a non-positive
+          [PoolConfig.MaxLifetime] clamps to.
+
+          database/sql reads 0 as "reuse a connection forever", and a connection that
+          lives forever survives a failover, a DNS change and a credential rotation —
+          it keeps talking to a replica that has been demoted, and nothing in the
+          application ever notices. The exact number matters far less than its being
+          FINITE, so this is a clamp rather than a refusal (ADR 0031): thirty minutes
+          is long enough to be invisible on the hot path and short enough that a
+          topology change is picked up without a restart.
+        name: DefaultMaxLifetime
         type: time.Duration
         value: "1800000000000"
-      - name: DefaultMaxIdle
+      - doc: |-
+          DefaultMaxIdle is the idle-connection ceiling a non-positive
+          [PoolConfig.MaxIdle] clamps to — the same value database/sql itself uses, so
+          the clamp changes nothing a caller could have observed.
+        name: DefaultMaxIdle
         type: int
         value: "2"
-      - name: DefaultCheckTimeout
+      - doc: |-
+          DefaultCheckTimeout is the liveness-probe budget a non-positive
+          [Config.CheckTimeout] clamps to. A health check that can hang forever is
+          not a health check.
+        name: DefaultCheckTimeout
         type: time.Duration
         value: "5000000000"
-      - name: DefaultVersionTable
+      - doc: |-
+          DefaultVersionTable is the table an empty [MigrateConfig.VersionTable]
+          clamps to. The name matches the de-facto convention of every migration tool
+          in the ecosystem, so an operator inspecting a database recognises it without
+          being told.
+        name: DefaultVersionTable
         type: string
         value: "\"schema_migrations\""
-      - name: DefaultLockTimeout
+      - doc: |-
+          DefaultLockTimeout is the migration-lock budget a non-positive
+          [MigrateConfig.LockTimeout] clamps to.
+
+          A migration run that waits forever for another holder is a deployment that
+          hangs with no output, which is strictly worse than one that fails and says
+          why. Two minutes is longer than almost every migration and shorter than
+          every deployment timeout that would otherwise kill the pod first.
+        name: DefaultLockTimeout
         type: time.Duration
         value: "120000000000"
-      - name: DefaultLockRetryInterval
+      - doc: |-
+          DefaultLockRetryInterval is how often a blocked runner retries the
+          non-blocking lock acquisition. A non-positive
+          [MigrateConfig.LockRetryInterval] clamps to it.
+        name: DefaultLockRetryInterval
         type: time.Duration
         value: "250000000"
+    doc: |-
+      Package sql — hosts Config, the parameters every port in this package is
+      built from, and the pool policy it applies.
+
+      Package sql — hosts the only place in this domain that renders
+      dialect-specific SQL. Every statement it sends is built here, spelled with
+      the vocabulary core/data/sql's Dialect owns: the bind markers, the quoting and the
+      row-lock clauses.
+
+      Package sql — hosts the scope-bound Executor handed to a TxFunc, and the
+      two guards that stand between a stale handle and a live transaction.
+
+      Package sql — hosts the liveness probe and the budget that bounds it.
+
+      Package sql — hosts the transactor's two ADR 0039 siblings: where a
+      statement issued under a context runs, and what waits for a commit.
+
+      Package sql — hosts the migration runner: the order, the version table, the
+      dry run, and the two directions.
+
+      Package sql — hosts MigrateConfig, the migration runner's parameters, and
+      the validation that turns a caller's slice into an ordered plan.
+
+      Package sql — hosts the migration lock of an engine with no advisory lock:
+      SQLite's own write lock on the database file, held for the whole run.
+
+      Package sql — hosts the migration lock: why it is the engine's own advisory
+      lock, and why it lives on a connection of its own.
+
+      Package sql — hosts the validated, sorted, clamped form of a MigrateConfig.
+
+      Package sql — hosts the version table: its portable shape, the reads and
+      the two writes that keep it in step with the schema.
+
+      Package sql — hosts the validated, clamped form of a Config.
+
+      Package sql — hosts the three rendered statements of one savepoint.
+
+      Package sql — hosts the one context key this package stores under.
+
+      Package sql implements the relational-database ports declared in
+      internal/core/data/sql (ADR 0055): the transaction manager, the pool policy, the
+      health check and the migration runner.
+
+      It ships NO DRIVER and imports none. A driver is a connector to a
+      third-party system, so pgx / go-sql-driver / the sqlite bindings belong
+      under third-party/ by the rule that put the AWS writers there (ADR 0012).
+      The caller opens its own *sql.DB and hands it over.
+
+      It is also NOT an ORM, has no query builder, no entity mapping and no lazy
+      loading, and never will (ADR 0055 §D1).
+
+      # Transaction ownership is structural
+
+      [NewTransactor] hands the unit of work a core/data/sql.Executor — three methods,
+      none of which is Commit or Rollback. A function that receives a transaction
+      therefore cannot end it: the mistake does not compile. The manager commits
+      when the function returns nil and rolls back otherwise, and it is the only
+      thing that ever does either.
+
+      # Nesting is a savepoint, and the traps are handled rather than avoided
+
+      database/sql has no nested transactions. A [core/data/sql.Transactor.Transact]
+      whose context already carries a transaction from THIS manager opens a
+      SAVEPOINT instead:
+
+        - The savepoint NAME is generated by the SDK from a counter that never
+          resets inside one transaction. It is never caller-supplied, because an
+          identifier cannot be a bound parameter; and it is never reused, because
+          a repeated name shadows rather than replaces, so RELEASE would release
+          the wrong one.
+        - The three statements are IDENTICAL on postgres, mysql and sqlite, which
+          is why those three are the supported set. Engines that spell nesting
+          differently are refused BY NAME at ParseDialect (ADR 0055 §D4).
+        - Non-zero [core/data/sql.TxOptionsValue] on a nested call is REFUSED: a
+          savepoint cannot change isolation or read-only mode, and silently
+          downgrading a caller's Serializable is worse than saying no.
+
+      # What a failed sub-transaction does
+
+      It rolls back to its savepoint and returns the error to the caller of the
+      inner Transact — verbatim, so errors.Is still answers. The OUTER
+      transaction survives, and that is not optimism: ROLLBACK TO SAVEPOINT is
+      exactly the statement that clears PostgreSQL's aborted state (SQLSTATE
+      25P02), so a caller who CATCHES the inner error has a usable transaction to
+      continue in. A caller who does not catch it propagates it, and the outer
+      scope rolls back in turn — the common case, and the safe default.
+
+      If the ROLLBACK TO SAVEPOINT statement itself fails, the transaction is
+      POISONED: every later operation is refused with [coresql.TxPoisoned], the
+      commit never happens, and the whole transaction is rolled back. The
+      engine's state is unknown at that point, and committing work the SDK
+      believes it undid is the one outcome worse than failing.
+
+      # Joining a transaction, and holding what waits for its commit
+
+      The manager is also a core/data/sql Joiner and a Deferrer (ADR 0139). Join answers
+      the executor of the innermost scope of the transaction a context carries for
+      THIS manager — a retired one, which refuses, when that scope has returned,
+      and never the pool in its place — or the pool when the context carries none.
+      Defer holds a function until that transaction commits; each held function
+      carries the id of the scope that held it, a failed savepoint drops what was
+      held at or above its own id, and the root runs what is left after its COMMIT.
+
+      # SQLite's migrations
+
+      SQLite has no advisory lock, and its runner holds the database file's write
+      lock instead (ADR 0140): the run is ONE transaction that takes the lock with
+      a write that writes nothing, and each migration is a savepoint of it.
+
+      # A partially applied migration, and what MySQL does to the guarantee
+
+      Each migration runs in ITS OWN transaction, and the version-table row is
+      written by that SAME transaction on that SAME executor. On PostgreSQL and
+      SQLite — where DDL is transactional — that is a real guarantee: a migration
+      that fails rolls back both halves, the database sits exactly at version
+      n-1, and re-running is safe.
+
+      On MySQL and MariaDB it is NOT, and the difference is not one this package
+      can close. DDL causes an IMPLICIT COMMIT: the server has already committed
+      the schema change before the runner's transaction reaches COMMIT. A
+      migration whose second statement fails therefore leaves the first
+      statement's ALTER TABLE applied and committed, while the version row — in
+      the same transaction — is rolled back. The database is then in a state no
+      version number describes.
+
+      No client-side code can make MySQL's DDL transactional, so this package
+      does three things instead of pretending: it says so (here, in the package
+      CLAUDE.md, in pkg/v1/data/sql's doc and in MigrationFailed's Private), it stops
+      at the first failure rather than continuing, and it reports the version and
+      the direction so the migration to inspect by hand is named.
+
+      The operational rule that follows is the CONSUMER's: one DDL statement per
+      migration on MySQL, which makes the failure atomic by construction. This
+      package cannot enforce it — it does not parse SQL — and does not pretend to.
+      See ADR 0055 D8.
+
+      # Nothing here waits on the wall clock
+
+      Every budget — the health-check probe, the migration-lock retry — is read
+      from an injected kernel/clock.Timed, so the suite advances a ManualClock
+      instead of sleeping.
+
+      Package sql — hosts Statements, the one helper that turns SQL text into a
+      migration step.
+
+      Package sql — hosts the transaction manager: the root transaction, the
+      nested savepoint, and the single rule about who is allowed to commit.
+
+      Package sql — hosts the per-context transaction chain: which transactor
+      opened a transaction, and how a nested call finds its own.
+
+      Package sql — hosts the per-transaction state every scope of one
+      transaction shares, and the context chain that finds it.
+
+      Package sql — hosts Withheld, a driver's error carried beside a verdict and
+      kept out of every rendering.
     functions:
-      - in:
+      - doc: |-
+          FileLockSQL renders the statement that makes a SQLite transaction take the
+          database file's write lock at once, where BEGIN — which database/sql sends
+          as SQLite's deferred form — takes none.
+
+          It is a DELETE that matches no row. SQLite starts the write transaction a
+          write statement needs when the statement STARTS, before its WHERE clause is
+          weighed, so the lock is taken and nothing is changed (ADR 0140). Two
+          transactions take it: the migration runner's, naming its version table —
+          the one table it knows exists at that point, since it creates it first in
+          the same transaction — and the queue's lease, naming its queue's table
+          before its first read, so the read cannot answer from a snapshot the update
+          after it would be refused for.
+
+          table is interpolated exactly as given — bare, as the runner's validated
+          version table is, or already quoted, as the queue's is — and must have been
+          validated at construction, which is the whole defence of an interpolated
+          identifier.
+        in:
           - name: table
             type: string
         name: FileLockSQL
         out:
           - type: string
-      - in:
+      - doc: |-
+          NewChecker returns a bounded liveness probe over cfg.DB.
+
+          Like [NewTransactor] it applies cfg.Pool, so a process whose only SQL port
+          is a health check still gets its pool policy installed.
+        in:
           - name: cfg
             type: Config
         name: NewChecker
@@ -819,7 +1321,16 @@ packages:
             type: coresql.Checker
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NewMigrator returns the migration runner for cfg.DB.
+
+          Every run is mutually exclusive across processes, and the lock is one its
+          holder's death releases: the session's advisory lock on PostgreSQL and
+          MySQL (ADR 0055 §D7), the database file's write lock on SQLite (ADR 0140).
+          Running unlocked is never offered as a fallback: a runner that silently
+          drops mutual exclusion is at its most dangerous in exactly the situation it
+          exists for — two instances of a deployment starting together.
+        in:
           - name: cfg
             type: Config
           - name: mig
@@ -830,14 +1341,41 @@ packages:
             type: coresql.Migrator
           - name: err
             type: error
-      - in:
+      - doc: |-
+          Statements returns a [coresql.Step] that runs stmts in order on the
+          transaction's executor, stopping at the first failure.
+
+          This is the smallest helper that is genuinely useful and deliberately not a
+          file loader. Reading a directory would mean inventing a filename grammar
+          (`0001_name.up.sql`? `V1__name.sql`?), a statement splitter, and a rule for
+          what a `;` inside a string literal means — three conventions the SDK would
+          impose on every consumer and none of them asked for (ADR 0055 §D8).
+
+          Each statement is sent as its own Exec rather than as one semicolon-joined
+          string, because multi-statement execution is a per-driver capability that
+          several disable by default, and because a failure then names the statement
+          that failed by its position in the slice.
+
+          The text is the caller's own and is never bound: a migration's DDL cannot be
+          parameterised on any engine. That is exactly why migrations must not be
+          built from user input, and why this helper takes a variadic of literals
+          rather than a template.
+        in:
           - name: stmts
             type: string
         name: Statements
         out:
           - type: coresql.Step
         variadic: true
-      - in:
+      - doc: |-
+          NewTransactor returns the transaction manager for cfg.DB.
+
+          It applies cfg.Pool to the caller's *sql.DB. That is a side effect on a
+          value the caller owns, and it is deliberate: a pool policy that has to be
+          installed by a second call is a pool policy someone will forget, and the
+          consequence of forgetting it (unlimited connections, connections that live
+          forever) lands on the database rather than on this process.
+        in:
           - name: cfg
             type: Config
         name: NewTransactor
@@ -846,7 +1384,10 @@ packages:
             type: coresql.Transactor
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NewWithheld returns cause withheld: reachable by errors.Is and errors.As,
+          absent from Error().
+        in:
           - name: cause
             type: error
         name: NewWithheld
@@ -858,54 +1399,309 @@ packages:
       stdsql: database/sql
     path: github.com/kitsunium/sdk/internal/service/data/sql
     types:
-      - name: PoolConfig
+      - doc: |-
+          PoolConfig is the connection-pool policy. It is applied to the caller's
+          *sql.DB at construction, and it is a POLICY rather than a set of hints: a
+          field whose zero value database/sql would read as a decision nobody made is
+          either clamped or refused, never passed through (ADR 0031).
+        name: PoolConfig
         struct:
           fields:
-            - name: MaxOpen
+            - doc: |-
+                MaxOpen is the hard ceiling on open connections. It is REQUIRED and
+                must be positive.
+
+                database/sql reads 0 as UNLIMITED. "As many connections as the
+                application happens to want" is a decision made by forgetting a line,
+                and the consequence lands on the database rather than on the process
+                that forgot — every replica racing to exhaust one server's
+                max_connections. No value the SDK could invent is defensible either,
+                because the right one depends on the server's ceiling divided by the
+                number of replicas, which the SDK cannot see. So this is the REFUSAL
+                side of ADR 0031.
+              name: MaxOpen
               type: int
-            - name: MaxIdle
+            - doc: |-
+                MaxIdle is the number of connections kept warm. A non-positive value
+                clamps to [DefaultMaxIdle]; a value above MaxOpen clamps DOWN to
+                MaxOpen, because database/sql does that reduction silently and a caller
+                reading their own configuration back would otherwise be misled.
+              name: MaxIdle
               type: int
-            - name: MaxLifetime
+            - doc: |-
+                MaxLifetime is how long a connection may be reused. A non-positive
+                value clamps to [DefaultMaxLifetime]; see that constant for why an
+                unbounded lifetime is not an option.
+              name: MaxLifetime
               type: time.Duration
-            - name: MaxIdleTime
+            - doc: |-
+                MaxIdleTime is how long an unused connection is kept. A non-positive
+                value is passed through as "no idle deadline", and that is deliberate
+                rather than an oversight: MaxLifetime is now always finite, so an idle
+                connection is already retired on a bounded schedule, and a second
+                timer would only decide how aggressively to shrink a warm pool — a
+                tuning choice with no dangerous zero.
+              name: MaxIdleTime
               type: time.Duration
-      - name: Config
+      - doc: |-
+          Config parameterises every constructor in this package: the caller's pool,
+          the dialect whose grammar the SDK will speak to it, the pool policy applied
+          at construction, the time source every budget is read from, and the health
+          probe's budget.
+
+          It is passed BY VALUE on purpose. A constructor must not be able to observe
+          a later mutation of the caller's struct, and the copy happens once per port
+          rather than once per statement.
+        name: Config
         struct:
           fields:
-            - name: DB
+            - doc: |-
+                DB is the caller's pool. REQUIRED — this package never opens one,
+                because opening one means importing a driver (ADR 0055 §D2).
+              name: DB
               type: "*stdsql.DB"
-            - name: Dialect
+            - doc: |-
+                Dialect selects the SQL grammar. REQUIRED and must be a dialect this
+                SDK can spell; resolve a configuration string through
+                core/data/sql.ParseDialect, which refuses the engines it cannot support BY
+                NAME instead of guessing.
+              name: Dialect
               type: coresql.Dialect
-            - name: Pool
+            - doc: Pool is the connection-pool policy, applied to DB at construction.
+              name: Pool
               type: PoolConfig
-            - name: Clock
+            - doc: |-
+                Clock is the time source every budget in this package is read from. A
+                nil Clock falls back to clock.System.
+
+                clock.Timed rather than clock.Clock because this package both stamps
+                (the version table's applied_at) and WAITS (the probe budget, the lock
+                retry). Reading package time instead would make every budget assertion
+                a sleep, and a sleep a tolerance, and a tolerance a flake.
+              name: Clock
               type: clock.Timed
-            - name: CheckTimeout
+            - doc: |-
+                CheckTimeout is the budget one [core/data/sql.Checker.Check] gets. A
+                non-positive value clamps to [DefaultCheckTimeout].
+              name: CheckTimeout
               type: time.Duration
-      - name: MigrateConfig
+      - doc: |-
+          MigrateConfig parameterises [NewMigrator].
+
+          It carries no directory, no file pattern and no naming convention, and the
+          SDK ships no example migration tree. Migrations are values the consumer
+          builds, because the moment the SDK reads a directory it has invented a
+          convention every consumer must adopt (ADR 0055 §D8).
+        name: MigrateConfig
         struct:
           fields:
-            - name: Migrations
+            - doc: |-
+                Migrations is the complete set this binary carries. Order does not
+                matter — the runner sorts by Version — but every entry must be valid
+                and no two may share a version.
+
+                It is COPIED at construction, so a caller appending to their slice
+                afterwards cannot change what the runner will apply.
+              name: Migrations
               type: "[]coresql.MigrationValue"
-            - name: VersionTable
+            - doc: |-
+                VersionTable names the bookkeeping table. Empty clamps to
+                [DefaultVersionTable]; anything that is not a bare SQL identifier is
+                REFUSED, because it is interpolated rather than bound.
+              name: VersionTable
               type: string
-            - name: LockTimeout
+            - doc: |-
+                LockTimeout bounds the wait for the advisory lock. Non-positive clamps
+                to [DefaultLockTimeout].
+              name: LockTimeout
               type: time.Duration
-            - name: LockRetryInterval
+            - doc: |-
+                LockRetryInterval is how often the non-blocking acquisition is retried
+                while another holder has the lock. Non-positive clamps to
+                [DefaultLockRetryInterval].
+              name: LockRetryInterval
               type: time.Duration
-      - methods:
-          - name: Error
+      - doc: |-
+          Withheld carries a driver's error for errors.Is and errors.As while keeping
+          its text out of Error().
+
+          A driver describes the row a statement touched. PostgreSQL's unique
+          violation says "Key (doc_key)=(…) already exists" and MySQL's says
+          "Duplicate entry '…'": a document store's key is routinely an e-mail
+          address, and a queue's row holds the caller's payload. So a package whose
+          rows hold a caller's data joins the driver's error through Withheld, beside
+          a verdict of its own — errors.Join, never errs.Wrap, so the verdict's code
+          stays the origin (CLAUDE.md rule 6) — and no rendering of the joined error
+          quotes a row (ADR 0139 §D7, ADR 0151 §D6). The cause stays one errors.As
+          away for a caller who knows its driver, and what it may log.
+
+          Error() says only what names no row: a context's end, in the context's own
+          words; otherwise the driver error's Go type, with its SQLSTATE or its result
+          code when a method offers one — a class of failure, never its subject.
+
+          The verdict stays each package's own — docstore's STATEMENT_FAILED, queue's
+          QUEUE_BACKEND_FAILED — since each package's errors are its own; what they
+          share is only this rendering of somebody else's.
+        methods:
+          - doc: |-
+              Error renders what can be said without the driver's words: a context's end
+              in its own words, since those hold no data; otherwise the driver error's Go
+              type, with its SQLSTATE or its result code when a method offers one.
+            name: Error
             out:
               - type: string
             recv: value
-          - name: Unwrap
+          - doc: Unwrap hands errors.Is and errors.As the driver's own error.
+            name: Unwrap
             out:
               - type: error
             recv: value
         name: Withheld
         struct:
           unexported: true
-  - facade:
+  - doc: |-
+      Package sql is the public facade for the SDK's relational-database domain:
+      transaction ownership, a pool policy, a health check and a migration runner,
+      over the standard library's database/sql.
+
+      It is NOT an ORM, and it never will be. There is no entity mapping, no query
+      builder, no lazy loading and no repository generation — you write SQL, the
+      SDK owns the transaction around it (ADR 0055).
+
+      It also ships no driver. Import the one you want, open the pool yourself,
+      and hand it over:
+
+      	import _ "github.com/jackc/pgx/v5/stdlib"
+
+      	pool, err := stdsql.Open("pgx", dsn)
+      	dialect, err := sql.ParseDialect("postgres")
+
+      	tm, err := sql.NewTransactor(sql.Config{
+      		DB:      pool,
+      		Dialect: dialect,
+      		Pool:    sql.PoolConfig{MaxOpen: 20},
+      	})
+
+      # Who is allowed to commit
+
+      Nobody but the manager. [Transact] hands your unit of work an [Executor] —
+      Exec, Query, QueryRow, and deliberately nothing else. A helper that receives
+      one CANNOT commit or roll back the transaction it was lent, because those
+      methods do not exist on the type it was given:
+
+      	err := sql.Transact(ctx, tm, func(ctx context.Context, ex sql.Executor) error {
+      		if _, err := ex.ExecContext(ctx, "UPDATE accounts SET cents = cents - $1 WHERE id = $2", n, from); err != nil {
+      			return err
+      		}
+      		return credit(ctx, ex, to, n) // credit cannot commit; it has no way to
+      	})
+
+      Returning nil commits. Returning an error rolls back and hands the error
+      back to you unchanged, so errors.Is keeps working.
+
+      # Nesting is a savepoint
+
+      database/sql has no nested transactions. Call [Transact] with a context that
+      already carries one and you get a SAVEPOINT of that transaction rather than
+      a second connection deadlocking against the first:
+
+      	_ = sql.Transact(ctx, tm, func(ctx context.Context, ex sql.Executor) error {
+      		if err := mustHappen(ctx, ex); err != nil {
+      			return err
+      		}
+      		// best-effort: if this fails, only ITS work is undone
+      		if err := sql.Transact(ctx, tm, optional); err != nil {
+      			log.Warn("optional step skipped", "err", err)
+      		}
+      		return nil
+      	})
+
+      Three consequences worth knowing before you rely on it:
+
+        - Only postgres, mysql and sqlite are supported, because those three spell
+          savepoints identically. SQL Server, Oracle and Db2 are refused BY NAME
+          at [ParseDialect] — their nesting is a different algorithm, not a
+          different string, and generating SQL that fails at the first nested
+          transaction in production is not an option.
+        - A failed nested scope does NOT condemn the outer transaction. ROLLBACK
+          TO SAVEPOINT is precisely the statement that clears PostgreSQL's aborted
+          state, so catching the inner error leaves you a usable transaction. If
+          that statement itself fails, the transaction is poisoned: every later
+          operation is refused and the commit never happens.
+        - A nested call must pass the ZERO [TxOptions]. A savepoint cannot change
+          isolation or read-only mode, and being handed a weaker transaction than
+          you asked for under a nil error is worse than being told no.
+
+      # Joining the caller's transaction, and waiting for its commit
+
+      The transactor [NewTransactor] returns has two more capabilities, each an
+      interface of its own beside [Transactor], found by type assertion (ADR 0139):
+
+      	ex, inTx := tm.(sql.Joiner).Join(ctx)       // where a statement under ctx runs
+      	held := tm.(sql.Deferrer).Defer(ctx, notify) // notify runs once ctx's transaction commits
+
+      [Joiner] answers the executor of the transaction ctx carries — so a
+      repository called inside its caller's transaction reads what that
+      transaction wrote — or the pool when it carries none. A context that
+      outlived its transaction still names it, and its executor refuses rather
+      than fall back to the pool. [Deferrer] holds a function until that
+      transaction commits: a rollback drops it, and so does the rollback of the
+      savepoint it was held in. It is how a message, a mail or a store's write
+      hook waits for the work it announces to be committed. The SDK's document
+      store over SQL is built on both.
+
+      # Migrations
+
+      [NewMigrator] applies an ordered, versioned set under a lock that excludes
+      every other runner and dies with its holder, so two instances starting
+      together cannot apply the same migration twice and a runner killed mid-run
+      leaves nothing held. On PostgreSQL and MySQL it is the session's advisory
+      lock, which the server drops with the connection. On SQLite it is the
+      database file's write lock (ADR 0140): the run is ONE transaction that takes
+      it with its first statement, each migration a savepoint of it, and the
+      operating system drops a dead process's file locks. A SQLite run needs a
+      single connection, and a migration there cannot run what SQLite refuses
+      inside a transaction — VACUUM, or PRAGMA journal_mode.
+
+      Migrations are VALUES you build. The SDK ships no directory, no file format
+      and no naming convention, because the moment it reads a directory it has
+      invented one you did not choose:
+
+      	m := sql.Migration{
+      		Version: 20260910143000,
+      		Name:    "create accounts",
+      		Up:      sql.Statements("CREATE TABLE accounts (id BIGINT PRIMARY KEY, cents BIGINT NOT NULL)"),
+      		Down:    sql.Statements("DROP TABLE accounts"),
+      	}
+
+      Each migration runs in its own transaction together with its version-table
+      row, so on PostgreSQL and SQLite a failed migration rolls back BOTH halves
+      and the database sits exactly at the previous version.
+
+      On MySQL and MariaDB that guarantee does not hold, and it is not something
+      this SDK can fix: DDL causes an IMPLICIT COMMIT, so a migration whose second
+      statement fails leaves the first one applied while its version row is rolled
+      back. Write ONE DDL statement per migration on MySQL and the failure is
+      atomic by construction. See ADR 0055 D8.
+
+      [Migrator].Plan is the dry run: it reports what [Migrator].Up would apply,
+      applies nothing and takes no lock. [Irreversible] is how a migration says
+      out loud that it cannot be rolled back — a nil Down is refused, because "I
+      forgot the reversal" and "there is no reversal" are the same nil.
+
+      # Errors
+
+      Every failure is a typed SDK error joined with the driver's own, side by
+      side, so neither question loses its answer:
+
+      	errors.Is(err, sql.CommitFailed)              // the SDK's verdict
+      	errs.HasCode(err, sql.CommitFailed.Code())    // the same, by code
+      	errors.Is(err, driver.ErrBadConn)             // the driver's own
+
+      The sentinels above are the matchable values; their Code() is the ADR 0005
+      dotted quad. No Public message in this domain ever carries a connection
+      string, a query or a bound argument.
+    facade:
       - const:
           - doc: DialectPostgres is PostgreSQL 9.1+.
             name: DialectPostgres
@@ -1228,7 +2024,13 @@ packages:
             - type: Step
           variadic: true
     functions:
-      - in:
+      - doc: |-
+          Transact runs fn inside a transaction with the driver's default isolation.
+
+          It is the ergonomic form of [Transactor].Transact for the common case. The
+          port itself keeps the options parameter so it never needs a second method
+          (ADR 0039); this helper keeps the call site short.
+        in:
           - name: ctx
             type: context.Context
           - name: tm

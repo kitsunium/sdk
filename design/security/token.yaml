@@ -189,53 +189,157 @@ packages:
             value: "0x00_03_2C_07"
         type: errs.Code
     constants:
-      - name: ClaimIssuer
+      - blockDoc: |-
+          Registered claim names (RFC 7519 §4.1). PASETO v4 reuses the same seven
+          names, with a different value encoding — see internal/service/security/token.
+        doc: ClaimIssuer is "iss" — who minted the token.
+        name: ClaimIssuer
         type: string
         value: "\"iss\""
-      - name: ClaimSubject
+      - blockDoc: |-
+          Registered claim names (RFC 7519 §4.1). PASETO v4 reuses the same seven
+          names, with a different value encoding — see internal/service/security/token.
+        doc: ClaimSubject is "sub" — who the token is about.
+        name: ClaimSubject
         type: string
         value: "\"sub\""
-      - name: ClaimAudience
+      - blockDoc: |-
+          Registered claim names (RFC 7519 §4.1). PASETO v4 reuses the same seven
+          names, with a different value encoding — see internal/service/security/token.
+        doc: ClaimAudience is "aud" — who the token is FOR. Checked, never assumed.
+        name: ClaimAudience
         type: string
         value: "\"aud\""
-      - name: ClaimExpiry
+      - blockDoc: |-
+          Registered claim names (RFC 7519 §4.1). PASETO v4 reuses the same seven
+          names, with a different value encoding — see internal/service/security/token.
+        doc: ClaimExpiry is "exp" — the instant after which the token is dead.
+        name: ClaimExpiry
         type: string
         value: "\"exp\""
-      - name: ClaimNotBefore
+      - blockDoc: |-
+          Registered claim names (RFC 7519 §4.1). PASETO v4 reuses the same seven
+          names, with a different value encoding — see internal/service/security/token.
+        doc: ClaimNotBefore is "nbf" — the instant before which it is not yet alive.
+        name: ClaimNotBefore
         type: string
         value: "\"nbf\""
-      - name: ClaimIssuedAt
+      - blockDoc: |-
+          Registered claim names (RFC 7519 §4.1). PASETO v4 reuses the same seven
+          names, with a different value encoding — see internal/service/security/token.
+        doc: ClaimIssuedAt is "iat" — when it was minted.
+        name: ClaimIssuedAt
         type: string
         value: "\"iat\""
-      - name: ClaimID
+      - blockDoc: |-
+          Registered claim names (RFC 7519 §4.1). PASETO v4 reuses the same seven
+          names, with a different value encoding — see internal/service/security/token.
+        doc: ClaimID is "jti" — a unique id for the token.
+        name: ClaimID
         type: string
         value: "\"jti\""
-      - name: MaxPrivateClaims
+      - doc: |-
+          MaxPrivateClaims caps how many application claims one token may carry. The
+          number is a bound, not a budget: a claim set is an authorisation statement,
+          and a token that needs more than this many members is describing a database
+          row rather than a subject. The cap keeps a hostile payload's decode cost
+          linear and bounded, which is the same reason the wire size is capped.
+        name: MaxPrivateClaims
         type: int
         value: "64"
-      - name: AlgorithmUnknown
+      - doc: |-
+          AlgorithmUnknown is the zero value — the algorithm nobody chose. Every
+          constructor refuses it rather than defaulting to one.
+        name: AlgorithmUnknown
         type: Algorithm
         value: "0"
-      - name: AlgorithmHS256
+      - doc: |-
+          AlgorithmHS256 is JOSE "HS256": HMAC-SHA-256 over a 256-bit shared
+          secret (RFC 7518 §3.2). Symmetric — a verifier can also mint tokens.
+        name: AlgorithmHS256
         type: Algorithm
         value: "1"
-      - name: AlgorithmES256
+      - doc: |-
+          AlgorithmES256 is JOSE "ES256": ECDSA on NIST P-256 with SHA-256 and the
+          fixed-width R||S signature encoding of RFC 7518 §3.4.
+        name: AlgorithmES256
         type: Algorithm
         value: "2"
-      - name: AlgorithmEdDSA
+      - doc: |-
+          AlgorithmEdDSA is JOSE "EdDSA": Ed25519 over the JWS signing input
+          (RFC 8037 §3.1).
+        name: AlgorithmEdDSA
         type: Algorithm
         value: "3"
-      - name: AlgorithmPasetoV4Public
+      - doc: |-
+          AlgorithmPasetoV4Public is PASETO v4.public: Ed25519 over the
+          pre-authentication encoding of the version header, payload and footer.
+          It is a distinct Algorithm from AlgorithmEdDSA even though both use
+          Ed25519, because the bytes that get signed are not the same bytes.
+        name: AlgorithmPasetoV4Public
         type: Algorithm
         value: "4"
+    doc: |-
+      Package token — the immutable claim set every concrete token format decodes
+      into and every issuer renders from.
+
+      Package token — the copy-on-write setters that build a [ClaimsValue].
+
+      Package token — ranges 0.2.13.* (the domain's verdicts) and 0.3.44.* (what
+      is specific to the two concrete formats) — ADR 0042, declared here since
+      ADR 0160.
+
+      Package token — declares the sentinel *errs.Error verdicts an issuer or a
+      verifier returns, and the refusals specific to the two concrete formats the
+      engine in internal/service/security/token implements (ADR 0160). Each var's
+      name equals its errs.Define Reason in SCREAMING_SNAKE form.
+
+      The Public strings are the half a third party reads (ADR 0005 §4). They name
+      WHICH check refused the token and never echo a value from it: not the
+      audience, not the issuer, not the key id, not a claim. A rejection message
+      that quotes the token's own contents back is a mirror an attacker can query.
+
+      Package token declares the security-token domain: the [Issuer] and
+      [Verifier] ports, the immutable [ClaimsValue] every concrete format decodes
+      into, and the typed verdicts a caller matches on. Concrete formats — JWT/JWS
+      compact (RFC 7519) and PASETO v4 — live in internal/service/security/token; this
+      package owns only the contract, so a caller can hold a Verifier without
+      knowing which wire format produced it.
+
+      # There is no registry, and that is the security decision
+
+      Every other pluggable SDK domain resolves an implementation through a
+      process-wide registry keyed on a name. A token registry would be keyed on
+      the "alg" header — a field the ATTACKER writes. Resolving the verifying
+      algorithm from that field is algorithm confusion, the class of bug where an
+      RSA/EC public key (public by definition) is fed to HMAC-SHA-256 as a shared
+      secret and the forgery verifies. So the algorithm is bound at construction,
+      by a constructor that only accepts the ONE key type that algorithm can use,
+      and the header is only ever compared against that binding — never consulted
+      to choose it. See ADR 0042.
+
+      [Algorithm] is a uint8 enum rather than a string for the same reason: the
+      unsecured "none" algorithm of RFC 7519 §6 has no representation in this
+      type, so no call site can request it and no configuration can enable it. A
+      token whose header says "none" is refused with [AlgorithmNone].
     functions:
-      - in:
+      - doc: |-
+          IsRegisteredClaim reports whether name is one of the seven registered claim
+          names this domain models itself.
+        in:
           - name: name
             type: string
         name: IsRegisteredClaim
         out:
           - type: bool
-      - name: NewClaimsValue
+      - doc: |-
+          NewClaimsValue returns an empty claim set to build on. The zero ClaimsValue
+          is equally valid and equally empty; this constructor exists so a call site
+          reads as a statement of intent rather than a struct literal.
+
+          pkg/v1/security/token re-exports it as the shorter NewClaims, since the Value suffix
+          is a core-layer naming rule (KTN-STRUCT-ROLE) and not a consumer's concern.
+        name: NewClaimsValue
         out:
           - type: ClaimsValue
     imports:
@@ -577,40 +681,71 @@ packages:
             public: The token repeats a member name
             reason: DUPLICATE_MEMBER
     types:
-      - methods:
-          - name: Issuer
+      - doc: |-
+          ClaimsValue is one token's claim set: the seven registered claims as typed
+          fields plus any number of application ("private") claims held as their raw
+          JSON encoding.
+
+          It is an immutable value. Accessors copy every slice and map out, the With*
+          methods return a modified copy rather than mutating the receiver, and every
+          field is unexported so encoding/json cannot reach the contents by reflection
+          — a claim set routinely carries personal data, and the only way it should
+          ever be serialised is through a format package that knows what it is doing.
+
+          Private claims are RAW JSON, not decoded values: this is the core layer, and
+          "what shape is a scope claim" is the caller's question, not the domain's.
+          Decode one with pkg/v1/security/token.PrivateClaim.
+        methods:
+          - doc: Issuer reports the "iss" claim, empty when the token carried none.
+            name: Issuer
             out:
               - type: string
             recv: value
-          - name: Subject
+          - doc: Subject reports the "sub" claim, empty when the token carried none.
+            name: Subject
             out:
               - type: string
             recv: value
-          - name: ID
+          - doc: ID reports the "jti" claim, empty when the token carried none.
+            name: ID
             out:
               - type: string
             recv: value
-          - name: Audience
+          - doc: Audience returns a copy of the "aud" claim, nil when the token carried none.
+            name: Audience
             out:
               - type: "[]string"
             recv: value
-          - name: Expiry
+          - doc: |-
+              Expiry reports the "exp" claim. The zero Time means the claim was ABSENT,
+              never "expired at the epoch" — a verifier decides what to do about absence
+              (see VerifierConfig.AllowMissingExpiry in internal/service/security/token).
+            name: Expiry
             out:
               - type: time.Time
             recv: value
-          - name: NotBefore
+          - doc: NotBefore reports the "nbf" claim; the zero Time means it was absent.
+            name: NotBefore
             out:
               - type: time.Time
             recv: value
-          - name: IssuedAt
+          - doc: IssuedAt reports the "iat" claim; the zero Time means it was absent.
+            name: IssuedAt
             out:
               - type: time.Time
             recv: value
-          - name: PrivateNames
+          - doc: |-
+              PrivateNames returns the application claim names, sorted, so a caller
+              enumerating them gets a stable order rather than Go's randomised map order.
+            name: PrivateNames
             out:
               - type: "[]string"
             recv: value
-          - in:
+          - doc: |-
+              PrivateRaw returns a copy of the raw JSON encoding of the named application
+              claim. The second result reports presence, so a claim explicitly set to JSON
+              null is distinguishable from a claim that was never sent.
+            in:
               - name: name
                 type: string
             name: PrivateRaw
@@ -620,40 +755,61 @@ packages:
               - name: found
                 type: bool
             recv: value
-          - name: IsZero
+          - doc: IsZero reports whether c carries no claim at all.
+            name: IsZero
             out:
               - type: bool
             recv: value
-          - name: String
+          - doc: |-
+              String implements fmt.Stringer and renders the SHAPE of the claim set, never
+              a value: "token.Claims{registered:3 aud:1 private:2}".
+
+              A claim set is the output of an authentication decision and routinely holds a
+              subject id, an email, a tenant, a scope list. Rendering any of it would put
+              that in whichever log line happened to use %v — which is exactly how claim
+              contents end up in a log aggregator that was never scoped to hold them. The
+              counts are enough to tell "the token had no audience" from "the audience did
+              not match", which is what a %v is usually reaching for.
+            name: String
             out:
               - type: string
             recv: value
-          - name: GoString
+          - doc: |-
+              GoString implements fmt.GoStringer so %#v stays redacted too — fmt bypasses
+              String for Go-syntax formatting and would otherwise dump every field.
+            name: GoString
             out:
               - type: string
             recv: value
-          - in:
+          - doc: WithIssuer returns a copy of c carrying iss. The empty string clears it.
+            in:
               - name: iss
                 type: string
             name: WithIssuer
             out:
               - type: ClaimsValue
             recv: value
-          - in:
+          - doc: WithSubject returns a copy of c carrying sub. The empty string clears it.
+            in:
               - name: sub
                 type: string
             name: WithSubject
             out:
               - type: ClaimsValue
             recv: value
-          - in:
+          - doc: WithID returns a copy of c carrying jti. The empty string clears it.
+            in:
               - name: jti
                 type: string
             name: WithID
             out:
               - type: ClaimsValue
             recv: value
-          - in:
+          - doc: |-
+              WithAudience returns a copy of c whose "aud" claim is exactly aud. Passing no
+              argument clears the claim; the slice is copied, so a later mutation of the
+              caller's backing array cannot reach the claim set.
+            in:
               - name: aud
                 type: string
             name: WithAudience
@@ -661,28 +817,49 @@ packages:
               - type: ClaimsValue
             recv: value
             variadic: true
-          - in:
+          - doc: |-
+              WithExpiry returns a copy of c carrying exp. The zero Time clears the claim,
+              which a verifier reads as "no expiry was sent" — not as "expired".
+            in:
               - name: exp
                 type: time.Time
             name: WithExpiry
             out:
               - type: ClaimsValue
             recv: value
-          - in:
+          - doc: WithNotBefore returns a copy of c carrying nbf. The zero Time clears it.
+            in:
               - name: nbf
                 type: time.Time
             name: WithNotBefore
             out:
               - type: ClaimsValue
             recv: value
-          - in:
+          - doc: WithIssuedAt returns a copy of c carrying iat. The zero Time clears it.
+            in:
               - name: iat
                 type: time.Time
             name: WithIssuedAt
             out:
               - type: ClaimsValue
             recv: value
-          - in:
+          - doc: |-
+              WithPrivateRaw returns a copy of c carrying the application claim name with
+              the raw JSON encoding raw.
+
+              It refuses three things rather than accommodating them:
+
+                - an empty name, which no JSON object member can carry meaningfully;
+                - one of the seven registered names ([IsRegisteredClaim]) — a second "exp"
+                  that the temporal validator never reads is a claim an application would
+                  trust and nothing would enforce;
+                - more than [MaxPrivateClaims] members, so the decode cost of a hostile
+                  payload stays bounded.
+
+              raw is copied and is NOT validated as JSON here: the format package that
+              produced it already parsed it, and re-parsing in the value type would put a
+              second, differently-strict JSON reader on the trusted path.
+            in:
               - name: name
                 type: string
               - name: raw
@@ -697,44 +874,266 @@ packages:
         name: ClaimsValue
         struct:
           unexported: true
-      - methods:
-          - name: String
+      - doc: |-
+          Algorithm is the signature algorithm a token issuer or verifier is bound to.
+          The zero value is [AlgorithmUnknown] and is never usable.
+
+          The set is closed and deliberately small: an algorithm reaches this enum only
+          when the SDK's crypto domain already ships the primitive behind it. "none"
+          is absent by construction.
+        methods:
+          - doc: |-
+              String reports the wire name of a — the JOSE "alg" header value for the JWS
+              algorithms, and the version+purpose header for PASETO. An unknown Algorithm
+              renders "unknown", which matches no wire name, so a zero value can never be
+              mistaken for a real header on either side of a comparison.
+            name: String
             out:
               - type: string
             recv: value
-          - name: Known
+          - doc: |-
+              Known reports whether a names an algorithm this domain implements. It is the
+              guard every constructor runs before binding a key, so an out-of-range value
+              is refused at construction rather than at the first verification.
+            name: Known
             out:
               - type: bool
             recv: value
         name: Algorithm
         underlying: uint8
   - constants:
-      - name: DefaultMaxTokenLen
+      - doc: |-
+          DefaultMaxTokenLen is the token-string bound applied when a config
+          leaves MaxTokenLen at zero. 8 KiB comfortably holds an OIDC ID token
+          with a certificate thumbprint; it does not hold an attack.
+        name: DefaultMaxTokenLen
         type: int
         value: 8 << 10
-      - name: MinTokenLen
+      - doc: |-
+          MinTokenLen is the floor a configured MaxTokenLen may not go below. A
+          bound smaller than this would reject every real token, which is a
+          configuration mistake worth naming rather than a policy.
+        name: MinTokenLen
         type: int
         value: "64"
-      - name: MaxTokenLenCeiling
+      - doc: |-
+          MaxTokenLenCeiling is the ceiling a configured MaxTokenLen may not
+          exceed. There is no legitimate multi-megabyte bearer token, and the
+          ceiling is what keeps "configurable" from meaning "unbounded".
+        name: MaxTokenLenCeiling
         type: int
         value: 1 << 20
-      - name: DefaultMaxClaimDepth
+      - doc: |-
+          DefaultMaxClaimDepth is the JSON nesting bound applied when a config
+          leaves MaxClaimDepth at zero.
+        name: DefaultMaxClaimDepth
         type: int
         value: "16"
-      - name: MaxClaimDepthCeiling
+      - doc: |-
+          MaxClaimDepthCeiling is the ceiling a configured MaxClaimDepth may not
+          exceed.
+        name: MaxClaimDepthCeiling
         type: int
         value: "64"
-      - name: DefaultMaxKeyCandidates
+      - doc: |-
+          DefaultMaxKeyCandidates is how many keys a set verifier will try for one
+          "kid" when the config leaves MaxKeyCandidates at zero. A rotation window
+          holds two; four leaves room for a slow rollover without turning a
+          published JWK Set into a signature-verification multiplier.
+        name: DefaultMaxKeyCandidates
         type: int
         value: "4"
-      - name: MaxKeyCandidatesCeiling
+      - doc: |-
+          MaxKeyCandidatesCeiling caps MaxKeyCandidates. Trying keys IS signature
+          verification, the expensive half of this package; a publisher who can
+          name the candidate count can name the cost.
+        name: MaxKeyCandidatesCeiling
         type: int
         value: "16"
-      - name: MaxLeeway
+      - doc: |-
+          MaxLeeway is the largest clock-skew allowance a verifier accepts.
+
+          Leeway exists because two hosts disagree about the time by seconds. A leeway
+          measured in hours is not skew tolerance, it is an expiry claim that has been
+          quietly disabled — so the constructor refuses it rather than honouring a
+          value whose effect the caller almost certainly did not intend (ADR 0031).
+        name: MaxLeeway
         type: time.Duration
         value: "300000000000"
+    doc: |-
+      Package token — one JWK Set member, with its binding already derived.
+
+      Package token — the three numeric limits a verification policy resolves.
+
+      Package token — the claims <-> JSON conversion shared by both formats.
+
+      JWT and PASETO agree on the seven registered claim NAMES and disagree on
+      their value encodings: JWT writes NumericDate (RFC 7519 §2) and allows "aud"
+      to be a string or an array of strings; PASETO writes RFC 3339 timestamps and
+      allows exactly one audience. So the traversal is written once and the two
+      encodings are a [claimShape] each — rather than two claim decoders that
+      would drift apart on everything except the part that actually differs.
+
+      Package token — the one-pass, string-aware JSON nesting counter.
+
+      Package token — the Ed25519 signing binding.
+
+      Package token — the bounded wire primitives every format here goes through:
+      segment splitting, strict base64url, JSON depth and duplicate-member checks,
+      and PASETO's pre-authentication encoding.
+
+      Every function in this file runs on ATTACKER-CONTROLLED bytes before any key
+      is touched, so each one is O(len(input)) with a bound checked first and no
+      allocation proportional to a count the attacker chooses.
+
+      Package token — the ECDSA P-256 signing binding.
+
+      Package token — the HMAC-SHA-256 binding.
+
+      Package token — the JWT issuing policy.
+
+      Package token — the JWT/JOSE claim-value encoding.
+
+      Package token — JSON string rendering that cannot fail.
+
+      encoding/json's Marshal returns an error no string or []string can ever
+      produce, and discarding it at a dozen call sites is how a real failure
+      somewhere else eventually gets discarded too. Rendering the two shapes this
+      package actually emits by hand removes the error channel instead of ignoring
+      it — and removes a reflective encode from every mint.
+
+      Package token — verification against a JWK or a JWK Set.
+
+      This file holds the ONLY run-time algorithm selection in the package, and the
+      selector is the KEY, never the token. A relying party fetched the key set
+      from a publisher it trusts; the "kty"/"crv" members are that publisher's
+      statement about their own key, and deriving the algorithm from them is
+      exactly as trustworthy as the key itself. Deriving it from the token's "alg"
+      header would be trusting the attacker's statement about the relying party's
+      key — which is algorithm confusion, spelled out.
+
+      Package token — JWS Compact Serialization (RFC 7515): the header, and the
+      algorithm gate every verifier runs before a key reaches a primitive.
+
+      Package token — the JWS compact issuer.
+
+      Package token — the parsed, not-yet-authenticated shape of a compact token.
+
+      Package token — the single-key JWS compact verifier.
+
+      Package token — the JWT constructor set: one per algorithm, each accepting
+      only the Go key type its algorithm can use.
+
+      That is not documentation. NewHS256Verifier's parameter is a
+      core/crypto.Key — a struct with an unexported field — so the classic
+      confusion bug, handing it an EC or RSA public key so the attacker can sign
+      with the public half, is a call that does not compile.
+
+      Package token — the algorithm-bound key contracts and their constructors.
+
+      This file is where algorithm confusion is made unwritable. Each binding
+      holds ONE Go key type and reports ONE algorithm, and the bind* helpers below
+      are the only way to build one. There is no `bind(alg, []byte)`, because a
+      function that takes an algorithm name and a bag of bytes is a function whose
+      caller can be talked into passing a public key where a shared secret goes.
+
+      Package token — PASETO v4.public: the constructors and the scheme gate.
+
+      PASETO is the format that answers the question "what if the algorithm were
+      not negotiable". Its header is a version and a purpose — "v4.public." —
+      baked into the signed bytes through the pre-authentication encoding, so
+      there is no "alg" field to substitute and algorithm confusion has nothing to
+      grip. This implementation still binds the key type at construction, because
+      the property should hold for the same reason on both formats rather than by
+      accident on one of them.
+
+      Only v4.public ships. See the package CLAUDE.md §PASETO for v4.local.
+
+      Package token — the PASETO v4.public issuer.
+
+      Package token — the PASETO v4.public issuing policy.
+
+      Package token — the PASETO claim-value encoding.
+
+      Package token — the PASETO v4.public verifier.
+
+      Package token — the PASETO v4.public verification policy.
+
+      Package token — the validated, defaults-applied form of a verification
+      config, so the checks run once at construction rather than once per token.
+
+      Package token implements the two concrete security-token formats behind the
+      core/security/token ports: JWT over JWS Compact Serialization (RFC 7519 + RFC 7515)
+      and PASETO v4.public. It is stdlib-only and composes the SDK's own crypto
+      schemes — HMAC-SHA-256 from service/crypto/mac/hmacsha2, Ed25519 from
+      service/crypto/sign/ed25519sig — so it adds no dependency to internal/service.
+
+      # Algorithm confusion is prevented by the constructor set, not by a check
+
+      There is no NewVerifier(alg, key) here, and there is no verifier that reads
+      the token's "alg" header to decide what to do. There is one constructor per
+      algorithm, each accepting only the ONE Go type that algorithm can use:
+
+      	NewHS256Verifier(secret crypto.Key,     cfg VerifierConfig)
+      	NewES256Verifier(pub *ecdsa.PublicKey,  cfg VerifierConfig)
+      	NewEdDSAVerifier(pub ed25519.PublicKey, cfg VerifierConfig)
+
+      The textbook algorithm-confusion bug — an RSA/EC public key handed to
+      HMAC-SHA-256 as a shared secret, so that anybody holding the public key can
+      mint tokens — is a call that does not compile here: *ecdsa.PublicKey is not
+      a crypto.Key and never converts to one. Verification then compares the
+      header against the binding and refuses a mismatch with
+      coretoken.AlgorithmMismatch, before any key reaches any primitive.
+
+      [NewVerifierFromJWK] and [NewSetVerifier] are the only places an algorithm is
+      chosen at run time, and they choose it from the KEY's "kty"/"crv" — material
+      the relying party fetched from a trusted publisher — never from the token.
+
+      # What is refused, always
+
+        - "alg":"none" in any capitalisation (RFC 7519 §6), with no option to
+          enable it: the core Algorithm enum has no value that spells it.
+        - a non-empty "crit" header (RFC 7515 §4.1.11).
+        - a token past the configured size, or claims past the configured nesting
+          depth, both checked before any decode.
+        - a repeated JSON member in the header or the claims (RFC 8725 §2.6).
+        - a token with no "exp", unless the profile opts out explicitly.
+
+      See the package CLAUDE.md for the RFC 8725 coverage table, including the
+      sections this package does NOT address.
+
+      Package token — hosts compile-time interface assertions
+      — keeping them out of the production
+      source so the runtime binary carries no diagnostic-only declarations.
+
+      Package token — the claim validation both formats share.
+
+      Everything here runs AFTER the signature has verified, and that ordering is a
+      security property, not an implementation detail: reporting "expired" for a
+      token whose signature was never checked tells an attacker what is inside a
+      forgery, and hands the application a claim set it may log.
+
+      Package token — the JWT verification policy.
     functions:
-      - in:
+      - doc: |-
+          NewVerifierFromJWK returns a JWT verifier bound to the algorithm key's own
+          type and curve imply:
+
+          	kty=oct                -> HS256
+          	kty=EC,  crv=P-256     -> ES256
+          	kty=OKP, crv=Ed25519   -> EdDSA
+
+          P-384 and P-521 are represented by the jwk package and refused HERE with
+          KeyUnsuitable. RSA never gets this far: jwk.Parse refuses it first, as
+          UNSUPPORTED_KEY_TYPE, because the SDK models no RSA scheme at all. The SDK
+          signs with none of them, and a verifier that pretends otherwise would promise
+          an interop the crypto domain cannot honour.
+
+          The key's own advisory members are enforced, not ignored: a "use" other than
+          "sig", a "key_ops" that excludes "verify", or an "alg" that disagrees with
+          what the key type implies, all refuse the key. A publisher who says "this key
+          is for encryption" has said something, and honouring it costs nothing.
+        in:
           - name: key
             type: jwk.KeyValue
           - name: cfg
@@ -745,7 +1144,58 @@ packages:
             type: coretoken.Verifier
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NewSetVerifier returns a JWT verifier that selects a key from set by the
+          token's "kid" header.
+
+          # The kid is a selector, not a credential
+
+          The kid chooses which key to TRY. It never decides whether the token is
+          valid: the signature does. So a kid naming an EC key does not let a token
+          claiming HS256 through — the binding built from that key reports ES256, the
+          header comparison refuses, and no key material reaches a MAC.
+
+          # Duplicate kids
+
+          jwk.Set.ByKid refuses to choose between keys sharing a kid, because nothing
+          in the document distinguishes them and picking the first would make the
+          answer depend on member order. This verifier CAN choose, because it has
+          something the key set does not: a signature. It tries the candidates in
+          document order and accepts the first that verifies, which is the rotation
+          path RFC 7517 §4.5 leaves open.
+
+          It tries a BOUNDED number of them. The candidate count is chosen by whoever
+          published the JWK Set, and each attempt is a signature verification, so an
+          unbounded loop would let a publisher — or anybody who can influence the
+          document — price every request. Past MaxKeyCandidates the token is refused
+          with KeyIDAmbiguous rather than verified slowly.
+
+          # The set is bound ONCE, here
+
+          Every member's verifying binding is derived at construction, not per token.
+          A JWK is a key's SERIALISED form and the binding is the same key in the
+          shape a primitive consumes; deriving it reads the key's own kty/crv/x/y and
+          nothing a token supplies, so it is a fixed function of material that is
+          fixed for this verifier's lifetime. Doing it per request cost a full PKIX
+          round trip — `x509.MarshalPKIXPublicKey` immediately re-parsed by
+          `x509.ParsePKIXPublicKey` — measured at 8.3 % of an ES256 JWKS
+          verification's CPU and 28.2 % of its allocated objects. See
+          `internal/service/crypto/key/jwk/BENCH.md`.
+
+          What deliberately did NOT move is the ORDER. Which key is selected, the
+          candidate bound, and the algorithm comparison against the binding all still
+          happen per token and in the same sequence, because that sequence is ADR
+          0042's security property. Nothing here is keyed on, or cached against,
+          anything the token carries.
+
+          # A set that can verify nothing is refused
+
+          Binding at construction is also what lets a useless set be refused there
+          (ADR 0031): an empty set, and one whose every member either has no kid or is
+          unusable, are both PolicyMisconfigured rather than a verifier that refuses
+          every token. The unusable members of a set that IS accepted still count
+          against MaxKeyCandidates — see indexByKid.
+        in:
           - name: set
             type: jwk.Set
           - name: cfg
@@ -756,7 +1206,13 @@ packages:
             type: coretoken.Verifier
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NewHS256Issuer returns a JWT issuer signing with HMAC-SHA-256 under secret.
+
+          HS256 is symmetric: anybody who can verify these tokens can also mint them.
+          Reach for [NewES256Issuer] or [NewEdDSAIssuer] the moment the verifier is
+          not the same trust domain as the issuer.
+        in:
           - name: secret
             type: corecrypto.Key
           - name: cfg
@@ -767,7 +1223,10 @@ packages:
             type: coretoken.Issuer
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NewES256Issuer returns a JWT issuer signing with ECDSA P-256 + SHA-256,
+          emitting the fixed-width R||S signature of RFC 7518 §3.4.
+        in:
           - name: priv
             type: "*ecdsa.PrivateKey"
           - name: cfg
@@ -778,7 +1237,8 @@ packages:
             type: coretoken.Issuer
           - name: err
             type: error
-      - in:
+      - doc: NewEdDSAIssuer returns a JWT issuer signing with Ed25519 (JOSE "EdDSA").
+        in:
           - name: priv
             type: ed25519.PrivateKey
           - name: cfg
@@ -789,7 +1249,8 @@ packages:
             type: coretoken.Issuer
           - name: err
             type: error
-      - in:
+      - doc: NewHS256Verifier returns a JWT verifier bound to HMAC-SHA-256 under secret.
+        in:
           - name: secret
             type: corecrypto.Key
           - name: cfg
@@ -800,7 +1261,12 @@ packages:
             type: coretoken.Verifier
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NewES256Verifier returns a JWT verifier bound to ECDSA P-256 under pub.
+
+          pub is validated as a curve point, not merely measured: an off-curve point
+          is a documented route to key recovery (RFC 8725 §3.4).
+        in:
           - name: pub
             type: "*ecdsa.PublicKey"
           - name: cfg
@@ -811,7 +1277,8 @@ packages:
             type: coretoken.Verifier
           - name: err
             type: error
-      - in:
+      - doc: NewEdDSAVerifier returns a JWT verifier bound to Ed25519 under pub.
+        in:
           - name: pub
             type: ed25519.PublicKey
           - name: cfg
@@ -822,7 +1289,8 @@ packages:
             type: coretoken.Verifier
           - name: err
             type: error
-      - in:
+      - doc: NewPasetoV4Issuer returns a PASETO v4.public issuer signing with Ed25519.
+        in:
           - name: priv
             type: ed25519.PrivateKey
           - name: cfg
@@ -833,7 +1301,8 @@ packages:
             type: coretoken.Issuer
           - name: err
             type: error
-      - in:
+      - doc: NewPasetoV4Verifier returns a PASETO v4.public verifier bound to pub.
+        in:
           - name: pub
             type: ed25519.PublicKey
           - name: cfg
@@ -853,83 +1322,358 @@ packages:
       jwk: github.com/kitsunium/sdk/internal/service/crypto/key/jwk
     path: github.com/kitsunium/sdk/internal/service/security/token
     types:
-      - name: IssuerConfig
+      - doc: |-
+          IssuerConfig configures a JWT issuer.
+
+          The zero value is usable and safe: it stamps "iat", requires the caller to
+          supply an expiry, and refuses to mint a token that would never expire.
+        name: IssuerConfig
         struct:
           fields:
-            - name: Issuer
+            - doc: Issuer, when non-empty, is stamped as "iss" on claims that carry none.
+              name: Issuer
               type: string
-            - name: Type
+            - doc: |-
+                Type overrides the JWS "typ" header. Empty means "JWT" (RFC 7519 §5.1).
+                Set it to an explicit media type such as "at+jwt" when this issuer mints
+                more than one kind of token (RFC 8725 §3.11 / §3.12).
+              name: Type
               type: string
-            - name: KeyID
+            - doc: |-
+                KeyID, when non-empty, is stamped as the JWS "kid" header — the value a
+                recipient's key-set verifier selects on. An issuer that publishes a JWK
+                Set needs one; an issuer whose verifier holds a single key does not.
+              name: KeyID
               type: string
-            - name: Lifetime
+            - doc: |-
+                Lifetime, when positive, is stamped as "exp" = now + Lifetime on claims
+                that carry no expiry of their own. Zero means the claims must bring one.
+              name: Lifetime
               type: time.Duration
-            - name: AllowMissingExpiry
+            - doc: |-
+                AllowMissingExpiry permits minting a token with no "exp" at all. The
+                zero value is false, so the dangerous shape is the one you have to ask
+                for by name: a bearer token that never expires is a password with worse
+                rotation (ADR 0030).
+              name: AllowMissingExpiry
               type: bool
-            - name: Clock
+            - doc: |-
+                Clock is the time source for "iat" and the derived "exp". Nil means
+                clock.System. It is a clock.Clock — the frozen read-only half of the
+                time port (ADR 0039) — because issuing stamps instants and never waits.
+              name: Clock
               type: clock.Clock
-      - name: PasetoIssuerConfig
+      - doc: |-
+          PasetoIssuerConfig configures a PASETO v4.public issuer.
+
+          It is a flat struct rather than an [IssuerConfig] plus two extras, and the
+          missing fields are the point: PASETO has no header parameters, so there is
+          nothing for Type or KeyID to set. Embedding the JWS config would have
+          published two knobs this format silently ignores, and a configuration field
+          that does nothing is a bug waiting for somebody to set it. The equivalent of
+          a "kid" here is [PasetoIssuerConfig.Footer], which the signature covers.
+
+          The zero value is usable and safe: it stamps "iat", requires the caller to
+          supply an expiry, and refuses to mint a token that would never expire.
+        name: PasetoIssuerConfig
         struct:
           fields:
-            - name: Issuer
+            - doc: Issuer, when non-empty, is stamped as "iss" on claims that carry none.
+              name: Issuer
               type: string
-            - name: Footer
+            - doc: |-
+                Footer is the optional, AUTHENTICATED but unencrypted footer. It is
+                covered by the signature through the pre-authentication encoding, and it
+                is where a key identifier belongs in this format.
+              name: Footer
               type: "[]byte"
-            - name: ImplicitAssertion
+            - doc: |-
+                ImplicitAssertion is v4's optional out-of-band context: it is covered by
+                the signature but never transmitted, so a token only verifies for a
+                recipient who already knows it. Both sides must configure the same value.
+              name: ImplicitAssertion
               type: "[]byte"
-            - name: Lifetime
+            - doc: |-
+                Lifetime, when positive, is stamped as "exp" = now + Lifetime on claims
+                that carry no expiry of their own. Zero means the claims must bring one.
+              name: Lifetime
               type: time.Duration
-            - name: AllowMissingExpiry
+            - doc: |-
+                AllowMissingExpiry permits minting a token with no "exp" at all. The
+                zero value is false, so the dangerous shape is the one you have to ask
+                for by name (ADR 0030).
+              name: AllowMissingExpiry
               type: bool
-            - name: Clock
+            - doc: |-
+                Clock is the time source for "iat" and the derived "exp". Nil means
+                clock.System.
+              name: Clock
               type: clock.Clock
-      - name: PasetoVerifierConfig
+      - doc: |-
+          PasetoVerifierConfig configures a PASETO v4.public verifier.
+
+          Like its issuing counterpart it is flat rather than an embedded
+          [VerifierConfig], and the absent knobs are deliberate: PASETO has no "typ"
+          to require and no "kid" to select on, so RequireType and MaxKeyCandidates
+          would be fields this format ignores.
+
+          The zero value is usable and strict: it requires an expiry, allows no clock
+          skew, checks no issuer or audience, expects no footer, and applies the
+          default bounds.
+        name: PasetoVerifierConfig
         struct:
           fields:
-            - name: Issuer
+            - doc: Issuer, when non-empty, must equal the token's "iss" (RFC 8725 §3.8).
+              name: Issuer
               type: string
-            - name: Audience
+            - doc: |-
+                Audience, when non-empty, must equal the token's "aud". PASETO's
+                audience is a single string, so there is no list to search.
+              name: Audience
               type: string
-            - name: Footer
+            - doc: |-
+                Footer is the footer this verifier expects, compared in constant time.
+                Empty means the token must carry NO footer.
+
+                The Verifier port returns claims, not a footer, so an unconstrained
+                footer would be data this package authenticated and then dropped on the
+                floor. Refusing is the only answer that does not quietly lose it.
+              name: Footer
               type: "[]byte"
-            - name: ImplicitAssertion
+            - doc: ImplicitAssertion must equal the value the issuer signed with.
+              name: ImplicitAssertion
               type: "[]byte"
-            - name: Leeway
+            - doc: |-
+                Leeway is the clock-skew allowance applied to "exp" and "nbf". It must
+                be in [0, MaxLeeway].
+              name: Leeway
               type: time.Duration
-            - name: MaxLifetime
+            - doc: |-
+                MaxLifetime, when positive, refuses an authenticated token whose exp-iat
+                span exceeds it. It requires "iat".
+              name: MaxLifetime
               type: time.Duration
-            - name: MaxTokenLen
+            - doc: MaxTokenLen bounds the token string. Zero means DefaultMaxTokenLen.
+              name: MaxTokenLen
               type: int
-            - name: MaxClaimDepth
+            - doc: |-
+                MaxClaimDepth bounds the claims' JSON nesting. Zero means
+                DefaultMaxClaimDepth.
+              name: MaxClaimDepth
               type: int
-            - name: AllowMissingExpiry
+            - doc: AllowMissingExpiry accepts a token with no "exp".
+              name: AllowMissingExpiry
               type: bool
-            - name: Clock
+            - doc: |-
+                Clock is the time source for the temporal claims. Nil means
+                clock.System; a clock.ManualClock makes an expiry test deterministic.
+              name: Clock
               type: clock.Clock
-      - name: VerifierConfig
+      - doc: |-
+          VerifierConfig configures a JWT verifier.
+
+          The zero value is usable and strict: it requires an expiry, allows no clock
+          skew, checks no issuer or audience (there is none to check against), and
+          applies the default bounds.
+        name: VerifierConfig
         struct:
           fields:
-            - name: Issuer
+            - doc: Issuer, when non-empty, must equal the token's "iss" (RFC 8725 §3.8).
+              name: Issuer
               type: string
-            - name: Audience
+            - doc: |-
+                Audience, when non-empty, must appear in the token's "aud"
+                (RFC 8725 §3.9). A correctly signed token minted for another API is not
+                a valid token here.
+              name: Audience
               type: string
-            - name: RequireType
+            - doc: |-
+                RequireType, when non-empty, must equal the JWS "typ" header. It is the
+                mechanism RFC 8725 §3.12 asks for: two kinds of token from one issuer
+                need validation rules that reject each other's tokens.
+              name: RequireType
               type: string
-            - name: Leeway
+            - doc: |-
+                Leeway is the clock-skew allowance applied to "exp" and "nbf". It must
+                be in [0, MaxLeeway].
+              name: Leeway
               type: time.Duration
-            - name: MaxLifetime
+            - doc: |-
+                MaxLifetime, when positive, refuses an authenticated token whose
+                exp-iat span exceeds it. It requires "iat": a lifetime that cannot be
+                computed is not a lifetime this recipient has accepted.
+              name: MaxLifetime
               type: time.Duration
-            - name: MaxTokenLen
+            - doc: |-
+                MaxTokenLen bounds the token string. Zero means DefaultMaxTokenLen; a
+                value outside [MinTokenLen, MaxTokenLenCeiling] is refused.
+              name: MaxTokenLen
               type: int
-            - name: MaxClaimDepth
+            - doc: |-
+                MaxClaimDepth bounds the claims' JSON nesting. Zero means
+                DefaultMaxClaimDepth; a value outside [1, MaxClaimDepthCeiling] is
+                refused.
+              name: MaxClaimDepth
               type: int
-            - name: MaxKeyCandidates
+            - doc: |-
+                MaxKeyCandidates bounds how many keys a set verifier tries for one kid.
+                Zero means DefaultMaxKeyCandidates. Ignored by single-key verifiers.
+              name: MaxKeyCandidates
               type: int
-            - name: AllowMissingExpiry
+            - doc: |-
+                AllowMissingExpiry accepts a token with no "exp". The zero value is
+                false, so the profile that RFC 7519 §4.1.4 leaves optional is required
+                here unless the caller opts out by name.
+              name: AllowMissingExpiry
               type: bool
-            - name: Clock
+            - doc: |-
+                Clock is the time source for the temporal claims. Nil means
+                clock.System; a clock.ManualClock makes an expiry test deterministic
+                without sleeping.
+              name: Clock
               type: clock.Clock
-  - facade:
+  - doc: |-
+      Package token — the dotted-quad codes a consumer routes on.
+
+      These are RE-EXPORTS, not declarations: the ranges 0.2.13.* and 0.3.44.* are
+      owned by internal/core/security/token, where every code of the token domain
+      is declared (ADR 0160), and 0.3.42.* by internal/core/crypto/key/jwk; the
+      errs ownership audit skips a cross-package selector for exactly this reason
+      (ADR 0035). Matching on a code
+      rather than on a reason string is the stronger contract — a code is a number
+      in docs/error-codes.yaml, a reason is a spelling.
+
+      	switch {
+      	case errs.HasCode(err, token.CodeExpired):          // 401, refresh
+      	case errs.HasCode(err, token.CodeAudienceMismatch): // 401, wrong service
+      	case errs.HasCode(err, token.CodeSignatureInvalid): // 401, and alert
+      	}
+
+      All three answer 401, and a token addressed to another service is no
+      exception: RFC 6750 §3.1 spends invalid_token — and 401 — on a token that is
+      "invalid for other reasons", while 403 (insufficient_scope) says the token
+      is valid HERE and merely too weak, which an audience mismatch is not. What
+      differs between the rows is what the caller does next, not the status.
+
+      Package token — the algorithm, registered-claim and JWK key vocabulary.
+
+      Package token — the constructor set, one per algorithm, plus the JWK
+      loaders and bridges. Each constructor accepts only the Go key type its
+      algorithm can use, which is what makes algorithm confusion a call that does
+      not compile.
+
+      Package token — the typed verdicts an issuer, a verifier or a key loader
+      returns.
+
+      Match them with errs.HasCode (the codes are re-exported in facade_gen.go) or
+      errs.HasReason. Their Public halves name WHICH check refused a token and
+      never echo a value out of it — not an audience, not an issuer, not a key id,
+      not a claim. The JWK* verdicts are the key loaders' — ParseJWK and
+      ParseJWKSet — and hold a key document to the same rule: they name the rule a
+      member broke, never the member's value.
+
+      Package token is the public facade for the SDK's security-token domain:
+      JSON Web Tokens over JWS Compact Serialization (RFC 7519) and PASETO
+      v4.public. It is stdlib-only and composes the SDK's own crypto schemes, so
+      it adds no dependency to a consumer's build.
+
+      	iss, err := token.NewES256Issuer(privateKey, token.IssuerConfig{
+      	    Issuer:   "https://auth.example.com",
+      	    Lifetime: 15 * time.Minute,
+      	})
+      	jwt, err := iss.Issue(token.NewClaims().WithSubject("user-42").WithAudience("api"))
+
+      	ver, err := token.NewES256Verifier(&privateKey.PublicKey, token.VerifierConfig{
+      	    Issuer:   "https://auth.example.com",
+      	    Audience: "api",
+      	    Leeway:   30 * time.Second,
+      	})
+      	claims, err := ver.Verify(jwt)
+
+      # Algorithm confusion is a call you cannot write
+
+      There is no NewVerifier(algorithm, key), and no verifier reads the token's
+      "alg" header to decide what to do with it. There is one constructor per
+      algorithm, and each accepts only the Go type that algorithm can use:
+
+      	NewHS256Verifier(secret crypto.Key,      cfg VerifierConfig)
+      	NewES256Verifier(pub *ecdsa.PublicKey,   cfg VerifierConfig)
+      	NewEdDSAVerifier(pub ed25519.PublicKey,  cfg VerifierConfig)
+
+      The textbook attack — take the RSA or EC public key the server publishes,
+      use it as an HMAC shared secret, mint tokens with it, and let a verifier
+      that trusts the header do the rest — needs a call that hands a public key to
+      the HMAC path. Here that call does not compile: crypto.Key is a struct with
+      an unexported field, and no *ecdsa.PublicKey converts to it. Verification
+      then COMPARES the header against the binding and refuses a mismatch with
+      AlgorithmMismatch, before any key reaches any primitive.
+
+      [NewVerifierFromJWK] and [NewSetVerifier] are the only places an algorithm
+      is selected at run time, and they select it from the KEY's kty/crv — the
+      material a relying party fetched from a publisher it trusts — never from the
+      token.
+
+      # Loading a published key
+
+      A relying party that verifies against an issuer's published keys fetches the
+      key document itself — this package performs no I/O, follows no jwks_uri and
+      caches nothing (ADR 0042) — and hands the bytes to [ParseJWKSet], or to
+      [ParseJWK] for a single key:
+
+      	set, err := token.ParseJWKSet(body) // the issuer's JWK Set, as fetched
+      	ver, err := token.NewSetVerifier(set, token.VerifierConfig{
+      	    Issuer:   "https://auth.example.com",
+      	    Audience: "api",
+      	})
+
+      Parsing is the only way to obtain a [JWK]: the type has no exported field
+      and no UnmarshalJSON, so its validation — strict base64url, coordinates at
+      the curve's fixed length, the point on its curve, a private "d" deriving
+      exactly the declared public key — is not a step a caller can skip by
+      decoding some other way. [NewJWKSet] assembles a set from keys already
+      parsed. A refusal carries one of the CodeJWK* codes, matchable with
+      errs.HasCode; a set is accepted whole or not at all, so one RSA member —
+      the SDK verifies nothing with RSA — refuses the document.
+
+      # What is always refused
+
+        - "alg":"none" in any capitalisation (RFC 7519 §6). [Algorithm] is an enum
+          with no value that spells it, so no configuration can enable it.
+        - a non-empty "crit" header (RFC 7515 §4.1.11).
+        - a token with no "exp", unless VerifierConfig.AllowMissingExpiry says
+          otherwise. RFC 7519 §4.1.4 makes exp OPTIONAL; a bearer token that never
+          expires is a password with a worse rotation story, so the default here
+          inverts that and the opt-out has a name.
+        - a token past MaxTokenLen, or claims past MaxClaimDepth — both checked
+          before any decode allocates.
+        - a repeated JSON member in the header or the claims (RFC 8725 §2.6).
+
+      # Testing time without sleeping
+
+      Every config has a Clock field, and it takes any value with the two methods
+      Now and Since — so the fake is one a test writes itself, and an expiry test
+      moves time by assignment instead of by sleeping:
+
+      	type fakeClock struct{ now time.Time }
+
+      	func (c *fakeClock) Now() time.Time                  { return c.now }
+      	func (c *fakeClock) Since(t time.Time) time.Duration { return c.now.Sub(t) }
+
+      	fake := &fakeClock{now: time.Unix(1000, 0)}
+      	ver, _ := token.NewHS256Verifier(secret, token.VerifierConfig{Clock: fake})
+      	fake.now = fake.now.Add(2 * time.Hour) // now the token is expired, deterministically
+
+      Move it between calls, or guard it with a mutex if a verifier reads it from
+      another goroutine at the same time.
+
+      # Claims are not printable
+
+      [Claims] renders its SHAPE under %v / %s / %#v — "token.Claims{registered:3
+      aud:1 private:2}" — and never a value. A claim set is the output of an
+      authentication decision and routinely holds a subject id, an email or a
+      tenant; the counts are enough to tell "no audience was sent" from "the
+      audience did not match", which is what a %v is usually reaching for.
+    facade:
       - const:
           - doc: |-
               CodeMalformed identifies an input that could not be read as a token
@@ -1849,7 +2593,17 @@ packages:
           out:
             - type: Claims
     functions:
-      - in:
+      - doc: |-
+          PrivateClaim decodes the named application claim of claims into T.
+
+          It lives here rather than on the Claims value because "what shape is a scope
+          claim" is the caller's question, not the domain's: the core value stores
+          private claims as the exact JSON bytes the issuer signed, so re-encoding a
+          decoded value can never change what was authenticated.
+
+          The second result reports presence, which is how a claim explicitly set to
+          JSON null is told apart from one that was never sent.
+        in:
           - name: claims
             type: Claims
           - name: name
@@ -1865,7 +2619,11 @@ packages:
         typeParams:
           - constraint: any
             name: T
-      - in:
+      - doc: |-
+          SetPrivateClaim returns a copy of claims carrying name encoded as JSON. It
+          refuses an empty name, one of the seven registered names, and a claim set
+          already at its private-claim cap.
+        in:
           - name: claims
             type: Claims
           - name: name

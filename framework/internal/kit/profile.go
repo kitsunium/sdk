@@ -1,5 +1,3 @@
-// Package kit — the Studio's profiler: the live heap and the goroutines,
-// folded onto the graph.
 package kit
 
 import (

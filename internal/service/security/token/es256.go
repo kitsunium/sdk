@@ -1,4 +1,3 @@
-// Package token — the ECDSA P-256 signing binding.
 package token
 
 import (

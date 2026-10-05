@@ -1,5 +1,3 @@
-// Package health — hosts Status, the verdict a check and a probe both carry,
-// and the aggregation rule that turns the first into the second.
 package health
 
 // Status is the verdict of one check or of a whole probe. It is a CLOSED set

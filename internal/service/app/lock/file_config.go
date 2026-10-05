@@ -1,5 +1,3 @@
-// Package lock — the file locker's configuration and the two ADR 0031 halves
-// it contains: one clamp and one refusal, in one struct, for contrast.
 package lock
 
 import (

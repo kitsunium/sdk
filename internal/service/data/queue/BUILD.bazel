@@ -9,6 +9,7 @@ go_library(
         "consume_config.go",
         "dirtrust_posix.go",
         "dirtrust_windows.go",
+        "doc.go",
         "file.go",
         "file_config.go",
         "file_dead.go",

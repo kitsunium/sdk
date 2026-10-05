@@ -1,5 +1,3 @@
-// Package entitlement - the read side of the cache guard where the kernel
-// does not provide it, and a reader is what breaks a writer.
 package entitlement
 
 import "log"

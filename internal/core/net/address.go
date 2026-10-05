@@ -1,4 +1,3 @@
-// Package net — the listen address value.
 package net
 
 // AddressValue names one socket to bind. It is a value type so a group's listen

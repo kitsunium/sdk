@@ -1,4 +1,3 @@
-// Package client — the path denylist policy.
 package client
 
 import (

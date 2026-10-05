@@ -1,4 +1,3 @@
-// Package mail — the one whole-message guard both transports run.
 package mail
 
 import (

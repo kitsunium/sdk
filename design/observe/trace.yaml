@@ -128,90 +128,344 @@ packages:
             value: "0x00_03_32_08"
         type: errs.Code
     constants:
-      - name: ExceptionEventName
+      - blockDoc: |-
+          ExceptionEventName and the three attribute keys around it are the OpenTelemetry
+          semantic convention for recording an error on a span.
+
+          They are constants here rather than strings at a call site because the whole
+          value of a convention is that two producers spell it identically: a backend
+          renders an event named exactly "exception" as an error, and renders
+          "Exception" as an event nobody will ever look at.
+        doc: ExceptionEventName is the reserved event name for a recorded error.
+        name: ExceptionEventName
         type: string
         value: "\"exception\""
-      - name: ExceptionTypeKey
+      - blockDoc: |-
+          ExceptionEventName and the three attribute keys around it are the OpenTelemetry
+          semantic convention for recording an error on a span.
+
+          They are constants here rather than strings at a call site because the whole
+          value of a convention is that two producers spell it identically: a backend
+          renders an event named exactly "exception" as an error, and renders
+          "Exception" as an event nobody will ever look at.
+        doc: ExceptionTypeKey names the error's type.
+        name: ExceptionTypeKey
         type: string
         value: "\"exception.type\""
-      - name: ExceptionMessageKey
+      - blockDoc: |-
+          ExceptionEventName and the three attribute keys around it are the OpenTelemetry
+          semantic convention for recording an error on a span.
+
+          They are constants here rather than strings at a call site because the whole
+          value of a convention is that two producers spell it identically: a backend
+          renders an event named exactly "exception" as an error, and renders
+          "Exception" as an event nobody will ever look at.
+        doc: ExceptionMessageKey names the error's message.
+        name: ExceptionMessageKey
         type: string
         value: "\"exception.message\""
-      - name: ExceptionStacktraceKey
+      - blockDoc: |-
+          ExceptionEventName and the three attribute keys around it are the OpenTelemetry
+          semantic convention for recording an error on a span.
+
+          They are constants here rather than strings at a call site because the whole
+          value of a convention is that two producers spell it identically: a backend
+          renders an event named exactly "exception" as an error, and renders
+          "Exception" as an event nobody will ever look at.
+        doc: |-
+          ExceptionStacktraceKey names the error's stack trace. This SDK never
+          fills it: a Go error carries no stack, and inventing one from the
+          recording site would name the wrong goroutine.
+        name: ExceptionStacktraceKey
         type: string
         value: "\"exception.stacktrace\""
-      - name: TraceIDLen
+      - blockDoc: |-
+          TraceIDLen and SpanIDLen are the byte lengths W3C Trace Context and
+          opentelemetry/proto/trace/v1 both fix: 16 bytes of trace-id, 8 of span-id.
+          They are not tunable — a 16-byte trace-id is the format, not a default.
+        doc: TraceIDLen is the trace identifier's length in bytes.
+        name: TraceIDLen
         type: int
         value: "16"
-      - name: SpanIDLen
+      - blockDoc: |-
+          TraceIDLen and SpanIDLen are the byte lengths W3C Trace Context and
+          opentelemetry/proto/trace/v1 both fix: 16 bytes of trace-id, 8 of span-id.
+          They are not tunable — a 16-byte trace-id is the format, not a default.
+        doc: SpanIDLen is the span identifier's length in bytes.
+        name: SpanIDLen
         type: int
         value: "8"
-      - name: TraceIDHexLen
+      - blockDoc: |-
+          TraceIDLen and SpanIDLen are the byte lengths W3C Trace Context and
+          opentelemetry/proto/trace/v1 both fix: 16 bytes of trace-id, 8 of span-id.
+          They are not tunable — a 16-byte trace-id is the format, not a default.
+        doc: TraceIDHexLen is the trace identifier's length in lowercase hex.
+        name: TraceIDHexLen
         type: int
         value: "32"
-      - name: SpanIDHexLen
+      - blockDoc: |-
+          TraceIDLen and SpanIDLen are the byte lengths W3C Trace Context and
+          opentelemetry/proto/trace/v1 both fix: 16 bytes of trace-id, 8 of span-id.
+          They are not tunable — a 16-byte trace-id is the format, not a default.
+        doc: SpanIDHexLen is the span identifier's length in lowercase hex.
+        name: SpanIDHexLen
         type: int
         value: "16"
-      - name: FlagSampled
+      - doc: |-
+          FlagSampled is the sampled bit: the least significant one. When set, the
+          caller "may have recorded trace data" (§3.2.2.5.1), which is what makes the
+          sampling decision a property of the TRACE rather than of each span.
+        name: FlagSampled
         type: TraceFlags
         value: "0x01"
-      - name: DefaultScopeName
+      - doc: |-
+          DefaultScopeName names this SDK's TRACE package as the instrumenting library
+          when a caller declares no scope of their own.
+
+          It is a separate constant from metrics' DefaultScopeName, and the difference is
+          not cosmetic: an InstrumentationScope names the library that produced THIS
+          signal, so stamping a span batch with `…/pkg/v1/observe/metrics` would tell a backend
+          that the metrics package emitted spans. Sharing the value would have been the
+          one place where sharing the model stopped being reuse and started being a
+          wrong answer — which is exactly the line ADR 0051 §Decision 2 draws, and why
+          internal/core/observe/otel takes the default as a parameter rather than owning one.
+        name: DefaultScopeName
         type: string
         value: "\"github.com/kitsunium/sdk/pkg/v1/observe/trace\""
-      - name: SpanKindUnspecified
+      - blockDoc: |-
+          The five kinds, in the schema's own declaration order: iota reproduces
+          SPAN_KIND_UNSPECIFIED = 0 through SPAN_KIND_CONSUMER = 5 exactly, which is
+          what the OTLP encoder emits as the enum's integer.
+        doc: |-
+          SpanKindUnspecified is SPAN_KIND_UNSPECIFIED (0). It is the zero value,
+          and the schema's own comment says an implementation should set INTERNAL
+          instead — so it CLAMPS rather than travels (ADR 0031 §clamp): a span
+          created with no stated kind is doing work inside this process, which is
+          what INTERNAL means. Nothing this SDK emits carries it.
+        name: SpanKindUnspecified
         type: SpanKind
         value: "0"
-      - name: SpanKindInternal
+      - blockDoc: |-
+          The five kinds, in the schema's own declaration order: iota reproduces
+          SPAN_KIND_UNSPECIFIED = 0 through SPAN_KIND_CONSUMER = 5 exactly, which is
+          what the OTLP encoder emits as the enum's integer.
+        doc: |-
+          SpanKindInternal is SPAN_KIND_INTERNAL (1): work inside one process,
+          with no remote counterpart.
+        name: SpanKindInternal
         type: SpanKind
         value: "1"
-      - name: SpanKindServer
+      - blockDoc: |-
+          The five kinds, in the schema's own declaration order: iota reproduces
+          SPAN_KIND_UNSPECIFIED = 0 through SPAN_KIND_CONSUMER = 5 exactly, which is
+          what the OTLP encoder emits as the enum's integer.
+        doc: |-
+          SpanKindServer is SPAN_KIND_SERVER (2): handling an inbound synchronous
+          request. Its parent is normally a remote CLIENT span.
+        name: SpanKindServer
         type: SpanKind
         value: "2"
-      - name: SpanKindClient
+      - blockDoc: |-
+          The five kinds, in the schema's own declaration order: iota reproduces
+          SPAN_KIND_UNSPECIFIED = 0 through SPAN_KIND_CONSUMER = 5 exactly, which is
+          what the OTLP encoder emits as the enum's integer.
+        doc: |-
+          SpanKindClient is SPAN_KIND_CLIENT (3): making an outbound synchronous
+          request and waiting for it.
+        name: SpanKindClient
         type: SpanKind
         value: "3"
-      - name: SpanKindProducer
+      - blockDoc: |-
+          The five kinds, in the schema's own declaration order: iota reproduces
+          SPAN_KIND_UNSPECIFIED = 0 through SPAN_KIND_CONSUMER = 5 exactly, which is
+          what the OTLP encoder emits as the enum's integer.
+        doc: |-
+          SpanKindProducer is SPAN_KIND_PRODUCER (4): enqueuing a message whose
+          handling happens later, and elsewhere.
+        name: SpanKindProducer
         type: SpanKind
         value: "4"
-      - name: SpanKindConsumer
+      - blockDoc: |-
+          The five kinds, in the schema's own declaration order: iota reproduces
+          SPAN_KIND_UNSPECIFIED = 0 through SPAN_KIND_CONSUMER = 5 exactly, which is
+          what the OTLP encoder emits as the enum's integer.
+        doc: |-
+          SpanKindConsumer is SPAN_KIND_CONSUMER (5): handling a message that was
+          enqueued earlier. Its parent finished long before it started, which is
+          why it is not simply a SERVER span.
+        name: SpanKindConsumer
         type: SpanKind
         value: "5"
-      - name: MaxTraceStateMembers
+      - blockDoc: |-
+          The three limits the W3C tracestate grammar fixes. They are the GRAMMAR's own
+          bounds, not ceilings this SDK invented, which is why there is no knob for any
+          of them (ADR 0031 §refuse: an SDK-chosen ceiling here would be arbitrary, and
+          the specification already supplies a non-arbitrary one).
+        doc: |-
+          MaxTraceStateMembers is the list cap: `list = list-member 0*31( OWS ","
+          OWS list-member )` is 32 members, no more.
+        name: MaxTraceStateMembers
         type: int
         value: "32"
-      - name: MaxTraceStateKeyLen
+      - blockDoc: |-
+          The three limits the W3C tracestate grammar fixes. They are the GRAMMAR's own
+          bounds, not ceilings this SDK invented, which is why there is no knob for any
+          of them (ADR 0031 §refuse: an SDK-chosen ceiling here would be arbitrary, and
+          the specification already supplies a non-arbitrary one).
+        doc: |-
+          MaxTraceStateKeyLen is the longest legal key: `simple-key = lcalpha
+          0*255(...)` is 1 + 255 characters.
+        name: MaxTraceStateKeyLen
         type: int
         value: "256"
-      - name: MaxTraceStateValueLen
+      - blockDoc: |-
+          The three limits the W3C tracestate grammar fixes. They are the GRAMMAR's own
+          bounds, not ceilings this SDK invented, which is why there is no knob for any
+          of them (ADR 0031 §refuse: an SDK-chosen ceiling here would be arbitrary, and
+          the specification already supplies a non-arbitrary one).
+        doc: |-
+          MaxTraceStateValueLen is the longest legal value: `value = 0*255(chr)
+          nblk-chr` is 255 + 1 characters.
+        name: MaxTraceStateValueLen
         type: int
         value: "256"
-      - name: StatusUnset
+      - blockDoc: |-
+          The three codes, in the schema's own declaration order: iota reproduces
+          STATUS_CODE_UNSET = 0 through STATUS_CODE_ERROR = 2 exactly, which is what the
+          OTLP encoder emits as the enum's integer.
+        doc: |-
+          StatusUnset is STATUS_CODE_UNSET (0), the default and the overwhelmingly
+          common value. It means "no explicit judgement was recorded" — NOT "it
+          worked". A backend applies its own heuristics (an HTTP 5xx, a timeout);
+          an SDK claiming OK on the caller's behalf would suppress exactly those.
+        name: StatusUnset
         type: StatusCode
         value: "0"
-      - name: StatusOK
+      - blockDoc: |-
+          The three codes, in the schema's own declaration order: iota reproduces
+          STATUS_CODE_UNSET = 0 through STATUS_CODE_ERROR = 2 exactly, which is what the
+          OTLP encoder emits as the enum's integer.
+        doc: |-
+          StatusOK is STATUS_CODE_OK (1): the developer explicitly asserted
+          success, which the specification says should override any backend
+          heuristic. It is therefore a claim, never set by this SDK on its own.
+        name: StatusOK
         type: StatusCode
         value: "1"
-      - name: StatusError
+      - blockDoc: |-
+          The three codes, in the schema's own declaration order: iota reproduces
+          STATUS_CODE_UNSET = 0 through STATUS_CODE_ERROR = 2 exactly, which is what the
+          OTLP encoder emits as the enum's integer.
+        doc: "StatusError is STATUS_CODE_ERROR (2): the operation failed."
+        name: StatusError
         type: StatusCode
         value: "2"
+    doc: |-
+      Package trace — this signal's half of the shared attribute model
+      (internal/core/observe/otel): the refusal an unusable set earns HERE, and the
+      Resource a Tracer publishes.
+
+      Package trace — the port a span context crosses a process boundary through.
+      Reading and writing the W3C headers through it — Inject, Extract — is the
+      engine's mechanism, internal/service/observe/trace (ADR 0160 §4).
+
+      Package trace — range 0.2.20.* (ADR 0051 core/observe/trace block), and
+      range 0.3.50.*, the tracing engine's, declared here since ADR 0160.
+
+      Package trace — carrying a span context on a context.Context.
+
+      Package trace — declares the sentinel *errs.Error values. Each var's name
+      equals its errs.Define Reason in SCREAMING_SNAKE form.
+
+      Package trace — Event: a timestamped point inside a span.
+
+      Package trace — the SpanExporter contract + process-wide exporter registry.
+
+      Package trace — the two identifiers a trace is built out of, and the flag
+      byte that travels with them.
+
+      Package trace — Link: a reference to a span in another trace.
+
+      Package trace — the sampling port.
+
+      Package trace — what a Sampler is given to decide with.
+
+      Package trace — the instrumentation scope this domain publishes.
+
+      Package trace — the four facts that identify a span on the wire.
+
+      Package trace — SpanKind: the span's relationship to its neighbours.
+
+      Package trace — SpanValue: one finished span, the unit an exporter ships.
+
+      Package trace — SpansValue: the exportable payload.
+
+      Package trace — StateBuilder: a tracestate list assembled member by member,
+      under the same checks Insert applies.
+
+      Package trace — tracestate: the W3C vendor list that travels beside a
+      traceparent, as a value. Reading it out of a header is the engine's
+      (internal/service/observe/trace, ADR 0160 §4).
+
+      Package trace — Status: whether the operation the span describes succeeded.
+
+      Package trace declares the SDK's distributed-tracing PORT: the span context
+      that travels between processes, the OpenTelemetry trace data model, the W3C
+      Trace Context propagation format, and the Tracer/Span pair an application
+      instruments against.
+
+      It is the third pillar of observability beside `logger` and `metrics`, and —
+      like `metrics` since ADR 0044 — it speaks the OpenTelemetry data model while
+      importing none of OpenTelemetry's code. OTel is a published specification;
+      this SDK implements it from the document, as it implements the Prometheus
+      exposition format, RFC 7517 and a five-field POSIX cron. What OTel buys is
+      INTEROPERABILITY, and interoperability is a property of the wire, not of the
+      import graph.
+
+      Concrete implementations — the Tracer, the samplers, the recorder and the
+      OTLP/JSON exporter — live in internal/service/observe/trace. See ADR 0051.
+
+      Package trace — one list member of a tracestate header.
     functions:
-      - in:
+      - doc: |-
+          ValidateAttrs panics with InvalidAttribute (0.2.20.7) when sorted cannot name
+          a dimension set: an empty Key, a value no constructor ever set, or the same
+          Key twice. The rules are the shared model's (internal/core/observe/otel); the code is
+          this signal's own.
+        in:
           - name: sorted
             type: "[]coreotel.AttrValue"
         name: ValidateAttrs
-      - in:
+      - doc: |-
+          SortAttrs returns a sorted, validated, owned copy of attrs — what a span, an
+          event and a link record, so the caller's slice cannot be mutated afterwards
+          through the span. An unusable set panics with InvalidAttribute, at the call
+          site that wrote it rather than at the first export.
+        in:
           - name: attrs
             type: "[]coreotel.AttrValue"
         name: SortAttrs
         out:
           - type: "[]coreotel.AttrValue"
-      - in:
+      - doc: |-
+          NormalizeResource returns the ResourceValue a Tracer publishes: attributes
+          sorted, validated, owned, and carrying ServiceNameKey whether or not the
+          caller supplied it. An unusable attribute set panics with InvalidAttribute,
+          at construction, rather than at the first export.
+        in:
           - name: resource
             type: coreotel.ResourceValue
         name: NormalizeResource
         out:
           - type: coreotel.ResourceValue
-      - in:
+      - doc: |-
+          ContextWithSpanContext returns a copy of parent carrying context.
+
+          An INVALID context is still stored rather than skipped. Storing it is what
+          makes "this scope deliberately has no trace" expressible: a handler that ran
+          under an unsampled or absent traceparent shadows any outer context instead of
+          silently re-parenting its children onto it.
+        in:
           - name: parent
             type: context.Context
           - name: context
@@ -219,19 +473,40 @@ packages:
         name: ContextWithSpanContext
         out:
           - type: context.Context
-      - in:
+      - doc: |-
+          SpanContextFromContext returns the span context carried by ctx, or the invalid
+          zero value when there is none.
+
+          It never returns an error and never panics on a nil-ish context value: an
+          absent trace is the normal state of most code, not a fault.
+        in:
           - name: ctx
             type: context.Context
         name: SpanContextFromContext
         out:
           - type: SpanContextValue
-      - in:
+      - doc: |-
+          RegisterExporter inserts e under e.Name() and returns it for singleton
+          binding. Panics on a nil exporter or a distinct exporter on a taken Name.
+
+          IFACE-PLUGIN: the registry hands plug-in SpanExporter instances back to
+          callers so each backend keeps its concrete type unexported.
+
+          "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
+          plug-in whose type is not comparable both satisfy the port and neither can
+          serve one call (see internal/kernel/plugin).
+        in:
           - name: e
             type: SpanExporter
         name: RegisterExporter
         out:
           - type: SpanExporter
-      - in:
+      - doc: |-
+          LookupExporter returns the SpanExporter registered under name.
+
+          IFACE-PLUGIN: the registry stores plug-in exporters behind the SpanExporter
+          interface — concrete backend types stay unexported.
+        in:
           - name: name
             type: ExporterName
         name: LookupExporter
@@ -240,10 +515,14 @@ packages:
             type: SpanExporter
           - name: ok
             type: bool
-      - name: AvailableExporters
+      - doc: AvailableExporters returns the sorted list of registered ExporterNames.
+        name: AvailableExporters
         out:
           - type: "[]ExporterName"
-      - in:
+      - doc: |-
+          Export ships spans through the SpanExporter registered as name. A missing
+          exporter returns UnknownExporter; an exporter failure wraps as ExportFailed.
+        in:
           - name: name
             type: ExporterName
           - name: spans
@@ -251,7 +530,15 @@ packages:
         name: Export
         out:
           - type: error
-      - in:
+      - doc: |-
+          ParseTraceID reads 32 lowercase hex digits into a TraceID, refusing an
+          all-zero result.
+
+          Uppercase is refused rather than folded: the traceparent grammar is 32HEXDIGLC
+          and a producer emitting uppercase is producing a header other vendors will
+          reject, so accepting it here would hide the defect exactly one hop from where
+          it was introduced.
+        in:
           - name: text
             type: string
         name: ParseTraceID
@@ -260,7 +547,10 @@ packages:
             type: TraceID
           - name: err
             type: error
-      - in:
+      - doc: |-
+          ParseSpanID reads 16 lowercase hex digits into a SpanID, refusing an all-zero
+          result for the reason ParseTraceID does.
+        in:
           - name: text
             type: string
         name: ParseSpanID
@@ -269,13 +559,22 @@ packages:
             type: SpanID
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NormalizeScope returns the ScopeValue a Tracer publishes, filling an empty Name
+          with DefaultScopeName. Version is left exactly as supplied: it is optional in
+          the specification, and inventing one would be a claim about code this package
+          cannot see.
+        in:
           - name: scope
             type: coreotel.ScopeValue
         name: NormalizeScope
         out:
           - type: coreotel.ScopeValue
-      - in:
+      - doc: |-
+          NewStateBuilder returns an empty builder with room for size members. A size
+          above MaxTraceStateMembers is clamped to it — no list holds more — and a
+          negative one is read as zero.
+        in:
           - name: size
             type: int
         name: NewStateBuilder
@@ -513,123 +812,328 @@ packages:
             public: The trace collector accepted the request but rejected some spans
             reason: OTLP_PARTIAL_SUCCESS
     types:
-      - methods:
-          - name: Normalized
+      - doc: |-
+          EventValue is one thing that happened at an instant during a span, rather than
+          over an interval — `opentelemetry/proto/trace/v1.Span.Event`.
+
+          An event is not a cheap child span, and the distinction is worth stating
+          because the wrong choice is invisible until a trace is unreadable: an event
+          has no identity, no duration and no children, so nothing can be a child of it
+          and nothing can link to it. Use one for a moment worth marking on a span's
+          timeline (a retry, a cache miss, an exception); use a child span for work that
+          took time.
+        methods:
+          - doc: |-
+              Normalized returns the event a span actually records: attributes sorted,
+              validated and owned, so the caller's slice cannot be mutated afterwards
+              through the span.
+            name: Normalized
             out:
               - type: EventValue
             recv: value
         name: EventValue
         struct:
           fields:
-            - name: Time
+            - doc: |-
+                Time is when it happened. An unset instant encodes as 0, which is what
+                the schema means by an unknown timestamp.
+              name: Time
               type: time.Time
-            - name: Name
+            - doc: Name is the event's low-cardinality label.
+              name: Name
               type: string
-            - name: Attrs
+            - doc: Attrs are the event's typed dimensions, sorted by Key.
+              name: Attrs
               type: "[]coreotel.AttrValue"
-      - methods:
-          - name: String
+      - doc: |-
+          ExporterName is the typed key under which a SpanExporter registers (e.g.
+          "otlpjson"). The zero value ExporterName("") is reserved invalid.
+
+          The registry is deliberately the same shape as core/observe/metrics' — the same
+          kernel/plugin.Registry underneath, named, reached by blank-importing the
+          exporter's package, config-addressable. It EARNS its
+          keep here for the reason it earns it there and for one more: ADR 0051
+          §Decision 5 requires the OTLP/HTTP emitter to be absent from it, and "absent
+          from the registry" is only a statement anyone can check if there is a registry
+          to be absent from. A test pins that absence.
+        methods:
+          - doc: String returns the raw name.
+            name: String
             out:
               - type: string
             recv: value
         name: ExporterName
         underlying: string
-      - methods:
-          - name: IsValid
+      - doc: |-
+          TraceID identifies one trace: 16 bytes, rendered as 32 lowercase hex digits
+          on the wire.
+
+          The ALL-ZERO value is invalid, and that is normative rather than stylistic —
+          W3C Trace Context §3.2.2.3 says a receiver "MUST ignore the traceparent" when
+          the trace-id is all zeroes, and the OTLP schema documents the same. It is
+          therefore the zero value of this type AND its "unset" spelling, which is why
+          IsValid exists and why nothing in this package accepts an id without asking.
+        methods:
+          - doc: IsValid reports whether t is a usable trace identifier, i.e. not all zeroes.
+            name: IsValid
             out:
               - type: bool
             recv: value
-          - name: String
+          - doc: |-
+              String renders the identifier as 32 lowercase hex digits — the spelling both
+              traceparent and OTLP/JSON use. OTLP/JSON is the one place the protobuf-JSON
+              mapping is overridden: "the traceId and spanId byte arrays are represented as
+              case-insensitive hex-encoded strings; they are not base64-encoded".
+            name: String
             out:
               - type: string
             recv: value
         name: TraceID
         underlying: "[TraceIDLen]byte"
-      - methods:
-          - name: IsValid
+      - doc: |-
+          SpanID identifies one span within a trace: 8 bytes, 16 lowercase hex digits.
+          The all-zero value is invalid for the same normative reason TraceID's is
+          (§3.2.2.4), and is additionally how "this span has no parent" is spelled —
+          a root span's ParentSpanID is the zero value, which OTLP encodes as an
+          omitted parentSpanId.
+        methods:
+          - doc: IsValid reports whether s is a usable span identifier, i.e. not all zeroes.
+            name: IsValid
             out:
               - type: bool
             recv: value
-          - name: String
+          - doc: String renders the identifier as 16 lowercase hex digits.
+            name: String
             out:
               - type: string
             recv: value
         name: SpanID
         underlying: "[SpanIDLen]byte"
-      - methods:
-          - name: IsSampled
+      - doc: |-
+          TraceFlags is the 8-bit field traceparent carries as its last component.
+
+          Version 00 of the specification defines exactly one bit, and §3.2.2.5.2 is
+          explicit about the rest: "The behavior of other flags … is not defined and is
+          reserved for future use. Vendors MUST set those to zero." This SDK therefore
+          MASKS on output rather than trusting what it was handed — see Sanitized.
+        methods:
+          - doc: IsSampled reports whether the sampled bit is set.
+            name: IsSampled
             out:
               - type: bool
             recv: value
-          - in:
+          - doc: |-
+              WithSampled returns f with the sampled bit set to sampled, leaving every
+              other bit as it was.
+            in:
               - name: sampled
                 type: bool
             name: WithSampled
             out:
               - type: TraceFlags
             recv: value
-          - name: Sanitized
+          - doc: |-
+              Sanitized returns f with every bit this specification version does not define
+              cleared.
+
+              It is applied on the way OUT, never on the way in. §3.2.2.5.2 says a vendor
+              MUST set undefined bits to zero, so emitting a bit we did not set would make
+              this SDK a non-conforming producer; but §3.2.4 says a receiver must not
+              "assume anything about unknown fields", so clearing them on the way in would
+              destroy information a future version defines. Keeping the received byte and
+              masking at format time satisfies both halves at once.
+            name: Sanitized
             out:
               - type: TraceFlags
             recv: value
         name: TraceFlags
         underlying: byte
-      - methods:
-          - name: Normalized
+      - doc: |-
+          LinkValue points at a span that is causally related to this one but is not its
+          parent — `opentelemetry/proto/trace/v1.Span.Link`.
+
+          The canonical case is a batch: one consumer span processes fifty messages
+          produced by fifty different traces. Making any one of them the parent would be
+          a lie about forty-nine, and making the batch a child of all fifty is not a
+          tree. A link says "related, elsewhere" without claiming ancestry.
+
+          It carries a whole SpanContextValue rather than a loose trace-id/span-id pair
+          because the linked context's tracestate and sampled bit are part of what a
+          backend needs: a link into a trace that was never sampled points at spans
+          nobody stored.
+        methods:
+          - doc: |-
+              Normalized returns the link a span actually records: attributes sorted,
+              validated and owned.
+            name: Normalized
             out:
               - type: LinkValue
             recv: value
-          - name: IsValid
+          - doc: IsValid reports whether the link names a joinable span.
+            name: IsValid
             out:
               - type: bool
             recv: value
         name: LinkValue
         struct:
           fields:
-            - name: Context
+            - doc: |-
+                Context identifies the linked span. A link whose context is invalid is
+                dropped rather than emitted — it names nothing.
+              name: Context
               type: SpanContextValue
-            - name: Attrs
+            - doc: Attrs describe the relationship, sorted by Key.
+              name: Attrs
               type: "[]coreotel.AttrValue"
-      - name: SpanParams
+      - doc: |-
+          SpanParams are the facts a span is born with.
+
+          It is a struct rather than a variadic option list because an option type is a
+          published func the SDK would then have to freeze (ADR 0039), and because the
+          zero value has to be usable: SpanParams{} is an INTERNAL span starting now
+          with no attributes, which is the common case and reads as one at the call site.
+        name: SpanParams
         struct:
           fields:
-            - name: Kind
+            - doc: |-
+                Kind is the span's relationship to its neighbours. The zero value
+                resolves to SpanKindInternal (SpanKind.Resolved).
+              name: Kind
               type: SpanKind
-            - name: Attrs
+            - doc: |-
+                Attrs are the dimensions known at Start. They are the ONLY ones a
+                Sampler sees, so anything the sampling decision depends on belongs here
+                rather than in a later SetAttrs.
+              name: Attrs
               type: "[]coreotel.AttrValue"
-            - name: Links
+            - doc: Links point at causally related spans in other traces.
+              name: Links
               type: "[]LinkValue"
-            - name: StartTime
+            - doc: |-
+                StartTime overrides the span's start instant. The zero value means
+                "now", which is what every caller but a replaying one wants — and it is
+                a CLAMP rather than a refusal because "now" is a description of what the
+                tracer does, not a value chosen on the caller's behalf (ADR 0031).
+              name: StartTime
               type: time.Time
-      - name: Sampler
+      - doc: |-
+          Sampler decides whether a span is recorded and exported. It reports true to
+          keep the span, false to drop it.
+
+          It is a FUNC port, not an interface, applying ADR 0041 structurally: a
+          published func type cannot grow a method at all, so there is no widening to
+          forbid and no sibling to invent later.
+
+          # The decision is taken ONCE, at the root
+
+          This is the load-bearing rule of the whole domain and it is not a convention —
+          it is what the `sampled` bit of traceparent is FOR. A Tracer consults a
+          Sampler only when it is starting a root span; every child, in this process or
+          in any process downstream, inherits the answer through
+          SpanContextValue.IsSampled.
+
+          Deciding per span produces a trace with holes in the middle, and a trace with
+          holes is worse than no trace: a span whose parent was dropped becomes an
+          orphan a backend renders as its own root, so one request appears as several
+          unrelated ones and the latency of the whole is unrecoverable. The failure is
+          also invisible at the point that causes it — the process that dropped the
+          parent shows nothing wrong at all.
+
+          A Sampler is therefore consulted on ROOT spans only. That is a property of the
+          Tracer, stated here because this is where a reader will look for it.
+
+          # Concurrency
+
+          A Sampler MUST be safe for concurrent use and MUST NOT block: it runs inline
+          on the goroutine starting the span, before any work the span measures.
+        name: Sampler
         underlying: func(params SamplingParams) bool
-      - name: SpanSink
+      - doc: |-
+          SpanSink receives every span that ends and was sampled. It is where a Tracer
+          hands its output, and it is a func port for the reason Sampler is.
+
+          It is the seam a batching processor would occupy (ADR 0051 §Deferred): a batch
+          is a SpanSink that buffers and forwards, which is why the port is one span at
+          a time rather than a slice — a sink that took slices would force every
+          non-batching consumer to allocate one.
+
+          A SpanSink MUST be safe for concurrent use: spans end on whichever goroutine
+          was doing the work. It runs on that goroutine, so a slow sink slows the
+          request it is observing.
+        name: SpanSink
         underlying: func(span SpanValue)
-      - name: SamplingParams
+      - doc: |-
+          SamplingParams is everything a Sampler sees. It describes a span that does not
+          exist yet, which is the point: the decision is taken before the span is
+          created, so an unsampled span costs no recording at all.
+
+          TraceID is present and Parent may not be. On a ROOT span the trace id has just
+          been minted and there is no parent; on a CHILD it is the parent's, inherited
+          unchanged. A ratio sampler reads it either way, which is what makes the same
+          sampler usable at both ends without a special case.
+        name: SamplingParams
         struct:
           fields:
-            - name: Parent
+            - doc: |-
+                Parent is the context this span descends from, or the invalid zero
+                value when this is a root.
+              name: Parent
               type: SpanContextValue
-            - name: TraceID
+            - doc: TraceID is the trace the new span belongs to.
+              name: TraceID
               type: TraceID
-            - name: Name
+            - doc: Name is the span's operation name.
+              name: Name
               type: string
-            - name: Kind
+            - doc: Kind is the span's relationship to its neighbours.
+              name: Kind
               type: SpanKind
-            - name: Attrs
+            - doc: |-
+                Attrs are the attributes supplied at Start, sorted by Key. Attributes
+                added AFTER Start are invisible here — the decision has already been
+                taken by then, which is the price of taking it once.
+              name: Attrs
               type: "[]coreotel.AttrValue"
-            - name: Links
+            - doc: Links are the links supplied at Start.
+              name: Links
               type: "[]LinkValue"
-      - methods:
-          - name: IsValid
+      - doc: |-
+          SpanContextValue is the immutable identity of a span: what traceparent and
+          tracestate carry between two processes, and what a child span inherits.
+
+          It is a VALUE, not a handle. A span context can be copied, compared field by
+          field and stored on a context.Context without any of it referring back to a
+          live span — which is what makes propagation across a process boundary the
+          same operation as propagation across a function call.
+
+          The zero value is the INVALID context, and that is deliberate rather than
+          incidental: an all-zero TraceID is exactly what W3C Trace Context §3.2.2.3
+          declares invalid, so "no trace here" and "a trace nobody may join" are one
+          value with one spelling. Every consumer therefore has exactly one check to
+          make — IsValid — instead of a nil test and a validity test that can disagree.
+        methods:
+          - doc: |-
+              IsValid reports whether the context names a joinable span: both identifiers
+              present and non-zero.
+            name: IsValid
             out:
               - type: bool
             recv: value
-          - name: IsSampled
+          - doc: |-
+              IsSampled reports whether the sampled bit is set on this context.
+
+              It is the ONLY sampling question anything downstream asks. The decision is
+              taken once, at the root of the trace, and travels in this bit; re-deciding per
+              span produces a trace with holes in the middle, which is worse than no trace
+              at all because it looks complete.
+            name: IsSampled
             out:
               - type: bool
             recv: value
-          - in:
+          - doc: |-
+              WithState returns a copy of c carrying state. It exists so a caller who
+              mutates the vendor list does not have to rebuild the identity around it.
+            in:
               - name: state
                 type: StateValue
             name: WithState
@@ -639,75 +1143,205 @@ packages:
         name: SpanContextValue
         struct:
           fields:
-            - name: TraceID
+            - doc: TraceID identifies the whole trace. Shared by every span in it.
+              name: TraceID
               type: TraceID
-            - name: SpanID
+            - doc: SpanID identifies this span within the trace.
+              name: SpanID
               type: SpanID
-            - name: Flags
+            - doc: |-
+                Flags is the traceparent flag byte, kept EXACTLY as received. Undefined
+                bits are masked at format time (TraceFlags.Sanitized), never on receipt.
+              name: Flags
               type: TraceFlags
-            - name: State
+            - doc: |-
+                State is the tracestate list travelling beside the traceparent. It is
+                propagated verbatim; this SDK adds no entry of its own.
+              name: State
               type: StateValue
-            - name: Remote
+            - doc: |-
+                Remote reports whether this context was EXTRACTED from a carrier rather
+                than created in this process. OTLP carries the fact as a span flag, and
+                a backend needs it to tell "my caller" from "my own parent span".
+              name: Remote
               type: bool
-      - methods:
-          - name: Resolved
+      - doc: |-
+          SpanKind says how a span relates to its parent and its children, which is what
+          lets a backend assemble a latency waterfall instead of a flat list.
+
+          The five values and their integers are
+          opentelemetry/proto/trace/v1.Span.SpanKind, copied from the schema so the OTLP
+          encoder emits the integer directly (OTLP/JSON encodes an enum as its NUMBER,
+          never as its name).
+        methods:
+          - doc: |-
+              Resolved returns the kind a span actually carries: SpanKindUnspecified clamps
+              to SpanKindInternal, every declared value is honoured, and anything else — a
+              cast, since there is no other way to produce one — clamps too.
+
+              It clamps where Temporality refuses (ADR 0044 §Decision 3), and the asymmetry
+              applies the clamp-or-refuse question honestly: an unstated temporality changes what a
+              NUMBER means, so no default can be chosen for the caller; an unstated kind
+              changes only how a span is drawn, and the specification itself names the
+              default. A clamp is right exactly when the SDK is not substituting judgement.
+            name: Resolved
             out:
               - type: SpanKind
             recv: value
-          - name: String
+          - doc: |-
+              String renders the kind as its OpenTelemetry name, for a text rendering and
+              for a test failure that has to be readable. It is never what goes on the wire:
+              OTLP/JSON carries the integer.
+            name: String
             out:
               - type: string
             recv: value
         name: SpanKind
         underlying: int32
-      - methods:
-          - name: Duration
+      - doc: |-
+          SpanValue is a completed span: the OpenTelemetry trace data model's `Span`
+          message, in Go.
+
+          It is IMMUTABLE and it is what a live Span becomes at End. Splitting the two
+          is what keeps an exporter from ever seeing a span mid-flight: the recording
+          type has mutators and no exporter can reach it, this one has no mutators and
+          is all an exporter is given.
+
+          Two fields are whole SpanContextValues rather than loose identifiers, and both
+          pay for themselves:
+
+            - Context carries the trace-id, the span-id, the sampled bit and the
+              tracestate as ONE value — the same value that travelled in the
+              traceparent, so nothing has to be reassembled to know what was propagated.
+            - Parent carries its own Remote flag, which is the only place the fact is
+              recorded that this span's parent ran in another process. OTLP has a field
+              for exactly that (`flags`, SPAN_FLAGS_CONTEXT_IS_REMOTE_MASK), and a
+              backend uses it to tell a service boundary from an internal call.
+
+          A root span's Parent is the invalid zero value, which OTLP encodes as an
+          omitted parentSpanId — the schema's own spelling for "no parent".
+        methods:
+          - doc: Duration reports how long the span covered, or zero when it never ended.
+            name: Duration
             out:
               - type: time.Duration
             recv: value
-          - name: IsRoot
+          - doc: IsRoot reports whether the span has no parent.
+            name: IsRoot
             out:
               - type: bool
             recv: value
         name: SpanValue
         struct:
           fields:
-            - name: Context
+            - doc: "Context identifies this span: trace-id, span-id, flags, tracestate."
+              name: Context
               type: SpanContextValue
-            - name: Parent
+            - doc: |-
+                Parent identifies the span this one descends from. The zero value means
+                this is a root span.
+              name: Parent
               type: SpanContextValue
-            - name: Name
+            - doc: Name is the low-cardinality operation label a backend groups on.
+              name: Name
               type: string
-            - name: Kind
+            - doc: |-
+                Kind is the span's relationship to its neighbours, already resolved —
+                never SpanKindUnspecified on a span a Tracer produced.
+              name: Kind
               type: SpanKind
-            - name: StartTime
+            - doc: StartTime opens the interval the span covers.
+              name: StartTime
               type: time.Time
-            - name: EndTime
+            - doc: |-
+                EndTime closes it. A span whose EndTime is unset never ended, and no
+                exporter in this SDK will ship one.
+              name: EndTime
               type: time.Time
-            - name: Attrs
+            - doc: Attrs are the span's typed dimensions, sorted by Key.
+              name: Attrs
               type: "[]coreotel.AttrValue"
-            - name: Events
+            - doc: |-
+                Events are timestamped points inside the interval, in the order they
+                were recorded.
+              name: Events
               type: "[]EventValue"
-            - name: Links
+            - doc: Links point at causally related spans in other traces.
+              name: Links
               type: "[]LinkValue"
-            - name: Status
+            - doc: Status is the recorded outcome, already resolved.
+              name: Status
               type: StatusValue
-      - methods:
-          - name: IsEmpty
+      - doc: |-
+          SpansValue is a batch of finished spans plus the two facts that describe all
+          of them at once — the OTLP payload hierarchy flattened into one Go value.
+
+          It is the trace counterpart of metrics' SnapshotValue and it is shaped by the
+          same rule (ADR 0044 §Decision 9): an OTLP encoder must be able to walk it
+          WITHOUT regrouping or reconstruction.
+
+          	SpansValue            -> resourceSpans[0]
+          	  .Resource           ->   .resource.attributes
+          	  .Scope              ->   .scopeSpans[0].scope {name, version}
+          	  .Spans[i]           ->   .scopeSpans[0].spans[]
+
+          The two single-element levels are single because one Tracer has exactly one
+          Resource and one Scope, exactly as one Meter does.
+
+          It carries NO StartTime/Time pair, and that absence is the model rather than
+          an omission: a metrics snapshot is one window shared by every point, while
+          every span carries its own interval. Copying a payload-level window down onto
+          a span would overwrite the only timestamps a trace has.
+        methods:
+          - doc: |-
+              IsEmpty reports whether the payload carries no span. An exporter uses it to
+              skip a POST that would carry nothing.
+            name: IsEmpty
             out:
               - type: bool
             recv: value
         name: SpansValue
         struct:
           fields:
-            - name: Resource
+            - doc: Resource identifies the producer, carried once for the whole payload.
+              name: Resource
               type: coreotel.ResourceValue
-            - name: Scope
+            - doc: |-
+                Scope identifies the instrumentation, carried once for the whole
+                payload.
+              name: Scope
               type: coreotel.ScopeValue
-            - name: Spans
+            - doc: |-
+                Spans are the finished spans, in the order they ended. That order is
+                stable and is what makes an exporter's output diffable; it is NOT
+                causal — a parent ends after its children.
+              name: Spans
               type: "[]SpanValue"
-      - methods:
-          - in:
+      - doc: |-
+          StateBuilder assembles a StateValue member by member, LEFTMOST FIRST — the
+          order a tracestate header lists them in, which is the opposite of Insert's
+          "newest at the front". It is how the engine's header parser
+          (internal/service/observe/trace.ParseTraceState) turns the list it read into
+          a value without this package parsing the header: reading the wire format is
+          the engine's mechanism, the list's invariants are this value's (ADR 0160 §4).
+
+          Every member is checked before it enters the list — the key against
+          `simple-key` / `multi-tenant-key`, the value against `value = 0*255(chr)
+          nblk-chr` — and so are the list's own two rules: a key appears once
+          (§3.3.1.4) and there are at most MaxTraceStateMembers members. So a builder
+          can only produce a list Insert could have produced, which is why it is not
+          the "second way in" a from-parts constructor would be.
+
+          The zero value is a usable empty builder. A builder is not safe for
+          concurrent use.
+        methods:
+          - doc: |-
+              Add appends key=value at the right end of the list, reporting whether it
+              did. It adds nothing and reports false when the key or the value is not one
+              the grammar can spell, when the key is already in the list, or when the list
+              already holds MaxTraceStateMembers members. Nothing of either argument is
+              echoed anywhere: a tracestate is written by a stranger.
+            in:
               - name: key
               - name: value
                 type: string
@@ -715,19 +1349,49 @@ packages:
             out:
               - type: bool
             recv: pointer
-          - name: State
+          - doc: |-
+              State returns the list built so far, leftmost first, and leaves the builder
+              empty. The builder hands its storage to the value rather than copying it, so
+              it lets go of that storage too: a later Add starts a new list instead of
+              writing into one that is meant to be immutable.
+            name: State
             out:
               - type: StateValue
             recv: pointer
         name: StateBuilder
         struct:
           unexported: true
-      - methods:
-          - name: Len
+      - doc: |-
+          StateValue is the parsed `tracestate` header: an ORDERED list of vendor
+          entries, leftmost first.
+
+          The order is load-bearing and is the reason this is not a map. §3.5 states it
+          twice over: "the order of unmodified key/value pairs MUST be preserved" and
+          "modified keys SHOULD be moved to the beginning (left) of the list", because
+          the leftmost entry is the system that touched the trace most recently. A map
+          would lose exactly that, and lose it silently.
+
+          The value is IMMUTABLE: Insert and Delete return a new StateValue rather
+          than mutating the receiver, so a span context handed to a handler cannot be
+          edited underneath the caller that produced it. The zero value is a valid empty
+          list.
+
+          This SDK writes NO entry of its own. It is not a tracing vendor with state to
+          carry, and inventing a key would put a name nobody registered on every
+          outbound request; Insert exists for a consumer who IS one.
+
+          A list comes from three places only: the zero value, Insert, and a
+          StateBuilder — the one the engine's header parser fills, member by member.
+          Each of the last two checks every member against the grammar before it
+          enters the list, so no StateValue holds an entry the next hop would refuse.
+        methods:
+          - doc: Len reports how many list members the state carries.
+            name: Len
             out:
               - type: int
             recv: value
-          - in:
+          - doc: Get returns the value recorded under key, and whether it was present.
+            in:
               - name: key
                 type: string
             name: Get
@@ -737,7 +1401,22 @@ packages:
               - name: ok
                 type: bool
             recv: value
-          - in:
+          - doc: |-
+              Insert returns a copy of s carrying key=value at the FRONT of the list,
+              replacing any existing entry for key.
+
+              Front, not in place, because §3.5 says a modified key "SHOULD be moved to the
+              beginning (left) of the list": leftmost means most recently touched, and that
+              is the only information the order carries.
+
+              When the result would exceed 32 members the OLDEST — rightmost — entry is
+              dropped, which is §3.3.1.5's "the vendor MUST truncate whole entries". Its
+              companion rule, "entries larger than 128 characters SHOULD be removed first",
+              is deliberately NOT implemented: it is scoped to truncation "due to size
+              limitations", and this list is bounded by member COUNT, never by byte length.
+              Implementing it would drop a short-lived vendor's entry for being verbose
+              rather than for being old, which is a different policy wearing the same name.
+            in:
               - name: key
               - name: value
                 type: string
@@ -748,91 +1427,346 @@ packages:
               - name: err
                 type: error
             recv: value
-          - in:
+          - doc: |-
+              Delete returns a copy of s without the entry under key. §3.5 asks a vendor
+              not to delete keys it did not generate; this method is the mechanism, not the
+              permission.
+            in:
               - name: key
                 type: string
             name: Delete
             out:
               - type: StateValue
             recv: value
-          - name: String
+          - doc: |-
+              String renders the list as a tracestate header value: `key=value` members
+              joined by a comma, leftmost first, with no optional whitespace.
+
+              The OWS the grammar allows is not reproduced. It is optional, it carries no
+              meaning, and omitting it makes the header a deterministic function of the
+              list — which is what lets a test compare bytes rather than re-parse.
+            name: String
             out:
               - type: string
             recv: value
         name: StateValue
         struct:
           unexported: true
-      - methods:
-          - name: String
+      - doc: |-
+          StatusCode is opentelemetry/proto/trace/v1.Status.StatusCode. Three values,
+          and the third is not the negation of the second.
+        methods:
+          - doc: |-
+              String renders the code as its OpenTelemetry name, for text output and
+              readable test failures. The wire carries the integer.
+            name: String
             out:
               - type: string
             recv: value
         name: StatusCode
         underlying: int32
-      - methods:
-          - name: Resolved
+      - doc: |-
+          StatusValue is a span's recorded outcome.
+
+          The Message field is only meaningful on StatusError, and the schema says so:
+          "message … SHOULD be used only if the code is ERROR". This type enforces it in
+          Resolved rather than trusting the caller, because a message hanging off an OK
+          status is the sort of thing that renders as an error in one backend's UI and
+          vanishes in another's.
+        methods:
+          - doc: |-
+              Resolved returns the status a span actually carries: an undeclared code
+              clamps to StatusUnset, and a Message survives only on StatusError.
+            name: Resolved
             out:
               - type: StatusValue
             recv: value
-          - name: IsUnset
+          - doc: |-
+              IsUnset reports whether the status carries no judgement at all. It is what the
+              OTLP encoder asks before deciding whether the `status` field is worth a line.
+            name: IsUnset
             out:
               - type: bool
             recv: value
         name: StatusValue
         struct:
           fields:
-            - name: Code
+            - doc: Code is the verdict.
+              name: Code
               type: StatusCode
-            - name: Message
+            - doc: |-
+                Message describes the failure. It is dropped unless Code is
+                StatusError, and it is the ONE free-text field a span carries — so it
+                must not be given a value the operator cannot see safely. It is not an
+                errs Public: a span message is read by whoever reads the trace.
+              name: Message
               type: string
   - constants:
-      - name: OTLPTracesPath
+      - doc: |-
+          OTLPTracesPath is the OTLP/HTTP path for the trace signal. It is a constant
+          rather than something the exporter appends, so an endpoint stays a full URL a
+          reviewer can read in one string: "http://collector:4318" + OTLPTracesPath.
+        name: OTLPTracesPath
         type: string
         value: "\"/v1/traces\""
-      - name: DefaultOTLPTimeout
+      - doc: |-
+          DefaultOTLPTimeout is the OpenTelemetry protocol exporter specification's own
+          default for OTEL_EXPORTER_OTLP_TIMEOUT. The clamp lands on the specification's
+          number rather than on one this SDK invented.
+        name: DefaultOTLPTimeout
         type: time.Duration
         value: "10000000000"
-      - name: DefaultOTLPMaxResponseBytes
+      - doc: |-
+          DefaultOTLPMaxResponseBytes caps the response body read at 1 MiB. The response
+          is the one length a REMOTE party controls in this exchange; the REQUEST body
+          is deliberately not capped, because its size is a property of the caller's own
+          span volume, any SDK-chosen ceiling would be arbitrary (ADR 0031 §refuse), and
+          the collector already answers 413 for one it will not take.
+
+          It also bounds the drain that recycles the connection after the verdict —
+          always this default rather than OTLPHTTPConfig.MaxResponseBytes, because
+          that knob bounds what is read into memory and the drain keeps nothing.
+        name: DefaultOTLPMaxResponseBytes
         type: int64
         value: 1 << 20
-      - name: HTTPRequestMethodKey
+      - blockDoc: |-
+          The OpenTelemetry HTTP semantic-convention attribute keys this middleware
+          records. They are dotted, which is the spelling the conventions SPECIFY — and
+          the reason the Prometheus metrics connector refuses them (ADR 0044 §Decision
+          8). OTLP carries them unchanged.
+        doc: HTTPRequestMethodKey is the request method, uppercase.
+        name: HTTPRequestMethodKey
         type: string
         value: "\"http.request.method\""
-      - name: HTTPResponseStatusCodeKey
+      - blockDoc: |-
+          The OpenTelemetry HTTP semantic-convention attribute keys this middleware
+          records. They are dotted, which is the spelling the conventions SPECIFY — and
+          the reason the Prometheus metrics connector refuses them (ADR 0044 §Decision
+          8). OTLP carries them unchanged.
+        doc: HTTPResponseStatusCodeKey is the response status.
+        name: HTTPResponseStatusCodeKey
         type: string
         value: "\"http.response.status_code\""
-      - name: URLPathKey
+      - blockDoc: |-
+          The OpenTelemetry HTTP semantic-convention attribute keys this middleware
+          records. They are dotted, which is the spelling the conventions SPECIFY — and
+          the reason the Prometheus metrics connector refuses them (ADR 0044 §Decision
+          8). OTLP carries them unchanged.
+        doc: |-
+          URLPathKey is the request path. It is the ESCAPED form — see the
+          middleware comment for why the decoded one is not recorded.
+        name: URLPathKey
         type: string
         value: "\"url.path\""
-      - name: URLSchemeKey
+      - blockDoc: |-
+          The OpenTelemetry HTTP semantic-convention attribute keys this middleware
+          records. They are dotted, which is the spelling the conventions SPECIFY — and
+          the reason the Prometheus metrics connector refuses them (ADR 0044 §Decision
+          8). OTLP carries them unchanged.
+        doc: URLSchemeKey is "http" or "https".
+        name: URLSchemeKey
         type: string
         value: "\"url.scheme\""
-      - name: URLFullKey
+      - blockDoc: |-
+          The OpenTelemetry HTTP semantic-convention attribute keys this middleware
+          records. They are dotted, which is the spelling the conventions SPECIFY — and
+          the reason the Prometheus metrics connector refuses them (ADR 0044 §Decision
+          8). OTLP carries them unchanged.
+        doc: |-
+          URLFullKey is the outbound URL, recorded on CLIENT spans only and with
+          its userinfo REDACTED — the client middleware renders it through
+          url.URL.Redacted(), not String(), so a password in the URL becomes
+          "xxxxx" instead of travelling to a telemetry backend. The query string
+          is NOT redacted: a secret passed as ?api_key= is still recorded, because
+          deciding which parameters are sensitive would mean guessing, and a
+          wrong guess is both a silent leak and a silently mangled attribute.
+          A caller who puts secrets in a query string must keep them out of the
+          URL the SDK is handed.
+        name: URLFullKey
         type: string
         value: "\"url.full\""
-      - name: ServerAddressKey
+      - blockDoc: |-
+          The OpenTelemetry HTTP semantic-convention attribute keys this middleware
+          records. They are dotted, which is the spelling the conventions SPECIFY — and
+          the reason the Prometheus metrics connector refuses them (ADR 0044 §Decision
+          8). OTLP carries them unchanged.
+        doc: ServerAddressKey is the host a client called, or a server was called on.
+        name: ServerAddressKey
         type: string
         value: "\"server.address\""
-      - name: ErrorTypeKey
+      - blockDoc: |-
+          The OpenTelemetry HTTP semantic-convention attribute keys this middleware
+          records. They are dotted, which is the spelling the conventions SPECIFY — and
+          the reason the Prometheus metrics connector refuses them (ADR 0044 §Decision
+          8). OTLP carries them unchanged.
+        doc: ErrorTypeKey names what went wrong when a call produced no response.
+        name: ErrorTypeKey
         type: string
         value: "\"error.type\""
-      - name: DefaultMaxSpans
+      - doc: |-
+          DefaultMaxSpans is the bound a Recorder uses when RecorderConfig leaves the
+          knob unset. 2048 finished spans is roughly one busy second of a single
+          service: high enough that a normal collection interval never reaches it, low
+          enough that a collector which stopped collecting costs megabytes rather than
+          the process.
+        name: DefaultMaxSpans
         type: int
         value: "2048"
-      - name: TraceParentLen
+      - blockDoc: |-
+          The traceparent field offsets, derived from the grammar rather than counted
+          by hand:
+
+          	value          = version "-" version-format
+          	version        = 2HEXDIGLC
+          	version-format = trace-id "-" parent-id "-" trace-flags
+          	trace-id       = 32HEXDIGLC
+          	parent-id      = 16HEXDIGLC
+          	trace-flags    = 2HEXDIGLC
+
+          which is 2 + 1 + 32 + 1 + 16 + 1 + 2 = 55 characters.
+        doc: TraceParentLen is the length of a version-00 traceparent, exactly.
+        name: TraceParentLen
         type: int
         value: "55"
-      - name: VersionSupported
+      - blockDoc: The two versions the specification names explicitly.
+        doc: |-
+          VersionSupported is the version this SDK emits: "00", the only version
+          the current Recommendation defines.
+        name: VersionSupported
         type: string
         value: "\"00\""
-      - name: TraceParentHeader
+      - blockDoc: |-
+          TraceParentHeader and TraceStateHeader are the two header names W3C Trace
+          Context defines. Both are lowercase: §3.2.1 asks a vendor to SEND the name in
+          lowercase while accepting any case on receipt, which is what http.Header's
+          canonicalisation already does for a Go receiver.
+        doc: TraceParentHeader carries the span context.
+        name: TraceParentHeader
         type: string
         value: "\"traceparent\""
-      - name: TraceStateHeader
+      - blockDoc: |-
+          TraceParentHeader and TraceStateHeader are the two header names W3C Trace
+          Context defines. Both are lowercase: §3.2.1 asks a vendor to SEND the name in
+          lowercase while accepting any case on receipt, which is what http.Header's
+          canonicalisation already does for a Go receiver.
+        doc: TraceStateHeader carries the vendor list.
+        name: TraceStateHeader
         type: string
         value: "\"tracestate\""
+    doc: |-
+      Package trace — the Tracer's configuration: producing Resource,
+      instrumentation Scope, sampling policy, span destination and clock.
+
+      Package trace — the OTLP/HTTP emitter: the exporter that POSTs an encoded
+      batch to a collector. The transport itself — endpoint refusal, the default
+      client and its own pool, the bounded reads, the classification — is the one
+      both signals share (internal/service/observe/internal/otlp); what is this signal's is
+      the path, the vocabulary every verdict is named in, and the encoder.
+
+      Package trace — OTLP/JSON encoder: SpansValue to the bytes an OTLP receiver
+      accepts, implemented from the specification with encoding/json.
+
+      Package trace — the outbound HTTP middleware.
+
+      Package trace — the inbound HTTP middleware.
+
+      Package trace — minting the two identifiers.
+
+      Package trace — the span an unsampled trace gets.
+
+      Package trace — the numeric rendering a refused sampling ratio is reported with.
+      The OTLP encoder's own renderings (a double, a decimal-string 64-bit
+      integer) are the ones both signals share, in internal/service/observe/internal/otlp.
+
+      Package trace — the one member of a collector's answer that is this signal's
+      own: the count an ExportTraceServiceResponse reports rejected.
+
+      Package trace — the OTLP payload tree: a Go mirror of
+      opentelemetry/proto/{collector/trace,trace}/v1, restricted to the fields this
+      SDK produces. The common/v1 and resource/v1 messages it embeds — KeyValue,
+      AnyValue, Resource, InstrumentationScope — and the proto3-JSON scalars are
+      the ones both signals share, in internal/service/observe/internal/otlp.
+
+      Field ORDER inside each struct is the schema's FIELD-NUMBER order, not a
+      reading order: encoding/json emits struct fields as declared, and deriving the
+      order from the document is what makes the expected bytes in the tests
+      checkable against the .proto field by field.
+
+      The visible evidence that the order came from the schema rather than from
+      taste is otlpSpan, which puts `flags` LAST — after `status` — because it is
+      field 16 and status is 15, even though every .proto listing shows `flags`
+      beside `parent_span_id` where it reads naturally. The same tell exists in the
+      metrics mirror, where `attributes` sits after the value because it is field 7.
+
+      Every field this SDK does not produce is ABSENT rather than always-empty
+      (rule 5): schemaUrl, droppedAttributesCount, droppedEventsCount and
+      droppedLinksCount here, and a scope's attributes in the shared Scope.
+
+      Package trace — the OTLP/HTTP exporter's configuration.
+
+      Package trace — propagation across a process boundary: the two W3C headers
+      written into, and read out of, a coretrace.Carrier. The port and the span
+      context are internal/core/observe/trace's; reading and writing the headers
+      is this engine's mechanism (ADR 0160 §4).
+
+      Package trace — recording an error on a span.
+
+      Package trace — the in-memory span destination.
+
+      Package trace — the in-memory recorder's configuration.
+
+      Package trace — the three samplers, and the fraction that is refused.
+
+      Package trace — the live, recording span.
+
+      Package trace — the traceparent header: parsing it, and writing it back. The
+      span context it carries is a value of internal/core/observe/trace; reading
+      and writing the header is this engine's mechanism (ADR 0160 §4).
+
+      Package trace is the concrete tracing implementation behind
+      internal/core/observe/trace: a Tracer, three samplers, an in-memory recorder, the
+      OTLP/JSON encoder and the OTLP/HTTP emitter — all from the OpenTelemetry and
+      W3C specifications, importing nothing from go.opentelemetry.io. See ADR 0051.
+
+      Package trace — the tracestate header read into a list. The list and the
+      grammar of its members are internal/core/observe/trace's StateValue; reading
+      the header — its commas, its optional whitespace, its "=" — is this engine's
+      mechanism (ADR 0160 §4).
     functions:
-      - in:
+      - doc: |-
+          NewOTLPHTTPExporter builds a SpanExporter that POSTs each batch to an OTLP
+          collector as OTLP/JSON.
+
+          # It is NOT registered, and that is a decision one step beyond ADR 0030
+
+          ADR 0030 refuses to arm a WRITER on stdout from an import. Arming a NETWORK
+          CLIENT from an import is strictly worse, and for a reason that is structural
+          rather than a matter of degree: there is no endpoint that could be a correct
+          default. `localhost:4318` is a guess, and a wrong guess turns every export into
+          a POST at whatever answers on that address — inside a cluster, that is a real
+          host belonging to somebody else. So this exporter is constructed explicitly, by
+          a caller who names the collector, or not at all. A test pins its absence from
+          AvailableExporters.
+
+          # It does not retry
+
+          The specification asks a client to honour Retry-After and otherwise back off
+          exponentially. `internal/service/app/resilience` already ships that policy, and a
+          backoff hidden inside Export would be a second one a caller cannot see, tune or
+          cancel — Export has no context to cancel it with. What this exporter supplies
+          instead is the CLASSIFICATION a retry policy needs, in the exact shape
+          resilience.RetryConfig.Retryable wants:
+
+          	resilience.NewRetry(resilience.RetryConfig{
+          	    MaxAttempts: 3,
+          	    BaseDelay:   time.Second,
+          	    Retryable:   trace.OTLPRetryable,
+          	})
+
+          A construction failure is returned rather than deferred into an always-failing
+          exporter: refusing at wiring time is strictly earlier than refusing at the
+          first export.
+        in:
           - name: name
             type: coretrace.ExporterName
           - name: cfg
@@ -843,13 +1777,49 @@ packages:
             type: coretrace.SpanExporter
           - name: err
             type: error
-      - in:
+      - doc: |-
+          OTLPRetryable reports whether err is an OTLP/HTTP failure the specification
+          says may be replayed: a transport fault, or one of HTTP 429 / 502 / 503 / 504.
+          Everything else — a rejected payload, a partial success, an unencodable span —
+          is false, because replaying identical bytes at a collector that already refused
+          them only costs the retry budget.
+
+          Its signature is exactly resilience.RetryConfig.Retryable's, so it drops
+          straight into a retry policy without an adapter. That is the whole reason this
+          exporter classifies instead of looping.
+        in:
           - name: err
             type: error
         name: OTLPRetryable
         out:
           - type: bool
-      - in:
+      - doc: |-
+          EncodeOTLPJSON renders spans as ONE OTLP/JSON ExportTraceServiceRequest —
+          exactly the bytes that go in the body of a POST to /v1/traces under
+          Content-Type: application/json.
+
+          It is the encoder half of this package's OTLP support and it does no I/O at
+          all, so it is usable and testable on its own: hand it a batch, compare the
+          bytes to the schema. The emitter half (NewOTLPHTTPExporter) calls exactly this
+          function and adds only the transport. That split is not tidiness — an encoding
+          defect and a network defect have different reproductions, different evidence
+          and different fixes, and a single Export that did both would make every OTLP
+          question start with "is the collector up?".
+
+          The batch maps onto the payload without a regrouping pass:
+
+          	SpansValue         -> resourceSpans[0]
+          	  .Resource        ->   .resource.attributes
+          	  .Scope           ->   .scopeSpans[0].scope
+          	  .Spans[i]        ->   .scopeSpans[0].spans[]
+
+          It REFUSES rather than emits a payload the schema cannot express: a span
+          carrying an all-zero trace-id or span-id (OTLPInvalidSpanContext), and a span
+          with no end time (OTLPSpanNotEnded). Both are STRUCTURE — a Tracer mints both
+          identifiers and End stamps the clock — so a batch can only carry either if it
+          was hand-built or the span never ended, and each fails on the first export or
+          never.
+        in:
           - name: spans
             type: coretrace.SpansValue
         name: EncodeOTLPJSON
@@ -858,7 +1828,11 @@ packages:
             type: "[]byte"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NewOTLPJSONExporter returns a SpanExporter writing each batch to dst as one
+          newline-terminated OTLP/JSON document. It is NOT added to the registry — bind
+          it yourself or call Export directly.
+        in:
           - name: name
             type: coretrace.ExporterName
           - name: dst
@@ -866,73 +1840,282 @@ packages:
         name: NewOTLPJSONExporter
         out:
           - type: coretrace.SpanExporter
-      - in:
+      - doc: |-
+          ClientMiddleware returns a middleware that traces every outbound request and
+          INJECTS the traceparent into it.
+
+          It is a corenet.Middleware[http.RoundTripper] — the SDK's own middleware type
+          again, this time instantiated at the outbound seam — so it composes with
+          corenet.Chain and wraps the guarded client's transport:
+
+          	c, err := client.New(cfg, identity, policy, hook)
+          	c.HTTP().Transport = corenet.Chain(c.HTTP().Transport, trace.ClientMiddleware(tracer))
+
+          It decorates the ROUND TRIPPER rather than the call site, and that placement is
+          the same argument the net domain makes for putting its Policy there: a caller
+          cannot construct a request that skips the transport, so "every egress carries a
+          traceparent" stops being a convention the next contributor has to remember.
+
+          # The request is CLONED
+
+          http.RoundTripper's contract says an implementation "should not modify the
+          request", and the reason is not pedantry: net/http retries an idempotent
+          request on a fresh connection using the SAME *http.Request, so a header set in
+          place would be observed by a caller inspecting the request afterwards, and a
+          span-per-attempt would write a different traceparent onto a request the caller
+          still holds. Cloning costs one header map per call and makes the middleware
+          re-entrant.
+        in:
           - name: tracer
             type: coretrace.Tracer
         name: ClientMiddleware
         out:
           - type: corenet.Middleware[http.RoundTripper]
-      - in:
+      - doc: |-
+          ServerMiddleware returns a middleware that traces every inbound request.
+
+          It is a corenet.Middleware[http.Handler] — the SDK's OWN middleware type,
+          instantiated at http.Handler — so it composes with corenet.Chain and drops
+          straight onto a group:
+
+          	srv.Group("api", server.Listen("tcp", ":8443")).
+          	    HandleHTTP(corenet.Chain(mux, trace.ServerMiddleware(tracer)))
+
+          It decorates an http.Handler rather than the group's ConnHandler because a
+          traceparent is an HTTP HEADER: the connection middleware sees bytes, and there
+          is no header at that level to extract. That is a statement about where the
+          propagation format lives, not a gap in the net domain.
+
+          # What it does, in order
+
+           1. EXTRACTS the span context from the request headers. A malformed or absent
+              traceparent silently starts a new trace — which is what W3C Trace Context
+              §4.3 requires, and never a rejected request: the header is written by a
+              stranger, so failing on it is a denial of service with extra steps.
+           2. Starts a SERVER span, named by the request METHOD alone.
+           3. Records the status and marks 5xx as an error.
+
+          # Why the span is named "GET" and not "GET /users/42"
+
+          A span name is a low-cardinality label a backend GROUPS on. A path carries
+          identifiers, so "GET /users/42" and "GET /users/43" are two operations to a
+          backend and one to a human — and a service with a million users has a million
+          span names, which is how a tracing bill becomes a story. The conventions ask
+          for "{method} {route}", where the ROUTE is the template; this SDK does not
+          route, so it has no template to use and does not invent one from the path. A
+          caller who has a router records it themselves, on the span this middleware
+          already put in the context.
+
+          The PATH is recorded as an attribute instead, where high cardinality is
+          affordable, and it is the ESCAPED form for the reason corenet.RequestValue
+          gives: url.URL.Path is already percent-decoded, so a "%2e%2e" that an upstream
+          reinterprets as ".." would be recorded as something it is not.
+        in:
           - name: tracer
             type: coretrace.Tracer
         name: ServerMiddleware
         out:
           - type: corenet.Middleware[http.Handler]
-      - name: NewTraceID
+      - doc: |-
+          NewTraceID draws a fresh 16-byte trace identifier.
+
+          Every byte is random. The W3C specification says a trace-id "SHOULD be
+          globally unique" and that "the ID SHOULD be generated with a random
+          distribution", and it warns against schemes that put structure in the id: a
+          backend may sample on the id's bits, so an id with a constant prefix samples
+          its whole prefix in or out together.
+
+          It RETRIES on the astronomically unlikely all-zero draw rather than returning
+          it, because the all-zero id is the specification's invalid value: emitting one
+          would produce a traceparent every conforming receiver is required to ignore,
+          which is a trace that silently does not exist.
+
+          The error is always nil. The bytes come from crypto/rand.Read, which since
+          Go 1.24 never returns an error and always fills its buffer — a failing source
+          crashes the program instead — and the signature keeps its error because it
+          is published (pkg/v1/observe/trace), as is EntropyFailed, which nothing
+          returns any more.
+        name: NewTraceID
         out:
           - name: id
             type: coretrace.TraceID
           - name: err
             type: error
-      - name: NewSpanID
+      - doc: |-
+          NewSpanID draws a fresh 8-byte span identifier, redrawing the all-zero value
+          for the reason NewTraceID does — the all-zero span-id additionally spells
+          "no parent", so emitting one would turn a child into a root. Its error is
+          always nil, for the reason NewTraceID's is.
+        name: NewSpanID
         out:
           - name: id
             type: coretrace.SpanID
           - name: err
             type: error
-      - in:
+      - doc: |-
+          Inject writes context into carrier as a traceparent, plus a tracestate when
+          the list is non-empty.
+
+          An INVALID context writes nothing at all — not an empty header, not a
+          zero-filled one. §3.2.2.3/§3.2.2.4 require a receiver to ignore an all-zero
+          identifier, so emitting one would spend a header on a value the next hop is
+          obliged to discard, and would make "we lost the context here" indistinguishable
+          from "we never had one".
+
+          An empty tracestate is likewise omitted rather than set blank, because §4.2
+          says a tracestate without a traceparent "is invalid and MUST be discarded" —
+          the two headers are a pair, and a blank one is not half of it.
+        in:
           - name: context
             type: coretrace.SpanContextValue
           - name: carrier
             type: coretrace.Carrier
         name: Inject
-      - in:
+      - doc: |-
+          Extract reads a span context out of carrier, returning the INVALID zero value
+          when there is nothing usable to read.
+
+          It returns no error, and that is a decision rather than an omission. §4.3
+          prescribes exactly one behaviour for a malformed traceparent — "the vendor
+          creates a new traceparent header and deletes tracestate" — so there is nothing
+          for a caller to decide and nothing for them to handle. Handing them an error
+          would invite the one response the specification forbids: failing a request
+          because a stranger wrote a bad header. ParseTraceParent is the typed-error
+          form, for a caller who is diagnosing rather than serving.
+
+          Three consequences of that rule, each visible here:
+
+            - A malformed traceparent DROPS the tracestate with it. The vendor list
+              describes a trace that this process is about to replace, so keeping it
+              would attach somebody else's state to a brand-new trace id.
+            - A malformed TRACESTATE does not drop the traceparent. §4.3 makes
+              validating tracestate a MAY and permits discarding just that header, and
+              the parent is independently well-formed — losing a valid parent over an
+              unreadable vendor list would break the trace to protect an annotation.
+            - Two traceparent headers merge, under the RFC's rule on repeated header
+              fields, into "value1,value2", which fails the grammar and restarts the
+              trace. That is the correct outcome: two upstreams claiming different
+              parents is not a case where either may be believed.
+        in:
           - name: carrier
             type: coretrace.Carrier
         name: Extract
         out:
           - type: coretrace.SpanContextValue
-      - in:
+      - doc: |-
+          RecordError records err on span as the OpenTelemetry-conventional `exception`
+          event, and marks the span's status ERROR.
+
+          It is a HELPER over the frozen core/observe/trace.Span port, not a method on it, and
+          the distinction is ADR 0039 in practice: what an error's TYPE is, whether a
+          recorded error should also set the status, and whether a stack trace belongs
+          on the span are all judgements about the caller's error model. A method would
+          freeze this SDK's answer into a port every downstream implementer has to
+          satisfy; a helper leaves the port at five methods and lets a caller who
+          disagrees write their own three lines.
+
+          The `exception.type` attribute carries the errs DOTTED-QUAD code when err is
+          an SDK error, and is omitted otherwise. A code is the stable identity of a
+          failure — a reason string can be reworded, a code cannot — and it is what an
+          operator greps for across a trace, a log line and an alert. A foreign error has
+          no such identity here, and `%T` would name a Go type nobody outside the process
+          can act on.
+
+          The `exception.message` attribute is err.Error() VERBATIM. On an SDK error that
+          is the wire-safe rendering (bracket header plus Public, never Private); on a
+          foreign error it is whatever the caller's error says. The rule is the log-line
+          rule: an error whose text carries a secret does not belong on a span, for the
+          same reason it does not belong in a log.
+
+          `exception.stacktrace` is never set. A Go error carries no stack, and one taken
+          here would name the goroutine that RECORDED the error rather than the one that
+          produced it — a plausible wrong answer, which is worse than an absent one.
+        in:
           - name: span
             type: coretrace.Span
           - name: err
             type: error
         name: RecordError
-      - in:
+      - doc: NewRecorder builds a Recorder from cfg, applying every clamp once.
+        in:
           - name: cfg
             type: RecorderConfig
         name: NewRecorder
         out:
           - type: "*Recorder"
-      - in:
+      - doc: |-
+          AlwaysSample keeps every root trace. It is the right default for a
+          development environment and for a low-traffic service, and it is what an
+          unset TracerConfig.Sampler clamps to (see NewTracer).
+        in:
           - name: _
             type: coretrace.SamplingParams
         name: AlwaysSample
         out:
           - type: bool
-      - in:
+      - doc: |-
+          NeverSample drops every root trace. It exists so "off" has a NAME: a
+          deployment that wants no tracing says NeverSample, which is greppable, rather
+          than setting a rate to zero, which is indistinguishable from forgetting to set
+          it (ADR 0031).
+        in:
           - name: _
             type: coretrace.SamplingParams
         name: NeverSample
         out:
           - type: bool
-      - in:
+      - doc: |-
+          ParentBased returns a Sampler that HONOURS a valid parent's decision and
+          consults root only when there is no parent.
+
+          It is the sampler almost every deployment wants, and the reason is the whole
+          design of the domain: the decision is taken once, at the root, and travels in
+          the traceparent's sampled bit. A process that re-decided for an inbound
+          request with a valid parent would produce a trace with a hole in the middle —
+          its own spans missing from a trace the caller kept, or present in one the
+          caller dropped, so the backend stores fragments of a request nobody can
+          reassemble.
+
+          A nil root CLAMPS to AlwaysSample rather than refusing. The nil means "the
+          caller did not name a root policy", and a sampler that dropped everything
+          would silently turn tracing off — the ADR 0031 failure this whole family is
+          written against. Every other constructor in this file refuses instead; this
+          one clamps because AlwaysSample is a description of the safe direction, not a
+          number chosen on the caller's behalf.
+        in:
           - name: root
             type: coretrace.Sampler
         name: ParentBased
         out:
           - type: coretrace.Sampler
-      - in:
+      - doc: |-
+          Ratio returns a Sampler keeping a deterministic FRACTION of root traces.
+
+          Deterministic on the trace id, not random per call, and that matters more than
+          it looks: two independent services that both start a root span for the same
+          incoming id — a retry, a fan-out re-entering the mesh — reach the same verdict,
+          so a trace is never half-kept. It is the same function OpenTelemetry's
+          TraceIDRatioBased specifies, over the id's last 8 bytes.
+
+          # Which fractions are refused, and why zero is one of them
+
+          NaN, a negative fraction and a fraction above 1 are refused because they are
+          not fractions. Exactly 0 is refused for a different and more interesting
+          reason, and it is the question ADR 0031 asks of every zero value: does 0 mean
+          "none" or "nobody set this"?
+
+          Here it means BOTH, and nothing in the type can tell them apart. A float64
+          field left unset in a config struct, a JSON document missing the key, a YAML
+          `rate:` with nothing after it — all three produce 0.0, and all three would
+          silently disable tracing for a deployment that believed it had configured it.
+          The failure is invisible: there is no error, no log line, and no telemetry —
+          the absence of telemetry is the symptom.
+
+          So the ambiguity is not resolved, it is REFUSED. A caller who wants no traces
+          says NeverSample, which cannot be produced by forgetting anything. A caller
+          who wants all of them says AlwaysSample, or Ratio(1). The one input that could
+          mean two things is the one input Ratio will not accept.
+        in:
           - name: fraction
             type: float64
         name: Ratio
@@ -941,7 +2124,35 @@ packages:
             type: coretrace.Sampler
           - name: err
             type: error
-      - in:
+      - doc: |-
+          ParseTraceParent reads a traceparent header value into a span context.
+
+          It implements §3.2.4 "Versioning of traceparent" rather than only the
+          version-00 grammar, and the difference is the whole point of the section: a
+          future version is FORWARD-COMPATIBLE by construction, because every version
+          is required to keep the first 55 characters exactly where version 00 puts
+          them. So:
+
+            - "ff" is refused by name — the specification declares it invalid.
+            - "00" must be EXACTLY 55 characters. The version-00 grammar has no
+              extension point, so trailing content is not "an unknown field", it is a
+              header this version cannot describe.
+            - A HIGHER version is parsed from its first 55 characters, and anything
+              beyond them must begin with a dash. Without that check a 56-character
+              header whose 56th byte is a hex digit would be read as a valid context
+              with a truncated flag field.
+            - Nothing past the flags is looked at: "vendors MUST NOT parse or assume
+              anything about unknown fields for this version."
+
+          The returned context is marked Remote, because a traceparent by definition
+          came from somewhere else.
+
+          A refusal is never the caller's cue to fail the request. §4.3 is explicit
+          that a vendor confronted with a malformed traceparent "creates a new
+          traceparent header and deletes tracestate" — the header is written by a
+          stranger, and a request rejected over it is a denial of service with extra
+          steps. See Extract, which is the shape that behaviour belongs in.
+        in:
           - name: header
             type: string
         name: ParseTraceParent
@@ -950,7 +2161,23 @@ packages:
             type: coretrace.SpanContextValue
           - name: err
             type: error
-      - in:
+      - doc: |-
+          FormatTraceParent renders a span context as a version-00 traceparent header
+          value, reporting ok=false when the context names no joinable span.
+
+          The pair is deliberate rather than an empty string: "there is no header for
+          this context" is a real outcome, not a degenerate rendering. §3.2.2.3 and
+          §3.2.2.4 make an all-zero identifier a value every conforming receiver MUST
+          ignore, so emitting one would spend a header to say nothing and would make
+          "we lost the context here" indistinguishable from "we never had one". A
+          caller writes the header only when ok.
+
+          The flag byte is SANITIZED here and nowhere else: §3.2.2.5.2 requires a vendor
+          to set every undefined bit to zero, and this is the one moment this SDK is
+          acting as a producer. A bit received from an upstream that defines it is
+          preserved in the SpanContextValue and dropped on the way out, which is the
+          only combination that satisfies both halves of the specification.
+        in:
           - name: context
             type: coretrace.SpanContextValue
         name: FormatTraceParent
@@ -959,13 +2186,48 @@ packages:
             type: string
           - name: ok
             type: bool
-      - in:
+      - doc: |-
+          NewTracer builds a Tracer from cfg, applying every clamp once.
+
+          It returns the concrete type rather than the core/observe/trace.Tracer interface so a
+          caller keeps reach to anything the concrete type grows later without the
+          interface having to (ADR 0039 §widening a returned value is safe). It cannot
+          fail: every field of TracerConfig has a resolved meaning, and the only inputs
+          that could be refused — a sampling ratio, an OTLP endpoint — are refused by
+          their own constructors, before they ever reach here.
+        in:
           - name: cfg
             type: TracerConfig
         name: NewTracer
         out:
           - type: "*Tracer"
-      - in:
+      - doc: |-
+          ParseTraceState reads a tracestate header value.
+
+          It refuses the whole header rather than salvaging the members it understood.
+          §4.3 permits exactly that — "if the tracestate header cannot be parsed the
+          vendor MAY discard the entire header" — and salvaging is worse than it looks:
+          a half-parsed list forwarded to the next hop is a list this process INVENTED,
+          carrying somebody else's vendor key with entries silently missing.
+
+          Empty and whitespace-only list members are SKIPPED rather than refused, which
+          §3.3.1.1 requires: `list-member = (key "=" value) / OWS`.
+
+          One deliberate leniency, and it is the only one: OWS is stripped around EVERY
+          member, including before the first and after the last, where the `list` rule
+          grants no OWS slot. A strictly-positioned parser would refuse "a=1 " — the
+          value's last character must be nblk-chr — but RFC 7230 §3.2.4 already requires
+          a recipient to strip leading and trailing whitespace from a field value before
+          it is a field-value, so that check could only ever fire on input the HTTP layer
+          is specified to have normalised, and it would pay for that by discarding
+          another vendor's entire list over whitespace nobody can see. The nblk-chr rule
+          is enforced in coretrace.StateValue.Insert instead, where it still prevents
+          something.
+
+          Each member is handed to a coretrace.StateBuilder, which checks it against
+          the member grammar, refuses a repeated key and a 33rd member — the list's
+          invariants are the value's, and this function only reads the header.
+        in:
           - name: header
             type: string
         name: ParseTraceState
@@ -983,68 +2245,216 @@ packages:
       otlp: github.com/kitsunium/sdk/internal/service/observe/internal/otlp
     path: github.com/kitsunium/sdk/internal/service/observe/trace
     types:
-      - name: TracerConfig
+      - doc: |-
+          TracerConfig configures a Tracer. Every field has a resolved meaning when
+          left unset — none of them is inert (ADR 0031).
+        name: TracerConfig
         struct:
           fields:
-            - name: Resource
+            - doc: |-
+                Resource identifies the producer of the telemetry and is carried once
+                per exported payload. An absent service.name is filled with
+                UnknownService, which is what the OpenTelemetry specification mandates
+                rather than a value this SDK invented.
+
+                It is the SAME type a MeterConfig takes, deliberately: service.name is
+                the key a backend correlates a trace with a metric on, so a process
+                that built two of them could silently fail to correlate at all.
+              name: Resource
               type: coreotel.ResourceValue
-            - name: Scope
+            - doc: |-
+                Scope identifies the instrumentation that starts the spans. An empty
+                Name resolves to DefaultScopeName; Version stays empty when the caller
+                has none, because it is optional in the specification and inventing one
+                would be a claim about code this package cannot see.
+              name: Scope
               type: coreotel.ScopeValue
-            - name: Sampler
+            - doc: |-
+                Sampler decides which ROOT traces are recorded. It is consulted for a
+                root span and for nothing else — every child inherits the answer through
+                the traceparent's sampled bit (see core/observe/trace.Sampler).
+
+                Unset CLAMPS to ParentBased(AlwaysSample), and the clamp is chosen so
+                that the zero value is the SAFE answer rather than the cheap one: a
+                tracer that silently dropped everything would make a misconfiguration
+                look exactly like a healthy quiet service. A deployment that wants none
+                says NeverSample, which is a name a reviewer can grep for.
+              name: Sampler
               type: coretrace.Sampler
-            - name: Sink
+            - doc: |-
+                Sink receives every sampled span at End. Unset means the tracer records
+                nothing — which is not an inert policy but the honest one: a Tracer with
+                no destination has nowhere to put a span, and buffering into a slice
+                nobody drains is the memory leak that shape invites.
+
+                NewRecorder is the in-tree destination; a batching processor would be a
+                Sink that buffers and forwards (ADR 0051 §Deferred).
+              name: Sink
               type: coretrace.SpanSink
-            - name: Clock
+            - doc: |-
+                Clock stamps StartTime and EndTime. Unset CLAMPS to clock.System.
+
+                It is here for the reason every clock in this SDK is: a test that had to
+                wait for wall-clock time to assert a duration is a test that is either
+                slow or flaky, and usually both.
+              name: Clock
               type: clock.Clock
-      - name: OTLPHTTPConfig
+      - doc: |-
+          OTLPHTTPConfig configures an OTLP/HTTP span exporter. Every field has a
+          resolved meaning when left unset except Endpoint, which has none that could be
+          right — see ADR 0051 §Decision 5: a full URL used as-is, so a caller writes
+          "http://collector:4318" + OTLPTracesPath, and an endpoint that is not an
+          absolute http(s) URL with a non-root path is REFUSED at construction
+          (OTLPEndpointInvalid). Timeout clamps to DefaultOTLPTimeout and is ignored
+          when Client is set; MaxResponseBytes clamps to DefaultOTLPMaxResponseBytes.
+
+          It is a DEFINED type over the configuration of the transport both signals
+          share (internal/service/observe/internal/otlp.HTTPConfig, where each field is
+          documented once), not an alias of it: trace.OTLPHTTPConfig and
+          metrics.OTLPHTTPConfig stay two types a caller cannot hand to the wrong
+          signal's constructor.
+        name: OTLPHTTPConfig
         underlying: otlp.HTTPConfig
-      - methods:
-          - name: Resource
+      - doc: |-
+          Recorder accumulates finished spans in memory and hands them out in batches.
+
+          It is the SpanSink a Tracer ships with, and it is a real destination rather
+          than a test double — it is what the OTLP exporters read, and what a caller
+          wires to a `scheduler` job that exports every N seconds.
+
+          # Overflow is counted, never silent
+
+          Past MaxSpans a span is DROPPED and a counter advances. Dropping the newest
+          rather than the oldest is the choice that keeps a burst from erasing the spans
+          that preceded it — the beginning of an incident is more informative than its
+          middle — and the count is published by Dropped, so "we are losing spans" is a
+          number an operator can alert on rather than a silence.
+
+          The alternative, growing without bound, converts a collector outage into an
+          OOM. The alternative to counting is worse: an integration that silently drops
+          telemetry looks exactly like a service that is quiet.
+        methods:
+          - doc: |-
+              Resource returns the producing resource this Recorder stamps on every payload,
+              already normalised. It exists so a Tracer and its Recorder can be given ONE
+              resource literal rather than two that a later edit could let drift apart.
+            name: Resource
             out:
               - type: coreotel.ResourceValue
             recv: pointer
-          - name: Scope
+          - doc: Scope returns the instrumentation scope this Recorder stamps on every payload.
+            name: Scope
             out:
               - type: coreotel.ScopeValue
             recv: pointer
-          - name: Sink
+          - doc: |-
+              Sink returns the core/observe/trace.SpanSink to hand to a TracerConfig.
+
+              It is a method returning a bound method value rather than the Recorder
+              implementing an interface, because SpanSink is a FUNC port — which is the
+              point of a func port: there is no interface for a caller to satisfy, so there
+              is nothing for a future version to widen (ADR 0041).
+            name: Sink
             out:
               - type: coretrace.SpanSink
             recv: pointer
-          - name: Collect
+          - doc: |-
+              Collect DRAINS the recorder and returns everything it held.
+
+              Draining, not copying, and the verb is chosen for the same reason ADR 0025
+              named a cache read `Fetch`: a read here MUTATES. Two independent collectors
+              would each carry away part of the spans, exactly as two readers of a delta
+              meter each carry away part of the observations (ADR 0044 §Decision 3). A
+              Recorder has ONE reader, and this comment is where a second one finds out.
+
+              The returned payload owns its slice, so the caller may hold it across the next
+              collection interval.
+            name: Collect
             out:
               - type: coretrace.SpansValue
             recv: pointer
-          - name: Len
+          - doc: Len reports how many spans are waiting to be collected.
+            name: Len
             out:
               - type: int
             recv: pointer
-          - name: Dropped
+          - doc: |-
+              Dropped reports how many spans have been refused since construction, across
+              every collection interval. It is cumulative — see the field comment.
+            name: Dropped
             out:
               - type: uint64
             recv: pointer
         name: Recorder
         struct:
           unexported: true
-      - name: RecorderConfig
+      - doc: |-
+          RecorderConfig configures a Recorder: who produced the spans, what
+          instrumented them, and how many may wait between collections.
+        name: RecorderConfig
         struct:
           fields:
-            - name: Resource
+            - doc: |-
+                Resource identifies the producer, stamped on every payload Collect
+                hands out.
+              name: Resource
               type: coreotel.ResourceValue
-            - name: Scope
+            - doc: Scope identifies the instrumentation, stamped on every payload.
+              name: Scope
               type: coreotel.ScopeValue
-            - name: MaxSpans
+            - doc: |-
+                MaxSpans bounds how many finished spans are held between Collects.
+
+                Non-positive CLAMPS to DefaultMaxSpans. It does NOT mean "unbounded",
+                and there is no setting that does (ADR 0031): a buffer nobody drains is
+                how a tracing integration takes a process down, and the zero value must
+                not be the dangerous answer.
+              name: MaxSpans
               type: int
-      - methods:
-          - name: Resource
+      - doc: |-
+          Tracer is the concrete core/observe/trace.Tracer. It holds a resolved configuration
+          and no mutable state at all: a span is the only thing that changes, and each
+          one owns its own.
+
+          That is why there is no lock here and no Collect: the tracer FANS OUT to a
+          SpanSink rather than accumulating, so N goroutines starting spans contend on
+          nothing in this type. Whatever buffering a deployment wants lives in the sink,
+          where its cost is visible.
+        methods:
+          - doc: Resource returns the producing resource this Tracer stamps on its payloads.
+            name: Resource
             out:
               - type: coreotel.ResourceValue
             recv: pointer
-          - name: Scope
+          - doc: Scope returns the instrumentation scope this Tracer stamps on its payloads.
+            name: Scope
             out:
               - type: coreotel.ScopeValue
             recv: pointer
-          - in:
+          - doc: |-
+              Start implements core/observe/trace.Tracer.
+
+              The sequence is fixed and each step exists for a stated reason:
+
+               1. The PARENT comes from ctx. A caller never passes one, because a parent
+                  passed by hand is a parent that can be the wrong one — the context is
+                  already the thing that travels down a call tree.
+               2. The TRACE ID is inherited from a valid parent, or minted. Inheriting is
+                  what makes a trace one trace; minting is what starts one.
+               3. The SAMPLER is consulted only when there is no valid parent. A child
+                  inherits the sampled bit, so the decision is taken once per trace — see
+                  core/observe/trace.Sampler for what re-deciding costs.
+               4. An unsampled span becomes a NO-OP whose context still carries the trace
+                  and span ids. Propagation continues, so a downstream service sees the
+                  same decision instead of starting a second, contradictory trace.
+
+              An empty name panics with InvalidSpanName: it is a literal at the call site,
+              so it is wrong on the first call or never.
+
+              Minting cannot fail, so Start has no error to report or degrade from: the
+              ids come from crypto/rand.Read, which since Go 1.24 never returns an error —
+              a failing source crashes the program instead.
+            in:
               - name: ctx
                 type: context.Context
               - name: name
@@ -1062,9 +2472,109 @@ packages:
         struct:
           unexported: true
     variables:
-      - name: OTLPJSON
+      - doc: |-
+          OTLPJSON is the default OTLP/JSON span exporter, registered to write each
+          batch to stderr as one newline-terminated document. Use NewOTLPJSONExporter
+          for a custom writer/name, EncodeOTLPJSON for the bytes alone, or
+          NewOTLPHTTPExporter to actually ship them to a collector.
+
+          stderr, not stdout, for the reason ADR 0030 gives in full: importing a package
+          must never arm a writer on a stream the process may be using as a protocol
+          channel. This instance is a diagnostic — the production path is
+          NewOTLPHTTPExporter, which is never registered because arming a network client
+          on import would be strictly worse than arming a writer.
+        name: OTLPJSON
         type: coretrace.SpanExporter
-  - facade:
+  - doc: |-
+      Package trace is distributed tracing: the third pillar of observability beside
+      [github.com/kitsunium/sdk/pkg/v1/observe/logger] and
+      [github.com/kitsunium/sdk/pkg/v1/observe/metrics].
+
+      It speaks the OpenTelemetry trace data model and the W3C Trace Context
+      propagation format, and imports NOTHING from go.opentelemetry.io. OTel is a
+      published specification; this SDK implements it from the document, exactly as
+      it implements the Prometheus exposition format, RFC 7517 and a five-field
+      POSIX cron. What OTel buys is interoperability, and interoperability is a
+      property of the wire, not of the import graph — a span exported by this
+      package is accepted by any OTLP collector, and the dependency budget is zero.
+
+      # The whole thing
+
+      	rec := trace.NewRecorder(trace.RecorderConfig{
+      		Resource: trace.Resource{Attrs: []trace.Attr{
+      			trace.String(trace.ServiceNameKey, "checkout"),
+      		}},
+      	})
+      	tracer := trace.NewTracer(trace.TracerConfig{
+      		Resource: rec.Resource(),
+      		Sink:     rec.Sink(),
+      	})
+
+      	ctx, span := tracer.Start(ctx, "charge", trace.SpanParams{Kind: trace.KindInternal})
+      	defer span.End()
+      	span.SetAttrs(trace.Int64("amount.cents", 1299))
+
+      [Recorder].Collect drains the finished spans; [EncodeOTLPJSON] turns them into
+      the bytes an OTLP collector accepts, and [NewOTLPHTTPExporter] POSTs them.
+
+      # Sampling is decided ONCE, at the root
+
+      A [Sampler] is consulted only when a trace STARTS. Every child span — in this
+      process and in every process downstream — inherits the answer through the
+      `sampled` bit of the traceparent header.
+
+      That is not an optimisation. Deciding per span produces a trace with holes in
+      it, and a trace with holes is worse than no trace at all: a span whose parent
+      was dropped becomes an orphan the backend renders as its own root, so one
+      request appears as several unrelated ones and the latency of the whole is
+      unrecoverable. The failure is invisible at the process that causes it.
+
+      [AlwaysSample], [NeverSample], [ParentBased] and [Ratio] are the four
+      policies. [Ratio] REFUSES a fraction of exactly 0 — see its documentation for
+      why that is the one input a sampling rate must not accept.
+
+      # Propagation is W3C Trace Context, and a bad header never fails a request
+
+      [Extract] reads a span context out of anything with http.Header's Get/Set
+      pair, and returns the invalid zero value when the header is absent, malformed,
+      or carries an identifier the specification declares invalid. It returns no
+      error, because the specification prescribes exactly one response — start a new
+      trace — and the header is written by a stranger. Rejecting a request over it
+      would be a denial of service with extra steps.
+
+      [ParseTraceParent] is the typed-error form, for a caller who is diagnosing
+      rather than serving.
+
+      # Middlewares
+
+      [ServerMiddleware] and [ClientMiddleware] are the SDK's own middleware type
+      instantiated at http.Handler and http.RoundTripper, so they compose with the
+      network domain's Chain:
+
+      	srv.Group("api", server.Listen("tcp", ":8443")).
+      		HandleHTTP(net.Chain(mux, trace.ServerMiddleware(tracer)))
+
+      	c.HTTP().Transport = net.Chain(c.HTTP().Transport, trace.ClientMiddleware(tracer))
+
+      The client one lives at the transport for the same reason the network domain's
+      policy does: there is no path to the network that skips it.
+
+      # What it deliberately does not do
+
+      It does not batch. A [SpanSink] receives one span at a time and a batching
+      processor is a sink that buffers and forwards — which is where its cost is
+      visible, rather than hidden inside a tracer.
+
+      It does not schedule an export.
+      [github.com/kitsunium/sdk/pkg/v1/app/scheduler] already owns "when", and Collect
+      plus Export is one call.
+
+      It does not register the OTLP/HTTP exporter. Arming a network client from an
+      import is a step beyond the stdout hazard the SDK already refuses, and there is
+      no endpoint that could be a correct default.
+
+      See ADR 0051.
+    facade:
       - const:
           - doc: KindUnspecified is SPAN_KIND_UNSPECIFIED; it resolves to KindInternal.
             name: KindUnspecified

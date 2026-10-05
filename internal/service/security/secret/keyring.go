@@ -1,4 +1,3 @@
-// Package secret — the keyring: the versions of one secret seen as keys.
 package secret
 
 import (

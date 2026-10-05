@@ -10,6 +10,7 @@ go_library(
         "conjunction.go",
         "defaults.go",
         "deny_policy.go",
+        "doc.go",
         "guard.go",
         "method_policy.go",
         "path.go",

@@ -1,4 +1,3 @@
-// Package kit — the history's storage: former values kept beside each record.
 package kit
 
 import (

@@ -1,5 +1,3 @@
-// Package sql — hosts the version table: its portable shape, the reads and
-// the two writes that keep it in step with the schema.
 package sql
 
 import (

@@ -2,7 +2,34 @@ apiVersion: kit.kitsunium/design/v2
 domain: app/view
 packages:
   - aliases:
-      - name: TrustedHTML
+      - doc: |-
+          TrustedHTML is an HTML fragment that the engine writes WITHOUT escaping.
+
+          It is deliberately an ALIAS of html/template.HTML rather than a defined type
+          of its own. That is not a convenience: html/template recognises its trust
+          types by an exact type switch, so a `type TrustedHTML string` would be
+          escaped like any other string — measured, it renders <b>hi</b> as
+          &lt;b&gt;hi&lt;/b&gt; — and a trust type that does not actually confer trust
+          is worse than none, because callers stop looking for the reason their markup
+          disappeared.
+
+          The alias has a consequence that is stated rather than hidden: because
+          TrustedHTML and html/template.HTML are the same type, the engine cannot tell
+          a fragment marked through [TrustHTML] from one a caller converted directly.
+          What the SDK buys is therefore precise, and it is worth naming exactly:
+
+            - Six of html/template's seven trust types — CSS, HTMLAttr, JS, JSStr,
+              URL and Srcset — are REFUSED outright when they appear in render data,
+              with the path that carries them named in the error. Those six have no
+              SDK spelling at all.
+            - The seventh has one canonical, greppable spelling, [TrustHTML], so
+              "where does this codebase decide to trust markup?" is one grep with one
+              answer rather than a hunt through an import list.
+
+          A build-time ban on the raw conversion in CONSUMER code belongs in
+          tools/sdkguard (ADR 0033), which already reads consumer source for exactly
+          this class of rule. It is not shipped here.
+        name: TrustedHTML
         target: template.HTML
     codes:
       - const:
@@ -131,26 +158,160 @@ packages:
             value: "0x00_03_39_02"
         type: errs.Code
     constants:
-      - name: DefaultMaxBytes
+      - doc: |-
+          DefaultMaxBytes is the ceiling [Config.MaxBytes] clamps to when it is not
+          positive: 8 MiB.
+
+          A rendered HTML document larger than this is a defect or an attack. The value
+          is generous by an order of magnitude for a page a browser is meant to parse,
+          and it is a CLAMP rather than a refusal because — unlike a lock's TTL, whose
+          two readings are opposites (ADR 0031, ADR 0052) — there is a defensible
+          universal answer here, and refusing view.Config{FS: templates} would make the
+          obvious spelling unusable for no safety gain.
+        name: DefaultMaxBytes
         type: int
         value: 8 << 20
-      - name: MaxPooledBytes
+      - doc: |-
+          MaxPooledBytes is the largest scratch buffer the engine keeps for reuse.
+
+          A single 8 MiB render must not leave 8 MiB pinned in a pool for the life of
+          the process; anything above this is returned to the collector instead.
+        name: MaxPooledBytes
         type: int
         value: 1 << 20
-      - name: HTML
+      - doc: |-
+          HTML is the [Engine] name of the stdlib html/template implementation in
+          internal/service/app/view. It is the only engine the SDK ships.
+        name: HTML
         type: Engine
         value: "\"html\""
-      - name: ContentTypeHTML
+      - doc: |-
+          ContentTypeHTML is the value an HTML [Renderer] reports from ContentType.
+
+          The charset is not decoration. A response whose Content-Type carries no
+          charset is sniffed by the browser, and a document sniffed as UTF-7 or as a
+          legacy multi-byte encoding can smuggle markup past an escaper that judged
+          the bytes as UTF-8.
+        name: ContentTypeHTML
         type: string
         value: "\"text/html; charset=utf-8\""
+    doc: |-
+      Package view — ranges 0.2.27.* (ADR 0058 core/app/view block) and 0.3.57.*
+      (ADR 0058 service/app/view block, declared here since ADR 0160).
+
+      Package view — the engine-neutral construction parameters.
+
+      Package view — declares the sentinel *errs.Error outcomes of the domain: the
+      port's, and the html/template engine's construction failures. Each var's
+      name equals its errs.Define Reason in SCREAMING_SNAKE form.
+
+      No Public string in this package names a template, a path, a line, a data key
+      or a fragment of template source. A Public is written to third parties, and
+      everything a template engine handles is either the application's internal
+      structure or somebody's data. What an operator needs travels in Fields and in
+      Private; what a browser gets is one sentence with nothing in it.
+
+      Package view — the plug-in contract an engine implements to enter the
+      registry.
+
+      Package view — holds the process-wide [Factory] registry. Engine packages
+      register themselves through package-level var initialisers when imported (no
+      init()), mirroring core/data/codec and core/observe/logger/writer.
+
+      Package view — the one trust type this domain admits, and the only spelling
+      the SDK offers for it.
+
+      Package view declares the SDK's server-side rendering DOMAIN: the [Renderer]
+      port that turns a named template plus a data value into bytes, the [Engine]
+      registry that resolves one implementation by name, and the single trust type
+      through which a caller can deliberately bypass escaping. A core sibling
+      admitted by ADR 0058.
+
+      # The domain is HTML, and that is a security boundary rather than a scope note
+
+      html/template's entire value is that it escapes ACCORDING TO CONTEXT: the
+      same value is escaped one way between two tags, another way inside an
+      attribute, another inside a URL, and another inside a <script> block.
+      text/template does none of that — it is string concatenation with a syntax —
+      and the two packages are API-compatible, so swapping one import for the
+      other compiles, passes every test, and ships stored XSS.
+
+      This domain therefore has no text/template representation at all. Not an
+      [Engine] name, not a Factory, not a constructor, not an import: a named AST
+      audit in internal/service/app/view fails the build if the identifier appears
+      anywhere in the domain's three packages. The distinction is structural
+      because a documented one is a distinction that survives exactly until the
+      afternoon someone needs to render an email body.
+
+      Plain-text templating is out of scope, by name. If it is ever wanted it
+      arrives as its own domain with its own port — never as a second [Engine] in
+      this registry, because a registry exists to make its members interchangeable
+      and an escaping engine is not interchangeable with a non-escaping one.
+
+      # Rendering is all-or-nothing, and the signature is what enforces it
+
+      [Renderer.Render] returns a []byte. It does NOT take an io.Writer, and that
+      is the decision this port is shaped by.
+
+      Template execution writes incrementally and can fail halfway: a nil pointer
+      in a field chain, a method returning an error, a range over the wrong type.
+      Handed an http.ResponseWriter, html/template will have flushed the status
+      line, the headers and part of the body before it reports the failure —
+      measured at seventeen bytes of a valid-looking page for a template failing on
+      its second action — and at that point 500 is no longer sendable and the
+      browser renders a truncated document. A caller cannot avoid this by being
+      careful; it can only avoid it by not being given the opportunity.
+
+      So the engine renders into a bounded buffer it owns and hands back the
+      complete bytes or nothing at all. The caller's destination is never touched
+      on a failed render, because the caller's destination is never passed in.
+
+      # Nothing here writes anywhere, which is how ADR 0030 is satisfied
+
+      ADR 0030 forbids an SDK default that writes to os.Stdout, because stdout may
+      be the process's protocol channel. This domain does not satisfy that rule by
+      choosing stderr; it satisfies it by having no destination in the port at all.
+      A Renderer holds no writer, opens no file and knows no stream.
+
+      # Where this domain stops
+
+      The SDK ships the extension point and one implementation of it. It does not
+      ship a template LANGUAGE: layouts, block inheritance, helper libraries,
+      in-template i18n, asset pipelines and distributed compilation caches are all
+      framework opinions, and a domain that held them would be a rendering
+      framework wearing a port's name. Template composition is whatever the chosen
+      engine's own syntax already provides — for html/template that is {{define}}
+      and {{template}}, which this package neither extends nor conventionalises.
     functions:
-      - in:
+      - doc: |-
+          Register inserts f under f.Engine() and returns it, so an engine package can
+          bind the singleton to a typed package-level variable:
+
+          	var Engine = view.Register(htmlFactory{})
+
+          It panics on a nil factory, on the empty [Engine] name, and when a DISTINCT
+          factory already claims the name. Re-registering the same factory is a no-op.
+
+          IFACE-PLUGIN: the registry hands plug-in Factory instances back to callers so
+          each engine keeps its concrete type unexported; the stable contract is the
+          Factory interface itself.
+
+          "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
+          plug-in whose type is not comparable both satisfy the port and neither can
+          serve one call (see internal/kernel/plugin).
+        in:
           - name: f
             type: Factory
         name: Register
         out:
           - type: Factory
-      - in:
+      - doc: |-
+          Lookup returns the [Factory] registered under name.
+
+          IFACE-PLUGIN: the registry hands plug-in Factory instances back to callers so
+          each engine keeps its concrete type unexported; the stable contract is the
+          Factory interface itself.
+        in:
           - name: name
             type: Engine
         name: Lookup
@@ -159,10 +320,23 @@ packages:
             type: Factory
           - name: found
             type: bool
-      - name: Available
+      - doc: |-
+          Available returns every registered [Engine], sorted, so a caller can print
+          what its imports actually wired up. It is nil before any Register.
+        name: Available
         out:
           - type: "[]Engine"
-      - in:
+      - doc: |-
+          Open resolves name and builds a [Renderer] from cfg.
+
+          It is the config-driven entry point, and it fails loudly on a name nobody
+          claims — [EngineUnknown] carrying the registered names — rather than falling
+          back to a default. A fallback here would mean a typo in a configuration file
+          silently choosing how every value in the program is escaped.
+
+          IFACE-PLUGIN: the engine's concrete Renderer stays unexported in
+          internal/service/app/view; the stable contract is the Renderer interface.
+        in:
           - name: name
             type: Engine
           - name: cfg
@@ -173,7 +347,20 @@ packages:
             type: Renderer
           - name: err
             type: error
-      - in:
+      - doc: |-
+          TrustHTML marks s as HTML that is already safe to write unescaped.
+
+          Every call is an assertion that s was produced by the server and sanitised —
+          a Markdown renderer's output, a fragment from a template the same program
+          authored. It is never correct to hand it a string that arrived from a
+          request, a database field a user controls, or a third-party API.
+
+          The function exists because the conversion it performs needs a NAME. A
+          reviewer scanning a diff for `template.HTML(` has to know that identifier
+          matters; a reviewer scanning for `TrustHTML` is reading the word "trust" in
+          the SDK's own vocabulary, at the call site where the decision was actually
+          made.
+        in:
           - name: s
             type: string
         name: TrustHTML
@@ -437,19 +624,125 @@ packages:
             public: A view template is not valid
             reason: TEMPLATE_PARSE_FAILED
     types:
-      - name: Config
+      - doc: |-
+          Config parameterises every [Factory]. It is deliberately small: this domain
+          ships an extension point, not a template language.
+        name: Config
         struct:
           fields:
-            - name: FS
+            - doc: |-
+                FS is the tree the templates are read from. Required.
+
+                It is an fs.FS rather than a directory path so that embed.FS, os.DirFS
+                and fstest.MapFS are all first-class, and so that the domain never
+                touches the filesystem API. It also removes path traversal from the
+                problem statement: fs.ValidPath rejects "..", so no template name can
+                address a file outside the tree the caller handed over.
+
+                Every regular file under FS is parsed, and each template is named by its
+                SLASH PATH relative to the root — "admin/page.html", not "page.html".
+                See [Factory] for why that is not a cosmetic choice.
+              name: FS
               type: fs.FS
-            - name: Ext
+            - doc: |-
+                Ext optionally restricts which files are parsed, by extension including
+                the dot (".html", ".gohtml").
+
+                Empty means every regular file in FS, which is the honest default: the
+                caller already chose the tree, and second-guessing its contents is the
+                SDK inventing a naming convention. Set it when templates share a
+                directory with assets.
+              name: Ext
               type: "[]string"
-            - name: MaxBytes
+            - doc: |-
+                MaxBytes caps a single render's output. Not positive clamps to
+                [DefaultMaxBytes]; there is deliberately no spelling for "unlimited".
+
+                The cap is the only bound that exists. text/template's Execute takes no
+                context, so a render cannot be cancelled, and the stdlib's own guard is a
+                recursion DEPTH limit (100000 frames) that says nothing about output
+                size: a {{range}} over an attacker-influenced collection has no depth at
+                all and will write until the machine stops. The same "no unbounded
+                setting" reasoning applies here as to the WebSocket ceilings in ADR 0047.
+              name: MaxBytes
               type: int
-      - name: Engine
+      - doc: |-
+          Engine names a registered template engine.
+
+          The zero value is the reserved invalid name: [Register] refuses it at boot,
+          so it can never reach [Lookup], [Open] or [Available].
+        name: Engine
         underlying: string
-  - functions:
-      - in:
+  - doc: |-
+      Package view — the cycle detection the trust-type scan needs, kept in its own
+      file so scan.go holds the walk and nothing else.
+
+      Package view — the one helper through which every core/app/view sentinel is
+      raised. The domain's codes and sentinels — the port's, and this engine's
+      construction failures — are declared in internal/core/app/view (ADR 0160).
+
+      No Public string the engine raises names a template, a path, a line or a
+      fragment of template source. html/template's diagnostics are unusually rich
+      — a parse failure carries the file path and the offending function name, an
+      escaping failure carries the escaper's internal state machine, and an
+      execution failure carries the path, the line, the column, a fragment of the
+      template's own source and a Go type name. Every one of those is useful to an
+      operator and every one of them is reconnaissance to a stranger, so all of it
+      travels as Fields and Private and none of it reaches a Public.
+
+      Package view implements the ADR 0058 rendering port over the stdlib's
+      html/template: one [coreview.Factory], registered under [coreview.HTML], that
+      parses a whole template tree eagerly and renders each request into a bounded
+      buffer it owns.
+
+      # Why html/template and nothing else
+
+      html/template is not "the stdlib option". It is the only template engine in
+      the Go ecosystem that escapes ACCORDING TO CONTEXT — a value between two
+      tags, the same value inside an attribute, inside a URL and inside a <script>
+      block are four different escapings, and it tracks which one applies by
+      parsing the surrounding HTML. text/template, pongo2, quicktemplate and jet
+      all escape uniformly or not at all, which is why they are extension-point
+      candidates rather than SDK defaults.
+
+      The package therefore never imports text/template, and does not merely
+      promise not to: TestDomainNeverReachesTextTemplate parses the source of all
+      three view packages and fails the build on the import. The two packages are
+      API-compatible, so the substitution compiles, passes every test and ships
+      stored XSS — a documented rule would not have survived the first afternoon
+      somebody needed to render an email body.
+
+      # What lands where
+
+        - html.go   — the Factory, its registration, and the two constructors.
+        - parse.go  — the FS walk, full-path naming, and the escaping probe that
+          turns a lazily-detected escaping failure into a refused construction.
+        - render.go — the renderer type and the bounded, all-or-nothing render.
+        - limit.go  — the writer that stops execution AT the ceiling.
+        - scan.go   — the trust-type scan that runs before the template does.
+        - cycles.go — the pointer bookkeeping that stops a self-referential model.
+
+      Package view — the writer that stops a render AT its ceiling rather than
+      after it.
+
+      Package view — construction: the FS walk, full-path template naming, the
+      MaxBytes clamp, and the escaping probe that moves a lazily-detected failure
+      to boot time.
+
+      Package view — the bounded, all-or-nothing render.
+
+      Package view — the trust-type scan that runs BEFORE the template does.
+    functions:
+      - doc: |-
+          NewHTML builds an html/template [coreview.Renderer] directly, without going
+          through the registry. It is what pkg/v1/app/view.New calls.
+
+          Both paths exist on purpose. A program that knows it renders HTML says so in
+          code and gets a compile-time answer; a program that resolves the engine from
+          configuration goes through [coreview.Open] and gets [coreview.EngineUnknown]
+          for a name nobody claims. The registry is the extension point, not a
+          mandatory indirection.
+        in:
           - name: cfg
             type: coreview.Config
         name: NewHTML
@@ -462,9 +755,124 @@ packages:
       coreview: github.com/kitsunium/sdk/internal/core/app/view
     path: github.com/kitsunium/sdk/internal/service/app/view
     variables:
-      - name: HTML
+      - doc: |-
+          HTML is the registered html/template [coreview.Factory].
+
+          It registers through a package-level var initialiser rather than an init(),
+          mirroring core/data/codec and core/observe/logger/writer: importing this package is what wires
+          the engine, and the binding is a value a caller can hold.
+
+          Registration arms nothing. Unlike ADR 0048's OTLP/HTTP emitter — which is
+          deliberately NOT registered, because an import that arms a network client is
+          worse than the stdout hazard ADR 0030 refuses — a Factory holds no file, no
+          socket and no stream. It cannot act until someone calls New.
+        name: HTML
         type: coreview.Factory
-  - facade:
+  - doc: |-
+      Package view is the public facade for the SDK's server-side rendering: a
+      named template plus a data value become a complete HTML document, escaped
+      according to the context each value lands in.
+
+      	//go:embed web
+      	var web embed.FS
+
+      	renderer, err := view.New(view.Config{FS: web, Ext: []string{".html"}})
+      	if err != nil { return err }
+
+      	document, err := renderer.Render(ctx, "web/admin/page.html", model)
+      	if err != nil { return err }            // nothing has been written yet
+      	w.Header().Set("Content-Type", renderer.ContentType())
+      	w.Write(document)
+
+      # The engine is html/template, and that is the decision, not a default
+
+      This package does not implement a template engine. It builds a CONTRACT on
+      top of the standard library's html/template, which is the only engine in the
+      Go ecosystem that escapes according to CONTEXT: the same value is escaped
+      one way between two tags, another inside an attribute, another inside a URL
+      and another inside a <script> block, and it decides which by parsing the
+      surrounding HTML.
+
+      Re-implementing that would be a security regression rather than a gain.
+      html/template is one of the most heavily audited packages in the standard
+      library, and a hand-written escaper would become the source of exactly the
+      cross-site scripting this domain exists to prevent. It is also already
+      "total control with no dependency" — it is the stdlib.
+
+      text/template has NO representation here. Not a name, not a Factory, not an
+      import: the two packages are API-compatible, so swapping one for the other
+      compiles, passes every test and ships stored XSS, and a named AST audit
+      fails the build if the identifier appears anywhere in the domain's three
+      packages.
+
+      # What the SDK adds that the stdlib does not have
+
+        - A [Renderer] port a framework can be wired to, with one registered
+          engine and room for others ([Register], [Open]).
+        - Templates named by their full SLASH PATH. html/template's own ParseFS
+          names them by filepath.Base, so a tree holding admin/page.html and
+          user/page.html ends up with ONE template called "page.html" — the second
+          parse silently wins, and every request for the admin page renders the
+          user page.
+        - Typed SDK errors instead of text/template's strings, with the engine's
+          leak-prone diagnostic kept out of the wire-safe half.
+        - Eager parsing AND an escaping probe at construction, so a broken tree is
+          a deploy that does not come up rather than a 500 on the one page nobody
+          smoke-tested.
+        - A byte ceiling, because text/template's Execute takes no context and
+          cannot be cancelled.
+
+      # Read this before calling TrustHTML
+
+      [TrustHTML] is the one place escaping can be bypassed, and it is the only
+      spelling the SDK offers for it. Six of html/template's seven trust types —
+      CSS, HTMLAttr, JS, JSStr, URL and Srcset — are REFUSED when they appear in
+      render data, with the path that carries them named in the error.
+
+      What that buys is precise, and the limit is worth reading twice:
+      [TrustedHTML] is a type ALIAS of html/template.HTML, because html/template
+      recognises its trust types by an exact type switch and a distinct type would
+      simply be escaped like any other string. The engine therefore CANNOT tell a
+      fragment marked through [TrustHTML] from one a caller converted directly.
+
+      So the SDK does not prevent a bad trust decision — it cannot see one. What
+      it prevents is an ACCIDENTAL one, and what it provides is a single greppable
+      word for the deliberate one. Every call is an assertion that the string was
+      produced by the server and sanitised. It is never correct to hand it a
+      string that arrived from a request, from a user-controlled database field,
+      or from a third-party API.
+
+      # Rendering is all-or-nothing
+
+      [Renderer].Render returns a []byte. It does not take an io.Writer, and that
+      is what the port is shaped by: template execution writes incrementally and
+      can fail halfway, so handed an http.ResponseWriter it would have flushed the
+      status line, the headers and a plausible prefix of the page before reporting
+      the failure — at which point 500 is no longer sendable and the browser
+      renders a truncated document. The engine renders into a bounded buffer it
+      owns and hands back the complete bytes or nothing at all.
+
+      # Parse once. This is the one performance rule the domain has.
+
+      Build the [Renderer] at start-up and keep it. It is immutable after
+      construction, safe for concurrent use, and holds no writer, no file and no
+      stream. Constructing one per request re-parses the whole tree and re-runs
+      the escaping analysis on every request; measured on a forty-two-template
+      tree, that is 34 times the time and 34 times the bytes of reusing one, and
+      the ratio grows with the tree — see internal/service/app/view/BENCH.md.
+      There is deliberately no reload, no lazy parse and no cache, because each of
+      them would put a mutex on the read path to solve a problem that a package
+      variable already solves.
+
+      # Scope
+
+      The SDK ships the extension point and one implementation of it. It does not
+      ship a template LANGUAGE: layouts, block inheritance, helper libraries,
+      in-template i18n and asset pipelines are framework opinions. Template
+      composition is whatever the engine's own syntax already provides — for
+      html/template that is {{define}} and {{template}}, which this package
+      neither extends nor conventionalises.
+    facade:
       - const:
           - doc: |-
               HTML is the [Engine] name of the stdlib html/template implementation. It

@@ -1,12 +1,3 @@
-// Package token — verification against a JWK or a JWK Set.
-//
-// This file holds the ONLY run-time algorithm selection in the package, and the
-// selector is the KEY, never the token. A relying party fetched the key set
-// from a publisher it trusts; the "kty"/"crv" members are that publisher's
-// statement about their own key, and deriving the algorithm from them is
-// exactly as trustworthy as the key itself. Deriving it from the token's "alg"
-// header would be trusting the attacker's statement about the relying party's
-// key — which is algorithm confusion, spelled out.
 package token
 
 import (

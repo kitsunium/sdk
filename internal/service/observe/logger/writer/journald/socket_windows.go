@@ -1,6 +1,5 @@
 //go:build windows
 
-// Package journald — the journal socket's family, which Windows does not have.
 package journald
 
 // unixDatagrams reports whether this platform can open the AF_UNIX datagram

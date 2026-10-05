@@ -1,4 +1,3 @@
-// Package lifecycle — hosts Phase, the direction a transition moved in.
 package lifecycle
 
 import "time"

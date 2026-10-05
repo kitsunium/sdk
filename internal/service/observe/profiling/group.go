@@ -1,5 +1,3 @@
-// Package profiling — hosts GroupGoroutines: goroutines counted by what they
-// work for, what they wait on and where.
 package profiling
 
 import (

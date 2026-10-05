@@ -1,4 +1,3 @@
-// Package config — the default layer, seen as an ordinary Source.
 package config
 
 import coreconfig "github.com/kitsunium/sdk/internal/core/app/config"

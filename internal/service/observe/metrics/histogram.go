@@ -1,4 +1,3 @@
-// Package metrics — atomic bucketed histogram.
 package metrics
 
 import (

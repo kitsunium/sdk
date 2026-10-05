@@ -11,6 +11,7 @@ go_library(
         "codes_gen.go",
         "conn.go",
         "design_gen.go",
+        "doc.go",
         "drain.go",
         "duration.go",
         "errors.go",

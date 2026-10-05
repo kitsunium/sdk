@@ -1,4 +1,3 @@
-// Package server — the bounded TLS handshake.
 package server
 
 import (

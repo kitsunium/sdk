@@ -1,5 +1,3 @@
-// Package self — the running process's runtime state, read from the Go
-// runtime's own metrics and the kernel's CPU accounting.
 package self
 
 import (

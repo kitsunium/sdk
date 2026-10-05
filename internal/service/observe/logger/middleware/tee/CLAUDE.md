@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # internal/service/observe/logger/middleware/tee/
 
 ## Purpose
@@ -21,7 +21,7 @@ seam, not a retry queue. Compose retry behind the spill sink.
 | `tee.go` | `TeeSink` + `NewTeeSink` (returns `*TeeSink`) + `Write` / `Flush` / `Close` + wrap helpers |
 | `config.go` | `Config` value type (`Primaries`, `Spill`) |
 | `internal/core/observe/logger/middleware/tee` | its sentinels — range 0.3.29.\* — declared in the core mirror since ADR 0160; this package declares none |
-| `doc.go` | package doc — scope, non-goals, concurrency |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167): scope, non-goals, concurrency |
 
 ## Spill semantics
 

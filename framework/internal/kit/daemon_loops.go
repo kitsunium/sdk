@@ -1,5 +1,3 @@
-// Package kit — the daemon's loops: their states, the scheduler that fires
-// the jobs, and the goroutine labels that name them.
 package kit
 
 import (

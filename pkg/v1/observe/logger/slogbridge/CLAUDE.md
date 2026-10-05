@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T20:02:20Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # pkg/v1/observe/logger/slogbridge/
 
 ## Purpose
@@ -44,13 +44,14 @@ package needs them (ADR 0033). `slogbridge.New` itself carries a documented
 
 | File | Role |
 |---|---|
-| `slogbridge.go` | package doc + `NewHandler` / `New` |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `slogbridge.go` | `NewHandler` / `New` |
 | `handler.go` | the `slog.Handler` implementation (`Enabled` / `Handle` / `WithAttrs` / `WithGroup`) |
 | `convert.go` | `toLevel`, `qualifyKey` / `qualifyGroup`, `appendAttr` / `appendGroup`, `convert` |
 | `codes_gen.go` | `CodeLoggerRequired` (range `1.1.1.*`) + the `LoggerRequired` sentinel — written by kit gen from `design/observe/logger.yaml` (ADR 0164) |
 
-`README.md` is generated from the package doc comment via `make docs-readme`
-(ADR 0008).
+`README.md` is written by `tools/genindex` from the committed `docs/api`
+(`make docs-readme`, ADR 0167).
 
 ## Conventions
 

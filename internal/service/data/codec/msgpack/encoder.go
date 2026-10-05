@@ -1,10 +1,3 @@
-// Package msgpack — the streaming encoder. Each Encode encodes one value into
-// a pooled scratch buffer and hands it to the writer in ONE Write, so a value
-// that fails to encode writes nothing and leaves the stream intact — the
-// vendor's encoder wrote as it went and left half a value behind. The bytes
-// are Marshal's, so a streamed value and a marshalled one are identical: the
-// vendor's streaming encoder, unlike its Marshal, wrote int8–int64 and
-// uint8–uint64 fields at their full Go width.
 package msgpack
 
 import (

@@ -1,4 +1,3 @@
-// Package session — the at-rest framing of a record.
 package session
 
 import (

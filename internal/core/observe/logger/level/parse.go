@@ -1,4 +1,3 @@
-// Package level — ParseLevel, the inverse of a lowercased Level.String.
 package level
 
 import "strings"

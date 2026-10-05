@@ -1,8 +1,3 @@
-// Package proc — the Group port: a cgroup v2 control group handle.
-//
-// Package proc — the LimitValue value type: a soft/hard setrlimit pair.
-//
-// Package proc — the Listener port: the supervisor side of sd_notify.
 package proc
 
 // LimitInfinity is the soft/hard value meaning "no limit" (RLIM_INFINITY). Use

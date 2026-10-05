@@ -1,6 +1,3 @@
-// Package profiling — the values a decoded profile is made of: the profile,
-// its samples, their stacks' frames and the sample types. Decoding them from
-// the pprof format is the engine's, internal/service/observe/profiling.
 package profiling
 
 import "time"

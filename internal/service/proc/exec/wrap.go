@@ -1,7 +1,3 @@
-// Package exec — central wrap helpers. Every syscall/stdlib cause is wrapped
-// back onto a coreproc sentinel by restating that sentinel's exact
-// Reason/Public/Private/ExitCode here once, so call sites stay terse and the
-// magic exit-code literals live in a single named place.
 package exec
 
 import (

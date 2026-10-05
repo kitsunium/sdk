@@ -1,7 +1,3 @@
-// Package codec — range 0.2.2.* (ADR 0005 core/data/codec block).
-//
-// Package codec — declares the registry's boot-time sentinel. Its var name
-// equals its errs.Define Reason in SCREAMING_SNAKE form.
 package codec
 
 import (

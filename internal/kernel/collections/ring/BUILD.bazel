@@ -6,6 +6,7 @@ go_library(
     name = "ring",
     srcs = [
         "codes_gen.go",
+        "doc.go",
         "ring.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/kernel/collections/ring",

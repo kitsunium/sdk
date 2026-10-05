@@ -1,5 +1,3 @@
-// Package cbor — the kind encoders of pointers, interfaces, byte strings,
-// arrays and the types CBOR cannot carry.
 package cbor
 
 import "reflect"

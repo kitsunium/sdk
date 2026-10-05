@@ -64,7 +64,7 @@ func surfaceFindings(o apiOptions, api *builtAPI) []string {
 	var out []string
 	//: the code's symbols per cell against the pins' markers.
 	if o.markers {
-		out = append(out, markerFindings(api.cells, o.cells, api.dirs, o.root)...)
+		out = append(out, markerFindings(api.cells, api.pkgDocs, o.cells, api.dirs, o.root)...)
 	}
 	//: the generated files against the design files' bytes.
 	if o.digests {

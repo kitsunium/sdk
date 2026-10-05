@@ -6,6 +6,7 @@ go_library(
     name = "memlimit",
     srcs = [
         "cgroup.go",
+        "doc.go",
         "memlimit.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/proc/memlimit",

@@ -1,14 +1,3 @@
-// Package logger — bridges the trace domain to the logging domain, so a log
-// line emitted inside a span carries that span's identity and an operator
-// holding a trace_id can find the logs that belong to it.
-//
-// This file is the ONLY place in the SDK where logging and tracing meet, and
-// that placement is the design (ADR 0062). internal/service/observe/logger and
-// internal/service/observe/trace are siblings, and neither imports the other because
-// the two domains meet only here, at the top layer; internal/core/observe/logger is
-// kept stdlib-only so a consumer who only wants a line on stderr does not
-// compile the trace model. pkg/v1 is the layer that knows both domains
-// already, so the binding lives here and nowhere else.
 package logger
 
 import (

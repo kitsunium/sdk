@@ -1,5 +1,3 @@
-// Package docstore — the writes: prepared outside every lock, checked and
-// persisted under the writers' lock, applied under both.
 package docstore
 
 import (

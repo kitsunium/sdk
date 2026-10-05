@@ -1,7 +1,3 @@
-// Package websocket — the closing handshake's payload (RFC 6455 §5.5.1): a
-// two-byte status code and an optional UTF-8 reason, written and read here.
-// The close code and the predicates that govern it — Sendable, Echoable — are
-// the domain's (corenet.WSCloseCode); this is their wire form (ADR 0160 §4).
 package websocket
 
 import (

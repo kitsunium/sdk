@@ -1,5 +1,3 @@
-// Package selfupdate — the three ports a self-update needs from its
-// environment: the network, the disk, and the stream between them.
 package selfupdate
 
 import (

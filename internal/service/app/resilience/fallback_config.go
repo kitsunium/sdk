@@ -1,4 +1,3 @@
-// Package resilience — fallback policy configuration.
 package resilience
 
 import coreres "github.com/kitsunium/sdk/internal/core/app/resilience"

@@ -1,5 +1,3 @@
-// Package queue — the durable broker's failure path: handing a message back,
-// renewing a lease, and the record left behind for whoever investigates.
 package queue
 
 import (

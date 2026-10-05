@@ -1,4 +1,3 @@
-// Package server — the completion state of one connection handed to net/http.
 package server
 
 import (

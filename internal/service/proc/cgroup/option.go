@@ -1,4 +1,3 @@
-// Package cgroup — the Option functional-option type and its accumulator.
 package cgroup
 
 // mountRoot is the canonical mount point of the unified cgroup v2 hierarchy.

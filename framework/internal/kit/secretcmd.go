@@ -1,4 +1,3 @@
-// Package kit — the secrets command.
 package kit
 
 import (

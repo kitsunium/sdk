@@ -1,8 +1,3 @@
-// Package cbor — the streaming decoder: one data item per Decode, read from
-// the stream as it arrives. The validator keeps its place across reads, so
-// each byte is validated once however the item is split, and an item is only
-// decoded once it has arrived whole and passed. The decoder buffers one item
-// at a time; bound the reader (io.LimitReader) when its peer is untrusted.
 package cbor
 
 import (

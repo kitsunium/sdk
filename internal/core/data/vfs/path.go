@@ -1,4 +1,3 @@
-// Package vfs — the path grammar every implementation shares.
 package vfs
 
 import (

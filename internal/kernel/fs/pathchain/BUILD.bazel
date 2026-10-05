@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/kernel:kernel_consumers"])
 go_library(
     name = "pathchain",
     srcs = [
+        "doc.go",
         "pathchain.go",
         "stack.go",
         "step.go",

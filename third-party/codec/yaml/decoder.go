@@ -1,6 +1,3 @@
-// Package yaml — range 0.3.77.* (third-party/codec/yaml block).
-//
-// Package yaml — adapts yaml.v3's *Decoder to codec.Decoder.
 package yaml
 
 import (

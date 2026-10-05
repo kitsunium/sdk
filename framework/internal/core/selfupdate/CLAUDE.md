@@ -16,7 +16,7 @@ value when it moves (ADR 0160). Imports: the standard library and
 
 | File | Role |
 |---|---|
-| `selfupdate.go` | the package doc: why the ORDER of the trust chain is the contract |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167): why the ORDER of the trust chain is the contract |
 | `selfupdate_interface.go` | `Getter` (network), `FileSystem` (disk), `Copier` (the stream between) |
 | `update_value.go` | `UpdateValue`, `CandidateValue` |
 | `codes_gen.go` | the range and its eighteen sentinels — written by kit gen from `design/framework/selfupdate.yaml` (ADR 0164) |

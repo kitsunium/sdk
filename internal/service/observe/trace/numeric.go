@@ -1,6 +1,3 @@
-// Package trace — the numeric rendering a refused sampling ratio is reported with.
-// The OTLP encoder's own renderings (a double, a decimal-string 64-bit
-// integer) are the ones both signals share, in internal/service/observe/internal/otlp.
 package trace
 
 import "strconv"

@@ -1,15 +1,3 @@
-// Package tlv — type metadata cache shared by encoder and decoder.
-//
-// Reflection-driven codecs pay reflect.Type.NumField + reflect.Type.Field
-// on every encode and every decode. For hot-path payloads with repeated
-// types those calls dominate the ns/op budget. structTypeInfoCache
-// memoises the (field name, index, type, kind) tuples per reflect.Type
-// pointer so subsequent encodes/decodes of the same struct skip the
-// reflect walk entirely and reuse the cached metadata.
-//
-// The cache is global, write-once-per-type, lock-free on the read path
-// (sync.Map's read-mostly fast path). reflect.Type pointers are stable
-// for the life of the process, so cache invalidation is unnecessary.
 package tlv
 
 import (

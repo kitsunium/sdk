@@ -1,4 +1,3 @@
-// Package validation — defines the path grammar every ViolationValue speaks.
 package validation
 
 import "strconv"

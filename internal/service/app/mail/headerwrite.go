@@ -1,4 +1,3 @@
-// Package mail — RFC 2047 encoding and RFC 5322 folding for header lines.
 package mail
 
 import (

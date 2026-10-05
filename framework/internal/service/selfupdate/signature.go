@@ -1,39 +1,3 @@
-// Package selfupdate — authenticity: the detached ed25519 signature over the
-// checksum manifest, and the vendor key it is verified against.
-// Package updater — release AUTHENTICITY, which is a different property from
-// the integrity checksum.go already proves.
-//
-// checksums.txt establishes that the archive arrived intact. It cannot
-// establish who published it: the manifest is fetched from the SAME release,
-// on the SAME origin, with the same write credentials as the archive beside
-// it (see fetchChecksums — it reuses `downloadURL` verbatim). Stable releases
-// are additionally served from a public MIRROR repository, a second
-// publishing origin entirely. Anyone able to write assets to that release
-// replaces the archive and regenerates the manifest in the same breath, and
-// every SHA-256 still matches. The digest defends against a corrupted
-// download, never against a hostile publisher.
-//
-// This file supplies the missing half: a DETACHED ed25519 signature over
-// checksums.txt, verified against the vendor public key linked into the
-// binary at build time. It is deliberately the same primitive, the same
-// algorithm and the same key that pkg/license already uses to authenticate
-// the roster (pkg/license/bundle.go ParseBundle, anchored on
-// linked in at build time by the consuming binary) — a second scheme would be a second thing
-// to get wrong. Once the manifest is authenticated the origin stops
-// mattering: a substituted mirror can serve any bytes it likes and cannot
-// produce a signature over them.
-//
-// ABSENT SIGNATURE: FAIL CLOSED, NO TRANSITION WINDOW.
-//
-// A client that installs an unsigned release when the .sig asset is missing
-// has no authenticity check at all — an attacker who can publish assets can
-// also decline to publish one, so "accept it when it is absent" is exactly
-// equivalent to "never require it". There is no grandfathering window and no
-// environment variable that reopens one. The cost is bounded and known: an
-// upgrade always moves FORWARD to a release published by the workflow that
-// ships with this code, so the only refusals are `upgrade --candidate <tag>`
-// against a pre-signing release candidate, which is a developer channel with
-// a source checkout one command away.
 package selfupdate
 
 import (

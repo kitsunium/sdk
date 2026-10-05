@@ -1,5 +1,3 @@
-// Package metrics — series identity: the canonical key binding an instrument
-// name and an attribute set to exactly one series.
 package metrics
 
 import (

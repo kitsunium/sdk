@@ -3,6 +3,7 @@
 **Status**: Accepted. Step 6 (govulncheck on the `gomarkdoc` binary) no longer runs: `bazel-ci.yml` removed it, for the reason recorded there, and it never covered SDK code — the SDK's own modules are scanned by [ADR 0136](0136-every-module-is-scanned-for-the-vulnerabilities-it-reaches.md)
 **Date**: 2026-05-22
 **Deciders**: kitsunium maintainers
+**Amended by**: [ADR 0167](0167-a-doc-comment-is-the-designs-and-a-readme-is-written-from-docs-api.md) — the READMEs are written by `tools/genindex -write-readmes` from the committed docs/api, whose doc text is the design's; gomarkdoc, its `//go:generate` lines, its CI install and the determinism step are retired. The rest of this record is kept as the history of the gomarkdoc era.
 **Amends**: ADR 0004 (Bazel SOT — exempted in §Scope)
 **Related**: ADR 0007 (release + docs versioning — sync-versions.mjs unchanged)
 

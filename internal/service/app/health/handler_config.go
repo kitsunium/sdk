@@ -1,4 +1,3 @@
-// Package health — hosts HandlerConfig, the one knob the three handlers take.
 package health
 
 // HandlerConfig parameterises the three handlers. Its zero value serves the

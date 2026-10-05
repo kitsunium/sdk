@@ -1,7 +1,3 @@
-// Package msgpack — pointers, interfaces, values that decode themselves, and
-// the entry point every decode starts from. unmarshalInto decodes exactly one
-// value and refuses trailing bytes: Unmarshal is handed one document, and
-// bytes after it are a framing error, not something to ignore.
 package msgpack
 
 import (

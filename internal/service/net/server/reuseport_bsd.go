@@ -1,6 +1,5 @@
 //go:build darwin || freebsd || netbsd || openbsd || dragonfly
 
-// Package server — SO_REUSEPORT support on the BSD family.
 package server
 
 import "syscall"

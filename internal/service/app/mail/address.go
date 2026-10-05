@@ -1,5 +1,3 @@
-// Package mail — the addr-spec subset this domain accepts, and the display-name
-// rule the composer depends on.
 package mail
 
 import (

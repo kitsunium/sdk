@@ -1,21 +1,3 @@
-// Package toml is the TOML codec, written against TOML v1.0.0
-// (https://toml.io/en/v1.0.0) with the standard library alone. It implements
-// codec.Codec, codec.StreamingCodec and codec.Appender.
-//
-// Decoding refuses what the specification refuses: a key or a table defined
-// twice, a table extended from a place the specification does not allow, an
-// integer outside int64, a control character in a string or a comment, bytes
-// that are not UTF-8. It also accepts the four TOML v1.1.0 relaxations the
-// library it replaced accepted — newlines, comments and a trailing comma in an
-// inline table, the \e and \xHH escapes, and a time without seconds — so that
-// no document that decoded before decodes no longer. Encoding writes TOML
-// v1.0.0 only.
-//
-// A document decodes into a map or a struct; an untyped target receives
-// map[string]any, []any, string, int64, float64, bool, time.Time for an offset
-// date-time, and LocalDateTime, LocalDate and LocalTime for the three local
-// kinds. A struct field is keyed by its toml tag, or by its name, matched
-// exactly first and then without regard to case.
 package toml
 
 import (

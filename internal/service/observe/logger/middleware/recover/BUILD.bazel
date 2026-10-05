@@ -6,6 +6,7 @@ go_library(
     name = "recover",
     srcs = [
         "config.go",
+        "doc.go",
         "panic_value.go",
         "recover_sink.go",
     ],

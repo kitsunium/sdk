@@ -1,7 +1,3 @@
-// Package errs — holds the wrap-trail mechanism introduced by
-// ADR 0005. Trail carries the sites a *Error was wrapped through; origin
-// wins on Code() per ADR 0002, but Trail() / HasCode() traverse the full
-// list of wrap sites to help observability and matching.
 package errs
 
 import "slices"

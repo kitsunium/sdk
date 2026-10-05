@@ -1,19 +1,3 @@
-// Package validation implements the SDK's constraint engine over the
-// internal/core/app/validation port: a small, closed set of built-in constraints,
-// the combinators that compose them and descend into nested structures, and a
-// struct-tag front end that compiles a cached plan per type (ADR 0046).
-//
-// Two entry shapes, one contract. The PROGRAMMATIC path is generic and uses no
-// reflection at all — Field and Each take an accessor function, so every
-// descent is a direct field read the compiler can inline. The TAG path trades
-// that for ergonomics and is measured rather than assumed; see BENCH.md.
-//
-// Both produce a core/app/validation.Constraint, so they compose with each other:
-// a struct-tag validator and a hand-written cross-field rule can be handed to
-// All and appear in one report.
-//
-// Collecting EVERY violation is the default and First is the opt-in. A form
-// that reports one error at a time makes the user submit it five times.
 package validation
 
 import (

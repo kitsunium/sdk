@@ -1,7 +1,5 @@
 //go:build !(dragonfly || illumos || solaris)
 
-// Package sqlite — the driver, linked on every GOOS modernc.org/sqlite has a
-// port to.
 package sqlite
 
 import _ "modernc.org/sqlite" // the driver, registered as "sqlite"

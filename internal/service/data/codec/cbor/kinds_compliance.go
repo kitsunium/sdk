@@ -1,6 +1,3 @@
-// Package cbor — hosts the compile-time interface assertions, keeping them
-// out of the production source so the runtime binary carries no
-// diagnostic-only declarations.
 package cbor
 
 // Compile-time assertions that every kind encoder and every decoder still

@@ -1,4 +1,3 @@
-// Package scheduler — hosts the run loop: waiting, firing, and draining.
 package scheduler
 
 import (

@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-10-03
 - **Deciders**: SDK maintainers
+- **Amended by**: [ADR 0167](0167-a-doc-comment-is-the-designs-and-a-readme-is-written-from-docs-api.md) — principle 28: READMEs come from docs/api, whose docs are the design's
 - **Supersedes**: [ADR 0071](0071-a-registry-refuses-what-it-cannot-store.md), [ADR 0072](0072-health-bounds-every-wait-it-owns.md), [ADR 0073](0073-session-waits-are-abandonable.md), [ADR 0082](0082-the-lock-path-is-a-file-never-a-link-to-one.md), [ADR 0083](0083-a-path-is-a-chain-and-a-held-lock-can-lose-its-file.md), [ADR 0084](0084-the-windows-lock-directory-has-an-answer-and-it-is-not-a-mode.md), [ADR 0086](0086-creating-an-entry-is-not-replacing-one-and-windows-says-so-in-two-bits.md), [ADR 0087](0087-the-root-a-caller-named-is-a-spelling-it-did-not-choose.md), [ADR 0088](0088-a-suite-nothing-runs-is-not-a-test-suite.md), [ADR 0093](0093-a-sweep-takes-the-zombie-never-the-status.md), [ADR 0095](0095-windows-runs-every-test-and-gates.md), [ADR 0132](0132-a-floor-a-caller-names-is-the-floor-applied.md), [ADR 0137](0137-a-lane-that-loops-over-modules-reads-the-census.md), [ADR 0138](0138-a-doc-link-resolves-or-it-is-not-written.md) — each as a decision record; the text of every one is kept as the record of its incident
 - **Amends**: [ADR 0045](0045-sdk-session-domain.md) §D5, [ADR 0083](0083-a-path-is-a-chain-and-a-held-lock-can-lose-its-file.md) and [ADR 0148](0148-a-private-socket-is-gated-by-its-directory-and-the-kernel-names-the-peer.md) §1 — through the incidents §As built records: a sixth guarantee of the session file store, two more consumers of `pathchain`, and a socket gated by its whole path
 - **Related**: [ADR 0155](0155-every-layer-groups-its-packages-by-family-and-a-path-may-move-while-v0.md), [ADR 0156](0156-the-public-module-links-the-standard-library-and-nothing-else.md), [ADR 0157](0157-one-module-per-vendor-released-with-the-sdk.md), [ADR 0158](0158-distribution-mechanisms-are-the-frameworks-not-the-sdks.md), [ADR 0159](0159-the-kernel-holds-what-the-domains-rewrote-and-is-published-by-nature.md), [ADR 0160](0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md), [ADR 0161](0161-an-untyped-error-fails-the-build.md) — the reorganisation this charter opens
@@ -133,10 +134,11 @@ disagree, the ADR's own text is the decision and this list is corrected.
     reproduced on the shipped code before it is fixed, a guard is tested with
     its accepting rows beside its refusing ones, and a number in a document was
     measured, never deduced. (ADR 0034, 0049, 0053, 0058, 0081, 0082, 0083)
-28. **Documentation is generated or checked, never trusted.** READMEs come from
-    doc comments, indexes are checked against the files on disk, and a doc
-    travels with the code in the same change. (ADR 0008, 0138; root `CLAUDE.md`
-    rule 11)
+28. **Documentation is generated or checked, never trusted.** Doc comments
+    are the design's and the pin markers' digests hold the code to them,
+    READMEs are written from docs/api, indexes are checked against the files on
+    disk, and a doc travels with the code in the same change. (ADR 0008, 0138,
+    0167; root `CLAUDE.md` rule 11)
 
 ### 2. An incident's rule lives in the package it hit
 

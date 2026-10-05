@@ -1,8 +1,3 @@
-// Package transform — the WrapParams the three schemes attach to a stdlib
-// cause. Each mirrors its sentinel — GzipFailed, FlateFailed, ZlibFailed,
-// declared with their codes in internal/core/data/transform (ADR 0160) — so a
-// wrapped compress/* failure carries the same Code/Reason/Public on the wire as
-// the bare sentinel.
 package transform
 
 import (

@@ -16,7 +16,8 @@ package declares no code and restates them in its wrap helpers.
 
 | File | What lives there |
 |---|---|
-| `vfs.go` | package doc, `verdict`, and the `failRead` / `failWrite` / `failPublish` wrap helpers |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `vfs.go` | `verdict`, and the `failRead` / `failWrite` / `failPublish` wrap helpers |
 | `os.go` | `NewOS`, the read half (delegating to `os.Root`), the write guards, and `Close` — `io.Closer` by type assertion (ADR 0039), releasing the root's descriptor rather than waiting for `os.Root`'s finalizer |
 | `os_write.go` | `WriteFile`, `MkdirAll`, `Remove`, `RemoveAll` — the non-atomic verbs |
 | `os_publish.go` | **the domain's reason to exist**: `publish`, `atomicOps`, `tempPath` |

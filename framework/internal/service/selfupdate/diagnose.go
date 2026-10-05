@@ -1,13 +1,3 @@
-// Package selfupdate — the half of an error that never goes on a wire, made
-// available to the one reader who is entitled to all of it.
-//
-// errs.Error.Error() renders "[<code> <REASON>] <public>" and deliberately
-// nothing else: no private detail, no fields, and not one word from the cause.
-// That is right for anything crossing a boundary, and it is exactly wrong for
-// the person who just typed `upgrade` and is owed "no space left on device".
-//
-// So the split is not "throw the detail away", it is "send it somewhere else".
-// This file is that somewhere else.
 package selfupdate
 
 import (

@@ -1,8 +1,3 @@
-// Package cbor — the constructors every failure goes through. Each one
-// carries one of the two codes internal/core/data/codec/cbor declares for
-// this package (ADR 0160) and its reason, and a Private line that says what
-// was refused — a type, a bound, an offset — and never a value read from the
-// input.
 package cbor
 
 import (

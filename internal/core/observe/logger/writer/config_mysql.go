@@ -1,4 +1,3 @@
-// Package writer — MySQLConfig value type for the "mysql" writer.
 package writer
 
 import (

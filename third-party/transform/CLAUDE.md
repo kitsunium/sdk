@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T19:56:52Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # third-party/transform/
 
 ## Purpose
@@ -187,7 +187,8 @@ without revisiting that ratio would make the guard bite legitimate traffic.
 
 | File | Surface |
 |---|---|
-| `transform.go` | package doc, `DefaultMaxDecompressedBytes`, `checkLimit` |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `transform.go` | `DefaultMaxDecompressedBytes`, `checkLimit` |
 | `zstd.go` | `Zstd` singleton, `ZstdCompressor`, `NewZstdCompressor`, `ZstdLevel`, `encoderLevel`, `isLimitError` |
 | `s2.go` | `S2` singleton, `S2Compressor`, `NewS2Compressor` |
 | `codes_gen.go` | `0.3.63.1`–`0.3.63.4`; `ZstdFailed`, `S2Failed`, `DecompressionLimitExceeded`, `LimitMisconfigured` — written by kit gen from `design/third-party/transform.yaml` (ADR 0164) |

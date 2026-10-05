@@ -1,7 +1,3 @@
-// Package health — hosts StartupCheckValue, and the table that says what each
-// of the three registrations is allowed to express. They are three types and
-// not one with a Probe field, because a field is set by distraction and a type
-// is not.
 package health
 
 import "time"

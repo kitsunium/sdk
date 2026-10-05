@@ -1,5 +1,3 @@
-// Package i18n — Accept-Language negotiation: RFC 9110 parsing over RFC 4647
-// matching.
 package i18n
 
 import (

@@ -1,7 +1,3 @@
-// Package health — hosts the three HTTP handlers. There are three because a
-// single handler that read the probe out of the URL would let a routing
-// mistake serve liveness on the readiness path — which is the domain's central
-// failure wearing a different hat.
 package health
 
 import (

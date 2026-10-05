@@ -1,9 +1,3 @@
-// Package baseenc — Base45 (RFC 9285) alphabet codec. Unlike base16/32/64
-// and ascii85, the stdlib ships no base45 encoder, so the encode/decode
-// transforms live here. Base45 is a block encoding (base45PairBytes input
-// bytes → base45GroupChars output chars; a trailing byte → base45TailChars
-// chars), hence O(n) — safe to share the 10 MiB maxBaseEncBytes cap with
-// the stdlib-backed variants.
 package baseenc
 
 // base45Alphabet is the RFC 9285 §3 table: indices 0..44 map to these

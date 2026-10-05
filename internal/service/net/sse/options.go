@@ -1,4 +1,3 @@
-// Package sse — the stream's functional options and their defaults.
 package sse
 
 import (

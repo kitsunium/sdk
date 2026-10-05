@@ -1,9 +1,3 @@
-// Package config — the key grammar a schema declares in, and its resolution
-// against the target type.
-//
-// Everything here runs ONCE, inside NewSchema. Nothing in this file runs during
-// a Load: a schema that compiled is a schema whose keys have already been
-// proven to name something.
 package config
 
 import (

@@ -1,9 +1,3 @@
-// Package logger — exposes the named, config-driven writer surface (ADR 0012):
-// the WriterName / *Config aliases, the WriterSpec pair, and NewMulti, which
-// resolves each named writer to a Sink and fans records out to all of them via
-// Multi. Built-in console + file writers activate with a blank import of
-// pkg/v1/observe/logger/writer; s3 / cloudwatch activate with a blank import of the
-// matching third-party/aws/writer package (which alone pulls the AWS SDK).
 package logger
 
 import (

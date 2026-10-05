@@ -1,4 +1,3 @@
-// Package id — UUIDv4 (random) generator (RFC 9562 §5.4).
 package id
 
 import (

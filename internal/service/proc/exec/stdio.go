@@ -1,11 +1,5 @@
 //go:build unix || windows
 
-// Package exec — per-process stdio wiring. buildStdio turns a Spec's Stdio mode
-// into the three *os.File the spawn passes as ProcAttr.Files, plus the
-// parent-side lifecycle: the child-side ends to close once the child owns its
-// dups (so EOF propagates on exit) and the copier goroutines that drain capture
-// pipes into the caller's writers. StdioInherit (default) shares the parent's
-// streams; StdioNull discards via the null device; StdioCapture connects pipes.
 package exec
 
 import (

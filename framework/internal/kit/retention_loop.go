@@ -1,4 +1,3 @@
-// Package kit — the retention of a store in a running app.
 package kit
 
 import (

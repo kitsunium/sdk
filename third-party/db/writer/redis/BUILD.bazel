@@ -13,6 +13,7 @@ go_library(
     srcs = [
         "client.go",
         "codes_gen.go",
+        "doc.go",
         "errors.go",
         "redis.go",
         "redissink.go",

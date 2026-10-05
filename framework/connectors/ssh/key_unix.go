@@ -1,7 +1,5 @@
 //go:build !windows
 
-// Package ssh - the unix half of the private-key permission gate. The
-// mode bits mean what they say here, so they are worth refusing on.
 package ssh
 
 import (

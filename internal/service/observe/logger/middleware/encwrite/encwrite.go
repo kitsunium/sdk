@@ -1,5 +1,3 @@
-// Package encwrite — the EncWriter decorator that seals each record's bytes
-// under a per-sink subkey and frames the box for a downstream byte sink.
 package encwrite
 
 import (

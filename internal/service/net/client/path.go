@@ -1,4 +1,3 @@
-// Package client — path safety checks applied before any allowlist pattern.
 package client
 
 import (

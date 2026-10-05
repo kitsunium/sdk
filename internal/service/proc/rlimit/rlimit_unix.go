@@ -1,15 +1,5 @@
 //go:build unix && !linux
 
-// Package rlimit — non-Linux Unix setrlimit(2) implementation. Darwin and the
-// BSDs expose setrlimit(2) for the calling process exactly as Linux does, so a
-// Spec's resource ceilings are honoured natively (applied post-fork on self by
-// the exec trampoline). The Linux-only prlimit64(2) path for a FOREIGN pid has
-// no portable equivalent here, so an Apply targeting another process degrades to
-// the typed UnsupportedPlatform sentinel rather than silently limiting the
-// caller. The Resource→RLIMIT_* table maps only the constants stdlib syscall
-// exports on every target; RLIMIT_NPROC/RLIMIT_MEMLOCK live in golang.org/x/sys
-// (banned), and RLIMIT_AS is absent on OpenBSD — both surface UnknownResource
-// via the build-tagged table rather than a wrong limit or a build break.
 package rlimit
 
 import (

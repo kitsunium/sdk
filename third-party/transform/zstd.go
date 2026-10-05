@@ -1,5 +1,3 @@
-// Package transform — the zstd scheme (RFC 8878) over
-// github.com/klauspost/compress/zstd.
 package transform
 
 import (

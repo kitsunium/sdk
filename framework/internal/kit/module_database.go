@@ -1,4 +1,3 @@
-// Package kit — what a module keeps: its stores and its migrations.
 package kit
 
 import (

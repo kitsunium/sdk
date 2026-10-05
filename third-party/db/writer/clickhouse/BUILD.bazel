@@ -15,6 +15,7 @@ go_library(
         "clickhousesink.go",
         "client.go",
         "codes_gen.go",
+        "doc.go",
         "errors.go",
     ],
     importpath = "github.com/kitsunium/sdk/third-party/db/writer/clickhouse",

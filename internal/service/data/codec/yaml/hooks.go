@@ -1,4 +1,3 @@
-// Package yaml — the hooks a Go type implements, read once per type.
 package yaml
 
 import (

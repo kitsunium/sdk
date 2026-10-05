@@ -1,6 +1,5 @@
 //go:build windows
 
-// Package server — the two socket families Windows cannot open at all.
 package server
 
 // platformLacks reports whether this platform has no socket for a family the

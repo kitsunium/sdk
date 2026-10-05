@@ -1,4 +1,3 @@
-// Package kit — the start's judgement of the declared databases.
 package kit
 
 import (

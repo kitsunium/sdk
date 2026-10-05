@@ -1,5 +1,3 @@
-// Package lifecycle — hosts the bring-up sequence and the partial-start
-// unwind that is its whole reason to exist.
 package lifecycle
 
 import (

@@ -1,4 +1,3 @@
-// Package gate — what a mandated upgrade does.
 package gate
 
 // UpdateAction is what the gate does when the entitlement verifies but the

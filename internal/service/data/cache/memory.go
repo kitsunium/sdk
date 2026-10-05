@@ -1,4 +1,3 @@
-// Package cache — the tagged, stampede-protected in-memory store.
 package cache
 
 import (

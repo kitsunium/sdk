@@ -1,6 +1,3 @@
-// Package health — hosts the execution of one check: its budget, its panic
-// recovery, and the wrapping that decides what a stranger reading the probe
-// body is allowed to learn.
 package health
 
 import (

@@ -8,6 +8,7 @@ go_library(
         "config.go",
         "cron.go",
         "cursor.go",
+        "doc.go",
         "entry.go",
         "every.go",
         "field_spec.go",

@@ -1,5 +1,3 @@
-// Package sql — hosts Withheld, a driver's error carried beside a verdict and
-// kept out of every rendering.
 package sql
 
 import (

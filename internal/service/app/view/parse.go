@@ -1,6 +1,3 @@
-// Package view — construction: the FS walk, full-path template naming, the
-// MaxBytes clamp, and the escaping probe that moves a lazily-detected failure
-// to boot time.
 package view
 
 import (

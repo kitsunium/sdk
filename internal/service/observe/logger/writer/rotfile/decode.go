@@ -1,8 +1,3 @@
-// Package rotfile — the config Decoder that makes "rotfile" reachable from a
-// config file via pkg/v1/observe/logger.FromConfig. Kept in its own file (NOT inlined
-// into rotfile.go) so the factory's Open and Decode halves never collide in one
-// source. Every helper redacts: a malformed value yields RotFileDecodeFailed
-// tagged with the writer name only, never the offending value (secret gate).
 package rotfile
 
 import (

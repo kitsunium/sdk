@@ -1,4 +1,3 @@
-// Package kit — the placement of each store: which database keeps its data.
 package kit
 
 import (

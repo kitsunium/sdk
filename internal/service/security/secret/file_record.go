@@ -1,5 +1,3 @@
-// Package secret — the file store's on-disk record: one JSON document per
-// secret, sealed when the store has a key.
 package secret
 
 import (

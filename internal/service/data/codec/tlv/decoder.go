@@ -1,6 +1,3 @@
-// Package tlv — reflection-driven decoder shared by Unmarshal and the
-// streaming Decoder. Every helper returns the residual byte slice plus a
-// wrapped *errs.Error on failure.
 package tlv
 
 import (

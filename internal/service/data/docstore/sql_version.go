@@ -1,6 +1,3 @@
-// Package docstore — the SQL store's versions: a third table, written by the
-// statements of the write that stores the document, in its transaction
-// (ADR 0143).
 package docstore
 
 import (

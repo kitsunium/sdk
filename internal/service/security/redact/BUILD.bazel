@@ -6,6 +6,7 @@ go_library(
     name = "redact",
     srcs = [
         "attrs.go",
+        "doc.go",
         "fields.go",
         "json.go",
         "plan.go",

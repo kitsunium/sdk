@@ -1,8 +1,5 @@
 //go:build windows
 
-// Package ssh - the windows half of the private-key permission gate.
-// There are no POSIX mode bits to read here, so the gate is deliberately
-// not applied rather than applied to a value that means nothing.
 package ssh
 
 import "os"

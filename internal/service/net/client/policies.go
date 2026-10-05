@@ -1,4 +1,3 @@
-// Package client — the policy constructors.
 package client
 
 import (

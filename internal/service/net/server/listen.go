@@ -1,4 +1,3 @@
-// Package server — listener construction.
 package server
 
 import (

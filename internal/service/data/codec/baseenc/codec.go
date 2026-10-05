@@ -1,15 +1,3 @@
-// Package baseenc implements a family of codec.Codec wrappers around the
-// stdlib byte encodings (base16 / base32 / base64 / ascii85). Each variant
-// registers itself with the core/data/codec registry under a distinct Name —
-// the variant discriminator is the registered Format, not a tagged enum.
-//
-// Universal Marshal flow: encode v with encoding/json, then base-N encode
-// the resulting bytes. Unmarshal reverses the pipeline. The JSON layer is
-// intentional — base-N alphabets are structureless, so flattening through
-// JSON gives consumers a single Marshal/Unmarshal contract over any value.
-//
-// Blank-importing this package registers all six variants at process start
-// via package-level var initialisers; no init() function involved.
 package baseenc
 
 import (

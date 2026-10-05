@@ -1,4 +1,3 @@
-// Package server — a group of datagram listeners.
 package server
 
 import (

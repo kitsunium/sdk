@@ -1,5 +1,3 @@
-// Package toml — the typed half of the decode: tables into structs and maps,
-// arrays into slices and arrays, through reflection.
 package toml
 
 import (

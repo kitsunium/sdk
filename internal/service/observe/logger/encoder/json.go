@@ -1,9 +1,3 @@
-// Package encoder — implements jsonEncoder, the structured single-line JSON
-// encoder that renders a record as one encoding/json-compatible object per
-// line: {"ts":…,"level":…,"msg":…,<flat attrs>}\n. Lives beside the text
-// encoder so the format and the transport (Sink) evolve independently. The
-// byte writer is hand-rolled (append-based, no reflection, no json.Marshal)
-// so the hot path stays allocation-free.
 package encoder
 
 import (

@@ -1,5 +1,3 @@
-// Package transform — the s2 scheme over github.com/klauspost/compress/s2, the
-// same module the zstd scheme uses, so it costs no second dependency.
 package transform
 
 import (

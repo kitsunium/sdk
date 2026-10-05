@@ -1,7 +1,3 @@
-// Package trace — the tracestate header read into a list. The list and the
-// grammar of its members are internal/core/observe/trace's StateValue; reading
-// the header — its commas, its optional whitespace, its "=" — is this engine's
-// mechanism (ADR 0160 §4).
 package trace
 
 import (

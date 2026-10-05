@@ -1,4 +1,3 @@
-// Package kit — a store that seals, as kit's port sees it.
 package kit
 
 import (

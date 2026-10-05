@@ -1,4 +1,3 @@
-// Package server — deliberate discard of non-actionable cleanup errors.
 package server
 
 // swallowErr intentionally discards a non-actionable error, recording the

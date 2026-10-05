@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T12:00:00Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # internal/core/observe/profiling/
 
 ## Purpose
@@ -19,7 +19,7 @@ by ADR 0121 and declared here since ADR 0160 §2 with its values unchanged.
 
 | File | Symbols |
 |---|---|
-| `profiling.go` | package doc |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
 | `profile.go` | `ProfileValue` (time, sample types, samples, comments, period, duration, default sample type), `SampleTypeValue`, `SampleValue` (stack, values, labels, numeric labels), `FrameValue` |
 | `folded.go` | `FoldedValue` (owners, top functions, flame, total, unattributed), `OwnerCostValue`, `FunctionCostValue`, `FlameNodeValue`, `FlameRoot` |
 | `goroutine.go` | `GoroutineValue` (labels, state, wait, thread lock, stack, creator), `GoroutineGroupValue` |

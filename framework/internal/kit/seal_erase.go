@@ -1,4 +1,3 @@
-// Package kit — cryptographic erasure: a data key destroyed.
 package kit
 
 import (

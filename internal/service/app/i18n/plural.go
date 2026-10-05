@@ -1,5 +1,3 @@
-// Package i18n — the hand-written CLDR plural rules, and the languages this
-// SDK will speak.
 package i18n
 
 import (

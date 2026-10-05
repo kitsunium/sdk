@@ -6,6 +6,7 @@ go_library(
     name = "winacl",
     srcs = [
         "dacl_windows.go",
+        "doc.go",
         "tokens_windows.go",
         "winacl.go",
     ],

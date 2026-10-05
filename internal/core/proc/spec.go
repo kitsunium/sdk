@@ -1,4 +1,3 @@
-// Package proc — the Spec value type: an immutable process spawn specification.
 package proc
 
 import (

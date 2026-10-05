@@ -5,8 +5,10 @@
 The public surface of the health domain (ADR 0060): startup, readiness and
 liveness probes, and the two check types that keep them apart.
 
-`README.md` is generated from the package doc comment (rule 10) — edit
-`health.go`, then `cd pkg/v1 && GOWORK=off go generate ./app/health/...`.
+`README.md` is written by `tools/genindex` from the committed `docs/api` (rule
+10, ADR 0167) — the package comment is in `doc.go`, which kit writes from
+`design/app/health.yaml`: edit the design, run `kit gen`, then `make api` and
+`make docs-readme`.
 
 ## Asking a running process
 
@@ -38,7 +40,7 @@ visibly discards the deadline. Possible, visible, reviewable.
 
 ## Generated
 
-`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/app/health.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the package comment and the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
+`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/app/health.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the declarations of their own, and `doc.go` — kit's too (ADR 0167) — the package comment. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
 
 ## Verification
 

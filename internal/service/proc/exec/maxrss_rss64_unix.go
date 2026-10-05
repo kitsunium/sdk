@@ -1,8 +1,5 @@
 //go:build unix && !386 && !arm && !mips && !mipsle
 
-// Package exec — peak-RSS read on a 64-bit GOARCH, where Rusage.Maxrss is
-// already int64 and needs no widening cast (see maxrss_rss32_unix.go for the
-// 32-bit counterpart).
 package exec
 
 import "syscall"

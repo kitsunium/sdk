@@ -42,6 +42,15 @@ packages:
             name: CodeSyslogCtxCancelled
             value: "0x00_03_0F_06"
         type: errs.Code
+    doc: |-
+      Package syslog declares the codes and sentinels of the logger's syslog sink,
+      internal/service/observe/logger/sink/syslog: range 0.3.15.*, allocated to
+      that engine (ADR 0005 service/observe/logger/sink/syslog block) and declared
+      here since ADR 0160, so the engine declares none.
+
+      Package syslog — declares the sentinels returned by the syslog
+      Sink. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE
+      form.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/observe/logger/sink/syslog
@@ -92,8 +101,36 @@ packages:
             private: service/observe/logger/sink/syslog.Write or Flush saw a cancelled context
             public: Syslog sink aborted due to cancellation
             reason: SYSLOG_CTX_CANCELLED
-  - functions:
-      - in:
+  - doc: |-
+      Package syslog — holds the Config struct consumed by
+      NewWithConfig. Pulled into its own file per the SDK's
+      one-exported-struct-per-file convention.
+
+      Package syslog — computes the RFC5424 priority value
+      (facility * 8 + severity) consumed by the framing layer. Pulled into
+      its own file so syslog_sink.go stays focused on the Sink contract.
+
+      Package syslog implements a network sink that ships records to a syslog
+      daemon via UDP or TCP. The wire format is a minimal RFC5424 envelope:
+
+      	<PRI>1 - - - - - - <payload>
+
+      PRI is computed from the record's level + the default USER facility.
+      Hostname, app-name, procid, msgid, and structured-data slots are fixed
+      to "-" to keep the producer side allocation-friendly; consumers that
+      need richer envelopes wrap this sink with their own framing.
+
+      Use case: ship logs to journald / rsyslog / a central syslog collector
+      over the standard 514/UDP port.
+    functions:
+      - doc: |-
+          New dials addr over network (udp / tcp) using net.Dial and returns a
+          syslog Sink. The connection lifetime is owned by the sink — Close
+          releases it. SECURITY: addr is passed straight to net.Dial. When addr
+          is consumer-controlled (env var, config, API input), prefer
+          NewWithConfig with a Dialer that enforces an allowlist so an attacker
+          cannot target internal services (169.254.169.254, localhost, etc.).
+        in:
           - name: network
           - name: addr
             type: string
@@ -103,7 +140,12 @@ packages:
             type: corelogger.Sink
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NewWithConfig dials addr over network (udp / tcp) using cfg.Dialer (or
+          net.Dial when cfg.Dialer is nil) and returns a syslog Sink. Recommended
+          constructor when addr might be consumer-controlled — plug an allowlist
+          dialer to defuse SSRF.
+        in:
           - name: network
           - name: addr
             type: string
@@ -119,8 +161,19 @@ packages:
       corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
     path: github.com/kitsunium/sdk/internal/service/observe/logger/sink/syslog
     types:
-      - name: Config
+      - doc: |-
+          Config tunes the syslog sink at construction time. Every field is
+          optional — the zero-value Config produces a sink using net.Dial as the
+          dialer, which is the pre-existing behaviour preserved by New.
+        name: Config
         struct:
           fields:
-            - name: Dialer
+            - doc: |-
+                Dialer, when non-nil, replaces net.Dial for the connection setup.
+                Callers whose operational environment exposes a hostile network
+                surface (e.g. a public-facing admin endpoint that takes a user-
+                controllable syslog destination) plug an allowlisted dialer here
+                to prevent SSRF against internal services or cloud-metadata
+                endpoints (CWE-918). Default nil preserves legacy net.Dial.
+              name: Dialer
               type: func(network, addr string) (conn net.Conn, err error)

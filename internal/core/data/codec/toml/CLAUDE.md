@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T00:00:00Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # internal/core/data/codec/toml/
 
 ## Purpose
@@ -12,7 +12,7 @@ Stdlib-only: this package imports `internal/kernel/errs` and nothing else.
 | File | Declares |
 |---|---|
 | `codes_gen.go` | 2 `errs.Code` constants, range `0.3.5.*`; 2 `errs.Define` sentinels, one per code — written by kit gen from `design/data/codec/toml.yaml` (ADR 0164) |
-| `doc.go` | the package comment, kept when its codes and sentinels moved to the design (ADR 0164) |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
 
 ## Error codes (range `0.3.5.*`)
 

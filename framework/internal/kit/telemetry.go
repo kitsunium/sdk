@@ -1,5 +1,3 @@
-// Package kit — telemetry: the numbers a product reports, exported on a
-// private socket when the deployment asks for them (ADR 0149).
 package kit
 
 import (

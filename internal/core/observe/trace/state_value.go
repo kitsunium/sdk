@@ -1,6 +1,3 @@
-// Package trace — tracestate: the W3C vendor list that travels beside a
-// traceparent, as a value. Reading it out of a header is the engine's
-// (internal/service/observe/trace, ADR 0160 §4).
 package trace
 
 import (

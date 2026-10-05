@@ -1,5 +1,3 @@
-// Package streamaead (reader.go) — the streaming-AEAD read path: header verify,
-// chunk-by-chunk decrypt with hold-back, and one-byte EOF look-ahead.
 package streamaead
 
 import (

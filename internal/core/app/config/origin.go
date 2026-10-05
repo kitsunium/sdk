@@ -1,5 +1,3 @@
-// Package config — provenance: which layer supplied a key's final value, and
-// the sibling a Source implements to say so.
 package config
 
 // The layer names a traced load reports. They are strings, not an enum, on

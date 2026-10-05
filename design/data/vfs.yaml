@@ -2,7 +2,15 @@ apiVersion: kit.kitsunium/design/v2
 domain: data/vfs
 packages:
   - aliases:
-      - name: FS
+      - doc: |-
+          FS is the read half of a filesystem, and it is io/fs.FS unchanged.
+
+          It is an ALIAS rather than a fresh interface, so a vfs.FS and an fs.FS are
+          the same type to the compiler and no conversion, adapter or assertion sits
+          between an SDK filesystem and the standard library's walkers. The name
+          exists to say, in one place, that the SDK's answer for reading is the
+          stdlib's answer for reading.
+        name: FS
         target: fs.FS
     codes:
       - const:
@@ -92,20 +100,146 @@ packages:
             name: CodeDirectorySyncFailed
             value: "0x00_03_37_02"
         type: errs.Code
+    doc: |-
+      Package vfs — range 0.2.25.* (ADR 0056 core/data/vfs block), and the
+      concrete filesystem's 0.3.55.* (ADR 0056 service/data/vfs block, declared
+      here since ADR 0160).
+
+      Package vfs — declares the sentinel *errs.Error port outcomes, and the two
+      a concrete filesystem in internal/service/data/vfs can produce and an
+      abstract one cannot (ADR 0160: every code is declared in the core, at the
+      service's path). Each var's name equals its errs.Define Reason in
+      SCREAMING_SNAKE form.
+
+      No Public string here names a path. A Public is read by third parties, and a
+      path is the one piece of caller data a filesystem error is guaranteed to
+      hold; it travels as a log-only field instead, reachable through errs.FieldsOf.
+
+      Package vfs — the path grammar every implementation shares.
+
+      Package vfs — the file-mode rule every implementation shares.
+
+      Package vfs declares the SDK's filesystem port. Reading is io/fs — this
+      package does not redeclare it, does not wrap it and does not reimplement its
+      walkers. What it adds is the half the standard library deliberately left
+      out: writing, directory creation and removal, and publication that is
+      ATOMIC. A core sibling admitted by ADR 0056.
+
+      # What comes for free, and must never be written again
+
+      [WritableFS] EMBEDS fs.FS. That one line is the whole interoperability
+      story: every implementation of this port IS an fs.FS, so fs.WalkDir,
+      fs.Glob, fs.ReadFile, fs.Sub, fs.Stat and every third-party consumer of
+      fs.FS work on it unchanged and with no adapter. There is deliberately no
+      vfs.Walk and no vfs.Glob in this SDK. Adding one would not be a feature: the
+      stdlib versions are correct, maintained by the Go project, and already
+      reachable through the embedded interface.
+
+      The read verbs are therefore absent from this file on purpose. If a method
+      you want already exists on fs.FS or as an io/fs package function, this port
+      does not restate it.
+
+      # Why the domain exists at all
+
+      Because "generate beside, swap by rename, flush the parent directory" is an
+      invariant the SDK repeats by hand in every publisher, and a discipline
+      repeated by hand is a discipline that will be forgotten exactly once. Here
+      it is a PRIMITIVE, with its failure path tested rather than assumed:
+      [AtomicWriter] promises that a caller which observes an error observes the
+      previous bytes, byte for byte, and finds no temporary file left behind.
+
+      # The path grammar, and what it does and does not guarantee
+
+      Every name handed to this port is a slash-separated, unrooted, "."- and
+      ".."-free path — exactly fs.ValidPath, which is already what fs.FS requires
+      of readers. [ValidatePath] is that check; [ValidateWritePath] adds the one
+      extra refusal a writer needs, namely that the root itself is not a target.
+
+      That is a LEXICAL guarantee and it is not the whole answer: a path made only
+      of legal elements can still leave the tree by traversing a symbolic link
+      that points outside it. Refusing that is the implementation's job, because
+      only the implementation knows what a link is — and it reports [PathEscaped]
+      when it happens. An implementation that cannot enforce it MUST refuse to be
+      constructed rather than accept a name it cannot confine.
+
+      # Permissions are never inferred
+
+      A zero mode is refused, never read as "use a default" (ADR 0031). Any file
+      mode the SDK could pick would be arbitrary: 0644 and 0600 differ by who may
+      read the bytes, and only the caller knows what the bytes are. Bits outside
+      fs.ModePerm — setuid, setgid, sticky, the type bits — are refused BY NAME
+      for the same reason a typo must not be able to mint a setuid file.
+
+      The concrete filesystems live in internal/service/data/vfs; this package owns the
+      contract, the two guards, and the typed sentinels.
+
+      Package vfs — the write contract and its ADR 0039 capability sibling.
+
+      They live apart from vfs.go because that file carries the package's doc and
+      the one thing that is NOT an interface declaration: the FS alias that says
+      reading is io/fs unchanged.
     functions:
-      - in:
+      - doc: |-
+          ValidatePath reports whether name is a path this domain will resolve, and
+          returns [InvalidPath] when it is not.
+
+          The rule is fs.ValidPath and nothing else, on purpose. io/fs already imposes
+          it on every reader, so a second, subtly different grammar for writers would
+          mean a name that can be written and not read back — and the SDK would have
+          invented that discrepancy itself. Concretely it rejects the empty string, a
+          leading or trailing slash, a doubled slash, a Windows-style backslash path,
+          and any "." or ".." element.
+
+          This is a LEXICAL guarantee. It closes "../../etc/passwd" and it does not
+          close a symbolic link that leaves the tree — see [PathEscaped], which is the
+          implementation's half of the same promise.
+
+          One result is worth stating because it surprises people: the separator here
+          is "/" and nothing else, so `..\..\etc\passwd` is ACCEPTED — it is one legal,
+          if peculiar, POSIX filename, and a file written under it lands inside the
+          root rather than above it. Rejecting backslashes would make a legal filename
+          unwritable to buy a confinement the grammar already provides.
+        in:
           - name: name
             type: string
         name: ValidatePath
         out:
           - type: error
-      - in:
+      - doc: |-
+          ValidateWritePath is [ValidatePath] plus the one refusal a writer needs: the
+          root itself is not a target.
+
+          fs.ValidPath accepts "." because a reader legitimately opens the tree to list
+          it. A writer that accepts it accepts `RemoveAll(".")`, which is a call that
+          empties the entire filesystem and reads, in a diff, exactly like a
+          no-op — and accepts `WriteFile(".")`, which cannot mean anything at all.
+        in:
           - name: name
             type: string
         name: ValidateWritePath
         out:
           - type: error
-      - in:
+      - doc: |-
+          ValidatePerm reports whether perm is a mode this domain will apply, and
+          returns [InvalidPermission] when it is not.
+
+          Two refusals, and ADR 0031 is the reason for both.
+
+          A ZERO mode is refused rather than defaulted. ADR 0031 admits clamping where
+          a working default needs no explanation and demands a refusal where any
+          SDK-chosen value would be arbitrary — and a file mode is the second case,
+          unambiguously: 0644 and 0600 differ by who may read the bytes, the SDK does
+          not know what the bytes are, and a mode of 0 is what an unfilled struct
+          field looks like. Silently choosing would make the SDK the author of a
+          security decision it has no information about.
+
+          Bits OUTSIDE fs.ModePerm are refused by name. setuid, setgid, the sticky bit
+          and the type bits are each a deliberate act; none of them should be
+          reachable by mistyping a permission literal, and a mode argument that also
+          carries them makes "0o4755 instead of 0o755" a one-character privilege
+          escalation. A caller who genuinely wants one of those wants a call that says
+          so, which this domain does not offer.
+        in:
           - name: perm
             type: fs.FileMode
         name: ValidatePerm
@@ -370,11 +504,140 @@ packages:
             private: "service/data/vfs: fsync on the parent directory failed AFTER a successful rename; the content is visible and may not survive a power loss — deliberately not rolled back"
             public: The file was published but the directory entry was not flushed
             reason: DIRECTORY_SYNC_FAILED
-  - functions:
-      - name: NewMem
+  - doc: |-
+      Package vfs — the in-memory filesystem, and the read half of its contract.
+
+      Package vfs — an open directory in the in-memory filesystem.
+
+      Package vfs — an open regular file in the in-memory filesystem.
+
+      Package vfs — the fs.FileInfo the in-memory filesystem reports.
+
+      Package vfs — one entry in the in-memory tree.
+
+      Package vfs — the in-memory filesystem's write half.
+
+      Package vfs — the disk-backed filesystem: its constructor, its read half,
+      and the guards every write goes through.
+
+      Package vfs — atomic publication: the five mechanics, the order they run in,
+      and the cleanup that makes a failure indistinguishable from never having
+      started.
+
+      Package vfs — the disk filesystem's non-atomic write verbs.
+
+      Package vfs — the honest refusal on platforms without the mechanics the disk
+      filesystem requires (ADR 0018 §(a): a uniform typed sentinel where a platform
+      has no native mechanic, never a silent drop and never a build break).
+
+      # Why Windows is refused rather than approximated
+
+      Two of this domain's three promises cannot be kept there, and the third is
+      weaker than it looks.
+
+      Flushing a directory has no equivalent. FlushFileBuffers on a directory
+      handle returns ERROR_ACCESS_DENIED, so after a crash a published name and
+      the bytes it names can disagree — which is the precise failure atomic
+      publication exists to prevent. There is no API that orders the two, so this
+      is not a matter of writing more code.
+
+      A permission mode is not an ACL. Go's os package maps an fs.FileMode to the
+      read-only attribute and nothing else, so 0600 does not exclude any account:
+      a file created in a directory carrying an inheritable permissive DACL is
+      readable by whoever that DACL admits. Honouring the mode would mean building
+      a security descriptor through CreateFileW, which stdlib syscall does not
+      expose — the same wall internal/service/security/session hit for the same reason.
+
+      And MoveFileEx with MOVEFILE_REPLACE_EXISTING, the closest thing to
+      rename(2), fails outright when the destination is open by another process
+      without FILE_SHARE_DELETE. A publisher whose swap fails because a reader is
+      reading is not the primitive this domain promises.
+
+      Approximating all three — calling Chmod, observing no error, skipping the
+      directory flush, and reporting success — would produce exactly the filesystem
+      this domain exists not to be: one that makes a durability and a permission
+      claim it cannot keep, on the platform where nobody would think to check. So
+      the constructor returns the typed proc.UnsupportedPlatform and the caller
+      chooses NewMem, an external store, or another host.
+
+      The gap is real and has a known closure — a Windows backend built on
+      CreateFileW + SetFileSecurity + MoveFileEx, with the directory-flush step
+      documented as absent rather than faked — and it is a separate change with its
+      own ADR. An untested implementation of a durability boundary is worth less
+      than an honest refusal.
+
+      Package vfs — the operating-system mechanics the disk filesystem needs, on
+      the platforms that have them.
+
+      Two of the three guarantees are portable and one is not. Confinement comes
+      from os.Root, which the standard library implements on every GOOS. Atomic
+      replacement comes from rename(2), which POSIX requires to be atomic. Flushing
+      a DIRECTORY — the step that makes a published name survive a power loss — is
+      the one that is not: it is fsync(2) on a directory descriptor here, and has
+      no equivalent on Windows. That is the reason this file has a build tag and a
+      sibling that refuses.
+
+      Package vfs implements the filesystem domain declared in internal/core/data/vfs
+      (ADR 0056): two concrete filesystems — one backed by the operating system,
+      one held in memory — behind one contract, plus the atomic publication both
+      of them promise.
+
+      # Two implementations, one set of refusals
+
+      The memory filesystem exists so a consumer can test its own code without a
+      temporary directory, and that is only worth anything if the two answer
+      identically. They therefore share the core guards ([corevfs.ValidateWritePath],
+      [corevfs.ValidatePerm]) and the same typed sentinels, and a table-driven
+      conformance suite runs the SAME cases against both. Where they cannot be
+      identical — symbolic links, durability, modification times — the difference
+      is named in the doc comment rather than discovered by a reader.
+
+      # What the operating-system filesystem confines, and what it does not
+
+      Confinement is enforced by os.Root, which resolves every name relative to a
+      held directory handle (openat2 with RESOLVE_BENEATH on Linux, an
+      lstat-verified walk elsewhere). A name that would leave the tree is refused
+      by the KERNEL, not by a string check in this package — that is the strong
+      guarantee, and this package neither reimplements it nor second-guesses it.
+
+      On top of it, this package refuses one thing os.Root permits: a WRITE whose
+      final component is a symbolic link. os.Root would follow it, and the target
+      is guaranteed to stay inside the root, so nothing escapes — but the bytes
+      would land somewhere other than the name the caller gave, which is the
+      classic symlink-plant. That refusal is [corevfs.PathEscaped].
+
+      It is checked with an Lstat before the operation, so it is a refusal of the
+      state this package OBSERVED, not a race-free guarantee: a link planted
+      between the check and the open is still followed. Stated plainly because the
+      distinction matters — the race-free property is confinement to the root, and
+      that one is the kernel's.
+
+      # Where it refuses to run at all
+
+      The operating-system filesystem needs two mechanics that are not portable: a
+      rename that atomically replaces, and a directory handle that can be flushed.
+      Where either is missing it returns proc.UnsupportedPlatform at CONSTRUCTION
+      (ADR 0018) rather than shipping a filesystem that makes a durability claim
+      it cannot keep. See osguard_other.go for which platforms and why.
+    functions:
+      - doc: |-
+          NewMem returns an empty in-memory filesystem containing only its root.
+
+          It takes no arguments on purpose. Every knob it could offer — a clock, a
+          size cap, a starting tree — would be a knob a consumer's test has to set
+          before it can assert anything, and the value of this type is that a test
+          double costs one line.
+        name: NewMem
         out:
           - type: corevfs.FullFS
-      - in:
+      - doc: |-
+          NewOS opens root as a confined filesystem.
+
+          The refusal order is deliberate. The PLATFORM is checked before the path:
+          on a GOOS without the mechanics this filesystem needs, no directory would
+          make it work, and reporting "no such directory" for a name that exists would
+          send the reader looking in the wrong place entirely.
+        in:
           - name: root
             type: string
         name: NewOS
@@ -386,7 +649,101 @@ packages:
     imports:
       corevfs: github.com/kitsunium/sdk/internal/core/data/vfs
     path: github.com/kitsunium/sdk/internal/service/data/vfs
-  - facade:
+  - doc: |-
+      Package vfs is the public facade for the SDK's filesystem domain: reading
+      stays io/fs, writing gets a contract, and publishing a file becomes one call
+      that either replaces it completely or changes nothing at all.
+
+      	site, err := vfs.NewOS("/srv/www")
+      	if err != nil {
+      		return err
+      	}
+
+      	// generated beside, swapped by rename(2), both flushed — one call
+      	if err := site.WriteAtomic("index.html", page, 0o644); err != nil {
+      		return err // the previous index.html is still being served
+      	}
+
+      # Reading is io/fs, and this package does not reimplement it
+
+      [FS] is a type ALIAS of io/fs.FS, and [WritableFS] embeds it. So a
+      filesystem from this package IS an fs.FS, and fs.WalkDir, fs.Glob,
+      fs.ReadFile, fs.Sub, fs.Stat and every library that already accepts an
+      fs.FS work on it with no adapter:
+
+      	pages, err := fs.Glob(site, "posts/*.md")
+      	err = fs.WalkDir(site, "assets", func(p string, d fs.DirEntry, err error) error { … })
+
+      There is deliberately no vfs.Walk and no vfs.Glob. The stdlib ones are
+      correct and already reachable; a second pair would only be a second place
+      for a bug to live.
+
+      # WriteAtomic, and what it promises when it fails
+
+      [AtomicWriter].WriteAtomic writes into a temporary in the SAME directory,
+      flushes it to the device, renames it over the target, and then flushes the
+      directory entry. Each step is there for a reason the previous one does not
+      cover: the same directory means the rename cannot cross a device, the file
+      flush means the rename is not publishing page-cache, and the directory flush
+      means the name survives a crash alongside the bytes it points at.
+
+      The interesting half is the failure. If WriteAtomic returns [PublishFailed],
+      the bytes previously at that name are unchanged — byte for byte — and no
+      temporary was left behind. That is not a description of the code, it is an
+      assertion with a test behind it: the SDK sabotages each step in turn and
+      compares a hash of the destination before and after.
+
+      One error means the opposite and has its own name. [DirectorySyncFailed]
+      arrives only AFTER a successful rename: the new content is what every reader
+      now sees, and the only thing in doubt is whether the directory entry
+      survives a power loss. It is deliberately not rolled back.
+
+      # Paths, and what confinement does and does not cover
+
+      Every name is a slash-separated, unrooted, "."- and ".."-free path — exactly
+      fs.ValidPath, the rule io/fs already imposes on readers. "../../etc/passwd"
+      is [InvalidPath]; it is refused, never normalised, because every normaliser
+      is a small parser and every small parser has a case its author missed.
+
+      On top of that, [NewOS] resolves every name against a held directory handle,
+      so a name that would leave the tree is refused by the KERNEL — including one
+      that only leaves it by traversing a symbolic link. And a WRITE whose final
+      component is a symbolic link is refused outright with [PathEscaped], even
+      when the link points somewhere perfectly legal: the caller named one file,
+      and the bytes would have landed on another.
+
+      # Permissions are refused, never defaulted
+
+      A zero mode returns [InvalidPermission]. 0644 and 0600 differ by who may
+      read the bytes, and the SDK does not know what the bytes are, so it declines
+      to choose — and a zero mode is what an unfilled struct field looks like.
+      setuid, setgid, sticky and the type bits are refused too, so a mistyped
+      octal literal cannot mint a setuid file.
+
+      # Two implementations
+
+      [NewOS] is the real one. [NewMem] is a filesystem held in a map, for testing
+      the code that uses one:
+
+      	filesystem := vfs.NewMem() // no temporary directory, no cleanup
+
+      They answer the same typed refusals for the same inputs — that is what makes
+      the second one a double rather than a different filesystem with matching
+      method names — and a table-driven conformance suite runs the same cases
+      against both. Three differences are real and are stated rather than
+      discovered: the memory filesystem has no symbolic links, reports the zero
+      ModTime, and makes no durability claim, because it has no device to make one
+      about.
+
+      # Where NewOS refuses to run
+
+      The disk filesystem needs a rename that atomically replaces, a directory
+      handle that can be flushed, and permission bits that mean something. Where
+      any of those is missing — Windows today — [NewOS] returns
+      proc.UnsupportedPlatform at CONSTRUCTION rather than shipping a filesystem
+      that would report success for a durability claim it cannot keep. [NewMem]
+      works everywhere.
+    facade:
       - alias:
           - doc: |-
               FS is the public alias for the read half, which is io/fs.FS unchanged. It

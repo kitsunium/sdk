@@ -1,11 +1,3 @@
-// Package s3 — the batching terminal Sink. AWS-free: it talks to S3 only through
-// the uploader seam, so the batching/flush logic is unit-tested with a fake
-// (the real AWS adapter lives in client.go). Records are coalesced into one
-// uploaded object per batch via the generic kernel batcher — flushed when the
-// buffered bytes reach MaxBatchBytes, on the FlushEvery ticker, or on Flush /
-// Close. The per-batch object key and the byte-weight both ride in the deliver
-// closure / WeightOf, so the coalescing/flush/ticker machinery is the shared
-// kernel/concur/batcher (ADR 0014), not a hand-rolled copy.
 package s3
 
 import (

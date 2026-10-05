@@ -1,4 +1,3 @@
-// Package client — the response body size ceiling.
 package client
 
 import (

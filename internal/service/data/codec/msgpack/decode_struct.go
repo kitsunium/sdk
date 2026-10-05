@@ -1,11 +1,3 @@
-// Package msgpack — the struct decoder. A struct reads a map by key, through
-// the layout struct.go builds, or an array by position — whatever its own
-// options say, as the vendor-backed codec read it — and nil zeroes it. An
-// inlined field behind a nil embedded pointer allocates that pointer, as
-// encoding/json does; one behind a nil pointer to an UNEXPORTED struct cannot
-// be allocated and is refused. A field reached through an unexported embedded
-// struct that was not inlined decodes when it is a struct itself, and is
-// stepped over otherwise, because reflection may not set it.
 package msgpack
 
 import (

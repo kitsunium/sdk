@@ -1,4 +1,3 @@
-// Package session — the on-disk store.
 package session
 
 import (

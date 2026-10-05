@@ -1,14 +1,3 @@
-// Package authz — hosts the built-in conditions an ABAC rule is written with.
-//
-// Every one of them reports an ABSENT or WRONG-KIND attribute as an error
-// rather than as false. That is the rule the whole domain turns on: a
-// comparison against an attribute the request does not carry is not a
-// comparison that failed, it is one that never happened, and the two have
-// opposite consequences the moment a rule is negated or combined.
-//
-// There is deliberately no Always condition. An unconditional rule is a grant
-// with no reason, and the caller who wants one writes the predicate at the
-// call site, where it appears in the diff and in review.
 package authz
 
 import (

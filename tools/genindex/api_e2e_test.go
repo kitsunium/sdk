@@ -202,6 +202,14 @@ func Test_checkAPI_docEdits(t *testing.T) {
 // header and its digests.
 func writePins(t *testing.T, root string, doc *apiDocument, design string) {
 	t.Helper()
+	writePinsAs(t, root, doc, design, false)
+}
+
+// writePinsAs is writePins; withDocs writes the doc digests a design that
+// owns its docs puts in its pins (ADR 0167): after each marker, and a
+// package marker in each pin file.
+func writePinsAs(t *testing.T, root string, doc *apiDocument, design string, withDocs bool) {
+	t.Helper()
 	files := map[string][]string{}
 	for _, s := range doc.Symbols {
 		dir := strings.TrimPrefix(strings.TrimPrefix(s.Package, fixtureModule), "/")
@@ -210,7 +218,22 @@ func writePins(t *testing.T, root string, doc *apiDocument, design string) {
 			name = "api_gen_1_test.go"
 		}
 		key := filepath.Join(dir, name)
-		files[key] = append(files[key], fmt.Sprintf("// go:%s %s %s", strings.TrimPrefix(s.ID, idPrefix), s.Kind, s.Canonical))
+		line := fmt.Sprintf("// go:%s %s %s", strings.TrimPrefix(s.ID, idPrefix), s.Kind, s.Canonical)
+		if withDocs {
+			line += markerDocPrefix + docDigest(&s)
+		}
+		files[key] = append(files[key], line)
+	}
+	if withDocs {
+		for _, p := range doc.Packages {
+			dir := strings.TrimPrefix(strings.TrimPrefix(p.Path, fixtureModule), "/")
+			for _, name := range []string{"api_gen_test.go", "api_gen_1_test.go"} {
+				key := filepath.Join(dir, name)
+				if _, ok := files[key]; ok {
+					files[key] = append([]string{packageMarkerPrefix + p.Path + markerDocPrefix + textDigest(p.Doc)}, files[key]...)
+				}
+			}
+		}
 	}
 	var designBytes []byte
 	if design != "" {
@@ -311,6 +334,82 @@ func TestCheckAPIMarkers(t *testing.T) {
 		t.Helper()
 		root, cells := fixtureCopy(t)
 		writePins(t, root, new(readFixtureDoc(t, root)), "")
+		c.change(t, root)
+		if status := runWriteAPI(apiOptions{root: root, cells: cells}, &bytes.Buffer{}); status != 0 {
+			t.Fatal("-write-api failed")
+		}
+
+		status, report := checkFixture(t, root, cells, true, false)
+
+		if len(c.want) == 0 {
+			if status != 0 || !strings.Contains(report, "pin markers hold") {
+				t.Fatalf("-check-api -markers = %d, want 0 and the markers holding:\n%s", status, report)
+			}
+			return
+		}
+		if status != 1 {
+			t.Fatalf("-check-api -markers = %d, want 1:\n%s", status, report)
+		}
+		for _, w := range c.want {
+			if !strings.Contains(report, w) {
+				t.Fatalf("the report does not name %q:\n%s", w, report)
+			}
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// TestCheckAPIDocDigests pins what the doc digests of a design that owns its
+// docs report (ADR 0167), each by its name: digests that match pass; a
+// symbol's doc, a struct field's doc or line comment, and the package
+// comment, each edited in the code alone, fail naming the symbol or the
+// package.
+func TestCheckAPIDocDigests(t *testing.T) {
+	t.Parallel()
+	core := "internal/core/lock/lock.go"
+	type tc struct {
+		// name describes the case.
+		name string
+		// change mutates the copy after its pins are written.
+		change func(t *testing.T, root string)
+		// want are fragments of the report.
+		want []string
+	}
+	tests := []tc{
+		{name: "digests that match the code", change: func(*testing.T, string) {}},
+		{
+			name:   "a function's doc",
+			change: func(t *testing.T, root string) { edit(t, root, core, "// Open opens", "// Open, edited, opens") },
+			want:   []string{"go:" + fixtureModule + "/internal/core/lock.Open: doc differs"},
+		},
+		{
+			name: "a field's doc",
+			change: func(t *testing.T, root string) {
+				edit(t, root, core, "// Name is the lock's name.", "// Name names it.")
+			},
+			want: []string{"go:" + fixtureModule + "/internal/core/lock.LeaseConfig: doc differs"},
+		},
+		{
+			name:   "an unexported field's comment is none of the digest's",
+			change: func(t *testing.T, root string) { edit(t, root, core, "// fence is the lease's", "// fence is its") },
+		},
+		{
+			name: "the package comment",
+			change: func(t *testing.T, root string) {
+				edit(t, root, core, "// Package lock is the fixture's core package", "// Package lock, edited, is the fixture's core package")
+			},
+			want: []string{"go:" + fixtureModule + "/internal/core/lock: package comment differs"},
+		},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		root, cells := fixtureCopy(t)
+		writePinsAs(t, root, new(readFixtureDoc(t, root)), "", true)
 		c.change(t, root)
 		if status := runWriteAPI(apiOptions{root: root, cells: cells}, &bytes.Buffer{}); status != 0 {
 			t.Fatal("-write-api failed")

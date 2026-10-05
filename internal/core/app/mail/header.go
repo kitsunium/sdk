@@ -1,5 +1,3 @@
-// Package mail — the names of the header fields the composer owns, and one
-// additional header as a value.
 package mail
 
 // Header field names the composer owns. A guard compares them

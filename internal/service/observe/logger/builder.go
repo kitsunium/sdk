@@ -1,10 +1,3 @@
-// Package logger — declares the chainable Builder API — the low-allocation
-// hot path for callers that care about per-call cost. Pulled from a
-// recycler.Pool[*chainBuilder], the builder accumulates attrs without
-// allocating beyond the pre-sized scratchpad and returns to the pool on
-// Send. It is NOT allocation-free end to end: the handler clones the
-// accumulated attrs on every Send, so exactly one slice escapes per emit
-// (see pkg/v1/observe/logger/BENCH.md).
 package logger
 
 import (

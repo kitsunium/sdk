@@ -1,4 +1,3 @@
-// Package validation — one embedded struct encoding/json descends into.
 package validation
 
 import "reflect"

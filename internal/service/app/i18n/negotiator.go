@@ -1,5 +1,3 @@
-// Package i18n — the language negotiator a server builds once and uses on
-// every request.
 package i18n
 
 import (

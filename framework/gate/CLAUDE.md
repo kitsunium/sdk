@@ -85,9 +85,8 @@ boundary rather than on bytes.
 
 ## README is generated
 
-`README.md` comes from `gomarkdoc` (ADR 0008). Regenerate with
-`make docs-readme` — which runs `cd framework && go generate ./...`, not `gomarkdoc`
-from the repository root. Do **not** hand-edit it.
+`README.md` is written by `tools/genindex` from the committed `docs/api`
+(`make docs-readme`, ADR 0167). Do **not** hand-edit it.
 
 ## Verification
 

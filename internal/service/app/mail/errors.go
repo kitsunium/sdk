@@ -1,7 +1,3 @@
-// Package mail — the one helper through which this package raises a sentinel
-// over a cause. The domain's codes and sentinels — the message refusals, and
-// the outcomes of composition and of the SMTP session — are declared in
-// internal/core/app/mail (ADR 0160).
 package mail
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

@@ -1,4 +1,3 @@
-// Package server — the pooled stream connection.
 package server
 
 import (

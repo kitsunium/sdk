@@ -1,6 +1,3 @@
-// Package msgpack — compile-time proof that every type here satisfies the
-// contract it is handed out as, and that time.Time is the IsZero type the
-// omitempty rule consults first.
 package msgpack
 
 import (

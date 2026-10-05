@@ -1,4 +1,3 @@
-// Package kit — where a store's versions are kept, engine by engine.
 package kit
 
 import (

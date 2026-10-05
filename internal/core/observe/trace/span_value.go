@@ -1,4 +1,3 @@
-// Package trace — SpanValue: one finished span, the unit an exporter ships.
 package trace
 
 import (

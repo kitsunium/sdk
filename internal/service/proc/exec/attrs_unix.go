@@ -1,9 +1,5 @@
 //go:build unix
 
-// Package exec — Unix best-effort post-start attributes: scheduling priority
-// (Nice), OOM-killer bias (OOMScoreAdj). Each is applied after fork/exec and
-// surfaces a typed error when the host refuses, rather than silently dropping a
-// requested field.
 package exec
 
 import (

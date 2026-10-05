@@ -1,6 +1,3 @@
-// Package token — hosts compile-time interface assertions
-// — keeping them out of the production
-// source so the runtime binary carries no diagnostic-only declarations.
 package token
 
 import coretoken "github.com/kitsunium/sdk/internal/core/security/token"

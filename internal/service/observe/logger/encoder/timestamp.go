@@ -1,20 +1,3 @@
-// Package encoder — renders the record timestamp, the one field every encoded
-// line carries and the single most expensive thing either encoder does.
-//
-// A CPU profile of a bare emit attributed 34.6 % of the WHOLE call —
-// builder, handler, encoder and sink together — to time.Time.AppendFormat,
-// with time.nextStdChunk and time.appendInt the two largest flat entries under
-// it. That is the generic formatter re-parsing the layout string, chunk by
-// chunk, on every single log record, to reach a result that never varies in
-// shape. appendTimestamp writes the same bytes with fixed offsets instead, and
-// is measured at 6.0× the stdlib call on a UTC instant and 5.0× on an offset
-// zone — `BenchmarkAppendTimestamp{,Zoned}` against their `…Stdlib` controls,
-// reported in internal/service/observe/logger/encoder/BENCH.md §5.2.
-//
-// It is a REPLACEMENT for one exact layout, not a general formatter: anything
-// it cannot render identically falls back to AppendFormat rather than
-// approximating. TestAppendTimestampMatchesAppendFormat pins the equivalence
-// across four zones and a hundred thousand instants each.
 package encoder
 
 import "time"

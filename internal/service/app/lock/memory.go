@@ -1,5 +1,3 @@
-// Package lock — the in-process locker: real leases, real expiry, real
-// takeover, and therefore the backend where fencing actually matters.
 package lock
 
 import (

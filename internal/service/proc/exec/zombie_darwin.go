@@ -1,6 +1,3 @@
-// Package exec — darwin's word on whether this process's unreaped child has
-// died: the probe zombieGroupRefused needs because darwin's kill(2) answers a
-// group of zombies with EPERM.
 package exec
 
 import (

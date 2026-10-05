@@ -1,8 +1,3 @@
-// Package multipart — adapts mime/multipart.Reader to codec.Decoder.
-//
-// This is the ONLY read path in the package: Unmarshal drives this decoder
-// over a bytes.Reader, so a body parsed from memory and a body streamed off a
-// socket go through identical code and identical bounds.
 package multipart
 
 import (

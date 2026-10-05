@@ -1,8 +1,3 @@
-// Package validation — the descent combinators. These are what make a
-// violation LOCATED on a nested structure, and they do it with an accessor
-// function rather than reflection: the programmatic path never imports
-// reflect, so a hot validator is a chain of direct field reads the compiler
-// can inline.
 package validation
 
 import corevalidation "github.com/kitsunium/sdk/internal/core/app/validation"

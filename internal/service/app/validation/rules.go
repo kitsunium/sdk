@@ -1,5 +1,3 @@
-// Package validation — the tag dialect: what a rule item may say, and what it
-// is refused for saying.
 package validation
 
 import (

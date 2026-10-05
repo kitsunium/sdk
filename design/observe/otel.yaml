@@ -2,36 +2,83 @@ apiVersion: kit.kitsunium/design/v2
 domain: observe/otel
 packages:
   - constants:
-      - name: AttrKindInvalid
+      - doc: |-
+          AttrKindInvalid is the zero value, and it names no type. An AttrValue
+          carrying it was built by a struct literal rather than by a
+          constructor, so its value was never set; every signal refuses it rather
+          than inventing an empty string for it (ADR 0031).
+        name: AttrKindInvalid
         type: AttrKind
         value: "0"
-      - name: AttrKindString
+      - doc: AttrKindString marks a string-valued attribute.
+        name: AttrKindString
         type: AttrKind
         value: "1"
-      - name: AttrKindBool
+      - doc: AttrKindBool marks a bool-valued attribute.
+        name: AttrKindBool
         type: AttrKind
         value: "2"
-      - name: AttrKindInt64
+      - doc: AttrKindInt64 marks a signed 64-bit integer attribute.
+        name: AttrKindInt64
         type: AttrKind
         value: "3"
-      - name: AttrKindFloat64
+      - doc: AttrKindFloat64 marks an IEEE-754 double attribute.
+        name: AttrKindFloat64
         type: AttrKind
         value: "4"
-      - name: ServiceNameKey
+      - doc: |-
+          ServiceNameKey is the attribute key OpenTelemetry's resource semantic
+          conventions reserve for the logical name of the service. It is dotted, like
+          every OTel-conventional key — which is exactly why the Prometheus connector
+          cannot carry it (see internal/service/observe/metrics/CLAUDE.md §What the Prometheus
+          connector loses). It is also the key a backend correlates a trace with a
+          metric on, which is why both signals read it from here.
+        name: ServiceNameKey
         type: string
         value: "\"service.name\""
-      - name: UnknownService
+      - doc: |-
+          UnknownService is the value the OpenTelemetry specification mandates when a
+          producer supplies no service.name. The spec allows appending the executable
+          name to it; this SDK does not, because a binary path is not a service
+          identity and would silently become one on a dashboard.
+        name: UnknownService
         type: string
         value: "\"unknown_service\""
+    doc: |-
+      Package otel holds the OpenTelemetry types every signal shares: the typed
+      attribute (common/v1 KeyValue and AnyValue), the Resource (resource/v1) and
+      the InstrumentationScope (common/v1). They live in the SHARED protos because
+      every signal uses them, so internal/core/observe/metrics and internal/core/observe/trace both
+      sit above this one model rather than one signal borrowing the other's. ADR
+      0051 §Decision 2 named this package and deferred it; it is that extraction.
+
+      Like the two signals above it, it implements the specification and imports
+      nothing from go.opentelemetry.io — nor anything else of this SDK: it is
+      standard library only.
+
+      It declares NO error code. An unusable attribute set is a programmer error
+      at the call site that wrote it, so the refusal belongs to the signal whose
+      API was misused: every function here that can refuse takes the caller's
+      sentinel and panics with it. Metrics keeps INVALID_ATTRIBUTE at 0.2.9.4,
+      trace has its own at 0.2.20.7, and a value built for one signal is still
+      accepted by the other, because there is only one type.
+
+      Package otel — Resource: who produced the telemetry.
+
+      Package otel — InstrumentationScope: what instrumented the telemetry.
     functions:
-      - in:
+      - doc: |-
+          String returns a string-valued AttrValue. It is the shortest of the four to write
+          because a string dimension is the overwhelmingly common one.
+        in:
           - name: key
           - name: value
             type: string
         name: String
         out:
           - type: AttrValue
-      - in:
+      - doc: Bool returns a bool-valued AttrValue.
+        in:
           - name: key
             type: string
           - name: value
@@ -39,7 +86,8 @@ packages:
         name: Bool
         out:
           - type: AttrValue
-      - in:
+      - doc: Int64 returns a signed-integer AttrValue.
+        in:
           - name: key
             type: string
           - name: value
@@ -47,7 +95,15 @@ packages:
         name: Int64
         out:
           - type: AttrValue
-      - in:
+      - doc: |-
+          Float64 returns a double AttrValue.
+
+          A float is a poor dimension — it is a measurement, not a category — and the
+          identity encoding keys it on its IEEE-754 BIT PATTERN, so -0.0 and +0.0 name
+          two different series and two NaNs with different payloads name two more. The
+          kind exists because the OTel attribute model has it and an OTLP payload can
+          carry it, not because a metric wants it.
+        in:
           - name: key
             type: string
           - name: value
@@ -55,27 +111,63 @@ packages:
         name: Float64
         out:
           - type: AttrValue
-      - in:
+      - doc: |-
+          CompareAttrKey orders two attributes by Key alone. A package-level function
+          value, not a closure, so passing it to slices.SortFunc allocates nothing.
+        in:
           - name: a
           - name: b
             type: AttrValue
         name: CompareAttrKey
         out:
           - type: int
-      - in:
+      - doc: |-
+          CompareAttrValue orders two attribute VALUES totally: kind first, then the
+          value within the kind. It never allocates.
+
+          The ordering distinguishes exactly the pairs AppendIdentity distinguishes,
+          which is what a Collect-time sort needs: if two values that name two
+          different series compared equal, their relative order would depend on the map
+          iteration that produced them and a snapshot would stop rendering identically
+          twice in a row. That is why a double falls back to its BIT PATTERN when the
+          numeric comparison ties — +0.0 and -0.0, and two NaNs with different
+          payloads, are distinct series and must be distinct here too.
+        in:
           - name: a
           - name: b
             type: AttrValue
         name: CompareAttrValue
         out:
           - type: int
-      - in:
+      - doc: |-
+          ValidateAttrs panics with refusal's message when sorted cannot name a
+          dimension set: an empty Key, a value no constructor ever set, or the same Key
+          twice.
+
+          It runs on the ALREADY SORTED set so duplicates are adjacent and the check
+          costs one comparison per attribute. Panicking is safe for the reason the
+          meter's cross-kind name refusal is: an attribute key and an attribute KIND
+          are both structure, written at the call site, so they are wrong on the first
+          call or never. The alternative is a set no exporter can emit — Prometheus and
+          OTLP both reject an empty attribute name — failing far away, inside the
+          component the SDK told the caller to stop thinking about.
+
+          refusal is the CALLER'S sentinel — an *errs.Error in every caller this SDK
+          has, typed here as the error it is so the model needs no import of its own:
+          the signal whose API was misused names the defect with its own dotted-quad
+          code, and this package owns none. It is read only to panic.
+        in:
           - name: sorted
             type: "[]AttrValue"
           - name: refusal
             type: error
         name: ValidateAttrs
-      - in:
+      - doc: |-
+          SortAttrs returns a sorted, validated, owned copy of attrs — the cold-path
+          form of what the meter does with a stack buffer on every fetch, and what a
+          Resource, a span, an event and a link do once each. It panics with refusal's
+          message on an unusable set, for the reason ValidateAttrs gives.
+        in:
           - name: attrs
             type: "[]AttrValue"
           - name: refusal
@@ -83,7 +175,19 @@ packages:
         name: SortAttrs
         out:
           - type: "[]AttrValue"
-      - in:
+      - doc: |-
+          NormalizeResource returns the ResourceValue a Meter or a Tracer publishes:
+          attributes sorted, validated, owned, and carrying ServiceNameKey whether or
+          not the caller supplied it. An unusable attribute set panics with refusal's
+          message, at construction, rather than at the first export.
+
+          The service.name default is not an SDK invention — the OpenTelemetry
+          specification mandates unknown_service for exactly this case, so the clamp
+          substitutes nobody's judgement (ADR 0031 §clamp).
+
+          It is a function and not a method because refusal is the CALLER'S: a method
+          on the shared type would have to pick one signal's code for both.
+        in:
           - name: resource
             type: ResourceValue
           - name: refusal
@@ -91,7 +195,16 @@ packages:
         name: NormalizeResource
         out:
           - type: ResourceValue
-      - in:
+      - doc: |-
+          NormalizeScope returns scope with an empty Name filled by defaultName.
+          Version is left exactly as supplied.
+
+          The default is a PARAMETER because it is the one part of the shared model
+          that must not be shared: a scope names the library that produced THIS
+          signal, so a span batch stamped with the metrics package's name would tell a
+          backend that the metrics package emitted spans. Each signal passes its own
+          DefaultScopeName (ADR 0051 §Decision 2).
+        in:
           - name: scope
             type: ScopeValue
           - name: defaultName
@@ -101,37 +214,79 @@ packages:
           - type: ScopeValue
     path: github.com/kitsunium/sdk/internal/core/observe/otel
     types:
-      - name: AttrKind
+      - doc: |-
+          AttrKind discriminates the type of an AttrValue's value. It is the OpenTelemetry
+          attribute model: a value is a string, a bool, a signed 64-bit integer or a
+          double — never a string that happens to spell one of the others.
+        name: AttrKind
         underlying: uint8
-      - methods:
-          - name: Kind
+      - doc: |-
+          AttrValue is one dimension — of a metric series, of a span, of a Resource: a
+          Key naming the dimension and a TYPED value observed for it.
+
+          The Key is STRUCTURE and the value is DATA. A key is written at the call site
+          and is constant for the lifetime of the process ("http.request.method"); a
+          value comes from whatever the process is measuring and varies per observation
+          ("GET", 503, true). That asymmetry is why an unusable key is a programmer
+          error the signal panics on, while an unbounded stream of values is a runtime
+          condition — the meter absorbs it into an overflow series.
+
+          The value is unexported and reachable only through Kind and the four typed
+          accessors, so the only way to build a usable AttrValue is one of the four
+          constructors — String, Bool, Int64, Float64. A struct literal can still set
+          Key, and the resulting AttrKindInvalid is refused rather than silently read
+          as an empty string.
+        methods:
+          - doc: Kind reports which type the attribute's value has.
+            name: Kind
             out:
               - type: AttrKind
             recv: value
-          - name: Str
+          - doc: Str returns the string value, and the empty string for every other kind.
+            name: Str
             out:
               - type: string
             recv: value
-          - name: Bool
+          - doc: Bool returns the bool value, and false for every other kind.
+            name: Bool
             out:
               - type: bool
             recv: value
-          - name: Int64
+          - doc: Int64 returns the integer value, and zero for every other kind.
+            name: Int64
             out:
               - type: int64
             recv: value
-          - name: Float64
+          - doc: Float64 returns the double value, and zero for every other kind.
+            name: Float64
             out:
               - type: float64
             recv: value
-          - in:
+          - doc: |-
+              AppendIdentity appends an INJECTIVE binary encoding of the attribute's value
+              — its kind tag followed by fixed-width or length-prefixed bytes — to dst.
+
+              The kind tag is what keeps String("v", "1") and Int64("v", 1) apart: without
+              it the two would encode identically and two series carrying different
+              dimensions would silently accumulate into one. It lives with the type rather
+              than in the meter so that every Meter implementation inherits the same
+              injectivity instead of re-deriving it.
+            in:
               - name: dst
                 type: "[]byte"
             name: AppendIdentity
             out:
               - type: "[]byte"
             recv: value
-          - in:
+          - doc: |-
+              AppendText appends the canonical TEXT rendering of the attribute's value.
+
+              Only AttrKindString can produce a byte an exposition format would have to
+              escape: a bool renders as "true"/"false", and an integer or a double renders
+              through strconv, so all three are drawn from [0-9a-zA-Z+-.] alone. An
+              exporter can therefore escape the string case and append the other three
+              verbatim.
+            in:
               - name: dst
                 type: "[]byte"
             name: AppendText
@@ -141,18 +296,52 @@ packages:
         name: AttrValue
         struct:
           fields:
-            - name: Key
+            - doc: |-
+                Key names the dimension. It must be non-empty and appear at most once
+                in an attribute set; ValidateAttrs checks both.
+              name: Key
               type: string
           unexported: true
-      - name: ResourceValue
+      - doc: |-
+          ResourceValue identifies the ENTITY that produced the telemetry — the
+          service, the process, the host. Its attributes are carried ONCE per payload
+          rather than on every point or span, which is the whole reason the concept
+          exists: service.name on ten thousand data points is ten thousand copies of
+          one fact.
+
+          SchemaURL is deliberately absent. It is optional in the specification, this
+          SDK emits no semantic-convention version, and a field that is always empty is
+          a placeholder (CLAUDE.md rule 5). It lands the day the SDK pins a convention
+          version, next to Attrs, and nothing else about the shape changes.
+        name: ResourceValue
         struct:
           fields:
-            - name: Attrs
+            - doc: |-
+                Attrs are the producer's attributes, sorted by Key. A ResourceValue
+                normalised by NormalizeResource always carries ServiceNameKey.
+              name: Attrs
               type: "[]AttrValue"
-      - name: ScopeValue
+      - doc: |-
+          ScopeValue identifies the INSTRUMENTATION that produced the telemetry — the
+          library, package or module that minted the instruments or started the spans,
+          as opposed to the service that runs it. OpenTelemetry calls it
+          InstrumentationScope, and it is what lets a backend tell "the SDK's own http
+          metrics" apart from "the application's".
+
+          SchemaURL and scope-level attributes are absent for the reason
+          ResourceValue's SchemaURL is: both are optional in the specification, nothing
+          in this SDK produces either, and an always-empty field is a placeholder.
+        name: ScopeValue
         struct:
           fields:
-            - name: Name
+            - doc: |-
+                Name is the instrumenting library's name. Empty means unset and
+                resolves to the signal's own default — see NormalizeScope.
+              name: Name
               type: string
-            - name: Version
+            - doc: |-
+                Version is the instrumenting library's version. It is optional in the
+                specification and stays empty when the caller has none — inventing one
+                would be a claim about code this package cannot see.
+              name: Version
               type: string

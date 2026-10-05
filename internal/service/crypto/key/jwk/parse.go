@@ -1,16 +1,3 @@
-// Package jwk — the decode half: JSON document to KeyValue, with every
-// RFC 7517 / 7518 / 8037 rejection made explicit and typed.
-//
-// Parsing accepts private members. That is not the asymmetry this package
-// guards: a caller parsing its own private JWK already holds the material. The
-// guarded direction is serialisation (see marshal.go), where a protected value
-// would become publishable JSON.
-//
-// There is deliberately no KeyValue.UnmarshalJSON. Parse is the single entry
-// point, so there is exactly one place where a document becomes a key and
-// exactly one set of checks it must pass — and KeyValue keeps a uniform value
-// receiver, which is what makes MarshalJSON fire on a plain (non-pointer) key
-// and therefore what makes the safe default actually reachable.
 package jwk
 
 import (

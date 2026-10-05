@@ -4,7 +4,10 @@ package(default_visibility = ["//internal/kernel:kernel_consumers"])
 
 go_library(
     name = "snapshot",
-    srcs = ["snapshot.go"],
+    srcs = [
+        "doc.go",
+        "snapshot.go",
+    ],
     importpath = "github.com/kitsunium/sdk/internal/kernel/concur/snapshot",
     visibility = ["//internal/kernel:kernel_consumers"],
 )

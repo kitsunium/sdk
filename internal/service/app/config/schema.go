@@ -1,10 +1,3 @@
-// Package config — the compiled schema: typed defaults, required keys, the
-// unknown-key policy, and the constraints the decoded configuration must
-// satisfy.
-//
-// A schema is compiled ONCE and refused at construction when it contradicts
-// either the type it describes or itself. Nothing here decides anything at load
-// time that could have been decided here.
 package config
 
 import (

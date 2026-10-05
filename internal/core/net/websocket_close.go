@@ -1,6 +1,3 @@
-// Package net — the WebSocket close code (RFC 6455 §7.4) and the predicates
-// that govern it in both directions. The close payload's wire form is
-// internal/service/net/websocket's (ADR 0160 §4).
 package net
 
 // The close codes RFC 6455 §7.4.1 defines. Three of them — WSCloseNoStatus,

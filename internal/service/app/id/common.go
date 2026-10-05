@@ -1,13 +1,3 @@
-// Package id wraps stdlib crypto/rand + the kernel clock as core/app/id.Generator
-// implementations (UUIDv4, UUIDv7, ULID, snowflake, NanoID, KSUID, TypeID).
-// Blank-importing this package self-registers every scheme that needs no
-// configuration; snowflake, NanoID and TypeID also offer explicit constructors.
-// No init() — registration is package-level var.
-//
-// Randomness is read with crypto/rand.Read, which since Go 1.24 never returns
-// an error and always fills its buffer — a failing source crashes the program
-// instead — so no generator here fails for want of entropy. EntropyFailed stays
-// declared, and published, but nothing returns it.
 package id
 
 import (

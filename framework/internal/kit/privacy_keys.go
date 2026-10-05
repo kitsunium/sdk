@@ -1,4 +1,3 @@
-// Package kit — the keys that index personal data without revealing it.
 package kit
 
 import (

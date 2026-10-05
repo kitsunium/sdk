@@ -1,6 +1,3 @@
-// Package logger — exposes the SDK version to the rest of the
-// logger package. The ldflags pipeline injects the real value at build
-// time; local development runs fall back to the "dev" sentinel.
 package logger
 
 // devVersion is the string returned by FrameworkVersion when Version was

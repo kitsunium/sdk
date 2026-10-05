@@ -1,5 +1,3 @@
-// Package studiokit — the Studio's live events, as a Server-Sent Events
-// stream.
 package studiokit
 
 import (

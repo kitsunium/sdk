@@ -1,4 +1,3 @@
-// Package kit — what the Studio sees of a record's versions.
 package kit
 
 import (

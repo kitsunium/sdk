@@ -1,4 +1,3 @@
-// Package queue — the record the in-memory broker keeps about one message.
 package queue
 
 import (

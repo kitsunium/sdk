@@ -1,5 +1,3 @@
-// Package jsonpatch — a JSON document read into a tree, compared by value, and
-// written back compact.
 package jsonpatch
 
 import (

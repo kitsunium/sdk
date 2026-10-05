@@ -1,0 +1,219 @@
+// Package msgpack is the MessagePack codec — a native implementation of the
+// specification (github.com/msgpack/msgpack/blob/master/spec.md) on the
+// standard library alone, registered as the "msgpack" Format. It replaced
+// github.com/vmihailenco/msgpack/v5 and writes the bytes that library wrote:
+// testdata/vendor-golden.txt holds the vendor's output for every value family
+// and the suite holds the native encoder to it byte for byte.
+//
+// The codec also implements StreamingCodec (one value per Encode, read back
+// one per Decode) and Appender (encode straight onto a caller's buffer).
+// Decoding is held to the bounds wire.go names: 10 MiB of input per Unmarshal
+// and per stream, 1000 levels of nesting, and no allocation sized by a length
+// the input declares before the input has proved it holds that many bytes.
+//
+// Package msgpack — compile-time proof that every type here satisfies the
+// contract it is handed out as, and that time.Time is the IsZero type the
+// omitempty rule consults first.
+//
+// Package msgpack — the decode cursor. A decodeState walks one in-memory
+// input and never reads past it: every length the input declares is checked
+// against the bytes that remain BEFORE anything is allocated for it, every
+// element of an array or map needs at least one byte so a count is checked the
+// same way, and containers nest at most maxDepth deep. Hostile input therefore
+// fails with UNMARSHAL_FAILED, never with a panic, an unbounded allocation or
+// a stack overflow.
+//
+// Package msgpack — decoding into an empty interface. The Go types are the
+// ones the vendor-backed codec produced, pinned by testdata/vendor-golden.txt,
+// so a caller's type assertions keep holding:
+//
+//	nil → nil              bool → bool
+//	fixint, int 8 → int8   int 16/32/64 → int16/int32/int64
+//	uint 8–64 → uint8…uint64   (a positive fixint is int8, as before)
+//	float 32 → float32     float 64 → float64
+//	str → string           bin → []byte (a copy)
+//	array → []any          map → map[string]any (keys must be str or bin)
+//	timestamp → time.Time (UTC)
+//
+// A map whose keys are not strings is refused here — decode it into a typed
+// map such as map[int]T or map[any]T — and so is an extension type other
+// than the timestamp.
+//
+// Package msgpack — pointers, interfaces, values that decode themselves, and
+// the entry point every decode starts from. unmarshalInto decodes exactly one
+// value and refuses trailing bytes: Unmarshal is handed one document, and
+// bytes after it are a framing error, not something to ignore.
+//
+// Package msgpack — slice, array and byte decoders. A declared element count
+// is never trusted with memory: it is first checked against the bytes that
+// remain, then at most preallocBytes worth of elements is reserved, and the
+// slice grows as elements actually decode — so a hostile count costs what its
+// input costs, not what it claims.
+//
+// Package msgpack — map decoders. A typed map decodes each key and value with
+// its own type's decoder, into two values reused for the whole map. A key
+// type that can hold an interface (map[any]T, a struct key with an interface
+// field) is checked for hashability before insertion: an array decoded as a
+// key would otherwise panic inside the runtime's map — the vendor's decoder
+// did exactly that on such input.
+//
+// Package msgpack — the per-type decoders, built once per Go type and cached
+// exactly like the encoders. The rules a decoder follows:
+//
+//   - nil sets the target to its zero value: 0, "", false, a nil pointer,
+//     slice or map, the zero struct, the zero time.
+//   - An integer target accepts any integer form whose value FITS; a value it
+//     cannot hold is refused instead of wrapped (the vendor wrapped 300 into
+//     an int8 as 44). An unsigned target refuses a negative value. A float
+//     target accepts floats and integers; a float32 target refuses a value
+//     beyond its range. An integer target refuses a float.
+//   - A string or []byte target accepts both str and bin; a []byte owns a copy.
+//   - A slice is replaced: the elements decoded are the elements it holds,
+//     reusing the backing array when it is large enough. A Go array takes at
+//     most its length, and its remaining elements are zeroed. A map gains the
+//     decoded pairs, as in encoding/json.
+//   - An interface holding a non-nil pointer decodes into what it points at;
+//     otherwise an empty interface receives the untyped value (decode_any.go)
+//     and the error interface receives a string as an error with that text.
+//   - A type that decodes itself — UnmarshalMsgpack([]byte) error, then
+//     encoding.BinaryUnmarshaler, then encoding.TextUnmarshaler — receives a
+//     copy of its bytes, so a method that keeps them is safe.
+//
+// Package msgpack — the struct decoder. A struct reads a map by key, through
+// the layout struct.go builds, or an array by position — whatever its own
+// options say, as the vendor-backed codec read it — and nil zeroes it. An
+// inlined field behind a nil embedded pointer allocates that pointer, as
+// encoding/json does; one behind a nil pointer to an UNEXPORTED struct cannot
+// be allocated and is refused. A field reached through an unexported embedded
+// struct that was not inlined decodes when it is a struct itself, and is
+// stepped over otherwise, because reflection may not set it.
+//
+// Package msgpack — the streaming decoder. When the 4 KiB read-ahead already
+// holds the whole next value — what valueExtent checks, allocating nothing —
+// Decode decodes it IN PLACE, by the same code Unmarshal runs, and consumes
+// it. Otherwise it FRAMES the value: it reads exactly the bytes of the next
+// value into a pooled scratch buffer, walking headers with the same table the
+// in-memory decoder uses and keeping a count of values still owed instead of
+// recursing, and decodes the frame. A value the fast path cannot vouch for —
+// incomplete or malformed — always takes the framed path, which says why, so
+// both paths fail alike. Framing never trusts a declared length with memory:
+// a string, binary or extension payload is refused outright when it is longer
+// than the stream can still deliver under its bound, and is otherwise read in
+// frameChunk pieces, so what a hostile header costs is what its bytes cost.
+//
+// The bound is the one the vendor-backed decoder had: one byte past
+// maxMsgPackBytes, for the whole stream. A clean end of input between two
+// values is io.EOF; an end inside a value, a malformed byte or a value that
+// does not fit its target is UNMARSHAL_FAILED, and ends the stream — More
+// reports false and every later Decode returns the same error.
+//
+// Package msgpack — the encode primitives. Each one appends one MessagePack
+// item to a byte slice and chooses the SHORTEST form the value fits, the
+// choice the vendor-backed codec made with UseCompactInts: a non-negative
+// integer of any Go type is a positive fixint or a uint 8/16/32/64, a negative
+// one a negative fixint or an int 8/16/32/64, so the Go width of a number is
+// not on the wire and two programs that disagree about it still interoperate.
+// Floats keep their width: float32 is float 32 and float64 is float 64.
+//
+// Package msgpack — the values that encode themselves, and the untyped entry
+// point. appendAny is where Marshal, Append and every interface value start:
+// the dynamic types a document is made of are written by a type switch, and
+// everything else by the type's cached plan, so both paths write the same
+// bytes for the same value.
+//
+// Package msgpack — map encoders. Pairs are written in Go's map iteration
+// order, which is not deterministic, exactly as the vendor-backed codec wrote
+// them: a caller who needs stable bytes encodes a struct, or a slice of pairs.
+//
+// The string-keyed maps a program builds most — map[string]any,
+// map[string]string, map[string]int, map[string]int64, map[string]float64 and
+// map[string]bool — are ranged over directly instead of through reflection,
+// which is what makes Marshal of such a map cost one allocation (the result).
+//
+// Package msgpack — the per-type encoders. Reflection runs ONCE per Go type:
+// encoderFor builds an encodeFunc for the type and caches it, so encoding a
+// value is a walk of precomputed closures and, for a struct, an append of
+// each key's pre-encoded bytes. A recursive type is handled the way
+// encoding/json handles it: a placeholder is cached first and forwards to the
+// real encoder once that exists.
+//
+// A type that encodes itself takes precedence over its kind, in the order the
+// vendor-backed codec checked: time.Time (the timestamp extension), then
+// MarshalMsgpack() ([]byte, error) — the method the vendor called, kept so a
+// type written for it still controls its own bytes — then
+// encoding.BinaryMarshaler and encoding.TextMarshaler, both written as a bin,
+// as before. A pointer-receiver method is called on the value's address, or on
+// an addressable copy when the value has none, so the bytes of a value never
+// depend on whether it was passed by pointer.
+//
+// Package msgpack — the struct encoder and the omitempty rule. A struct is a
+// map of its layout's keys in declaration order, each key appended as bytes
+// encoded once per type. omitempty is decided by the vendor-backed codec's
+// rule: an IsZero() method when the value has one (a nil pointer to such a
+// type is empty), else the kind's zero — no elements, false, 0, nil — and a
+// struct is empty when every one of its fields would be left out.
+//
+// One quirk is kept on purpose because the wire shows it: a field inlined
+// from an embedded struct POINTER that is nil is written as nil — unless the
+// struct has an omitempty field anywhere, in which case such fields are left
+// out. testdata/vendor-golden.txt pins the first case.
+//
+// Package msgpack — the streaming encoder. Each Encode encodes one value into
+// a pooled scratch buffer and hands it to the writer in ONE Write, so a value
+// that fails to encode writes nothing and leaves the stream intact — the
+// vendor's encoder wrote as it went and left half a value behind. The bytes
+// are Marshal's, so a streamed value and a marshalled one are identical: the
+// vendor's streaming encoder, unlike its Marshal, wrote int8–int64 and
+// uint8–uint64 fields at their full Go width.
+//
+// Package msgpack — how a call fails. Every failure is one of the two codes
+// this package has always owned: MARSHAL_FAILED (0.3.7.1) for an encode and
+// UNMARSHAL_FAILED (0.3.7.2) for a decode, so a caller routing on the reason
+// keeps working whatever the cause. What went wrong is said in Private, which
+// is log-only, and in Fields — offsets, Go type names, limits — and never by
+// quoting the input: a decode failure names where and what, not the bytes.
+//
+// Package msgpack — how a Go struct maps onto a MessagePack map. The rules are
+// the ones the vendor-backed codec applied, so existing tags keep their
+// meaning:
+//
+//   - The key is the `msgpack:"name"` tag, else the Go field name — case and
+//     all; there is no fallback to the json tag. `msgpack:"-"` leaves the
+//     field out, and so does being unexported.
+//   - `omitempty` leaves an empty field out of the map: a zero number, false,
+//     an empty string, slice, map or array, a nil pointer or interface, a
+//     value whose IsZero() reports true (time.Time), a struct all of whose
+//     fields would be left out.
+//   - A field named `_msgpack` carries struct-wide options: `as_array` (or
+//     `asArray`) encodes the struct as an array of every field in order, and
+//     `omitempty` applies to every field declared after it.
+//   - An embedded struct, or pointer to one, has its fields INLINED unless one
+//     of their names is already taken, `noinline` is set, or the type encodes
+//     itself (a marshaler, time.Time); `inline` forces it and drops only the
+//     colliding names. A struct that cannot inline is one field named after
+//     it — and an inlined one's name still decodes, as a nested map.
+//   - `alias:other` lets the field also be DECODED from the key "other".
+//
+// Decoding matches keys exactly and steps over keys no field claims; a struct
+// accepts both the map and the array form whatever its own options. Two fields
+// claiming one key are refused when the type is first used, instead of writing
+// a map that repeats a key.
+//
+// Package msgpack — the timestamp extension (spec.md §Timestamp extension
+// type, type −1). A time.Time is written in the SHORTEST of the three forms
+// the instant fits, the choice the vendor-backed codec made, byte for byte:
+//
+//	timestamp 32  fixext 4,  type −1, uint32 seconds            (0 ≤ sec < 2³², no nanoseconds)
+//	timestamp 64  fixext 8,  type −1, nsec<<34 | seconds        (0 ≤ sec < 2³⁴)
+//	timestamp 96  ext 8 (12), type −1, uint32 nsec, int64 sec   (everything else, negative included)
+//
+// Only the instant crosses the wire. A decoded time is in UTC — the vendor
+// returned time.Local, which made the same bytes decode to a different
+// time.Time on every machine; the instant was and is identical.
+//
+// Package msgpack — the MessagePack wire vocabulary: every format byte of the
+// specification (github.com/msgpack/msgpack/blob/master/spec.md), the width of
+// the length or value field that follows each one, and the 256-entry table
+// that turns a header byte into a description both the decoder and the stream
+// framer read, so the two cannot disagree about where a value ends.
+package msgpack

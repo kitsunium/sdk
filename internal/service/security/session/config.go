@@ -1,4 +1,3 @@
-// Package session — the in-memory store's construction parameters.
 package session
 
 import (

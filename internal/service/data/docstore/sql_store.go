@@ -1,6 +1,3 @@
-// Package docstore — the SQL store: the same documents, keys, indexes and
-// refusals as Store, kept in a database the caller owns, each call on the
-// transaction its context carries (ADR 0139).
 package docstore
 
 import (

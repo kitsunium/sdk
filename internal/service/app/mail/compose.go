@@ -1,5 +1,3 @@
-// Package mail — the composition helpers: media types, part construction, and
-// the size estimate that keeps the output buffer to one allocation.
 package mail
 
 import (

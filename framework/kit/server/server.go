@@ -1,5 +1,3 @@
-//go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /framework/kit/server .
-
 // Package server makes a kit app in the server profile — the default — serve
 // HTTP: its endpoints, its frontends and its health probes, on the SDK's
 // server engine. A product that serves HTTP imports it:

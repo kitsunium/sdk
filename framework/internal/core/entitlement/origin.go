@@ -1,6 +1,3 @@
-// Package entitlement - where the roster is fetched from. Authority comes from
-// the vendor signature, never from the origin that served the bytes, so the
-// binary is free to ask several places and keep whichever answers.
 package entitlement
 
 // OriginValue is one publication point for the roster pair.

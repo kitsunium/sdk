@@ -1,4 +1,3 @@
-// Package yaml — the streaming encoder: one document per Encode.
 package yaml
 
 import (

@@ -1,8 +1,3 @@
-// Package s3 — the AWS adapter. This file (with cred_adapter.go) is the ONLY
-// place that imports the AWS SDK; every other file is SDK-free and unit-tested
-// through the uploadFunc seam. The live PutObject lives in an anonymous closure
-// returned by newUploadFunc — confining the SDK here and keeping the batching
-// logic testable without a network.
 package s3
 
 import (

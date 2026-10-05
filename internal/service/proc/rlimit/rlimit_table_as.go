@@ -1,10 +1,5 @@
 //go:build unix && !linux && !openbsd
 
-// Package rlimit — RLIMIT_AS mapping for the non-Linux Unix targets whose stdlib
-// syscall exports it (Darwin, FreeBSD, NetBSD, DragonFly). OpenBSD has no
-// address-space rlimit — RLIMIT_AS is absent from its kernel ABI — so it supplies
-// the no-op in rlimit_table_openbsd.go instead, leaving ResourceAS unmapped
-// (UnknownResource) rather than failing to compile on the missing constant.
 package rlimit
 
 import (

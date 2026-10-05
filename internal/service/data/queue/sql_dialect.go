@@ -1,8 +1,3 @@
-// Package queue — the only place the SQL broker renders SQL. Every statement
-// it sends is built here, once, at NewSQL, for its dialect and its table; the
-// two whose length depends on a batch are rendered per call from the same
-// parts. Every one is spelled with the vocabulary core/data/sql's Dialect owns: the
-// bind markers, the quoting and the row lock.
 package queue
 
 import (

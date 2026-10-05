@@ -1,4 +1,3 @@
-// Package metrics — one snapshot group's series map.
 package metrics
 
 import coreotel "github.com/kitsunium/sdk/internal/core/observe/otel"

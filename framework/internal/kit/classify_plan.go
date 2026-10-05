@@ -1,5 +1,3 @@
-// Package kit — the plan of a Go type's classified members, computed once per
-// type.
 package kit
 
 import (

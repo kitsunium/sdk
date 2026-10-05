@@ -1,7 +1,3 @@
-// Package logger — declares genericHandler — the corelogger.Handler
-// implementation that composes an Encoder (format) with a Sink (transport).
-// It replaces the legacy TextHandler that fused both responsibilities into
-// one struct, and ships as the single Handler the service layer offers.
 package logger
 
 import (

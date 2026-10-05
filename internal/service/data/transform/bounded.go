@@ -1,10 +1,3 @@
-// Package transform — shared decompression bound for the stdlib gzip, flate and
-// zlib schemes. Each Decompress reads through an io.LimitReader so a malformed or
-// hostile stream cannot drive an unbounded allocation at this layer. The full
-// self-describing decompression-bomb guard (max output size + max expansion
-// ratio keyed to the frame header) lives in the pkg/v1/data/codec frame layer (a
-// later commit, CodeCompressedFrameInvalid); this is the conservative
-// layer-local backstop ADR 0014 D1 asks for.
 package transform
 
 import (

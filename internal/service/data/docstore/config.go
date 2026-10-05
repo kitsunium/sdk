@@ -1,6 +1,3 @@
-// Package docstore — the store's construction parameters, and the refusals a
-// configuration no store could honour gets, the index declarations' included:
-// an IndexSpec is core/data/docstore's, which both engines take (ADR 0160).
 package docstore
 
 import (

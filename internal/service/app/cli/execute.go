@@ -1,5 +1,3 @@
-// Package cli — resolution and dispatch: the loop that turns an argument
-// vector into one [corecli.InvocationValue] and one [corecli.Action] call.
 package cli
 
 import (

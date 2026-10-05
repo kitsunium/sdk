@@ -1,6 +1,3 @@
-// Package recover — holds the Config struct consumed by NewWithConfig.
-// Pulled into its own file so recover_sink.go stays focused on the Sink
-// contract.
 package recover
 
 // Config tunes the recover sink at construction time. Every field is

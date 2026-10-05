@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T09:00:00Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # internal/service/data/sql/
 
 ## Purpose
@@ -22,7 +22,8 @@ under the values this package allocated. This package declares no code.
 
 | File | Surface |
 |---|---|
-| `sql.go` | package doc + `failed()` — the verdict/driver-error join |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `sql.go` | `failed()` — the verdict/driver-error join |
 | `config.go` | `Config`, `PoolConfig`, `Default{MaxLifetime,MaxIdle,CheckTimeout}` |
 | `resolved.go` | `resolved` — the validated, clamped form of a `Config` |
 | `tx.go` | `NewTransactor`, `transactor`, root/nested settle paths, `cleanup()`, `txEnded()`; the held functions run after the root's commit and are dropped with a failed savepoint |
@@ -165,7 +166,7 @@ of the run's one transaction — and its version-table row is written by that
 
 The MySQL row is the reason this table exists. No client-side code can make
 MySQL's DDL transactional, so the runner does three things instead of
-pretending: it **says so** (here, in `sql.go`'s package doc, in `pkg/v1/data/sql`'s
+pretending: it **says so** (here, in the package comment in `doc.go`, in `pkg/v1/data/sql`'s
 doc, and in `MigrationFailed`'s `Private`), it **stops at the first failure**
 rather than continuing to *n+1*, and it **names the version and direction** so
 the migration to inspect by hand is identified.

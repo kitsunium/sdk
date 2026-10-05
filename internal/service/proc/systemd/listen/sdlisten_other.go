@@ -1,8 +1,5 @@
 //go:build !unix
 
-// Package listen — non-Unix stub. Socket activation relies on file-descriptor
-// inheritance, which is a Unix mechanism, so every entry point returns the typed
-// UnsupportedPlatform sentinel and an empty result rather than acting.
 package listen
 
 import (

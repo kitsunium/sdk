@@ -1,4 +1,3 @@
-// Package kit — the HTTP request and response an endpoint can reach.
 package kit
 
 import (

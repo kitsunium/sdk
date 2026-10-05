@@ -1,15 +1,3 @@
-// Package session — ranges 0.2.14.* (the port's verdicts) and 0.3.46.* (the
-// engines' own refusals) — ADR 0045, declared here since ADR 0160.
-//
-// Package session — declares the sentinel *errs.Error outcomes: the verdicts
-// of the port, and the refusals specific to the engines in
-// internal/service/security/session (ADR 0160). Each var's name equals its
-// errs.Define Reason in SCREAMING_SNAKE form.
-//
-// Every Public string here is written on the assumption that a third party
-// reads it: none of them contains an identifier, a subject, a data key, a
-// directory path, or a count. The identifier in particular is a bearer secret,
-// so it never appears in a Public, in a Private, or in a Field.
 package session
 
 // exitConfig matches sysexits EX_CONFIG (78). A refused store configuration —

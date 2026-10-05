@@ -1,4 +1,3 @@
-// Package kit — topics and subscriptions: asynchronous messages of one type.
 package kit
 
 import (

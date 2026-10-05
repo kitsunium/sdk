@@ -1,4 +1,3 @@
-// Package id — snowflake (Twitter-style) stateful generator.
 package id
 
 import (

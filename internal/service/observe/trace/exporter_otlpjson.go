@@ -1,5 +1,3 @@
-// Package trace — OTLP/JSON encoder: SpansValue to the bytes an OTLP receiver
-// accepts, implemented from the specification with encoding/json.
 package trace
 
 import (

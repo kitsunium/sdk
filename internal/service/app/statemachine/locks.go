@@ -1,6 +1,3 @@
-// Package statemachine — hosts the per-entity locks that serialise the
-// transitions of one entity, and the context mark that tells a hook's own
-// machine apart.
 package statemachine
 
 import (

@@ -1,4 +1,3 @@
-// Package i18n — the placeholder syntax, compiled once at catalogue load.
 package i18n
 
 import (

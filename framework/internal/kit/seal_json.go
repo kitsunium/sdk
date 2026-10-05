@@ -1,4 +1,3 @@
-// Package kit — a document as it lies at rest, sealed member by member.
 package kit
 
 import (

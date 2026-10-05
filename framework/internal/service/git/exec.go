@@ -1,10 +1,3 @@
-//go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /framework/internal/service/git .
-
-// Package git implements the core git contract by shelling out to the git binary.
-//
-// There is no VCS library dependency: git's own porcelain is the contract, and
-// every invocation is hardened against a repository that may be hostile — see
-// hardenedGitConfig.
 package git
 
 import (

@@ -1,8 +1,3 @@
-// Package nettransport — the NetConfig value type plus compose, the single
-// helper a factory uses to build the levelgate(async(netSink)) chain. Keeping
-// the composition order here (not in each factory) means tcp / udp / http all
-// inherit the same back-pressure + level-floor wiring, with only the transport
-// send/close seam varying per protocol.
 package nettransport
 
 import (

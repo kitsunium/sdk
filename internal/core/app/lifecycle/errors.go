@@ -1,10 +1,3 @@
-// Package lifecycle — ranges 0.2.19.* (ADR 0050 core/app/lifecycle block) and
-// 0.3.49.* (ADR 0050 service/app/lifecycle block, declared here since ADR 0160).
-//
-// Package lifecycle — declares the sentinel *errs.Error outcomes of the
-// domain: the registration refusals, and the engine's and the supervisor's
-// verdicts on a run. Each var's name equals its errs.Define Reason in
-// SCREAMING_SNAKE form.
 package lifecycle
 
 // exitConfig matches sysexits EX_CONFIG (78). A refused registration — and a

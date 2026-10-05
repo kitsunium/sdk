@@ -10,6 +10,7 @@ go_library(
         "cgroup_linux.go",
         "cgroup_other.go",
         "cgroup_windows.go",
+        "doc.go",
         "option.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/proc/cgroup",

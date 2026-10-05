@@ -12,7 +12,8 @@ span and phase change on it when `KIT_TELEMETRY` names a socket at the start
 
 | File | Role |
 |---|---|
-| `telemetry.go` | package doc, `Kind`, `Op` + `OpNames` + `OpOf`, `Outcome`, `NodeRef`, `Event`, `Nop`, `RecordSize`, `encode` / `Decode` (64 bytes, little-endian, fixed offsets); the exporter's constants and types — `Protocol`, the buffer bounds, `HelloValue`, `ExporterConfig`, `Exporter`, the ring (`slot`, `ring`) and the padded `counter` — live here too, next to `Event`, as ktn-linter's co-location rule asks |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `telemetry.go` | `Kind`, `Op` + `OpNames` + `OpOf`, `Outcome`, `NodeRef`, `Event`, `Nop`, `RecordSize`, `encode` / `Decode` (64 bytes, little-endian, fixed offsets); the exporter's constants and types — `Protocol`, the buffer bounds, `HelloValue`, `ExporterConfig`, `Exporter`, the ring (`slot`, `ring`) and the padded `counter` — live here too, next to `Event`, as ktn-linter's co-location rule asks |
 | `exporter.go` | the exporter's behaviour: `NewExporter(*ExporterConfig)`, `Ref`, `Instance`, `Emit` — the bounded ring, one CAS per event, drop and count when full —, `Start`, `Stop`, `Dropped`, `Sent`, the handshake line; a client whose close fails is logged, never returned |
 | `telemetry_interface.go` | `Emitter` (the port a product emits to), and the exporter's narrow views of its listener (`accepter`) and of a client (`writer`) |
 | `exporter_compliance.go` | `var _ Emitter = (*Exporter)(nil)` |

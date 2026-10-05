@@ -1,6 +1,3 @@
-// Package rotfile — calendar pruning of rotated siblings (MaxAgeDays), split
-// out of rotate.go so each function stays under KTN-FUNC-MAXLOC. The exported
-// on-demand Rotate method lives beside its receiver in rotating_sink.go.
 package rotfile
 
 import (

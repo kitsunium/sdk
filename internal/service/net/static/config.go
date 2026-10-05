@@ -1,4 +1,3 @@
-// Package static — what NewHandler refuses in a Config.
 package static
 
 import (

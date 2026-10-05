@@ -1,4 +1,3 @@
-// Package config — file Source over an io/fs.FS (codec-dispatched parse).
 package config
 
 import (

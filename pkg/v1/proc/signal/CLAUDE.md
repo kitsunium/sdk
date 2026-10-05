@@ -19,19 +19,13 @@ types and no logic of its own.
 
 ## Consumer-facing docs
 
-`README.md` is **generated** by gomarkdoc from the package doc comment in
-`signal.go` (ADR 0008). Do NOT hand-edit it: change the doc comment and run
-
-```
-cd pkg/v1/proc/signal && gomarkdoc --output README.md \
-  --repository.url https://github.com/kitsunium/sdk \
-  --repository.default-branch main --repository.path /pkg/v1/proc/signal .
-```
-
-(or `make docs-readme`). `scripts/pre-commit/check-readme-drift.sh` — a step
-of CI's `bazel` job — fails a change whose file on disk drifts from what
-gomarkdoc would emit. Maintainer rationale stays here;
-consumer prose belongs in the package doc comment.
+`README.md` is written by `tools/genindex` from the committed `docs/api`
+(`make docs-readme`, ADR 0167). Do NOT hand-edit it: the package comment is in
+`doc.go`, which kit writes from the design (`design/proc.yaml`) — edit the
+design, run `kit gen`, then `make api` and `make docs-readme`.
+`scripts/pre-commit/check-readme-drift.sh` — run by `make lint` and CI — fails
+a change whose file on disk drifts from what genindex would write. Maintainer
+rationale stays here; consumer prose belongs in the package doc comment.
 
 ## Platform
 
@@ -55,4 +49,4 @@ Windows run of the suite found it (ADR 0095).
 
 ## Generated
 
-`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/proc.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the package comment and the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
+`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/proc.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the declarations of their own, and `doc.go` — kit's too (ADR 0167) — the package comment. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.

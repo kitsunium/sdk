@@ -4,7 +4,10 @@ package(default_visibility = ["//internal/service:service_consumers"])
 
 go_library(
     name = "hmacsha2",
-    srcs = ["hmacsha2.go"],
+    srcs = [
+        "doc.go",
+        "hmacsha2.go",
+    ],
     importpath = "github.com/kitsunium/sdk/internal/service/crypto/mac/hmacsha2",
     visibility = [
         "//:__subpackages__",

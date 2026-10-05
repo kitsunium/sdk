@@ -1,5 +1,3 @@
-// Package secret — the file store's construction parameters and the checks
-// that refuse a directory the store cannot keep secrets in.
 package secret
 
 import (

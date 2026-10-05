@@ -1,4 +1,3 @@
-// Package scheduler — hosts EntryValue, the registration a Scheduler owns.
 package scheduler
 
 // EntryValue is one registered pairing of a [Schedule] with a [Job], under a

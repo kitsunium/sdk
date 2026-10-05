@@ -62,6 +62,27 @@ packages:
             name: CodeDecodeMisconfigured
             value: "0x00_03_48_08"
         type: errs.Code
+    doc: |-
+      Package strictjson declares the error codes and the sentinels of the strict
+      JSON decoder (not a codec), internal/service/data/codec/strictjson — range
+      0.3.72.* (ADR 0102 service/data/codec/strictjson block).
+
+      The codes live in the core at the path that mirrors the package emitting
+      them (ADR 0160 §2) and keep the values they were allocated with: the LL
+      byte 3 records the layer that allocated the range, not the directory that
+      declares it today (ADR 0160 §3). Nothing here encodes or decodes — the
+      mechanism, and the constructors that attach a failure's detail, stay in
+      the service package.
+
+      Package strictjson — the sentinel *errs.Error values, one per code. Each
+      Reason derives from its var name or from its Code constant (ADR 0020);
+      the Public and Private texts are the ones the service package always
+      emitted, so moving the declaration changed no rendering.
+
+      Every Public and every Private below is a fixed sentence. None of them can
+      carry a byte of the document, because the document is what a caller least
+      controls and an error message is where input classically leaks back out —
+      into a response, into a log someone else reads.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/data/codec/strictjson
@@ -155,17 +176,70 @@ packages:
             public: The JSON decoder was called with an argument it cannot use
             reason: DECODE_MISCONFIGURED
   - constants:
-      - name: MaxPointerBytes
+      - doc: |-
+          MaxPointerBytes bounds the JSON Pointer a refusal carries. A pointer is
+          built from the document's member names, so its length is the document's
+          to choose; past the bound it is cut back to the deepest ancestor that fits,
+          which still points at the right place, just less precisely.
+        name: MaxPointerBytes
         type: int
         value: "256"
+    doc: |-
+      Package strictjson — the reader that bounds a document and remembers why
+      it stopped.
+
+      Package strictjson decodes exactly one JSON document into a Go value,
+      refusing everything the permissive decoder lets through, within a byte
+      bound, with errors that never quote the input.
+
+      The universal codec's json format is encoding/json with its defaults: no
+      size limit, unknown members silently dropped, a member matched to a field
+      case-insensitively, a duplicated name resolved by whichever came last, and
+      trailing data after the value ignored. Each of those is a way for one
+      document to be read two ways — by this program and by whatever else parsed
+      it first — and none of them fails. This package is the other decoder, built
+      on encoding/json/v2 whose defaults already refuse most of them:
+
+        - a document longer than the bound is refused before it is buffered past
+          the bound;
+        - an object member the target does not declare is refused, and so is one
+          that differs from a declared name only by case;
+        - a duplicated member name, invalid UTF-8, and anything after the one
+          value are refused;
+        - a number out of the field's range is refused rather than wrapped.
+
+      Every refusal is a typed error whose text is a fixed sentence: the
+      document's bytes appear in no Public, no Private and no wrapped cause.
+      Where the document failed is available through PointerOf, as a JSON
+      Pointer built from the document's own member names — a location, never a
+      value.
     functions:
-      - in:
+      - doc: |-
+          Unreadable is the refusal of a reader that failed before the document
+          ended: DocumentUnreadable, the origin, carrying the failure's TYPE as its
+          cause field and never its message, which a reader may have built from the
+          bytes it read. The HTTP form uses it for a body whose first read failed.
+        in:
           - name: failure
             type: error
         name: Unreadable
         out:
           - type: error
-      - in:
+      - doc: |-
+          Decode reads exactly one JSON value from r into v, which must be a non-nil
+          pointer, reading at most maxBytes bytes of it.
+
+          It refuses — with DocumentTooLarge, DocumentEmpty, DocumentMalformed,
+          MemberUnknown, ValueMismatched or DocumentUnreadable — every document the
+          package comment lists, and DecodeMisconfigured when maxBytes is not
+          positive, v is not a non-nil pointer, or r is nil. On a refusal v may have
+          been partly written; a caller that keeps v after an error keeps a
+          half-decoded value.
+
+          A document longer than maxBytes is refused whatever the decoder made of the
+          part it read: the truncation, not the prefix, is the finding. The reader is
+          never read past maxBytes + 1 bytes.
+        in:
           - name: r
             type: io.Reader
           - name: v
@@ -175,7 +249,14 @@ packages:
         name: Decode
         out:
           - type: error
-      - in:
+      - doc: |-
+          CheckArguments refuses the two calls no input can make succeed — a
+          non-positive bound, and a v that is not a non-nil pointer — with
+          DecodeMisconfigured naming the argument, and returns nil otherwise. Decode
+          runs it first; a caller reading from something other than a plain reader
+          (the HTTP form in the httpbody package) runs it before touching its input,
+          so the same call is refused the same way through every door.
+        in:
           - name: v
             type: any
           - name: maxBytes
@@ -183,7 +264,16 @@ packages:
         name: CheckArguments
         out:
           - type: error
-      - in:
+      - doc: |-
+          DecodeChecked reads and decodes one bounded document from r into v, for a
+          caller that has already refused what CheckArguments refuses and holds a
+          non-nil reader. oversize recognises a read error that is itself a size
+          refusal — http.MaxBytesError, for a request body — so it is reported as
+          DocumentTooLarge rather than as a failed read; nil recognises none.
+
+          It is how the HTTP form reuses this decoder without this package naming
+          net/http: the recogniser is the caller's, and so is the import.
+        in:
           - name: r
             type: io.Reader
           - name: v
@@ -195,7 +285,15 @@ packages:
         name: DecodeChecked
         out:
           - type: error
-      - in:
+      - doc: |-
+          PointerOf returns where a document Decode refused went wrong — or one the
+          httpbody package's DecodeRequest refused — as a JSON Pointer (RFC 6901),
+          "" being the document itself, and reports whether err carries one.
+
+          The pointer is built from the document's own member names and array
+          indices, so it is the input's text, bounded to MaxPointerBytes: a location,
+          never a value. Render it as untrusted — escape it in HTML, quote it in a log.
+        in:
           - name: err
             type: error
         name: PointerOf
@@ -204,15 +302,44 @@ packages:
             type: string
           - name: ok
             type: bool
-      - in:
+      - doc: |-
+          Misconfigured refuses a call before anything is read: DecodeMisconfigured,
+          with the argument's name — never its value — as a field.
+        in:
           - name: argument
             type: string
         name: Misconfigured
         out:
           - type: error
     path: github.com/kitsunium/sdk/internal/service/data/codec/strictjson
-  - functions:
-      - in:
+  - doc: |-
+      Package httpbody decodes the JSON body of an HTTP request with the strict
+      decoder of its parent package, adding the three things only an HTTP body
+      has: a bound net/http enforces too, an empty body settled before anything
+      else, and a media type that must declare JSON.
+
+      It is a package of its own so that the decoder alone links no net/http: a
+      program that reads JSON documents from files, queues or sockets imports
+      strictjson and nothing of HTTP, and only a server that reads request bodies
+      imports this package and the net/http it needs anyway.
+    functions:
+      - doc: |-
+          DecodeRequest decodes the JSON body of req into v, which must be a non-nil
+          pointer, exactly as strictjson.Decode does, reading at most maxBytes bytes.
+
+          Around that decoder it adds the three things only an HTTP body has:
+
+            - the body is read through http.MaxBytesReader, so a body past the bound
+              is DocumentTooLarge (413) AND net/http is told to close the connection
+              rather than drain what the client keeps sending;
+            - an empty body is DocumentEmpty before anything else is looked at,
+              whatever the Content-Type says — a caller for whom the body is optional
+              treats that code as "no body", one for whom it is required answers 400;
+            - a non-empty body must declare application/json or a +json type (RFC
+              6839), or it is MediaTypeUnsupported (415) and is not parsed at all.
+
+          w is used only to tell net/http to close the connection; nil is accepted.
+        in:
           - name: w
             type: http.ResponseWriter
           - name: req
@@ -227,7 +354,64 @@ packages:
     imports:
       http: net/http
     path: github.com/kitsunium/sdk/internal/service/data/codec/strictjson/httpbody
-  - facade:
+  - doc: |-
+      Package strictjson decodes exactly one JSON document into a Go value,
+      within a byte bound, refusing what a permissive decoder lets through — and
+      no refusal ever repeats a byte of the document.
+
+      	var in CreateItem
+      	if err := strictjson.Decode(file, &in, 1<<20); err != nil {
+      		return err // DOCUMENT_TOO_LARGE, MEMBER_UNKNOWN, VALUE_MISMATCHED…
+      	}
+
+      # Why a second JSON decoder
+
+      The codec package's json format is encoding/json with its defaults, which
+      is the right thing for data this program wrote. For a document somebody
+      else wrote it is five ways for one document to be read two ways, none of
+      which fails: no size limit, unknown members silently dropped, a member
+      matched to a field case-insensitively, a duplicated name won by whichever
+      came last, and data after the value ignored. This package refuses all five,
+      plus invalid UTF-8 and a number out of its field's range. It is built on
+      encoding/json/v2, whose defaults already refuse most of them.
+
+      # The refusals
+
+      Each is a typed error with a fixed sentence and an HTTP status, matched with
+      errs.HasCode:
+
+      	CodeDocumentTooLarge      413  longer than the bound — the part read is not decoded as if it were whole
+      	CodeDocumentEmpty         400  zero bytes: "no body", which a caller may accept
+      	CodeDocumentMalformed     400  syntax, truncation, trailing data, a duplicate name, invalid UTF-8
+      	CodeMemberUnknown         400  a member the target does not declare, including a case-only variant
+      	CodeValueMismatched       400  the wrong kind, a number out of range, a field's own unmarshaler refused
+      	CodeMediaTypeUnsupported  415  a request body (httpbody) that does not declare application/json or +json
+      	CodeDocumentUnreadable    400  the reader failed before the document ended
+      	CodeDecodeMisconfigured   500  a non-positive bound, or a target that is not a non-nil pointer
+
+      A zero bound is refused rather than read as "unlimited": the two readings of
+      zero are opposites, and the unlimited one is a memory-exhaustion bug.
+
+      # Never the input
+
+      No Public, no Private and no field of a refusal carries a value from the
+      document, and the decoder's own error — whose text quotes the offending
+      member name and, for a field's own unmarshaler, the offending value — is not
+      kept in the chain. Where the document failed is available separately, from
+      PointerOf, as a JSON Pointer ("/items/1/price") built from the document's own
+      member names and indices and bounded to MaxPointerBytes: a location, never
+      a value, and still the document's text, so render it as untrusted.
+
+      # Request bodies
+
+      The JSON body of an HTTP request is decoded by the package beneath this one,
+      github.com/kitsunium/sdk/pkg/v1/data/codec/strictjson/httpbody, whose
+      DecodeRequest adds what only an HTTP body has — a bound net/http enforces
+      too, an empty body settled first, a media type that must declare JSON — and
+      refuses with this package's codes. It is a package of its own so that this
+      one links no net/http: a program decoding documents from files, queues or
+      sockets does not carry an HTTP stack it never serves.
+    facade:
       - const:
           - doc: |-
               MaxPointerBytes bounds the JSON Pointer PointerOf returns; a longer one is
@@ -371,7 +555,37 @@ packages:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       svcstrict: github.com/kitsunium/sdk/internal/service/data/codec/strictjson
     path: github.com/kitsunium/sdk/pkg/v1/data/codec/strictjson
-  - facade:
+  - doc: |-
+      Package httpbody decodes the JSON body of an HTTP request with the strict
+      decoder of github.com/kitsunium/sdk/pkg/v1/data/codec/strictjson, adding
+      what only an HTTP body has.
+
+      	var in CreateItem
+      	if err := httpbody.DecodeRequest(w, r, &in, 1<<20); err != nil {
+      		http.Error(w, errs.PublicOf(err), errs.HTTPStatusOf(err)) // 400, 413 or 415
+      		return
+      	}
+
+      # What a request body adds
+
+      The body is read through http.MaxBytesReader, so a body past the bound also
+      tells net/http to close the connection instead of draining what the client
+      keeps sending. An empty body is strictjson's CodeDocumentEmpty before its
+      Content-Type is looked at — treat that code as "no body" where the body is
+      optional. A non-empty body must declare application/json or a
+      structured-syntax +json type (RFC 6839), or it is strictjson's
+      CodeMediaTypeUnsupported (415) and is not parsed at all.
+
+      Everything else is strictjson's: the bound, the refusals and their codes —
+      match them with errs.HasCode and the strictjson constants — and PointerOf,
+      which locates a refused body as it locates any refused document.
+
+      # Why a package of its own
+
+      So that strictjson links no net/http. A program decoding documents from
+      files, queues or sockets imports strictjson alone; a server imports this
+      package too, and the net/http it serves with anyway.
+    facade:
       - func:
           doc: |-
             DecodeRequest decodes the JSON body of req into v, a non-nil pointer, as

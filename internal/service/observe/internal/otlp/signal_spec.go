@@ -1,5 +1,3 @@
-// Package otlp — SignalSpec: everything the shared OTLP/HTTP transport needs to
-// know about the signal it is carrying, and nothing it owns itself.
 package otlp
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

@@ -18,7 +18,7 @@ the build it came from.
   (`SIGTERM`/`SIGKILL`/`SIGINT`/`SIGHUP`/`SIGQUIT`) and the most-used resource
   sentinels, so callers drive `Stop`/`SignalGroup` and build `Spec.Rlimits`
   without importing `internal/core/proc` (which they cannot — it is internal).
-- **Stdio re-exports** (`facade_gen.go` since ADR 0166; `stdio.go`, which held them, is gone and its package comment joined `signals.go`'s): `StdioMode` and `StdioInherit` /
+- **Stdio re-exports** (`facade_gen.go` since ADR 0166; `stdio.go`, which held them, is gone, and the package comment is `doc.go`'s since ADR 0167): `StdioMode` and `StdioInherit` /
   `StdioNull` / `StdioCapture`, so a consumer sets `Spec.Stdio` — and captures
   a child's output into any `io.Writer` — with public names only.
   `TestCaptureAndBareNamesThroughTheFacade` is that consumer.
@@ -34,10 +34,11 @@ the build it came from.
 | `Start`, `MustStart` | spawn; a bare `Spec.Path` is searched in the child's PATH (Spec.Env's, else the parent's), `exec.ErrDot`/`ErrNotFound` wrapped in `SpawnFailed` |
 | `Self`, `Build`, `ParseBuild`; `Stats`, `Distribution`, `BuildInfo`, `Module` | the running process and the build it came from — one-line delegations to, and aliases of, `internal/service/proc/self` (ADR 0100) |
 
-- **README is generated.** `README.md` is produced by `gomarkdoc` from the
-  package doc comment in `process.go` (Rule 10). Edit the doc comment, then
-  `make docs-readme` (or run the `//go:generate` line). Maintainer rationale
-  (this file) stays in `CLAUDE.md`.
+- **README is generated.** `README.md` is written by `tools/genindex` from the
+  committed `docs/api` (`make docs-readme`, ADR 0167). The package comment is in
+  `doc.go`, which kit writes from the design (`design/proc.yaml`): edit the
+  design, run `kit gen`, then `make api` and `make docs-readme`. Maintainer
+  rationale (this file) stays in `CLAUDE.md`.
 
 ## The process itself (ADR 0100)
 
@@ -99,4 +100,4 @@ after Windows gained its backend; the first Windows run of the suite found it
 
 ## Generated
 
-`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/proc.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the package comment and the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
+`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/proc.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the declarations of their own, and `doc.go` — kit's too (ADR 0167) — the package comment. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.

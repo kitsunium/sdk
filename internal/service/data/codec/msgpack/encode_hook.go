@@ -1,8 +1,3 @@
-// Package msgpack — the values that encode themselves, and the untyped entry
-// point. appendAny is where Marshal, Append and every interface value start:
-// the dynamic types a document is made of are written by a type switch, and
-// everything else by the type's cached plan, so both paths write the same
-// bytes for the same value.
 package msgpack
 
 import (

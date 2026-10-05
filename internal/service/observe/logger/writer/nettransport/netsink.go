@@ -1,9 +1,3 @@
-// Package nettransport — netSink, the terminal per-record network sink. It ships
-// each formatted record straight to the transport seam under a mutex, mirroring
-// the syslog sink: the send is synchronous, so the recycled payload p is fully
-// consumed before Write returns and needs no defensive clone (the Write path is
-// 0 alloc — see BENCH.md). Non-blocking back-pressure is provided by the async
-// middleware composed around it, not here.
 package nettransport
 
 import (

@@ -1,4 +1,3 @@
-// Package scheduler — hosts the calendar cursor the cron walk advances.
 package scheduler
 
 import "time"

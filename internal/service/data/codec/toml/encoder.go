@@ -1,5 +1,3 @@
-// Package toml — the streaming codec.Encoder: one TOML document per Encode
-// call, written to the writer in one Write.
 package toml
 
 import (

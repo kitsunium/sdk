@@ -1,27 +1,5 @@
 //go:build windows
 
-// Package lock — the lock directory's safety verdict on Windows, where the
-// question the POSIX rule asks has no answer and the attack it prevents has no
-// mechanism (ADR 0081).
-//
-// # Two questions, three masks, one reader
-//
-// Both rules here ask the kernel's DACL reader (internal/kernel/fs/winacl, the
-// reader this package wrote for ADR 0084 and that the queue now shares from
-// there), and they ask it different things — exactly as the POSIX pair differ
-// over the sticky bit, and drawn finer, because Windows spells create and
-// delete as separate bits rather than one sticky flag (ADR 0086):
-//
-//   - [checkDir] asks winacl.ReplaceRights of the lock directory — can a
-//     stranger take away the entry a holder created? — and
-//     winacl.ContentRights of what the lock FILES created there inherit;
-//   - [plantable] asks winacl.CreateRights of the directory holding a path
-//     component — can a stranger put a directory at a name nobody has taken?
-//
-// The reader measures and never decides. What this domain decides on an
-// inspection that could not run is to ACCEPT, and to log that it did (see
-// [checkDir], [noteUninspected]) — where the queue, asking the same reader,
-// refuses (ADR 0095).
 package lock
 
 import (

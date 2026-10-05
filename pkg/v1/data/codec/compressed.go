@@ -1,11 +1,3 @@
-// Package codec — range 1.2.0.* (ADR 0005 pkg/v1/data/codec block).
-//
-// Package codec — compressed-frame verbs (ADR 0014 D1). MarshalCompressed and
-// UnmarshalCompressed wrap the universal codec dispatch in a self-describing,
-// version-tagged compression frame, so any value can be compressed in any
-// registered Format without a parallel API. Compression is a parallel transform
-// registry, never a codec Format (ADR 0014 §Why-not), so the algorithm is named
-// separately from the wire Format.
 package codec
 
 import (

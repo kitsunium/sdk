@@ -1,5 +1,3 @@
-//go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /pkg/v1/observe/logger/writer .
-
 // Package writer activates the dependency-free logger writers — "console",
 // "file", and "rotfile" — by blank-importing their service factory packages. A
 // single

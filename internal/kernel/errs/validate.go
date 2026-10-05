@@ -1,7 +1,3 @@
-// Package errs — centralises the runtime structural checks
-// applied by Define. Factoring the logic out of Define lets tests cover
-// every rule as a plain function call without subprocess fixtures for
-// package-init panics.
 package errs
 
 import (

@@ -1,5 +1,3 @@
-// Package proc — the MemoryLimitValue value type and the MemorySource enum: what
-// a derived Go soft memory limit is, and what decided it.
 package proc
 
 // MemorySource names what decided the Go soft memory limit, so a caller that

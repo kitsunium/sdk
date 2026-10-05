@@ -1,13 +1,3 @@
-// Package jwk — the encode half, and the place the package's one real security
-// decision lives.
-//
-// Serialising a key is the operation that undoes core/crypto.Key's redaction:
-// it turns protected material into JSON somebody will write to a file, a
-// config map, or an HTTP response. So the two directions are not a boolean
-// argument — they are two differently named methods, and the one the language
-// reaches for on its own (MarshalJSON, i.e. plain json.Marshal) is the safe
-// one. Emitting "d" or "k" requires typing MarshalPrivate at the call site,
-// where a reviewer reads it.
 package jwk
 
 import (

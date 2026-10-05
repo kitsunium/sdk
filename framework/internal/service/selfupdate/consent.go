@@ -1,35 +1,3 @@
-// Package selfupdate — range 0.3.66.* (ADR 0005 §Registry, allocated in
-// codeRangeOwners per ADR 0035).
-//
-// The domain's own range is 0.2.34.* and it holds every refusal the CONTRACT
-// names: an unsigned release, a digest that does not match, a redirect this
-// build will not follow. Those are the outcomes a caller of framework/selfupdate
-// branches on, and none of them is redeclared here.
-//
-// What lives in this range is the other half — the failures an IMPLEMENTATION
-// has and a contract does not: a JSON body that will not decode, a tar that
-// will not open, a temp file that cannot be created next to the running
-// binary. The core has no vocabulary for them because a different
-// implementation of the same port would fail in different places.
-//
-// Package selfupdate — consent: whether a caller that did not ask to upgrade
-// may nonetheless replace this binary, and the advice printed when it may not.
-// Package updater — CONSENT for an upgrade nobody typed.
-//
-// An explicit `upgrade` command is a deliberate act and needs no permission: a
-// it IS the permission. The licence gate is the opposite case. It fires from
-// the root command's PersistentPreRun on every invocation, so a plain
-// routine command that could reach a code path downloading an archive,
-// chmods it 0755, moves it over the running executable and, where sudoers
-// allows it, does that last step as root — none of which the person who
-// typed `run` asked for. The gate's own comment already conceded the point:
-// "this is the one moment a user is staring at a pause they did not ask for".
-//
-// A mandatory update that simply refuses is useless, so refusing is not what
-// this does. It asks when someone is there to answer, takes an explicit
-// out-of-band authorisation when nobody is (CI, devcontainers, hooks), and
-// when it does decline it prints every way forward rather than leaving a
-// dead end.
 package selfupdate
 
 import (

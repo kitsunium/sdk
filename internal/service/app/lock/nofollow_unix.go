@@ -1,8 +1,5 @@
 //go:build linux || darwin || freebsd || openbsd || netbsd || dragonfly
 
-// Package lock — the Unix half of "do not follow an indirection at the lock
-// path": O_NOFOLLOW, and a refusal that does not depend on which errno the
-// kernel chose to spell it with.
 package lock
 
 import (

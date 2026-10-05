@@ -69,9 +69,85 @@ packages:
             value: "0x00_03_30_02"
         type: errs.Code
     constants:
-      - name: NoExpiry
+      - doc: |-
+          NoExpiry is the [EntryValue.TTL] that stores an entry with no deadline.
+
+          It is a distinct value from the zero TTL, which means "use the store's
+          default". A cache with a one-minute default holding one entry that must
+          never expire is a real combination, and reading both meanings out of 0 would
+          make it unspellable — the caller would have to know the default and restate
+          it, which stops being true the day the default changes.
+        name: NoExpiry
         type: time.Duration
         value: "-1"
+    doc: |-
+      Package cache declares the SDK's cache DOMAIN: the [Store] port that owns a
+      set of keyed entries, the [EntryValue] a caller hands it, and the three
+      sibling interfaces through which a store advertises what else it can do.
+      A core sibling admitted by ADR 0049, which amends ADR 0025.
+
+      # This is not internal/kernel/collections/cache
+
+      [github.com/kitsunium/sdk/internal/kernel/collections/cache] is a PRIMITIVE: a generic
+      LRU + TTL map with no port, no error surface and no vocabulary. It stays
+      exactly what it is, and the concrete store in internal/service/data/cache is
+      built on top of it.
+
+      This package is the DOMAIN: an interface a caller can hold without naming an
+      implementation, plus the three things a primitive deliberately does not
+      have — invalidation by tag, protection against a stampede of concurrent
+      misses, and the ability to put one store in front of another.
+
+      # A read is not free, and the port says so
+
+      The read verb is [Store.Fetch], not Get, and the name is load-bearing. A hit
+      promotes the entry in the store's recency order and moves its counters; in
+      the concrete memory store it takes a WRITE lock for exactly that reason. Two
+      concurrent Fetches of one key are therefore not interchangeable with one,
+      and a Fetch is not something to sprinkle through a function that must not
+      mutate. ADR 0025 named the primitive's method Fetch for this reason; the
+      port keeps the name so the honesty survives the layer boundary.
+
+      # There is no registry
+
+      Like proc (ADR 0016), resilience (ADR 0026), net (ADR 0029), scheduler
+      (ADR 0041), token (ADR 0042), session (ADR 0045) and validation (ADR 0046),
+      this domain has no name-to-implementation registry.
+
+      The domain reason is session's: the set of backends is closed and small, and
+      picking one is a deployment decision made in code. Resolving it from a
+      configuration string would let a typo silently downgrade a shared cache to a
+      per-process one — and unlike a downgraded logger, a downgraded cache still
+      answers every call correctly, so nothing would ever surface.
+
+      The mechanical reason is decisive on its own: [Store] is generic in V, and
+      Go has no map from a name to Store[V] for an open V. A registry here would
+      have to erase the type and hand it back as any, which is precisely the
+      unchecked cast the typed port exists to remove.
+
+      # Keys are strings, values are not
+
+      [Store] fixes the key type to string while leaving V generic. The primitive
+      is generic in both, and the domain deliberately narrows one half: a domain
+      key appears in a tag bucket, in an error field and in a log line, and a
+      generic K would need a formatting rule for each of those before it could.
+      A caller with a non-string key formats it once, at the edge, where the
+      encoding is a decision rather than a default.
+
+      Package cache — the sibling interfaces a store advertises by type assertion
+      (ADR 0039), kept out of cache.go so the FROZEN port stands alone in the file
+      that names the package.
+
+      Package cache — range 0.2.18.* (ADR 0049 core/data/cache block), and the
+      chained store's 0.3.48.* (ADR 0049 service/data/cache block, declared here
+      since ADR 0160).
+
+      Package cache — the immutable value a caller hands to a Store.
+
+      Package cache — declares the sentinel *errs.Error port outcomes, and the
+      two the chained store in internal/service/data/cache emits (ADR 0160: every
+      code is declared in the core, at the service's path). Each var's name equals
+      its errs.Define Reason in SCREAMING_SNAKE form.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/data/cache
@@ -322,25 +398,95 @@ packages:
             public: A tier of the cache chain could not serve the operation
             reason: CACHE_TIER_FAILED
     types:
-      - name: Fill
+      - doc: |-
+          Fill computes the entry for a key that the cache does not hold. It is the
+          caller's code: a database query, an HTTP call, a derivation.
+
+          It is a FUNC port rather than a one-method interface, the shape
+          internal/core already admits for resilience.Operation, scheduler.Job and
+          validation.Constraint — and, per ADR 0039, a func type satisfies the
+          no-widening rule structurally, because it cannot grow a method at all.
+        name: Fill
         typeParams:
           - constraint: any
             name: V
         underlying: func(ctx context.Context) (EntryValue[V], error)
-      - name: EntryValue
+      - doc: |-
+          EntryValue is what a caller stores: the value, how long it should live, and
+          the tags by which it can later be invalidated in bulk.
+
+          It is a VALUE — a store copies what it needs and never retains the slice the
+          caller passed, so a caller may reuse or mutate its Tags slice afterwards.
+        name: EntryValue
         struct:
           fields:
-            - name: Value
+            - doc: Value is the payload.
+              name: Value
               type: V
-            - name: TTL
+            - doc: |-
+                TTL is how long the entry stays fetchable.
+
+                  > 0        this exact lifetime
+                  0          the store's configured default
+                  [NoExpiry] no deadline at all
+
+                Any other negative value is a mistake, not a third meaning, and is
+                refused with [CacheEntryRejected] rather than reinterpreted.
+              name: TTL
               type: time.Duration
-            - name: Tags
+            - doc: |-
+                Tags label the entry for bulk invalidation. Order is not significant and
+                duplicates are collapsed. An empty tag is refused: it names a set nobody
+                can ask for, so accepting it would index the entry under a key that can
+                only ever be reached by accident.
+
+                Tags cost memory in the store's reverse index — see
+                internal/service/data/cache/CLAUDE.md, which states the per-pair cost and
+                measures it.
+              name: Tags
               type: "[]string"
         typeParams:
           - constraint: any
             name: V
-  - functions:
-      - in:
+  - doc: |-
+      Package cache — hosts the compile-time interface assertions, keeping them
+      out of the production source so the runtime binary carries no
+      diagnostic-only declarations.
+
+      Package cache — the L1/L2 chain.
+
+      Package cache — the NewChain constructor configuration.
+
+      Package cache provides the concrete cache stores implementing
+      internal/core/data/cache: a tagged, stampede-protected memory store over the
+      kernel LRU+TTL primitive, and the chain that puts one store in front of
+      another. Stdlib-only, cross-OS. ADR 0049.
+
+      Package cache — the tagged, stampede-protected in-memory store.
+
+      Package cache — what the underlying primitive actually stores.
+
+      Package cache — the refusals every store shares, and the wrapping rule for
+      a caller's fill error.
+
+      Package cache — the two-way tag index behind InvalidateTag.
+
+      Package cache — one level of a chained store.
+    functions:
+      - doc: |-
+          NewChain puts each store in front of the next: tiers[0] is the nearest and
+          is consulted first, the last is the authority.
+
+          Every tier MUST implement [corecache.EntryFetcher] and [corecache.Tagger].
+          That is checked here, once, and refused with
+          [corecache.CacheChainMisconfigured] rather than discovered per call — see
+          that sentinel for the reasoning.
+
+          The returned value is a [corecache.Store] and also implements
+          [corecache.EntryFetcher], [corecache.Tagger] and [corecache.Loader].
+
+          IFACE-PLUGIN: the concrete chain stays unexported behind this constructor.
+        in:
           - name: cfg
             type: ChainConfig
           - name: stores
@@ -355,7 +501,24 @@ packages:
           - constraint: any
             name: V
         variadic: true
-      - in:
+      - doc: |-
+          NewMemory builds an in-process cache store from cfg.
+
+          The returned value is a [corecache.Store]. It also implements
+          [corecache.EntryFetcher], [corecache.Tagger] and [corecache.Loader]; reach
+          them by type assertion, which is the ADR 0039 way a port grows without
+          breaking anyone who implemented it.
+
+          A non-positive MaxEntries is REFUSED, not defaulted. ADR 0031 splits on
+          whether the SDK can supply a value without inventing the caller's
+          requirement, and a cache capacity is the requirement: it is the whole
+          statement of how much memory the caller is willing to spend. Worse, the
+          value the primitive gives a zero — unbounded — is the dangerous reading, and
+          it is dangerous twice over here, because an unbounded store also grows an
+          unbounded tag index.
+
+          IFACE-PLUGIN: the concrete store stays unexported behind this constructor.
+        in:
           - name: cfg
             type: MemoryConfig
         name: NewMemory
@@ -372,21 +535,115 @@ packages:
       corecache: github.com/kitsunium/sdk/internal/core/data/cache
     path: github.com/kitsunium/sdk/internal/service/data/cache
     types:
-      - name: ChainConfig
+      - doc: |-
+          ChainConfig parameterises [NewChain]. Its zero value builds a working chain;
+          the one field is an observation hook, not a policy.
+        name: ChainConfig
         struct:
           fields:
-            - name: OnPromoteError
+            - doc: |-
+                OnPromoteError, if non-nil, is called when a value served from a FAR
+                tier could not be written into a nearer one.
+
+                A failed promotion is not a failed read: the caller already has the
+                value, and failing the call would turn a degraded cache into a degraded
+                service. But it is also not nothing — a near tier that rejects every
+                promotion is a tier that will never be used again, and with this hook nil
+                that is completely invisible. Wire it.
+              name: OnPromoteError
               type: func(key string, err error)
-      - name: MemoryConfig
+      - doc: |-
+          MemoryConfig parameterises [NewMemory].
+
+          Its zero value is deliberately NOT a working cache: MaxEntries must be
+          stated. See [NewMemory] for why that refusal, and not a default, is the
+          right ADR 0031 half here.
+        name: MemoryConfig
         struct:
           fields:
-            - name: MaxEntries
+            - doc: |-
+                MaxEntries caps the live entry count; the least-recently-used entry is
+                evicted above it. It MUST be positive.
+              name: MaxEntries
               type: int
-            - name: DefaultTTL
+            - doc: |-
+                DefaultTTL applies to every entry whose own TTL is zero. Zero means the
+                default is "no deadline", so entries leave only by eviction, by Delete,
+                or by tag invalidation. Negative is refused.
+              name: DefaultTTL
               type: time.Duration
-            - name: Clock
+            - doc: |-
+                Clock is the time source, injectable so TTL is testable. nil means
+                clock.System. Only the reading half of the port is used — a cache reads
+                time, it never waits for it (ADR 0039).
+              name: Clock
               type: clock.Clock
-  - facade:
+  - doc: |-
+      Package cache is the public facade for the SDK's caching, and it offers two
+      surfaces because there are two different jobs.
+
+      # The primitive: Cache[K,V]
+
+      [Cache] is a generic LRU + TTL map — construct it, Set, Fetch, done. No
+      port, no error surface, no vocabulary. Reach for it when you want a bounded
+      map with expiry inside one component.
+
+      	c := cache.New[string, int](cache.Config[string, int]{MaxEntries: 1024, DefaultTTL: time.Minute})
+      	c.Set("answer", 42)
+      	v, ok := c.Fetch("answer") // 42, true
+
+      # The domain: Store[V]
+
+      [Store] is the cache as an INTERFACE, with the three things a primitive
+      deliberately does not have: invalidation by tag, protection against a
+      stampede of concurrent misses, and the ability to put one store in front of
+      another. Reach for it when a cache is part of your architecture rather than
+      an implementation detail — when something else has to be able to invalidate
+      what you cached, or when the thing behind the cache must not be hit N times
+      the instant a hot key expires.
+
+      	store, err := cache.NewMemory[Profile](cache.MemoryConfig{
+      	    MaxEntries: 10_000,       // refused if zero — a capacity is your decision
+      	    DefaultTTL: time.Minute,
+      	})
+
+      	loader, _ := store.(cache.Loader[Profile])
+      	profile, err := loader.Load(ctx, key, func(ctx context.Context) (cache.Entry[Profile], error) {
+      	    p, err := db.Profile(ctx, id)
+      	    return cache.Entry[Profile]{Value: p, TTL: time.Minute, Tags: []string{"user:" + id}}, err
+      	})
+
+      	tagger, _ := store.(cache.Tagger)
+      	removed, err := tagger.InvalidateTag(ctx, "user:"+id) // every entry derived from that user
+
+      The two do not compete: the domain store is BUILT on the primitive, and
+      [Cache] stays exactly what it was.
+
+      # Fetch, not Get — on both surfaces
+
+      A hit promotes the entry in the recency order and moves the counters, so a
+      read MUTATES. Naming it Get would promise a purity neither surface offers,
+      and in the domain store it takes a write lock for precisely that reason.
+
+      # Stampede protection stops at the process boundary
+
+      [Loader].Load guarantees ONE fill per key across every goroutine in THIS
+      process. It does not coordinate across replicas. Ten instances of a service
+      each running this still send ten concurrent requests to the origin when a
+      hot key expires — so a fleet's worst-case origin load falls by the
+      concurrency factor within an instance, not to one. Cross-process collapsing
+      needs a shared lease, which is a distributed system and not something a
+      cache can promise. Size the origin against the number of replicas, not
+      against the number of requests.
+
+      # Nothing across tiers is atomic
+
+      [NewChain] is two independent stores, and there is no transaction between
+      them. Every multi-tier operation has a window in which they disagree; the
+      package chooses which side of that window is safer and says so, rather than
+      implying a consistency it cannot deliver. See internal/service/data/cache's
+      CLAUDE.md for each choice and its reason.
+    facade:
       - const:
           - doc: |-
               NoExpiry is the [Entry].TTL that stores an entry with no deadline.

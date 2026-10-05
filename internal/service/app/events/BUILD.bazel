@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "events",
     srcs = [
+        "doc.go",
         "events.go",
         "on.go",
         "publish.go",

@@ -1,4 +1,3 @@
-// Package lifecycle — what a supervisor tells its observer.
 package lifecycle
 
 import "time"

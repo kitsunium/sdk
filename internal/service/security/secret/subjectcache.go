@@ -1,5 +1,3 @@
-// Package secret — the bounded cache of opened subject keys, and the order it
-// keeps between filling an entry and destroying a key.
 package secret
 
 import (

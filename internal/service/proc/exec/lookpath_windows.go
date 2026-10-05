@@ -1,9 +1,5 @@
 //go:build windows
 
-// Package exec — the Windows spellings of a PATH search: a name is tried with
-// each PATHEXT extension unless it already carries one, a regular file is
-// runnable by its extension, and variable names are case-insensitive ("Path"
-// is the usual spelling there).
 package exec
 
 import (

@@ -1,6 +1,3 @@
-// Package queue — the durable queue's state machine is a NAME. This file is
-// its grammar: what a queued, an in-flight and an abandoned message are
-// called, and how a name is read back into the facts it carries.
 package queue
 
 import (

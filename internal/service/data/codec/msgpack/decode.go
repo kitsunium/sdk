@@ -1,10 +1,3 @@
-// Package msgpack — the decode cursor. A decodeState walks one in-memory
-// input and never reads past it: every length the input declares is checked
-// against the bytes that remain BEFORE anything is allocated for it, every
-// element of an array or map needs at least one byte so a count is checked the
-// same way, and containers nest at most maxDepth deep. Hostile input therefore
-// fails with UNMARSHAL_FAILED, never with a panic, an unbounded allocation or
-// a stack overflow.
 package msgpack
 
 import (

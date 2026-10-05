@@ -37,14 +37,61 @@ packages:
             name: CodeCodecNil
             value: "0x00_02_02_05"
         type: errs.Code
+    doc: |-
+      Package codec — declares the optional Appender extension that
+      hot-path encoders (NDJSON, JSON, text) implement so callers can write into
+      a caller-supplied buffer without paying for an intermediate allocation.
+
+      Codecs that satisfy Codec but do NOT implement Appender remain valid; the
+      logger and other consumers detect support with a runtime type assertion
+      and fall back to Marshal + copy when the optional interface is absent.
+
+      Package codec declares the domain contracts every format codec in the SDK
+      implements. Consumers interact with codecs through the pkg/v1/data/codec facade;
+      concrete implementations live in internal/service/data/codec/<format>/.
+
+      This package is interface-only: no runtime state, no registrations, no
+      format-specific knowledge. Codecs register themselves via the registry in
+      registry.go when their service subpackage is imported.
+
+      Package codec — range 0.2.2.* (ADR 0005 core/data/codec block).
+
+      Package codec — declares the registry's boot-time sentinel. Its var name
+      equals its errs.Define Reason in SCREAMING_SNAKE form.
+
+      Package codec — declares the typed Format string and its helpers.
+      The zero Format ("") is invalid — consumers obtain a Format via the
+      pkg/v1/data/codec constants or via the FromMIME / FromExtension helpers.
+
+      Package codec — holds the process-wide Codec registry.
+      Service-level codec packages register themselves via package-level var
+      initialisers when the package is imported.
     functions:
-      - in:
+      - doc: |-
+          Register inserts c into the registry and returns it so callers can bind
+          the singleton to a typed package-level variable like
+          `var Codec codec.Codec = codec.Register(&jsonCodec{})`. Panics on nil
+          argument or duplicate Name / MIME / extension.
+
+          IFACE-PLUGIN: the registry hands plug-in codec instances back to callers
+          so each domain can keep its concrete codec type unexported; the only
+          stable contract is the Codec interface itself.
+
+          "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
+          plug-in whose type is not comparable both satisfy the port and neither can
+          serve one call (see internal/kernel/plugin).
+        in:
           - name: c
             type: Codec
         name: Register
         out:
           - type: Codec
-      - in:
+      - doc: |-
+          Lookup returns the codec registered under f.
+
+          IFACE-PLUGIN: the registry stores plug-in codec instances behind the Codec
+          interface — concrete types are intentionally unexported per-format.
+        in:
           - name: f
             type: Format
         name: Lookup
@@ -53,7 +100,14 @@ packages:
             type: Codec
           - name: ok
             type: bool
-      - in:
+      - doc: |-
+          LookupMIME returns the codec whose MIME list matches. MIME parameters
+          (e.g. "; charset=utf-8") are stripped before the index lookup so that
+          "application/json; charset=utf-8" resolves like "application/json".
+
+          IFACE-PLUGIN: the registry stores plug-in codec instances behind the Codec
+          interface — concrete types are intentionally unexported per-format.
+        in:
           - name: raw
             type: string
         name: LookupMIME
@@ -62,7 +116,12 @@ packages:
             type: Codec
           - name: ok
             type: bool
-      - in:
+      - doc: |-
+          LookupExt returns the codec whose extension list contains ext.
+
+          IFACE-PLUGIN: the registry stores plug-in codec instances behind the Codec
+          interface — concrete types are intentionally unexported per-format.
+        in:
           - name: ext
             type: string
         name: LookupExt
@@ -71,7 +130,10 @@ packages:
             type: Codec
           - name: ok
             type: bool
-      - name: Available
+      - doc: |-
+          Available returns the sorted list of registered Formats, or nil before any
+          Register.
+        name: Available
         out:
           - type: "[]Format"
     imports:
@@ -205,53 +267,123 @@ packages:
             public: A codec is already registered under that name, MIME type or extension
             reason: DUPLICATE_REGISTRATION
     types:
-      - methods:
-          - name: Known
+      - doc: Format is the typed string identifier of a codec.
+        methods:
+          - doc: Known reports whether f has been registered in the codec registry.
+            name: Known
             out:
               - type: bool
             recv: value
-          - name: String
+          - doc: String implements fmt.Stringer and returns the raw identifier.
+            name: String
             out:
               - type: string
             recv: value
         name: Format
         underlying: string
   - constants:
-      - name: Any
+      - doc: |-
+          Any is a value whose kind the type does not decide: an interface, a
+          json.RawMessage, a type that writes its own JSON.
+        name: Any
         type: Kind
         value: "0"
-      - name: Object
+      - doc: "Object is a JSON object whose members are Fields: a struct."
+        name: Object
         type: Kind
         value: "1"
-      - name: Array
+      - doc: "Array is a JSON array whose elements are Items: a slice or an array."
+        name: Array
         type: Kind
         value: "2"
-      - name: Map
+      - doc: |-
+          Map is a JSON object whose member names are keys and whose values are
+          Values: a Go map.
+        name: Map
         type: Kind
         value: "3"
-      - name: String
+      - doc: |-
+          String is a JSON string: a string, a []byte in base64, a text
+          marshaler, a time.Time.
+        name: String
         type: Kind
         value: "4"
-      - name: Integer
+      - doc: Integer is a JSON number the type holds as an integer.
+        name: Integer
         type: Kind
         value: "5"
-      - name: Number
+      - doc: Number is a JSON number the type holds as a float, or json.Number.
+        name: Number
         type: Kind
         value: "6"
-      - name: Boolean
+      - doc: Boolean is true or false.
+        name: Boolean
         type: Kind
         value: "7"
-      - name: Unsupported
+      - doc: |-
+          Unsupported is a type encoding/json refuses to encode: a channel, a
+          function, a complex number, an unsafe pointer, a map whose key it
+          cannot write as a member name. A value holding one is refused whole.
+        name: Unsupported
         type: Kind
         value: "8"
+    doc: |-
+      Package jsonshape — the members encoding/json writes for a struct, resolved
+      by its own rules: json/v2's field walk under the v1 options Go 1.27's
+      encoding/json runs with.
+
+      Package jsonshape — which methods make encoding/json hand a type's encoding
+      over to the type itself.
+
+      Package jsonshape describes how values of a Go type look on the wire under
+      encoding/json: which JSON kind each value takes, which members an object
+      has and under which names, which may be missing and which may be null
+      (ADR 0133).
+
+      The description follows the encoding/json of the toolchain the SDK is built
+      with — Go 1.27, whose encoding/json runs on the json/v2 engine with the v1
+      options — and it is a description of ENCODING: encoding/json decodes any
+      member as absent, so Optional says what an encoded value may omit, never
+      what a decoder requires.
+
+      Struct members are resolved as encoding/json resolves them: embedded
+      structs promoted one level at a time, through a pointer, an unexported
+      embedded struct's exported fields included; for one name, the shallowest
+      field wins, a single tagged one breaks a tie at that depth, and a tie that
+      remains writes neither — nor any deeper field of that name. A field keeps
+      access to the Go field behind it: its struct tag, its Go name, and its index
+      path for reflect.Value.FieldByIndex, so a framework can read its own tags
+      beside encoding/json's.
+
+      A type that writes its own JSON — json.Marshaler, or json/v2's MarshalerTo —
+      is opaque: Any, whatever it writes. One that writes text — an
+      encoding.TextMarshaler or TextAppender — is a String. A pointer receiver's
+      method counts only where encoding/json calls it: on an addressable value.
+      Of(T) describes a T encoded by value — json.Marshal(v) — whose root is not
+      addressable, and neither are the fields and array elements under it; a
+      pointer's and a slice's elements are, and a map's values never are. Describe
+      *T for json.Marshal(&v).
+      time.Time is described by what its method writes — a date-time string — and
+      json.Number by what encoding/json writes for it — a number.
+
+      Package jsonshape — a struct field's json tag, read with the grammar the
+      json/v2 engine reads it with.
+
+      Package jsonshape — the walk from a Go type to its shape.
     functions:
-      - in:
+      - doc: |-
+          Of describes the values of t on the wire. A nil t — the type of a nil
+          interface — is Any. Of never fails: what encoding/json refuses is described
+          as Unsupported where it occurs. Every call returns a new tree, which the
+          caller may keep and change.
+        in:
           - name: t
             type: reflect.Type
         name: Of
         out:
           - type: "*ShapeValue"
-      - name: For
+      - doc: "For describes the values of T on the wire: Of(reflect.TypeFor[T]())."
+        name: For
         out:
           - type: "*ShapeValue"
         typeParams:
@@ -259,70 +391,122 @@ packages:
             name: T
     path: github.com/kitsunium/sdk/internal/service/data/codec/jsonshape
     types:
-      - methods:
-          - name: String
+      - doc: Kind is the JSON kind a value takes on the wire. The zero Kind is Any.
+        methods:
+          - doc: "String returns the kind's lower-case name: \"object\", \"integer\", \"any\"."
+            name: String
             out:
               - type: string
             recv: value
-          - name: MarshalText
+          - doc: MarshalText writes the kind's name, so a shape encodes as readable JSON.
+            name: MarshalText
             out:
               - type: "[]byte"
               - type: error
             recv: value
         name: Kind
         underlying: uint8
-      - name: ShapeValue
+      - doc: |-
+          ShapeValue describes the values of one Go type on the wire: the JSON kind
+          they take and, for a container, the shape of what it holds. It encodes as
+          readable JSON; the Go-only parts of its fields are left out.
+        name: ShapeValue
         struct:
           fields:
-            - name: Kind
+            - doc: Kind is the JSON kind the values take.
+              name: Kind
               tag: json:"kind"
               type: Kind
-            - name: Name
+            - doc: |-
+                Name is the qualified Go type name — "time.Time",
+                "example.com/shop.Order" — for a named type from a package, and empty
+                otherwise.
+              name: Name
               tag: json:"name,omitempty"
               type: string
-            - name: Format
+            - doc: |-
+                Format refines a kind: the Go kind of a number ("int64", "uint8",
+                "float32"), "base64" for bytes written as a string, "date-time" for a
+                time.Time, "duration-ns" for a time.Duration's integer nanoseconds.
+              name: Format
               tag: json:"format,omitempty"
               type: string
-            - name: Nullable
+            - doc: |-
+                Nullable reports that a value of the type can be written as null: a
+                nil pointer, slice, map or interface.
+              name: Nullable
               tag: json:"nullable,omitempty"
               type: bool
-            - name: Fields
+            - doc: Fields are an Object's members, in the order encoding/json writes them.
+              name: Fields
               tag: json:"fields,omitempty"
               type: "[]FieldValue"
-            - name: Items
+            - doc: Items is an Array's element shape.
+              name: Items
               tag: json:"items,omitempty"
               type: "*ShapeValue"
-            - name: Values
+            - doc: |-
+                Values is a Map's value shape — and, on an Object, the shape of the
+                members an embedded map adds beyond Fields (json/v2's embed option).
+              name: Values
               tag: json:"values,omitempty"
               type: "*ShapeValue"
-            - name: Ref
+            - doc: |-
+                Ref is set, to Name, on the shape of a type already being described
+                further up: the description stops there instead of recursing. A
+                recursive type is always a named one, so Ref names an ancestor.
+              name: Ref
               tag: json:"ref,omitempty"
               type: string
-      - name: FieldValue
+      - doc: |-
+          FieldValue is one member of an Object: its wire name and shape, what the
+          encoder may do with it, and the Go field it is written from — which a
+          framework reads its own tags from.
+        name: FieldValue
         struct:
           fields:
-            - name: Name
+            - doc: Name is the member name on the wire.
+              name: Name
               tag: json:"name"
               type: string
-            - name: Shape
+            - doc: |-
+                Shape describes the member's value. When Quoted, the value travels
+                inside a JSON string.
+              name: Shape
               tag: json:"shape"
               type: "*ShapeValue"
-            - name: Optional
+            - doc: |-
+                Optional reports that an encoded object may lack the member: its tag
+                says omitempty on a kind that can be empty, or omitzero, or the field
+                is promoted through an embedded pointer that may be nil.
+              name: Optional
               tag: json:"optional,omitempty"
               type: bool
-            - name: Quoted
+            - doc: |-
+                Quoted reports the ",string" option taking effect: the value is written
+                as a JSON string holding its own encoding — "42" for 42.
+              name: Quoted
               tag: json:"quoted,omitempty"
               type: bool
-            - name: Rules
+            - doc: Rules is the field's validate tag as written, for a reader to show.
+              name: Rules
               tag: json:"rules,omitempty"
               type: string
-            - name: GoName
+            - doc: GoName is the Go field's name.
+              name: GoName
               tag: json:"-"
               type: string
-            - name: Tag
+            - doc: |-
+                Tag is the Go field's whole struct tag, so a framework can read tags of
+                its own — where a request field is read from — beside encoding/json's.
+              name: Tag
               tag: json:"-"
               type: reflect.StructTag
-            - name: Index
+            - doc: |-
+                Index is the path to the Go field from the described struct, through
+                every embedding, for reflect.Type.FieldByIndex and
+                reflect.Value.FieldByIndex.
+              name: Index
               tag: json:"-"
               type: "[]int"
   - codes:
@@ -355,84 +539,464 @@ packages:
             value: "0x01_02_00_04"
         type: v1errs.Code
     constants:
-      - name: JSON
+      - blockDoc: |-
+          Known format constants — string values are part of the public contract.
+          Prefer the typed constants over string literals at call sites: the
+          IDE catches typos at compile time, autocomplete surfaces the full
+          list, and the underlying string value (frozen post-v1.0.0) stays
+          available via `string(codec.JSON)` whenever raw access is needed.
+        doc: JSON denotes the stdlib encoding/json wire format.
+        name: JSON
         type: Format
         value: "\"json\""
-      - name: NDJSON
+      - blockDoc: |-
+          Known format constants — string values are part of the public contract.
+          Prefer the typed constants over string literals at call sites: the
+          IDE catches typos at compile time, autocomplete surfaces the full
+          list, and the underlying string value (frozen post-v1.0.0) stays
+          available via `string(codec.JSON)` whenever raw access is needed.
+        doc: NDJSON denotes the newline-delimited JSON dialect.
+        name: NDJSON
         type: Format
         value: "\"ndjson\""
-      - name: XML
+      - blockDoc: |-
+          Known format constants — string values are part of the public contract.
+          Prefer the typed constants over string literals at call sites: the
+          IDE catches typos at compile time, autocomplete surfaces the full
+          list, and the underlying string value (frozen post-v1.0.0) stays
+          available via `string(codec.JSON)` whenever raw access is needed.
+        doc: XML denotes the stdlib encoding/xml wire format.
+        name: XML
         type: Format
         value: "\"xml\""
-      - name: CSV
+      - blockDoc: |-
+          Known format constants — string values are part of the public contract.
+          Prefer the typed constants over string literals at call sites: the
+          IDE catches typos at compile time, autocomplete surfaces the full
+          list, and the underlying string value (frozen post-v1.0.0) stays
+          available via `string(codec.JSON)` whenever raw access is needed.
+        doc: CSV denotes the stdlib encoding/csv wire format.
+        name: CSV
         type: Format
         value: "\"csv\""
-      - name: Form
+      - blockDoc: |-
+          Known format constants — string values are part of the public contract.
+          Prefer the typed constants over string literals at call sites: the
+          IDE catches typos at compile time, autocomplete surfaces the full
+          list, and the underlying string value (frozen post-v1.0.0) stays
+          available via `string(codec.JSON)` whenever raw access is needed.
+        doc: |-
+          Form denotes application/x-www-form-urlencoded, the encoding every
+          HTML form POSTs. Its native Go shape is url.Values: a repeated key
+          carries multiple values, which is the only array syntax the format
+          has.
+        name: Form
         type: Format
         value: "\"form\""
-      - name: ASN1DER
+      - blockDoc: |-
+          Known format constants — string values are part of the public contract.
+          Prefer the typed constants over string literals at call sites: the
+          IDE catches typos at compile time, autocomplete surfaces the full
+          list, and the underlying string value (frozen post-v1.0.0) stays
+          available via `string(codec.JSON)` whenever raw access is needed.
+        doc: ASN1DER denotes the stdlib encoding/asn1 DER wire format.
+        name: ASN1DER
         type: Format
         value: "\"asn1-der\""
-      - name: PEM
+      - blockDoc: |-
+          Known format constants — string values are part of the public contract.
+          Prefer the typed constants over string literals at call sites: the
+          IDE catches typos at compile time, autocomplete surfaces the full
+          list, and the underlying string value (frozen post-v1.0.0) stays
+          available via `string(codec.JSON)` whenever raw access is needed.
+        doc: PEM denotes the stdlib encoding/pem block format.
+        name: PEM
         type: Format
         value: "\"pem\""
-      - name: YAML
+      - blockDoc: |-
+          Known format constants — string values are part of the public contract.
+          Prefer the typed constants over string literals at call sites: the
+          IDE catches typos at compile time, autocomplete surfaces the full
+          list, and the underlying string value (frozen post-v1.0.0) stays
+          available via `string(codec.JSON)` whenever raw access is needed.
+        doc: |-
+          YAML denotes YAML as the SDK reads and writes it: a named subset of
+          YAML 1.2.2 on the standard library alone, which refuses anchors, tags,
+          merge keys and the other constructs it leaves out by name. The full
+          reader is the opt-in "yaml-full" Format of third-party/codec/yaml.
+        name: YAML
         type: Format
         value: "\"yaml\""
-      - name: TOML
+      - blockDoc: |-
+          Known format constants — string values are part of the public contract.
+          Prefer the typed constants over string literals at call sites: the
+          IDE catches typos at compile time, autocomplete surfaces the full
+          list, and the underlying string value (frozen post-v1.0.0) stays
+          available via `string(codec.JSON)` whenever raw access is needed.
+        doc: TOML denotes TOML v1.0.0, read and written by the SDK's stdlib-only codec.
+        name: TOML
         type: Format
         value: "\"toml\""
-      - name: CBOR
+      - blockDoc: |-
+          Known format constants — string values are part of the public contract.
+          Prefer the typed constants over string literals at call sites: the
+          IDE catches typos at compile time, autocomplete surfaces the full
+          list, and the underlying string value (frozen post-v1.0.0) stays
+          available via `string(codec.JSON)` whenever raw access is needed.
+        doc: |-
+          CBOR denotes the RFC 8949 wire format, encoded and decoded on the
+          standard library alone.
+        name: CBOR
         type: Format
         value: "\"cbor\""
-      - name: MsgPack
+      - blockDoc: |-
+          Known format constants — string values are part of the public contract.
+          Prefer the typed constants over string literals at call sites: the
+          IDE catches typos at compile time, autocomplete surfaces the full
+          list, and the underlying string value (frozen post-v1.0.0) stays
+          available via `string(codec.JSON)` whenever raw access is needed.
+        doc: |-
+          MsgPack denotes the MessagePack wire format (msgpack.org specification),
+          implemented natively on the standard library.
+        name: MsgPack
         type: Format
         value: "\"msgpack\""
-      - name: TLV
+      - blockDoc: |-
+          Known format constants — string values are part of the public contract.
+          Prefer the typed constants over string literals at call sites: the
+          IDE catches typos at compile time, autocomplete surfaces the full
+          list, and the underlying string value (frozen post-v1.0.0) stays
+          available via `string(codec.JSON)` whenever raw access is needed.
+        doc: |-
+          TLV denotes the self-describing Type-Length-Value reflection
+          codec (one record per encode; nested composites supported).
+        name: TLV
         type: Format
         value: "\"tlv\""
-      - name: FlatBuffers
+      - blockDoc: |-
+          Known format constants — string values are part of the public contract.
+          Prefer the typed constants over string literals at call sites: the
+          IDE catches typos at compile time, autocomplete surfaces the full
+          list, and the underlying string value (frozen post-v1.0.0) stays
+          available via `string(codec.JSON)` whenever raw access is needed.
+        doc: |-
+          FlatBuffers denotes the passthrough codec for already-encoded
+          FlatBuffer payloads — schema-typed reads stay in the caller's
+          flatc-generated accessors.
+        name: FlatBuffers
         type: Format
         value: "\"flatbuffers\""
-      - name: Base64
+      - blockDoc: |-
+          Known format constants — string values are part of the public contract.
+          Prefer the typed constants over string literals at call sites: the
+          IDE catches typos at compile time, autocomplete surfaces the full
+          list, and the underlying string value (frozen post-v1.0.0) stays
+          available via `string(codec.JSON)` whenever raw access is needed.
+        doc: Base64 denotes the JSON-mediated base64 (std) text-safe wrap.
+        name: Base64
         type: Format
         value: "\"base64\""
-      - name: Base64URL
+      - blockDoc: |-
+          Known format constants — string values are part of the public contract.
+          Prefer the typed constants over string literals at call sites: the
+          IDE catches typos at compile time, autocomplete surfaces the full
+          list, and the underlying string value (frozen post-v1.0.0) stays
+          available via `string(codec.JSON)` whenever raw access is needed.
+        doc: Base64URL denotes the JSON-mediated base64 (URL-safe alphabet) wrap.
+        name: Base64URL
         type: Format
         value: "\"base64url\""
-      - name: Base32
+      - blockDoc: |-
+          Known format constants — string values are part of the public contract.
+          Prefer the typed constants over string literals at call sites: the
+          IDE catches typos at compile time, autocomplete surfaces the full
+          list, and the underlying string value (frozen post-v1.0.0) stays
+          available via `string(codec.JSON)` whenever raw access is needed.
+        doc: Base32 denotes the JSON-mediated base32 (std) text-safe wrap.
+        name: Base32
         type: Format
         value: "\"base32\""
-      - name: Base16
+      - blockDoc: |-
+          Known format constants — string values are part of the public contract.
+          Prefer the typed constants over string literals at call sites: the
+          IDE catches typos at compile time, autocomplete surfaces the full
+          list, and the underlying string value (frozen post-v1.0.0) stays
+          available via `string(codec.JSON)` whenever raw access is needed.
+        doc: Base16 denotes the JSON-mediated base16 (uppercase hex) wrap.
+        name: Base16
         type: Format
         value: "\"base16\""
-      - name: Hex
+      - blockDoc: |-
+          Known format constants — string values are part of the public contract.
+          Prefer the typed constants over string literals at call sites: the
+          IDE catches typos at compile time, autocomplete surfaces the full
+          list, and the underlying string value (frozen post-v1.0.0) stays
+          available via `string(codec.JSON)` whenever raw access is needed.
+        doc: Hex denotes the JSON-mediated lowercase-hex text-safe wrap.
+        name: Hex
         type: Format
         value: "\"hex\""
-      - name: ASCII85
+      - blockDoc: |-
+          Known format constants — string values are part of the public contract.
+          Prefer the typed constants over string literals at call sites: the
+          IDE catches typos at compile time, autocomplete surfaces the full
+          list, and the underlying string value (frozen post-v1.0.0) stays
+          available via `string(codec.JSON)` whenever raw access is needed.
+        doc: ASCII85 denotes the JSON-mediated Adobe Ascii85 text-safe wrap.
+        name: ASCII85
         type: Format
         value: "\"ascii85\""
-      - name: Base45
+      - blockDoc: |-
+          Known format constants — string values are part of the public contract.
+          Prefer the typed constants over string literals at call sites: the
+          IDE catches typos at compile time, autocomplete surfaces the full
+          list, and the underlying string value (frozen post-v1.0.0) stays
+          available via `string(codec.JSON)` whenever raw access is needed.
+        doc: Base45 denotes the JSON-mediated RFC 9285 Base45 wrap (QR-code safe).
+        name: Base45
         type: Format
         value: "\"base45\""
-      - name: Base58
+      - blockDoc: |-
+          Known format constants — string values are part of the public contract.
+          Prefer the typed constants over string literals at call sites: the
+          IDE catches typos at compile time, autocomplete surfaces the full
+          list, and the underlying string value (frozen post-v1.0.0) stays
+          available via `string(codec.JSON)` whenever raw access is needed.
+        doc: |-
+          Base58 denotes the JSON-mediated Bitcoin Base58 wrap (short inputs;
+          base-conversion is O(n²) so a 4 KiB input cap applies).
+        name: Base58
         type: Format
         value: "\"base58\""
-      - name: Base62
+      - blockDoc: |-
+          Known format constants — string values are part of the public contract.
+          Prefer the typed constants over string literals at call sites: the
+          IDE catches typos at compile time, autocomplete surfaces the full
+          list, and the underlying string value (frozen post-v1.0.0) stays
+          available via `string(codec.JSON)` whenever raw access is needed.
+        doc: |-
+          Base62 denotes the JSON-mediated Base62 wrap (short inputs; same O(n²)
+          4 KiB input cap as Base58).
+        name: Base62
         type: Format
         value: "\"base62\""
-      - name: BSON
+      - blockDoc: |-
+          Known format constants — string values are part of the public contract.
+          Prefer the typed constants over string literals at call sites: the
+          IDE catches typos at compile time, autocomplete surfaces the full
+          list, and the underlying string value (frozen post-v1.0.0) stays
+          available via `string(codec.JSON)` whenever raw access is needed.
+        doc: |-
+          BSON denotes the MongoDB binary document format (top-level must be a
+          document — struct or map — not a scalar). ADR 0021.
+        name: BSON
         type: Format
         value: "\"bson\""
-      - name: Multipart
+      - blockDoc: |-
+          Known format constants — string values are part of the public contract.
+          Prefer the typed constants over string literals at call sites: the
+          IDE catches typos at compile time, autocomplete surfaces the full
+          list, and the underlying string value (frozen post-v1.0.0) stays
+          available via `string(codec.JSON)` whenever raw access is needed.
+        doc: |-
+          Multipart denotes RFC 7578 multipart/form-data. Its native Go shape is
+          a [MultipartForm] of [MultipartPart] sections; any other value travels
+          as a single JSON-mediated part. The RFC 2046 boundary lives in the
+          Content-Type header, which the Codec contract cannot carry — the codec
+          re-emits it in the body, and [MultipartContentType] recovers the header
+          value from the bytes Marshal returned.
+        name: Multipart
         type: Format
         value: "\"multipart\""
-      - name: Gzip
+      - doc: Gzip selects the gzip compressor (frame algID 0x01).
+        name: Gzip
         type: CompressAlgorithm
         value: "\"gzip\""
-      - name: Flate
+      - doc: Flate selects the raw-DEFLATE compressor (frame algID 0x02).
+        name: Flate
         type: CompressAlgorithm
         value: "\"flate\""
+    doc: |-
+      Package codec is the universal encoder/decoder dispatch facade.
+
+      One verb, twenty-four formats. [Marshal] and [Unmarshal] reach every
+      encoding the SDK ships — JSON, YAML, CBOR, MessagePack, BSON, NDJSON,
+      XML, TOML, CSV, urlencoded forms, multipart/form-data, ASN.1 DER, PEM,
+      TLV, FlatBuffers,
+      plus the nine base-N variants (base64, base64url, base32, base16,
+      base45, base58, base62, hex, ascii85). Format-swap at runtime is a
+      single string change.
+
+      # Goals
+
+        - One verb, many formats. codec.Marshal(f, v) reaches every
+          registered wire format — your call site doesn't change when
+          you swap JSON for CBOR.
+        - Stable Format strings. Once registered, a Format string is
+          frozen across minor versions. Code that compiles today keeps
+          compiling.
+        - Streaming when it pays. Codecs that implement StreamingCodec
+          get NewEncoder / NewDecoder automatically — no need to buffer
+          megabytes.
+        - Zero registration code. Blank-import the package; the 16
+          codecs register themselves as Go initialises them. No Register()
+          calls in consumer code. A program that needs one format imports
+          that format's package beneath this one instead, and links it alone.
+        - Append for hot paths. Codecs implementing Appender let you
+          reuse a []byte buffer across calls — handy in tight loops.
+        - Broadcast marshal. MarshalMany(v, formats...) serialises the
+          same value to N formats at once — content negotiation, replication,
+          multi-protocol message buses.
+
+      # What's shipped — all 24 formats
+
+      Single blank import (`import _ "github.com/kitsunium/sdk/pkg/v1/data/codec"`)
+      activates the entire list. The Streaming column marks codecs that
+      implement core/data/codec.StreamingCodec and unlock NewEncoder /
+      NewDecoder. Every codec implements core/data/codec.Appender.
+
+      	| Format       | Go constant       | MIME                       | Extension           | Streaming | Best for |
+      	|--------------|-------------------|----------------------------|---------------------|:---------:|----------|
+      	| json         | codec.JSON        | application/json           | .json               | yes       | API responses, public configs |
+      	| ndjson       | codec.NDJSON      | application/x-ndjson       | .ndjson / .jsonl    | —         | streaming logs, line-oriented batches |
+      	| xml          | codec.XML         | application/xml            | .xml                | yes       | legacy integrations |
+      	| csv          | codec.CSV         | text/csv                   | .csv                | —         | tabular exports |
+      	| form         | codec.Form        | application/x-www-form-urlencoded | .form / .urlencoded | —  | HTML form bodies, query strings |
+      	| asn1-der     | codec.ASN1DER     | application/pkix-cert      | .der / .cer         | —         | crypto / X.509 artefacts |
+      	| pem          | codec.PEM         | application/x-pem-file     | .pem / .crt / .key  | —         | block-wrapped DER (certs, keys) |
+      	| yaml         | codec.YAML        | application/yaml           | .yaml / .yml        | yes       | human-edited configs |
+      	| toml         | codec.TOML        | application/toml           | .toml               | yes       | app configs (strict typing) |
+      	| cbor         | codec.CBOR        | application/cbor           | .cbor               | yes       | IoT / mobile (RFC 8949) |
+      	| msgpack      | codec.MsgPack     | application/msgpack        | .msgpack / .mpk     | yes       | RPC payloads |
+      	| bson         | codec.BSON        | application/bson           | .bson               | —         | MongoDB documents (top level must be a document) |
+      	| multipart    | codec.Multipart   | multipart/form-data        | —                   | yes       | uploads / form posts (native shape codec.MultipartForm) |
+      	| tlv          | codec.TLV         | application/x-tlv          | .tlv                | yes       | custom binary streams, self-describing |
+      	| flatbuffers  | codec.FlatBuffers | application/x-flatbuffers  | .fbs / .bin         | —         | zero-copy passthrough |
+      	| base64       | codec.Base64      | application/base64         | .b64 / .base64      | yes       | text-safe wrap (JSON → base-N) |
+      	| base64url    | codec.Base64URL   | application/base64url      | .b64url             | yes       | URL-safe base64 |
+      	| base32       | codec.Base32      | application/base32         | .b32                | yes       | larger alphabet for human-typed tokens |
+      	| base16       | codec.Base16      | application/base16         | .b16                | yes       | hex-like text (uppercase) |
+      	| base45       | codec.Base45      | application/base45         | .b45                | yes       | QR-code alphanumeric payloads (RFC 9285) |
+      	| base58       | codec.Base58      | application/base58         | .b58                | yes       | Bitcoin-style short IDs (4 KiB input cap) |
+      	| base62       | codec.Base62      | application/base62         | .b62                | yes       | alphanumeric short IDs (4 KiB input cap) |
+      	| hex          | codec.Hex         | application/hex            | .hex                | yes       | classic hex pair encoding (lowercase) |
+      	| ascii85      | codec.ASCII85     | application/ascii85        | .a85                | yes       | 4-byte to 5-char text packing |
+
+      Runtime introspection: codec.Available() returns the live registry
+      list, codec.FromMIME and codec.FromExtension resolve from external
+      metadata.
+
+      # Quick start
+
+      	package main
+
+      	import (
+      	    "fmt"
+
+      	    "github.com/kitsunium/sdk/pkg/v1/data/codec"
+      	)
+
+      	type User struct {
+      	    Name string `json:"name" cbor:"name" yaml:"name"`
+      	    Age  int    `json:"age"  cbor:"age"  yaml:"age"`
+      	}
+
+      	func main() {
+      	    u := User{Name: "Ada", Age: 36}
+      	    for _, f := range []codec.Format{codec.JSON, codec.CBOR, codec.YAML, codec.MsgPack, codec.Base64} {
+      	        data, _ := codec.Marshal(f, u)
+      	        var back User
+      	        _ = codec.Unmarshal(f, data, &back)
+      	        fmt.Printf("%-10s %d bytes  → %#v\n", f, len(data), back)
+      	    }
+      	}
+
+      # Activation
+
+      A single blank import activates the full registry:
+
+      	import _ "github.com/kitsunium/sdk/pkg/v1/data/codec"
+
+      The package is the aggregate of the sixteen per-format packages beneath it
+      — asn1, baseenc, bson, cbor, csv, flatbuffers, form, json, msgpack,
+      multipart, ndjson, pem, tlv, toml, xml and yaml — and blank-imports each.
+      Every one of them imports its codec, which registers itself in the registry
+      as Go initialises it, once however many packages import it. Consumers never
+      call a Register() function — registration is a side-effect. Importing one
+      of those packages instead registers its format alone, links nothing of the
+      others, and names that format's error codes (ADR 0134).
+
+      # Extension interfaces
+
+      A registered codec MAY implement one or both of these optional
+      interfaces (assert at the call site):
+
+      	// Append into a caller-supplied buffer — drops the fresh-slice
+      	// allocation Marshal returns (see BENCH.md for per-codec numbers;
+      	// the remaining allocs are the encoder's, not the facade's).
+      	type Appender interface {
+      	    Append(dst []byte, v any) ([]byte, error)
+      	}
+
+      	// Streaming — open Encoder/Decoder around an io.Writer/io.Reader.
+      	type StreamingCodec interface {
+      	    NewEncoder(w io.Writer) Encoder
+      	    NewDecoder(r io.Reader) Decoder
+      	}
+
+      [StreamingUnsupported] is returned from [NewEncoder] / [NewDecoder]
+      when the resolved codec does not satisfy StreamingCodec.
+
+      # Errors
+
+      Dispatch failures carry typed dotted-quad codes under range 1.2.0.*:
+
+        - 1.2.0.1 — [CodeUnknownFormat]: Available() does not list the requested Format.
+        - 1.2.0.2 — [CodeCodecUnavailable]: reserved for future build-tag gating.
+        - 1.2.0.3 — [CodeStreamingUnsupported]: NewEncoder / NewDecoder called on a non-streaming codec.
+
+      Per-codec failures carry the codec's own range (0.3.* for service
+      codecs), which each per-format package names — cbor.CodeUnmarshalFailed,
+      yaml.CodeAnchorRefused. Inspect with the accessors in
+      github.com/kitsunium/sdk/pkg/v1/errs:
+
+      	if errs.HasCode(err, codec.CodeUnknownFormat) { … }
+      	if errs.HasReason(err, "UNKNOWN_FORMAT")       { … }
+
+      Package codec — range 1.2.0.* (ADR 0005 pkg/v1/data/codec block).
+
+      Package codec — compressed-frame verbs (ADR 0014 D1). MarshalCompressed and
+      UnmarshalCompressed wrap the universal codec dispatch in a self-describing,
+      version-tagged compression frame, so any value can be compressed in any
+      registered Format without a parallel API. Compression is a parallel transform
+      registry, never a codec Format (ADR 0014 §Why-not), so the algorithm is named
+      separately from the wire Format.
+
+      Package codec — declares the sentinel *errs.Error values the
+      facade emits when dispatch fails.
+
+      Package codec — the multipart/form-data value types, and the one helper a
+      consumer needs to send what Marshal(Multipart, …) returns. The format is a
+      container whose delimiter lives in the Content-Type header, which the Codec
+      contract cannot carry, so the facade publishes the two shapes the codec
+      speaks natively and the function that recovers that header from the body —
+      the multipart package's own Form, Part and ContentType, under the names this
+      package has always given them.
+
+      Package codec — JSON-bridge promotion path for codecs whose runtime
+      preconditions reject the public Marshal(F, any) / Unmarshal(F, *,
+      any) contract. Six of the twenty-four registered codecs constrain
+      their input shape: csv expects [][]string, ndjson expects []T, pem
+      expects *pem.Block, flatbuffers expects []byte or BytesProvider,
+      form expects url.Values, tlv's decoder cannot project composites
+      into typed targets. Without promotion the facade's "format-swap is
+      a single string change" promise is a lie for 6/24. Promotion
+      intercepts the VALUE_INVALID / FLATBUFFERS_BAD_* / UNMARSHAL_FAILED
+      responses, encodes the value to JSON, wraps the bytes in a
+      codec-specific container the codec will accept, and reverses the
+      pipeline on Unmarshal. The fast (native-shape) path is untouched so
+      existing callers see zero overhead. See
+      TestUniversalRoundtripAllCodecs for the contract pin.
     facade:
       - alias:
           - doc: Format re-exports core/data/codec.Format so consumers only depend on pkg/v1.
@@ -519,7 +1083,15 @@ packages:
             - name: err
               type: error
     functions:
-      - in:
+      - doc: |-
+          Marshal serialises v using the codec registered under f. The codec's
+          native input shape is tried first (fast path, zero overhead); if the
+          codec rejects v as the wrong shape (csv requires [][]string, pem
+          requires *pem.Block, etc.) the facade promotes v via json-encode +
+          codec-specific wrap so every Format accepts any Go value — see
+          promote.go for the per-format strategies and the uniform-contract
+          rationale.
+        in:
           - name: f
             type: Format
           - name: v
@@ -530,7 +1102,12 @@ packages:
             type: "[]byte"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          Unmarshal parses data into v using the codec registered under f. As
+          with Marshal, the codec's native target shape is tried first; on
+          shape mismatch the facade promotes via JSON-bridge so every Format
+          can decode into any Go target.
+        in:
           - name: f
             type: Format
           - name: data
@@ -540,7 +1117,28 @@ packages:
         name: Unmarshal
         out:
           - type: error
-      - in:
+      - doc: |-
+          MarshalMany serialises v into every format in formats and returns a
+          map keyed by Format with the encoded bytes. The same logical value
+          goes out in N different wire encodings — handy for HTTP content
+          negotiation, multi-protocol message buses, archival doubling, or
+          cross-region replication where each region speaks a different
+          codec.
+
+          Per-format errors are joined under [errors.Join] and returned as a
+          single error; partial results stay in the returned map so callers
+          can decide whether to ship the formats that succeeded or fail the
+          whole batch. An unknown Format in the list surfaces
+          [UnknownFormat] / [CodeUnknownFormat] inside that joined error
+          (and leaves no entry in the map for that Format).
+
+          Calling with formats == nil (or empty) returns an empty map and no
+          error — the no-op semantics mirror calling Marshal zero times.
+
+          	out, err := codec.MarshalMany(payload, codec.JSON, codec.CBOR, codec.MsgPack)
+          	// out[codec.JSON], out[codec.CBOR], out[codec.MsgPack] all populated
+          	// when err == nil.
+        in:
           - name: v
             type: any
           - name: formats
@@ -552,7 +1150,8 @@ packages:
           - name: err
             type: error
         variadic: true
-      - in:
+      - doc: NewEncoder returns a streaming encoder for the codec registered under f.
+        in:
           - name: f
             type: Format
           - name: w
@@ -563,7 +1162,8 @@ packages:
             type: Encoder
           - name: err
             type: error
-      - in:
+      - doc: NewDecoder returns a streaming decoder for the codec registered under f.
+        in:
           - name: f
             type: Format
           - name: r
@@ -574,7 +1174,8 @@ packages:
             type: Decoder
           - name: err
             type: error
-      - in:
+      - doc: FromMIME resolves a MIME string to its registered Format.
+        in:
           - name: mime
             type: string
         name: FromMIME
@@ -583,7 +1184,8 @@ packages:
             type: Format
           - name: ok
             type: bool
-      - in:
+      - doc: FromExtension resolves a file extension to its registered Format.
+        in:
           - name: ext
             type: string
         name: FromExtension
@@ -592,7 +1194,14 @@ packages:
             type: Format
           - name: ok
             type: bool
-      - in:
+      - doc: |-
+          MarshalCompressed serialises v with the codec registered under f, compresses
+          the result with the transform registered under algo, and wraps both in a
+          self-describing frame so UnmarshalCompressed needs no Format or Algorithm
+          argument. It returns UnknownCompressor when algo has no frame id or no
+          registered body, CompressedFrameInvalid when f exceeds the addressable length,
+          and forwards any codec / compressor error untouched (origin wins).
+        in:
           - name: f
             type: Format
           - name: algo
@@ -605,7 +1214,13 @@ packages:
             type: "[]byte"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          UnmarshalCompressed parses a frame produced by MarshalCompressed, decompresses
+          the payload under a bomb guard, and decodes it into v using the inner Format
+          the frame records. A malformed frame, an unknown algorithm id, or a payload
+          that decompresses past the bomb guard returns CompressedFrameInvalid; codec
+          and compressor faults are forwarded untouched.
+        in:
           - name: box
             type: "[]byte"
           - name: v
@@ -656,7 +1271,78 @@ packages:
             private: "pkg/v1/data/codec: JSON-bridge promotion path could not serve the request"
             public: codec promotion failed
             reason: PROMOTE_FAILED
-  - facade:
+  - doc: |-
+      Package jsonshape describes how values of a Go type look on the wire under
+      encoding/json — the JSON kind each value takes, the members an object has
+      and under which names, which may be missing and which may be null — for a
+      reader to show: an API's documentation, a developer console, a schema
+      generator (ADR 0133).
+
+      # The whole thing
+
+      	shape := jsonshape.For[Order]()
+      	for _, field := range shape.Fields {
+      		fmt.Println(field.Name, field.Shape.Kind, field.Optional)
+      	}
+
+      # What it follows
+
+      The description follows the encoding/json of the toolchain the SDK is built
+      with — Go 1.27, whose encoding/json runs on the json/v2 engine with the v1
+      options — and describes ENCODING: encoding/json decodes any member as
+      absent, so [Field].Optional says what an encoded value may omit, never what
+      a decoder requires.
+
+      Struct members are resolved exactly as encoding/json resolves them:
+      embedded structs promoted one level at a time, through a pointer, an
+      unexported embedded struct's exported fields included; for one name, the
+      shallowest field wins, a single tagged one breaks a tie at that depth, and a
+      tie that remains writes neither — nor any deeper field of that name. A
+      field promoted through an embedded pointer is Optional, since a nil one
+      drops it. Tag names are read as the engine reads them, and json/v2's embed
+      option is honoured: a named struct field carrying it is promoted, and an
+      embedded map takes the members no field names ([Shape].Values on an
+      Object).
+
+      # What a type decides for itself
+
+      A type that writes its own JSON — json.Marshaler, or json/v2's MarshalerTo
+      — is opaque: [Any], whatever it writes. One that writes text — an
+      encoding.TextMarshaler or TextAppender — is a [String]. A struct that
+      embeds time.Time gains its MarshalJSON and is opaque too.
+
+      A method with a POINTER receiver counts only where encoding/json calls it:
+      on an addressable value. [Of](T) describes a T encoded by value —
+      json.Marshal(v) — whose root is not addressable, and neither are the fields
+      and array elements under it; a pointer's and a slice's elements are, and a
+      map's values never are. For json.Marshal(&v), describe *T.
+
+      Three types are described by what is written rather than by their kind:
+      time.Time is a String with Format "date-time", time.Duration an Integer
+      with Format "duration-ns", json.Number a Number.
+
+      A nil pointer, slice, map or interface is written as null, so their shapes
+      are Nullable; an array never is. A []byte is a base64 String; a byte ARRAY
+      is an Array of integers. A map whose key encoding/json cannot write as a
+      member name — a bool, a struct — is [Unsupported], as are channels,
+      functions and complex numbers: encoding/json refuses the whole value.
+
+      # Recursion
+
+      A type that reaches itself is described once; further down, its shape is a
+      reference ([Shape].Ref, the type's qualified name) with no members. A type
+      used twice side by side is described twice.
+
+      # The Go field behind each member
+
+      [Field].Tag, [Field].GoName and [Field].Index give access to the Go field a
+      member is written from, promoted fields included: a framework can read its
+      own tags — where a request field is read from, whether it is secret —
+      beside encoding/json's, and reach the value with reflect.Value.FieldByIndex.
+      A field encoding/json never writes (json:"-", unexported) has no member; a
+      framework that needs it finds it with reflect.VisibleFields and matches the
+      two by index path.
+    facade:
       - alias:
           - doc: |-
               Kind is the JSON kind a value takes on the wire; its zero value is Any. It

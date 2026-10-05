@@ -1,5 +1,3 @@
-// Package statemachine — hosts Config, a machine's construction parameters,
-// and the defaults its zero fields resolve to.
 package statemachine
 
 import (

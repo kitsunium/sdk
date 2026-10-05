@@ -10,6 +10,7 @@ go_library(
         "book.go",
         "config.go",
         "definition.go",
+        "doc.go",
         "locks.go",
         "loop.go",
         "machine.go",

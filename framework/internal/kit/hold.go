@@ -1,4 +1,3 @@
-// Package kit — legal holds: records kept whatever their retention says.
 package kit
 
 import (

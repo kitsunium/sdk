@@ -1,6 +1,3 @@
-// Package flatbuffers — small adapter interfaces that let strongly-typed
-// FlatBuffers wrappers participate in the universal codec contract without
-// reaching into schema-generated structs from this package.
 package flatbuffers
 
 // BytesProvider is the optional source interface a Marshal argument may

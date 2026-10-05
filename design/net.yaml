@@ -253,116 +253,400 @@ packages:
             value: "0x00_02_0B_22"
         type: errs.Code
     constants:
-      - name: PhaseNew
+      - blockDoc: The lifecycle phases, in the order a server passes through them.
+        doc: PhaseNew is a constructed server that has not bound anything yet.
+        name: PhaseNew
         type: Phase
         value: "0"
-      - name: PhaseStarting
+      - blockDoc: The lifecycle phases, in the order a server passes through them.
+        doc: PhaseStarting is binding listeners; some may already be up.
+        name: PhaseStarting
         type: Phase
         value: "1"
-      - name: PhaseServing
+      - blockDoc: The lifecycle phases, in the order a server passes through them.
+        doc: PhaseServing is bound and accepting.
+        name: PhaseServing
         type: Phase
         value: "2"
-      - name: PhaseDraining
+      - blockDoc: The lifecycle phases, in the order a server passes through them.
+        doc: PhaseDraining has stopped accepting and is waiting for in-flight work.
+        name: PhaseDraining
         type: Phase
         value: "3"
-      - name: PhaseStopped
+      - blockDoc: The lifecycle phases, in the order a server passes through them.
+        doc: PhaseStopped has released every listener.
+        name: PhaseStopped
         type: Phase
         value: "4"
-      - name: SSEContentType
+      - doc: |-
+          SSEContentType is the media type an event stream must be served under. A
+          client that receives anything else does not start an EventSource at all.
+        name: SSEContentType
         type: string
         value: "\"text/event-stream\""
-      - name: SSEMinRetry
+      - doc: |-
+          SSEMinRetry is the smallest reconnection hint the wire can carry. The retry
+          field is an integer MILLISECOND count, so anything shorter rounds to zero —
+          and zero does not mean "a very short delay", it means "reconnect at once".
+        name: SSEMinRetry
         type: time.Duration
         value: "1000000"
-      - name: SSELastEventIDHeader
+      - doc: |-
+          SSELastEventIDHeader is the request header a reconnecting client sends,
+          carrying the id of the last event it processed.
+        name: SSELastEventIDHeader
         type: string
         value: "\"Last-Event-ID\""
-      - name: WSGUID
+      - doc: |-
+          WSGUID is the fixed string RFC 6455 §1.3 concatenates to Sec-WebSocket-Key
+          before hashing. It is a constant of the protocol, not a secret and not a
+          parameter: its only job is to make the accept value impossible to produce by
+          echoing the request, so a cache or a naive proxy cannot fake an upgrade.
+        name: WSGUID
         type: string
         value: "\"258EAFA5-E914-47DA-95CA-C5AB0DC85B11\""
-      - name: WSVersion
+      - doc: |-
+          WSVersion is the only protocol version this domain speaks (RFC 6455 §4.1).
+          A request naming any other version is refused WITH this value advertised
+          back, which is what lets a client renegotiate instead of guessing.
+        name: WSVersion
         type: string
         value: "\"13\""
-      - name: WSKeyLen
+      - doc: |-
+          WSKeyLen is how many bytes Sec-WebSocket-Key decodes to (RFC 6455 §4.1).
+          A key of any other length is not a WebSocket handshake, whatever it decodes.
+        name: WSKeyLen
         type: int
         value: "16"
-      - name: WSKeyHeader
+      - blockDoc: |-
+          The handshake headers, spelled once so no caller mistypes one into a silent
+          miss.
+        doc: WSKeyHeader carries the client's 16 random bytes, base64-encoded.
+        name: WSKeyHeader
         type: string
         value: "\"Sec-WebSocket-Key\""
-      - name: WSAcceptHeader
+      - blockDoc: |-
+          The handshake headers, spelled once so no caller mistypes one into a silent
+          miss.
+        doc: WSAcceptHeader carries the server's proof it understood the handshake.
+        name: WSAcceptHeader
         type: string
         value: "\"Sec-WebSocket-Accept\""
-      - name: WSVersionHeader
+      - blockDoc: |-
+          The handshake headers, spelled once so no caller mistypes one into a silent
+          miss.
+        doc: |-
+          WSVersionHeader carries the client's version, and the server's
+          counter-offer when it refuses one.
+        name: WSVersionHeader
         type: string
         value: "\"Sec-WebSocket-Version\""
-      - name: WSProtocolHeader
+      - blockDoc: |-
+          The handshake headers, spelled once so no caller mistypes one into a silent
+          miss.
+        doc: WSProtocolHeader carries the subprotocol list, then the single choice.
+        name: WSProtocolHeader
         type: string
         value: "\"Sec-WebSocket-Protocol\""
-      - name: WSExtensionsHeader
+      - blockDoc: |-
+          The handshake headers, spelled once so no caller mistypes one into a silent
+          miss.
+        doc: |-
+          WSExtensionsHeader carries the extension offer. This domain negotiates
+          none, so it is never echoed — see the package CLAUDE.md.
+        name: WSExtensionsHeader
         type: string
         value: "\"Sec-WebSocket-Extensions\""
-      - name: WSUpgradeToken
+      - blockDoc: |-
+          The handshake headers, spelled once so no caller mistypes one into a silent
+          miss.
+        doc: WSUpgradeToken is the token both Upgrade headers must carry.
+        name: WSUpgradeToken
         type: string
         value: "\"websocket\""
-      - name: WSMaxControlPayload
+      - doc: |-
+          WSMaxControlPayload is the ceiling RFC 6455 §5.5 puts on a control frame's
+          payload. It exists so an endpoint can answer a Ping without buffering: a
+          control frame is answered inline, between the fragments of a message, so it
+          must fit in a fixed buffer that is always available.
+        name: WSMaxControlPayload
         type: int
         value: "125"
-      - name: WSCloseNormal
+      - blockDoc: |-
+          The close codes RFC 6455 §7.4.1 defines. Three of them — WSCloseNoStatus,
+          WSCloseAbnormal and WSCloseTLSHandshake — are values an application may
+          OBSERVE but that MUST NOT appear on the wire: they describe the absence of a
+          close frame, so sending one would be a statement contradicted by its own
+          delivery.
+        doc: WSCloseNormal is a completed purpose, on either side.
+        name: WSCloseNormal
         type: WSCloseCode
         value: "1000"
-      - name: WSCloseGoingAway
+      - blockDoc: |-
+          The close codes RFC 6455 §7.4.1 defines. Three of them — WSCloseNoStatus,
+          WSCloseAbnormal and WSCloseTLSHandshake — are values an application may
+          OBSERVE but that MUST NOT appear on the wire: they describe the absence of a
+          close frame, so sending one would be a statement contradicted by its own
+          delivery.
+        doc: |-
+          WSCloseGoingAway is a server shutting down or a browser navigating away.
+          It is what a drain sends.
+        name: WSCloseGoingAway
         type: WSCloseCode
         value: "1001"
-      - name: WSCloseProtocolError
+      - blockDoc: |-
+          The close codes RFC 6455 §7.4.1 defines. Three of them — WSCloseNoStatus,
+          WSCloseAbnormal and WSCloseTLSHandshake — are values an application may
+          OBSERVE but that MUST NOT appear on the wire: they describe the absence of a
+          close frame, so sending one would be a statement contradicted by its own
+          delivery.
+        doc: WSCloseProtocolError is a frame the RFC forbids.
+        name: WSCloseProtocolError
         type: WSCloseCode
         value: "1002"
-      - name: WSCloseUnsupportedData
+      - blockDoc: |-
+          The close codes RFC 6455 §7.4.1 defines. Three of them — WSCloseNoStatus,
+          WSCloseAbnormal and WSCloseTLSHandshake — are values an application may
+          OBSERVE but that MUST NOT appear on the wire: they describe the absence of a
+          close frame, so sending one would be a statement contradicted by its own
+          delivery.
+        doc: |-
+          WSCloseUnsupportedData is a well-formed frame carrying data this endpoint
+          cannot accept — binary to a text-only peer, for instance.
+        name: WSCloseUnsupportedData
         type: WSCloseCode
         value: "1003"
-      - name: WSCloseNoStatus
+      - blockDoc: |-
+          The close codes RFC 6455 §7.4.1 defines. Three of them — WSCloseNoStatus,
+          WSCloseAbnormal and WSCloseTLSHandshake — are values an application may
+          OBSERVE but that MUST NOT appear on the wire: they describe the absence of a
+          close frame, so sending one would be a statement contradicted by its own
+          delivery.
+        doc: |-
+          WSCloseNoStatus means the peer's Close frame carried no code. It is
+          reported to the application and never sent.
+        name: WSCloseNoStatus
         type: WSCloseCode
         value: "1005"
-      - name: WSCloseAbnormal
+      - blockDoc: |-
+          The close codes RFC 6455 §7.4.1 defines. Three of them — WSCloseNoStatus,
+          WSCloseAbnormal and WSCloseTLSHandshake — are values an application may
+          OBSERVE but that MUST NOT appear on the wire: they describe the absence of a
+          close frame, so sending one would be a statement contradicted by its own
+          delivery.
+        doc: |-
+          WSCloseAbnormal means the connection died without a Close frame. It is
+          reported to the application and never sent.
+        name: WSCloseAbnormal
         type: WSCloseCode
         value: "1006"
-      - name: WSCloseInvalidPayload
+      - blockDoc: |-
+          The close codes RFC 6455 §7.4.1 defines. Three of them — WSCloseNoStatus,
+          WSCloseAbnormal and WSCloseTLSHandshake — are values an application may
+          OBSERVE but that MUST NOT appear on the wire: they describe the absence of a
+          close frame, so sending one would be a statement contradicted by its own
+          delivery.
+        doc: |-
+          WSCloseInvalidPayload is a text frame that is not valid UTF-8, or a close
+          reason that is not.
+        name: WSCloseInvalidPayload
         type: WSCloseCode
         value: "1007"
-      - name: WSClosePolicyViolation
+      - blockDoc: |-
+          The close codes RFC 6455 §7.4.1 defines. Three of them — WSCloseNoStatus,
+          WSCloseAbnormal and WSCloseTLSHandshake — are values an application may
+          OBSERVE but that MUST NOT appear on the wire: they describe the absence of a
+          close frame, so sending one would be a statement contradicted by its own
+          delivery.
+        doc: WSClosePolicyViolation is the generic refusal when no other code fits.
+        name: WSClosePolicyViolation
         type: WSCloseCode
         value: "1008"
-      - name: WSCloseTooLarge
+      - blockDoc: |-
+          The close codes RFC 6455 §7.4.1 defines. Three of them — WSCloseNoStatus,
+          WSCloseAbnormal and WSCloseTLSHandshake — are values an application may
+          OBSERVE but that MUST NOT appear on the wire: they describe the absence of a
+          close frame, so sending one would be a statement contradicted by its own
+          delivery.
+        doc: WSCloseTooLarge is a message beyond what this endpoint accepts.
+        name: WSCloseTooLarge
         type: WSCloseCode
         value: "1009"
-      - name: WSCloseExtensionRequired
+      - blockDoc: |-
+          The close codes RFC 6455 §7.4.1 defines. Three of them — WSCloseNoStatus,
+          WSCloseAbnormal and WSCloseTLSHandshake — are values an application may
+          OBSERVE but that MUST NOT appear on the wire: they describe the absence of a
+          close frame, so sending one would be a statement contradicted by its own
+          delivery.
+        doc: |-
+          WSCloseExtensionRequired is a client giving up because the server did not
+          negotiate an extension it needs. A server never sends it.
+        name: WSCloseExtensionRequired
         type: WSCloseCode
         value: "1010"
-      - name: WSCloseInternalError
+      - blockDoc: |-
+          The close codes RFC 6455 §7.4.1 defines. Three of them — WSCloseNoStatus,
+          WSCloseAbnormal and WSCloseTLSHandshake — are values an application may
+          OBSERVE but that MUST NOT appear on the wire: they describe the absence of a
+          close frame, so sending one would be a statement contradicted by its own
+          delivery.
+        doc: WSCloseInternalError is an unexpected condition on this side.
+        name: WSCloseInternalError
         type: WSCloseCode
         value: "1011"
-      - name: WSCloseTLSHandshake
+      - blockDoc: |-
+          The close codes RFC 6455 §7.4.1 defines. Three of them — WSCloseNoStatus,
+          WSCloseAbnormal and WSCloseTLSHandshake — are values an application may
+          OBSERVE but that MUST NOT appear on the wire: they describe the absence of a
+          close frame, so sending one would be a statement contradicted by its own
+          delivery.
+        doc: |-
+          WSCloseTLSHandshake means the TLS handshake failed. It is reported to the
+          application and never sent — there is no connection to send it on.
+        name: WSCloseTLSHandshake
         type: WSCloseCode
         value: "1015"
-      - name: WSContinuation
+      - blockDoc: |-
+          The opcodes RFC 6455 defines. Everything else in the four-bit space is
+          reserved, and a reserved opcode fails the connection rather than being
+          skipped: an endpoint that ignored it would be desynchronised from a peer that
+          believes the frame meant something.
+        doc: WSContinuation continues the message the previous frame began.
+        name: WSContinuation
         type: WSOpCode
         value: "0x0"
-      - name: WSText
+      - blockDoc: |-
+          The opcodes RFC 6455 defines. Everything else in the four-bit space is
+          reserved, and a reserved opcode fails the connection rather than being
+          skipped: an endpoint that ignored it would be desynchronised from a peer that
+          believes the frame meant something.
+        doc: WSText carries a UTF-8 payload, validated on both sides.
+        name: WSText
         type: WSOpCode
         value: "0x1"
-      - name: WSBinary
+      - blockDoc: |-
+          The opcodes RFC 6455 defines. Everything else in the four-bit space is
+          reserved, and a reserved opcode fails the connection rather than being
+          skipped: an endpoint that ignored it would be desynchronised from a peer that
+          believes the frame meant something.
+        doc: WSBinary carries opaque bytes.
+        name: WSBinary
         type: WSOpCode
         value: "0x2"
-      - name: WSClose
+      - blockDoc: |-
+          The opcodes RFC 6455 defines. Everything else in the four-bit space is
+          reserved, and a reserved opcode fails the connection rather than being
+          skipped: an endpoint that ignored it would be desynchronised from a peer that
+          believes the frame meant something.
+        doc: WSClose begins or completes the closing handshake.
+        name: WSClose
         type: WSOpCode
         value: "0x8"
-      - name: WSPing
+      - blockDoc: |-
+          The opcodes RFC 6455 defines. Everything else in the four-bit space is
+          reserved, and a reserved opcode fails the connection rather than being
+          skipped: an endpoint that ignored it would be desynchronised from a peer that
+          believes the frame meant something.
+        doc: WSPing asks the peer to answer with a Pong carrying the same payload.
+        name: WSPing
         type: WSOpCode
         value: "0x9"
-      - name: WSPong
+      - blockDoc: |-
+          The opcodes RFC 6455 defines. Everything else in the four-bit space is
+          reserved, and a reserved opcode fails the connection rather than being
+          skipped: an endpoint that ignored it would be desynchronised from a peer that
+          believes the frame meant something.
+        doc: WSPong answers a Ping, or is sent unsolicited as a one-way heartbeat.
+        name: WSPong
         type: WSOpCode
         value: "0xA"
+    doc: |-
+      Package net — the listen address value.
+
+      Package net — the completed-call observation record.
+
+      Package net — the outbound client configuration.
+
+      Package net — range 0.2.11.* (ADR 0029 core/net block).
+
+      Package net — the accepted stream connection port.
+
+      Package net — the shutdown signal a long-lived handler observes.
+
+      Package net — the configuration-friendly duration value.
+
+      Package net — declares the sentinel *errs.Error outcomes of the network
+      domain. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE form.
+      Service implementations and the pkg/v1 facades wrap these sentinels; they
+      declare no codes of their own (the ADR 0016 proc precedent).
+
+      Package net — compile-time interface assertions, kept out of the production
+      source per KTN-IFACE-ASSERT-PLACEMENT.
+
+      Package net — the opaque, redacting TLS identity value.
+
+      Package net — the on-disk TLS material description.
+
+      Package net — the TLS identity construction parameters.
+
+      Package net — the per-group resource ceilings.
+
+      Package net — TLS material parsing helpers shared by NewIdentity.
+
+      Package net — the generic handler decorator.
+
+      Package net — the received datagram port.
+
+      Package net — the server lifecycle phase.
+
+      Package net — the outbound authorisation port.
+
+      Package net — compile-time interface assertions, kept out of the production
+      source per KTN-IFACE-ASSERT-PLACEMENT.
+
+      Package net — the completed outbound response value.
+
+      Package net — the Server-Sent Events frame: the value a stream sends and the
+      rules a frame must satisfy to be carried at all. Writing it — the encoder
+      that splits Data into data lines, and the comment frame — is
+      internal/service/net/sse's (ADR 0160 §4).
+
+      Package net — the server's reported state.
+
+      Package net — the per-phase deadlines.
+
+      Package net — the WebSocket protocol's vocabulary (RFC 6455): the opening
+      handshake's constants and the control-frame ceiling. Reading and writing the
+      protocol — the handshake's key check and digest, the frame codec, the close
+      payload, the UTF-8 check — is internal/service/net/websocket's (ADR 0160 §4).
+
+      Package net — the WebSocket close code (RFC 6455 §7.4) and the predicates
+      that govern it in both directions. The close payload's wire form is
+      internal/service/net/websocket's (ADR 0160 §4).
+
+      Package net — the WebSocket application message (RFC 6455 §5.6). Its UTF-8
+      rule (§8.1) is checked by the engine on the bytes, as they come off and go
+      onto the wire: internal/service/net/websocket.ValidateText (ADR 0160 §4).
+
+      Package net — the WebSocket frame opcode (RFC 6455 §5.2).
+
+      Package net — shared sentinel-wrapping helper.
     functions:
-      - in:
+      - doc: |-
+          WithDrainSignal returns ctx carrying the channel a server closes when it
+          begins draining.
+
+          A request context is deliberately NOT what carries this. Cancelling it would
+          tell every in-flight handler to abandon the response it is halfway through,
+          which is the opposite of a graceful drain — the drain exists so those
+          responses finish. This signal is additive: a handler that ignores it behaves
+          exactly as before, and a handler that holds a connection open indefinitely —
+          an event stream, a long poll — gets the one piece of information it cannot
+          otherwise have, namely that finishing now is the cooperative thing to do.
+
+          The channel is closed, never sent on, so every observer sees it and a late
+          observer sees it immediately.
+        in:
           - name: ctx
             type: context.Context
           - name: draining
@@ -370,13 +654,25 @@ packages:
         name: WithDrainSignal
         out:
           - type: context.Context
-      - in:
+      - doc: |-
+          DrainSignal returns the drain channel carried by ctx, or nil when the server
+          serving this request publishes none.
+
+          A nil channel is the right absence: receiving from it blocks forever, so a
+          select that watches it alongside other cases simply never fires that case.
+          A caller therefore needs no nil check.
+        in:
           - name: ctx
             type: context.Context
         name: DrainSignal
         out:
           - type: <-chan struct{}
-      - in:
+      - doc: |-
+          NewIdentityValue validates in-memory TLS material and returns the opaque identity.
+          It fails loudly where the standard library is silent: a CA bundle that yields
+          no usable certificate is TLSMaterialInvalid, never an empty pool that would
+          verify nothing.
+        in:
           - name: p
             type: IdentityParams
         name: NewIdentityValue
@@ -385,7 +681,13 @@ packages:
             type: IdentityValue
           - name: err
             type: error
-      - in:
+      - doc: |-
+          Chain applies middlewares to a handler, outermost first.
+
+          Chain(h, a, b, c) yields a(b(c(h))): the first middleware listed is the first
+          to see a connection. That ordering matches how the list reads on the page,
+          which is the only ordering a reader will guess correctly.
+        in:
           - name: h
             type: H
           - name: middlewares
@@ -884,68 +1186,138 @@ packages:
             public: The static file handler configuration is not valid
             reason: STATIC_MISCONFIGURED
     types:
-      - methods:
-          - name: String
+      - doc: |-
+          AddressValue names one socket to bind. It is a value type so a group's listen
+          set is comparable and copyable, and so a configuration file can express it
+          directly.
+        methods:
+          - doc: String renders the address as "network://addr" for logs and error fields.
+            name: String
             out:
               - type: string
             recv: value
         name: AddressValue
         struct:
           fields:
-            - name: Network
+            - doc: |-
+                Network is the socket family: tcp, tcp4, tcp6, udp, udp4, udp6, unix,
+                unixgram or unixpacket.
+              name: Network
               tag: json:"network"
               type: string
-            - name: Addr
+            - doc: |-
+                Addr is the bind target: "host:port" for the IP families, a filesystem
+                path for the unix families.
+              name: Addr
               tag: json:"addr"
               type: string
-      - name: CallValue
+      - doc: |-
+          CallValue records one completed outbound call for observation, so a caller
+          can log, meter or trace every egress without wrapping each call site by hand.
+
+          It is handed to a CallHook once the response body is FINISHED WITH — read to
+          the end, failed, or closed — not when the headers arrive. A body's size is
+          only known after it has been read, and an over-sized body or a failed close
+          happens later still, so a record emitted at the headers could carry neither:
+          it reported every call as a clean success of zero bytes. A refused request
+          and an unreachable upstream are still reported immediately, because in
+          neither case is there a body to wait for.
+        name: CallValue
         struct:
           fields:
-            - name: Method
+            - doc: Method is the uppercase HTTP method.
+              name: Method
               type: string
-            - name: Host
+            - doc: Host is the authority the call was sent to.
+              name: Host
               type: string
-            - name: Path
+            - doc: Path is the request path.
+              name: Path
               type: string
-            - name: Status
+            - doc: Status is the HTTP status code, or zero when the call produced no response.
+              name: Status
               type: int
-            - name: Bytes
+            - doc: Bytes is the number of response body bytes read.
+              name: Bytes
               type: int64
-            - name: Duration
+            - doc: |-
+                Duration is the wall-clock time from request start to response headers.
+                It deliberately excludes the body: the record is emitted once the body is
+                done with, but this field measures the upstream's time to first answer,
+                which is the one a slow upstream and a large payload do not share.
+              name: Duration
               type: time.Duration
-            - name: Err
+            - doc: |-
+                Err is what ended the call: a policy refusal, a transport failure, the
+                response ceiling, or a failed close. Nil when the body was read in full.
+              name: Err
               type: error
-      - name: CallHook
+      - doc: |-
+          CallHook receives one CallValue per completed outbound call. It is a function
+          port rather than an interface because it is a single-method contract with no
+          state, and a func keeps the domain free of a dependency on the logger or the
+          metrics package: the consumer wires it to whichever it uses.
+
+          A CallHook MUST be safe for concurrent use and MUST NOT block — it runs on the
+          calling goroutine, so a slow hook slows every request.
+        name: CallHook
         underlying: func(call CallValue)
-      - name: ClientConfig
+      - doc: |-
+          ClientConfig describes an outbound client. Durations use DurationValue so a
+          configuration file can say "5s" rather than a nanosecond count.
+
+          It sits in core beside LimitsValue and TimeoutsValue, which carry the same
+          kind of knobs for the inbound half. Keeping both faces' configuration in one
+          layer is what lets a consumer decode a whole network stanza against the
+          contract package alone, without importing an implementation to name the type
+          of a field it is setting.
+        name: ClientConfig
         struct:
           fields:
-            - name: BaseURL
+            - doc: BaseURL is the origin every relative path resolves against.
+              name: BaseURL
               tag: json:"base_url"
               type: string
-            - name: DialTimeout
+            - doc: DialTimeout bounds establishing the TCP connection.
+              name: DialTimeout
               tag: json:"dial_timeout"
               type: DurationValue
-            - name: HandshakeTimeout
+            - doc: HandshakeTimeout bounds the TLS handshake.
+              name: HandshakeTimeout
               tag: json:"handshake_timeout"
               type: DurationValue
-            - name: ResponseTimeout
+            - doc: |-
+                ResponseTimeout bounds the wait for response headers after the request
+                has been written. It is separate from TotalTimeout so a slow upstream is
+                distinguishable from a large body.
+              name: ResponseTimeout
               tag: json:"response_timeout"
               type: DurationValue
-            - name: TotalTimeout
+            - doc: TotalTimeout bounds the whole call, body included.
+              name: TotalTimeout
               tag: json:"total_timeout"
               type: DurationValue
-            - name: MaxResponseSize
+            - doc: |-
+                MaxResponseSize caps the response body in bytes. A body of exactly this
+                size is admitted; only one past it fails the call, and the body is never
+                truncated.
+              name: MaxResponseSize
               tag: json:"max_response_size"
               type: int64
-            - name: MaxRedirects
+            - doc: |-
+                MaxRedirects caps the redirect chain. Every hop is re-authorised by the
+                policy, so a redirect cannot walk out of the allowed surface.
+              name: MaxRedirects
               tag: json:"max_redirects"
               type: int
-            - name: DefaultHeaders
+            - doc: DefaultHeaders are added to every request that does not already set them.
+              name: DefaultHeaders
               tag: json:"default_headers"
               type: map[string]string
-      - methods:
-          - in:
+      - doc: ConnHandlerFunc adapts a plain function to ConnHandler.
+        methods:
+          - doc: ServeConn implements ConnHandler by calling f.
+            in:
               - name: ctx
                 type: context.Context
               - name: c
@@ -956,23 +1328,49 @@ packages:
             recv: value
         name: ConnHandlerFunc
         underlying: func(ctx context.Context, c Conn) error
-      - methods:
-          - name: Duration
+      - doc: |-
+          DurationValue is a time.Duration that round-trips through JSON as either a Go
+          duration string ("30s", "1m30s") or a raw nanosecond count. The SDK's config
+          loader (ADR 0028) decodes through a JSON round-trip, and encoding/json renders
+          a bare time.Duration as nanoseconds — which would force an operator to write
+          30000000000 in a YAML file to mean thirty seconds. This type accepts both and
+          always emits the readable form.
+
+          The mixed receivers are required by encoding/json and are not a style slip:
+          MarshalJSON must take a value so a non-pointer struct field marshals, and
+          UnmarshalJSON must take a pointer so it can assign. The standard library's
+          time.Time carries the same asymmetry for the same reason.
+
+          PROMOTION CANDIDATE: this type is domain-neutral and stdlib-only, so it
+          belongs in internal/kernel or internal/core/app/config the moment a second domain
+          needs it. It is declared here because the repo's bar for a shared primitive is
+          two real consumers arising from an actual duplication, and today there is one.
+        methods:
+          - doc: Duration returns the value as a plain time.Duration.
+            name: Duration
             out:
               - type: time.Duration
             recv: value
-          - name: String
+          - doc: String renders the canonical Go duration form, e.g. "1m30s".
+            name: String
             out:
               - type: string
             recv: value
-          - name: MarshalJSON
+          - doc: |-
+              MarshalJSON emits the readable duration string so a written-back configuration
+              file stays legible.
+            name: MarshalJSON
             out:
               - name: encoded
                 type: "[]byte"
               - name: err
                 type: error
             recv: value
-          - in:
+          - doc: |-
+              UnmarshalJSON accepts a quoted Go duration string ("30s") or a bare number of
+              nanoseconds, so both a hand-written config file and a machine-generated one
+              decode.
+            in:
               - name: data
                 type: "[]byte"
             name: UnmarshalJSON
@@ -981,104 +1379,235 @@ packages:
             recv: pointer
         name: DurationValue
         underlying: time.Duration
-      - methods:
-          - name: String
+      - doc: |-
+          IdentityValue is an opaque TLS identity: a certificate chain, the trust
+          anchors used to verify the peer, and the negotiated-version policy. Its String
+          and GoString output is always "<redacted>" so an accidental %v, %s or %#v can
+          never spill key material into a log line. The only way out is ClientConfig or
+          ServerConfig, which mint a fresh *tls.Config per call.
+
+          The zero value is valid and means "no identity" — IsZero reports it.
+        methods:
+          - doc: |-
+              String implements fmt.Stringer and always redacts so key material never
+              reaches a log line through %v or %s.
+            name: String
             out:
               - type: string
             recv: value
-          - name: GoString
+          - doc: |-
+              GoString implements fmt.GoStringer so %#v stays redacted too — fmt bypasses
+              String for Go-syntax formatting and would otherwise dump the unexported fields.
+            name: GoString
             out:
               - type: string
             recv: value
-          - name: IsZero
+          - doc: |-
+              IsZero reports whether the identity carries no material at all, which is the
+              zero value a caller gets when no TLS was configured.
+            name: IsZero
             out:
               - type: bool
             recv: value
-          - name: ClientConfig
+          - doc: |-
+              ClientConfig returns a fresh *tls.Config for dialling a peer. Each call yields
+              a new value so a caller mutating the result cannot affect any other user of
+              the same identity.
+
+              "Fresh" covers the slices and the trust pool, not only the outer struct. A
+              new *tls.Config whose Certificates and RootCAs still point at the identity's
+              own would leave cfg.Certificates[0] = other and cfg.RootCAs.AddCert(evil)
+              reaching every other configuration the identity has ever minted, including
+              ones already in use — which is the opposite of what an opaque, immutable
+              identity is for. Who pays that cost, and how often, is the CALLER's choice
+              and not a property of this method: net/client calls it once inside New and
+              net/server once per listener, but service/app/mail calls it per connection —
+              which for SMTP is per message — deliberately, because StartTLS takes the
+              config and a transport that reused one would hand every send a *tls.Config
+              another send could still be mutating. Three slice clones are nothing beside
+              an SMTP round trip; the sentence that used to sit here said "never per
+              request", which was true of the two net callers and false of the third.
+            name: ClientConfig
             out:
               - type: "*tls.Config"
             recv: value
-          - name: ServerConfig
+          - doc: |-
+              ServerConfig returns a fresh *tls.Config for accepting connections, switching
+              to mutual TLS when the identity requires a client certificate.
+            name: ServerConfig
             out:
               - type: "*tls.Config"
             recv: value
         name: IdentityValue
         struct:
           unexported: true
-      - name: IdentityFileParams
+      - doc: |-
+          IdentityFileParams names TLS material to read from the filesystem. Every path
+          is optional on its own; the combination is validated once the bytes are in
+          hand, by the same core constructor that validates in-memory material.
+
+          It is the disk-sourced twin of IdentityParams and lives beside it on purpose:
+          the two describe one domain concept — the material an identity is built from
+          — and splitting them across layers would let the rules that govern them drift
+          apart, which is exactly what this domain refuses for TLS.
+        name: IdentityFileParams
         struct:
           fields:
-            - name: CertFile
+            - doc: |-
+                CertFile is the PEM leaf certificate followed by any intermediates.
+                Supplying it without KeyFile is always a configuration slip, never an
+                intention, and is refused: an mTLS client that silently degrades to plain
+                TLS is a security hole that reports nothing.
+              name: CertFile
               tag: json:"cert_file"
               type: string
-            - name: KeyFile
+            - doc: KeyFile is the PEM private key matching CertFile.
+              name: KeyFile
               tag: json:"key_file"
               type: string
-            - name: RootsFile
+            - doc: |-
+                RootsFile is the PEM CA bundle used to verify the peer. Leaving it empty
+                selects the platform trust store, which is right for a public endpoint and
+                wrong for a private PKI.
+              name: RootsFile
               tag: json:"roots_file"
               type: string
-            - name: ClientCAFile
+            - doc: |-
+                ClientCAFile is the PEM CA bundle a server accepts client certificates
+                from. Required whenever RequireClientCert is set.
+              name: ClientCAFile
               tag: json:"client_ca_file"
               type: string
-            - name: ServerName
+            - doc: |-
+                ServerName overrides the name verified against the peer certificate.
+
+                This is far more often required than its "optional" typing suggests. Any
+                deployment reached through a port forward or a tunnel connects to
+                127.0.0.1 while the peer certificate names the real service, and the
+                handshake then fails every single time until ServerName is set. Treat it
+                as mandatory whenever the dial address is not the certificate's name.
+              name: ServerName
               tag: json:"server_name"
               type: string
-            - name: MinVersion
+            - doc: |-
+                MinVersion is the lowest accepted TLS version. Zero selects TLS 1.3;
+                anything below TLS 1.2 is refused.
+              name: MinVersion
               tag: json:"min_version"
               type: uint16
-            - name: NextProtos
+            - doc: NextProtos is the ALPN protocol list, e.g. {"h2", "http/1.1"}.
+              name: NextProtos
               tag: json:"next_protos"
               type: "[]string"
-            - name: RequireClientCert
+            - doc: RequireClientCert turns a server identity into mutual TLS.
+              name: RequireClientCert
               tag: json:"require_client_cert"
               type: bool
-      - name: IdentityParams
+      - doc: |-
+          IdentityParams carries in-memory TLS material. Every field is optional on its
+          own; the combination is what is validated by NewIdentity. Sourcing material
+          from memory rather than from disk is what lets a consumer pull certificates
+          out of a secret manager without ever writing them to a filesystem.
+        name: IdentityParams
         struct:
           fields:
-            - name: CertPEM
+            - doc: |-
+                CertPEM is the PEM-encoded leaf certificate followed by any intermediates.
+                Paired with KeyPEM; supplying one without the other is an error.
+              name: CertPEM
               type: "[]byte"
-            - name: KeyPEM
+            - doc: KeyPEM is the PEM-encoded private key matching CertPEM.
+              name: KeyPEM
               type: "[]byte"
-            - name: RootsPEM
+            - doc: |-
+                RootsPEM is the PEM-encoded CA bundle used to verify the peer. When empty
+                the platform trust store is used, which is the right default for a public
+                endpoint and the wrong one for a private PKI.
+              name: RootsPEM
               type: "[]byte"
-            - name: ClientCAPEM
+            - doc: |-
+                ClientCAPEM is the PEM-encoded CA bundle a server accepts client
+                certificates from. It is meaningless on a client identity.
+              name: ClientCAPEM
               type: "[]byte"
-            - name: ServerName
+            - doc: |-
+                ServerName overrides the name verified against the peer certificate. It is
+                required when connecting to a host by IP whose certificate names a DNS name.
+              name: ServerName
               type: string
-            - name: MinVersion
+            - doc: |-
+                MinVersion is the lowest accepted TLS version. Zero selects TLS 1.3;
+                anything below TLS 1.2 is refused outright.
+              name: MinVersion
               type: uint16
-            - name: NextProtos
+            - doc: NextProtos is the ALPN protocol list, e.g. {"h2", "http/1.1"}.
+              name: NextProtos
               type: "[]string"
-            - name: RequireClientCert
+            - doc: |-
+                RequireClientCert turns a server identity into mutual TLS: the peer must
+                present a certificate that chains to ClientCAPEM.
+              name: RequireClientCert
               type: bool
-      - name: LimitsValue
+      - doc: |-
+          LimitsValue bounds what one listener group may consume. Every field is
+          optional; zero means "use the domain default", never "unbounded" — an unset
+          ceiling must not be the dangerous one.
+        name: LimitsValue
         struct:
           fields:
-            - name: MaxConns
+            - doc: |-
+                MaxConns caps concurrent connections in the group. Beyond it, a new
+                connection is accepted and immediately closed with ConnLimitReached, which
+                is kinder than letting the accept queue silently overflow.
+              name: MaxConns
               tag: json:"max_conns"
               type: int
-            - name: ReadBufferSize
+            - doc: |-
+                ReadBufferSize sizes the per-connection scratch buffer returned by
+                Conn.Buffer.
+              name: ReadBufferSize
               tag: json:"read_buffer_size"
               type: int
-            - name: MaxPacketSize
+            - doc: |-
+                MaxPacketSize is the largest datagram accepted. A larger one is DROPPED
+                and counted in StateValue.OversizedPackets, never delivered truncated:
+                the kernel discards the tail, so the prefix that survives reads exactly
+                like a complete message and the handler cannot tell the difference.
+              name: MaxPacketSize
               tag: json:"max_packet_size"
               type: int
-            - name: Backlog
+            - doc: Backlog is the listen backlog depth where the platform honours it.
+              name: Backlog
               tag: json:"backlog"
               type: int
-            - name: Shards
+            - doc: |-
+                Shards is the number of independent listeners to open on one address with
+                SO_REUSEPORT, each with its own accept loop, to remove accept contention.
+                Zero selects the platform default.
+              name: Shards
               tag: json:"shards"
               type: int
-            - name: BatchSize
+            - doc: |-
+                BatchSize is how many datagrams to read per syscall. Zero selects the
+                default; one disables batching.
+              name: BatchSize
               tag: json:"batch_size"
               type: int
-      - name: Middleware
+      - doc: |-
+          Middleware decorates a handler with another of the same type.
+
+          It is generic over the handler type so stream and datagram handlers share one
+          shape and one Chain helper, instead of the domain carrying two near-identical
+          middleware types that would inevitably drift.
+        name: Middleware
         typeParams:
           - constraint: any
             name: H
         underlying: func(next H) H
-      - methods:
-          - in:
+      - doc: PacketHandlerFunc adapts a plain function to PacketHandler.
+        methods:
+          - doc: ServePacket implements PacketHandler by calling f.
+            in:
               - name: ctx
                 type: context.Context
               - name: p
@@ -1089,15 +1618,22 @@ packages:
             recv: value
         name: PacketHandlerFunc
         underlying: func(ctx context.Context, p Packet) error
-      - methods:
-          - name: String
+      - doc: |-
+          Phase is where a server sits in its lifecycle. It is reported by State so an
+          operator — or a readiness probe — can tell "not yet listening" apart from
+          "listening" and from "draining", which a single boolean cannot express.
+        methods:
+          - doc: String renders the phase for logs and status output.
+            name: String
             out:
               - type: string
             recv: value
         name: Phase
         underlying: uint8
-      - methods:
-          - in:
+      - doc: PolicyFunc adapts a plain function to the Policy interface.
+        methods:
+          - doc: Allow implements Policy by calling f.
+            in:
               - name: req
                 type: RequestValue
             name: Allow
@@ -1106,162 +1642,373 @@ packages:
             recv: value
         name: PolicyFunc
         underlying: func(req RequestValue) error
-      - name: ResponseValue
+      - doc: |-
+          ResponseValue is a fully-read outbound response.
+
+          The client returns this rather than an *http.Response on purpose. A returned
+          *http.Response makes the caller responsible for closing the body and for
+          reading it under a size cap, and a single forgotten Close leaks a connection.
+          It also makes an accurate byte count impossible: the size of a body is only
+          known once it has been read, so an observation hook firing at header time can
+          never report it. Reading and closing inside the client fixes both.
+        name: ResponseValue
         struct:
           fields:
-            - name: Status
+            - doc: |-
+                Status is the HTTP status code. It is set even when the call also returns
+                an error, so a caller can tolerate a specific status deliberately.
+              name: Status
               type: int
-            - name: Header
+            - doc: Header is the response header set.
+              name: Header
               type: http.Header
-            - name: Body
+            - doc: |-
+                Body is the fully-read response body, already bounded by the client's
+                size cap. It is nil for a status that carries no body, such as 204.
+              name: Body
               type: "[]byte"
-      - name: RequestValue
+      - doc: |-
+          RequestValue describes an outbound request to the transport policy.
+
+          Two field choices are load-bearing and were paid for in a real integration:
+
+            - The path is the ESCAPED form, the one that goes on the wire. url.URL.Path
+              is already percent-DECODED, so a policy that judges it accepts "%2e%2e"
+              — which the upstream then reinterprets as "..". Judging the decoded form
+              makes a correctly written allowlist bypassable, so this type does not
+              carry it.
+            - RawQuery is present because a policy often needs to require a parameter,
+              not just permit a path. A read-only policy that cannot see the query
+              cannot, for instance, insist that a listing call passes the filter that
+              makes its result correct.
+
+          The value is immutable by construction: a policy receives a copy and cannot
+          mutate the request it is judging.
+        name: RequestValue
         struct:
           fields:
-            - name: Method
+            - doc: Method is the uppercase HTTP method, e.g. "GET".
+              name: Method
               type: string
-            - name: Scheme
+            - doc: Scheme is the URL scheme, e.g. "https".
+              name: Scheme
               type: string
-            - name: Host
+            - doc: |-
+                Host is the authority, host[:port]. It is carried because a policy that
+                sees only the path cannot defend against a redirect that keeps the path
+                and swaps the origin.
+              name: Host
               type: string
-            - name: EscapedPath
+            - doc: |-
+                EscapedPath is the percent-encoded path exactly as it will be sent. It is
+                never the decoded form — see the type comment.
+              name: EscapedPath
               type: string
-            - name: RawQuery
+            - doc: RawQuery is the encoded query string, without the leading "?".
+              name: RawQuery
               type: string
-      - methods:
-          - name: IsZero
+      - doc: |-
+          SSEEventValue is one Server-Sent Events frame.
+
+          The format has no escape mechanism. A line terminator inside a value is not
+          quoted, it SPLITS the value: that is exactly what makes a multi-line payload
+          expressible — Data is emitted as one "data:" line per line and the client
+          rejoins them with "\n" — and exactly what makes a line terminator inside ID
+          or Name unrepresentable. Those are refused rather than truncated, because a
+          silently shortened id is a resume token pointing at the wrong place.
+        methods:
+          - doc: IsZero reports whether the frame carries no field at all.
+            name: IsZero
             out:
               - type: bool
             recv: value
-          - name: Validate
+          - doc: |-
+              Validate reports whether the frame can be carried by the wire format.
+
+              It is separate from the encoder (internal/service/net/sse.AppendEvent) so a
+              caller can check a frame before committing to send it, and so the encoder
+              can validate everything BEFORE it appends anything — a half-written frame on
+              a stream is unrecoverable, since the peer has already read it.
+            name: Validate
             out:
               - type: error
             recv: value
         name: SSEEventValue
         struct:
           fields:
-            - name: ID
+            - doc: |-
+                ID is the frame's "id" field. A client stores the last non-empty id it
+                saw and sends it back as Last-Event-ID when it reconnects, so this is the
+                resume token — and it is the CALLER's to mint, because only the caller
+                knows what it means. Empty emits no id field, which leaves the client's
+                stored id untouched; that is the format's own behaviour, not an omission.
+              name: ID
               tag: json:"id"
               type: string
-            - name: Name
+            - doc: |-
+                Name is the frame's "event" field — the event type the client dispatches
+                under. Empty means the default type, "message".
+              name: Name
               tag: json:"event"
               type: string
-            - name: Data
+            - doc: |-
+                Data is the payload. Every line terminator it carries (LF, CR or CRLF)
+                becomes a separate "data:" line, which the client rejoins with "\n". A
+                payload that mixed terminators therefore arrives normalised to LF: the
+                value is preserved, its byte spelling is not.
+              name: Data
               tag: json:"data"
               type: string
-            - name: Retry
+            - doc: |-
+                Retry is the reconnection delay hint, emitted as an integer millisecond
+                count. Zero emits no retry field.
+              name: Retry
               tag: json:"retry"
               type: DurationValue
-      - methods:
-          - name: Degraded
+      - doc: |-
+          StateValue is a snapshot of the server's lifecycle and listeners.
+
+          It is a value, so a caller can hold it, log it, or compare it without racing
+          the server that produced it.
+        methods:
+          - doc: |-
+              Degraded reports whether any listener fell back from a requested
+              optimisation, so a caller can assert "no silent degradation" in one call
+              instead of walking the slice.
+            name: Degraded
             out:
               - type: bool
             recv: value
         name: StateValue
         struct:
           fields:
-            - name: Phase
+            - doc: Phase is where the server sits in its lifecycle.
+              name: Phase
               tag: json:"phase"
               type: Phase
-            - name: Listeners
+            - doc: Listeners describes every bound listener, including any degradation.
+              name: Listeners
               tag: json:"listeners"
               type: "[]ListenerStateValue"
-            - name: ActiveConns
+            - doc: ActiveConns is the number of connections currently being served.
+              name: ActiveConns
               tag: json:"active_conns"
               type: int64
-            - name: TotalConns
+            - doc: TotalConns is the number accepted since the server started.
+              name: TotalConns
               tag: json:"total_conns"
               type: uint64
-            - name: RejectedConns
+            - doc: RejectedConns is the number turned away by the connection ceiling.
+              name: RejectedConns
               tag: json:"rejected_conns"
               type: uint64
-            - name: OversizedPackets
+            - doc: |-
+                OversizedPackets is the number of datagrams dropped for passing their
+                group's MaxPacketSize. They are counted rather than delivered because the
+                kernel has already discarded the tail, and the prefix that survives is
+                indistinguishable from a complete message to the handler receiving it. A
+                read loop has nobody to return an error to, so this counter is the report.
+              name: OversizedPackets
               tag: json:"oversized_packets"
               type: uint64
-            - name: AcceptBackoffs
+            - doc: |-
+                AcceptBackoffs is the number of times an accept loop waited after Accept
+                failed with anything but its listener closing — the process out of file
+                descriptors, typically, with connections still queued. Retrying at once
+                would spin a core per listener while the condition lasts; each wait is
+                5 ms, doubling to 1 s, and the next accepted connection starts the curve
+                over. A count that keeps rising is a server that cannot accept.
+              name: AcceptBackoffs
               tag: json:"accept_backoffs"
               type: uint64
-      - name: ListenerStateValue
+      - doc: |-
+          ListenerStateValue reports one bound listener.
+
+          It carries the address actually bound rather than the one requested, and it
+          reports any fallback explicitly, so a caller never has to infer either.
+        name: ListenerStateValue
         struct:
           fields:
-            - name: Group
+            - doc: Group is the listener group's name.
+              name: Group
               tag: json:"group"
               type: string
-            - name: Address
+            - doc: |-
+                Address is the address actually bound, which for a port of zero is the
+                one the kernel chose rather than the one requested.
+              name: Address
               tag: json:"address"
               type: string
-            - name: Network
+            - doc: Network is the socket family.
+              name: Network
               tag: json:"network"
               type: string
-            - name: Shards
+            - doc: Shards is how many listeners were actually opened on this address.
+              name: Shards
               tag: json:"shards"
               type: int
-            - name: Degraded
+            - doc: |-
+                Degraded reports that a requested optimisation was unavailable and the
+                server fell back. It is surfaced rather than logged once at startup,
+                because a silent fallback is indistinguishable from a working one and
+                nobody re-reads yesterday's logs to find out.
+              name: Degraded
               tag: json:"degraded"
               type: bool
-            - name: DegradedReason
+            - doc: DegradedReason names the fallback in plain words when Degraded is set.
+              name: DegradedReason
               tag: json:"degraded_reason,omitempty"
               type: string
-            - name: Adopted
+            - doc: |-
+                Adopted reports a listener inherited from a supervisor rather than bound
+                by this process.
+              name: Adopted
               tag: json:"adopted"
               type: bool
-      - name: TimeoutsValue
+      - doc: |-
+          TimeoutsValue bounds each phase of a connection separately.
+
+          Per-phase deadlines rather than one overall budget: a slow reader, a slow
+          writer and an idle keep-alive connection are three different problems with
+          three different right answers, and a single timeout cannot tell them apart.
+
+          Every field is a PER-OPERATION bound, refreshed each time, not a budget for
+          the connection's whole life. The distinction is the whole point: a peer
+          sending one byte per second violates a per-read bound at once and stays
+          inside a lifetime bound until the lifetime runs out.
+        name: TimeoutsValue
         struct:
           fields:
-            - name: Read
+            - doc: Read bounds one read from the peer.
+              name: Read
               tag: json:"read"
               type: DurationValue
-            - name: Write
+            - doc: Write bounds one write to the peer.
+              name: Write
               tag: json:"write"
               type: DurationValue
-            - name: Idle
+            - doc: Idle bounds how long a connection may sit with no traffic at all.
+              name: Idle
               tag: json:"idle"
               type: DurationValue
-            - name: Handshake
+            - doc: |-
+                Handshake bounds the TLS handshake, which is the phase a hostile peer can
+                most cheaply stall. Unlike the others, zero here does NOT mean unbounded:
+                the negotiation happens before any handler exists to notice it, so it
+                falls back to the domain's default instead.
+              name: Handshake
               tag: json:"handshake"
               type: DurationValue
-      - methods:
-          - name: Sendable
+      - doc: WSCloseCode is the status code a Close frame carries (RFC 6455 §7.4).
+        methods:
+          - doc: |-
+              Sendable reports whether the code may appear in a Close frame on the wire.
+
+              It is deliberately a property of the CODE rather than a check inside the
+              sender, because the same question is asked twice from opposite directions: a
+              peer that sends 1006 is committing a protocol error, and so is this endpoint
+              if it ever does. One predicate, both directions, no chance of the two
+              drifting apart.
+            name: Sendable
             out:
               - type: bool
             recv: value
-          - name: Echoable
+          - doc: |-
+              Echoable returns the code to send back when answering this one.
+
+              It exists because §5.5.1 says an endpoint SHOULD echo the peer's status code,
+              and the one code a peer can leave us holding — WSCloseNoStatus, for a Close
+              with no payload — is a code §7.4.1 forbids on the wire. Echoing blindly is
+              therefore a protocol error waiting for the first well-behaved peer that
+              closes without saying why.
+            name: Echoable
             out:
               - type: WSCloseCode
             recv: value
         name: WSCloseCode
         underlying: uint16
-      - methods:
-          - name: OpCode
+      - doc: |-
+          WSMessageValue is one complete WebSocket application message, reassembled
+          from however many frames carried it.
+
+          A message is the unit an application reasons about; a frame is the unit the
+          transport reasons about. Handing the application frames would make
+          fragmentation — which is the sender's private choice of chunk size, not a
+          semantic boundary — visible in every consumer.
+        methods:
+          - doc: OpCode returns the frame opcode this message is carried under.
+            name: OpCode
             out:
               - type: WSOpCode
             recv: value
         name: WSMessageValue
         struct:
           fields:
-            - name: Binary
+            - doc: |-
+                Binary reports whether the payload is opaque bytes (opcode 0x2) rather
+                than UTF-8 text (opcode 0x1). The zero value is text, which is the
+                opcode a zero-valued frame would carry anyway.
+              name: Binary
               tag: json:"binary"
               type: bool
-            - name: Data
+            - doc: |-
+                Data is the reassembled payload. For a text message it is valid UTF-8,
+                which the engine verifies on both the receiving and the sending side.
+              name: Data
               tag: json:"data"
               type: "[]byte"
-      - methods:
-          - name: IsControl
+      - doc: WSOpCode is a frame's four-bit type field (RFC 6455 §5.2).
+        methods:
+          - doc: |-
+              IsControl reports whether the opcode names a control frame.
+
+              Control frames are the ones that may be injected BETWEEN the fragments of a
+              message, so the distinction decides which fragmentation rules apply.
+            name: IsControl
             out:
               - type: bool
             recv: value
-          - name: Defined
+          - doc: Defined reports whether RFC 6455 assigns this opcode a meaning.
+            name: Defined
             out:
               - type: bool
             recv: value
-          - name: String
+          - doc: String renders the opcode for a log line or an error field.
+            name: String
             out:
               - type: string
             recv: value
         name: WSOpCode
         underlying: byte
-  - functions:
-      - in:
+  - doc: |-
+      Package client — the response body size ceiling.
+
+      Package client is the outbound half of the SDK's network domain (ADR 0029):
+      an HTTP client whose read-only posture is enforced by the transport rather
+      than by the call site.
+
+      Package client — the policy conjunction.
+
+      Package client — the configuration defaults.
+
+      Package client — the path denylist policy.
+
+      Package client — the policy-enforcing RoundTripper.
+
+      Package client — the method allowlist policy.
+
+      Package client — path safety checks applied before any allowlist pattern.
+
+      Package client — the path allowlist policy.
+
+      Package client — the policy constructors.
+    functions:
+      - doc: |-
+          New builds a client from cfg, the TLS identity, the policy and the hook.
+
+          A nil policy is refused rather than defaulted to "allow everything": an
+          unguarded egress path wearing the name of a guarded one is worse than none.
+        in:
           - name: cfg
             type: corenet.ClientConfig
           - name: id
@@ -1276,14 +2023,24 @@ packages:
             type: "*Client"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          AllowMethods admits only the named HTTP methods. Passing none admits none:
+          an allowlist that lost its contents must close, not open.
+        in:
           - name: methods
             type: string
         name: AllowMethods
         out:
           - type: corenet.Policy
         variadic: true
-      - in:
+      - doc: |-
+          AllowPaths admits only paths matching one of the patterns.
+
+          The patterns are supplied UNANCHORED and this constructor anchors them.
+          Leaving anchoring to the caller is precisely the omission that turns an
+          allowlist into a sieve — `/v1/profiles` would otherwise be satisfied by
+          `/anything/v1/profiles/and/more` — and it is invisible in review.
+        in:
           - name: patterns
             type: string
         name: AllowPaths
@@ -1293,7 +2050,11 @@ packages:
           - name: err
             type: error
         variadic: true
-      - in:
+      - doc: |-
+          DenyPaths refuses paths matching one of the patterns. A deny is final and is
+          not overridable by an allow pattern, so a narrow exclusion can be carved out
+          of a broad allow rule without rewriting it into something unreadable.
+        in:
           - name: patterns
             type: string
         name: DenyPaths
@@ -1303,7 +2064,10 @@ packages:
           - name: err
             type: error
         variadic: true
-      - in:
+      - doc: |-
+          Policies requires every policy to allow the request. Composition is by
+          conjunction so that adding a policy can only ever narrow what is permitted.
+        in:
           - name: members
             type: corenet.Policy
         name: Policies
@@ -1316,12 +2080,27 @@ packages:
       url: net/url
     path: github.com/kitsunium/sdk/internal/service/net/client
     types:
-      - methods:
-          - name: HTTP
+      - doc: |-
+          Client performs guarded outbound HTTP calls.
+
+          Every request it sends — including one forged through the *http.Client that
+          HTTP returns — passes through a transport that consults the policy first, so
+          the client's posture cannot be bypassed by forgetting a check at a call site.
+        methods:
+          - doc: |-
+              HTTP returns the underlying *http.Client.
+
+              The policy still applies: it lives in the transport, so a third-party SDK
+              handed this client cannot escape it. That is precisely why the check was put
+              there rather than in Do.
+            name: HTTP
             out:
               - type: "*http.Client"
             recv: pointer
-          - in:
+          - doc: |-
+              Get issues a guarded GET against a path relative to the configured base URL.
+              The query is encoded here so no call site has to remember to escape it.
+            in:
               - name: ctx
                 type: context.Context
               - name: path
@@ -1335,7 +2114,15 @@ packages:
               - name: err
                 type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Do sends req and returns a fully-read response.
+
+              It returns a value rather than an *http.Response so the caller cannot leak a
+              connection by forgetting to close the body, and so the byte count is known —
+              which is what lets the observation hook report an accurate size. The hook
+              fires from the body itself, so a caller using the escape hatch is observed on
+              exactly the same terms.
+            in:
               - name: req
                 type: "*http.Request"
             name: Do
@@ -1348,100 +2135,265 @@ packages:
         name: Client
         struct:
           unexported: true
-  - functions:
-      - in:
+  - doc: |-
+      Package server — adoption of listeners inherited from a supervisor.
+
+      Package server — the datagram batch-read abstraction.
+
+      Package server — compile-time interface assertions, kept out of the
+      production source per KTN-IFACE-ASSERT-PLACEMENT.
+
+      Package server — the portable datagram reader.
+
+      Package server — the pooled stream connection.
+
+      Package server — compile-time interface assertions, kept out of the
+      production source per KTN-IFACE-ASSERT-PLACEMENT.
+
+      Package server — the socket that holds its connection slot until it closes.
+
+      Package server — the completion state of one connection handed to net/http.
+
+      Package server — batch-reader selection on Linux.
+
+      Package server — batch-reader selection on platforms without recvmmsg.
+
+      Package server — every served socket family is left to the kernel here.
+
+      Package server — the two socket families Windows cannot open at all.
+
+      Package server — the bounded TLS handshake.
+
+      Package server — the net/http adapter.
+
+      Package server — the bounds only an HTTP group has.
+
+      Package server — the listener bridge that lets net/http consume our accepts.
+
+      Package server — the width-correct kernel length assignment.
+
+      Package server — the start, accept and drain lifecycle.
+
+      Package server — compile-time interface assertions, kept out of the
+      production source per KTN-IFACE-ASSERT-PLACEMENT.
+
+      Package server — listener construction.
+
+      Package server — the listener that hands out close-tracking sockets.
+
+      Package server — the recvmmsg batched datagram reader.
+
+      Package server — the recvmmsg message header layout.
+
+      Package server — the functional options.
+
+      Package server — the pooled datagram.
+
+      Package server — a group of datagram listeners.
+
+      Package server — datagram listener construction and the read loop.
+
+      Package server — the datagram read loop.
+
+      Package server — per-connection state recycling.
+
+      Package server — the descriptor-bearing socket contract.
+
+      Package server — SO_REUSEPORT support on the BSD family.
+
+      Package server — SO_REUSEPORT support on Linux.
+
+      Package server — the SO_REUSEPORT floor for platforms without it.
+
+      Package server is the inbound half of the SDK's network domain (ADR 0029):
+      one unified listener engine for TCP, Unix, TLS and mutual TLS, serving
+      pluggable handlers grouped behind shared middlewares and policies.
+
+      Package server — kernel sockaddr decoding for the batched reader.
+
+      Package server — a group of listeners sharing one handler and policy.
+
+      Package server — the per-group connection ceiling.
+
+      Package server — deliberate discard of non-actionable cleanup errors.
+
+      Package server — how a Unix kernel reports a datagram longer than the read
+      buffer: by truncating it, which is not an error at all.
+
+      Package server — how Windows reports a datagram longer than the read buffer.
+    functions:
+      - doc: |-
+          WithDrainTimeout bounds how long Shutdown waits for in-flight connections
+          before closing them hard.
+        in:
           - name: d
             type: time.Duration
         name: WithDrainTimeout
         out:
           - type: Option
-      - in:
+      - doc: |-
+          Listen adds an address to a group. It is variadic-friendly by repetition:
+          calling it twice binds two addresses to the same handler, which is how one
+          service reaches both a TCP port and a Unix socket.
+        in:
           - name: network
           - name: addr
             type: string
         name: Listen
         out:
           - type: GroupOption
-      - in:
+      - doc: |-
+          TLS turns the group's listeners into TLS listeners, or mutual-TLS ones when
+          the identity requires a client certificate. One option covers both, so the
+          two cannot drift apart in configuration.
+        in:
           - name: id
             type: corenet.IdentityValue
         name: TLS
         out:
           - type: GroupOption
-      - in:
+      - doc: ReadTimeout bounds one read from the peer.
+        in:
           - name: d
             type: time.Duration
         name: ReadTimeout
         out:
           - type: GroupOption
-      - in:
+      - doc: WriteTimeout bounds one write to the peer.
+        in:
           - name: d
             type: time.Duration
         name: WriteTimeout
         out:
           - type: GroupOption
-      - in:
+      - doc: IdleTimeout bounds how long a connection may sit with no traffic.
+        in:
           - name: d
             type: time.Duration
         name: IdleTimeout
         out:
           - type: GroupOption
-      - in:
+      - doc: |-
+          ReadHeaderTimeout bounds the HEADER phase of an HTTP request on its own: the
+          request line and the header fields must arrive within d of the connection
+          becoming ready for a request, however long the read timeout lets the body
+          take.
+
+          The header phase is the one a slowloris attack stalls — a few bytes a
+          second, never finishing a line — and it is also the phase a legitimate
+          client completes in milliseconds, so it deserves a far shorter bound than a
+          read timeout sized for an upload. Unset (or non-positive) keeps what the
+          group did before this option existed: the header phase is bounded by the
+          read timeout. It has no effect on a group that does not serve HTTP.
+        in:
           - name: d
             type: time.Duration
         name: ReadHeaderTimeout
         out:
           - type: GroupOption
-      - in:
+      - doc: |-
+          MaxHeaderBytes caps how many bytes net/http reads for one request's line and
+          header fields. A request over the cap is answered 431 Request Header Fields
+          Too Large and never reaches the handler.
+
+          Unset (or non-positive) keeps net/http's own default, 1 MiB
+          (http.DefaultMaxHeaderBytes) — which was applying silently before this
+          option existed. net/http reads a small fixed allowance past the cap before
+          refusing, so the refusal happens a few kilobytes after n, not at the byte.
+          It has no effect on a group that does not serve HTTP.
+        in:
           - name: "n"
             type: int
         name: MaxHeaderBytes
         out:
           - type: GroupOption
-      - in:
+      - doc: |-
+          HandshakeTimeout bounds the TLS negotiation on a group's listeners.
+
+          Unset does NOT mean unbounded here, unlike the other three: the handshake is
+          the phase a peer can stall before any handler exists to notice, so it falls
+          back to the domain's default rather than to no bound at all.
+        in:
           - name: d
             type: time.Duration
         name: HandshakeTimeout
         out:
           - type: GroupOption
-      - in:
+      - doc: ReadBufferSize sizes the per-connection scratch buffer handed to the handler.
+        in:
           - name: "n"
             type: int
         name: ReadBufferSize
         out:
           - type: GroupOption
-      - in:
+      - doc: |-
+          MaxPacketSize caps the datagram size a group accepts. A larger datagram is
+          dropped and counted in State, never delivered as a truncated prefix.
+        in:
           - name: "n"
             type: int
         name: MaxPacketSize
         out:
           - type: GroupOption
-      - in:
+      - doc: |-
+          BatchSize sets how many datagrams one read attempts to collect. One disables
+          batching explicitly; zero selects the platform default. Where the platform
+          cannot batch, State reports the degradation rather than hiding it.
+        in:
           - name: "n"
             type: int
         name: BatchSize
         out:
           - type: GroupOption
-      - in:
+      - doc: |-
+          Shards sets how many listeners to open on each of the group's addresses.
+
+          Several listeners on one address is what SO_REUSEPORT buys: the kernel
+          load-balances incoming connections across them, so N accept loops never
+          contend on one accept queue. Zero selects one per core; one disables sharding.
+          Where the platform or the socket family cannot shard, the count collapses to
+          one and State reports why rather than staying silent.
+        in:
           - name: "n"
             type: int
         name: Shards
         out:
           - type: GroupOption
-      - in:
+      - doc: |-
+          MaxConns caps how many connections the group serves at once.
+
+          The budget is per group, not per socket: a group listening on a TCP port and
+          a Unix socket, or sharded across several listeners, shares one ceiling —
+          which is what an operator sizing a server actually means. Beyond it a
+          connection is accepted and closed immediately with ConnLimitReached, because
+          a refusal the peer can observe beats a timeout it cannot tell from a hang.
+          Zero means no ceiling.
+        in:
           - name: "n"
             type: int
         name: MaxConns
         out:
           - type: GroupOption
-      - in:
+      - doc: |-
+          Adopt takes over a socket inherited from a supervisor instead of binding one.
+
+          Socket activation is what makes a zero-downtime restart possible: the
+          supervisor holds the bound socket across the exec, so no connection is lost
+          and no bind races. The name is the one the unit file publishes in
+          LISTEN_FDNAMES. Repeat the option to adopt several sockets into one group.
+
+          A named socket the supervisor did not pass is SocketAdoptFailed, never a
+          silent fallback to binding: a service that quietly binds its own port has
+          lost exactly the property activation exists to provide.
+        in:
           - name: names
             type: string
         name: Adopt
         out:
           - type: GroupOption
         variadic: true
-      - in:
+      - doc: New builds a server.
+        in:
           - name: opts
             type: Option
         name: New
@@ -1453,30 +2405,40 @@ packages:
       http: net/http
     path: github.com/kitsunium/sdk/internal/service/net/server
     types:
-      - name: Option
+      - doc: Option configures a Server.
+        name: Option
         underlying: func(*Server)
-      - name: GroupOption
+      - doc: GroupOption configures a StreamGroup.
+        name: GroupOption
         underlying: func(*StreamGroup)
-      - methods:
-          - name: Name
+      - doc: |-
+          PacketGroup is a set of datagram sockets sharing one handler, one middleware
+          chain and one policy. It mirrors StreamGroup deliberately: the whole point of
+          the domain is that a UDP service is wired the same way a TCP one is.
+        methods:
+          - doc: Name returns the group's name.
+            name: Name
             out:
               - type: string
             recv: pointer
-          - in:
+          - doc: Handle sets the group's handler, replacing any previous one.
+            in:
               - name: h
                 type: corenet.PacketHandler
             name: Handle
             out:
               - type: "*PacketGroup"
             recv: pointer
-          - in:
+          - doc: HandleFunc sets the group's handler from a plain function.
+            in:
               - name: f
                 type: corenet.PacketHandlerFunc
             name: HandleFunc
             out:
               - type: "*PacketGroup"
             recv: pointer
-          - in:
+          - doc: Use appends middlewares, outermost first.
+            in:
               - name: middlewares
                 type: corenet.Middleware[corenet.PacketHandler]
             name: Use
@@ -1487,33 +2449,64 @@ packages:
         name: PacketGroup
         struct:
           unexported: true
-      - methods:
-          - in:
+      - doc: |-
+          Server owns a set of listener groups and their lifecycle.
+
+          It is safe for concurrent use. Declaration-time mistakes — a duplicate group
+          name, an unusable address — are recorded and returned by Start rather than
+          panicking or forcing an error check on every declaration, which is what keeps
+          wiring a server down to a handful of readable lines.
+        methods:
+          - doc: |-
+              Start binds every group's listeners and begins accepting.
+
+              It returns once every listener is bound, so a caller that gets a nil error
+              knows the ports are open — which is what makes a test able to dial
+              immediately, and a supervisor able to report readiness honestly.
+            in:
               - name: ctx
                 type: context.Context
             name: Start
             out:
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Serve starts the server and blocks until ctx is cancelled, then drains.
+
+              It is the one-call entry point: a caller that has nothing else to do on the
+              main goroutine writes Serve and gets startup, blocking and graceful shutdown
+              without assembling them.
+            in:
               - name: ctx
                 type: context.Context
             name: Serve
             out:
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Shutdown stops accepting and waits for in-flight connections to finish,
+              severing what remains once ctx expires.
+            in:
               - name: ctx
                 type: context.Context
             name: Shutdown
             out:
               - type: error
             recv: pointer
-          - name: Close
+          - doc: |-
+              Close releases every listener and severs every live connection immediately,
+              without draining.
+            name: Close
             out:
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Group declares a listener group and returns it for handler attachment.
+
+              It returns the group rather than (group, error) on purpose: a declaration
+              error is recorded and surfaced by Start, so the common path stays a single
+              chained expression instead of an error check per line.
+            in:
               - name: name
                 type: string
               - name: opts
@@ -1523,7 +2516,11 @@ packages:
               - type: "*StreamGroup"
             recv: pointer
             variadic: true
-          - in:
+          - doc: |-
+              PacketGroup declares a datagram listener group and returns it for handler
+              attachment. It mirrors Group deliberately: the point of the domain is that a
+              UDP service is declared the same way a TCP one is.
+            in:
               - name: name
                 type: string
               - name: opts
@@ -1533,40 +2530,60 @@ packages:
               - type: "*PacketGroup"
             recv: pointer
             variadic: true
-          - name: State
+          - doc: State returns a snapshot of the server's lifecycle and listeners.
+            name: State
             out:
               - type: corenet.StateValue
             recv: pointer
         name: Server
         struct:
           unexported: true
-      - methods:
-          - name: Name
+      - doc: |-
+          StreamGroup is a set of listeners sharing one handler, one middleware chain
+          and one policy. Grouping exists so a server can expose the same handler on a
+          TCP port and a Unix socket — or two ports with different TLS identities —
+          without the caller assembling the wiring twice.
+        methods:
+          - doc: Name returns the group's name.
+            name: Name
             out:
               - type: string
             recv: pointer
-          - in:
+          - doc: Handle sets the group's handler, replacing any previous one.
+            in:
               - name: h
                 type: corenet.ConnHandler
             name: Handle
             out:
               - type: "*StreamGroup"
             recv: pointer
-          - in:
+          - doc: |-
+              HandleFunc sets the group's handler from a plain function. It exists because
+              the overwhelmingly common case is one function, and making that case require
+              a named type would be the papercut that decides whether the API feels light.
+            in:
               - name: f
                 type: corenet.ConnHandlerFunc
             name: HandleFunc
             out:
               - type: "*StreamGroup"
             recv: pointer
-          - in:
+          - doc: |-
+              HandleHTTP serves an http.Handler over this group's listeners.
+
+              The group keeps its own limits, TLS identity and drain; net/http only does
+              the protocol. That split is ADR 0029 D3: reimplementing HTTP would mean
+              owning request smuggling defences, HTTP/2 flow control and HPACK to lose,
+              not gain, throughput.
+            in:
               - name: h
                 type: http.Handler
             name: HandleHTTP
             out:
               - type: "*StreamGroup"
             recv: pointer
-          - in:
+          - doc: Use appends middlewares, outermost first.
+            in:
               - name: middlewares
                 type: corenet.Middleware[corenet.ConnHandler]
             name: Use
@@ -1578,14 +2595,50 @@ packages:
         struct:
           unexported: true
   - constants:
-      - name: DefaultKeepAlive
+      - doc: |-
+          DefaultKeepAlive is the comment cadence a stream uses when the caller sets
+          none. It sits under the idle timeout of every proxy worth naming — nginx and
+          most cloud load balancers default to 60 s, some CDNs to 30 — so a stream that
+          has nothing to say still proves it is alive before anything cuts it.
+        name: DefaultKeepAlive
         type: time.Duration
         value: "15000000000"
-      - name: DefaultWriteTimeout
+      - doc: |-
+          DefaultWriteTimeout bounds ONE frame's write. It is not a budget for the
+          stream, which by nature has none; it is what stops a peer that has stopped
+          reading from pinning a goroutine and a socket buffer forever.
+        name: DefaultWriteTimeout
         type: time.Duration
         value: "10000000000"
+    doc: |-
+      Package sse — an event's wire form, as the WHATWG HTML standard's
+      Server-Sent Events format spells it: the encoder that turns a
+      corenet.SSEEventValue into the bytes a stream writes, and a comment into the
+      one frame no client dispatches.
+
+      The value and the rules it must satisfy are the core's
+      (corenet.SSEEventValue.Validate); writing it is a mechanism, and it moved
+      here from internal/core/net (ADR 0160 §4).
+
+      Package sse — the stream's functional options and their defaults.
+
+      Package sse is the server side of Server-Sent Events (ADR 0029): a
+      unidirectional server→client stream over an ordinary HTTP response, carrying
+      text/event-stream frames until either end decides it is over.
+
+      It is written against net/http's own interfaces, not against this SDK's
+      listener engine, so it works on any http.Handler. Mounted on the SDK engine
+      it additionally observes the server's drain signal, which is what stops an
+      endless stream from holding a graceful shutdown open for its whole budget.
     functions:
-      - in:
+      - doc: |-
+          AppendEvent appends e's wire form to dst and returns the extended slice.
+
+          It appends nothing when the frame is invalid: the whole frame is validated
+          first (corenet.SSEEventValue.Validate), so a stream never emits a partial
+          one. Appending rather than returning a fresh slice is what lets a stream
+          reuse one buffer for its whole life.
+        in:
           - name: dst
             type: "[]byte"
           - name: e
@@ -1596,7 +2649,14 @@ packages:
             type: "[]byte"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          AppendComment appends a comment frame — a line beginning with ':' that
+          every client ignores — to dst.
+
+          It exists for keep-alive: an idle event stream is indistinguishable from a
+          dead one to a proxy counting idle seconds, and a comment is the only traffic
+          the format offers that cannot be mistaken for an event.
+        in:
           - name: dst
             type: "[]byte"
           - name: text
@@ -1607,28 +2667,70 @@ packages:
             type: "[]byte"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          KeepAlive sets the interval between keep-alive comments.
+
+          Zero does NOT mean "never" (ADR 0031): a stream with keep-alive silently
+          disabled works perfectly on a developer's loopback and dies at one minute
+          behind a real proxy, which is the worst possible place to learn it. Zero is
+          clamped to DefaultKeepAlive; a negative interval is refused, because no value
+          the SDK invented for it would be defensible. To disable it, say so with
+          [WithoutKeepAlive].
+        in:
           - name: d
             type: time.Duration
         name: KeepAlive
         out:
           - type: Option
-      - name: WithoutKeepAlive
+      - doc: |-
+          WithoutKeepAlive disables the keep-alive comment entirely.
+
+          It exists so that "never" is something a caller writes on purpose rather than
+          something a zero value does to them. Reach for it when the stream already
+          carries traffic more often than any intermediary's idle timeout, or when
+          there is no intermediary at all.
+        name: WithoutKeepAlive
         out:
           - type: Option
-      - in:
+      - doc: |-
+          WriteTimeout bounds how long one frame's write may take.
+
+          It is deliberately per-frame. A group's WriteTimeout is an absolute deadline
+          for the whole response, which for an endless stream means the stream is cut
+          at that instant; the stream therefore replaces it with this bound, refreshed
+          on every frame. Zero is clamped to DefaultWriteTimeout, negative is refused.
+        in:
           - name: d
             type: time.Duration
         name: WriteTimeout
         out:
           - type: Option
-      - in:
+      - doc: |-
+          Retry sets the reconnection delay the stream advertises in its opening frame.
+
+          It is the server's one chance to control how hard clients come back: a fleet
+          that all reconnect on the browser default of about three seconds is a
+          thundering herd aimed at a server that has just restarted. Zero sends no
+          retry field and leaves the client on its own default.
+        in:
           - name: d
             type: time.Duration
         name: Retry
         out:
           - type: Option
-      - in:
+      - doc: |-
+          New starts an event stream on w and returns it.
+
+          It writes the response headers and flushes them immediately, so the client's
+          EventSource opens at once rather than at the first event — which on a stream
+          whose first event may be minutes away is the difference between working and
+          appearing hung.
+
+          It fails when the response cannot be flushed. That is checked before anything
+          is written, because a stream that cannot flush is not a slow stream: every
+          frame sits in the transport buffer until the handler returns, and a handler
+          that never returns delivers nothing at all.
+        in:
           - name: w
             type: http.ResponseWriter
           - name: r
@@ -1647,32 +2749,78 @@ packages:
       http: net/http
     path: github.com/kitsunium/sdk/internal/service/net/sse
     types:
-      - name: Option
+      - doc: Option configures a Stream.
+        name: Option
         underlying: func(*config)
-      - methods:
-          - name: LastEventID
+      - doc: |-
+          Stream is one open event stream: an HTTP response held open, written one
+          frame at a time and flushed after each.
+
+          It is safe for concurrent use. That is not decoration — the keep-alive runs
+          on its own goroutine and shares the response writer with the handler, and a
+          handler that fans events in from several producers is the normal shape.
+        methods:
+          - doc: |-
+              LastEventID returns the id the client says it last processed, or "" for a
+              fresh connection.
+
+              The SDK does NOT replay from it, and the shape of the problem is why. A
+              replay buffer held by the stream would be useless by construction: a
+              reconnect is a NEW connection and therefore a new stream, so its buffer is
+              always empty at exactly the moment a resume needs it. A buffer that outlived
+              the stream would be an application store — it has to know how many events to
+              keep, how long they stay valid, and whether replaying them is even safe,
+              which is a question about the events' meaning and not about the transport.
+              The honest thing is to hand the cursor to the handler and let it resume from
+              its own log.
+            name: LastEventID
             out:
               - type: string
             recv: pointer
-          - name: Done
+          - doc: |-
+              Done returns the channel closed when the stream has ended: the client
+              disconnected, the server began draining, or Close was called.
+
+              A streaming handler selects on it. Send refuses once it is closed as well, so
+              a handler that only ever calls Send in a loop still terminates — but a
+              handler that watches this can stop between events instead of discovering it
+              on the next one.
+            name: Done
             out:
               - type: <-chan struct{}
             recv: pointer
-          - in:
+          - doc: |-
+              Send writes one event and flushes it.
+
+              The frame is validated before anything is written, so an unrepresentable
+              event cannot leave half of itself on a stream the peer is already parsing.
+            in:
               - name: event
                 type: corenet.SSEEventValue
             name: Send
             out:
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Comment writes a comment frame — ignored by every client — and flushes it.
+
+              It is what keep-alive is made of, and it is exported because a caller
+              sometimes needs to prove liveness at a moment of its own choosing: right
+              after the headers, or after a long computation it knows took too long.
+            in:
               - name: text
                 type: string
             name: Comment
             out:
               - type: error
             recv: pointer
-          - name: Close
+          - doc: |-
+              Close ends the stream and joins its goroutines.
+
+              A handler should defer it. Returning from the handler also ends the stream —
+              net/http cancels the request context — but Close makes the moment explicit
+              and joins the keep-alive rather than leaving it to notice.
+            name: Close
             out:
               - type: error
             recv: pointer
@@ -1680,20 +2828,75 @@ packages:
         struct:
           unexported: true
   - constants:
-      - name: DefaultContentSecurityPolicy
+      - doc: |-
+          DefaultContentSecurityPolicy is the policy sent when Config names none: the
+          page's own origin for everything it loads, no base URL or form target
+          elsewhere, and no framing by another page.
+        name: DefaultContentSecurityPolicy
         type: string
         value: "\"default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'\""
-      - name: DefaultReferrerPolicy
+      - doc: |-
+          DefaultReferrerPolicy is the Referrer-Policy sent when Config names none: a
+          full referrer to this origin, none at all to another.
+        name: DefaultReferrerPolicy
         type: string
         value: "\"same-origin\""
-      - name: ImmutableCacheControl
+      - doc: |-
+          ImmutableCacheControl is the Cache-Control of a file Config.Immutable marks
+          content-hashed: stored for a year, shared caches included, and never
+          revalidated — a new version has a new name.
+        name: ImmutableCacheControl
         type: string
         value: "\"public, max-age=31536000, immutable\""
-      - name: RevalidateCacheControl
+      - doc: |-
+          RevalidateCacheControl is the Cache-Control of every other response: stored,
+          but revalidated before each use, so a redeployed page is never served stale.
+        name: RevalidateCacheControl
         type: string
         value: "\"no-cache\""
+    doc: |-
+      Package static — what NewHandler refuses in a Config.
+
+      Package static — opening a name of the tree, and telling a name that names
+      nothing from a tree that failed.
+
+      Package static — the lookup failures a Unix kernel reports for a name.
+
+      Package static — the lookup failures Windows reports for a name.
+
+      Package static — one file's response: its caching, its type, its body.
+
+      Package static serves a tree of files from an io/fs.FS over HTTP — what
+      http.FileServerFS does, and what it does not (ADR 0130).
+
+      A request path is cleaned from the root before anything is looked up, so a
+      ".." never climbs above the tree, whatever the file system does with names.
+      A directory is never listed: it is served by its index.html, or it is 404.
+      An optional single-page-application fallback serves the root's index.html
+      for a path with no extension that names nothing, so client-side routes
+      survive a reload while a missing script is still a 404 and never a page of
+      HTML. Every response — a file, a redirect, a 404, a 405, a 500 — carries a
+      Content-Security-Policy, X-Content-Type-Options: nosniff and a
+      Referrer-Policy. A file the caller marks content-hashed is cached for a year
+      and never revalidated; everything else is revalidated before each use.
+
+      Only GET and HEAD are answered, and HEAD answers exactly what GET would,
+      without the body. Every status goes through the ResponseWriter the handler
+      was given, so a wrapping handler that records the status sees every 5xx: a
+      file the tree holds but cannot open, stat or seek.
     functions:
-      - in:
+      - doc: |-
+          NewHandler returns a Handler serving fsys as cfg says. It refuses, with the core
+          net sentinel STATIC_MISCONFIGURED and an "option" field naming what, a nil
+          fsys, a header value holding a control character, and a Referrer-Policy that
+          is not a list of known tokens. It reads nothing from fsys: a tree that
+          appears after the handler is built is served once it is there.
+
+          To serve a sub-directory — the "dist" of an embed.FS — hand NewHandler the result
+          of fs.Sub. The handler confines request NAMES to the tree it is given; what
+          the tree's own entries point at is the file system's business, so serve an
+          os.Root's FS rather than os.DirFS where a link could lead out of it.
+        in:
           - name: fsys
             type: fs.FS
           - name: cfg
@@ -1707,19 +2910,51 @@ packages:
       http: net/http
     path: github.com/kitsunium/sdk/internal/service/net/static
     types:
-      - name: Config
+      - doc: |-
+          Config says how a tree is served. Its zero value is a working, strict
+          configuration: the default policies, no fallback, nothing cached for good.
+        name: Config
         struct:
           fields:
-            - name: ContentSecurityPolicy
+            - doc: |-
+                ContentSecurityPolicy is sent on every response. Empty sends
+                DefaultContentSecurityPolicy; there is no way to send none. A value
+                holding a control character is refused at construction.
+              name: ContentSecurityPolicy
               type: string
-            - name: ReferrerPolicy
+            - doc: |-
+                ReferrerPolicy is sent on every response: one of the eight tokens the
+                Referrer Policy specification defines, or a comma-separated list of
+                them. Empty sends DefaultReferrerPolicy. Any other value is refused at
+                construction, because a browser ignores a token it does not know and falls back
+                to its own default, which sends the origin to every site.
+              name: ReferrerPolicy
               type: string
-            - name: SinglePageApp
+            - doc: |-
+                SinglePageApp serves the root's index.html, with 200, for a path that
+                has no extension and names nothing in the tree. A path with an
+                extension that names nothing stays a 404, and so does a directory with
+                no index.html.
+              name: SinglePageApp
               type: bool
-            - name: Immutable
+            - doc: |-
+                Immutable reports whether the file at name — slash-separated, relative
+                to the root, as served: "assets/app-3f2a9c.js" — is content-hashed, so
+                its response may be cached with ImmutableCacheControl. For a fallback it
+                is asked about "index.html", the file actually served. Nil marks
+                nothing.
+              name: Immutable
               type: func(name string) bool
-      - methods:
-          - in:
+      - doc: |-
+          Handler serves one file tree. It is safe for concurrent use.
+
+          The zero Handler has no tree and answers every request 500, with the
+          default headers. Build one with NewHandler.
+        methods:
+          - doc: |-
+              ServeHTTP answers one request: the security headers first, then the method,
+              then the name.
+            in:
               - name: w
                 type: http.ResponseWriter
               - name: r
@@ -1729,8 +2964,21 @@ packages:
         name: Handler
         struct:
           unexported: true
-  - functions:
-      - in:
+  - doc: |-
+      Package tlsid loads TLS and mutual-TLS material into the opaque, redacting
+      identity declared by internal/core/net (ADR 0029). It is the service half of
+      the domain's TLS surface: this package does the filesystem I/O and nothing
+      else, delegating every validation decision to core so that in-memory and
+      on-disk material are held to exactly the same standard.
+    functions:
+      - doc: |-
+          Load reads the named TLS material and returns the validated identity.
+
+          A missing or unreadable file is TLSMaterialInvalid naming the offending
+          field, never a silently skipped one: a trust bundle that fails to load must
+          not degrade into "trust the platform", and a client keypair that fails to
+          load must not degrade into an anonymous connection.
+        in:
           - name: p
             type: corenet.IdentityFileParams
         name: Load
@@ -1743,32 +2991,105 @@ packages:
       corenet: github.com/kitsunium/sdk/internal/core/net
     path: github.com/kitsunium/sdk/internal/service/net/tlsid
   - constants:
-      - name: CloseCodeLen
+      - doc: |-
+          CloseCodeLen is the width of the status code that opens a Close frame's
+          payload. A Close payload is therefore either empty or at least this long —
+          one byte is not "a truncated code", it is a protocol error.
+        name: CloseCodeLen
         type: int
         value: "2"
-      - name: MaskLen
+      - doc: MaskLen is the width of the masking key a client prefixes to every frame.
+        name: MaskLen
         type: int
         value: "4"
-      - name: MinHeaderLen
+      - doc: |-
+          MinHeaderLen is the shortest possible frame header: flags/opcode and the
+          mask bit with a 7-bit length.
+        name: MinHeaderLen
         type: int
         value: "2"
-      - name: MaxHeaderLen
+      - doc: |-
+          MaxHeaderLen is the longest possible frame header: the two fixed bytes, a
+          64-bit extended length, and a masking key.
+        name: MaxHeaderLen
         type: int
         value: "14"
-      - name: DefaultPingInterval
+      - doc: |-
+          DefaultPingInterval is how often an idle connection proves the peer is still
+          there. It sits under the idle timeout of every proxy worth naming (nginx and
+          most cloud load balancers default to 60 s), so a connection that has nothing
+          to say still survives the intermediaries between it and its peer.
+        name: DefaultPingInterval
         type: time.Duration
         value: "30000000000"
-      - name: DefaultWriteTimeout
+      - doc: |-
+          DefaultWriteTimeout bounds ONE frame's write. A connection has no total write
+          budget by nature; this is what stops a peer that has stopped reading from
+          pinning a goroutine and a socket buffer forever.
+        name: DefaultWriteTimeout
         type: time.Duration
         value: "10000000000"
-      - name: DefaultMaxMessageSize
+      - doc: |-
+          DefaultMaxMessageSize is the ceiling on one reassembled message. It exists
+          because a message's size is chosen by the PEER, one 64-bit field at a time,
+          and fragmentation lets that peer keep choosing until the process dies.
+        name: DefaultMaxMessageSize
         type: int64
         value: 1 << 20
-      - name: DefaultMaxFrameSize
+      - doc: |-
+          DefaultMaxFrameSize is the ceiling on a single frame's announced payload. It
+          is checked before any buffer is sized, which is the whole point: the number
+          being checked is the number the attacker wrote.
+        name: DefaultMaxFrameSize
         type: int64
         value: 1 << 20
+    doc: |-
+      Package websocket — the closing handshake's payload (RFC 6455 §5.5.1): a
+      two-byte status code and an optional UTF-8 reason, written and read here.
+      The close code and the predicates that govern it — Sendable, Echoable — are
+      the domain's (corenet.WSCloseCode); this is their wire form (ADR 0160 §4).
+
+      Package websocket — the frame header and its wire form (RFC 6455 §5).
+
+      Reading and writing frames is this package's mechanism, not the domain's
+      contract (ADR 0160 §4): it moved here from internal/core/net, which keeps
+      what a second implementation would share — the opcode, the close code, the
+      message and the control-frame ceiling (corenet.WSMaxControlPayload).
+
+      Package websocket — the RFC 6455 §4.2 opening handshake.
+
+      Package websocket — the opening handshake's key exchange (RFC 6455 §4.1,
+      §4.2.2): the check that a Sec-WebSocket-Key is a nonce, and the digest that
+      answers it. The protocol's constants — the GUID, the version, the header
+      names — are the domain's (corenet.WSGUID and its neighbours).
+
+      Package websocket — the connection's functional options and their defaults.
+
+      Package websocket — the UTF-8 rule a text message must satisfy (RFC 6455
+      §8.1), checked on the bytes as they come off and go onto the wire. The
+      message itself is the domain's value (corenet.WSMessageValue).
+
+      Package websocket is the server side of RFC 6455: an HTTP request upgraded
+      into a bidirectional, message-oriented connection over the same socket.
+
+      It is written against net/http's own interfaces, not against this SDK's
+      listener engine, so it works inside any http.Handler. Mounted on the SDK
+      engine it additionally observes the server's drain signal, which is what
+      stops a connection that by design never ends from being severed under its
+      handler on every deployment.
+
+      permessage-deflate and every other extension are deliberately NOT negotiated;
+      the reserved frame bits an extension would use are refused as protocol
+      errors. See the package CLAUDE.md.
     functions:
-      - in:
+      - doc: |-
+          AppendClosePayload appends a Close frame's payload — a two-byte status code
+          followed by an optional UTF-8 reason — to dst.
+
+          It refuses a code that must not appear on the wire and a reason that would
+          push the control frame past its 125-byte ceiling. Both refusals happen before
+          anything is appended.
+        in:
           - name: dst
             type: "[]byte"
           - name: code
@@ -1781,7 +3102,15 @@ packages:
             type: "[]byte"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          ParseClosePayload reads a received Close frame's payload.
+
+          An empty payload is legal and reports corenet.WSCloseNoStatus — the value
+          that exists to describe exactly this, and that must never be sent. A
+          ONE-byte payload is not a truncated code to be salvaged: it is a protocol
+          error, and treating it as anything else would let a peer choose which half
+          of the code this endpoint reads.
+        in:
           - name: b
             type: "[]byte"
         name: ParseClosePayload
@@ -1792,13 +3121,29 @@ packages:
             type: string
           - name: err
             type: error
-      - in:
+      - doc: |-
+          FrameHeaderLen returns the full header length announced by the first two
+          bytes of a frame, or 0 when fewer than two bytes are available.
+
+          It exists so a reader can take exactly two bytes, learn how many more the
+          header needs, and take exactly those — never speculating past the header into
+          a payload it has not yet bounded.
+        in:
           - name: b
             type: "[]byte"
         name: FrameHeaderLen
         out:
           - type: int
-      - in:
+      - doc: |-
+          ParseFrameHeader parses a COMPLETE frame header and enforces every rule
+          RFC 6455 states about it that does not depend on which side sent it.
+
+          The masking requirement is deliberately NOT here: it is the one rule whose
+          answer depends on the direction of travel, so it lives in
+          [FrameHeaderValue.ValidateFromClient] where the direction is named. Every
+          other rule — reserved bits, reserved opcodes, control-frame shape, minimal
+          length encoding — is absolute and is checked here, once.
+        in:
           - name: b
             type: "[]byte"
         name: ParseFrameHeader
@@ -1807,13 +3152,51 @@ packages:
             type: FrameHeaderValue
           - name: err
             type: error
-      - in:
+      - doc: |-
+          ApplyMask XORs payload in place with the frame's masking key.
+
+          The transform is its own inverse, so the same call unmasks what it masked.
+          It is done in place because the payload has already been read into the
+          buffer that will be handed to the application: copying it out to unmask would
+          double the cost of every frame for no gain.
+
+          It runs over EVERY inbound byte and there is no way to opt out — RFC 6455
+          §5.1 requires every client-to-server frame to be masked — so it moves a
+          machine word at a time rather than a byte at a time. A CPU profile of a 4 KiB
+          receive attributed 89 % of the whole path to the byte-at-a-time form; the
+          word form is measured at sixteen times its throughput at that size, and the
+          compiler renders each word as one memory-destination XOR with no vector
+          instruction, no assembly and no unsafe.pointer anywhere.
+
+          # Why the byte order cancels
+
+          [binary.LittleEndian] is used for BOTH the payload word and the key word, and
+          that is the entire endianness argument. A fixed-order decode E is a bijection
+          between eight bytes and a uint64 under which XOR is bytewise —
+          E(a)^E(b) = E(a XOR b), because each byte occupies its own bit field — so
+          decoding, XORing and re-encoding with ONE order reproduces the byte-for-byte
+          XOR on every machine, big-endian included. What is unsafe is not the choice
+          of order but MIXING two, or reinterpreting the slice as words directly, which
+          is native-order and would silently disagree with a little-endian key on a
+          big-endian host. Neither appears here, and neither can be added without
+          changing the one order this function names.
+        in:
           - name: payload
             type: "[]byte"
           - name: key
             type: "[MaskLen]byte"
         name: ApplyMask
-      - in:
+      - doc: |-
+          AppendFrame appends one server frame to dst and returns the extended slice.
+
+          The frame is never masked, because RFC 6455 §5.1 forbids a server from
+          masking and a client that receives a masked frame fails the connection. That
+          is expressed by the absence of a parameter rather than by a documented
+          default: there is no argument a caller could pass to get it wrong.
+
+          Appending rather than allocating is what lets a connection reuse one buffer
+          for its whole life.
+        in:
           - name: dst
             type: "[]byte"
           - name: op
@@ -1828,7 +3211,17 @@ packages:
             type: "[]byte"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          Upgrade completes the RFC 6455 opening handshake and returns the connection.
+
+          On failure it has already written an HTTP response — a 426 carrying the
+          version this server speaks, a 400, a 403 or a 405 as the fault requires — so
+          the handler has nothing left to answer and should simply return.
+
+          The socket is taken over from net/http, which means it is no longer the HTTP
+          server's to close, nor this SDK's listener engine's. Both are told, and the
+          connection is the handler's until it closes it.
+        in:
           - name: w
             type: http.ResponseWriter
           - name: r
@@ -1842,69 +3235,191 @@ packages:
           - name: err
             type: error
         variadic: true
-      - in:
+      - doc: |-
+          AcceptKey computes the Sec-WebSocket-Accept value for a client's
+          Sec-WebSocket-Key (RFC 6455 §4.2.2 step 5).
+
+          The digest is SHA-1 by the RFC's own instruction. It is not a security
+          primitive here and is not used as one: its job is to prove the server parsed
+          the handshake rather than replaying it, so that a cache holding a stale 101
+          cannot be mistaken for a live upgrade.
+        in:
           - name: key
             type: string
         name: AcceptKey
         out:
           - type: string
-      - in:
+      - doc: |-
+          ValidateKey reports whether a Sec-WebSocket-Key is what RFC 6455 §4.1 says
+          it is: base64 of exactly sixteen bytes.
+
+          It is checked rather than merely echoed through the digest because a key of
+          the wrong length is a request that was not produced by a WebSocket client at
+          all — most often a scanner, sometimes a proxy replaying a fragment — and
+          answering it with a 101 hands a socket to something that will never speak the
+          protocol.
+        in:
           - name: key
             type: string
         name: ValidateKey
         out:
           - type: error
-      - in:
+      - doc: |-
+          Subprotocols declares the subprotocols this server speaks, most preferred
+          first.
+
+          The SERVER's order decides, not the client's: the client advertises what it
+          can do, and choosing among those is the server's call — a client that listed
+          a deprecated dialect first should not be able to pin the server to it.
+
+          When the client offers none this server can speak, the upgrade still
+          succeeds with no Sec-WebSocket-Protocol header, which RFC 6455 §4.2.2 names
+          as the way to say "none agreed". Failing the handshake instead would be a
+          stricter rule than the protocol has, and it would break every client that
+          advertises an optional dialect.
+
+          Each name must be an RFC 7230 token, which is what RFC 6455 §4.1 requires
+          of a subprotocol: the chosen one is written verbatim into the response, so a
+          name carrying a space, a comma or a quote would put a malformed handshake on
+          the wire — it is refused at Upgrade instead. The list is copied here, so a
+          caller reusing the slice it passed cannot change later handshakes, or race
+          with the ones in flight.
+        in:
           - name: names
             type: string
         name: Subprotocols
         out:
           - type: Option
         variadic: true
-      - in:
+      - doc: |-
+          MaxMessageSize bounds one reassembled message.
+
+          Zero is clamped to [DefaultMaxMessageSize] and a negative value is refused
+          (ADR 0031). There is deliberately no way to spell "unbounded": the length is
+          announced by the peer in a 64-bit field, and fragmentation lets it keep
+          announcing more, so an unbounded ceiling is not a configuration choice — it
+          is a remote memory allocator.
+        in:
           - name: "n"
             type: int64
         name: MaxMessageSize
         out:
           - type: Option
-      - in:
+      - doc: |-
+          MaxFrameSize bounds one frame's ANNOUNCED payload length.
+
+          It is a separate bound from [MaxMessageSize] because it is enforced at a
+          different moment: the frame ceiling is checked against the header, before a
+          single payload byte is read or a single byte allocated, whereas the message
+          ceiling is checked as fragments accumulate. A connection that only had the
+          second would have to allocate the first frame to discover it was too big.
+        in:
           - name: "n"
             type: int64
         name: MaxFrameSize
         out:
           - type: Option
-      - in:
+      - doc: |-
+          PingInterval sets how often the connection pings an otherwise silent peer.
+
+          Zero does NOT mean "never" (ADR 0031). A connection with the heartbeat
+          silently disabled works perfectly on a developer's loopback and dies at one
+          minute behind a real proxy — and worse, it stops noticing a peer that has
+          vanished without closing, which is the normal way a mobile client leaves.
+          Zero is clamped to [DefaultPingInterval]; a negative interval is refused; to
+          disable it, say so with [WithoutPing].
+
+          Every interval the heartbeat sends a Ping, and one interval later it ends
+          the connection if the handler has READ no frame since. It counts frames
+          Receive has read, never frames that merely arrived, so it keeps a
+          connection open only while one goroutine loops on Receive — see [Conn].
+        in:
           - name: d
             type: time.Duration
         name: PingInterval
         out:
           - type: Option
-      - name: WithoutPing
+      - doc: |-
+          WithoutPing disables the heartbeat entirely.
+
+          It exists so that "never" is something a caller writes on purpose rather than
+          something a zero value does to them. It also disables the only liveness check
+          this connection has: without it, a peer that disappears without closing —
+          a laptop lid, a NAT rebinding — leaves a goroutine parked on a read that will
+          never return until something else closes the socket.
+        name: WithoutPing
         out:
           - type: Option
-      - in:
+      - doc: |-
+          WriteTimeout bounds how long one frame's write may take.
+
+          It is per-frame on purpose. A group's WriteTimeout is an absolute deadline
+          for the whole HTTP response, which for a connection that outlives the
+          response entirely would cut it at that instant; the upgrade therefore clears
+          the inherited deadline and replaces it with this bound, refreshed per frame.
+          Zero is clamped to [DefaultWriteTimeout], negative is refused.
+        in:
           - name: d
             type: time.Duration
         name: WriteTimeout
         out:
           - type: Option
-      - in:
+      - doc: |-
+          AllowOrigins replaces the default same-origin rule with an exact allowlist.
+
+          The comparison is on the whole Origin header, case-insensitively — scheme,
+          host and port together. Comparing only the host would accept
+          http://app.example.com for an https server, which is precisely the downgrade
+          an origin check exists to notice. Behind a proxy that terminates TLS this is
+          the only way to have the scheme checked at all: the request arrives in
+          plaintext there, so the default rule cannot see which scheme the browser
+          used (see sameOrigin).
+
+          The list is copied here, for the same reason Subprotocols copies its own.
+        in:
           - name: origins
             type: string
         name: AllowOrigins
         out:
           - type: Option
         variadic: true
-      - name: AllowAnyOrigin
+      - doc: |-
+          AllowAnyOrigin disables the origin check.
+
+          It has to be written out because the browser's same-origin policy does NOT
+          apply to WebSocket: a page on any site can open a connection to this server
+          and the browser will attach the user's cookies to the handshake. An upgrader
+          that accepted every origin by default would be a cross-site request forgery
+          primitive with a default-on switch, so the switch is default-off and named.
+
+          Reach for it when authentication does not ride on ambient credentials — a
+          bearer token in the subprotocol, a signed ticket in the query — which is
+          exactly the case where the origin proves nothing anyway.
+        name: AllowAnyOrigin
         out:
           - type: Option
-      - in:
+      - doc: |-
+          ValidateText reports whether a payload can travel as a text frame.
+
+          Validation is performed on the REASSEMBLED message rather than per frame, and
+          that is a correctness requirement rather than an optimisation: a multi-byte
+          sequence may straddle a fragment boundary, so a per-frame check would reject
+          perfectly valid messages whose only fault is where the sender chose to split
+          them.
+        in:
           - name: b
             type: "[]byte"
         name: ValidateText
         out:
           - type: error
-      - in:
+      - doc: |-
+          NewConn assembles the connection and starts the goroutines it owns.
+
+          It is exported only because the struct-constructor lint requires a
+          New-prefixed constructor beside every exported struct; it takes an unexported
+          option set, so nothing outside this package can call it. [Upgrade] is the
+          real entry point, and the public façade re-exports only that.
+        in:
           - name: socket
             type: stdnet.Conn
           - name: buffered
@@ -1924,84 +3439,213 @@ packages:
       stdnet: net
     path: github.com/kitsunium/sdk/internal/service/net/websocket
     types:
-      - methods:
-          - name: ValidateFromClient
+      - doc: |-
+          FrameHeaderValue is one parsed frame header (RFC 6455 §5.2).
+
+          The RSV bits are absent on purpose. They only mean anything once an extension
+          has been negotiated, this domain negotiates none, and a set RSV bit is
+          therefore a protocol error rather than a value to carry — see
+          ParseFrameHeader.
+        methods:
+          - doc: |-
+              ValidateFromClient enforces the one framing rule whose answer depends on the
+              direction of travel: RFC 6455 §5.1 requires every client-to-server frame to
+              be masked.
+
+              An unmasked client frame FAILS THE CONNECTION. That is not pedantry about a
+              key that protects nothing cryptographically: masking exists so a hostile
+              script cannot steer a browser into emitting bytes that a transparent
+              intermediary would read as a second, attacker-chosen HTTP request. An
+              endpoint that accepted unmasked frames would let that script skip the one
+              mechanism the design has against cache poisoning.
+            name: ValidateFromClient
             out:
               - type: error
             recv: value
         name: FrameHeaderValue
         struct:
           fields:
-            - name: Final
+            - doc: "Final is the FIN bit: this frame completes the message."
+              name: Final
               tag: json:"final"
               type: bool
-            - name: OpCode
+            - doc: OpCode is the frame type.
+              name: OpCode
               tag: json:"opcode"
               type: corenet.WSOpCode
-            - name: Masked
+            - doc: |-
+                Masked is the MASK bit. RFC 6455 §5.1 requires it on every client frame
+                and forbids it on every server frame.
+              name: Masked
               tag: json:"masked"
               type: bool
-            - name: MaskKey
+            - doc: MaskKey is the four-byte key, meaningful only when Masked.
+              name: MaskKey
               tag: json:"mask_key"
               type: "[MaskLen]byte"
-            - name: Length
+            - doc: |-
+                Length is the payload length the frame announces. It is what the peer
+                SAYS, not what it has sent — every bound must be checked against it
+                BEFORE any buffer is sized from it.
+              name: Length
               tag: json:"length"
               type: uint64
-      - name: Option
+      - doc: Option configures a Conn.
+        name: Option
         underlying: func(*config)
-      - methods:
-          - name: Subprotocol
+      - doc: |-
+          Conn is one upgraded WebSocket connection.
+
+          Every connection needs exactly ONE goroutine looping on [Conn.Receive] for
+          its whole life — not two, and not zero — and that includes a connection the
+          handler only ever writes to.
+
+          Not two, because the protocol is a single ordered frame stream: two
+          concurrent readers would each take half of a message.
+
+          Not zero, because that loop is more than the way messages arrive. It is
+          where the peer's Ping is answered (RFC 6455 §5.5.2), where its Close is
+          replied to (§5.5.1), and the only place the heartbeat can see that the peer
+          is alive: the heartbeat counts frames the handler has READ, so a Pong the
+          peer sent on time but nobody read is, to it, silence. A handler that only
+          pushes therefore runs the loop in a goroutine of its own and discards what
+          it reads. Without one, the heartbeat ends the connection within two ping
+          intervals — about a minute at [DefaultPingInterval] — however healthy the
+          peer is. Nothing here starts that reader for you: it would have to own the
+          buffer Receive hands out, and owning it is what makes a steady-state read
+          free.
+
+          Writes are safe for concurrent use — the heartbeat writes from its own
+          goroutine while the handler writes from another, and a handler fanning
+          messages in from several producers is the normal shape.
+        methods:
+          - doc: |-
+              Subprotocol returns the subprotocol the handshake agreed on, or "" when none
+              was.
+            name: Subprotocol
             out:
               - type: string
             recv: pointer
-          - name: Done
+          - doc: |-
+              Done returns the channel closed when the connection has ended: the peer sent
+              Close, the socket died, the heartbeat found the peer silent, the server began
+              draining, or the handler closed it.
+
+              Done is for the goroutines that are NOT reading. The one goroutine every
+              connection needs looping on Receive (see [Conn]) learns of the end from
+              Receive's terminal error at the same moment. A handler that pushes
+              application events selects on Done beside its event source, so it stops
+              between events rather than on the next failed Send.
+
+              Watching Done does not replace the reader. A connection nobody reads answers
+              no Ping, replies to no Close, and is ended by the heartbeat within two ping
+              intervals, however healthy the peer is.
+            name: Done
             out:
               - type: <-chan struct{}
             recv: pointer
-          - name: PeerCloseCode
+          - doc: |-
+              PeerCloseCode returns the status code the peer's Close frame carried.
+
+              It reports [corenet.WSCloseNoStatus] when the peer closed without one — the
+              code that exists to describe exactly that — and zero when no Close frame was
+              ever received, which is the case that matters most: it distinguishes a peer
+              that said goodbye from one that vanished.
+            name: PeerCloseCode
             out:
               - type: corenet.WSCloseCode
             recv: pointer
-          - name: Receive
+          - doc: |-
+              Receive reads the next complete message, answering control frames on the way.
+
+              It is called in a loop, by one goroutine, for the connection's whole life —
+              on a connection with nothing to read as much as on any other. Control
+              frames are served INSIDE this call: the Pong a Ping is owed, the Close a
+              Close is owed, and the count the heartbeat reads to decide the peer is
+              alive. Stop calling it and all three stop with it; see [Conn].
+
+              It returns a message only when one is whole: fragmentation is the sender's
+              private choice of chunk size, not a semantic boundary, so surfacing it would
+              put an implementation detail of the peer's writer into every consumer.
+
+              The returned Data aliases the connection's own reassembly buffer and is valid
+              until the next call to Receive. A handler that keeps a message past that must
+              copy it — the same rule the engine's Conn.Buffer() carries, for the same
+              reason: reusing one buffer is what makes a steady-state read allocate
+              nothing.
+            name: Receive
             out:
               - name: message
                 type: corenet.WSMessageValue
               - name: err
                 type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Send writes one message as a single frame and returns once it is on the wire.
+
+              The SDK never fragments what it sends. Fragmentation exists so a sender can
+              begin a message whose length it does not yet know; every message this API can
+              express is already in memory, so splitting it would add a failure mode
+              (a half-sent message when the socket dies mid-sequence) in exchange for
+              nothing.
+            in:
               - name: message
                 type: corenet.WSMessageValue
             name: Send
             out:
               - type: error
             recv: pointer
-          - in:
+          - doc: SendText writes one UTF-8 text message.
+            in:
               - name: text
                 type: string
             name: SendText
             out:
               - type: error
             recv: pointer
-          - in:
+          - doc: SendBinary writes one binary message.
+            in:
               - name: data
                 type: "[]byte"
             name: SendBinary
             out:
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Ping sends a Ping frame carrying payload.
+
+              It is exported because the automatic heartbeat answers "is the peer alive on
+              its own schedule"; a caller sometimes needs to ask at a moment of its own —
+              right after a long computation, or before committing to expensive work on the
+              peer's behalf. A payload past [corenet.WSMaxControlPayload] is refused: a
+              control frame must fit a buffer that is always available.
+            in:
               - name: payload
                 type: "[]byte"
             name: Ping
             out:
               - type: error
             recv: pointer
-          - name: Close
+          - doc: |-
+              Close ends the connection with a normal-closure status.
+
+              A handler should defer it. It returns nil even when the socket has already
+              gone: by the time a handler is closing, the peer having left first is the
+              expected ending, not a fault to report. Use [Conn.CloseWith] to say something
+              more specific.
+            name: Close
             out:
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              CloseWith ends the connection with a specific status code and reason.
+
+              It reports an error only when the CODE or the reason is unusable — a code the
+              RFC forbids on the wire, a reason that is not UTF-8 or does not fit a control
+              frame. Those are caller mistakes and must surface whatever the socket is
+              doing; a transport failure at this point is not, because there is nothing
+              left to do about it.
+            in:
               - name: code
                 type: corenet.WSCloseCode
               - name: reason
@@ -2013,7 +3657,66 @@ packages:
         name: Conn
         struct:
           unexported: true
-  - facade:
+  - doc: |-
+      Package client is the outbound half of the SDK's network domain (ADR 0029):
+      an HTTP client whose posture is enforced by the transport rather than by the
+      call site.
+
+      # Why the policy lives in the transport
+
+      A [Policy] is evaluated inside the http.RoundTripper, underneath every call
+      site. A caller cannot construct a request that skips it, because there is no
+      path to the network that does not pass through the transport. "This client is
+      read-only" therefore stops being a convention the next contributor has to
+      remember and becomes a property of the code — which is why [Client].HTTP can
+      safely hand the underlying *http.Client to a third-party SDK without
+      forfeiting the guarantee.
+
+      Every default is closed. A conjunction with no members refuses, a path
+      allowlist with no patterns refuses, and a client built with a nil policy is
+      refused outright. An allowlist that lost its contents — a renamed config key,
+      a slice never populated — must close, never quietly become a passthrough.
+
+      # Building a read-only client
+
+      	allow, err := client.AllowPaths(`/v1/(subscribers|supi/[^/]+|profiles(/[^/]+)?)`)
+      	deny, err := client.DenyPaths(`/v1/(authentication|policy|eir|oam).*`)
+      	policy := client.Policies(client.AllowMethods("GET"), deny, allow)
+
+      	c, err := client.New(client.Config{BaseURL: "https://sdm.core.svc:8000"},
+      		identity, policy, func(call client.CallInfo) {
+      			logger.Info(ctx, lg, "egress",
+      				logger.String("path", call.Path), logger.Int("status", call.Status))
+      		})
+
+      	resp, err := c.Get(ctx, "/v1/subscribers", url.Values{"profileId": {"P-tenant-a"}})
+
+      Patterns are supplied UNANCHORED and anchored by the constructor. Leaving
+      anchoring to the caller is exactly the omission that turns an allowlist into a
+      sieve, and it is invisible in review.
+
+      # What the response gives you
+
+      Get and Do return a fully-read [Response] rather than an *http.Response. A
+      returned *http.Response makes the caller responsible for closing the body and
+      bounding its size, and one forgotten Close leaks a connection. It also makes
+      an honest byte count impossible, since the size of a body is only known once
+      it has been read.
+
+      A non-2xx status returns BOTH the response and an error: a caller diagnosing
+      the failure needs the body, and a caller who never considered the status still
+      gets an error. A 204 with no body is a normal outcome, not a failure.
+
+      # What it deliberately does not do
+
+      It does not decode. Depending on the codec registry would link every codec
+      the SDK ships into every consumer that only wanted a guarded GET, so
+      decoding belongs above this layer.
+
+      It does not truncate an oversized body — it fails with [ResponseTooLarge]. A
+      silent truncation does not stay silent; it resurfaces several layers away as
+      an incomprehensible decode error on a body that looks complete.
+    facade:
       - alias:
           - doc: Client performs guarded outbound HTTP calls.
             name: Client
@@ -2163,7 +3866,114 @@ packages:
       svcclient: github.com/kitsunium/sdk/internal/service/net/client
       tlsid: github.com/kitsunium/sdk/pkg/v1/net/tlsid
     path: github.com/kitsunium/sdk/pkg/v1/net/client
-  - facade:
+  - doc: |-
+      Package server — the two group options only an HTTP group reads: the header
+      phase's own deadline and the header size cap.
+
+      Package server is the inbound half of the SDK's network domain (ADR 0029):
+      one unified listener engine for TCP, Unix, TLS and mutual TLS, serving
+      pluggable handlers grouped behind shared middlewares.
+
+      # The whole thing
+
+      	srv := server.New()
+      	srv.Group("echo", server.Listen("tcp", ":8080")).
+      		HandleFunc(func(ctx context.Context, c server.Conn) error {
+      			_, err := io.Copy(c, c)
+      			return err
+      		})
+      	err := srv.Serve(ctx)
+
+      That is the design target, not a simplified excerpt. [Conn] embeds net.Conn,
+      so a handler reads and writes a connection exactly as it would any socket and
+      every io helper keeps working — io.Copy, bufio, encoding wrappers. Everything
+      the domain adds is additive.
+
+      # Groups
+
+      A group is a set of listeners sharing one handler, one middleware chain and
+      one policy. It exists so the same handler can answer on a TCP port and a Unix
+      socket without wiring it twice:
+
+      	srv.Group("api",
+      		server.Listen("tcp", ":8443"),
+      		server.Listen("unix", "/run/api.sock"),
+      		server.TLS(identity),
+      		server.IdleTimeout(30*time.Second),
+      	).Use(mw).Handle(handler)
+
+      [Group] returns the group rather than a (group, error) pair on purpose: a
+      declaration mistake — a duplicate name, an unusable address, a missing
+      handler — is recorded and reported by [Server].Start. The declaration chain
+      stays readable, and nothing is swallowed.
+
+      # TLS and mutual TLS
+
+      One option covers both. A [github.com/kitsunium/sdk/pkg/v1/net/tlsid.Identity]
+      built with RequireClientCert turns the group's listeners into mutual-TLS
+      listeners; the same identity type serves the outbound client, so the two
+      cannot drift apart. The handshake runs on the connection's own goroutine, so
+      a slow or hostile peer cannot stall the accept path for everyone else.
+
+      # Lifecycle
+
+      [Server].Start returns once every listener is bound, so a nil error means the
+      ports are open. [Server].Serve starts, blocks until the context is cancelled,
+      then drains. [Server].Shutdown stops accepting and waits for in-flight work
+      within a budget, severing what remains when the budget expires — a shutdown
+      that never returns is worse than one that admits it gave up.
+
+      [Server].State reports the phase, the addresses actually bound, and whether
+      any listener fell back from a requested optimisation. A silent degradation is
+      indistinguishable from a working server, so it is surfaced rather than logged
+      once at startup.
+
+      An Accept that fails for any reason but its listener closing — the process
+      out of file descriptors, typically — is retried after a wait, never at once:
+      5 ms, doubling, held at one second, started over by the next accepted
+      connection, as net/http's own Serve does. Retrying at once would spin a core
+      per listener for as long as the condition lasts. A shutdown during a wait
+      ends it at once, and [State].AcceptBackoffs counts the waits, so a server
+      that cannot accept says so.
+
+      # Connections that never end
+
+      A drain waits for in-flight work to finish, which assumes it eventually does.
+      An event stream, a long poll, or anything built on a protocol upgrade breaks
+      that assumption: the request is in flight forever by design, so the drain
+      waits out its whole budget and then severs the socket under the handler.
+
+      [DrainSignal] is the way out. A handler holding a connection open selects on
+      it alongside its own work and returns when it closes, which turns a
+      budget-length DRAIN_TIMEOUT into a clean drain:
+
+      	select {
+      	case <-server.DrainSignal(r.Context()):
+      		return
+      	case ev := <-events:
+      		// …
+      	}
+
+      The request context is deliberately NOT cancelled to say this. Cancelling it
+      would tell every handler to abandon the response it is halfway through, which
+      is the opposite of what a graceful drain is for. The signal is additive: a
+      handler that ignores it behaves exactly as it did before.
+
+      [github.com/kitsunium/sdk/pkg/v1/net/sse] is the Server-Sent Events
+      implementation built on it, and watches the signal for you.
+
+      # Protocol upgrades
+
+      [github.com/kitsunium/sdk/pkg/v1/net/websocket] is WebSocket (RFC 6455),
+      server side. It hijacks the response, which means the socket stops being the
+      engine's: it is neither closed nor waited for by a drain — the same carve-out
+      http.Server.Shutdown documents for hijacked connections. The connection
+      watches [DrainSignal] and closes itself with a 1001 "going away" instead, so
+      a deployment ends it deliberately rather than by severing it.
+
+      The same is true of anything else a handler hijacks: once the socket is taken
+      over it is the handler's to close.
+    facade:
       - func:
           doc: |-
             ReadHeaderTimeout bounds the HEADER phase of an HTTP request on its own: the
@@ -2595,7 +4405,85 @@ packages:
       svcserver: github.com/kitsunium/sdk/internal/service/net/server
       tlsid: github.com/kitsunium/sdk/pkg/v1/net/tlsid
     path: github.com/kitsunium/sdk/pkg/v1/net/server
-  - facade:
+  - doc: |-
+      Package sse is the server side of Server-Sent Events: a unidirectional
+      server→client stream over an ordinary HTTP response.
+
+      # The whole thing
+
+      	func handler(w http.ResponseWriter, r *http.Request) {
+      		stream, err := sse.New(w, r)
+      		if err != nil {
+      			http.Error(w, "streaming unavailable", http.StatusInternalServerError)
+      			return
+      		}
+      		defer stream.Close()
+
+      		for {
+      			select {
+      			case <-stream.Done():
+      				return
+      			case ev := <-events:
+      				if err := stream.Send(sse.Event{ID: ev.Cursor, Name: "tick", Data: ev.JSON}); err != nil {
+      					return
+      				}
+      			}
+      		}
+      	}
+
+      It is written against net/http's own interfaces, so it works in any
+      http.Handler. Mounted on this SDK's engine — Group.HandleHTTP — it
+      additionally observes the server's drain signal, which is what stops an
+      endless stream from holding a graceful shutdown open for its whole budget.
+
+      # Why a newline is not an error
+
+      The format has no escape mechanism. A line terminator inside a value is not
+      quoted, it SPLITS the value across several "data:" lines, which the client
+      rejoins with "\n" — so a multi-line payload is expressible and exact. The
+      same absence of escaping makes a terminator inside [Event].ID or
+      [Event].Name unrepresentable, and those are refused rather than truncated: a
+      silently shortened id is a resume token pointing at the wrong place.
+
+      # Reconnection, and what the SDK does not do
+
+      A client stores the last non-empty id it saw and sends it back in the
+      Last-Event-ID header when it reconnects. [Stream].LastEventID hands that
+      cursor to the handler. Nothing is replayed from it, on purpose.
+
+      A replay buffer held by the stream would be empty at exactly the moment a
+      resume needs it — a reconnect is a NEW connection and therefore a new stream.
+      A buffer that outlived the stream would be an application store: it has to
+      know how many events to keep, how long they stay valid, and whether replaying
+      them is even safe, which are questions about what the events MEAN and not
+      about the transport. So the cursor is handed over and the handler resumes
+      from its own log. Minting ids is the handler's job for the same reason: an id
+      the SDK invented would be a number that means nothing to the application the
+      client sends it back to.
+
+      # Keep-alive
+
+      An idle stream is indistinguishable from a dead one to a proxy counting idle
+      seconds. [Stream] therefore sends a periodic comment — ignored by every
+      client, so it can never be mistaken for an event. The interval defaults to
+      [DefaultKeepAlive]; a zero passed to [KeepAlive] is clamped to it rather than
+      silently meaning "never", and "never" is spelled [WithoutKeepAlive].
+
+      # Shutdown
+
+      [Stream].Done closes when the client disconnects, when the handler calls
+      [Stream].Close, or when the server begins draining. [Stream].Send refuses
+      once it has, so a handler that only ever calls Send in a loop terminates too.
+      Both halves matter: without the second, one handler shape could still hold a
+      graceful shutdown open until its budget expired.
+
+      # Clients
+
+      This package is the server half only. The SDK's outbound client returns a
+      fully-read body by design and cannot consume a stream that never ends; see
+      the package CLAUDE.md for why that is a separate decision rather than an
+      omission.
+    facade:
       - const:
           - doc: |-
               ContentType is the media type an event stream is served under. A client that
@@ -2809,7 +4697,77 @@ packages:
       http: net/http
       svcsse: github.com/kitsunium/sdk/internal/service/net/sse
     path: github.com/kitsunium/sdk/pkg/v1/net/sse
-  - facade:
+  - doc: |-
+      Package static serves a tree of files — a single-page application, a
+      documentation site, an embed.FS — over HTTP: what http.FileServerFS does,
+      and what it does not (ADR 0130).
+
+      # The whole thing
+
+      	//go:embed dist
+      	var dist embed.FS
+
+      	tree, _ := fs.Sub(dist, "dist")
+      	assets, err := static.New(tree, static.Config{
+      		SinglePageApp: true,
+      		Immutable:     func(name string) bool { return strings.HasPrefix(name, "assets/") },
+      	})
+      	if err != nil {
+      		return err
+      	}
+      	mux.Handle("GET /app/", http.StripPrefix("/app", assets))
+
+      # What it refuses
+
+        - A request path is cleaned from the root before anything is looked up,
+          so no spelling of ".." climbs above the tree — whatever the file
+          system itself does with a name.
+        - A directory is never listed. It is served by its index.html, after a
+          redirect to its name with a trailing slash so the page's relative links
+          resolve inside it; a directory with no index.html is a 404.
+        - Only GET and HEAD are answered; anything else is a 405 with Allow. HEAD
+          answers exactly what GET would, without the body.
+
+      # A single-page application
+
+      With [Config].SinglePageApp, a path that has no extension and names nothing
+      is served the root's index.html with a 200, so a client-side route
+      survives a reload. A path WITH an extension that names nothing stays a 404:
+      a script tag must never receive a page of HTML in place of the script it
+      asked for.
+
+      # Headers
+
+      Every response — a file, a redirect, a 404, a 405, a 500 — carries a
+      Content-Security-Policy ([DefaultContentSecurityPolicy] unless
+      [Config].ContentSecurityPolicy names one), X-Content-Type-Options: nosniff,
+      and a Referrer-Policy ([DefaultReferrerPolicy], "same-origin", unless
+      [Config].ReferrerPolicy names one). [New] refuses a policy holding a control
+      character, and a Referrer-Policy that is not a list of the tokens the
+      specification defines, since a browser ignores one it does not know.
+
+      Under nosniff a browser refuses a script or a stylesheet served with the
+      wrong type, and the standard library lets a host's MIME tables override its
+      own. The types a page cannot run without — HTML, JavaScript, CSS, JSON,
+      WebAssembly, SVG, a web manifest — are therefore pinned, the same on every
+      host.
+
+      A file [Config].Immutable marks content-hashed is sent with
+      [ImmutableCacheControl]: cached for a year and never revalidated. Every
+      other response is sent with [RevalidateCacheControl], so a redeployed page
+      is never served stale.
+
+      # Errors a wrapper can see
+
+      Every status goes through the ResponseWriter the handler was given, so a
+      handler wrapped by one that records the status sees every 5xx. A name the
+      file system refuses — nothing there, a character it cannot hold, a file
+      used as a directory, a component too long — is the client's 404, because a
+      client chooses every name it asks for and could otherwise produce a 5xx at
+      will. A name the tree holds and cannot open, stat or seek — a permission
+      refused, a storage failure — is a 500. A failure after the status is sent
+      cannot change it; the body is cut short of its declared length instead.
+    facade:
       - const:
           - doc: |-
               DefaultContentSecurityPolicy is the policy sent when Config names none: the
@@ -2890,7 +4848,70 @@ packages:
       fs: io/fs
       svcstatic: github.com/kitsunium/sdk/internal/service/net/static
     path: github.com/kitsunium/sdk/pkg/v1/net/static
-  - facade:
+  - doc: |-
+      Package tlsid builds TLS and mutual-TLS identities for the SDK's network
+      domain (ADR 0029), from files on disk or from material already in memory.
+
+      An Identity is opaque and redacts itself: its String and GoString output is
+      always "<redacted>", so an accidental %v, %s or %#v cannot spill key material
+      into a log line. The only way out is [Identity].ClientConfig or
+      [Identity].ServerConfig, each of which mints a fresh *tls.Config, so one
+      caller's mutation can never reach another.
+
+      The package exists to close a specific, widely-repeated bug. The standard
+      library's x509.CertPool.AppendCertsFromPEM reports failure through a boolean
+      return that is almost universally discarded, so a CA bundle that is empty,
+      truncated, or accidentally a private key produces a pool that parses without
+      complaint and verifies nothing. Here such a bundle is a typed
+      TLS_MATERIAL_INVALID error. An absent bundle (use the platform trust store)
+      stays deliberately distinct from an unusable one.
+
+      The same principle governs the rest of the surface: a certificate supplied
+      without its key is refused rather than degraded to an anonymous connection, a
+      server that demands a client certificate without a CA bundle to verify it
+      against is refused at construction rather than rejecting every peer at
+      handshake time, and the minimum version defaults to TLS 1.3 with TLS 1.0 and
+      1.1 refused outright per RFC 8996. A silent downgrade is always the wrong
+      answer for transport security, so this package never performs one.
+
+      # Loading from disk
+
+      	id, err := tlsid.Load(tlsid.FileParams{
+      		CertFile:   "/etc/pki/client.crt",
+      		KeyFile:    "/etc/pki/client.key",
+      		RootsFile:  "/etc/pki/ca.crt",
+      		ServerName: "sdm.core.svc",
+      	})
+      	if err != nil {
+      		return err
+      	}
+      	conn, err := tls.Dial("tcp", "127.0.0.1:8000", id.ClientConfig())
+
+      ServerName is optional in the type and close to mandatory in practice: any
+      deployment reached through a port forward or a tunnel dials 127.0.0.1 while
+      the peer certificate names the real service, and the handshake fails until
+      ServerName overrides the verified name.
+
+      # Loading from memory
+
+      New takes the same material as bytes, so certificates can come from a secret
+      manager without ever touching a filesystem:
+
+      	id, err := tlsid.New(tlsid.Params{CertPEM: cert, KeyPEM: key, RootsPEM: ca})
+
+      # Mutual TLS
+
+      Set RequireClientCert on a server identity and supply the CA bundle that
+      client certificates must chain to:
+
+      	id, err := tlsid.Load(tlsid.FileParams{
+      		CertFile:          "/etc/pki/server.crt",
+      		KeyFile:           "/etc/pki/server.key",
+      		ClientCAFile:      "/etc/pki/client-ca.crt",
+      		RequireClientCert: true,
+      	})
+      	ln := tls.NewListener(raw, id.ServerConfig())
+    facade:
       - alias:
           - doc: |-
               Identity is an opaque TLS identity. Its String and GoString output is always
@@ -2952,7 +4973,168 @@ packages:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       svctlsid: github.com/kitsunium/sdk/internal/service/net/tlsid
     path: github.com/kitsunium/sdk/pkg/v1/net/tlsid
-  - facade:
+  - doc: |-
+      Package websocket is the server side of RFC 6455: an HTTP request upgraded
+      into a bidirectional, message-oriented connection over the same socket.
+
+      # The whole thing
+
+      	func handler(w http.ResponseWriter, r *http.Request) {
+      		conn, err := websocket.Upgrade(w, r)
+      		if err != nil {
+      			return // Upgrade has already written the HTTP refusal
+      		}
+      		defer conn.Close()
+
+      		for {
+      			msg, rerr := conn.Receive()
+      			if rerr != nil {
+      				return
+      			}
+      			if serr := conn.Send(msg); serr != nil {
+      				return
+      			}
+      		}
+      	}
+
+      It is written against net/http's own interfaces, so it works in any
+      http.Handler. Mounted on this SDK's engine — Group.HandleHTTP — it
+      additionally observes the server's drain signal, which is what stops a
+      connection that by design never ends from being severed under its handler on
+      every deployment.
+
+      # Messages, not frames
+
+      [Conn].Receive returns whole messages. Fragmentation is the sender's private
+      choice of chunk size, not a semantic boundary, so surfacing it would put an
+      implementation detail of the peer's writer into every consumer. Control
+      frames — Ping, Pong, Close — are answered underneath and never surface as
+      messages: they are transport, not payload.
+
+      The returned [Message].Data aliases the connection's reassembly buffer and is
+      valid until the next [Conn].Receive. Keep it longer and you must copy it.
+      That is what makes a steady-state read allocate nothing.
+
+      # What is refused, and why refusing is the specification
+
+      RFC 6455 is unusual in how much of it is stated as MUST-fail rather than
+      should-tolerate, because a frame stream that keeps going after a
+      disagreement is two endpoints reading different messages from the same bytes.
+      This implementation refuses:
+
+        - an unmasked client frame (§5.1) — masking is what stops a hostile script
+          from steering a browser into emitting bytes a transparent proxy would
+          read as a second, attacker-chosen HTTP request;
+        - a set reserved bit or a reserved opcode (§5.2);
+        - a fragmented or over-125-byte control frame (§5.5);
+        - a length not in its minimal encoding (§5.2);
+        - a continuation with no message in progress, or a new data frame
+          interrupting one (§5.4);
+        - a text message that is not valid UTF-8 (§8.1), judged on the reassembled
+          message so a sequence straddling a fragment boundary stays valid;
+        - a close code that must never travel — 1004, 1005, 1006, 1015 and the
+          unallocated ranges (§7.4.2) — in either direction.
+
+      # Bounds
+
+      A frame announces its length in a 64-bit field the PEER writes.
+      [MaxFrameSize] is checked against that announcement before a single byte is
+      read or allocated, and [MaxMessageSize] against the accumulated total, since
+      fragmentation lets a peer exceed any per-frame bound a thousand small frames
+      at a time. Neither has an "unbounded" setting on purpose.
+
+      # Extensions
+
+      None are negotiated, permessage-deflate included. The server sends no
+      Sec-WebSocket-Extensions header — which RFC 6455 §4.2.2 defines as the way to
+      say "no extension is in use" — and the frame reader enforces the same answer
+      by refusing any reserved bit an extension would have set. Compression is
+      therefore a refusal the wire can verify, not a promise in a document.
+
+      # Origin
+
+      The browser's same-origin policy does not apply to WebSocket: any page can
+      open a connection to this server, and the browser attaches the user's cookies
+      to the handshake. By default an Origin header, when present, must name the
+      request's own host and port — and, when this server terminates TLS itself,
+      the https scheme as well, because an http:// page for the same host is
+      exactly the downgrade the check exists to notice. A request with no Origin (a
+      CLI, a service, a Go client) is allowed, because there is no ambient
+      credential to abuse; the opaque "null" origin is refused.
+
+      Behind a proxy that terminates TLS, the request reaches this server in
+      plaintext whatever the browser used, so the default rule cannot see the
+      scheme. It does not guess it either: a request carrying Forwarded or
+      X-Forwarded-Proto on a connection this server did not terminate is refused,
+      with a message naming what to configure. Only the PRESENCE of those headers
+      is read, never their value — one a client writes can make the check stricter
+      and never looser. [AllowOrigins] names the origins outright and replaces the
+      default rule entirely; [AllowAnyOrigin] removes the check, by name.
+
+      # One goroutine always reads
+
+      Every connection needs exactly one goroutine looping on [Conn].Receive for
+      its whole life — including a connection the handler only ever writes to.
+      That loop is where the peer's Ping is answered (RFC 6455 §5.5.2), where its
+      Close is replied to (§5.5.1), and the only place the heartbeat can see that
+      the peer is alive. A handler that pushes runs it in a goroutine of its own
+      and discards what it reads:
+
+      	func push(w http.ResponseWriter, r *http.Request) {
+      		conn, err := websocket.Upgrade(w, r)
+      		if err != nil {
+      			return
+      		}
+      		defer conn.Close()
+
+      		go func() { // the reader: required even with nothing to read
+      			for {
+      				if _, rerr := conn.Receive(); rerr != nil {
+      					return
+      				}
+      			}
+      		}()
+
+      		for {
+      			select {
+      			case <-conn.Done():
+      				return
+      			case event := <-events: // the application's own feed
+      				if serr := conn.SendText(event); serr != nil {
+      					return
+      				}
+      			}
+      		}
+      	}
+
+      The reading goroutine needs no joining: the deferred Close ends the
+      connection, and its Receive returns the terminal error.
+
+      # Liveness and shutdown
+
+      A peer that vanishes without closing leaves a socket that is perfectly
+      readable and will simply never produce another byte. The heartbeat is the
+      only thing that turns that silence into an ending: every [PingInterval] it
+      sends a Ping, and one interval later it ends the connection if the handler
+      has READ no frame since. It counts frames the handler has read, not frames
+      that arrived — a Pong the peer sent on time is silence to it until
+      [Conn].Receive reads it — so a connection nobody reads is ended within two
+      intervals, about a minute at [DefaultPingInterval], however healthy the peer
+      is. Zero is clamped to [DefaultPingInterval] rather than meaning "never", and
+      "never" is spelled [WithoutPing].
+
+      [Conn].Done closes when the peer sends Close, when the socket dies, when the
+      heartbeat gives up, when the handler closes it, or when the server begins
+      draining — in which case the connection sends a 1001 "going away" of its own
+      accord. [Conn].Receive and [Conn].Send refuse from the same instant, so the
+      reading loop and a pushing loop both terminate too.
+
+      # Clients
+
+      This package is the server half only. The SDK's outbound client returns a
+      fully-read body by design and cannot dial an upgrade; see the package
+      CLAUDE.md for why that is a separate decision rather than an omission.
+    facade:
       - const:
           - doc: |-
               GUID is the fixed string RFC 6455 §1.3 concatenates to the client's key

@@ -1,5 +1,3 @@
-// Package token — the immutable claim set every concrete token format decodes
-// into and every issuer renders from.
 package token
 
 import (

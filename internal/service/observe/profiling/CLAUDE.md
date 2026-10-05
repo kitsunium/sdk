@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T13:06:04Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # internal/service/observe/profiling/
 
 ## Purpose
@@ -17,7 +17,8 @@ Stdlib only (plus `kernel/clock` — the CPU window is a timer on it, `clock.Sys
 
 | File | Role |
 |---|---|
-| `profiling.go` | package doc; `MaxCPUWindow`, `MaxProfileBytes`, `MaxFrames` — the bounds of the capture and the decoder, the engine's |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `profiling.go` | `MaxCPUWindow`, `MaxProfileBytes`, `MaxFrames` — the bounds of the capture and the decoder, the engine's |
 | `capture.go` | `CaptureCPU`, `CaptureHeap` |
 | `wire.go` | the protocol-buffer wire reader: varints (a tenth byte past the 64th bit refused), length-delimited fields, skips, packed or unpacked repeated varints — every read bounds-checked |
 | `parse.go` | `Parse`: the bound, gzip or raw — gzip inflated through the registered `"gzip"` transform scheme, its refusal kept `PROFILE_MALFORMED` around the library's own error (`libraryCause`) — the Profile's top-level fields through a reader table |

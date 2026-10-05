@@ -6,6 +6,7 @@ go_library(
     name = "recycler",
     srcs = [
         "capped.go",
+        "doc.go",
         "recycler.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/kernel/concur/recycler",

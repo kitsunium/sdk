@@ -1,16 +1,3 @@
-// Package cbor — the encoder's entry point and its scalars. Encoding appends
-// to a byte slice and never builds an intermediate value: the common
-// dynamic types an untyped document holds are matched by a type switch, and
-// every other type goes through the plan resolved once for it.
-//
-// What the encoder writes is fixed: integers, lengths and tag numbers in
-// their shortest head; a float64 as a double, a float32 as a single, NaN as
-// 0xf97e00 and the infinities as half-precision; a time.Time as its integer
-// Unix seconds (null when zero); a nil slice, map or pointer as null; map
-// pairs in the bytewise order of their encoded keys (RFC 8949 §4.2.1), so
-// equal values encode to equal bytes. It writes nothing its own decoder would
-// refuse: no string that is not UTF-8, no two equal keys in a map, nothing
-// nested deeper than maxCBORNestedLevels.
 package cbor
 
 import (

@@ -88,8 +88,41 @@ packages:
             name: CodeIDTimestampRange
             value: "0x00_03_27_07"
         type: errs.Code
+    doc: |-
+      Package id — ranges 0.2.7.* (ADR 0024 core/app/id block) and 0.3.39.*
+      (ADR 0024 service/app/id block, declared here since ADR 0160).
+
+      Package id — declares the sentinels of the domain: those the Generator
+      facade returns, and those the concrete schemes raise. A registry sentinel's
+      name equals its errs.Define Reason in SCREAMING_SNAKE form; a scheme
+      sentinel's Reason is its Code constant's name, minus Code, in the same form
+      (ADR 0020's namespaced derivation: CodeIDMalformed → ID_MALFORMED).
+
+      Package id declares the identifier-generation port of the SDK: the Generator
+      contract and the typed Scheme string under which a generator registers. It is
+      a core sibling beside codec, writer, crypto, logger, transform, and proc
+      (ADR 0024) and mirrors transform exactly — the registry resolves a Scheme to
+      a Generator the way transform resolves an Algorithm to a Compressor.
+
+      No generation bodies live here; concrete generators (UUIDv4/UUIDv7/ULID/
+      snowflake/NanoID/KSUID) live under internal/service/app/id/ and self-register via
+      a package-level var initialiser when imported — no init(). TypeID lives there
+      too but is NOT registered: it carries a caller-chosen type prefix, and there
+      is no prefix the SDK could invent on their behalf, so New("typeid") returns
+      UnknownScheme by design. The canonical external form of every identifier is
+      its string rendering, so Generator.New returns a string (UUIDs dashed-hex,
+      ULID Crockford base32, snowflake decimal, KSUID base62, NanoID URL-safe).
+
+      Package id — holds the process-wide Generator registry. Service-level scheme
+      packages register themselves via package-level var initialisers when imported
+      (no init()), mirroring core/data/codec, core/crypto, and core/data/transform.
     functions:
-      - in:
+      - doc: |-
+          New generates a fresh identifier using the Generator registered under scheme.
+          A scheme with no registered generator returns UnknownScheme (blank-import the
+          scheme's package to register it); a generator entropy/clock fault propagates
+          unchanged with the scheme's own service-layer code.
+        in:
           - name: scheme
             type: Scheme
         name: New
@@ -98,13 +131,31 @@ packages:
             type: string
           - name: err
             type: error
-      - in:
+      - doc: |-
+          Register inserts g under g.Scheme() and returns it so callers can bind the
+          singleton to a typed package-level variable like
+          `var UUIDv4 = id.Register(uuidv4Gen{})`. Panics on a nil generator or when a
+          distinct generator already claims the same Scheme.
+
+          IFACE-PLUGIN: the registry hands plug-in Generator instances back to callers
+          so each scheme keeps its concrete type unexported; the contract is the
+          Generator interface itself.
+
+          "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
+          plug-in whose type is not comparable both satisfy the port and neither can
+          serve one call (see internal/kernel/plugin).
+        in:
           - name: g
             type: Generator
         name: Register
         out:
           - type: Generator
-      - in:
+      - doc: |-
+          Lookup returns the Generator registered under name.
+
+          IFACE-PLUGIN: the registry stores plug-in scheme instances behind the
+          Generator interface — concrete types are intentionally unexported per scheme.
+        in:
           - name: name
             type: Scheme
         name: Lookup
@@ -113,7 +164,10 @@ packages:
             type: Generator
           - name: ok
             type: bool
-      - name: Available
+      - doc: |-
+          Available returns the sorted list of registered Schemes, or nil before any
+          Register.
+        name: Available
         out:
           - type: "[]Scheme"
     imports:
@@ -222,19 +276,54 @@ packages:
             public: Identifier generation observed a clock outside the scheme's timestamp range
             reason: ID_TIMESTAMP_RANGE
     types:
-      - methods:
-          - name: String
+      - doc: |-
+          Scheme is the typed key under which a Generator registers (e.g. "uuidv4",
+          "uuidv7", "ulid", "snowflake", "nanoid", "ksuid"). The zero value Scheme("")
+          is reserved invalid, mirroring codec.Format and transform.Algorithm.
+        methods:
+          - doc: String implements fmt.Stringer and returns the raw identifier.
+            name: String
             out:
               - type: string
             recv: value
-          - name: Known
+          - doc: Known reports whether s has been registered in the Generator registry.
+            name: Known
             out:
               - type: bool
             recv: value
         name: Scheme
         underlying: string
-  - functions:
-      - in:
+  - doc: |-
+      Package id wraps stdlib crypto/rand + the kernel clock as core/app/id.Generator
+      implementations (UUIDv4, UUIDv7, ULID, snowflake, NanoID, KSUID, TypeID).
+      Blank-importing this package self-registers every scheme that needs no
+      configuration; snowflake, NanoID and TypeID also offer explicit constructors.
+      No init() — registration is package-level var.
+
+      Randomness is read with crypto/rand.Read, which since Go 1.24 never returns
+      an error and always fills its buffer — a failing source crashes the program
+      instead — so no generator here fails for want of entropy. EntropyFailed stays
+      declared, and published, but nothing returns it.
+
+      Package id — KSUID generator (32-bit second prefix + 128-bit payload, base62).
+
+      Package id — NanoID generator (URL-safe alphabet, configurable length).
+
+      Package id — snowflake (Twitter-style) stateful generator.
+
+      Package id — TypeID generator (type prefix + UUIDv7 in lowercase base32).
+
+      Package id — ULID generator (48-bit time + 80-bit random, Crockford base32).
+
+      Package id — UUIDv4 (random) generator (RFC 9562 §5.4).
+
+      Package id — UUIDv7 (time-ordered) generator (RFC 9562 §5.7).
+    functions:
+      - doc: |-
+          ParseKSUID decodes the canonical 27-character rendering s, returning the
+          instant the identifier was issued (second resolution, UTC) and its 16-byte
+          random payload. It is the inverse of what KSUID.New renders.
+        in:
           - name: s
             type: string
         name: ParseKSUID
@@ -245,7 +334,16 @@ packages:
             type: "[ksuidPayloadBytes]byte"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NewNanoID returns a NanoID Generator producing size characters. It is NOT
+          added to the global registry — bind it to your own variable.
+
+          A non-positive size is REFUSED rather than clamped (ADR 0031): a zero-length
+          identifier identifies nothing, and any length chosen on the caller's behalf
+          here would be the SDK substituting its judgement for the one decision this
+          constructor exists to take. Callers who want the canonical length say so by
+          not passing one — that is what the registered NanoID singleton is.
+        in:
           - name: size
             type: int
         name: NewNanoID
@@ -254,13 +352,25 @@ packages:
             type: coreid.Generator
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NewSnowflake returns a snowflake Generator bound to node (reduced into the
+          10-bit node space). It is NOT added to the global registry — bind it to your
+          own variable.
+        in:
           - name: node
             type: int64
         name: NewSnowflake
         out:
           - type: coreid.Generator
-      - in:
+      - doc: |-
+          NewTypeID returns a TypeID Generator stamping prefix on every identifier. It
+          is NOT added to the global registry — bind it to your own variable.
+
+          prefix is validated strictly and an invalid one is REFUSED at construction
+          (ADR 0031): the prefix is the entire value of the scheme, so a generator
+          built from a bad one would mint identifiers that fail to parse everywhere
+          else, one per call, with nothing to point at.
+        in:
           - name: prefix
             type: string
         name: NewTypeID
@@ -269,7 +379,15 @@ packages:
             type: coreid.Generator
           - name: err
             type: error
-      - in:
+      - doc: |-
+          FormatTypeID renders prefix and the canonical dashed-hex UUID uuid as a
+          TypeID. It is the migration entry point: an existing UUID column becomes a
+          typed identifier without reissuing anything.
+
+          The UUID version is deliberately NOT enforced. New only ever mints v7, but
+          refusing to label a v4 that already exists in a caller's database would make
+          this function useless for the one job it has.
+        in:
           - name: prefix
           - name: uuid
             type: string
@@ -279,7 +397,11 @@ packages:
             type: string
           - name: err
             type: error
-      - in:
+      - doc: |-
+          ParseTypeID splits the canonical TypeID s into its type prefix and the
+          dashed-hex UUID its suffix encodes. Together with FormatTypeID it round-trips
+          in both directions.
+        in:
           - name: s
             type: string
         name: ParseTypeID
@@ -293,40 +415,113 @@ packages:
       coreid: github.com/kitsunium/sdk/internal/core/app/id
     path: github.com/kitsunium/sdk/internal/service/app/id
     variables:
-      - name: KSUID
+      - blockDoc: |-
+          KSUID is the registered KSUID generator: a 32-bit second-resolution timestamp
+          followed by 128 random bits, rendered as 27 base62 characters that sort by
+          creation time as plain strings.
+        doc: KSUID is the registered generator.
+        name: KSUID
         type: coreid.Generator
-      - name: NanoID
+      - doc: |-
+          NanoID is the registered default-size NanoID generator: nanoIDDefaultSize
+          URL-safe characters drawn uniformly from a CSPRNG. Use NewNanoID for an
+          explicit length.
+        name: NanoID
         type: coreid.Generator
-      - name: Snowflake
+      - doc: |-
+          Snowflake is the default-node snowflake generator, registered for the
+          "snowflake" scheme. Its node id is derived from the hostname+pid so distinct
+          processes rarely collide; use NewSnowflake for an explicit node assignment.
+        name: Snowflake
         type: coreid.Generator
-      - name: ULID
+      - doc: |-
+          ULID is the registered ULID generator: a 48-bit ms timestamp + 80 random bits
+          rendered as 26 Crockford-base32 chars, lexically sortable by time.
+        name: ULID
         type: coreid.Generator
-      - name: UUIDv4
+      - doc: UUIDv4 is the registered random UUIDv4 generator (RFC 9562 §5.4).
+        name: UUIDv4
         type: coreid.Generator
-      - name: UUIDv7
+      - doc: |-
+          UUIDv7 is the registered time-ordered UUIDv7 generator (RFC 9562 §5.7): a
+          48-bit Unix-millisecond prefix makes successive ids k-sortable.
+        name: UUIDv7
         type: coreid.Generator
   - constants:
-      - name: UUIDv4Scheme
+      - doc: UUIDv4Scheme is the random-UUID scheme key.
+        name: UUIDv4Scheme
         type: Scheme
         value: "\"uuidv4\""
-      - name: UUIDv7Scheme
+      - doc: UUIDv7Scheme is the time-ordered UUID scheme key.
+        name: UUIDv7Scheme
         type: Scheme
         value: "\"uuidv7\""
-      - name: ULIDScheme
+      - doc: ULIDScheme is the ULID scheme key.
+        name: ULIDScheme
         type: Scheme
         value: "\"ulid\""
-      - name: SnowflakeScheme
+      - doc: SnowflakeScheme is the snowflake scheme key.
+        name: SnowflakeScheme
         type: Scheme
         value: "\"snowflake\""
-      - name: NanoIDScheme
+      - doc: NanoIDScheme is the NanoID scheme key.
+        name: NanoIDScheme
         type: Scheme
         value: "\"nanoid\""
-      - name: KSUIDScheme
+      - doc: KSUIDScheme is the KSUID scheme key.
+        name: KSUIDScheme
         type: Scheme
         value: "\"ksuid\""
-      - name: TypeIDScheme
+      - doc: |-
+          TypeIDScheme is the TypeID scheme key. It is the only scheme key New
+          cannot resolve: a TypeID needs a type prefix, and there is no
+          non-arbitrary prefix the SDK could choose on a caller's behalf, so no
+          generator is registered under it. New(TypeIDScheme) returns
+          UnknownScheme by design — build one with NewTypeID instead. The key is
+          exported because Generator.Scheme() reports it.
+        name: TypeIDScheme
         type: Scheme
         value: "\"typeid\""
+    doc: |-
+      Package id is the public facade for SDK identifier generation. One verb,
+      seven schemes: [New] dispatches by [Scheme] string, and the named helpers
+      [UUIDv4]/[UUIDv7]/[ULID]/[Snowflake]/[NanoID]/[KSUID] return the canonical
+      string form directly.
+
+      Pick by what you need the identifier to carry:
+
+        - [UUIDv4] — 122 random bits, unguessable, unordered.
+
+        - [UUIDv7] and [ULID] — a millisecond prefix makes them k-sortable; ULID
+          renders in 26 Crockford base32 characters instead of 36.
+
+        - [Snowflake] — 41-bit timestamp + 10-bit node + 12-bit sequence, for
+          coordinated per-node issuance.
+
+        - [NanoID] — 21 URL-safe characters, the shortest of the set, no timestamp.
+
+        - [KSUID] — 27 base62 characters, sortable to the second, and decodable:
+          [ParseKSUID] recovers when an identifier was issued.
+
+        - TypeID — a type prefix plus a UUIDv7, "user_01h2xcejqtf2nbrexx3vqjhp41".
+          An identifier that names its own entity cannot be pasted into the wrong
+          column unnoticed. Built with [NewTypeID], read with [ParseTypeID], and
+          [FormatTypeID] relabels UUIDs a caller already stores.
+
+      In practice:
+
+      	uid, _ := id.UUIDv7()        // "0190b3c0-...-...."
+      	sortable, _ := id.ULID()     // "01J8...": lexically time-sortable
+      	short, _ := id.NanoID()      // "V1StGXR8_Z5jdHi6B-myT"
+      	sf := id.NewSnowflake(7)     // explicit node id
+      	s, _ := sf.New()
+      	users, _ := id.NewTypeID("user")
+      	u, _ := users.New()          // "user_01h2xcejqtf2nbrexx3vqjhp41"
+
+      Activation is automatic: importing this package registers every scheme that
+      needs no configuration. NanoID and TypeID also take explicit constructors,
+      and those REFUSE a length of zero or an invalid type prefix rather than hand
+      back a generator that mints degraded identifiers (ADR 0031).
     facade:
       - alias:
           - doc: Scheme is the public alias for the identifier-scheme key.
@@ -485,37 +680,48 @@ packages:
           out:
             - type: "[]Scheme"
     functions:
-      - name: UUIDv4
+      - doc: UUIDv4 returns a fresh random UUIDv4 in canonical dashed-hex form.
+        name: UUIDv4
         out:
           - name: newID
             type: string
           - name: err
             type: error
-      - name: UUIDv7
+      - doc: UUIDv7 returns a fresh time-ordered UUIDv7 (k-sortable by creation time).
+        name: UUIDv7
         out:
           - name: newID
             type: string
           - name: err
             type: error
-      - name: ULID
+      - doc: ULID returns a fresh ULID (26-char Crockford base32, lexically time-sortable).
+        name: ULID
         out:
           - name: newID
             type: string
           - name: err
             type: error
-      - name: Snowflake
+      - doc: Snowflake returns a fresh id from the default-node snowflake generator.
+        name: Snowflake
         out:
           - name: newID
             type: string
           - name: err
             type: error
-      - name: NanoID
+      - doc: |-
+          NanoID returns a fresh 21-character NanoID over the URL-safe alphabet. The
+          characters are drawn by rejection sampling, so every symbol is equally
+          likely; 21 of them carry 126 bits, slightly more than a UUIDv4.
+        name: NanoID
         out:
           - name: newID
             type: string
           - name: err
             type: error
-      - name: KSUID
+      - doc: |-
+          KSUID returns a fresh KSUID: 27 base62 characters that sort by creation time
+          as plain strings. Feed the result to ParseKSUID to recover that time.
+        name: KSUID
         out:
           - name: newID
             type: string

@@ -1,11 +1,3 @@
-// Package process — the running process itself: what it was built from and
-// what it is doing.
-//
-// Package process — ergonomic re-exports: the handful of signal constants and
-// resource sentinels callers need to drive Stop/SignalGroup and read typed
-// errors without importing internal/core/proc directly.
-//
-// Package process — StdioMode re-exports for wiring a child's standard streams.
 package process
 
 import (

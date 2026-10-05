@@ -1,24 +1,3 @@
-// Package msgpack — the per-type decoders, built once per Go type and cached
-// exactly like the encoders. The rules a decoder follows:
-//
-//   - nil sets the target to its zero value: 0, "", false, a nil pointer,
-//     slice or map, the zero struct, the zero time.
-//   - An integer target accepts any integer form whose value FITS; a value it
-//     cannot hold is refused instead of wrapped (the vendor wrapped 300 into
-//     an int8 as 44). An unsigned target refuses a negative value. A float
-//     target accepts floats and integers; a float32 target refuses a value
-//     beyond its range. An integer target refuses a float.
-//   - A string or []byte target accepts both str and bin; a []byte owns a copy.
-//   - A slice is replaced: the elements decoded are the elements it holds,
-//     reusing the backing array when it is large enough. A Go array takes at
-//     most its length, and its remaining elements are zeroed. A map gains the
-//     decoded pairs, as in encoding/json.
-//   - An interface holding a non-nil pointer decodes into what it points at;
-//     otherwise an empty interface receives the untyped value (decode_any.go)
-//     and the error interface receives a string as an error with that text.
-//   - A type that decodes itself — UnmarshalMsgpack([]byte) error, then
-//     encoding.BinaryUnmarshaler, then encoding.TextUnmarshaler — receives a
-//     copy of its bytes, so a method that keeps them is safe.
 package msgpack
 
 import (

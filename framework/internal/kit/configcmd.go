@@ -1,5 +1,3 @@
-// Package kit — the config command: every setting, its value and where it
-// comes from.
 package kit
 
 import (

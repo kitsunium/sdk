@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "plug",
-    srcs = ["plug.go"],
+    srcs = [
+        "doc.go",
+        "plug.go",
+    ],
     importpath = "github.com/kitsunium/sdk/framework/internal/kit/plug",
     visibility = [
         "//framework:__subpackages__",

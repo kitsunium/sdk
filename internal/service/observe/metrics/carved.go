@@ -1,4 +1,3 @@
-// Package metrics — one instrument name's slot in a collection arena.
 package metrics
 
 // carved is one instrument name's slot in a collection arena: the kind its

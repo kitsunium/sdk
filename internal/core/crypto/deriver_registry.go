@@ -1,8 +1,3 @@
-// Package crypto — range 0.2.4.* (ADR 0013 core/crypto block).
-//
-// Package crypto — the key-derivation port implemented by each KDF scheme.
-//
-// Package crypto — the process-wide Deriver registry + Subkey dispatch.
 package crypto
 
 // derivers maps each Algorithm to its Deriver. A distinct capability beside

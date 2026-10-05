@@ -1,4 +1,3 @@
-// Package selfupdate replaces the running binary with a newer signed release.
 package selfupdate
 
 // releaseInfo represents the GitHub release API response structure.

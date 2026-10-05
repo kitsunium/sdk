@@ -1,4 +1,3 @@
-// Package metrics — the qualifier set of one text-exporter "# metric" line.
 package metrics
 
 // metricHeader is everything one "# metric" line says about an instrument

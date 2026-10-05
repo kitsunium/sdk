@@ -1,8 +1,3 @@
-// Package config — resolving a declaration into a compiled schema.
-//
-// Everything in this file runs once, inside NewSchema, and every failure it
-// reports is CONFIG_SCHEMA_INVALID: the author's declaration, not the
-// operator's deployment.
 package config
 
 import (

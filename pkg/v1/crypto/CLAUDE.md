@@ -17,8 +17,9 @@ because Go links what a package imports and never its parent directory — so th
 "siblings, not children" placement ADR 0013, 0014 and 0102 §D5 relied on bought
 nothing, and ADR 0155 refuted it by measurement.
 
-Consumer-facing prose lives in the package doc comment (`crypto.go`) and is
-rendered to `README.md` by gomarkdoc — edit the doc comment, not the README.
+Consumer-facing prose lives in the package doc comment (`doc.go`, which kit
+writes from the design, ADR 0167) and reaches `README.md` through `docs/api` and
+`tools/genindex` (`make docs-readme`) — edit the design, not the README.
 
 ## The family
 
@@ -40,6 +41,7 @@ family's choice table the children's link back to.
 ## Contents
 
 ```
+doc.go     — the package comment; kit writes it from the design (ADR 0167)
 crypto.go  — Key alias + Algorithm defined type, KeyLen + AESGCM +
              XChaCha20Poly1305 consts, NewKey, Seal / SealAs / Open +
              SealStream / OpenStream + WrapKey / UnwrapKey; blank-imports the
@@ -49,7 +51,7 @@ crypto_external_test.go — facade tests (round trips, non-oracle Open, stream
              vs box versions, redaction, the V104 defined-type check)
 crypto_bench_test.go    — the benchmarks BENCH.md is generated from
 BENCH.md   — generated cost report; carries the crypto family's choice table
-README.md  — generated from the package doc comment (make docs-readme)
+README.md  — written by tools/genindex from docs/api (make docs-readme)
 ```
 
 ## Streaming (ADR 0014 §D2)
@@ -113,7 +115,7 @@ cd pkg/v1 && GOWORK=off go list -deps ./crypto/hash | grep -x 'github.com/kitsun
 
 ## Generated
 
-`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/crypto.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the package comment and the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
+`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/crypto.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the declarations of their own, and `doc.go` — kit's too (ADR 0167) — the package comment. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
 
 ## Verification
 

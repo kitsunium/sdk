@@ -1,6 +1,3 @@
-// Package websocket — the UTF-8 rule a text message must satisfy (RFC 6455
-// §8.1), checked on the bytes as they come off and go onto the wire. The
-// message itself is the domain's value (corenet.WSMessageValue).
 package websocket
 
 import (

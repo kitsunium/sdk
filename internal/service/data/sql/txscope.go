@@ -1,5 +1,3 @@
-// Package sql — hosts the per-context transaction chain: which transactor
-// opened a transaction, and how a nested call finds its own.
 package sql
 
 import "context"

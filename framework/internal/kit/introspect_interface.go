@@ -1,4 +1,3 @@
-// Package kit — what the source endpoint needs of the root it reads.
 package kit
 
 import (

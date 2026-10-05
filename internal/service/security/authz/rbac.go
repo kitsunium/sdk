@@ -1,4 +1,3 @@
-// Package authz — hosts the role-based evaluator.
 package authz
 
 import (

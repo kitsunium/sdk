@@ -1,5 +1,3 @@
-// Package mail — the fixed-width line breaker every base64 body streams
-// through.
 package mail
 
 import "io"

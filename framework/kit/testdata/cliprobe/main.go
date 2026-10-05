@@ -1,5 +1,3 @@
-//go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /framework/kit/testdata/cliprobe .
-
 // Command cliprobe is the smallest product a status line is: one service,
 // one default fail-safe command that writes a line. The fresh-process
 // benchmark of framework/kit builds and runs it.

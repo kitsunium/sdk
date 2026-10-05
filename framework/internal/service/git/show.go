@@ -1,4 +1,3 @@
-// Package git — reading a file's content at a specific commit.
 package git
 
 import (

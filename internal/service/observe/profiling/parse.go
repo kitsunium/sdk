@@ -1,6 +1,3 @@
-// Package profiling — hosts Parse: a pprof profile's bytes, gzipped or not,
-// decoded into a ProfileValue with its string, function and location tables
-// resolved.
 package profiling
 
 import (

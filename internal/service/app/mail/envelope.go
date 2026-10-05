@@ -1,4 +1,3 @@
-// Package mail — the SMTP envelope, derived from a message after validating it.
 package mail
 
 import coremail "github.com/kitsunium/sdk/internal/core/app/mail"

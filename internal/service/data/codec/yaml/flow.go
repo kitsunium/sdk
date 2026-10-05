@@ -1,4 +1,3 @@
-// Package yaml — flow collections: [a, b] and {k: v}, across lines.
 package yaml
 
 import coreyaml "github.com/kitsunium/sdk/internal/core/data/codec/yaml"

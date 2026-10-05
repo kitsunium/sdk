@@ -9,8 +9,8 @@ contract — type aliases plus delegating functions, no new logic.
 The package is `notify`. It was `sdnotify`, at the root of `pkg/v1`, until
 ADR 0155 put the proc facades under `pkg/v1/proc` and the two systemd protocols
 under `systemd/`: the import path's last element and the package name agree,
-so a caller writes `notify.Ready()`. The source file keeps the protocol's name,
-`sdnotify.go`.
+so a caller writes `notify.Ready()`. The package comment is in `doc.go`, which
+kit writes from the design (ADR 0167).
 
 ## Surface
 
@@ -45,14 +45,14 @@ func WatchdogInterval() (d time.Duration, ok bool)
 
 ## README is generated
 
-`README.md` is produced by `gomarkdoc` from the package doc comment in
-`sdnotify.go` (ADR 0008). Edit the doc comment, then `make docs-readme` (or run
-the `//go:generate` line at the top of `sdnotify.go`). Do not hand-edit
-`README.md`.
+`README.md` is written by `tools/genindex` from the committed `docs/api`
+(`make docs-readme`, ADR 0167); do not hand-edit it. The package comment is in
+`doc.go`, which kit writes from the design (`design/proc.yaml`): edit the
+design, run `kit gen`, then `make api` and `make docs-readme`.
 
 ## Generated
 
-`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/proc.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the package comment and the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
+`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/proc.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the declarations of their own, and `doc.go` — kit's too (ADR 0167) — the package comment. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
 
 ## Do NOT
 

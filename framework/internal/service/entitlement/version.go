@@ -1,6 +1,3 @@
-// Package entitlement - the mandatory-update floor. The roster says which
-// version is the lowest allowed to run; this decides whether the binary
-// asking is above it.
 package entitlement
 
 import (

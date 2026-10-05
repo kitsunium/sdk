@@ -1,15 +1,3 @@
-// Package syslog implements a network sink that ships records to a syslog
-// daemon via UDP or TCP. The wire format is a minimal RFC5424 envelope:
-//
-//	<PRI>1 - - - - - - <payload>
-//
-// PRI is computed from the record's level + the default USER facility.
-// Hostname, app-name, procid, msgid, and structured-data slots are fixed
-// to "-" to keep the producer side allocation-friendly; consumers that
-// need richer envelopes wrap this sink with their own framing.
-//
-// Use case: ship logs to journald / rsyslog / a central syslog collector
-// over the standard 514/UDP port.
 package syslog
 
 import (

@@ -1,4 +1,3 @@
-// Package events — hosts DispatchValue, the report of one Publish.
 package events
 
 // DispatchValue reports what one [Bus.Publish] did: how many listeners ran,

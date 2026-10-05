@@ -1,14 +1,5 @@
 //go:build windows
 
-// Package exec — the Windows spawn primitive. Start turns a Spec into a running,
-// supervised process via os.StartProcess (CreateProcess under the hood) and
-// returns a coreproc.Process handle. Stdio (inherit/null/capture) reuses the
-// portable stdioState; Setpgid maps to a new console process group so a later
-// CTRL_BREAK can target the child. The Unix-only Spec fields — rlimits, umask,
-// nice/oom, credentials, ExtraFiles, a cgroup path — have no Windows equivalent
-// in this layer (resource confinement is the Job Object backend's job, applied at
-// the cgroup port), so they are rejected up front with the uniform sentinel
-// rather than silently dropped.
 package exec
 
 import (

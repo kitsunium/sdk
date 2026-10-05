@@ -4,7 +4,10 @@ package(default_visibility = ["//internal/service:service_consumers"])
 
 go_library(
     name = "pbkdf2pw",
-    srcs = ["pbkdf2pw.go"],
+    srcs = [
+        "doc.go",
+        "pbkdf2pw.go",
+    ],
     importpath = "github.com/kitsunium/sdk/internal/service/crypto/password/pbkdf2pw",
     visibility = [
         "//:__subpackages__",

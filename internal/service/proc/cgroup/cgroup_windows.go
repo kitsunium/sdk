@@ -1,24 +1,5 @@
 //go:build windows
 
-// Package cgroup — Windows control groups via Job Objects. A Win32 Job Object is
-// the native, kernel-enforced equivalent of a cgroup v2 control group: it caps a
-// set of assigned processes' memory / CPU / process-count and can terminate them
-// atomically. We bind the kernel32 entry points directly (syscall.NewLazyDLL, no
-// golang.org/x/sys per the dep-light invariant) with the ABI struct layouts
-// hand-declared and cited from the Win32 headers (winnt.h / jobapi2.h), the same
-// discipline the proc trampoline already uses.
-//
-// Mapping to the core/proc.Group port:
-//   - Create        → CreateJobObjectW
-//   - SetMemoryMax  → JOBOBJECT_EXTENDED_LIMIT_INFORMATION.ProcessMemoryLimit
-//   - SetCPUMax     → JOBOBJECT_CPU_RATE_CONTROL_INFORMATION (hard cap)
-//   - SetPidsMax    → JOBOBJECT_BASIC_LIMIT_INFORMATION.ActiveProcessLimit
-//   - Add           → OpenProcess + AssignProcessToJobObject
-//   - Kill          → TerminateJobObject
-//   - Delete        → CloseHandle
-//
-// SetIOMax and Freeze/Thaw have no stable, generally-available Job Object
-// equivalent, so they return the uniform UnsupportedPlatform sentinel.
 package cgroup
 
 import (

@@ -6,6 +6,7 @@ go_library(
     name = "transform",
     srcs = [
         "bounded.go",
+        "doc.go",
         "flate.go",
         "gzip.go",
         "pool.go",

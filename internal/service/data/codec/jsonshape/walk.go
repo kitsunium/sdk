@@ -1,4 +1,3 @@
-// Package jsonshape — the walk from a Go type to its shape.
 package jsonshape
 
 import (

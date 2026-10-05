@@ -1,4 +1,3 @@
-// Package trace — Link: a reference to a span in another trace.
 package trace
 
 import (

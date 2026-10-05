@@ -148,6 +148,9 @@ type apiBuilder struct {
 	cache *fileCache
 	// byDir holds, per cell, the symbols of each package directory.
 	byDir []map[string][]apiSymbol
+	// pkgDocs holds, per cell, the package comment of each package
+	// directory: what a pin file's package marker is compared with.
+	pkgDocs []map[string]string
 	// dirs are the project's package directories and their import paths.
 	dirs map[string]string
 }
@@ -193,23 +196,25 @@ func (b *apiBuilder) readCell(index int, cell platform, listing []*listedPackage
 	}
 	codes := map[string]*apiCode{}
 	byDir := map[string][]apiSymbol{}
+	docs := map[string]string{}
 	//: every project package, after its dependencies, so a re-exported
 	//: sentinel finds its code.
 	for _, cp := range project {
 		//: a package outside every module read is none of the API's.
-		if rerr := b.readPackage(index, cp, codes, byDir); rerr != nil {
+		if rerr := b.readPackage(index, cp, codes, byDir, docs); rerr != nil {
 			//: name it.
 			return rerr
 		}
 	}
 	b.byDir = append(b.byDir, byDir)
+	b.pkgDocs = append(b.pkgDocs, docs)
 	b.cache.release(listing)
 	//: the cell is recorded.
 	return nil
 }
 
 // readPackage records one package's record and symbols on a cell.
-func (b *apiBuilder) readPackage(index int, cp *checkedPackage, codes map[string]*apiCode, byDir map[string][]apiSymbol) error {
+func (b *apiBuilder) readPackage(index int, cp *checkedPackage, codes map[string]*apiCode, byDir map[string][]apiSymbol, docs map[string]string) error {
 	m, ok := b.modules[cp.listed.Module.Path]
 	//: go list only lists main modules' packages as project packages.
 	if !ok {
@@ -228,8 +233,10 @@ func (b *apiBuilder) readPackage(index int, cp *checkedPackage, codes map[string
 		}
 	}
 	byDir[cp.listed.Dir] = syms
+	record := packageRecord(cp, m.module.Dir, place)
+	docs[cp.listed.Dir] = record.Doc
 	//: and the package itself.
-	return m.packages.add(packageRecord(cp, m.module.Dir, place), index)
+	return m.packages.add(record, index)
 }
 
 // packageRecord is a package's own record on a cell: its name, directory,
@@ -256,7 +263,7 @@ func packageRecord(cp *checkedPackage, modDir string, place pkgPlace) apiPackage
 
 // result assembles the documents: one per module that holds a package.
 func (b *apiBuilder) result(cells []platform) (*builtAPI, error) {
-	out := &builtAPI{docs: map[string]*apiDocument{}, cells: b.byDir}
+	out := &builtAPI{docs: map[string]*apiDocument{}, cells: b.byDir, pkgDocs: b.pkgDocs}
 	//: every module, by path.
 	for _, path := range sortedKeys(b.modules) {
 		doc := b.modules[path].document(cells)

@@ -1,6 +1,3 @@
-// Package lock — the file locker: exclusion between PROCESSES on one machine,
-// composed with the in-process gate because flock(2) alone provides none
-// between goroutines.
 package lock
 
 import (

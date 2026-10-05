@@ -1,4 +1,3 @@
-// Package authz — hosts the attribute-based evaluator.
 package authz
 
 import (

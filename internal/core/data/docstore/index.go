@@ -1,5 +1,3 @@
-// Package docstore — the declaration of a secondary index, which both engines
-// take at construction and file by the same rule.
 package docstore
 
 // IndexSpec declares one secondary index: a name to read it by, whether it is

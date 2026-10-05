@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T00:00:00Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # internal/core/observe/otel/
 
 ## Purpose
@@ -28,7 +28,8 @@ Code range: **none**, deliberately — see §The refusal is the caller's.
 
 | File | Surface |
 |---|---|
-| `attr_value.go` | package doc + `AttrKind` (+ the five kinds) + `AttrValue` + the four constructors (`String`/`Bool`/`Int64`/`Float64`) + accessors + `AppendIdentity`/`AppendText` + `CompareAttrKey`/`CompareAttrValue` + `ValidateAttrs`/`SortAttrs`, both taking the caller's refusal |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `attr_value.go` | `AttrKind` (+ the five kinds) + `AttrValue` + the four constructors (`String`/`Bool`/`Int64`/`Float64`) + accessors + `AppendIdentity`/`AppendText` + `CompareAttrKey`/`CompareAttrValue` + `ValidateAttrs`/`SortAttrs`, both taking the caller's refusal |
 | `resource_value.go` | `ResourceValue` + `NormalizeResource` (taking the caller's refusal) + `ServiceNameKey`/`UnknownService` |
 | `scope_value.go` | `ScopeValue` + `NormalizeScope` (taking the signal's default name) |
 | `model_external_test.go` | the canonical text, the injective identity, the refusal seam, Resource and Scope normalisation |

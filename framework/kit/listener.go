@@ -1,5 +1,3 @@
-// Package kit — listeners: inbound ports that are not HTTP, a private socket
-// speaking a versioned contract (ADR 0148).
 package kit
 
 import (

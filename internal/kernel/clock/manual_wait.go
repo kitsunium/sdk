@@ -1,5 +1,3 @@
-// Package clock — hosts manualWait, the record a [ManualClock] keeps for one
-// armed wait, plus the three lock-free helpers that operate on it.
 package clock
 
 import (

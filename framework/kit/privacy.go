@@ -1,4 +1,3 @@
-// Package kit — privacy: kit's own service for holds and the journal.
 package kit
 
 import (

@@ -8,9 +8,10 @@ catalogue of translated messages, CLDR plural forms that are right in Polish
 and Arabic and not only in English, and `Accept-Language` negotiation that
 never fails a request.
 
-`README.md` is **generated** from the package doc comment in `i18n.go` by
-`gomarkdoc` (rule 10 / ADR 0008). Edit the doc comment, then run
-`make docs-readme`. Never hand-edit `README.md`.
+`README.md` is **generated** by `tools/genindex` from the committed `docs/api`
+(`make docs-readme`, ADR 0167). The package comment is in `doc.go`, which kit
+writes from `design/app/i18n.yaml`: edit the design, run `kit gen`, then
+`make api` and `make docs-readme`. Never hand-edit `README.md`.
 
 ## Surface
 
@@ -99,7 +100,7 @@ said.
 
 ## Generated
 
-`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/app/i18n.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the package comment and the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
+`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/app/i18n.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the declarations of their own, and `doc.go` — kit's too (ADR 0167) — the package comment. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
 
 ## Verification
 

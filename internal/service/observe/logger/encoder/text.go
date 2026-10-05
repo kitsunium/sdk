@@ -1,7 +1,3 @@
-// Package encoder — implements TextEncoder, the default human-readable
-// encoder that renders a record as "TIME LEVEL msg key=val key=val …\n".
-// Lives in its own package so the format and the transport (Sink) can
-// evolve independently.
 package encoder
 
 import (

@@ -19,7 +19,8 @@ raises the core's.
 
 | File | Surface |
 |---|---|
-| `spool.go` | package doc, `Spool`, `New`, `Send` (`mint`), `SendWithID`, both through `queue` (`stamp`, `domainOf`), the per-identifier `announcement` count, `Run` (the queue's `Consume`, one mail at a time), `DeadLetters`, `Close` |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `spool.go` | `Spool`, `New`, `Send` (`mint`), `SendWithID`, both through `queue` (`stamp`, `domainOf`), the per-identifier `announcement` count, `Run` (the queue's `Consume`, one mail at a time), `DeadLetters`, `Close` |
 | `identifier.go` | `MaxIDBytes` and `checkID` — the rule every identifier keeps, whoever minted it |
 | `config.go` | `Config`, `DefaultSendTimeout`, `DefaultRetryBase` / `DefaultRetryMax`, `DefaultMaxMessageBytes`, `DeliveredMemory`; the refusals |
 | `deliver.go` | the queue handler: the record read back, a duplicate dropped, the attempt bounded on the spool's clock with its `AttemptValue` in the context, a transport panic recovered, a failure parked (`LeaseExtender.Extend` by `Backoff.Delay(attempt)`) or — on the last attempt — nacked into the dead letter |

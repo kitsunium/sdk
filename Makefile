@@ -34,7 +34,7 @@ help: ## Print this help (default goal).
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "docs-dev" "$(DIM)hot-reloading docs dev server (astro dev, no full rebuild — fast iteration)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "cover"  "bazel coverage --combined_report=lcov //..."
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "release-dry-run"  "$(DIM)compute-bumps + cut-tags in dry-run (see ADR 0007)$(RST)"
-	@printf "  $(GREEN)%-7s$(RST)  %s\n" "docs-readme"  "$(DIM)regenerate every pkg/v1/*/README.md from its doc comment (see ADR 0008)$(RST)"
+	@printf "  $(GREEN)%-7s$(RST)  %s\n" "docs-readme"  "$(DIM)write every pkg/ and framework/ README.md from docs/api (see ADR 0167)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "api"          "$(DIM)write docs/api — every exported symbol, read from the code on the 12 cells — then error-codes and gazelle$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "regen"        "$(DIM)delete every kit-generated file, kit gen + make api, require zero diff (local: needs the pinned kit)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "profile"      "$(DIM)capture cpu+mem+block+mutex pprof for codec bench (WAVE=<slug>)$(RST)"
@@ -131,6 +131,8 @@ lint:
 	bash scripts/pre-commit/check-pkg-docs.sh
 	bash scripts/pre-commit/check-bench-md.sh
 	bash scripts/pre-commit/check-error-codes-drift.sh
+	# Every README is what docs/api writes (ADR 0167): genindex, no binary.
+	bash scripts/pre-commit/check-readme-drift.sh
 	# Gazelle gives every internal/ package //:__subpackages__ visibility, which
 	# admits the whole repository, so the layer direction is asserted on the
 	# build graph instead of assumed from visibility (ADR 0068).
@@ -486,24 +488,19 @@ release-dry-run:
 		/bin/bash scripts/release/cut-tags.sh --dry-run $(if $(BUMP),--bump=$(BUMP),) < /tmp/sdk-release-majors.txt; \
 	fi
 
-# `docs-readme` regenerates pkg/v1/<service>/README.md from each
-# package's Go doc comment via the `gomarkdoc` binary (ADR 0008).
-# The binary is installed with `go install
-# github.com/princjef/gomarkdoc/cmd/gomarkdoc@v1.1.0` so it lives on
-# $PATH without adding ~50 indirect deps to the SDK module's go.mod,
-# which requires nothing (ADR 0156).
-#
-# The package list is NOT enumerated here. It was, and it went stale: the
-# enumeration named 15 packages while 27 carried a //go:generate directive,
-# so client, server and ten others could never be regenerated at all. Letting
-# `go generate ./...` find the directives makes the set self-maintaining — a
-# new pkg/v1 package is covered the moment it declares one.
+# `docs-readme` writes the README.md of every package under pkg/ and
+# framework/ from the committed docs/api (tools/genindex -write-readmes, ADR
+# 0167, amending ADR 0008): the package comment, then every exported symbol's
+# declaration and doc — an alias with the fields and methods of the type it
+# names, which go/doc never showed — and the examples of the package's tests.
+# A README states only what docs/api holds, and docs/api's docs are the
+# design's (the pin markers' doc digests), so a README changes when the design
+# does: edit the doc in design/, `kit gen`, `make api`, then this target.
+# genindex is the SDK's stdlib-only tool — nothing to install. The package
+# list is docs/api's, never enumerated, and a README genindex wrote for a
+# package that is gone is removed.
 docs-readme:
-	@command -v gomarkdoc >/dev/null 2>&1 \
-	  || { echo "✗ gomarkdoc not on PATH. Install: go install github.com/princjef/gomarkdoc/cmd/gomarkdoc@v1.1.0"; exit 1; }
-	cd pkg/v1 && go generate ./...
-	cd framework && go generate ./...
-	@echo "→ every pkg/v1 and framework package declaring //go:generate gomarkdoc regenerated"
+	cd tools/genindex && GOWORK=off go run . -write-readmes -repo-root $(CURDIR)
 
 # `error-codes` writes docs/error-codes.yaml — the human-readable list of the
 # dotted-quad error codes (ADR 0005/0006) — from docs/api: every errs.Code

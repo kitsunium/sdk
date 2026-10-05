@@ -1,5 +1,3 @@
-// Package queue — the durable broker's configuration, and the directory
-// checks it runs before anything is opened.
 package queue
 
 import (

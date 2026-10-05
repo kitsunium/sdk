@@ -1,4 +1,3 @@
-// Package i18n — the renderer: one language, one resolution chain.
 package i18n
 
 import (

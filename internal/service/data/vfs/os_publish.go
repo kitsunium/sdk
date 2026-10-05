@@ -1,6 +1,3 @@
-// Package vfs — atomic publication: the five mechanics, the order they run in,
-// and the cleanup that makes a failure indistinguishable from never having
-// started.
 package vfs
 
 import (

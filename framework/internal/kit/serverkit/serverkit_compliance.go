@@ -1,4 +1,3 @@
-// Package serverkit — the compile-time proof that the engine is kit's.
 package serverkit
 
 import "github.com/kitsunium/sdk/framework/internal/kit/plug"

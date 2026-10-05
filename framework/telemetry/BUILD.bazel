@@ -6,6 +6,7 @@ go_library(
     name = "telemetry",
     srcs = [
         "codes_gen.go",
+        "doc.go",
         "exporter.go",
         "exporter_compliance.go",
         "telemetry.go",

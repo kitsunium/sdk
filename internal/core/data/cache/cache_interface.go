@@ -1,6 +1,3 @@
-// Package cache — the sibling interfaces a store advertises by type assertion
-// (ADR 0039), kept out of cache.go so the FROZEN port stands alone in the file
-// that names the package.
 package cache
 
 import "context"

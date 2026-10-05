@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T13:06:04Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # internal/service/proc/exec
 
 The keystone spawn primitive of the process-supervision domain (ADR 0016).
@@ -26,7 +26,8 @@ process that already exists.
 
 | File | Build tag | Role |
 |---|---|---|
-| `exec.go` | all | package doc + `validateSpec` (empty Path ⇒ `InvalidSpec`) |
+| `doc.go` | all | the package comment — kit writes it from the design (ADR 0167) |
+| `exec.go` | all | `validateSpec` (empty Path ⇒ `InvalidSpec`) |
 | `exec_unix.go` | `unix` | `Start`: validate → check limits → resolve creds → `SysProcAttr` → `os.StartProcess` through `childwait.Spawn` (`forkClaimed`) → post-start attrs; `teardown` on attr failure; `awaitTrampoline` reaps a trampoline that failed before exec, through the claim |
 | `exec_other.go` | `!unix && !windows` | `Start` ⇒ `UnsupportedPlatform` (compiles everywhere) |
 | `exec_windows.go`, `handle_windows.go`, `joblimits_windows.go`, `cgroup_placement_windows.go` | `windows` | the CreateProcess backend: stdio, a console process group for `Setpgid`, rlimits through a Job Object; the Unix-only fields refused with `UnsupportedPlatform` |

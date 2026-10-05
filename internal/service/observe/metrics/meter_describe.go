@@ -1,4 +1,3 @@
-// Package metrics — the description a Meter attaches to an instrument NAME.
 package metrics
 
 import coremetrics "github.com/kitsunium/sdk/internal/core/observe/metrics"

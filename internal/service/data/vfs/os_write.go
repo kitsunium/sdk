@@ -1,4 +1,3 @@
-// Package vfs — the disk filesystem's non-atomic write verbs.
 package vfs
 
 import (

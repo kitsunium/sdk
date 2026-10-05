@@ -1,5 +1,3 @@
-// Package lifecycle — hosts the shutdown sequence and the per-component
-// budget that bounds it.
 package lifecycle
 
 import (

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T12:00:00Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # internal/kernel/fs/flock/
 
 ## Purpose
@@ -20,7 +20,8 @@ session its gate, its abandonable waits and its own platform gate.
 
 | File | Holds |
 |---|---|
-| `flock.go` | the package doc, `TryLock` and `Unlock` — the contract, stated once for every platform |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `flock.go` | `TryLock` and `Unlock` — the contract, stated once for every platform |
 | `flock_unix.go` | `Native = true` and `flock(LOCK_EX\|LOCK_NB)` / `flock(LOCK_UN)` (linux, darwin, the four BSDs; android and ios through their tags) |
 | `flock_windows.go` | `Native = true` and `LockFileEx` / `UnlockFileEx` over offset 0, 2^64-1 bytes, with `LOCKFILE_FAIL_IMMEDIATELY`, bound from `kernel32` with `syscall.NewLazyDLL` (no `x/sys`, ADR 0018) — and the measured table of how it differs from `flock(2)` |
 | `flock_other.go` | `Native = false` and `errors.ErrUnsupported` from both calls (js, wasip1, plan9, aix, solaris, illumos) |

@@ -1,5 +1,3 @@
-// Package spool — one delivery: the record read back, a duplicate dropped,
-// the attempt bounded, and its failure parked, or dead-lettered.
 package spool
 
 import (

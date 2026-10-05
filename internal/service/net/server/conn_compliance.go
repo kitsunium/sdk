@@ -1,5 +1,3 @@
-// Package server — compile-time interface assertions, kept out of the
-// production source per KTN-IFACE-ASSERT-PLACEMENT.
 package server
 
 import corenet "github.com/kitsunium/sdk/internal/core/net"

@@ -1,11 +1,3 @@
-// Package tlv — wire-format tag constants and shared limits for the TLV
-// (Type-Length-Value) codec.
-//
-// Wire layout (each record):
-//
-//	tag(1B) length(varint) value(...)
-//
-// length is unsigned LEB128 (1-10 bytes); value layout depends on the tag.
 package tlv
 
 // Numeric limits — grouped at the top so const → type → var → func

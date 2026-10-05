@@ -7,6 +7,7 @@ go_library(
     srcs = [
         "config.go",
         "deliver.go",
+        "doc.go",
         "event.go",
         "identifier.go",
         "ledger.go",

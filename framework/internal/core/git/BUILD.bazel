@@ -6,6 +6,7 @@ go_library(
     name = "git",
     srcs = [
         "codes_gen.go",
+        "doc.go",
         "git.go",
         "line_range.go",
     ],

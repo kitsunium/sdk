@@ -1,4 +1,3 @@
-// Package config — the schema declaration: what an author writes.
 package config
 
 import (

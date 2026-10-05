@@ -9,15 +9,17 @@ loading a published key — `internal/service/crypto/key/jwk`, plus two generic
 helpers (`PrivateClaim` / `SetPrivateClaim`) that keep `encoding/json` out of
 the core value type. Stdlib-only, so a consumer gains no dependency.
 
-Consumer-facing prose lives in the package doc comment (`token.go`), which
-`gomarkdoc` renders into `README.md` (rule 10). This file is the maintainer's
-half.
+Consumer-facing prose lives in the package doc comment (`doc.go`, which kit
+writes from `design/security/token.yaml`, ADR 0167); `README.md` is written by
+`tools/genindex` from the committed `docs/api` (`make docs-readme`). This file
+is the maintainer's half.
 
 ## Contents
 
 | File | Surface |
 |---|---|
-| `token.go` | package doc — the fragments `codes.go`, `constants.go`, `constructors.go` and `sentinels.go` held, joined in file-name order when their declarations moved to `facade_gen.go` (ADR 0166) — + `PrivateClaim` / `SetPrivateClaim` |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167): the fragments `codes.go`, `constants.go`, `constructors.go` and `sentinels.go` held, joined in file-name order when their declarations moved to `facade_gen.go` (ADR 0166), then the package doc proper |
+| `token.go` | `PrivateClaim` / `SetPrivateClaim` |
 | `facade_gen.go` | kit's, from `design/security/token.yaml`'s `facade:` (ADR 0166): the type aliases (`Algorithm`, `Claims`, `Issuer`, `Verifier`, the four `*Config`, `Key` / `JWK` / `JWKSet` / `KeyType` / `Curve`), `NewClaims`, the four `Algorithm*` values, the seven `Claim*` names and the JWK vocabulary (three `KeyType*`, four `Curve*`), the ten issuer/verifier `New*` forwarders and the three JWK loaders `ParseJWK` / `ParseJWKSet` / `NewJWKSet`, the 29 verdict vars re-exported from `core/security/token` (all 23 token verdicts, ADR 0160) and `core/crypto/key/jwk` (the six `JWK*` parse refusals), and the 29 `Code*` constants re-exported for `errs.HasCode` |
 
 ## Why the codes are re-exported
@@ -94,8 +96,9 @@ reason `Claims` aliases `ClaimsValue`.
 - Do not widen `Issuer` or `Verifier` — they are aliased ports, so ADR 0039
   applies: a sibling interface, never a widening.
 - Do not add a constant, a field or a flag that admits `alg: none`.
-- Do not hand-edit `README.md`. Edit the package comment in `token.go` and run
-  `make docs-readme` (rule 10 / ADR 0008).
+- Do not hand-edit `README.md`. Edit the package comment in the design
+  (`design/security/token.yaml`), run `kit gen`, then `make api` and
+  `make docs-readme` (ADR 0167).
 - Do not make `Claims` printable, or add an accessor that renders its contents.
   The shape-only rendering is a security property of the core type.
 - **Do not import `internal/` from a `_external_test.go` file here.** The
@@ -109,7 +112,7 @@ reason `Claims` aliases `ClaimsValue`.
 
 ## Generated
 
-`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/security/token.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the package comment and the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
+`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/security/token.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: `doc.go` holds the package comment, which kit writes from the design (ADR 0167), and the hand-written files the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
 
 ## Verification
 

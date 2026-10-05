@@ -1,4 +1,3 @@
-// Package authz — hosts AttrValue, one typed fact about a request.
 package authz
 
 import "slices"

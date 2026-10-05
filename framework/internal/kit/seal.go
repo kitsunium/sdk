@@ -1,4 +1,3 @@
-// Package kit — sealing at rest: members sealed where kit keeps them.
 package kit
 
 import (

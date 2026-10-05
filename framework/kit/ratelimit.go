@@ -1,4 +1,3 @@
-// Package kit — rate limits on an endpoint, per client.
 package kit
 
 import (

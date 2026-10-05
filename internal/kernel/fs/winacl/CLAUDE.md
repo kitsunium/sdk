@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T12:00:00Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # internal/kernel/fs/winacl/
 
 ## Purpose
@@ -25,7 +25,8 @@ and each caller kept its masks and its own answer to "could not look".
 
 | File | Holds |
 |---|---|
-| `winacl.go` | the package doc; the rights `RightAddFile`, `RightAddSubdirectory`, `RightDeleteChild`, `RightDelete`, `RightWriteDAC`, `RightWriteOwner`, and the three masks built from them, `ReplaceRights`, `CreateRights`, `ContentRights`. Every platform compiles it, so a rule can name its masks in a file without a build tag |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `winacl.go` | the rights `RightAddFile`, `RightAddSubdirectory`, `RightDeleteChild`, `RightDelete`, `RightWriteDAC`, `RightWriteOwner`, and the three masks built from them, `ReplaceRights`, `CreateRights`, `ContentRights`. Every platform compiles it, so a rule can name its masks in a file without a build tag |
 | `dacl_windows.go` | `GrantsAnyone`: `GetNamedSecurityInfoW` + `GetAce` from `advapi32`, the eight discretionary ACE shapes, the generic-right expansion, `reachOf` (which object an entry governs), the SID bounds — and the 250-line estimate that deferred it three times, re-checked |
 | `tokens_windows.go` | `tokenSet`: the three nested accounts a DACL is evaluated for — a deny reaches every account holding the SID it names, which a map keyed by the ACE's SID gets wrong (ADR 0084 §D3b; the third account, ADR 0086) |
 | `walk_internal_windows_test.go` | the walk over lists assembled byte by byte and read with the SHIPPED `GetAce`: every ACE shape, deny-then-allow across nested identifiers, conditional entries, inheritance, separate denial states, and entries too small for the SID they claim |

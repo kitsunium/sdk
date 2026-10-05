@@ -1,5 +1,3 @@
-// Package clock — hosts manualTicker, the [Ticker] handle a [ManualClock]
-// hands out for a repeating wait.
 package clock
 
 import "time"

@@ -1,10 +1,3 @@
-// Package token — JSON string rendering that cannot fail.
-//
-// encoding/json's Marshal returns an error no string or []string can ever
-// produce, and discarding it at a dozen call sites is how a real failure
-// somewhere else eventually gets discarded too. Rendering the two shapes this
-// package actually emits by hand removes the error channel instead of ignoring
-// it — and removes a reflective encode from every mint.
 package token
 
 import "strings"

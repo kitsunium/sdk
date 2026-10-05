@@ -1,5 +1,3 @@
-// Package kit — the interfaces of nodes: what every declaration is, and the
-// roles some play.
 package kit
 
 import (

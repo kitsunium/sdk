@@ -1,13 +1,3 @@
-// Package selfupdate — the two shapes every error in this package is built
-// with, so the choice at a call site is which sentinel rather than which
-// spelling.
-//
-// The split between them is whether this package DECIDED the failure or was
-// TOLD about one. A decision has no cause to carry — nothing failed, a rule
-// was applied — and the sentinel itself is the whole of it. A report from
-// outside has a cause that must survive, because `errors.Is(err, os.ErrPermission)`
-// and the text the operating system wrote are the two things a wrapper most
-// often destroys.
 package selfupdate
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

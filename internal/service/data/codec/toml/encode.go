@@ -1,8 +1,3 @@
-// Package toml — the encode: a Go map or struct written as a TOML document.
-// The layout is the one the previous library wrote, byte for byte on the
-// values it accepted: a table's plain keys first, then its sub-tables and
-// arrays of tables, each under its header; struct fields in declaration order
-// and map keys sorted; strings literal when they can be, basic otherwise.
 package toml
 
 import (

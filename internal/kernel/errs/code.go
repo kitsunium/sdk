@@ -1,12 +1,3 @@
-// Package errs — defines the dotted-quad Code type introduced by
-// ADR 0005. Layout: MM.LL.PP.SS over uint32 — Major.Layer.Package.Serial.
-// Codes are comparable, ordered, map-keyable, and const-expressible via
-// hex literals (Pack is a runtime constructor only).
-//
-// Code is a packed uint32 (shifts/masks only), so it is fully portable across
-// 32- and 64-bit GOARCH — there is no build constraint here. Validation bounds
-// every Code to uint32 ≤ 0x7FFFFFFF (validate.go), so the rare int(code) cast
-// round-trips losslessly even where int is 32-bit.
 package errs
 
 import (

@@ -1,8 +1,5 @@
 //go:build !windows
 
-// Package queue — who else can write a queue directory, asked of the mode bits:
-// the whole answer on Unix, where a directory's other-write bit and its sticky
-// bit are exactly the two facts the question needs.
 package queue
 
 import (

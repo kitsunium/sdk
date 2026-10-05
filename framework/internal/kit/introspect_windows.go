@@ -1,7 +1,5 @@
 //go:build windows
 
-// Package kit — how the source endpoint opens a file on Windows: the link
-// itself, never its target.
 package kit
 
 import (

@@ -1,4 +1,3 @@
-// Package trace — the in-memory span destination.
 package trace
 
 import (

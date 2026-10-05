@@ -1,4 +1,3 @@
-// Package studiokit — the compile-time proof that the stream is kit's.
 package studiokit
 
 import "github.com/kitsunium/sdk/framework/internal/kit/plug"

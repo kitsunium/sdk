@@ -1,15 +1,5 @@
 //go:build linux || darwin || freebsd || openbsd || netbsd || dragonfly
 
-// Package vfs — the operating-system mechanics the disk filesystem needs, on
-// the platforms that have them.
-//
-// Two of the three guarantees are portable and one is not. Confinement comes
-// from os.Root, which the standard library implements on every GOOS. Atomic
-// replacement comes from rename(2), which POSIX requires to be atomic. Flushing
-// a DIRECTORY — the step that makes a published name survive a power loss — is
-// the one that is not: it is fsync(2) on a directory descriptor here, and has
-// no equivalent on Windows. That is the reason this file has a build tag and a
-// sibling that refuses.
 package vfs
 
 import "os"

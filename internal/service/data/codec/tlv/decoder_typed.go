@@ -1,21 +1,3 @@
-// Package tlv — target-aware decode fast path.
-//
-// The default decoder (decoder.go) produces an untyped value tree
-// (map[string]any for structs, []any for slices, map[any]any for maps)
-// then projects it onto the caller's typed target. For typed-struct
-// targets this pays two costs: the outer map[string]any allocation +
-// per-field string keys, AND a second walk through projectMapToStruct.
-//
-// decodeStructInto walks the wire ONCE, locating each field by name
-// in the cached structTypeInfo and assigning into target.Field(i)
-// directly. The result is byte-identical to the untyped path on
-// roundtrip; only the in-flight allocation profile changes.
-//
-// Scope: top-level *struct targets only. Nested struct fields still
-// fall through the untyped decodeValue + convertValue helpers so
-// cross-shape narrowings (e.g. map[string]any field on a typed
-// struct) remain compatible. Extending the fast path to nested
-// structs is a follow-up that reuses the same primitives.
 package tlv
 
 import (

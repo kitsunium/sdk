@@ -4,7 +4,10 @@ package(default_visibility = ["//internal/service:service_consumers"])
 
 go_library(
     name = "file",
-    srcs = ["file.go"],
+    srcs = [
+        "doc.go",
+        "file.go",
+    ],
     importpath = "github.com/kitsunium/sdk/internal/service/observe/logger/writer/file",
     visibility = [
         "//:__subpackages__",

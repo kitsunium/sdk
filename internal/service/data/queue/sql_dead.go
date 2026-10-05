@@ -1,5 +1,3 @@
-// Package queue — the SQL broker's dead letters: burying one a handler
-// rejected, reading them back, and the two decisions an operator takes.
 package queue
 
 import (

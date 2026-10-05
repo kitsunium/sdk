@@ -1,4 +1,3 @@
-// Package mail — the attachment guards.
 package mail
 
 import (

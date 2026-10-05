@@ -1,15 +1,3 @@
-// Package msgpack is the MessagePack codec — a native implementation of the
-// specification (github.com/msgpack/msgpack/blob/master/spec.md) on the
-// standard library alone, registered as the "msgpack" Format. It replaced
-// github.com/vmihailenco/msgpack/v5 and writes the bytes that library wrote:
-// testdata/vendor-golden.txt holds the vendor's output for every value family
-// and the suite holds the native encoder to it byte for byte.
-//
-// The codec also implements StreamingCodec (one value per Encode, read back
-// one per Decode) and Appender (encode straight onto a caller's buffer).
-// Decoding is held to the bounds wire.go names: 10 MiB of input per Unmarshal
-// and per stream, 1000 levels of nesting, and no allocation sized by a length
-// the input declares before the input has proved it holds that many bytes.
 package msgpack
 
 import (

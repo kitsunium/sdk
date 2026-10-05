@@ -9,6 +9,7 @@ go_library(
         "chain.go",
         "chain_config.go",
         "config.go",
+        "doc.go",
         "memory.go",
         "record.go",
         "refuse.go",

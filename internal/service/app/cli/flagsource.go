@@ -1,4 +1,3 @@
-// Package cli — the one seam between this domain and internal/core/app/config.
 package cli
 
 import (

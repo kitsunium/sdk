@@ -1,4 +1,3 @@
-// Package yaml — encoding: Go values resolved, then written in block style.
 package yaml
 
 import (

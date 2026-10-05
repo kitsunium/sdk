@@ -1,4 +1,3 @@
-// Package authz — hosts DenyOverrides, the one combining algorithm.
 package authz
 
 import (

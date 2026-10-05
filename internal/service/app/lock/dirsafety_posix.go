@@ -1,7 +1,5 @@
 //go:build !windows
 
-// Package lock — the lock directory's safety verdict where a directory's mode
-// bits say who may replace its entries (ADR 0081).
 package lock
 
 import (

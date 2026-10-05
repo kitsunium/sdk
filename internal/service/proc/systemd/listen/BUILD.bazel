@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "listen",
     srcs = [
+        "doc.go",
         "sdlisten_other.go",
         "sdlisten_unix.go",
     ],

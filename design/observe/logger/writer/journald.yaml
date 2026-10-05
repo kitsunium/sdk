@@ -18,6 +18,16 @@ packages:
             name: CodeJournaldWriteFailed
             value: "0x00_03_1F_02"
         type: errs.Code
+    doc: |-
+      Package journald declares the codes and sentinels of the journald log writer,
+      internal/service/observe/logger/writer/journald: range 0.3.31.*, allocated to
+      that engine (ADR 0015 service slot 0x1f) and declared here since ADR 0160, so
+      the engine declares none.
+
+      Package journald — declares the sentinels returned by the journald sink's
+      constructor and Write path. Each var's name equals its errs.Define Reason in
+      SCREAMING_SNAKE form. No record content or socket path is ever echoed into
+      these errors.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/observe/logger/writer/journald
@@ -39,26 +49,90 @@ packages:
             private: "service/observe/logger/writer/journald: the unix-datagram socket returned an error"
             public: Journald sink write failed
             reason: JOURNALD_WRITE_FAILED
-  - imports:
+  - doc: |-
+      Package journald — the config Decoder making "journald" reachable from a
+      config file via pkg/v1/observe/logger.FromConfig. Only plain-data keys are decodable
+      (socket_path / min_level / buffer_size); the Dialer seam is code-only. A
+      malformed shape yields the shared core/observe/logger/writer.WriterConfigInvalid (no
+      per-package code), tagged with the writer name only — never the value.
+
+      Package journald registers the "journald" writer factory (ADR 0015): a
+      stdlib unix-datagram sink that ships records to the systemd journal. Importing
+      the package self-registers the factory (no init()), so
+      writer.Open("journald", journald.Config{…}) and YAML FromConfig
+      topologies resolve. Linux-only in practice (the socket is systemd's), but the
+      code is plain stdlib net and builds everywhere; on a host without journald the
+      Open simply fails with JournaldOpenFailed. On Windows, whose AF_UNIX sockets
+      are stream-only, the default dialer cannot connect a datagram socket at all
+      and Open refuses it with UNSUPPORTED_PLATFORM before trying (ADR 0018).
+
+      Package journald — the Config value type, in its own file per the
+      one-exported-struct-per-file convention.
+
+      Package journald — journaldSink, the terminal datagram sink. It frames each
+      record as a single "MESSAGE=<line>\n" journal entry into a reused buffer and
+      sends it as one unix datagram, so the steady-state Write path allocates
+      nothing (the buffer grows once, then is reused under the mutex). Non-blocking
+      back-pressure is provided by the async middleware composed around it.
+
+      Framing note: the native journald protocol length-prefixes multiline field
+      values; this sink emits the simple "MESSAGE=<line>\n" form, which is correct
+      because the SDK encoders strip CR/LF/NUL from the message — a record is always
+      a single line at this layer.
+
+      Package journald — the journal socket's family, left to the kernel here.
+
+      Package journald — the journal socket's family, which Windows does not have.
+
+      Package journald — the wrap points every failure of this writer goes through,
+      so each carries its code from internal/core/observe/logger/writer/journald.
+    imports:
       level: github.com/kitsunium/sdk/internal/core/observe/logger/level
       writer: github.com/kitsunium/sdk/internal/core/observe/logger/writer
     path: github.com/kitsunium/sdk/internal/service/observe/logger/writer/journald
     types:
-      - name: Config
+      - doc: |-
+          Config tunes the journald sink. Every field is optional: the zero
+          Config connects the default systemd journal socket, inherits the
+          handler-global level, and uses async's default ring. It carries only stdlib
+          types, so the package stays dep-light.
+        name: Config
         struct:
           fields:
-            - name: SocketPath
+            - doc: |-
+                SocketPath overrides the journal datagram socket; the zero value uses the
+                systemd default (/run/systemd/journal/socket).
+              name: SocketPath
               type: string
-            - name: Dialer
+            - doc: |-
+                Dialer, when non-nil, replaces net.Dial for connecting the socket.
+                Injectable so tests connect an in-memory pipe with no real journald.
+              name: Dialer
               type: func(network, addr string) (conn net.Conn, err error)
-            - name: MinLevel
+            - doc: |-
+                MinLevel is the optional per-writer severity floor; the zero value
+                (level.Info) inherits the handler-global level.
+              name: MinLevel
               type: level.Level
-            - name: BufferSize
+            - doc: |-
+                BufferSize is the async ring capacity; a non-positive value applies
+                async's own default. The producer never blocks on the socket — a slow
+                journald surfaces as drops via OnDrop.
+              name: BufferSize
               type: int
-            - name: OnDrop
+            - doc: |-
+                OnDrop, when non-nil, is invoked with the count of records discarded
+                because the non-blocking ring saturated.
+              name: OnDrop
               type: func(dropped int)
-            - name: OnError
+            - doc: |-
+                OnError, when non-nil, is invoked with each downstream send failure the
+                async drainer observes; the zero value silently discards them.
+              name: OnError
               type: func(err error)
     variables:
-      - name: Writer
+      - doc: |-
+          Writer is the registered journald factory singleton. The blank assignment runs
+          writer.Register at package load (no init()), mirroring the codec convention.
+        name: Writer
         type: writer.Factory

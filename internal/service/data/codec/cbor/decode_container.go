@@ -1,8 +1,3 @@
-// Package cbor — decoding into byte slices and arrays, slices, arrays and
-// maps. A slice is resized to the array it receives and the elements it
-// reuses are zeroed first, so nothing of its previous content survives; an
-// array keeps its length, dropping extra elements and zeroing missing ones;
-// a map keeps its entries and gains the decoded ones.
 package cbor
 
 import (

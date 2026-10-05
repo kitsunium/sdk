@@ -1,4 +1,3 @@
-// Package kit — where the data keys are, against what they seal.
 package kit
 
 import (

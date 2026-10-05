@@ -1,8 +1,5 @@
 //go:build unix && !freebsd && !dragonfly
 
-// Package rlim — the uint64 syscall.Rlimit constructor. On every Unix target
-// except FreeBSD and DragonFly the kernel types Rlimit.Cur/Max as uint64,
-// matching coreproc.LimitValue exactly.
 package rlim
 
 import "syscall"

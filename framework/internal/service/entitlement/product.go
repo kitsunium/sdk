@@ -1,5 +1,3 @@
-// Package entitlement — the product: which vendor's roster this binary trusts,
-// and the names its artefacts carry.
 package entitlement
 
 import (

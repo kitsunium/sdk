@@ -1,6 +1,3 @@
-// Package otlp — common.v1.KeyValue, the repeated message every OTLP payload
-// spells its dimensions with, and its rendering from the shared attribute
-// model.
 package otlp
 
 import coreotel "github.com/kitsunium/sdk/internal/core/observe/otel"

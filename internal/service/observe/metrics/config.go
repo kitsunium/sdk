@@ -1,5 +1,3 @@
-// Package metrics — the Meter's configuration: cardinality bound, aggregation
-// temporality, producing Resource, instrumentation Scope and clock.
 package metrics
 
 import (

@@ -1,7 +1,3 @@
-// Package bson — the per-type plans: how a Go type maps onto BSON, worked out
-// once from reflection and cached by reflect.Type, so an encode or a decode
-// only reads what was decided. A plan is built under one mutex and published
-// complete; reading a published plan takes no lock.
 package bson
 
 import (

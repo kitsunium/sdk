@@ -1,4 +1,3 @@
-// Package vfs — an open directory in the in-memory filesystem.
 package vfs
 
 import (

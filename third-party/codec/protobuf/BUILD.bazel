@@ -13,6 +13,7 @@ go_library(
     srcs = [
         "codec.go",
         "codes_gen.go",
+        "doc.go",
     ],
     importpath = "github.com/kitsunium/sdk/third-party/codec/protobuf",
     visibility = ["//visibility:public"],

@@ -151,26 +151,101 @@ packages:
             value: "0x00_03_58_15"
         type: errs.Code
     constants:
-      - name: CreateEvent
+      - doc: |-
+          CreateEvent is the event name of the step that brings a new entity into its
+          initial state. No declared transition may take it, so a history can always
+          tell a creation from an event.
+        name: CreateEvent
         type: string
         value: "\"create\""
-      - name: TriggerStart
+      - doc: |-
+          TriggerStart is the creation of an entity: the step into its initial
+          state.
+        name: TriggerStart
         type: Trigger
         value: "1"
-      - name: TriggerEvent
+      - doc: TriggerEvent is an event transition, fired by a caller.
+        name: TriggerEvent
         type: Trigger
         value: "2"
-      - name: TriggerDelay
+      - doc: |-
+          TriggerDelay is a timer transition due once an entity has spent a
+          declared duration in its state.
+        name: TriggerDelay
         type: Trigger
         value: "3"
-      - name: TriggerDeadline
+      - doc: |-
+          TriggerDeadline is a timer transition due at an instant the entity
+          itself carries — a due date, an expiry.
+        name: TriggerDeadline
         type: Trigger
         value: "4"
-      - name: TriggerGuard
+      - doc: |-
+          TriggerGuard is a transition due as soon as a condition on the entity
+          holds.
+        name: TriggerGuard
         type: Trigger
         value: "5"
+    doc: |-
+      Package statemachine — ranges 0.2.56.* (ADR 0120 core/app/statemachine
+      block) and 0.3.88.* (ADR 0120 service/app/statemachine block, declared here
+      since ADR 0160).
+
+      Package statemachine — declares the sentinel *errs.Error outcomes of the
+      domain: the contract's one refusal, and the engine's outcomes. Each var's
+      name equals its errs.Define Reason in SCREAMING_SNAKE form.
+
+      No Public text names a key, an event or a state: those travel as log-only
+      fields, because a key is often an identifier a caller would rather not see
+      echoed, and the fields are where an operator looks anyway.
+
+      Package statemachine — hosts the values the Journal port speaks: a record of
+      one entity and the steps of its history.
+
+      Package statemachine declares the ports of the state-machine domain (ADR
+      0120): the [Store] a machine reads and writes the entities it drives through,
+      the [Journal] that keeps beside them what a store does not — when each entity
+      entered its state, and the transitions that brought it there — and the
+      values those two ports speak ([RecordValue], [StepValue], [Trigger]). The
+      engine — declarations, transitions, hooks, the agenda of timers and the loop
+      that fires them — lives in internal/service/app/statemachine; this package owns
+      only the contract.
+
+      # The store stays the single source of truth
+
+      An entity's state is a field of the entity, and the entity lives in the
+      caller's store, not in the machine. A machine never keeps a second copy of an
+      entity: it reads it through [Store.Get], writes it through [Store.Insert] or
+      [Store.Replace], and forgets it the moment the caller says it was deleted.
+      What the machine does keep — the instant an entity entered its state and a
+      bounded history — is not something the entity carries, and it lives in a
+      [Journal] so a restart does not reset every timer.
+
+      # Missing and existing are answers, not errors
+
+      [Store.Get] reports an absent entity with found == false, [Store.Insert] a
+      taken key with inserted == false, and [Store.Replace] a vanished entity with
+      replaced == false. A store therefore never has to produce a code of this
+      domain to say something ordinary, and the machine decides what each answer
+      means: a transition refused, an entity that does not exist, a creation that
+      collided. An error from a port method is a store that FAILED, nothing else.
+
+      # There is no registry
+
+      A store is a caller's collection and a journal is where that caller keeps
+      its bookkeeping: neither has a name the SDK could resolve, so, like lock
+      (ADR 0052) and secret (ADR 0096), the domain has no name->implementation
+      table.
+
+      Package statemachine — hosts Trigger, the closed set of things that fire a
+      transition, with its text form. Its one refusal, TriggerUnknown, is
+      declared in errors.go with the domain's other sentinels.
     functions:
-      - in:
+      - doc: |-
+          ParseTrigger reads a trigger's name, as String writes it. Anything else —
+          an empty name included — is refused with [TriggerUnknown], which does not
+          repeat the name.
+        in:
           - name: name
             type: string
         name: ParseTrigger
@@ -546,82 +621,202 @@ packages:
             public: The request ended while the entity was busy
             reason: WAIT_ABANDONED
     types:
-      - name: RecordValue
+      - doc: |-
+          RecordValue is what a machine keeps about one entity beside the store: the
+          state it is in, since when, and the transitions that brought it there,
+          oldest first and bounded by the machine's history length.
+
+          State and Entered describe the entity as the machine last saw it. When an
+          entity's state changes behind the machine's back — a write that did not go
+          through a transition — the machine records the new state with Entered set
+          to the moment it learned of it, and adds no step: it knows the state, not a
+          transition.
+        name: RecordValue
         struct:
           fields:
-            - name: Key
+            - doc: Key is the entity's key in the store.
+              name: Key
               tag: json:"key"
               type: string
-            - name: State
+            - doc: State is the state the entity is in.
+              name: State
               tag: json:"state"
               type: S
-            - name: Entered
+            - doc: Entered is when the entity entered State.
+              name: Entered
               tag: json:"entered"
               type: time.Time
-            - name: History
+            - doc: History holds the latest transitions, oldest first.
+              name: History
               tag: json:"history,omitempty"
               type: "[]StepValue[S]"
         typeParams:
           - constraint: comparable
             name: S
-      - name: StepValue
+      - doc: |-
+          StepValue is one transition in a record's history: which, from where to
+          where, what fired it, who asked, and when it was stored.
+        name: StepValue
         struct:
           fields:
-            - name: Event
+            - doc: Event is the transition's name; [CreateEvent] for a creation.
+              name: Event
               tag: json:"event"
               type: string
-            - name: From
+            - doc: "From is the state left: the zero S for a creation."
+              name: From
               tag: json:"from"
               type: S
-            - name: To
+            - doc: To is the state entered.
+              name: To
               tag: json:"to"
               type: S
-            - name: Trigger
+            - doc: Trigger says what fired the transition.
+              name: Trigger
               tag: json:"trigger"
               type: Trigger
-            - name: Actor
+            - doc: |-
+                Actor says who fired it when a caller did, as the machine's
+                configuration reads it from the caller's context; empty when the
+                machine's own loop fired it or nobody said.
+              name: Actor
               tag: json:"actor,omitempty"
               type: string
-            - name: At
+            - doc: At is when the transition was stored.
+              name: At
               tag: json:"at"
               type: time.Time
         typeParams:
           - constraint: comparable
             name: S
-      - methods:
-          - name: String
+      - doc: |-
+          Trigger says what fired a transition. The set is closed: every transition a
+          machine can take is declared one of these ways, and a history names which.
+
+          The values are STABLE — a journal may store them as numbers, and none is
+          ever renumbered — and the zero value is not a trigger, so a step read from
+          a journal that lost the field names no trigger rather than some default.
+          String and ParseTrigger give the text form.
+        methods:
+          - doc: |-
+              String returns the trigger's name — "start", "event", "delay", "deadline"
+              or "guard" — or "" for a value outside the set, which is how a caller tells
+              a trigger from one that is not.
+            name: String
             out:
               - type: string
             recv: value
         name: Trigger
         underlying: uint8
   - constants:
-      - name: DefaultMinGap
+      - doc: |-
+          DefaultMinGap is the least time between the end of one run of a machine's
+          loop and the start of the next, when Config.MinGap is not positive: a burst
+          of writes is one run, and a transition chain advances one step per run.
+        name: DefaultMinGap
         type: time.Duration
         value: "1000000000"
-      - name: DefaultMaxHistory
+      - doc: |-
+          DefaultMaxHistory is how many transitions a record keeps when
+          Config.MaxHistory is not positive.
+        name: DefaultMaxHistory
         type: int
         value: "20"
-      - name: WakeStart
+      - doc: WakeStart is the first run, when Run starts.
+        name: WakeStart
         type: Wake
         value: "1"
-      - name: WakeDue
+      - doc: "WakeDue is a run the loop woke for by itself: a transition fell due."
+        name: WakeDue
         type: Wake
         value: "2"
-      - name: WakeChange
+      - doc: WakeChange is a run a write woke the loop for.
+        name: WakeChange
         type: Wake
         value: "3"
-      - name: LoopRunStarted
+      - doc: "LoopRunStarted reports a run starting: Wake and Started are set."
+        name: LoopRunStarted
         type: LoopEventKind
         value: "1"
-      - name: LoopRunEnded
+      - doc: "LoopRunEnded reports a run ending: every field is set."
+        name: LoopRunEnded
         type: LoopEventKind
         value: "2"
-      - name: LoopWaiting
+      - doc: |-
+          LoopWaiting reports the loop re-armed to wake earlier, at Next, because
+          a write arrived while it slept.
+        name: LoopWaiting
         type: LoopEventKind
         value: "3"
+    doc: |-
+      Package statemachine — hosts the agenda: when each entity's next automatic
+      transition falls due, the entities written since the loop last looked, and
+      the backoff of those whose transition failed.
+
+      Package statemachine — hosts the blueprint: a definition frozen for one
+      machine, indexed for the lookups a transition makes, and the evaluation of
+      what is due for an entity.
+
+      Package statemachine — hosts the book: what a machine keeps beside the
+      store — one record per entity, the census per state, the entities held by a
+      read or a transition — and its writes through the Journal, one key at a
+      time.
+
+      Package statemachine — hosts Config, a machine's construction parameters,
+      and the defaults its zero fields resolve to.
+
+      Package statemachine — hosts MachineSpec, the declaration of a machine: its
+      states, its transitions and its hooks, and what a caller reads back from it.
+
+      Package statemachine — hosts the per-entity locks that serialise the
+      transitions of one entity, and the context mark that tells a hook's own
+      machine apart.
+
+      Package statemachine — hosts the machine's own loop: Step, one pass over
+      what is due; Run, which paces the passes and sleeps until the next
+      transition due or a write, never polling; and what OnLoop is told.
+
+      Package statemachine is the state-machine engine over stored entities (ADR
+      0120): a [MachineSpec] declares the states an entity goes through and the
+      transitions between them — events a caller fires, timers after a duration in
+      a state, deadlines the entity carries, guards on the entity — with hooks on
+      the way; a [StateMachine] runs it over the caller's store, keeps a record of each
+      entity beside it, and fires the timers and guards from its own loop, which
+      sleeps until the next transition due and wakes on a write. The ports it is
+      given — the Store, the Journal — are internal/core/app/statemachine's.
+
+      # One entity, one transition at a time
+
+      A transition takes its entity's lock, reads it again, runs the OnEnter hooks
+      of the state entered, writes it — an insert for a creation, a replace
+      otherwise, and a replace never brings back an entity deleted meanwhile —
+      records the step, releases the lock, and only then runs the OnTransition
+      hooks. A hook that panics fails what it was part of and never leaves an
+      entity locked. Transitions of different entities run concurrently.
+
+      # The agenda
+
+      Each entity in a state that a timer or a guard leaves has ONE entry on a
+      heap: the instant its earliest automatic transition falls due. The loop
+      pops what is due, evaluates only those entities and the ones written since
+      it last looked, and sleeps until the heap's top — so finding the next
+      transition due costs O(log N), where re-reading the whole store on every
+      wake costs O(N). BENCH.md measures both.
+
+      Package statemachine — hosts what a store's owner tells a machine about
+      writes it did not make, and how the machine brings its records and its
+      agenda in line with them.
+
+      Package statemachine — hosts the transitions a caller asks for (Start,
+      Fire) and the part every transition shares: the hooks, the write, the step
+      recorded, and the lock released before the OnTransition hooks.
     functions:
-      - in:
+      - doc: |-
+          NewMachineSpec starts the declaration of a machine over entities of type E.
+          state returns a pointer to the entity's state field: the engine reads the
+          state through it and writes the new state through it, so the store stays
+          the single source of truth.
+        in:
           - name: state
             type: func(*E) *S
         name: NewMachineSpec
@@ -632,7 +827,19 @@ packages:
             name: E
           - constraint: comparable
             name: S
-      - in:
+      - doc: |-
+          NewStateMachine checks def and cfg, then opens a machine over cfg.Store: it
+          reads the journal, reads every entity once, reconciles the two — an entity
+          the journal does not know, or whose state differs, enters its state now; a
+          record whose entity is gone is dropped — and schedules what is due. It is
+          the only moment the machine reads the whole store.
+
+          A definition with problems is refused with every problem joined, a missing
+          Initial as [corestm.InitialMissing]; a nil or storeless cfg with [corestm.StoreMissing]; a
+          journal that cannot be loaded, or a store that cannot be read, with
+          [corestm.JournalFailed] or [corestm.StoreFailed]. The machine keeps its own copy of def,
+          and reads cfg once.
+        in:
           - name: ctx
             type: context.Context
           - name: def
@@ -654,59 +861,150 @@ packages:
       kbackoff: github.com/kitsunium/sdk/internal/kernel/backoff
     path: github.com/kitsunium/sdk/internal/service/app/statemachine
     types:
-      - name: FiringValue
+      - doc: |-
+          FiringValue is a transition the machine's own loop is about to fire, as
+          Config.Observe is told it.
+        name: FiringValue
         struct:
           fields:
-            - name: Key
+            - doc: Key is the entity's key.
+              name: Key
               type: string
-            - name: Event
+            - doc: Event is the transition's name.
+              name: Event
               type: string
-            - name: From
+            - doc: From is the state the entity is in.
+              name: From
               type: S
-            - name: To
+            - doc: To is the state it is about to enter.
+              name: To
               type: S
-            - name: Trigger
+            - doc: "Trigger is a delay, a deadline or a guard: the loop fires nothing else."
+              name: Trigger
               type: corestm.Trigger
         typeParams:
           - constraint: comparable
             name: S
-      - name: Config
+      - doc: |-
+          Config parameterises NewStateMachine. Only Store is required; every other zero
+          field resolves to a working default.
+        name: Config
         struct:
           fields:
-            - name: Store
+            - doc: Store holds the entities. Required.
+              name: Store
               type: corestm.Store[E]
-            - name: Journal
+            - doc: |-
+                Journal keeps each entity's record beside the store. Nil keeps the
+                records in memory: after a restart every entity re-enters its state
+                when the machine opens, which restarts every After timer.
+              name: Journal
               type: corestm.Journal[S]
-            - name: Clock
+            - doc: |-
+                Clock is what the machine stamps and waits on. Nil is clock.System; a
+                clock.ManualClock drives every timer of a test.
+              name: Clock
               type: clock.Timed
-            - name: Actor
+            - doc: |-
+                Actor reads, from the context a caller hands Start or Fire, who fired
+                the transition; the result lands in the record's history and in the
+                change hooks receive. Never called for a transition the loop fires.
+                Nil records nobody.
+              name: Actor
               type: func(ctx context.Context) string
-            - name: Observe
+            - doc: |-
+                Observe brackets every transition the machine's OWN loop fires — the
+                ones no caller can wrap: it is called before the transition with the
+                loop's context, returns the context the transition's hooks and store
+                calls run under — a tracer puts its span there — and a function the
+                engine calls with the outcome once the OnTransition hooks have run and
+                the loop has recorded it: a panic there is reported as LoopPanicked and
+                changes nothing, the transition stands. A caller wraps its own Start and
+                Fire itself. It is called while the loop holds the entity, so it must
+                not fire that entity. Nil observes nothing.
+              name: Observe
               type: func(ctx context.Context, firing FiringValue[S]) (context.Context, func(err error))
-            - name: Report
+            - doc: |-
+                Report receives every error no caller's return value carries: an
+                OnTransition hook's failure, a Journal write that failed, and each
+                transition the loop could not fire. It is called with no lock of the
+                machine held, so it may read the machine — its census, a record — or
+                fire it. Nil drops them — the SDK does not write to stderr on the
+                caller's behalf (ADR 0030) — so wire it.
+              name: Report
               type: func(ctx context.Context, err error)
-            - name: OnLoop
+            - doc: |-
+                OnLoop is told what Run does: a run starting, a run ending with what
+                it fired and when the loop wakes next, and the loop re-arming earlier
+                because a write arrived. Called on the loop's goroutine; keep it short.
+                Nil observes nothing.
+              name: OnLoop
               type: func(event LoopEvent)
-            - name: MinGap
+            - doc: |-
+                MinGap is the least time between the end of one run of the loop and
+                the start of the next. Not positive means DefaultMinGap.
+              name: MinGap
               type: time.Duration
-            - name: Backoff
+            - doc: |-
+                Backoff is how long an entity whose automatic transition failed waits
+                before it is tried again, by consecutive failures. A zero BaseDelay
+                means 1s doubling to a minute.
+              name: Backoff
               type: kbackoff.Value
-            - name: MaxHistory
+            - doc: |-
+                MaxHistory is how many transitions each record keeps. Not positive
+                means DefaultMaxHistory.
+              name: MaxHistory
               type: int
         typeParams:
           - constraint: any
             name: E
           - constraint: comparable
             name: S
-      - methods:
-          - in:
+      - doc: |-
+          MachineSpec declares a state machine over entities of type E whose state is
+          an S: the state a new entity enters, the transitions between states and how
+          each is fired, and the hooks that run on the way.
+
+          A MachineSpec is DATA. Every transition is declared before a machine runs,
+          which is what lets a caller draw the machine exactly — [MachineSpec.States]
+          and [MachineSpec.Transitions] read it back — and what lets the engine know,
+          for any state, which timers and guards can move an entity out of it.
+
+          Four kinds of transitions:
+
+            - On: an event, fired by a caller with [StateMachine.Fire];
+            - After: a duration spent in a state, fired by the machine's loop;
+            - At: an instant the entity carries — a due date, a deadline — fired by
+              the loop once it has come;
+            - When: a guard on the entity, fired by the loop as soon as it holds. A
+              guard sees the entity only and is asked again each time the entity is
+              written; a condition on the time is an instant, declared with At.
+
+          When several automatic transitions leave a state and more than one is due,
+          the one declared FIRST fires.
+
+          A mistake — a duplicate, an empty event name, a nil function, a duration
+          that is not positive — is recorded rather than panicked on, read back with
+          [MachineSpec.Problems], and refused by NewStateMachine. Build a MachineSpec on one
+          goroutine; once a machine is built from it, the machine keeps its own copy
+          and later declarations do not reach it.
+        methods:
+          - doc: |-
+              Initial sets the state a new entity enters with [StateMachine.Start]. A second
+              call replaces the first.
+            in:
               - name: state
                 type: S
             name: Initial
             out:
               - type: "*MachineSpec[E, S]"
             recv: pointer
-          - in:
+          - doc: |-
+              On declares an event transition: [StateMachine.Fire] with event moves an entity
+              in state from to state to. One event may leave several states, but only one
+              transition per event and state.
+            in:
               - name: event
                 type: string
               - name: from
@@ -716,7 +1014,12 @@ packages:
             out:
               - type: "*MachineSpec[E, S]"
             recv: pointer
-          - in:
+          - doc: |-
+              After declares a timer transition: an entity that has spent delay in state
+              from moves to state to, fired by the machine's loop. The time is counted
+              from when the entity entered the state, which the machine's journal keeps
+              across restarts.
+            in:
               - name: event
                 type: string
               - name: delay
@@ -728,7 +1031,12 @@ packages:
             out:
               - type: "*MachineSpec[E, S]"
             recv: pointer
-          - in:
+          - doc: |-
+              At declares a timer transition at an instant the entity carries: an entity
+              in state from moves to state to once the instant instant returns has come;
+              false means no instant for now. The engine asks again each time the entity
+              is written, and its loop sleeps until the earliest instant.
+            in:
               - name: event
                 type: string
               - name: from
@@ -740,7 +1048,11 @@ packages:
             out:
               - type: "*MachineSpec[E, S]"
             recv: pointer
-          - in:
+          - doc: |-
+              When declares a guard transition: an entity in state from moves to state to
+              as soon as guard holds. The guard sees the entity only and is asked each time
+              the entity is written, never on a clock.
+            in:
               - name: event
                 type: string
               - name: from
@@ -752,7 +1064,17 @@ packages:
             out:
               - type: "*MachineSpec[E, S]"
             recv: pointer
-          - in:
+          - doc: |-
+              OnEnter adds a hook run when an entity enters state, before it is stored.
+              Hooks of one state run in declaration order.
+
+              An error cancels the transition, and so does a panic — recovered as
+              [corestm.HookPanicked], with the entity's lock released on the way out. A hook may
+              change the entity but not its state nor its key ([corestm.HookChangedState],
+              [corestm.HookChangedKey]), and must not fire its own machine: it runs under the
+              entity's lock, so the call is refused with [corestm.Reentrant] rather than waiting
+              for itself.
+            in:
               - name: state
                 type: S
               - name: hook
@@ -761,33 +1083,57 @@ packages:
             out:
               - type: "*MachineSpec[E, S]"
             recv: pointer
-          - in:
+          - doc: |-
+              OnTransition adds a hook run after every stored transition, whoever fired
+              it — the natural place to publish it. Hooks run in declaration order, once
+              the entity's lock is released, so a hook may fire the machine again. An
+              error or a panic is reported through Config.Report; the transition stands
+              and the next hooks still run.
+            in:
               - name: hook
                 type: func(context.Context, ChangeValue[E, S]) error
             name: OnTransition
             out:
               - type: "*MachineSpec[E, S]"
             recv: pointer
-          - name: Problems
+          - doc: |-
+              Problems returns the declaration's mistakes so far, in the order they were
+              made, each an error carrying a code of this package and log-only fields
+              naming the event, the state or the function concerned. A missing Initial is
+              not among them — it is only a mistake once the declaration is complete, and
+              NewStateMachine reports it as [corestm.InitialMissing].
+            name: Problems
             out:
               - type: "[]error"
             recv: pointer
-          - name: States
+          - doc: |-
+              States returns every state the declaration names, in the order each was
+              first mentioned: the initial state, the ends of each transition, the states
+              that have hooks.
+            name: States
             out:
               - type: "[]S"
             recv: pointer
-          - name: Transitions
+          - doc: Transitions returns the declared transitions in declaration order.
+            name: Transitions
             out:
               - type: "[]TransitionValue[S]"
             recv: pointer
-          - name: InitialState
+          - doc: |-
+              InitialState returns the state a new entity enters, and whether Initial
+              was called.
+            name: InitialState
             out:
               - name: state
                 type: S
               - name: set
                 type: bool
             recv: pointer
-          - in:
+          - doc: |-
+              Can reports whether [StateMachine.Fire] with event would move entity: an event
+              transition by that name leaves its current state. It is a function of the
+              declaration alone and needs no running machine.
+            in:
               - name: entity
                 type: E
               - name: event
@@ -804,88 +1150,171 @@ packages:
             name: E
           - constraint: comparable
             name: S
-      - name: TransitionValue
+      - doc: |-
+          TransitionValue is one declared transition, as [MachineSpec.Transitions]
+          reads it back.
+        name: TransitionValue
         struct:
           fields:
-            - name: Event
+            - doc: Event is the transition's name.
+              name: Event
               type: string
-            - name: From
+            - doc: From is the state it leaves.
+              name: From
               type: S
-            - name: To
+            - doc: To is the state it enters.
+              name: To
               type: S
-            - name: Trigger
+            - doc: "Trigger says how it fires: an event, a delay, a deadline or a guard."
+              name: Trigger
               type: corestm.Trigger
-            - name: Delay
+            - doc: Delay is After's duration; zero for every other trigger.
+              name: Delay
               type: time.Duration
         typeParams:
           - constraint: comparable
             name: S
-      - name: ChangeValue
+      - doc: |-
+          ChangeValue describes one stored transition, as an OnTransition hook
+          receives it.
+        name: ChangeValue
         struct:
           fields:
-            - name: Entity
+            - doc: Entity is the entity as stored after the transition.
+              name: Entity
               type: E
-            - name: At
+            - doc: At is when the transition was stored.
+              name: At
               type: time.Time
-            - name: Key
+            - doc: Key is the entity's key in the store.
+              name: Key
               type: string
-            - name: Event
+            - doc: |-
+                Event is the transition's name; core/app/statemachine.CreateEvent for a
+                creation.
+              name: Event
               type: string
-            - name: Actor
+            - doc: |-
+                Actor is who fired it, as Config.Actor read it from the caller's
+                context; empty when the machine's loop fired it.
+              name: Actor
               type: string
-            - name: From
+            - doc: "From is the state left: the zero S for a creation."
+              name: From
               type: S
-            - name: To
+            - doc: To is the state entered.
+              name: To
               type: S
-            - name: Trigger
+            - doc: Trigger says what fired it.
+              name: Trigger
               type: corestm.Trigger
         typeParams:
           - constraint: any
             name: E
           - constraint: comparable
             name: S
-      - methods:
-          - name: String
+      - doc: Wake says why a run of the loop started.
+        methods:
+          - doc: String returns "start", "due" or "change"; "" outside the set.
+            name: String
             out:
               - type: string
             recv: value
         name: Wake
         underlying: uint8
-      - methods:
-          - name: String
+      - doc: LoopEventKind says what a [LoopEvent] reports.
+        methods:
+          - doc: String returns "run-started", "run-ended" or "waiting"; "" outside the set.
+            name: String
             out:
               - type: string
             recv: value
         name: LoopEventKind
         underlying: uint8
-      - name: LoopEvent
+      - doc: |-
+          LoopEvent is what Config.OnLoop is told about [StateMachine.Run]. Which fields
+          are set depends on Kind.
+        name: LoopEvent
         struct:
           fields:
-            - name: Err
+            - doc: Err joins what failed in the run; nil when nothing did.
+              name: Err
               type: error
-            - name: Started
+            - doc: Started is when the run started.
+              name: Started
               type: time.Time
-            - name: Ended
+            - doc: Ended is when the run ended.
+              name: Ended
               type: time.Time
-            - name: Next
+            - doc: |-
+                Next is when the loop wakes by itself next — never sooner than
+                Config.MinGap after the run ended; zero when only a write will wake it.
+              name: Next
               type: time.Time
-            - name: Fired
+            - doc: Fired counts the transitions the run stored.
+              name: Fired
               type: int
-            - name: Failed
+            - doc: Failed counts the transitions the run could not fire.
+              name: Failed
               type: int
-            - name: Kind
+            - doc: Kind says what is reported.
+              name: Kind
               type: LoopEventKind
-            - name: Wake
+            - doc: Wake says why the run started.
+              name: Wake
               type: Wake
-      - methods:
-          - in:
+      - doc: |-
+          StateMachine runs a [MachineSpec] over the entities of a [corestm.Store]: it
+          creates them in their initial state, moves them along event transitions when
+          a caller fires one, and — while [StateMachine.Run] goes — along the timers and
+          guards that are due. It is safe for concurrent use.
+
+          Transitions of one entity run one at a time; transitions of different
+          entities run concurrently. Beside the store the machine keeps one record per
+          entity — its state, since when, its latest transitions — in memory and in
+          the configured journal, plus the census of entities per state.
+
+          The store may be written by others. Tell the machine through
+          [StateMachine.Changed] and [StateMachine.Deleted]: a write can move a deadline or
+          make a guard hold, and a state changed behind the machine's back re-enters
+          its state at the moment the machine learns of it.
+        methods:
+          - doc: |-
+              Run is the machine's own loop: it fires the timer and guard transitions as
+              they fall due, until ctx ends, and returns nil then. It returns
+              [corestm.LoopRunning] at once when another Run or a Step of this machine is going.
+
+              It never polls. A run fires what is due — per entity, the first declared
+              transition due, one per entity per run — and the loop then sleeps until the
+              next transition due or until a write wakes it: [StateMachine.Changed], or a
+              transition stored by Start or Fire. No run starts sooner than
+              Config.MinGap after the previous one ended, so a burst of writes is one
+              run. A machine with no timer and no guard never runs, and Run just waits for
+              ctx.
+
+              An entity whose transition failed is tried again after Config.Backoff,
+              counted per entity: one failing entity delays nobody else. Everything runs
+              on the calling goroutine, so a caller's pprof labels cover every hook the
+              loop runs.
+            in:
               - name: ctx
                 type: context.Context
             name: Run
             out:
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Step makes one pass over what is due now: every entity written since the
+              last pass is evaluated, and every entity whose transition is due fires it
+              — the first declared one due, one transition per entity. It returns when
+              the loop should look again by itself: the current instant when entities
+              wait to be evaluated, the earliest due instant otherwise, the zero time when
+              nothing is scheduled; and the failures joined.
+
+              It is for a caller that drives the machine itself instead of Run — a test,
+              another scheduler. It returns [corestm.LoopRunning] when Run or another Step is
+              going.
+            in:
               - name: ctx
                 type: context.Context
             name: Step
@@ -893,11 +1322,18 @@ packages:
               - type: time.Time
               - type: error
             recv: pointer
-          - name: Census
+          - doc: |-
+              Census counts the entities per state. Every declared state is present, at
+              zero when no entity is in it; an undeclared state found in the store is
+              present while an entity is in it.
+            name: Census
             out:
               - type: map[S]int
             recv: pointer
-          - in:
+          - doc: |-
+              Record returns what the machine keeps about the entity under key, and false
+              when it knows none.
+            in:
               - name: key
                 type: string
             name: Record
@@ -905,11 +1341,27 @@ packages:
               - type: corestm.RecordValue[S]
               - type: bool
             recv: pointer
-          - name: Records
+          - doc: Records returns every record, the most recently entered state first.
+            name: Records
             out:
               - type: "[]corestm.RecordValue[S]"
             recv: pointer
-          - in:
+          - doc: |-
+              Changed tells the machine the entity under key was written by something
+              other than the machine — call it after the write is visible to Store.Get.
+              The machine reads the entity: a state that changed behind its back enters
+              its record as of now, and when a timer or a guard leaves the entity's state
+              the loop is woken to ask again what is due — a write can move a deadline or
+              make a guard hold. An entity the store no longer holds is forgotten, as by
+              [StateMachine.Deleted].
+
+              Calling it for the machine's own writes is harmless. When a transition of
+              the entity is in flight — which is where a store that notifies on every
+              write calls it from — it returns at once and the transition reads the
+              entity again before it lets go of it. Call it OUTSIDE any lock of the
+              store: it may wait for the entity's lock while the loop, holding it, reads
+              the store.
+            in:
               - name: ctx
                 type: context.Context
               - name: key
@@ -918,7 +1370,12 @@ packages:
             out:
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Deleted tells the machine the entity under key was deleted: its record
+              leaves the census, the journal and the agenda. A read or a transition of the
+              entity in progress will not record it again. It returns the journal's
+              failure, if any; the record is dropped either way.
+            in:
               - name: ctx
                 type: context.Context
               - name: key
@@ -927,7 +1384,15 @@ packages:
             out:
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Start enters a new entity into the machine: it sets the initial state, runs
+              the initial state's OnEnter hooks and inserts the entity, then runs the
+              OnTransition hooks. The step recorded is core/app/statemachine.CreateEvent.
+
+              It returns the entity as stored. It refuses an entity whose key is empty
+              ([corestm.KeyEmpty]) or already taken ([corestm.EntityExists]), and a call made through the
+              context an OnEnter hook of this machine was given ([corestm.Reentrant]).
+            in:
               - name: ctx
                 type: context.Context
               - name: entity
@@ -937,7 +1402,16 @@ packages:
               - type: E
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Fire moves the entity under key along the event transition by that name
+              leaving its current state, and returns it as stored.
+
+              It refuses a key the store does not hold ([corestm.EntityMissing]), an event no
+              transition takes from the entity's state ([corestm.TransitionRefused] — returned
+              with the entity, whose state says why), and a call made through the context
+              an OnEnter hook of this machine was given ([corestm.Reentrant]). On any other
+              failure — a hook, the store — it returns the entity as it was read.
+            in:
               - name: ctx
                 type: context.Context
               - name: key
@@ -956,7 +1430,77 @@ packages:
             name: E
           - constraint: comparable
             name: S
-  - facade:
+  - doc: |-
+      Package statemachine is a state-machine engine over stored entities (ADR
+      0120): declare the states an entity goes through and the transitions between
+      them, hand the engine your store, and it moves entities along — on the
+      events you fire, and by itself on timers, deadlines and guards.
+
+      	def := statemachine.Define(func(o *Order) *Status { return &o.Status }).
+      	    Initial(Pending).
+      	    On("pay", Pending, Paid).
+      	    After("abandon", 24*time.Hour, Pending, Cancelled).    // a duration in the state
+      	    At("expire", Paid, Expired, func(o Order) (time.Time, bool) { return o.ShipBy, !o.ShipBy.IsZero() }).
+      	    When("ready", Paid, Shipping, func(o Order) bool { return o.Packed }).
+      	    OnEnter(Paid, chargeCard).                               // before the store: an error cancels
+      	    OnTransition(publish)                                    // after the store: an error is reported
+
+      	m, err := statemachine.New(ctx, def, &statemachine.Config[Order, Status]{
+      	    Store: orders, Journal: records,
+      	    Report: func(ctx context.Context, err error) { log.Print(err) }, // what no return value carries
+      	})
+      	go func() {
+      	    if err := m.Run(ctx); err != nil {                       // LoopRunning: another loop is going
+      	        log.Print(err)
+      	    }
+      	}()                                                          // fires timers, deadlines and guards
+      	o, err := m.Start(ctx, Order{ID: "o-1"})                     // Pending, inserted
+      	o, err = m.Fire(ctx, "o-1", "pay")                           // Paid, replaced
+
+      # Your store is the source of truth
+
+      The state is a field of your entity and the entity lives in your [Store]:
+      the engine reads it with Get, creates with Insert and moves with Replace — a
+      Replace that finds the entity gone stores nothing, so a transition never
+      brings back an entity deleted meanwhile. Beside the store the machine keeps
+      one [Record] per entity — its state, since when, its latest transitions — in
+      memory and in the [Journal] you give it, which is what keeps an After timer
+      counting across a restart. Tell the machine about writes it did not make
+      with Machine.Changed and Machine.Deleted: a write can move a deadline or
+      make a guard hold, and a state changed behind its back enters its record as
+      of the moment the machine learns of it.
+
+      # Transitions
+
+      Transitions of one entity run one at a time, transitions of different
+      entities concurrently. A transition runs the OnEnter hooks of the state
+      entered, stores the entity, records the step, releases the entity and then
+      runs the OnTransition hooks. A hook that panics fails what it was part of —
+      an OnEnter hook its transition, an OnTransition hook only itself — and never
+      leaves an entity locked. An OnEnter hook may change the entity but not its
+      state or key, and must not fire its own machine (Reentrant); an
+      OnTransition hook may.
+
+      # The loop never polls
+
+      Machine.Run keeps an agenda: each entity in a state a timer or a guard
+      leaves has one entry, the instant its earliest automatic transition falls
+      due, on a heap. The loop fires what is due — per entity, the first declared
+      transition due — and sleeps until the next one or until a write wakes it,
+      never sooner than Config.MinGap after its last run, so a burst of writes is
+      one run. Finding the next transition due costs O(log N) where a loop that
+      re-reads the store on every wake pays O(N); BENCH.md in the engine measures
+      both. An entity whose transition fails is retried after Config.Backoff,
+      counted per entity. Give the machine a clock.ManualClock (pkg/v1/clock) and
+      a test drives every timer.
+
+      # What it does not do
+
+      It is not a durable workflow runtime: there is no replay, no activity, no
+      compensation, and nothing survives a crash but what your store and your
+      journal hold. A write to an entity that does not go through the machine can
+      race with a transition of it; the store's Replace is the arbiter.
+    facade:
       - const:
           - doc: |-
               CreateEvent is the event name of the step that brings a new entity into its

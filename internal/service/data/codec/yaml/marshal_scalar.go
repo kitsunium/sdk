@@ -1,4 +1,3 @@
-// Package yaml — encoding: how a scalar is written so every reader reads it back.
 package yaml
 
 import (

@@ -1,8 +1,3 @@
-// Package bson — the encoder's entry point and dispatch. It appends one
-// document to a byte slice, reflection planned once per type, the common
-// interface values taken by a type switch instead. Each element's type byte is
-// written as a placeholder and set once the value has said what it encodes as;
-// each document's length is reserved and filled in when the document ends.
 package bson
 
 import (

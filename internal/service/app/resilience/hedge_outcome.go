@@ -1,4 +1,3 @@
-// Package resilience — what one hedged attempt reports back to the race.
 package resilience
 
 import (

@@ -1,4 +1,3 @@
-// Package kit — the databases as the graph shows them.
 package kit
 
 import (

@@ -10,6 +10,7 @@ go_library(
         "config.go",
         "dirsafety_posix.go",
         "dirsafety_windows.go",
+        "doc.go",
         "fence.go",
         "file.go",
         "file_config.go",

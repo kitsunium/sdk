@@ -1,4 +1,3 @@
-// Package resilience — keyed rate-limiter configuration.
 package resilience
 
 import (

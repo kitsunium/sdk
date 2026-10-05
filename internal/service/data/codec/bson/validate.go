@@ -1,9 +1,3 @@
-// Package bson — the structural validator. Unmarshal runs it over the whole
-// input before the target is touched, so a malformed document never leaves a
-// half-decoded value behind, and the decoder that follows reads bytes whose
-// every length, terminator, type byte and string has been checked. Every
-// declared length is compared with the bytes actually remaining before
-// anything is sliced or allocated from it.
 package bson
 
 import (

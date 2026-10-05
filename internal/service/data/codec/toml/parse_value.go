@@ -1,5 +1,3 @@
-// Package toml — values: the dispatch on a value's first byte, arrays, inline
-// tables and booleans.
 package toml
 
 import "bytes"

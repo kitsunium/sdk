@@ -1,23 +1,3 @@
-//go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /framework/connectors/ssh .
-
-// Package ssh is the ssh implementation of the framework's entitlement
-// Identity port, plus enrolment: minting a subject identity locally and turning
-// it into a request the vendor can act on.
-//
-// It is a connector module of its own (ADR 0158), the shape the database
-// engines have: the mechanism — roster, signature, offline cache, anti-rollback
-// ratchet, CI seat, version floor — is the framework's entitlement package,
-// which reaches no ssh code, while golang.org/x/crypto/ssh, and the
-// golang.org/x/sys it brings, are required by this module and nothing else.
-//
-//	identity := ssh.NewSSHIdentity("") // the user's ~/.ssh
-//	service := entitlement.New(identity, vendorKey, &product)
-//	grant, err := service.Verify(time.Now())
-//
-// Possession is proven against key material the user ALREADY has, and every
-// refusal is said in the entitlement contract's vocabulary (0.2.35.*); the one
-// failure that contract has no word for, a failed enrolment, is this package's
-// own CodeEnrolmentFailed (0.3.65.1).
 package ssh
 
 import (

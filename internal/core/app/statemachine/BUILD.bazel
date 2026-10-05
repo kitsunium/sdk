@@ -7,9 +7,9 @@ go_library(
     srcs = [
         "codes_gen.go",
         "design_gen.go",
+        "doc.go",
         "errors.go",
         "record.go",
-        "statemachine.go",
         "trigger.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/app/statemachine",

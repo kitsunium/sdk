@@ -1,5 +1,3 @@
-// Package multipart — reading a part's Content-Disposition, and the one rule
-// its filename is reduced by on every operating system.
 package multipart
 
 import (

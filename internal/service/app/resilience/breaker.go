@@ -1,4 +1,3 @@
-// Package resilience — circuit-breaker policy.
 package resilience
 
 import (

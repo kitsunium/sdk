@@ -1,4 +1,3 @@
-// Package trace — SpansValue: the exportable payload.
 package trace
 
 import coreotel "github.com/kitsunium/sdk/internal/core/observe/otel"

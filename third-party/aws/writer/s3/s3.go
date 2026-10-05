@@ -1,13 +1,3 @@
-// Package s3 registers the "s3" writer factory. It lives under third-party/ —
-// NOT in pkg/v1 — in the third-party/aws module it shares with the cloudwatch
-// writer, so the AWS SDK it pulls never enters the module graph of pkg/v1
-// consumers (nothing in the SDK requires that module; see ADR 0012), and a
-// consumer of this writer inherits no other vendor (ADR 0157).
-// Blank-importing the package self-registers the factory
-// (and pulls the AWS SDK), so writer.Open("s3", logger.S3Config{…}) resolves
-// only in builds that opt in. The factory wraps the batching terminal sink
-// (s3sink.go) with the async middleware for a non-blocking ring + OnDrop, and
-// with levelgate for the per-writer MinLevel.
 package s3
 
 import (

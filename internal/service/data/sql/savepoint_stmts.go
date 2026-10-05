@@ -1,4 +1,3 @@
-// Package sql — hosts the three rendered statements of one savepoint.
 package sql
 
 // savepointStmts groups one savepoint's rendered statements so runNested

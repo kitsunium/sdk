@@ -30,6 +30,41 @@ packages:
             name: CodeCWEventRejected
             value: "0x00_03_19_15"
         type: errs.Code
+    doc: |-
+      Package cloudwatch — the AWS adapter. This file (with cred_adapter.go) is the
+      ONLY place that imports the AWS SDK; every other file is SDK-free and unit-
+      tested through the deliverFunc seam. The live PutLogEvents lives in an
+      anonymous closure returned by newDeliverFunc.
+
+      Package cloudwatch — range 0.3.25.* (ADR 0015 writer registry; PP octet 0x19).
+
+      Package cloudwatch — bridges writer.CredentialProvider onto the AWS SDK's
+      aws.CredentialsProvider so credentials refresh on each Retrieve. Split from
+      client.go to keep one struct per file.
+
+      Package cloudwatch registers the "cloudwatch" writer factory. It lives under
+      third-party/ — NOT in pkg/v1 — in the third-party/aws module it shares with
+      the s3 writer, so the AWS SDK it pulls never enters the module graph of
+      pkg/v1 consumers (ADR 0012), and a consumer of this writer inherits no other
+      vendor (ADR 0157).
+      Blank-importing the package self-registers the factory (and pulls the AWS
+      SDK), so writer.Open("cloudwatch",
+      logger.CloudWatchConfig{…}) resolves only in builds that opt in. The factory
+      wraps the batching terminal sink (cwsink.go) with async (non-blocking ring +
+      OnDrop) and levelgate (per-writer MinLevel).
+
+      Package cloudwatch — the batching terminal Sink. AWS-free: it talks to
+      CloudWatch Logs only through the deliverFunc seam, so the batching/flush logic
+      is unit-tested with a fake (the real AWS adapter lives in client.go). Each
+      record becomes one log event (carrying its RecordEvent.Time); events are
+      coalesced via the generic kernel batcher and delivered when the batch reaches
+      the event cap, on the FlushEvery ticker, or on Flush / Close. The
+      PutLogEvents chronological-order requirement is honoured by the deliver
+      closure (a stable sort by timestamp), so the coalescing/flush/ticker
+      machinery is the shared kernel/concur/batcher (ADR 0014), not a hand-rolled copy.
+
+      Package cloudwatch — declares the sentinels returned by the CloudWatch writer.
+      Each var's name equals its errs.Define Reason in SCREAMING_SNAKE form.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       writer: github.com/kitsunium/sdk/internal/core/observe/logger/writer
@@ -63,7 +98,8 @@ packages:
             public: CloudWatch writer dropped a log event with an out-of-range timestamp
             reason: EVENT_REJECTED
     variables:
-      - name: Writer
+      - doc: Writer is the registered cloudwatch factory singleton (no init()).
+        name: Writer
         type: writer.Factory
   - codes:
       - const:
@@ -88,6 +124,41 @@ packages:
             name: CodeS3PutFailed
             value: "0x00_03_23_14"
         type: errs.Code
+    doc: |-
+      Package s3 — the AWS adapter. This file (with cred_adapter.go) is the ONLY
+      place that imports the AWS SDK; every other file is SDK-free and unit-tested
+      through the uploadFunc seam. The live PutObject lives in an anonymous closure
+      returned by newUploadFunc — confining the SDK here and keeping the batching
+      logic testable without a network.
+
+      Package s3 — range 0.3.35.* (ADR 0015 service slot 0x23).
+
+      Package s3 — bridges the SDK's writer.CredentialProvider onto the AWS SDK's
+      aws.CredentialsProvider so credentials refresh on each Retrieve. Split from
+      client.go to keep one struct per file.
+
+      Package s3 — declares the sentinels returned by the S3 writer. Each var's
+      name equals its errs.Define Reason in SCREAMING_SNAKE form.
+
+      Package s3 registers the "s3" writer factory. It lives under third-party/ —
+      NOT in pkg/v1 — in the third-party/aws module it shares with the cloudwatch
+      writer, so the AWS SDK it pulls never enters the module graph of pkg/v1
+      consumers (nothing in the SDK requires that module; see ADR 0012), and a
+      consumer of this writer inherits no other vendor (ADR 0157).
+      Blank-importing the package self-registers the factory
+      (and pulls the AWS SDK), so writer.Open("s3", logger.S3Config{…}) resolves
+      only in builds that opt in. The factory wraps the batching terminal sink
+      (s3sink.go) with the async middleware for a non-blocking ring + OnDrop, and
+      with levelgate for the per-writer MinLevel.
+
+      Package s3 — the batching terminal Sink. AWS-free: it talks to S3 only through
+      the uploader seam, so the batching/flush logic is unit-tested with a fake
+      (the real AWS adapter lives in client.go). Records are coalesced into one
+      uploaded object per batch via the generic kernel batcher — flushed when the
+      buffered bytes reach MaxBatchBytes, on the FlushEvery ticker, or on Flush /
+      Close. The per-batch object key and the byte-weight both ride in the deliver
+      closure / WeightOf, so the coalescing/flush/ticker machinery is the shared
+      kernel/concur/batcher (ADR 0014), not a hand-rolled copy.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       writer: github.com/kitsunium/sdk/internal/core/observe/logger/writer
@@ -111,5 +182,6 @@ packages:
             public: S3 writer failed to upload a log batch
             reason: PUT_FAILED
     variables:
-      - name: Writer
+      - doc: Writer is the registered s3 factory singleton (no init(); package-level var).
+        name: Writer
         type: writer.Factory

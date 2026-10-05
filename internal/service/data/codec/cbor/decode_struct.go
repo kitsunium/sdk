@@ -1,8 +1,3 @@
-// Package cbor — decoding into structs. A map's text keys find their field
-// exactly, then ignoring case; its integer keys find a keyasint field; a key
-// no field has is skipped with its value, and a key seen twice keeps its
-// first value — fxamacker/cbor's rules. A toarray struct takes an array of
-// exactly as many elements as it has fields.
 package cbor
 
 import (

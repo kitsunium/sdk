@@ -1,6 +1,3 @@
-// Package id — holds the process-wide Generator registry. Service-level scheme
-// packages register themselves via package-level var initialisers when imported
-// (no init()), mirroring core/data/codec, core/crypto, and core/data/transform.
 package id
 
 import (

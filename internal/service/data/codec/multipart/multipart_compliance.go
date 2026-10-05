@@ -1,6 +1,3 @@
-// Package multipart — compile-time proof that the concrete types satisfy the
-// contracts this package advertises. Kept in its own *_compliance.go file so
-// the assertions live where a reader looks for them and nowhere else.
 package multipart
 
 import "github.com/kitsunium/sdk/internal/core/data/codec"

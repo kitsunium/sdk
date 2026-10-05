@@ -1,6 +1,3 @@
-// Package toml — what the codec knows about a Go type, computed once per type
-// and cached: how a struct's fields map to keys under the toml struct tag,
-// and which special roles a type plays.
 package toml
 
 import (

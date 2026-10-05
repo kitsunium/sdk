@@ -1,5 +1,3 @@
-// Package kit — revisions: a record keeps its versions, diffed and
-// restored.
 package kit
 
 import (

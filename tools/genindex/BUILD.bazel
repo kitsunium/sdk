@@ -27,6 +27,7 @@ go_library(
         "markers.go",
         "options.go",
         "platforms.go",
+        "readme.go",
         "render.go",
     ],
     importpath = "github.com/kitsunium/sdk/tools/genindex",
@@ -53,6 +54,7 @@ go_test(
         "main_test.go",
         "markers_test.go",
         "platforms_test.go",
+        "readme_test.go",
     ],
     # The platforms table every judgement is made on, and the schema whose
     # vectors the writer is held to, at the same paths relative to this

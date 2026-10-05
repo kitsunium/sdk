@@ -1,4 +1,3 @@
-// Package kit — loops: work the daemon waits for, woken by time or by events.
 package kit
 
 import (

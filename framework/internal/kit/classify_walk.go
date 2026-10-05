@@ -1,4 +1,3 @@
-// Package kit — the walk of a value along its classification plan.
 package kit
 
 import (

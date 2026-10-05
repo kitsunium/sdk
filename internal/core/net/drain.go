@@ -1,4 +1,3 @@
-// Package net — the shutdown signal a long-lived handler observes.
 package net
 
 import "context"

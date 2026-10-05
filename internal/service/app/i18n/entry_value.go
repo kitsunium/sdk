@@ -1,4 +1,3 @@
-// Package i18n — a catalogue entry, in the two shapes a catalogue file has.
 package i18n
 
 import corei18n "github.com/kitsunium/sdk/internal/core/app/i18n"

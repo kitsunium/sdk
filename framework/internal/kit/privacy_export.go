@@ -1,4 +1,3 @@
-// Package kit — export: a person's data as kit gives it back.
 package kit
 
 import (

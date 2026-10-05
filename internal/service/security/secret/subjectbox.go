@@ -1,5 +1,3 @@
-// Package secret — the subject box: what SubjectKeys.Seal returns, and the
-// associated data it and a wrapped key are bound to.
 package secret
 
 import (

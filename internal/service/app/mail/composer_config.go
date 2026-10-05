@@ -1,4 +1,3 @@
-// Package mail — the composer's optional wiring.
 package mail
 
 import (

@@ -1,23 +1,3 @@
-// Package proc declares the OS process-supervision contract of the SDK: the
-// ports (Process, Reaper, Group, Listener), the immutable value types (Spec,
-// ExitValue, LimitValue, NotificationValue, Signal, Resource), and the domain's
-// complete error-sentinel set (range 0.2.6.*). It is the sixth internal/core
-// sibling (ADR 0016), peer of codec / writer / crypto / logger / transform.
-//
-// Unlike codec and crypto, proc ships no plug-in registry: each primitive has a
-// single canonical OS implementation chosen at build time by platform tag, not
-// a runtime-registered scheme. Core declares the ports and value types; concrete
-// behaviour lives in internal/service/proc/*; the pkg/v1/proc facades (process,
-// signal, reaper, rlimit, cgroup, systemd/notify) re-export this surface.
-//
-// proc is stdlib-only (os, syscall, time, strconv, strings) plus
-// internal/kernel/errs — no golang.org/x/sys — preserving the SDK's dep-light
-// invariant. Every error returned by the domain is one of the sentinels in
-// errors.go; service code wraps them with errs.Wrap and never defines new codes.
-//
-// Package proc — the Process port: lifetime control over a spawned process.
-//
-// Package proc — the Reaper port: collection of terminated child processes.
 package proc
 
 // Resource identifies a per-process resource governed by setrlimit(2). It is an

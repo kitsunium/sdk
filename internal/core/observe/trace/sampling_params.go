@@ -1,4 +1,3 @@
-// Package trace — what a Sampler is given to decide with.
 package trace
 
 import coreotel "github.com/kitsunium/sdk/internal/core/observe/otel"

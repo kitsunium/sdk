@@ -1,9 +1,3 @@
-// Package token — the claim validation both formats share.
-//
-// Everything here runs AFTER the signature has verified, and that ordering is a
-// security property, not an implementation detail: reporting "expired" for a
-// token whose signature was never checked tells an attacker what is inside a
-// forgery, and hands the application a claim set it may log.
 package token
 
 import (

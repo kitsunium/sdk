@@ -1,4 +1,3 @@
-// Package git — resolving the git directory that governs a path, once per root.
 package git
 
 import (

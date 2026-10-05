@@ -1,7 +1,3 @@
-// Package logger — declares the TopologyConfig DTO consumed by FromConfig.
-// A TopologyConfig is the decoded shape of a logger config file: a global level
-// plus an ordered list of named writer entries. It is a plain data carrier with
-// no behaviour — the construction logic lives in FromConfig.
 package logger
 
 // TopologyConfig is the decoded logger configuration: a global Level (parsed by

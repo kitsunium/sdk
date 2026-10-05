@@ -1,7 +1,3 @@
-// Package validation — the size constraints: how long a string is, and how
-// many elements a slice holds. Two rules rather than one, because "at most 30
-// characters" and "at most 30 entries" are different requirements with
-// different fixes, and Go's type system cannot spell len over both anyway.
 package validation
 
 import (

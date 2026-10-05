@@ -1,5 +1,3 @@
-// Package lifecycle — hosts the engine: registration, the state Start and
-// Stop share, and the observation hook.
 package lifecycle
 
 import (

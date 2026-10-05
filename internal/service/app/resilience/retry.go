@@ -1,4 +1,3 @@
-// Package resilience — retry-with-exponential-backoff policy.
 package resilience
 
 import (

@@ -1,6 +1,3 @@
-// Package health — hosts LivenessCheckValue, the registration a dependency
-// cannot be written into. See health_check.go for the table of what each of
-// the three may say.
 package health
 
 import "time"

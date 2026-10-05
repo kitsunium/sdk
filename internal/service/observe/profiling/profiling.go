@@ -1,37 +1,3 @@
-// Package profiling captures and reads the running process's own profiles
-// (ADR 0121): its CPU over a bounded window and its live heap through
-// runtime/pprof, decoded from the pprof wire format with the standard library
-// alone; a fold that charges each sample to an owner the caller names and adds
-// up per-owner costs, the costliest functions and a pruned flame graph; and
-// its goroutines, parsed from the runtime's dump into their state, how long
-// they have waited, their labels and their stacks, and grouped.
-//
-// # The attribution is the caller's
-//
-// A profile says which functions ran; what they ran FOR is the caller's
-// knowledge. [Fold] takes an Attribute function: a framework reads the pprof
-// label it put on the goroutine — a CPU sample carries its goroutine's labels
-// — or, for the heap, whose samples carry none, looks for a function it owns on
-// the stack. [CanonicalName] makes a frame's spelling meet the one a static
-// analysis produced.
-//
-// # What is estimated
-//
-// A heap profile is SAMPLED — about one allocation per 512 KiB is recorded and
-// scaled back up — and a CPU profile counts 100 samples a second: both say
-// where the cost is with confidence and how much only approximately. A test,
-// or a dashboard, should ask where the bytes are, not how many exactly.
-//
-// # One CPU profiler per process
-//
-// The runtime has one. [CaptureCPU] refuses a second capture with
-// ProfilerBusy rather than queueing it, whoever started the first.
-//
-// # Values and codes are the core's
-//
-// What a capture returns — the profile, a fold, a goroutine — and every
-// sentinel are declared in internal/core/observe/profiling (ADR 0160); this
-// package is the engine and declares none of them.
 package profiling
 
 import "time"

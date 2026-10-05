@@ -1,6 +1,5 @@
 //go:build linux
 
-// Package rlimit — Linux setrlimit/prlimit64 implementation.
 package rlimit
 
 import (

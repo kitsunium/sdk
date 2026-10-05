@@ -1,5 +1,3 @@
-// Package health — hosts the lifecycle wiring: the one registration that makes
-// "not ready" precede a drain instead of following it.
 package health
 
 import (

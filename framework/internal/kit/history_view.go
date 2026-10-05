@@ -1,4 +1,3 @@
-// Package kit — the history as the graph and the Studio show it.
 package kit
 
 import (

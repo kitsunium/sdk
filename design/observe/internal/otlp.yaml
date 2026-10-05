@@ -2,29 +2,140 @@ apiVersion: kit.kitsunium/design/v2
 domain: observe/internal/otlp
 packages:
   - constants:
-      - name: DefaultTimeout
+      - doc: |-
+          DefaultTimeout bounds one export round trip when an HTTPConfig leaves Timeout
+          unset. Ten seconds is the value the OpenTelemetry protocol exporter
+          specification itself defaults OTEL_EXPORTER_OTLP_TIMEOUT to, so it is a clamp
+          onto the specification's own number rather than a figure this SDK invented
+          (ADR 0031).
+        name: DefaultTimeout
         type: time.Duration
         value: "10000000000"
-      - name: DefaultMaxResponseBytes
+      - doc: |-
+          DefaultMaxResponseBytes caps how much of a collector's response body is
+          read: 1 MiB. A conforming response is an ExportMetricsServiceResponse, an
+          ExportTraceServiceResponse or a Status message — hundreds of bytes. The cap
+          exists because the body is the one length a REMOTE party controls in this
+          exchange; the REQUEST body is deliberately not capped, because its size is a
+          property of the caller's own volume, any SDK-chosen ceiling would be
+          arbitrary (ADR 0031 §refuse), and the collector already answers 413 for one
+          it will not take.
+
+          It also bounds the drain that recycles the connection after the verdict —
+          always this default rather than HTTPConfig.MaxResponseBytes, for the reason
+          closeResponse gives.
+        name: DefaultMaxResponseBytes
         type: int64
         value: 1 << 20
-      - name: DocumentTerminator
+      - doc: |-
+          DocumentTerminator ends each document a WRITER-bound OTLP exporter emits, so
+          a stream of exports is newline-delimited JSON. It is deliberately NOT part of
+          what Marshal returns: that is the HTTP body, and a body is one document.
+        name: DocumentTerminator
         type: byte
         value: "'\\n'"
+    doc: |-
+      Package otlp — common.v1.AnyValue, restricted to the cases the shared
+      attribute model has.
+
+      Package otlp — the OTLP/HTTP sender's configuration, which each signal
+      publishes under its own name.
+
+      Package otlp — common.v1.KeyValue, the repeated message every OTLP payload
+      spells its dimensions with, and its rendering from the shared attribute
+      model.
+
+      Package otlp — one OTLP/JSON document, and the timestamp every message in it
+      carries.
+
+      Package otlp is the OTLP machinery the metrics and trace signals share: the
+      proto3-JSON scalar encodings and the common/resource messages every OTLP
+      payload carries, the single-document marshal, the newline-terminated stream
+      a writer-bound exporter emits, and the OTLP/HTTP sender — endpoint
+      refusal, the default client and its own connection pool, the bounded body
+      reads, and the classification of a collector's answer into three verdicts.
+
+      It was written twice, once per signal (ADR 0048 for metrics, ADR 0051 for
+      trace), and the two copies differed in nothing but the error codes, the
+      wording of their refusals and the name of the field a partial success counts.
+      Those three are exactly what this package does NOT own: a signal hands it a
+      SignalSpec value carrying its sentinels, its wrap parameters and its field names,
+      so every error leaves here under the calling signal's dotted-quad code and in
+      its words, byte for byte what that signal returned before the transport was
+      shared. This package declares no code.
+
+      What stays in each signal is what is genuinely its own: the payload tree
+      (ResourceMetrics or ResourceSpans and everything below them), the encoder
+      that builds it and the refusals only that encoder can raise, the signal's
+      path constant, and the exported names a caller types — OTLPHTTPConfig,
+      NewOTLPHTTPExporter, OTLPRetryable.
+
+      It is internal to internal/service on purpose: nothing above the service
+      layer may reach it, and nothing but the two signals needs to.
+
+      Package otlp — resource.v1.Resource, carried once per payload by every
+      signal.
+
+      Package otlp — the collector's answer to an OTLP/HTTP export, and the
+      lenient 64-bit decoder the specification asks for.
+
+      Package otlp — the three proto3-JSON scalar encodings OTLP inherits and
+      encoding/json does not produce on its own.
+
+      Package otlp — common.v1.InstrumentationScope, carried once per payload by
+      every signal.
+
+      Package otlp — the OTLP/HTTP sender: the only file of this package, and of
+      the two signals that use it, that opens an outbound socket.
+
+      Package otlp — SignalSpec: everything the shared OTLP/HTTP transport needs to
+      know about the signal it is carrying, and nothing it owns itself.
+
+      Package otlp — the newline-delimited stream a writer-bound OTLP/JSON
+      exporter emits.
     functions:
-      - in:
+      - doc: |-
+          Attrs renders an attribute set as the repeated KeyValue every OTLP message
+          spells its dimensions with. An empty set stays nil, which encoding/json
+          omits — the proto3 rule for an empty repeated field.
+        in:
           - name: attrs
             type: "[]coreotel.AttrValue"
         name: Attrs
         out:
           - type: "[]KeyValue"
-      - in:
+      - doc: |-
+          KeyValueOf maps one typed attribute onto a KeyValue whose AnyValue names the
+          attribute's kind.
+
+          Exactly one AnyValue field is non-nil, and it is emitted even when it holds
+          the type's zero: a oneof member has explicit presence, so an absent field
+          means "no case selected", not "the default". Bool("cache.hit", false) must
+          therefore encode as {"boolValue":false} and not as {}.
+        in:
           - name: attr
             type: coreotel.AttrValue
         name: KeyValueOf
         out:
           - type: KeyValue
-      - in:
+      - doc: |-
+          Marshal renders request — a signal's whole payload tree — as ONE OTLP/JSON
+          document: HTML escaping DISABLED and no trailing newline, exactly the bytes
+          that go in the body of a POST.
+
+          encoding/json escapes '<', '>' and '&' into their \u00xx forms by default, a
+          defence for JSON embedded in a <script> element. An OTLP body never is, and
+          OTel-conventional attributes carry URLs (url.full, http.route) whose query
+          separator is exactly '&' — so the default turns a readable payload into an
+          unreadable one for no gain, and makes this SDK's bytes differ from every
+          other OTLP producer's for identical input. json.Encoder is the only way to
+          turn it off, and it appends a newline a single-document body must not carry.
+
+          failure is the CALLER'S: the wrap a rendering fault leaves under, with the
+          signal's EXPORT_FAILED code and wording. The fault is near-impossible —
+          every field of a payload tree is a Go primitive or one of the Marshalers in
+          this package — and it is still typed rather than swallowed.
+        in:
           - name: request
             type: R
           - name: failure
@@ -38,19 +149,45 @@ packages:
         typeParams:
           - constraint: any
             name: R
-      - in:
+      - doc: |-
+          UnixNano converts a wall-clock instant to the fixed64 nanosecond timestamp
+          OTLP carries, mapping an unset instant onto 0.
+
+          The guard is not defensive noise. time.Time's own documentation says
+          UnixNano's "result is undefined if the Unix time in nanoseconds cannot be
+          represented by an int64", and the zero Time is exactly that case: it returns
+          a large negative number which, cast to uint64, becomes a timestamp several
+          centuries in the future. A snapshot built by hand rather than by a Meter, or
+          an event stamped by a manual clock left at its zero, is the reachable path,
+          and it would ship silently wrong rather than visibly empty. Zero is what the
+          schema already means by an unknown timestamp.
+        in:
           - name: instant
             type: time.Time
         name: UnixNano
         out:
           - type: Uint64
-      - in:
+      - doc: |-
+          ResourceOf renders the shared ResourceValue a Meter or a Tracer publishes.
+          Its attributes are already sorted, validated and owned, so this is a field
+          copy and nothing else.
+        in:
           - name: resource
             type: coreotel.ResourceValue
         name: ResourceOf
         out:
           - type: ResourceMessage
-      - in:
+      - doc: |-
+          DecodeRejected reports how many items a 2xx body says were rejected,
+          decoding the body's partialSuccess into into — a pointer to the signal's own
+          message, which this function reads back and nothing else keeps.
+
+          An unparseable or empty body is NOT a failure. The request was accepted —
+          that is what the 200 said — and the specification's own posture on this
+          exchange is that a receiver ignores what it does not recognise; turning a
+          collector's malformed response into a lost-data verdict would report a
+          failure that did not happen, and would do it on every export.
+        in:
           - name: payload
             type: "[]byte"
           - name: into
@@ -58,13 +195,23 @@ packages:
         name: DecodeRejected
         out:
           - type: int64
-      - in:
+      - doc: ScopeOf renders the shared ScopeValue a Meter or a Tracer publishes.
+        in:
           - name: scope
             type: coreotel.ScopeValue
         name: ScopeOf
         out:
           - type: ScopeMessage
-      - in:
+      - doc: |-
+          NewSender validates cfg and builds the sender a signal's
+          NewOTLPHTTPExporter wraps. A refused endpoint fails HERE, at wiring, under
+          the signal's EndpointInvalid code, rather than at the first export: an
+          endpoint is STRUCTURE, wrong on the first export or never, which is what
+          makes refusing it safe.
+
+          cfg is taken by pointer so the configuration is not copied onto the stack;
+          nothing in it is retained except owned copies.
+        in:
           - name: cfg
             type: "*HTTPConfig"
           - name: signal
@@ -75,7 +222,10 @@ packages:
             type: "*Sender"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NewStream binds a Stream to dst. failure is the wrap a writer fault leaves
+          under — the calling signal's EXPORT_FAILED, in its own words.
+        in:
           - name: dst
             type: io.Writer
           - name: failure
@@ -89,7 +239,17 @@ packages:
       http: net/http
     path: github.com/kitsunium/sdk/internal/service/observe/internal/otlp
     types:
-      - name: AnyValue
+      - doc: |-
+          AnyValue is common.v1.AnyValue, restricted to the four SCALAR cases the
+          SDK's attribute model has: stringValue (1), boolValue (2), intValue (3),
+          doubleValue (4).
+
+          arrayValue (5), kvlistValue (6) and bytesValue (7) are absent because
+          internal/core/observe/otel.AttrValue has no corresponding kind — homogeneous array
+          attributes are deferred with a measured reason (ADR 0044 §Decision 2).
+          Exactly one pointer is non-nil, and it is emitted even at its zero value,
+          because a oneof member has explicit presence.
+        name: AnyValue
         struct:
           fields:
             - name: StringValue
@@ -104,20 +264,86 @@ packages:
             - name: DoubleValue
               tag: json:"doubleValue,omitempty"
               type: "*Double"
-      - name: HTTPConfig
+      - doc: |-
+          HTTPConfig configures an OTLP/HTTP sender. Every field has a resolved meaning
+          when left unset except Endpoint, which has none that could be right.
+
+          Each signal publishes it as a DEFINED type of its own —
+          `type OTLPHTTPConfig otlp.HTTPConfig` in internal/service/observe/metrics and in
+          internal/service/observe/trace — so metrics.OTLPHTTPConfig and trace.OTLPHTTPConfig
+          stay two types a caller cannot mix up, while their fields are declared, and
+          documented, once: here.
+        name: HTTPConfig
         struct:
           fields:
-            - name: Endpoint
+            - doc: |-
+                Endpoint is the FULL URL the payload is POSTed to, used exactly as
+                given — no path is appended, no scheme is guessed.
+
+                That mirrors the specification's own split: the per-signal endpoint
+                variable is documented as a full URL used without modification, and it
+                exists precisely because joining a base with a path is where collectors
+                and SDKs disagree. A caller writes "http://collector:4318" plus the
+                signal's path constant (OTLPMetricsPath, OTLPTracesPath), where a
+                reviewer can see the whole address in one string.
+
+                It is REFUSED at construction when it is not an absolute http(s) URL with
+                a host and a non-root path: a bare host would POST to "/" and collect
+                404s forever, which looks exactly like a collector that is up.
+              name: Endpoint
               type: string
-            - name: Client
+            - doc: |-
+                Client is the http.Client the POST rides on. When nil, a client bounded
+                by Timeout and refusing every redirect is built, on a connection pool of
+                its own: a clone of http.DefaultTransport while that is the stdlib's
+                *http.Transport, proxy environment included. A process that replaced
+                http.DefaultTransport with another RoundTripper gets a fresh transport
+                that keeps only the proxy environment and the idle reaping, never that
+                RoundTripper — routing, an mTLS identity or a policy that lives in one
+                reaches this exporter only through a Client that carries it.
+
+                A supplied client is used AS-IS, including its own timeout, redirect
+                policy and Transport — it is the seam a caller uses to install a proxy,
+                an mTLS identity or an SSRF allowlist, and second-guessing it here would
+                defeat that. One whose Transport is http.DefaultTransport (a nil
+                Transport is) shares that pool with the whole process, and anything that
+                empties it — every httptest.Server.Close, every
+                http.DefaultClient.CloseIdleConnections — can make a response that had
+                already arrived read as a transport fault, so a 200 comes back retryable.
+                Give such a client a Transport of its own.
+              name: Client
               type: "*http.Client"
-            - name: Headers
+            - doc: |-
+                Headers are set on every request before Content-Type, so a hosted
+                collector's Authorization or tenant header can ride along. Their values
+                are treated as secrets: they are never echoed into an error or a field.
+              name: Headers
               type: map[string]string
-            - name: Timeout
+            - doc: |-
+                Timeout bounds one export round trip, request and response body
+                together. Non-positive CLAMPS to DefaultTimeout; there is no "no timeout"
+                setting, because a stalled collector must never wedge the goroutine that
+                is exporting (ADR 0031).
+
+                It is ignored when Client is non-nil — a caller who brought their own
+                client brought their own deadline.
+              name: Timeout
               type: time.Duration
-            - name: MaxResponseBytes
+            - doc: |-
+                MaxResponseBytes caps the response body read. Non-positive CLAMPS to
+                DefaultMaxResponseBytes.
+              name: MaxResponseBytes
               type: int64
-      - name: KeyValue
+      - doc: |-
+          KeyValue is common.v1.KeyValue: key (1) + value (2). One attribute of a
+          resource, a data point, a span, an event or a link.
+
+          Field ORDER inside every message of this package is the schema's
+          FIELD-NUMBER order, not a reading order: encoding/json emits struct fields as
+          declared, and deriving the order from the document is what makes the
+          expected bytes in each signal's tests checkable against the .proto field by
+          field.
+        name: KeyValue
         struct:
           fields:
             - name: Key
@@ -126,20 +352,47 @@ packages:
             - name: Value
               tag: json:"value"
               type: AnyValue
-      - name: ResourceMessage
+      - doc: |-
+          ResourceMessage is resource.v1.Resource: attributes (1).
+
+          droppedAttributesCount (2) is absent because this SDK drops no resource
+          attribute. What each signal does drop is a different thing, counted where it
+          happens: the meter folds excess SERIES into an overflow series, and a
+          Recorder drops whole SPANS when it is full.
+        name: ResourceMessage
         struct:
           fields:
             - name: Attributes
               tag: json:"attributes,omitempty"
               type: "[]KeyValue"
-      - interface:
+      - doc: |-
+          RejectedCounter is a signal's partialSuccess message — ExportMetricsPartialSuccess,
+          ExportTracePartialSuccess — reduced to the one number the sender reads.
+
+          The messages differ in exactly one member name (rejectedDataPoints,
+          rejectedSpans), so each signal declares its own small struct with its own
+          json tag and this method, and DecodeRejected decodes into it: the tags stay
+          static, which keeps encoding/json's matching rules what they were when each
+          signal decoded its own response type.
+        interface:
           methods:
             - name: RejectedCount
               out:
                 - type: int64
         name: RejectedCounter
-      - methods:
-          - in:
+      - doc: |-
+          LenientInt64 decodes a 64-bit integer written EITHER as a JSON number OR as a
+          decimal string.
+
+          This is not tolerance for its own sake, it is the specification: 64-bit
+          integers are encoded as decimal strings, "and either numbers or strings are
+          accepted when decoding". Collectors differ — the reference collector emits
+          the string form, some proxies re-serialise it as a number — and a decoder
+          that accepted only one of them would silently read every partial success as
+          a full one whenever it met the other.
+        methods:
+          - doc: UnmarshalJSON accepts 42 and "42" alike.
+            in:
               - name: data
                 type: "[]byte"
             name: UnmarshalJSON
@@ -148,8 +401,16 @@ packages:
             recv: pointer
         name: LenientInt64
         underlying: int64
-      - methods:
-          - name: MarshalJSON
+      - doc: |-
+          Int64 is a signed 64-bit integer rendered as a DECIMAL STRING.
+
+          That is the proto3 JSON mapping OTLP inherits — "64-bit integer numbers in
+          JSON-encoded payloads are encoded as decimal strings" — and the reason is
+          range, not taste: a JSON number is a double in most parsers, so an int64
+          past 2^53 loses its low bits on the way through.
+        methods:
+          - doc: MarshalJSON renders the integer as a quoted decimal string.
+            name: MarshalJSON
             out:
               - name: encoded
                 type: "[]byte"
@@ -158,8 +419,13 @@ packages:
             recv: value
         name: Int64
         underlying: int64
-      - methods:
-          - name: MarshalJSON
+      - doc: |-
+          Uint64 is an unsigned 64-bit integer rendered as a decimal string, for the
+          same reason Int64 is: fixed64 and uint64 both map to a string. Every
+          timestamp in an OTLP payload uses it, and every one of them is past 2^53.
+        methods:
+          - doc: MarshalJSON renders the integer as a quoted decimal string.
+            name: MarshalJSON
             out:
               - name: encoded
                 type: "[]byte"
@@ -168,8 +434,19 @@ packages:
             recv: value
         name: Uint64
         underlying: uint64
-      - methods:
-          - name: MarshalJSON
+      - doc: |-
+          Double is an IEEE-754 double rendered as a JSON number, or as one of the
+          three quoted spellings proto3 JSON gives a non-finite value.
+
+          encoding/json refuses NaN and ±Inf outright ("json: unsupported value"), so
+          without this type a single NaN would fail the whole export. The model allows
+          the value — a gauge is whatever was sampled — and the specification says how
+          to spell it, so the encoder spells it.
+        methods:
+          - doc: |-
+              MarshalJSON renders the double shortest-round-trip, or names it when it is
+              not finite.
+            name: MarshalJSON
             out:
               - name: encoded
                 type: "[]byte"
@@ -178,7 +455,16 @@ packages:
             recv: value
         name: Double
         underlying: float64
-      - name: ScopeMessage
+      - doc: |-
+          ScopeMessage is common.v1.InstrumentationScope: name (1) + version (2). A Meter and
+          a Tracer both normalise Name, so it is always present; Version is optional in
+          the specification and omitted when the caller has none rather than emitted
+          blank.
+
+          attributes (3) and droppedAttributesCount (4) are absent: nothing in this SDK
+          produces a scope attribute (ADR 0044 §Deferred), and an always-empty field
+          is a placeholder (rule 5).
+        name: ScopeMessage
         struct:
           fields:
             - name: Name
@@ -187,8 +473,32 @@ packages:
             - name: Version
               tag: json:"version,omitempty"
               type: string
-      - methods:
-          - in:
+      - doc: |-
+          Sender POSTs encoded OTLP/JSON documents to one collector and maps each
+          answer onto one of three verdicts, under the calling signal's codes.
+
+          It holds no mutable state, so it needs no mutex: http.Client is safe for
+          concurrent use, and every request builds its own body reader from its own
+          document.
+
+          It does NOT retry, and that is a decision rather than an omission. The
+          specification asks a client to honour Retry-After and otherwise back off
+          exponentially; internal/service/app/resilience already ships that policy, and a
+          backoff hidden inside a send would be a second one a caller cannot see, tune
+          or cancel — an exporter's Export has no context to cancel it with. What it
+          supplies instead is the CLASSIFICATION a retry policy needs: a transient
+          verdict carries the signal's Unavailable code, which each signal's
+          OTLPRetryable reads.
+        methods:
+          - doc: |-
+              Post sends body — one document Marshal returned — and returns a typed
+              verdict under the signal's codes.
+
+              Nothing here panics and nothing blocks past the client's deadline: a
+              transport fault returns the transient verdict, and every response path
+              drains a BOUNDED remainder and closes the body, so the keep-alive connection
+              returns to the pool whenever the body ends within that bound.
+            in:
               - name: body
                 type: "[]byte"
             name: Post
@@ -198,29 +508,90 @@ packages:
         name: Sender
         struct:
           unexported: true
-      - name: SignalSpec
+      - doc: |-
+          SignalSpec is one signal's vocabulary for the shared OTLP/HTTP sender: the
+          sentinels each verdict wraps, the parameters each wrap of a FOREIGN cause
+          uses, the field a partial success counts under, and how that signal's
+          collector reports a partial success at all.
+
+          It is the error-code injection seam this package is built around. The sender
+          decides WHICH verdict an exchange earns — the specification's sections, the
+          same for every signal — and the SignalSpec decides what that verdict is CALLED:
+          the dotted-quad code, the reason, the public and private wording. A metrics
+          export refused by a collector still reads OTLP_EXPORT_REJECTED 0.3.45.8 and
+          "The OTLP collector rejected the metrics payload", a trace export
+          0.3.50.6 and "The trace collector rejected the export", exactly as before
+          the transport was shared.
+
+          Every field is required. A signal declares its SignalSpec once, as a
+          package-level value, and hands a pointer to NewSender.
+        name: SignalSpec
         struct:
           fields:
-            - name: EndpointInvalid
+            - doc: |-
+                EndpointInvalid refuses an endpoint that cannot address a collector:
+                empty, not http or https, no host, or no path beyond "/".
+              name: EndpointInvalid
               type: "*errs.Error"
-            - name: EndpointUnparsable
+            - doc: |-
+                EndpointUnparsable wraps url.Parse's own failure. It carries the
+                EndpointInvalid code with the parse error on the trail, and never the
+                URL's text.
+              name: EndpointUnparsable
               type: errs.WrapParams
-            - name: RequestUnbuildable
+            - doc: |-
+                RequestUnbuildable wraps http.NewRequest's failure — near-unreachable,
+                the endpoint having been validated at construction, and still typed.
+              name: RequestUnbuildable
               type: errs.WrapParams
-            - name: TransportFault
+            - doc: |-
+                TransportFault wraps a client.Do failure: the request never got an
+                answer, which the specification says a client SHOULD retry. It must
+                carry the Unavailable code, so the signal's retry classifier sees it.
+              name: TransportFault
               type: errs.WrapParams
-            - name: Rejected
+            - doc: |-
+                Rejected is the permanent verdict: a status outside the retryable set,
+                or a 3xx the redirect refusal handed back.
+              name: Rejected
               type: "*errs.Error"
-            - name: Unavailable
+            - doc: "Unavailable is the transient verdict: one of HTTP 429, 502, 503, 504."
+              name: Unavailable
               type: "*errs.Error"
-            - name: PartialSuccess
+            - doc: |-
+                PartialSuccess is the verdict for a 2xx whose body reports rejected
+                items: data was lost, and the specification forbids replaying it.
+              name: PartialSuccess
               type: "*errs.Error"
-            - name: RejectedField
+            - doc: |-
+                RejectedField is the errs Field key a PartialSuccess carries the
+                rejected count under: "rejected_data_points", "rejected_spans".
+              name: RejectedField
               type: string
-            - name: DecodeRejected
+            - doc: |-
+                DecodeRejected reads the rejected count out of a 2xx body — the one
+                member that differs between ExportMetricsServiceResponse and
+                ExportTraceServiceResponse. A signal passes a function that hands
+                otlp.DecodeRejected a fresh pointer to its own partial-success message.
+              name: DecodeRejected
               type: func(payload []byte) int64
-      - methods:
-          - in:
+      - doc: |-
+          Stream writes whole OTLP/JSON documents to one io.Writer, each terminated by
+          DocumentTerminator, so a stream of exports is newline-delimited JSON — what a
+          file or a terminal wants, where an HTTP body wants the document alone.
+
+          mu serialises the single write: an exporter port requires concurrency safety
+          and the writer is caller-supplied, so two concurrent exports must not
+          interleave partial documents into a non-atomic destination. Encoding happens
+          before Emit is called, outside the lock, so a slow writer serialises callers
+          without also serialising the work.
+        methods:
+          - doc: |-
+              Emit writes doc followed by DocumentTerminator in ONE write, so a refusal
+              upstream leaves the destination untouched and the only error surface left is
+              the write itself. doc must be a document Marshal returned; it is extended in
+              place by one byte, which its spare capacity usually absorbs.
+            in:
               - name: doc
                 type: "[]byte"
             name: Emit

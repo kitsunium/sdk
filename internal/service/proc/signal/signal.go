@@ -1,8 +1,3 @@
-// Package signal — typed signal toolbox over os/signal: Notify subscribes to a
-// set of signals on a leak-free channel, and Relay forwards received signals to
-// a process or process group. The kill(2) path is platform-split into
-// relay_unix.go / relay_other.go; this file holds the cross-platform Notify and
-// the Target value, since os/signal itself is portable.
 package signal
 
 import (

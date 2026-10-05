@@ -1,4 +1,3 @@
-// Package kit — a transaction writes one database: the dev warning.
 package kit
 
 import (

@@ -1,9 +1,5 @@
 //go:build unix
 
-// Package exec — the Unix spawn: validates the Spec, resolves credentials,
-// builds the SysProcAttr (Setpgid/Setsid/Credential), forks/execs via
-// os.StartProcess, then applies best-effort scheduling attributes. Returns a
-// *Handle satisfying the coreproc.Process port.
 package exec
 
 import (

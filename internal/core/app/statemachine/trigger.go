@@ -1,6 +1,3 @@
-// Package statemachine — hosts Trigger, the closed set of things that fire a
-// transition, with its text form. Its one refusal, TriggerUnknown, is
-// declared in errors.go with the domain's other sentinels.
 package statemachine
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

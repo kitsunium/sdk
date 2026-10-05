@@ -1,4 +1,3 @@
-// Package net — the generic handler decorator.
 package net
 
 import "slices"

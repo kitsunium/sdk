@@ -1,4 +1,3 @@
-// Package metrics — the in-memory Meter (a core/observe/metrics.FullMeter).
 package metrics
 
 import (

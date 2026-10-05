@@ -1,5 +1,3 @@
-// Package otlp — the collector's answer to an OTLP/HTTP export, and the
-// lenient 64-bit decoder the specification asks for.
 package otlp
 
 import (

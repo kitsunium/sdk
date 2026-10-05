@@ -1,5 +1,3 @@
-// Package profiling — hosts Fold: a profile's samples charged to owners, the
-// costliest functions, and the flame graph, in the profile's own unit.
 package profiling
 
 import (

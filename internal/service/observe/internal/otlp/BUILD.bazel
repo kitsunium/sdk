@@ -6,6 +6,7 @@ go_library(
     name = "otlp",
     srcs = [
         "any_value.go",
+        "doc.go",
         "http_config.go",
         "key_value.go",
         "marshal.go",

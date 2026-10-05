@@ -1,4 +1,3 @@
-// Package token — the HMAC-SHA-256 binding.
 package token
 
 import (

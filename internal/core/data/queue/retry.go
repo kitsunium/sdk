@@ -1,4 +1,3 @@
-// Package queue — the failure a handler reports when no retry can fix it.
 package queue
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

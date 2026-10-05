@@ -1,5 +1,3 @@
-// Package trace — StateBuilder: a tracestate list assembled member by member,
-// under the same checks Insert applies.
 package trace
 
 import "slices"

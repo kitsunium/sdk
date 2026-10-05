@@ -6,6 +6,7 @@ go_library(
     name = "i18n",
     srcs = [
         "accept.go",
+        "doc.go",
         "entry_value.go",
         "errors.go",
         "load.go",

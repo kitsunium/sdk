@@ -1,9 +1,3 @@
-// Package selfupdate — the ports, aliased from core.
-//
-// They are ALIASES rather than a second declaration: a service-local copy of a
-// contract the core layer owns compiles fine and drifts silently, and a caller
-// holding one of each would find them interchangeable right up until a method
-// is added to one of them.
 package selfupdate
 
 import coreupd "github.com/kitsunium/sdk/framework/internal/core/selfupdate"

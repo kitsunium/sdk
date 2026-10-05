@@ -1,4 +1,3 @@
-// Package kit — mailers: a durable outbox and the transport that empties it.
 package kit
 
 import (

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T12:00:00Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # internal/service/proc/internal/rlim/
 
 ## Purpose
@@ -28,7 +28,7 @@ both sit in the proc family, so the rule admits exactly the family's engines.
 
 | File | Build tag | Surface |
 |---|---|---|
-| `doc.go` | all | the package doc — off Unix there is no rlimit struct and the package holds nothing else |
+| `doc.go` | all | the package comment — kit writes it from the design (ADR 0167) — off Unix there is no rlimit struct and the package holds nothing else |
 | `value_default.go` | `unix && !freebsd && !dragonfly` | `Make`: the pair assigned verbatim |
 | `value_signed.go` | `freebsd \|\| dragonfly` | `Make`: the pair converted to `int64`, `^uint64(0)` → `-1` |
 | `value_default_external_test.go` | as `value_default.go` | the pair unchanged, infinity included |

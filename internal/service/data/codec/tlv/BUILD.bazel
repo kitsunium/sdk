@@ -8,6 +8,7 @@ go_library(
         "codec.go",
         "decoder.go",
         "decoder_typed.go",
+        "doc.go",
         "encoder.go",
         "helpers.go",
         "typeinfo.go",

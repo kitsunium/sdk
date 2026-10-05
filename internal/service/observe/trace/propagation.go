@@ -1,7 +1,3 @@
-// Package trace — propagation across a process boundary: the two W3C headers
-// written into, and read out of, a coretrace.Carrier. The port and the span
-// context are internal/core/observe/trace's; reading and writing the headers
-// is this engine's mechanism (ADR 0160 §4).
 package trace
 
 import coretrace "github.com/kitsunium/sdk/internal/core/observe/trace"

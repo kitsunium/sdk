@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/kernel:kernel_consumers"])
 go_library(
     name = "flock",
     srcs = [
+        "doc.go",
         "flock.go",
         "flock_other.go",
         "flock_unix.go",

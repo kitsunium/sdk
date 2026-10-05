@@ -1,5 +1,3 @@
-// Package tee — the TeeSink decorator that fans each record out to every
-// primary sink and spills to a dead-letter sink only when all primaries fail.
 package tee
 
 import (

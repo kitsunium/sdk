@@ -1,5 +1,3 @@
-// Package validation — hosts ReportValue, the ordered collection of everything
-// one validation found wrong.
 package validation
 
 import (

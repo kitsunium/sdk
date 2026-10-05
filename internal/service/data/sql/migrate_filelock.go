@@ -1,5 +1,3 @@
-// Package sql — hosts the migration lock of an engine with no advisory lock:
-// SQLite's own write lock on the database file, held for the whole run.
 package sql
 
 import (

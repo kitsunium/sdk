@@ -1,5 +1,3 @@
-// Package gate — the policy value: which invocations are exempt, and what a
-// mandated upgrade does.
 package gate
 
 import (

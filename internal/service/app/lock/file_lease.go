@@ -1,5 +1,3 @@
-// Package lock — the lease handed out by the file locker. It carries no
-// deadline, deliberately: see [fileLocker] for why its locks do not expire.
 package lock
 
 import (

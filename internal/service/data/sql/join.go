@@ -1,5 +1,3 @@
-// Package sql — hosts the transactor's two ADR 0039 siblings: where a
-// statement issued under a context runs, and what waits for a commit.
 package sql
 
 import (

@@ -1,6 +1,3 @@
-// Package docstore — the values both engines read and return: a stored
-// document as JSON, one version of a document, and what a write says about the
-// version it makes.
 package docstore
 
 import (

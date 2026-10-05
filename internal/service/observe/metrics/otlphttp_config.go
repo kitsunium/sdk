@@ -1,4 +1,3 @@
-// Package metrics — the OTLP/HTTP exporter's configuration.
 package metrics
 
 import "github.com/kitsunium/sdk/internal/service/observe/internal/otlp"

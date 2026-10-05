@@ -1,4 +1,3 @@
-// Package i18n — the six CLDR plural categories.
 package i18n
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

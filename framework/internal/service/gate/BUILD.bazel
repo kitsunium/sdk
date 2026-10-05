@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "gate",
-    srcs = ["gate.go"],
+    srcs = [
+        "doc.go",
+        "gate.go",
+    ],
     importpath = "github.com/kitsunium/sdk/framework/internal/service/gate",
     visibility = [
         "//framework:__subpackages__",

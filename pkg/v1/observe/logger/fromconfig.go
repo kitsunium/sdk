@@ -1,14 +1,3 @@
-// Package logger — declares pkg/v1/observe/logger's sentinels. Each var's
-// name equals its errs.Define Reason in SCREAMING_SNAKE form.
-//
-// Package logger — exposes FromConfig, the capstone of the config-driven writer
-// subsystem (ADR 0014 §D5): it builds a fully wired Logger from a config blob
-// with zero Go glue. The blob is decoded by a codec the CONSUMER already
-// registered (FromConfig imports only the core/data/codec dispatch surface, never
-// pkg/v1/data/codec or any service codec, so a pkg/v1/observe/logger consumer inherits no
-// vendor modules). Each decoded WriterEntry is resolved against the writer
-// registry; a Factory that implements ConfigDecoder translates its own option
-// map, otherwise a default mapping passes the raw map straight to the factory.
 package logger
 
 import (

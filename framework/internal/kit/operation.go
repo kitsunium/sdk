@@ -1,4 +1,3 @@
-// Package kit — operations: a typed request answered by a typed response.
 package kit
 
 import (

@@ -1,14 +1,5 @@
 //go:build unix || windows
 
-// Package exec — resolving a bare executable name through the PATH the child
-// will run with.
-//
-// os.StartProcess does not search PATH: it hands its path to execve (or to
-// CreateProcess) as written, so a bare "go" names a file in the current
-// directory and fails with ENOENT. The port documents Spec.Path as "absolute
-// or PATH-resolvable", which is what os/exec.Command gives a Go programmer, so
-// the resolution happens here, once, before either spawn path — the direct
-// fork/exec and the limits trampoline, which execs the target itself.
 package exec
 
 import (

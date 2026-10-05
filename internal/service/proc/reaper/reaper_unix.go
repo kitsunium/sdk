@@ -1,7 +1,5 @@
 //go:build unix
 
-// Package reaper — Unix SIGCHLD waitpid reaping loop (all Unix). The
-// PR_SET_CHILD_SUBREAPER arming lives in the Linux-only sibling.
 package reaper
 
 import (

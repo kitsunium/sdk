@@ -1,4 +1,3 @@
-// Package kit — observation: the spans and events of a running product.
 package kit
 
 import (

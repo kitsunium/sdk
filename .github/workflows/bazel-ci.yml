@@ -23,13 +23,10 @@ jobs:
       # SHA-pinned per the .github/workflows/CLAUDE.md policy — version
       # comments track the resolved human-readable tag.
       #
-      # fetch-depth: 0 — gomarkdoc resolves the repository URL + default
-      # branch via `git symbolic-ref refs/remotes/origin/HEAD` to build
-      # the source links in READMEs. A shallow clone (depth=1) makes
-      # that lookup fail and gomarkdoc falls back to a bare-name link
-      # shape that drifts from what local regen produces — the README
-      # drift gate then fails on a phantom diff. Full history kills
-      # the variability.
+      # fetch-depth: 0 — full history. gomarkdoc needed it for the README
+      # source links (ADR 0008); genindex, which writes the READMEs now (ADR
+      # 0167), does not, and narrowing the clone is a change of its own,
+      # measured against every other step of this job.
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           fetch-depth: 0
@@ -71,32 +68,15 @@ jobs:
             exit 1
           fi
 
-      # gomarkdoc is the SOT for the README drift gate (ADR 0008). A fresh
-      # CI runner does not ship it — install it here so the drift +
-      # determinism steps below see the same binary `make docs-readme`
-      # expects locally. Pinned to v1.1.0, matching the Makefile.
-      - name: install gomarkdoc
-        run: go install github.com/princjef/gomarkdoc/cmd/gomarkdoc@v1.1.0
-
-      # README drift gate (ADR 0008). Sits between the gazelle drift
-      # check and `bazel build` so a stale README fails fast before the
-      # heavy build+test burn. The script is the canonical spec (also
-      # used by `make lint` and the local pre-commit hook).
+      # README drift gate (ADR 0167, amending ADR 0008): every README under
+      # pkg/ and framework/ is what tools/genindex -write-readmes writes from
+      # the committed docs/api — the SDK's own stdlib-only tool, so there is
+      # no binary to install and no determinism step to keep it honest. Sits
+      # between the gazelle drift check and `bazel build` so a stale README
+      # fails fast before the heavy build+test burn; `make lint` runs the
+      # same script.
       - name: drift check — README.md regenerated
         run: bash scripts/pre-commit/check-readme-drift.sh
-
-      - name: determinism check — gomarkdoc reproducible
-        run: bash scripts/pre-commit/check-readme-determinism.sh
-
-      # govulncheck on the gomarkdoc binary was removed: gomarkdoc@v1.1.0
-      # (the last released tag) bundles golang.org/x/crypto < v0.52.0 and
-      # github.com/go-git/v5 < v5.17.1, both carrying historical CVEs in
-      # SSH / knownhosts / repo-write paths gomarkdoc never reaches. We
-      # can't bump the deps without a new gomarkdoc release, so scanning
-      # the binary blocks every SDK PR on a waiting-for-upstream signal.
-      # gomarkdoc is TOOLING: the SDK's own modules are scanned, in source
-      # mode and for reachability, by `make vuln-check` below (ADR 0136).
-      # Re-enable this step when gomarkdoc ships a refreshed release.
 
       - name: build
         run: bazel build --config=ci //...

@@ -1,5 +1,3 @@
-// Package health — hosts Config, the registry's construction parameters, and
-// the two bounds the SDK will not let a caller past.
 package health
 
 import (

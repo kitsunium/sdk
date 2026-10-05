@@ -1,9 +1,3 @@
-// Package logger — declares the sourceHandler decorator — a Handler
-// middleware that resolves the RecordEvent.PC captured by the front-end into a
-// structured "source" attribute (file:line:function) before delegating to the
-// wrapped Handler. It is additive and opt-in: the record shape is unchanged
-// until a caller wraps a Logger via WithCaller, and resolution is stdlib-only
-// (runtime.CallersFrames).
 package logger
 
 import (

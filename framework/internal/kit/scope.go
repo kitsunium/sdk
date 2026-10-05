@@ -1,7 +1,3 @@
-// Package kit — scopes: the parts of a singleton's lock or of a socket's
-// path that are only known at the start — the user, the executable, a
-// configuration directory —, so one declaration keeps one process per user,
-// per installed copy or per configuration.
 package kit
 
 import (

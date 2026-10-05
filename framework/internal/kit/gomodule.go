@@ -1,5 +1,3 @@
-// Package kit — the Go modules of the running binary, read from its build
-// info.
 package kit
 
 import (

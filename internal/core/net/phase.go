@@ -1,4 +1,3 @@
-// Package net — the server lifecycle phase.
 package net
 
 // Phase is where a server sits in its lifecycle. It is reported by State so an

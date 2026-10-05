@@ -1,4 +1,3 @@
-// Package kit — the privacy journal: what kit did to personal data, and why.
 package kit
 
 import (

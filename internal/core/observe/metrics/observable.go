@@ -1,5 +1,3 @@
-// Package metrics — the asynchronous (observable) instruments: a value read at
-// collection time rather than written at observation time.
 package metrics
 
 import coreotel "github.com/kitsunium/sdk/internal/core/observe/otel"

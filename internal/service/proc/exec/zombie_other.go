@@ -1,6 +1,5 @@
 //go:build unix && !darwin
 
-// Package exec — the zombie probe where the kernel needs none.
 package exec
 
 // leaderIsZombie answers false: only darwin refuses a group of zombies with

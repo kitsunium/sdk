@@ -1,5 +1,3 @@
-// Package clock — hosts ManualClock, the deterministic [Timed] whose instant
-// only moves when a caller moves it.
 package clock
 
 import (

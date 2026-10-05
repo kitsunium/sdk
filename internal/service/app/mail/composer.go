@@ -1,4 +1,3 @@
-// Package mail — the composer: a message value in, RFC 5322 wire bytes out.
 package mail
 
 import (

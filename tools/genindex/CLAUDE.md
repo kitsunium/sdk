@@ -1,9 +1,9 @@
-<!-- updated: 2026-10-04T08:50:00Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # tools/genindex/
 
 ## Purpose
 
-One Go program that reads the SDK's Go code for the documentation, in five
+One Go program that reads the SDK's Go code for the documentation, in six
 modes:
 
 - **the symbol index** (the default) — every exported declaration of a
@@ -36,8 +36,26 @@ modes:
   change (ADR 0163): a symbol added in the code alone, a function turned
   variable, a constraint widened, a struct tag or a receiver fails the
   markers; a design edit without `kit gen`, or a generated file edited by
-  hand, fails the digests. This program never reads the design's YAML: it
+  hand, fails the digests. Since ADR 0167 a marker also ends with ` doc:<sha256>`
+  and each pin file holds `// package <path> doc:<sha256>`: on every cell the
+  sha256 of each symbol's doc as docs/api records it — a struct's exported
+  fields' docs after it, each as NUL, its name, NUL, its doc — and of the
+  package comment equal them, or the doc (or the package comment) differs — a
+  doc edited in the code alone. This program never reads the design's YAML: it
   parses Go and hashes bytes;
+- **`-write-readmes`** (`make docs-readme`) and **`-check-readmes`**
+  (`scripts/pre-commit/check-readme-drift.sh`, in `make lint` and CI) — the
+  `README.md` of every package under `pkg/` and `framework/` that the committed
+  docs/api records, written from it (ADR 0167, gomarkdoc retired): the import,
+  the package comment, an index, then every constant, variable, function and
+  type — an alias with the declaration, field docs and methods of the type it
+  names —, each value's code and initializer, and the examples of the
+  package's test files (go/doc's `Examples`, the one part docs/api does not
+  hold). Doc text is printed by `go/doc/comment`'s Markdown printer, code
+  blocks fenced, doc links to the page's anchors. The check names each README
+  that differs, is missing, or was written by this program for a package
+  docs/api no longer records (`-write-readmes` removes it); a README this
+  program did not write (its first line is not the header) is the owner's;
 - **`-write-error-codes`** (`make error-codes`, which `make api` runs) and
   **`-check-error-codes`** (`scripts/pre-commit/check-error-codes-drift.sh`)
   — `docs/error-codes.yaml` written from the committed `docs/api`, or compared
@@ -62,7 +80,7 @@ fixture repository. The `tools/` conventions are in `tools/CLAUDE.md`.
 | File | Holds |
 |---|---|
 | `main.go` | `main`, `runIndex` (the index mode), `buildIndex` (the stamped `generatedAt`), `defaultRepoRoot` (two levels above `-input`, or above the working directory), `writeIndex` (stdout, or the file and its directory created — a failed close is a failed write), `exitErr` |
-| `cli.go` | the flags (`-input`, `-output`, `-url-base`, `-module`, `-repo-root`, `-source-url-prefix`, `-platforms`, `-check-doclinks`, `-write-api`, `-check-api`, `-markers`, `-digests`, `-write-error-codes`, `-check-error-codes`), `mode`, `usage` (one mode at a time; `-markers` and `-digests` need `-check-api`), `runMode`, `runAPIMode`, `runErrorCodesMode` (no platforms table: `docs/api` names its cells) |
+| `cli.go` | the flags (`-input`, `-output`, `-url-base`, `-module`, `-repo-root`, `-source-url-prefix`, `-platforms`, `-check-doclinks`, `-write-api`, `-check-api`, `-markers`, `-digests`, `-write-error-codes`, `-check-error-codes`, `-write-readmes`, `-check-readmes`), `mode`, `usage` (one mode at a time; `-markers` and `-digests` need `-check-api`), `runMode`, `runAPIMode`, `runErrorCodesMode` (no platforms table: `docs/api` names its cells; the README modes too) |
 | `platforms.go` | `platform` (`String`, `matches` — the go command's `build.Context.MatchFile`, cgo off), `readPlatforms` / `parsePlatforms` (the cells between `cat <<'CELLS'` and `CELLS`; no table, a table never closed, an empty one, a malformed or repeated cell refused by name; a carriage return ignored), `cellNames` |
 | `options.go` | `indexOptions`, the parameters every stage of the index's walk takes together |
 | `collect.go` | `collect` (the index's walk under the module root), `skipDir` (dot directories, `vendor`, `testdata`, `node_modules`), `loadDir` / `packageSymbols`, `importPathOf`, `relPath`; `_test.go` files parsed so `Example` functions attach, their declarations never indexed |
@@ -71,6 +89,7 @@ fixture repository. The `tools/` conventions are in `tools/CLAUDE.md`.
 | `index.go` | the index document: `schemaVersion` (1; the docs site's own index, from `docs/api`, is schema 2), `index` (`schema`, `generatedAt`, `module`, `symbols`), `symbol` (short field names: the file shipped gzipped on every page view) |
 | `doclinks.go` | the check: `runDocLinkCheck` (exit 0, or 1 on a dead link, an unreadable package or no directory given), `checkDocLinks` / `deadLinksInDir` / `deadLinksInPackage`, judged on the cells given, `sameScopeLinks`, `docComments`, `docLinkAdvice` (write `[Type].Member` for a member of an aliased type) |
 | `api.go` | the API modes: `apiOptions`, `realRoot` (symbolic links resolved, as go list reports directories), `buildAPI` (modules, every cell listed at once, one cell checked at a time), `apiBuilder` (`readCell`, `readPackage`, `noteDirs`, `result`), `packageRecord`, `runWriteAPI` / `writeDocument` / `removeStale` (a module that is gone takes its document with it), `existingDocuments` |
+| `readme.go` | the READMEs (ADR 0167): `readmePackages` (every docs/api package under `readmeRoots`), `indexAPI`, `renderReadmes`, `readme` (`render`, `index`, `valueSection`, `function`, `typeSection`, `owner` — an alias's owner's declaration and methods —, `forms` — a form per record, a record of some cells naming them —, `declWithDocs`, `code`, `docText` — `go/doc/comment`, code fenced, headings with no id —, `exampleBlocks`), `packageExamples`, `declOf`/`typeDecl`/`fieldLines` (the declarations gofmt would write), `runWriteReadmes`, `runCheckReadmes`, `staleReadmes` |
 | `apicheck.go` | `runCheckAPI`, `documentFindings` / `documentDrift` (missing, differing or stale documents), `symbolDrift` (each record added, changed or removed, by id and cells, bounded), `surfaceFindings` (the markers and the digests, when asked) |
 | `apiload.go` | the loader: `goCommand` (the pinned environment: `GOOS`, `GOARCH`, `GOWORK` — the root's `go.work`, or off —, `GOFLAGS=-mod=readonly`, `CGO_ENABLED=0`, `GOTOOLCHAIN=local`, every build knob at its default, `PWD`), `modules` (`go list -m -json`), `list` (`go list -e -json=… -deps <module>/...` per cell), `fileCache` (each file parsed once, kept while a cell still to be checked compiles it), `checkCell` / `checkPackage` (go/types from source, `IgnoreFuncBodies`, the cell's `Sizes`, the module's go line), `cellImporter` |
 | `apisym.go` | one package's records on one cell: `apiSymbol`, `apiCode`, `apiField`, `pkgReader` (`readSymbols`, the file's `qualifier`, `funcDecl`, `valueSpec`, `constSymbol`, `varSymbol`, `initID`, `resolveCodes`, `defineCode`), `pathQualifier`, `isDefine`, `isErrsCode`, `dottedQuad`, `relSlash` |
@@ -78,14 +97,15 @@ fixture repository. The `tools/` conventions are in `tools/CLAUDE.md`.
 | `apisym_place.go` | `layerRules` and `placeOf`: a package's layer by directory and its family within it, `root` for the kernel's and pkg/v1's root packages |
 | `apiid.go` | the go: id: `goID` (`String`, `parseGoID`, `goIDPattern` — the grammar platform's design calls goid), `escapePath` (`%2e`), `objectID` / `funcID` / `methodRecv` — the names platform's `loader.ObjectID` gives |
 | `apidoc.go` | the document: `apiDocument`, `apiPackage`, `builtAPI`, `packageDir`, `variants` (records merged across cells: one per distinct form, with its cells), `moduleAPI.document`, `apiSymbolOrder`, `encodeDocument`, `documentName` |
-| `markers.go` | the pin markers: `readPins` / `readPin` / `parseMarker`, `cellMarkers` (the pin files a cell compiles, an id declared twice), `markerFindings` / `compareCell` / `judgeSymbol` (undeclared, missing, kind, constraint, tag, signature, receiver, foreign), `signatureFinding`, `splitTypeParams`, `findingCells` (each finding once, with its cells) |
+| `markers.go` | the pin markers: `readPins` / `readPin` / `parseMarker` (a trailing ` doc:<sha256>` split off by `splitDocDigest`; `parsePackageMarker`, `docDigest`, `textDigest`, `comparePackageDoc` — ADR 0167), `cellMarkers` (the pin files a cell compiles, an id declared twice), `markerFindings` / `compareCell` / `judgeSymbol` (undeclared, missing, kind, constraint, tag, signature, receiver, foreign), `signatureFinding`, `splitTypeParams`, `findingCells` (each finding once, with its cells) |
 | `errcodes.go` | `docs/error-codes.yaml`: `errorCode` (`dotted`, `hex`), `parseQuad`, `errorCodes` / `documentCodes` / `declaresCode` (the rule, each constant once whatever its cells, one read with two values refused), `compareErrorCodes`, `packageDirs` (module directory joined with the package's), `encodeErrorCodes` (the header and four lines per entry), `readDocuments` / `readDocument` (strict: an unknown member or another format refused), `runWriteErrorCodes`, `runCheckErrorCodes`, `errorCodesDrift` / `entryKeys` (each entry listed and not declared, or declared and not listed, bounded) |
 | `digests.go` | the generated files: `kitHeader` (`// Code generated by kit from <design file> (sha256 <hex>, body <hex>). DO NOT EDIT.`), `digestFindings`, `generatedFiles` (a pin or port file by name, or any file with the header), `checkGenerated`, `checkDesignDigest`, `sha256Hex`, `readFirstLine` |
 | `main_test.go`, `doclinks_test.go` | the index's rendering and walk on fixtures, the functions filed under a type among them (`Test_emit_typeFuncs`); the check per platform — illumos and solaris judged apart —, its errors, its ordering and its positions; `Test_platforms`, the repository's table read as genindex reads it |
 | `platforms_test.go` | the table's reader, every refusal by name |
 | `apivectors_test.go` | `Test_goIDVectors` and `Test_canonicalVectors`: the writer held to `docs/api/schema.json`'s vectors |
 | `apisym_test.go`, `apidoc_test.go`, `markers_test.go`, `digests_test.go` | codes, re-exports, docs, places; the merge across cells, the order, the bytes, the drift report; every marker finding and every digest finding by name |
-| `api_e2e_test.go` | `-write-api` and `-check-api` through the go command on `testdata/apirepo`: the document, the doc edits a check catches, and `TestCheckAPIMarkers` and `TestCheckAPIDigests` — every case reported by name |
+| `api_e2e_test.go` | `-write-api` and `-check-api` through the go command on `testdata/apirepo`: the document, the doc edits a check catches, and `TestCheckAPIMarkers`, `TestCheckAPIDocDigests` (a doc, a field's doc and the package comment edited in the code alone; an unexported field's comment is none of the digest's) and `TestCheckAPIDigests` — every case reported by name |
+| `readme_test.go` | `TestWriteReadmes_fixture` (the README of `testdata/apirepo`'s facade: header, import, package comment, index, an alias with its owner's declaration, field docs and methods, a source link, an example with its output; none for an internal package; the same bytes twice), `TestCheckReadmes_drift` (edited, missing, stale — and removed by a write —, and a hand-written README left alone), `Test_declOf`, `Test_memberName`, `Test_escapeMarkdown` |
 | `api_census_test.go` | `Test_apiCensus` (an independent go/parser and go/build census of every module of `go.work` against `docs/api`'s counts) and `Test_apiCodes` (`docs/api`'s codes against `docs/error-codes.yaml`, the errs masks named apart, every sentinel complete and listed) |
 | `errcodes_test.go` | the rule, the refusals and the bytes on fixture documents; `-write-error-codes` then `-check-error-codes` on a staged repository, each drift named; `Test_errorCodesCensus` — the repository's `docs/error-codes.yaml` against the sources read with go/parser alone (a `Code…` constant of `errs.Code`, written or carried down an `iota` group, that re-exports nothing; a hex literal's value too) |
 | `testdata/apirepo/` | a repository of its own, `example.com/fixture`, with a two-cell platforms table |
@@ -101,7 +121,7 @@ fixture repository. The `tools/` conventions are in `tools/CLAUDE.md`.
   beside any predeclared or imported result such as an `error` — in that type's
   `Funcs`, not the package's: every constructor, and in `pkg/v1` every function
   returning a facade alias. Each gets the row of a package-level function, once,
-  anchored by its own name, which is how gomarkdoc anchors it beneath the type.
+  anchored by its own name, which is how gomarkdoc anchored it beneath the type.
   Reading the package's `Funcs` alone kept 303 of `pkg/v1`'s 444 functions out of
   the index (1,664 rows before, 1,967 after, at `1896ad23`).
 - **A link is judged per platform.** A package declares different symbols on

@@ -1,4 +1,3 @@
-// Package cache — the NewChain constructor configuration.
 package cache
 
 // ChainConfig parameterises [NewChain]. Its zero value builds a working chain;

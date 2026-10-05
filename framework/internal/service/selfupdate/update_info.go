@@ -1,4 +1,3 @@
-// Package selfupdate replaces the running binary with a newer signed release.
 package selfupdate
 
 import coreupd "github.com/kitsunium/sdk/framework/internal/core/selfupdate"

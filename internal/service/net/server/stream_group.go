@@ -1,4 +1,3 @@
-// Package server — a group of listeners sharing one handler and policy.
 package server
 
 import (

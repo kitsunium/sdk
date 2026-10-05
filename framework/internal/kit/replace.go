@@ -1,4 +1,3 @@
-// Package kit — replacements: a test's substitute for an operation.
 package kit
 
 import (

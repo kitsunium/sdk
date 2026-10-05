@@ -2,7 +2,24 @@ apiVersion: kit.kitsunium/design/v2
 domain: app/events
 packages:
   - aliases:
-      - name: EventType
+      - doc: |-
+          EventType identifies the events a subscription reacts to by their concrete
+          Go TYPE. It is an alias for reflect.Type, so a caller never converts.
+
+          The key is the type and not a name because a name is unchecked: two
+          packages can both pick "user.created", a rename silently unhooks every
+          listener, and nothing fails until production is quiet. A Go type is minted
+          by the compiler, cannot collide across packages, and is renamed by the same
+          tool that renames its uses. The price is that an event crossing a process
+          boundary has no identity here — which is the frontier in the package
+          documentation, not a limitation to work around.
+
+          A subscription's EventType MUST be a CONCRETE type. [Bus.Publish] resolves
+          an event's type with reflect.TypeOf, which returns the value's DYNAMIC type
+          and never an interface type, so a listener registered on an interface could
+          never fire. That registration is refused rather than accepted and silently
+          starved — see [InvalidEventType].
+        name: EventType
         target: reflect.Type
     codes:
       - const:
@@ -75,9 +92,70 @@ packages:
             value: "0x00_03_34_02"
         type: errs.Code
     constants:
-      - name: PriorityNormal
+      - doc: |-
+          PriorityNormal is the zero [Priority] and the value a caller with no
+          opinion about ordering should leave in place. Negative priorities run
+          before it, positive ones after.
+        name: PriorityNormal
         type: Priority
         value: "0"
+    doc: |-
+      Package events — ranges 0.2.22.* (ADR 0053 core/app/events block) and
+      0.3.52.* (ADR 0053 service/app/events block, declared here since ADR 0160).
+
+      Package events — declares the sentinel *errs.Error outcomes of the domain:
+      the registration refusals, the control sentinel, and the bus's verdicts on
+      a dispatch. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE
+      form.
+
+      Package events declares the SDK's IN-PROCESS event bus port: the [Listener]
+      that reacts to one event, the [SubscriptionValue] that registers it at a
+      priority, and the [Bus] that dispatches a published event to all of them.
+      A core sibling admitted by ADR 0053.
+
+      # events is not a queue
+
+      This is the frontier the whole domain rests on, and it is stated first
+      because getting it wrong produces a bus that guarantees neither half:
+
+        - events is IN-PROCESS, SYNCHRONOUS and SAME-GOROUTINE. Publish returns
+          when every listener has returned. There is no durability, no retry, no
+          dead-letter queue and no delivery beyond this process. If the process
+          dies mid-dispatch, the event never happened as far as anything outside
+          memory is concerned.
+        - A queue is INTER-PROCESS, ASYNCHRONOUS and DURABLE, with retries and a
+          dead-letter path.
+
+      A caller who wants "asynchronous but reliable" is asking for a queue, and
+      must be sent to one rather than served half of it here. Handing them a
+      goroutine per listener would give them asynchrony without durability, which
+      is the worst of both: work that can be lost and no record that it was.
+
+      # What the bus is for
+
+      One fact, several independent consequences, all inside the caller's
+      transaction. "The order was placed" is one fact; writing the audit row,
+      invalidating the cache and stamping the metric are three consequences that
+      have nothing to say to each other. Without a bus the publisher imports all
+      three; with one it imports none.
+
+      # The port
+
+      [Listener] is a FUNCTION type rather than an interface — the shape
+      internal/core/CLAUDE.md already admits for resilience.Operation,
+      scheduler.Job and lifecycle.Start. ADR 0039's rule is that a published port
+      must not grow a method, because pkg/v1 aliases publish the shape and Go
+      interfaces are structural; a func type satisfies that rule structurally,
+      since it cannot grow a method at all.
+
+      The engine, the priority ordering, the panic guard and the TYPED
+      registration front end live in internal/service/app/events; this package owns
+      the contract, the three domain values, and the typed sentinels a
+      registration refuses with.
+
+      Package events — hosts DispatchValue, the report of one Publish.
+
+      Package events — hosts SubscriptionValue and the Priority that orders it.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/app/events
@@ -266,39 +344,184 @@ packages:
             public: A listener tried to stop the dispatch without the authority to
             reason: HALT_NOT_PERMITTED
     types:
-      - name: Listener
+      - doc: |-
+          Listener reacts to one published event. The dynamic type of event is
+          exactly the [EventType] the subscription was registered for, so a listener
+          may assert it unconditionally — internal/service/app/events.On does that for
+          the caller and is the only registration path most code needs.
+
+          Delivery is SYNCHRONOUS on the publisher's goroutine: a Listener that
+          blocks blocks the publisher, and a Listener that takes a lock takes it in
+          the publisher's lock order. Keep it short, or hand off to something that
+          owns its own goroutine — and if what you actually need is "return now,
+          finish later, reliably", see the package documentation's frontier.
+
+          Returning [Halt] stops the dispatch: the listeners after this one in
+          priority order are not called. Only a subscription that declared
+          [SubscriptionValue.MayHalt] can do that; from any other listener it is a
+          HALT_NOT_PERMITTED failure and the dispatch continues.
+
+          Returning any other non-nil error is COLLECTED and the dispatch CONTINUES.
+          The other listeners are independent consequences of the same fact; making
+          their delivery depend on this one's disk being full would reintroduce
+          exactly the coupling a bus exists to remove.
+
+          ctx is the publisher's context, passed through untouched. The bus never
+          inspects it: an event is a fact that has already happened, and cancelling
+          half of its consequences produces the partial state the synchronous
+          contract exists to prevent. A Listener that must honour cancellation holds
+          the context and can.
+        name: Listener
         underlying: func(ctx context.Context, event any) error
-      - name: DispatchValue
+      - doc: |-
+          DispatchValue reports what one [Bus.Publish] did: how many listeners ran,
+          whether one of them stopped the dispatch and which, how many never ran
+          because of that, and how many failed.
+
+          Every field is a scalar, deliberately. A per-listener slice would allocate
+          on every publish — including the overwhelmingly common publish in which
+          nothing goes wrong — and the per-listener detail already exists where it
+          belongs: each collected error carries the listener's name and the event's
+          type as fields. The report answers "what happened to this dispatch"; the
+          errors answer "to whom".
+        name: DispatchValue
         struct:
           fields:
-            - name: Delivered
+            - doc: |-
+                Delivered counts the listeners that ran and returned. A listener that
+                returned an error is delivered — it saw the event — and is also
+                counted in Failed. A listener that panicked is NOT delivered.
+              name: Delivered
               type: int
-            - name: Failed
+            - doc: |-
+                Failed counts the listeners that returned a non-nil error other than
+                [Halt], plus the listeners that panicked, plus a [Halt] returned
+                without [SubscriptionValue.MayHalt].
+              name: Failed
               type: int
-            - name: Halted
+            - doc: |-
+                Halted reports that a listener returned [Halt] and the dispatch stopped
+                there. It is not a failure: [Bus.Publish] returns a nil error for a
+                dispatch whose only remarkable event was a halt.
+              name: Halted
               type: bool
-            - name: HaltedBy
+            - doc: |-
+                HaltedBy names the listener that halted, and is empty when Halted is
+                false. It is the whole answer to "why did the last three listeners not
+                run", which is otherwise a question only a debugger can settle.
+              name: HaltedBy
               type: string
-            - name: Skipped
+            - doc: |-
+                Skipped counts the listeners that were registered for this event type
+                and never ran because the dispatch was halted before reaching them.
+              name: Skipped
               type: int
-      - name: Priority
+      - doc: |-
+          Priority orders the listeners registered for one event type. LOWER RUNS
+          FIRST, as with every ordering comparator in the stdlib, so a listener that
+          must observe the event before the others is registered at a negative
+          priority and one that must clean up after them at a positive one.
+
+          Two subscriptions at the SAME priority run in REGISTRATION order — the
+          order their Subscribe calls returned in. That is a promise, not an
+          implementation detail: a bus whose ties resolved by map iteration would
+          produce a different order on every run of the same program, and a listener
+          set that works on Tuesday would be the same code that fails on Wednesday.
+
+          Every value is usable and none is reserved, so there is nothing here for
+          [Bus.Subscribe] to refuse (ADR 0031: the zero value is the safe default,
+          and the refusals this domain does make are in [InvalidSubscription]).
+        name: Priority
         underlying: int
-      - name: SubscriptionValue
+      - doc: |-
+          SubscriptionValue is one named listener's registration against one event
+          type: what it is called, when it runs relative to its siblings, whether it
+          is allowed to stop the dispatch, and what it does.
+
+          The zero value is not runnable and is refused by [Bus.Subscribe]
+          ([InvalidSubscription]) rather than accepted and silently skipped.
+        name: SubscriptionValue
         struct:
           fields:
-            - name: Name
+            - doc: |-
+                Name identifies the listener in every error field and is the handle
+                [Bus.Unsubscribe] removes it by. It must be non-empty and unique among
+                the subscriptions registered for the same event type.
+              name: Name
               type: string
-            - name: Priority
+            - doc: |-
+                Priority orders this listener among the others registered for the same
+                event type. Its zero value, [PriorityNormal], is a working default.
+              name: Priority
               type: Priority
-            - name: MayHalt
+            - doc: |-
+                MayHalt authorises this listener to stop the dispatch by returning
+                [Halt]. Its zero value — false — is the conservative reading: a
+                listener cannot silently prevent its siblings from ever seeing the
+                event.
+
+                It is a FIELD rather than a capability every listener has because a veto
+                is an authority, and an authority that is not written down is one nobody
+                reviews. Spelled here it is in the diff, in the review and in grep, at
+                the wiring site where the reader is already asking who does what — the
+                same instrument ADR 0031 applies to resilience.HedgeConfig.Idempotent,
+                for the same reason: a precondition the SDK cannot check becomes a
+                required, greppable assertion instead of a comment.
+
+                A listener that returns [Halt] without this set does NOT stop the
+                dispatch; the refusal is reported as HALT_NOT_PERMITTED and collected
+                with the other listener errors.
+              name: MayHalt
               type: bool
-            - name: Listener
+            - doc: Listener is the reaction itself. It must be non-nil.
+              name: Listener
               type: Listener
-  - functions:
-      - name: New
+  - doc: |-
+      Package events — hosts the engine: registration, removal, and the
+      copy-on-write membership the dispatch reads.
+
+      Package events — hosts the TYPED registration front end: the generic
+      functions that hide the erasure the heterogeneous bus is built on.
+
+      Package events — hosts the dispatch: the ordered walk, the halt, the panic
+      guard, and the aggregate.
+
+      Package events — one published version of the bus membership, and the two
+      rewrites that produce the next one.
+    functions:
+      - doc: |-
+          New returns an empty in-process event bus.
+
+          It takes no configuration, and that is a decision rather than an omission.
+          Every knob considered was a CONTRACT and not a setting — whether a listener
+          error stops the dispatch, whether a cancelled context abandons it, who may
+          halt it — and a bus whose semantics vary by construction is a bus no call
+          site can be read against. A Config today would be an empty struct, which
+          CLAUDE.md rule 5 refuses; if a genuine knob ever appears it arrives as a
+          sibling constructor, which is what ADR 0039 prescribes for a published
+          signature that cannot grow.
+        name: New
         out:
           - type: corev.Bus
-      - in:
+      - doc: |-
+          On registers a typed listener for the event type E.
+
+          It is a package-level FUNCTION and not a method on Bus because Go methods
+          cannot take type parameters of their own. That is not a workaround, it is
+          the whole design constraint: a method-based Subscribe[E] would force the
+          type parameter onto the Bus itself, and a Bus[E] carries exactly one event
+          type — which is a channel, not a bus. See ADR 0053 §D3.
+
+          	err := events.On(bus, events.Handler[OrderPlaced]{
+          		Name:     "audit",
+          		Priority: -10,
+          		Handle:   func(ctx context.Context, e OrderPlaced) error { return audit.Write(ctx, e) },
+          	})
+
+          E MUST be a concrete type. An interface E is refused here rather than
+          registered and never called: Publish resolves an event's type with
+          reflect.TypeOf, which never yields an interface type (ADR 0031).
+        in:
           - name: bus
             type: corev.Bus
           - name: handler
@@ -309,7 +532,14 @@ packages:
         typeParams:
           - constraint: any
             name: E
-      - in:
+      - doc: |-
+          Off removes the listener registered under name for the event type E.
+
+          It exists so that removing a listener is spelled with the same type
+          parameter that registered it. Without it a caller would have to write
+          reflect.TypeFor[E]() by hand — the one place reflection would have leaked
+          out of this package and into application code.
+        in:
           - name: bus
             type: corev.Bus
           - name: name
@@ -324,21 +554,153 @@ packages:
       corev: github.com/kitsunium/sdk/internal/core/app/events
     path: github.com/kitsunium/sdk/internal/service/app/events
     types:
-      - name: Handler
+      - doc: |-
+          Handler is one typed listener's registration: the [On] argument.
+
+          It is the typed front of core/app/events.SubscriptionValue, field for field.
+          The duplication is the layer: core owns the ERASED contract a bus can
+          actually dispatch, and this owns the shape a caller writes. Collapsing them
+          would mean either putting a type parameter in the core port — which would
+          make the bus hold exactly one event type — or making every caller write
+          their own assertion.
+        name: Handler
         struct:
           fields:
-            - name: Name
+            - doc: |-
+                Name identifies the listener in every error field and is the handle
+                [Off] removes it by. It must be non-empty and unique among the
+                listeners registered for E.
+              name: Name
               type: string
-            - name: Priority
+            - doc: |-
+                Priority orders this listener among the others registered for E. Lower
+                runs first; equal priorities run in registration order. Its zero value,
+                core/app/events.PriorityNormal, is a working default.
+              name: Priority
               type: corev.Priority
-            - name: MayHalt
+            - doc: |-
+                MayHalt authorises Handle to stop the dispatch by returning
+                core/app/events.Halt. False — the zero value — means it cannot.
+              name: MayHalt
               type: bool
-            - name: Handle
+            - doc: |-
+                Handle is the reaction. It receives the event ALREADY TYPED. It must be
+                non-nil.
+              name: Handle
               type: func(ctx context.Context, event E) error
         typeParams:
           - constraint: any
             name: E
-  - facade:
+  - doc: |-
+      Package events is the public facade for the SDK's IN-PROCESS event bus: one
+      fact is published, and every listener registered for that fact's type reacts
+      to it, in an order you choose, on your goroutine, before Publish returns.
+
+      	bus := events.New()
+
+      	_ = events.On(bus, events.Handler[OrderPlaced]{
+      		Name:     "audit",
+      		Priority: -10, // runs before the default-priority listeners
+      		Handle:   func(ctx context.Context, e OrderPlaced) error { return audit.Write(ctx, e) },
+      	})
+      	_ = events.On(bus, events.Handler[OrderPlaced]{
+      		Name:   "cache",
+      		Handle: func(ctx context.Context, e OrderPlaced) error { return cache.InvalidateTag(ctx, e.CustomerID) },
+      	})
+
+      	report, err := bus.Publish(ctx, OrderPlaced{ID: 42, CustomerID: "c-7"})
+
+      # This is not a queue, and the difference is the whole design
+
+      Read this before anything else in the package. The two are confused
+      constantly, and a bus that tries to be both guarantees neither.
+
+      	                | events (this package)      | a queue
+      	----------------|----------------------------|---------------------------
+      	Scope           | one process                | many processes
+      	Timing          | synchronous                | asynchronous
+      	Goroutine       | the publisher's            | a consumer's
+      	Transaction     | the publisher's            | its own
+      	Durability      | none                       | the point of it
+      	Retries / DLQ   | none                       | the point of it
+      	If the process  | the event never happened   | the event is still there
+      	dies mid-flight |                            |
+
+      If you need "return now, finish later, and do not lose it", you need a
+      queue. This package will not give you a worse version of one: there is no
+      option to dispatch on another goroutine, because that would buy you
+      asynchrony while quietly removing durability — work that can vanish with no
+      record that it existed. Publish an event AND enqueue a job; they are
+      different statements about different guarantees.
+
+      What this package is for is the other case, which is far more common: one
+      fact with several INDEPENDENT consequences that all belong to the caller's
+      transaction. Writing the audit row, invalidating the cache and stamping the
+      metric have nothing to say to each other, and the code that placed the order
+      should not have to import all three.
+
+      # Ordering
+
+      Listeners for one event type run in ascending [Handler].Priority — lower
+      first, as with every stdlib comparator — and listeners at the SAME priority
+      run in registration order. Both halves are promises. A bus whose ties
+      resolved by map iteration would run the same program in a different order
+      every time, and a listener set that works today would be the same code that
+      fails tomorrow.
+
+      # Stopping the dispatch
+
+      A listener stops the remaining listeners by returning [Halt]. Only a
+      listener whose registration set [Handler].MayHalt may do so; from any other
+      listener the attempt is refused as [HaltNotPermitted], the dispatch
+      CONTINUES, and the refusal is reported.
+
+      The permission is a field at the registration site rather than a power every
+      listener has, because a veto is an authority and an authority nobody wrote
+      down is one nobody reviews. `MayHalt: true` is in the diff, in the review
+      and in grep, next to the name of the listener that holds it.
+
+      A halt is not a failure. [Bus].Publish returns a nil error for a dispatch
+      whose only remarkable event was a halt, and reports it through
+      [Dispatch].Halted, [Dispatch].HaltedBy and [Dispatch].Skipped.
+
+      # Typing
+
+      Go has no covariance and its methods cannot take type parameters, so a
+      typed listener registers on a multi-type bus through the package-level
+      generic [On] rather than through a method:
+
+      	events.On(bus, events.Handler[OrderPlaced]{…})
+
+      [On] derives the routing key from E and wraps your typed function in the
+      erased one the bus dispatches. Your listener never sees an `any`. The event
+      type must be CONCRETE: an interface is refused at registration
+      ([InvalidEventType]), because Publish routes on a value's dynamic type and a
+      listener keyed on an interface would be registered and never called.
+
+      # Errors and panics
+
+      A listener error does NOT stop the dispatch. The listeners are independent
+      consequences of one fact, and making the third one's delivery depend on the
+      second one's disk being full is the coupling a bus exists to remove.
+      Everything that failed is aggregated with errors.Join, carrying
+      [ListenerFailed] and the listener's own error side by side — so
+      errs.HasCode(err, CodeListenerFailed) and your own errors.Is both answer on
+      the same value.
+
+      A listener that PANICS does not take the publisher down and does not
+      silence the listeners after it. The panic is recovered, reported as
+      [ListenerPanicked] with the listener's name, the panic value and the
+      originating stack in fields, and the dispatch continues.
+
+      # Cancellation
+
+      The bus passes ctx to every listener and never inspects it. An event is a
+      fact that has already happened; abandoning half of its consequences because
+      the publisher's deadline expired produces exactly the partial state the
+      synchronous contract exists to prevent. A listener that must honour
+      cancellation holds the context and can.
+    facade:
       - const:
           - doc: |-
               PriorityNormal is the zero Priority: negative values run before it,

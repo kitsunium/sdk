@@ -1,6 +1,3 @@
-// Package secret — the rotator: a policy that mints new versions of one
-// secret on a schedule, keeping enough old ones that nothing sealed before a
-// rotation breaks because of it.
 package secret
 
 import (

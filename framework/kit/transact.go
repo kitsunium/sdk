@@ -1,5 +1,3 @@
-// Package kit — transactions: what a unit of work writes commits together,
-// and what it sends leaves at its commit.
 package kit
 
 import (

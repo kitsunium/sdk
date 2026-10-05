@@ -1,4 +1,3 @@
-// Package websocket — the connection's functional options and their defaults.
 package websocket
 
 import (

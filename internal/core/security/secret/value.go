@@ -1,5 +1,3 @@
-// Package secret — the Value: a secret that every rendering writes as a
-// placeholder, and that only an explicit Reveal hands back.
 package secret
 
 import (

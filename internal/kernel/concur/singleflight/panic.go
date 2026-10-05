@@ -1,5 +1,3 @@
-// Package singleflight — the panic carried out of the shared call into every
-// waiter.
 package singleflight
 
 import (

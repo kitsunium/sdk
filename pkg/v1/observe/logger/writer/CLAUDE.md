@@ -15,8 +15,8 @@ three factories so `logger.NewMulti` resolves those names. Mirrors the
 | `writer.go` | package doc + blank imports of `internal/service/observe/logger/writer/{console,file,rotfile}` |
 
 No exported symbols — the package exists purely for its registration
-side-effects. `README.md` is generated from the package doc comment via
-`make docs-readme` (ADR 0008).
+side-effects. `README.md` is written by `tools/genindex` from the committed `docs/api`
+(`make docs-readme`, ADR 0167).
 
 ## Conventions
 

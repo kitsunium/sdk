@@ -1,7 +1,3 @@
-// Package profiling — hosts the resolver: string indexes into strings,
-// location ids into frames — each location's frames built once and shared by
-// every sample that passes through it, and counted against MaxFrames when they
-// are built and each time a stack copies them — and labels into maps.
 package profiling
 
 import (

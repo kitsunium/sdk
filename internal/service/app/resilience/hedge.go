@@ -1,4 +1,3 @@
-// Package resilience — hedging (duplicate-request racing) policy.
 package resilience
 
 import (

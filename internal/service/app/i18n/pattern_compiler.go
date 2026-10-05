@@ -1,4 +1,3 @@
-// Package i18n — the placeholder parser, run once per catalogue entry.
 package i18n
 
 import (

@@ -1,5 +1,3 @@
-// Package postgres — the credentials a new connection is opened with, read
-// again from the URL each time.
 package postgres
 
 import "github.com/jackc/pgx/v5"

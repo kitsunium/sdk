@@ -4,7 +4,10 @@ package(default_visibility = ["//internal/service:service_consumers"])
 
 go_library(
     name = "console",
-    srcs = ["console.go"],
+    srcs = [
+        "console.go",
+        "doc.go",
+    ],
     importpath = "github.com/kitsunium/sdk/internal/service/observe/logger/writer/console",
     visibility = [
         "//:__subpackages__",

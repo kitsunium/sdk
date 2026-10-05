@@ -1,4 +1,3 @@
-// Package cache — one level of a chained store.
 package cache
 
 import corecache "github.com/kitsunium/sdk/internal/core/data/cache"

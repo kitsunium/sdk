@@ -1,4 +1,3 @@
-// Package token — the one-pass, string-aware JSON nesting counter.
 package token
 
 // depthScan is the state a linear nesting scan needs: how deep it currently

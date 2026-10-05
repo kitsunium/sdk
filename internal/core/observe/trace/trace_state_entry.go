@@ -1,4 +1,3 @@
-// Package trace — one list member of a tracestate header.
 package trace
 
 // traceStateEntry is one `key=value` list member. It is unexported because the

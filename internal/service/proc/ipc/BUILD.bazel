@@ -8,6 +8,7 @@ go_library(
         "chain_unix.go",
         "dir_other.go",
         "dir_unix.go",
+        "doc.go",
         "ipc.go",
         "ipc_compliance.go",
         "peer_linux.go",

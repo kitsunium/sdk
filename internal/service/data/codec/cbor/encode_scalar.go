@@ -1,5 +1,3 @@
-// Package cbor — the kind encoders of the scalars: booleans, integers of
-// every width, floats and strings, each answering omitempty for its kind.
 package cbor
 
 import "reflect"

@@ -1,4 +1,3 @@
-// Package validation — the ordered-value bounds constraints.
 package validation
 
 import (

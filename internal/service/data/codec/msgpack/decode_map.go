@@ -1,9 +1,3 @@
-// Package msgpack — map decoders. A typed map decodes each key and value with
-// its own type's decoder, into two values reused for the whole map. A key
-// type that can hold an interface (map[any]T, a struct key with an interface
-// field) is checked for hashability before insertion: an array decoded as a
-// key would otherwise panic inside the runtime's map — the vendor's decoder
-// did exactly that on such input.
 package msgpack
 
 import (

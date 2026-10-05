@@ -1,4 +1,3 @@
-// Package trace — the inbound HTTP middleware.
 package trace
 
 import (

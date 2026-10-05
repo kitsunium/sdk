@@ -17,7 +17,7 @@ keeps its value when it moves (ADR 0160). Imports: the standard library and
 
 | File | Role |
 |---|---|
-| `gate.go` | the package doc: what it decides and what it refuses to perform |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167): what it decides and what it refuses to perform |
 | `policy.go` | `PolicyValue`, `Exempt`, `Validate` |
 | `decision.go` | `DecisionValue`, `Outcome` |
 | `update_action.go` | `UpdateAction` — refuse, apply, warn |

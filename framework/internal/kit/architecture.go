@@ -1,5 +1,3 @@
-// Package kit — the architecture the graph draws: where each store keeps its
-// data.
 package kit
 
 import (

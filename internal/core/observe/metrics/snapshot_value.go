@@ -1,4 +1,3 @@
-// Package metrics — the exportable snapshot: the OTel payload hierarchy in Go.
 package metrics
 
 import (

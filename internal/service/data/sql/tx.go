@@ -1,5 +1,3 @@
-// Package sql — hosts the transaction manager: the root transaction, the
-// nested savepoint, and the single rule about who is allowed to commit.
 package sql
 
 import (

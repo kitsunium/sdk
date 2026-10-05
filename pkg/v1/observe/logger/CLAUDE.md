@@ -8,6 +8,8 @@ Stable v1 public API for SDK logging. Everything consumer code needs — `Logger
 ## Contents
 
 ```
+doc.go         — the package comment; kit writes it from design/observe/logger.yaml
+                 (ADR 0167)
 facade_gen.go  — kit's (ADR 0166), from design/observe/logger.yaml's facade:: every
                  alias, re-export and forwarder the files below name, and what
                  builder.go, caller.go, kind.go, levelvar.go and memory.go held before
@@ -205,7 +207,7 @@ ADR 0039 never came into play.
 
 ## Generated
 
-`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/observe/logger.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the package comment and the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
+`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/observe/logger.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: `doc.go` holds the package comment, which kit writes from the design (ADR 0167), and the hand-written files the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
 
 ## Verification
 

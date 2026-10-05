@@ -1,4 +1,3 @@
-// Package yaml — the parsed document: an arena of nodes and the bounds on it.
 package yaml
 
 // maxYAMLBytes caps the bytes one document may hold: Unmarshal refuses a

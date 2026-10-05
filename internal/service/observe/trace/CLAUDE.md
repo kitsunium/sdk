@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T12:00:00Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # internal/service/observe/trace/
 
 ## Purpose
@@ -23,7 +23,8 @@ sentinels as `coretrace.X` and declares none.
 
 | File | Surface |
 |---|---|
-| `tracer.go` | package doc + `Tracer` + `NewTracer` + `Start` (the mint/sample/inherit sequence) |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `tracer.go` | `Tracer` + `NewTracer` + `Start` (the mint/sample/inherit sequence) |
 | `config.go` | `TracerConfig` + every clamp, applied once in `resolved()` |
 | `span.go` | the recording `span`: mutex-guarded attrs/events/status, idempotent `End`; `finish` TRANSFERS its slices to the exported value rather than cloning them, and `sortedIncoming` skips the clone `SortAttrs` makes when there is one attribute to merge — both in §Cost |
 | `noop_span.go` | the span an unsampled trace gets — and why it still carries a context |

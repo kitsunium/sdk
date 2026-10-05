@@ -1,6 +1,5 @@
 //go:build linux
 
-// Package server — kernel sockaddr decoding for the batched reader.
 package server
 
 import (

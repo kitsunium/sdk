@@ -1,6 +1,3 @@
-// Package queue — hosts the delivery policy every broker is configured with,
-// and the guard both implementations run so that the two refuse identical
-// inputs identically.
 package queue
 
 import (

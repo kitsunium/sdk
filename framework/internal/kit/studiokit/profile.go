@@ -1,5 +1,3 @@
-// Package studiokit — the Studio's profiler: the live heap folded onto the
-// graph's nodes, and every goroutine grouped.
 package studiokit
 
 import (

@@ -1,6 +1,5 @@
 //go:build unix
 
-// Package static — the lookup failures a Unix kernel reports for a name.
 package static
 
 import (

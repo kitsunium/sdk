@@ -1,7 +1,3 @@
-// Package logger — WithError decomposes an SDK typed error into structured log
-// Attrs (error.code / error.reason / error.public + wrap-trail codes), making
-// the SDK's dotted-quad errors first-class structured data rather than a flat
-// string. It lives beside the Attr constructors it produces.
 package logger
 
 import (

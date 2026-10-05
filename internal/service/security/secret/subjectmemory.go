@@ -1,4 +1,3 @@
-// Package secret — the in-process subject-key store.
 package secret
 
 import (

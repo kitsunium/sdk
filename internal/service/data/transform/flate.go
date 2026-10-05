@@ -1,5 +1,3 @@
-// Package transform — the flate (raw DEFLATE) Compressor over compress/flate.
-// Shares the package with the gzip scheme; both self-register at import.
 package transform
 
 import (

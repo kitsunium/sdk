@@ -1,6 +1,3 @@
-// Package level — range 0.2.17.* (ADR 0006 core/observe/logger/level block).
-//
-// Package level — Var, the atomic Level holder behind the Leveler port.
 package level
 
 import "sync/atomic"

@@ -5,6 +5,7 @@ package(default_visibility = ["//visibility:public"])
 go_library(
     name = "serverkit",
     srcs = [
+        "doc.go",
         "serverkit.go",
         "serverkit_compliance.go",
     ],

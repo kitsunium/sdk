@@ -68,6 +68,31 @@ packages:
             name: CodePathUnsafe
             value: "0x00_03_5B_09"
         type: errs.Code
+    doc: |-
+      Package ipc — the private socket's codes, range 0.3.91.* (ADR 0148).
+
+      The range was allocated to internal/service/proc/ipc, the engine, and is
+      declared here, at the same path in the core, since ADR 0160. The values did
+      not change with the move, and the LL byte still records the service layer
+      that allocated them.
+
+      Package ipc — the sentinels internal/service/proc/ipc refuses with. Each
+      var's name equals its errs.Define Reason in SCREAMING_SNAKE form. None
+      quotes a path in its Public half: the path travels in the "path" field, for
+      the log. The Private strings name the service package, where each condition
+      is detected.
+
+      Package ipc is the private socket's contract (ADR 0148, ADR 0160): who is
+      at the other end of a connection, the connection that carries that answer,
+      the two ports a private socket is reached through — the Listener that
+      accepts and the Dialer that connects — and the codes every refusal carries.
+
+      The engine is internal/service/proc/ipc: a Unix socket in a 0700 directory
+      whose whole path is audited, the kernel's word on the peer where it gives
+      one, a named pipe with its own DACL on Windows. Nothing here opens a socket.
+      The ports exist so a caller that holds a Listener or a Dialer can be handed
+      a double in a test — connections from net.Pipe with the peer the test
+      chooses — instead of a socket on disk.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/proc/ipc
@@ -194,41 +219,229 @@ packages:
             public: The private socket's path runs through a directory another account controls
             reason: PATH_UNSAFE
     types:
-      - name: PeerValue
+      - doc: |-
+          PeerValue is who is at the other end of a connection, as the kernel says:
+          the peer's user, group and process where the kernel names them, and whether
+          it did (Verified) — false where only the directory's permissions admitted it.
+        name: PeerValue
         struct:
           fields:
-            - name: UID
-            - name: GID
+            - doc: |-
+                UID and GID are the peer's effective user and group; -1 when the
+                kernel does not say (Verified is then false).
+              name: UID
+            - doc: |-
+                UID and GID are the peer's effective user and group; -1 when the
+                kernel does not say (Verified is then false).
+              name: GID
               type: int
-            - name: PID
+            - doc: PID is the peer's process, 0 when the kernel does not say.
+              name: PID
               type: int
-            - name: SID
+            - doc: |-
+                SID is the peer's account on Windows, read from its process token;
+                empty elsewhere.
+              name: SID
               type: string
-            - name: Verified
+            - doc: |-
+                Verified is true when the kernel named the peer — UID and GID by
+                SO_PEERCRED on Linux, SID from the process token on Windows —, false
+                when only the directory's permissions admitted it.
+              name: Verified
               type: bool
-      - name: Conn
+      - doc: |-
+          Conn is a connection with its peer's identity: what a Listener's Accept
+          returns to a listener and a Dialer's Dial to a client, Peer naming the
+          other end.
+        name: Conn
         struct:
           fields:
             - embedded: true
               type: net.Conn
-            - name: Peer
+            - doc: Peer is who connected (for a listener) or who listens (for a dialer).
+              name: Peer
               type: PeerValue
-  - functions:
-      - in:
+  - doc: |-
+      Package ipc — the components ABOVE the socket's directory, and who could
+      steer them: ADR 0083's rule, applied where the directory is the whole of the
+      access control (ADR 0148).
+
+      # One Lstat sees one component; every lookup crosses all of them
+
+      [checkEntry] judges the socket's directory by its own entry: not a link, a
+      directory, this account's, written by nobody else. It cannot see a PARENT,
+      and every lookup this package makes — the Mkdir that creates the directory,
+      the bind that creates the socket, the connect that reaches it — follows a
+      link planted at one. Measured on the code before this file, with a link
+      planted in a 0777|sticky directory, which is what /tmp is:
+
+      	Config.Path     /tmp/ipc…/pub/app/run/d.sock    pub dtrwxrwxrwx, app -> …/elsewhere
+      	NewListener     accepted: the socket was bound at …/elsewhere/run/d.sock
+      	Dial            accepted
+      	app re-planted  -> …/trap, where another listener waited
+      	Dial            accepted: the trap's listener read the client's first line
+
+      The planter owns its link, so the sticky bit lets it replace that link at
+      will: it decides where the directory is created, and later which socket a
+      client reaches. Across accounts it also owns the directory the socket's
+      directory was created in, and on macOS an inheritable access-control entry
+      it puts there is inherited by the 0700 directory Listen creates and by the
+      0600 socket bound inside — observed with ls -le — which no mode check sees.
+      Outside Linux the peer is not verified, so that entry is a way in.
+
+      # The rule: who could have created a component, and who can replace it
+
+      A link at a parent is not evidence on its own — /tmp -> private/tmp and
+      /var -> private/var on macOS, /var/run -> /run on most Linux distributions —
+      and what separates those from an attack is the directory the component
+      lives in, exactly as internal/service/app/lock reasons (ADR 0083). So every
+      component above the socket's directory is judged by the directory holding
+      it, and only when ANYBODY can write that directory:
+
+        - an indirection is refused ([kindIndirection]): anybody could have
+          planted it. The sticky bit does not exempt it — sticky governs UNLINKING
+          an entry that exists, and planting creates one at a name nobody had
+          taken. This is lock's rule, unchanged.
+        - a component owned by neither this process's user nor root is refused
+          ([kindForeign]): anybody could have created it, and whoever did decides
+          everything below it, down to the entries a directory made there
+          inherits. lock has no such rule because a lock is shared between
+          accounts on purpose; a private socket's directory must be this
+          account's, and its gate is that nobody else reaches it.
+        - without the sticky bit, any component is refused ([kindReplaceable]):
+          anybody can rename it away and put their own in its place. The socket's
+          directory itself is held to the same rule by [checkHolder].
+
+      A directory writable by its GROUP is not judged: a directory shared with a
+      group is a deliberate arrangement, as lock accepts it.
+
+      # What it does not see
+
+      A component this rule accepts can be replaced only by this account, by
+      root, by the owner of the directory holding it or by that directory's group
+      — accounts the deployment chose by placing the socket there. A socket under a tree another
+      account owns therefore trusts that account, by the deployment's own choice,
+      and nothing here refuses it. The audit runs at Listen — before the directory
+      is created and again after — and at every Dial; on Linux the peer's
+      credentials are the gate that holds between them.
+
+      Package ipc — the socket directory on Unix: created 0700, refused when
+      another account could write to it, when it is a link, or when another
+      account could steer the path to it (chain_unix.go).
+
+      Package ipc is a private socket between processes of one machine: a
+      listener only its own account — and the accounts it names — can reach, a
+      client that refuses to talk to a socket another account planted, and the
+      kernel's word on who is at the other end (ADR 0148).
+
+      Two gates, and which one holds where is said rather than assumed:
+
+        - THE DIRECTORY, everywhere. The socket lives in a directory this
+          process's account owns and nobody else may write to; connecting to a
+          Unix socket needs search permission on every directory above it, so a
+          0700 directory admits its owner and root and nobody else. It is checked
+          at Listen and at Dial, never widened by this package — and so is the
+          PATH to it: a component above it that anybody could have planted or
+          created, or can replace, is refused (PATH_UNSAFE, chain_unix.go), since
+          every lookup follows a link planted at a parent.
+        - THE PEER'S CREDENTIALS, where the kernel gives them: SO_PEERCRED on
+          Linux. There the listener refuses a peer whose UID is neither its own
+          nor allowed, whatever the directory says. Elsewhere Peer.Verified is
+          false and the directory is the only gate — stated, not papered over.
+
+      Windows has no search permission to gate a socket by its directory: there
+      the endpoint is a named pipe (pipe_windows.go) named after Config.Path,
+      whose own DACL grants this process's account only, which refuses remote
+      clients (PIPE_REJECT_REMOTE_CLIENTS) and which nobody can join once it
+      exists (FILE_FLAG_FIRST_PIPE_INSTANCE); each end reads the other's account
+      from its process token (Peer.SID), and a client refuses a listener of
+      another account before it sends a byte.
+
+      The contract is internal/core/proc/ipc (ADR 0160): the peer and the
+      connection that carries it, the Listener and Dialer ports this package's
+      Listener and Dialer implement, and the codes every refusal carries. This
+      package is the engine — and Config, the one configuration both ends share,
+      is the engine's (ADR 0074).
+
+      Package ipc — the compile-time proof that the engines satisfy the core
+      ports (ADR 0160): a method renamed or retyped on either engine fails the
+      build here, not in a caller that holds the port.
+
+      Package ipc — the peer's credentials on Linux: SO_PEERCRED, what the peer
+      had when it connected or listened.
+
+      Package ipc — no peer credentials outside Linux without x/sys: the peer is
+      unverified and the directory is the gate.
+
+      Package ipc — the private endpoint on Windows: a named pipe.
+
+      A Unix socket there is a file in a directory, but Windows has no search
+      permission to make a directory the gate, so the endpoint is a named pipe,
+      the object Windows secures by itself:
+
+        - its DACL grants this process's account only, protected from
+          inheritance (SDDL "D:P(A;;GA;;;<SID>)"), so no other account can open
+          it — Everyone, Authenticated Users and Administrators included;
+        - PIPE_REJECT_REMOTE_CLIENTS refuses a client of another machine;
+        - the first instance is created with FILE_FLAG_FIRST_PIPE_INSTANCE: when
+          the name exists — another daemon, or a squatter that made it first —
+          the listen fails (IN_USE) rather than joining an instance somebody
+          else controls, and the next instance is created before a connection is
+          handed out, so the name never lapses while the listener lives;
+        - each end reads the other's account from its process token
+          (GetNamedPipeClientProcessId / GetNamedPipeServerProcessId, then
+          OpenProcessToken): a client refuses a server of another account before
+          it sends a byte (ENDPOINT_FOREIGN), and opens the pipe at
+          SECURITY_IDENTIFICATION, so the server can learn who it is but never
+          act as it.
+
+      The pipe is named after Config.Path, so one configuration serves every
+      platform: \\.\pipe\ipc-<16 hex digits of the path's SHA-256>-<base name>.
+      Nothing is created in the path's directory.
+
+      The handles are opened overlapped and handed to os.NewFile, which puts
+      them on the runtime's poller: reads, writes and deadlines are the os
+      package's. kernel32 and advapi32 are bound with syscall.NewLazyDLL, as the
+      lock domain binds LockFileEx and GetNamedSecurityInfoW — golang.org/x/sys
+      is banned SDK-wide (ADR 0018).
+
+      Package ipc — the Unix socket: a 0700 directory, a 0600 socket, a leftover
+      removed only when nobody answers on it and it is ours, and the peer the
+      kernel names where it does.
+    functions:
+      - doc: |-
+          NewListener opens the private socket at cfg.Path. A socket already there is
+          dialled first: one that answers is refused (IN_USE) and left alone, one
+          that does not is a leftover of a dead process and is removed — provided it
+          is a socket this account owns. The socket file is made 0600. On Windows the
+          named pipe is created with FILE_FLAG_FIRST_PIPE_INSTANCE: a name that
+          exists is IN_USE, whoever made it.
+        in:
           - name: cfg
             type: "*Config"
         name: NewListener
         out:
           - type: "*Listener"
           - type: error
-      - in:
+      - doc: |-
+          NewDialer validates cfg and returns a Dialer for it. The allow-lists are
+          copied, so a caller that later edits its slices does not change who this
+          dialer admits.
+        in:
           - name: cfg
             type: "*Config"
         name: NewDialer
         out:
           - type: "*Dialer"
           - type: error
-      - in:
+      - doc: |-
+          Dial connects to the private socket at cfg.Path, within ctx and
+          dialTimeout. It refuses first — before a byte is sent — a directory
+          another account could write to and a socket file another account owns, so
+          a client never hands a request to an impostor; and where the kernel names
+          the listener, it refuses one that is neither this account nor allowed. On
+          Windows it refuses a pipe whose server runs as another account.
+        in:
           - name: ctx
             type: context.Context
           - name: cfg
@@ -237,7 +450,12 @@ packages:
         out:
           - type: "*coreipc.Conn"
           - type: error
-      - in:
+      - doc: |-
+          RuntimeDir is where an application's private sockets belong on this
+          machine: $RUNTIME_DIRECTORY (systemd's), then $XDG_RUNTIME_DIR/<app>, then
+          %LOCALAPPDATA%\<app> on Windows, else <tmp>/<app>-<uid>. It creates
+          nothing; Listen does, at 0700.
+        in:
           - name: app
             type: string
         name: RuntimeDir
@@ -247,41 +465,86 @@ packages:
       coreipc: github.com/kitsunium/sdk/internal/core/proc/ipc
     path: github.com/kitsunium/sdk/internal/service/proc/ipc
     types:
-      - name: Config
+      - doc: |-
+          Config is where a private socket lives and who, besides its own account,
+          may use it. The same value serves the listener and its clients.
+        name: Config
         struct:
           fields:
-            - name: Path
+            - doc: |-
+                Path is the socket's absolute path. Its directory is created 0700 when
+                missing and refused when another account could write to it.
+              name: Path
               type: string
-            - name: AllowUIDs
-            - name: AllowGIDs
+            - doc: |-
+                AllowUIDs and AllowGIDs admit peers besides this process's own user:
+                an on-call group declared at deployment, say. They are enforced where
+                the kernel names the peer (Peer.Verified); the directory must still
+                let those accounts reach the socket, which is the deployment's to
+                arrange — this package never widens a directory. Windows has no UID:
+                there the pipe's DACL admits this account only, and the lists admit
+                nobody more.
+              name: AllowUIDs
+            - doc: |-
+                AllowUIDs and AllowGIDs admit peers besides this process's own user:
+                an on-call group declared at deployment, say. They are enforced where
+                the kernel names the peer (Peer.Verified); the directory must still
+                let those accounts reach the socket, which is the deployment's to
+                arrange — this package never widens a directory. Windows has no UID:
+                there the pipe's DACL admits this account only, and the lists admit
+                nobody more.
+              name: AllowGIDs
               type: "[]int"
-      - methods:
-          - name: Accept
+      - doc: |-
+          Listener accepts the connections of admitted peers only; a peer the
+          kernel names and the configuration does not admit is closed and counted.
+          It is the engine behind the core Listener port.
+        methods:
+          - doc: |-
+              Accept returns the next connection of an admitted peer. A peer the kernel
+              names and the configuration does not admit is closed at once, counted
+              (Refused), and never returned.
+            name: Accept
             out:
               - type: "*coreipc.Conn"
               - type: error
             recv: pointer
-          - name: Refused
+          - doc: |-
+              Refused is how many connections Accept closed because their peer was not
+              admitted.
+            name: Refused
             out:
               - type: int64
             recv: pointer
-          - name: Addr
+          - doc: Addr is the listener's address.
+            name: Addr
             out:
               - type: net.Addr
             recv: pointer
-          - name: Path
+          - doc: Path is the socket's path.
+            name: Path
             out:
               - type: string
             recv: pointer
-          - name: Close
+          - doc: |-
+              Close stops accepting and removes the socket file (a named pipe vanishes
+              with its last handle).
+            name: Close
             out:
               - type: error
             recv: pointer
         name: Listener
         struct:
           unexported: true
-      - methods:
-          - in:
+      - doc: |-
+          Dialer connects to the private socket a configuration names: the engine
+          behind the core Dialer port. Code that holds the port dials the same
+          endpoint as often as it needs to, and a test hands that code a double.
+        methods:
+          - doc: |-
+              Dial connects to the dialer's socket, exactly as the package-level Dial
+              does with the same configuration.
+            in:
               - name: ctx
                 type: context.Context
             name: Dial
@@ -292,7 +555,72 @@ packages:
         name: Dialer
         struct:
           unexported: true
-  - facade:
+  - doc: |-
+      Package ipc is a private socket between processes of one machine — a
+      daemon and the short-lived clients that talk to it, a product and the tool
+      that attaches to it (ADR 0148).
+
+      	cfg := ipc.Config{Path: filepath.Join(ipc.RuntimeDir("statusline"), "daemon.sock")}
+      	ln, err := ipc.Listen(cfg)          // the daemon
+      	c, err := ipc.Dial(ctx, cfg)        // a client; c.Peer says who listens
+
+      # Who can connect
+
+      Two gates, and the package says which one holds where:
+
+        - The DIRECTORY, everywhere. The socket lives in a directory its account
+          owns and nobody else may write to — created 0700 when missing, refused
+          otherwise ([CodeDirectoryUnsafe]) — and the socket file is 0600.
+          Connecting needs search permission on the directory, so only its owner
+          (and root) get through. On Windows the endpoint is a named pipe named
+          after the path, whose own DACL grants this account only, which refuses
+          remote clients and which nobody can join once it exists.
+        - The PEER'S CREDENTIALS, where the kernel gives them: on Linux,
+          SO_PEERCRED names the peer's user, group and process, and a peer that is
+          neither this account nor in Config.AllowUIDs / AllowGIDs is closed
+          before Accept returns it. On Windows each end reads the other's account
+          from its process token ([Peer].SID) and refuses another one. Elsewhere
+          [Peer].Verified is false and the directory is the only gate.
+
+      # The path to the directory is part of the gate
+
+      Every lookup — the directory's creation, the bind, the connect — follows a
+      link planted at a PARENT of the directory, so on Unix Listen and Dial walk
+      the whole path one component at a time and judge each by the directory
+      holding it, where ANYBODY can write that directory: a link there could have
+      been planted by anyone, a component another account owns could have been
+      created by anyone, and without the sticky bit anyone can replace what is
+      there. Each is refused ([CodePathUnsafe]) before anything is created or a
+      byte is sent. The links an operating system ships — /tmp and /var on macOS,
+      /var/run on Linux — live in directories only root writes and are accepted.
+      A socket placed under a tree another account owns trusts that account:
+      [RuntimeDir] places it under this account's own.
+
+      # Nothing is taken over
+
+      Listen dials a socket already at the path first. One that answers is left
+      alone and refused ([CodeInUse]); one that does not — what a killed daemon
+      leaves — is removed and replaced, provided it IS a socket this account
+      owns. A client refuses a socket file another account owns
+      ([CodeEndpointForeign]) before it sends a byte: a request never reaches an
+      impostor.
+
+      # Where
+
+      [RuntimeDir] names an application's directory: $RUNTIME_DIRECTORY (systemd),
+      $XDG_RUNTIME_DIR/<app>, %LOCALAPPDATA%\<app> on Windows, else
+      <tmp>/<app>-<uid>. A path is at most the shortest sun_path any supported
+      kernel has, less its NUL.
+
+      # Ports, and the doubles they admit
+
+      [Listener] and [Dialer] are interfaces, as net.Listener is: [Listen] and
+      [NewDialer] return the socket engine behind them, and code that holds one
+      can be handed a double in a test — connections from net.Pipe, with the
+      [Peer] the test chooses — instead of a socket on disk. Both are frozen at
+      the methods they have; a capability added later is a second interface an
+      endpoint may also implement, never a method added to these.
+    facade:
       - const:
           - name: CodeMisconfigured
             reexport: coreipc.CodeMisconfigured
@@ -379,21 +707,29 @@ packages:
           out:
             - type: string
     functions:
-      - in:
+      - doc: |-
+          Listen opens the private socket at cfg.Path and returns the engine behind
+          the Listener port.
+        in:
           - name: cfg
             type: Config
         name: Listen
         out:
           - type: Listener
           - type: error
-      - in:
+      - doc: |-
+          NewDialer returns the engine behind the Dialer port for the private socket
+          at cfg.Path. The configuration is checked here, before anything is touched,
+          and copied: editing cfg's slices afterwards changes nothing.
+        in:
           - name: cfg
             type: Config
         name: NewDialer
         out:
           - type: Dialer
           - type: error
-      - in:
+      - doc: Dial connects to the private socket at cfg.Path, within ctx and one second.
+        in:
           - name: ctx
             type: context.Context
           - name: cfg

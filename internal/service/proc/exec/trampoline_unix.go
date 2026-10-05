@@ -1,18 +1,5 @@
 //go:build unix
 
-// Package exec — the re-exec trampoline that honours Spec.Rlimits and Spec.Umask
-// pre-exec. The Go runtime exposes no SysProcAttr hook to run setrlimit(2)/
-// umask(2) in the child between fork and exec, so when a Spec requests either,
-// Start does NOT exec the target directly: it execs this very binary
-// (os.Executable()) as a tiny trampoline, passing the real target + an encoded
-// limits payload in a sentinel env var. The init() below detects that var,
-// applies the limits in the fresh process (before main), then execve()s the real
-// target — so the target starts already under its rlimits/umask, with no cgo and
-// no dependency. The limits persist across the execve.
-//
-// Footgun: any binary that imports this package and is run with the sentinel env
-// var set will re-exec. Start sets it only on the trampoline child and strips it
-// before execve, so a normal run never has it; do not set it by hand.
 package exec
 
 import (

@@ -1,5 +1,3 @@
-// Package net — compile-time interface assertions, kept out of the production
-// source per KTN-IFACE-ASSERT-PLACEMENT.
 package net
 
 // The func adapters must satisfy the ports they exist to adapt; an adapter that

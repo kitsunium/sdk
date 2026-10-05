@@ -1,4 +1,3 @@
-// Package kit — the Studio's read API: the graph, the events, the sources.
 package kit
 
 import (

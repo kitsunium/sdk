@@ -1,4 +1,3 @@
-// Package yaml — the YAML 1.2 core schema: what a plain scalar means.
 package yaml
 
 import (

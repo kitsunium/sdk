@@ -1,5 +1,3 @@
-// Package journald — the Config value type, in its own file per the
-// one-exported-struct-per-file convention.
 package journald
 
 import (

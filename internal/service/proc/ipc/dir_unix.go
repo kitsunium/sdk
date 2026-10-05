@@ -1,8 +1,5 @@
 //go:build unix
 
-// Package ipc — the socket directory on Unix: created 0700, refused when
-// another account could write to it, when it is a link, or when another
-// account could steer the path to it (chain_unix.go).
 package ipc
 
 import (

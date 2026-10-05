@@ -1,4 +1,3 @@
-// Package resilience — hedging policy configuration.
 package resilience
 
 import (

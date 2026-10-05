@@ -8,6 +8,7 @@ go_library(
         "client.go",
         "config.go",
         "decode.go",
+        "doc.go",
         "netsink.go",
         "nettransport.go",
         "wrap.go",

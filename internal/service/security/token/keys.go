@@ -1,10 +1,3 @@
-// Package token — the algorithm-bound key contracts and their constructors.
-//
-// This file is where algorithm confusion is made unwritable. Each binding
-// holds ONE Go key type and reports ONE algorithm, and the bind* helpers below
-// are the only way to build one. There is no `bind(alg, []byte)`, because a
-// function that takes an algorithm name and a bag of bytes is a function whose
-// caller can be talked into passing a public key where a shared secret goes.
 package token
 
 import (

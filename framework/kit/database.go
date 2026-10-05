@@ -1,4 +1,3 @@
-// Package kit — databases: the SQL engines a store can be kept on.
 package kit
 
 import (

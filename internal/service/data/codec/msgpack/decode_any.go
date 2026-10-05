@@ -1,18 +1,3 @@
-// Package msgpack — decoding into an empty interface. The Go types are the
-// ones the vendor-backed codec produced, pinned by testdata/vendor-golden.txt,
-// so a caller's type assertions keep holding:
-//
-//	nil → nil              bool → bool
-//	fixint, int 8 → int8   int 16/32/64 → int16/int32/int64
-//	uint 8–64 → uint8…uint64   (a positive fixint is int8, as before)
-//	float 32 → float32     float 64 → float64
-//	str → string           bin → []byte (a copy)
-//	array → []any          map → map[string]any (keys must be str or bin)
-//	timestamp → time.Time (UTC)
-//
-// A map whose keys are not strings is refused here — decode it into a typed
-// map such as map[int]T or map[any]T — and so is an extension type other
-// than the timestamp.
 package msgpack
 
 import (

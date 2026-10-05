@@ -1,7 +1,3 @@
-// Package mail — compile-time port conformance for the two transports.
-//
-// These assertions live apart from the implementations because a failure here
-// is a statement about the PORT, not about a function.
 package mail
 
 import coremail "github.com/kitsunium/sdk/internal/core/app/mail"

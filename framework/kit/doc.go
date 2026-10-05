@@ -1,5 +1,39 @@
-//go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /framework/kit .
-
+// Package kit — who may call an operation: the principal, the rules and their
+// checks.
+//
+// Package kit — activities: what a daemon's idle stop waits for besides its
+// connections, a notion of the product's own — sessions still open, work
+// still queued.
+//
+// Package kit — the App: the services a product mounts, served by one process.
+//
+// Package kit — the static analysis a product can be given: the platform's
+// analyzer, run in the background in dev (ADR 0147 §1).
+//
+// Package kit — process profiles: what an app does with its process (ADR
+// 0147 §5) — serve, run as a daemon, or run one CLI command — and the
+// singleton lock.
+//
+// Package kit — authentication: the handler that says who calls, and the user
+// it names.
+//
+// Package kit — the catalog of the generic mechanics a node is built from.
+//
+// Package kit — CLI commands: a short command of the product that Main runs
+// once, in the CLI profile, and whose status is the process's.
+//
+// Package kit — commands: an operation that changes something, with one
+// handler.
+//
+// Package kit — the app's options and environments.
+//
+// Package kit — databases: the SQL engines a store can be kept on.
+//
+// Package kit — the interfaces of databases: the engine a connector gives, and
+// what kit asks of it.
+//
+// Package kit — the decoding of a request into its typed value.
+//
 // Package kit is a framework in which every product is its own diagram.
 //
 // A product is made of services. A service declares its building blocks as
@@ -117,4 +151,99 @@
 // serves the read-only API the Studio reads, and no route that acts on the
 // product exists. The mechanics underneath — lifecycle, health, scheduler, queue, tracing,
 // logging, validation, resilience, identifiers — are the kitsunium SDK's.
+//
+// Package kit — endpoints: an HTTP route and the operation it serves.
+//
+// Package kit — the errors a product returns to its callers, and their wire
+// mapping.
+//
+// Package kit — exposures: an operation an endpoint serves over HTTP, and
+// who may run it.
+//
+// Package kit — reading a record's former values.
+//
+// Package kit — legal holds: records kept whatever their retention says.
+//
+// Package kit — secondary indexes of a store.
+//
+// Package kit — jobs: scheduled work run by the daemon's loop.
+//
+// Package kit — listeners: inbound ports that are not HTTP, a private socket
+// speaking a versioned contract (ADR 0148).
+//
+// Package kit — loops: work the daemon waits for, woken by time or by events.
+//
+// Package kit — mailers: a durable outbox and the transport that empties it.
+//
+// Package kit — modules: a set of services a product mounts as one.
+//
+// Package kit — the mount of a module: its prefix and its bindings.
+//
+// Package kit — operations: a typed request answered by a typed response.
+//
+// Package kit — the password policy of a store's fields.
+//
+// Package kit — ports: an operation a service needs and does not implement.
+//
+// Package kit — privacy: kit's own service for holds and the journal.
+//
+// Package kit — erasure: a record's personal data removed as its retention
+// would.
+//
+// Package kit — export: a person's data as kit gives it back.
+//
+// Package kit — CPU profiles of the running process, for the Studio.
+//
+// Package kit — queries: an operation that reads and changes nothing.
+//
+// Package kit — rate limits on an endpoint, per client.
+//
+// Package kit — records: the product's data as modules and the Studio reach
+// it.
+//
+// Package kit — replacements: a test's substitute for an operation.
+//
+// Package kit — the HTTP request and response an endpoint can reach.
+//
+// Package kit — retention: how long a store keeps its personal data.
+//
+// Package kit — revisions: a record keeps its versions, diffed and
+// restored.
+//
+// Package kit — binaries and their process roles: one executable, several
+// Apps, and the versioned contracts between them (D22).
+//
+// Package kit — scopes: the parts of a singleton's lock or of a socket's
+// path that are only known at the start — the user, the executable, a
+// configuration directory —, so one declaration keeps one process per user,
+// per installed copy or per configuration.
+//
+// Package kit — secrets: the values the product declares and the operator
+// provides.
+//
+// Package kit — where the secrets are kept, per environment.
+//
+// Package kit — services: a bounded context and the building blocks it owns.
+//
+// Package kit — settings: a value the environment gives a service.
+//
+// Package kit — the interfaces of settings: the values a setting holds, and
+// what kit reads of a declaration.
+//
+// Package kit — frontends: static assets the product serves.
+//
+// Package kit — stores: a typed, keyed collection of entities.
+//
+// Package kit — telemetry: the numbers a product reports, exported on a
+// private socket when the deployment asks for them (ADR 0149).
+//
+// Package kit — topics and subscriptions: asynchronous messages of one type.
+//
+// Package kit — transactions: what a unit of work writes commits together,
+// and what it sends leaves at its commit.
+//
+// Package kit — watches: how a module hears the writes of a product's marked
+// fields.
+//
+// Package kit — workflows: a state machine over the entities of one store.
 package kit

@@ -1,5 +1,3 @@
-// Package statemachine — hosts the values the Journal port speaks: a record of
-// one entity and the steps of its history.
 package statemachine
 
 import "time"

@@ -1,21 +1,3 @@
-// Package metrics — the OTLP payload tree: a Go mirror of
-// opentelemetry/proto/{collector/metrics,metrics}/v1, restricted to the fields
-// this SDK produces. The common/v1 and resource/v1 messages it embeds —
-// KeyValue, AnyValue, Resource, InstrumentationScope — and the proto3-JSON
-// scalars are the ones both signals share, in internal/service/observe/internal/otlp.
-//
-// Field ORDER inside each struct is the schema's FIELD-NUMBER order, not a
-// reading order: encoding/json emits struct fields as declared, and deriving
-// the order from the document is what makes the expected bytes in the tests
-// checkable against the .proto field by field. The visible evidence that the
-// order came from the schema rather than from taste is otlpNumberDataPoint,
-// which puts attributes AFTER the value because it is field 7 — it replaced a
-// long-removed labels field at 1.
-//
-// Every field this SDK does not produce is ABSENT rather than always-empty
-// (rule 5): schemaUrl, unit, flags, exemplars, droppedAttributesCount, and a
-// histogram point's min/max. `description` joined the produced set in ADR 0067
-// and is omitted only when the metric carries none — see otlpMetric.
 package metrics
 
 import "github.com/kitsunium/sdk/internal/service/observe/internal/otlp"

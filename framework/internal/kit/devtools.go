@@ -1,4 +1,3 @@
-// Package kit — the dev tools' routes of the Studio, read-only.
 package kit
 
 import (

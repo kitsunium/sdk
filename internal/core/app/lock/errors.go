@@ -1,9 +1,3 @@
-// Package lock — ranges 0.2.21.* (ADR 0052 core/app/lock block) and 0.3.51.*
-// (ADR 0052 service/app/lock block, declared here since ADR 0160).
-//
-// Package lock — declares the sentinel *errs.Error outcomes of the domain: the
-// port's, and those the concrete lockers emit. Each var's name equals its
-// errs.Define Reason in SCREAMING_SNAKE form.
 package lock
 
 // exitConfig matches sysexits EX_CONFIG (78). A locker refused at construction

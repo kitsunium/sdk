@@ -1,10 +1,3 @@
-// Package trace — this signal's half of the shared attribute model
-// (internal/core/observe/otel): the refusal an unusable set earns HERE, and the
-// Resource a Tracer publishes.
-//
-// Package trace — the port a span context crosses a process boundary through.
-// Reading and writing the W3C headers through it — Inject, Extract — is the
-// engine's mechanism, internal/service/observe/trace (ADR 0160 §4).
 package trace
 
 import coreotel "github.com/kitsunium/sdk/internal/core/observe/otel"

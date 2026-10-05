@@ -1,5 +1,3 @@
-// Package logger — a Logger that owns the writers it was built over, and the
-// one call that releases them.
 package logger
 
 import (

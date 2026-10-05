@@ -1,8 +1,5 @@
 //go:build unix
 
-// Package signal — Unix Relay: forwards each received signal to a pid or process
-// group via kill(2), where a negative Target addresses the group whose id is its
-// absolute value.
 package signal
 
 import (

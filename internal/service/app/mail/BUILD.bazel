@@ -11,6 +11,7 @@ go_library(
         "composer.go",
         "composer_config.go",
         "composition.go",
+        "doc.go",
         "entity.go",
         "envelope.go",
         "errors.go",

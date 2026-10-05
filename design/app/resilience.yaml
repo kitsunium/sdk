@@ -53,6 +53,19 @@ packages:
             name: CodeFallbackFailed
             value: "0x00_02_08_07"
         type: errs.Code
+    doc: |-
+      Package resilience — range 0.2.8.* (ADR 0026 core/app/resilience block).
+
+      Package resilience — declares the sentinel *errs.Error policy outcomes. Each
+      var's name equals its errs.Define Reason in SCREAMING_SNAKE form.
+
+      Package resilience declares the reliability port of the SDK: the context-aware
+      Operation an executor guards and the composable Runner interface every policy
+      (retry, circuit-breaker, rate-limit, bulkhead, timeout, fallback, hedging)
+      satisfies. A core sibling admitted by ADR 0026 (Phase-B wave). Policies are
+      concrete and live in internal/service/app/resilience; this package owns only the
+      contract + the typed outcome sentinels, so policies compose by wrapping:
+      Retry(Breaker(Timeout(op))).
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/app/resilience
@@ -147,55 +160,266 @@ packages:
             public: The operation and its fallback both failed
             reason: FALLBACK_FAILED
     types:
-      - name: Operation
+      - doc: |-
+          Operation is the unit of work a Runner guards. It MUST honour ctx
+          cancellation (return promptly when ctx.Done fires) so timeout/cancellation
+          propagate; a non-cancellable op caps a Timeout's precision at op granularity.
+
+          The port says nothing about idempotence, because most policies do not need
+          it: retry replays an Operation only after it has failed, and every other
+          policy runs it at most once. The hedging policy is the exception — it runs
+          copies CONCURRENTLY, so a non-idempotent Operation produces a double effect
+          (a double charge, a double insert) rather than a slow one. The SDK cannot
+          detect idempotence, so the hedging config makes the caller assert it in code
+          (HedgeConfig.Idempotent) instead of trusting a doc comment.
+        name: Operation
         underlying: func(ctx context.Context) error
   - aliases:
-      - name: BackoffValue
+      - doc: |-
+          BackoffValue is an exponential backoff: the wait after the n-th consecutive
+          failure is BaseDelay × Multiplier^(n−1), held at MaxDelay when one is set and
+          widened by Jitter when one is asked for. Delay(attempt) never returns a
+          negative duration, however large attempt is (ADR 0103).
+
+          It is the policy NewRetry has always applied between attempts, published so
+          a loop that retries on its own terms — a supervised goroutine, an outbox, a
+          state machine's failed transition — computes the same curve instead of
+          writing a fourth copy of it. RetryConfig keeps its four fields of the same
+          names; NewRetry builds its waits from the same two halves.
+
+          It is an alias of kernel/backoff.Value, the layer that OWNS the curve (ADR
+          0074): the curve names no policy and no domain, so the domains that only
+          need the curve import the kernel directly instead of this package.
+        name: BackoffValue
         target: kbackoff.Value
+    doc: |-
+      Package resilience — the exponential backoff every waiting policy computes,
+      re-exported from the kernel package that owns it.
+
+      Package resilience — circuit-breaker policy.
+
+      Package resilience — circuit-breaker configuration.
+
+      Package resilience — circuit-breaker state machine values.
+
+      Package resilience — bulkhead (bounded-concurrency) policy.
+
+      Package resilience — fallback (secondary-operation) policy.
+
+      Package resilience — fallback policy configuration.
+
+      Package resilience — hedging (duplicate-request racing) policy.
+
+      Package resilience — hedging policy configuration.
+
+      Package resilience — what one hedged attempt reports back to the race.
+
+      Package resilience — the per-call bookkeeping of a hedged race.
+
+      Package resilience — the keyed rate limiter: one token bucket per caller,
+      with the set of callers bounded and idle ones forgotten.
+
+      Package resilience — keyed rate-limiter configuration.
+
+      Package resilience — the Runner returned when a policy cannot be honoured.
+
+      Package resilience — token-bucket rate-limit policy.
+
+      Package resilience — token-bucket rate-limiter configuration.
+
+      Package resilience — retry-with-exponential-backoff policy.
+
+      Package resilience — retry policy configuration.
+
+      Package resilience — shared retryable-error classification helper.
+
+      Package resilience provides the concrete reliability policies (retry,
+      circuit-breaker, rate-limit, bulkhead, timeout, fallback, hedging)
+      implementing core/app/resilience.Runner. Each constructor returns a Runner;
+      policies compose by nesting. ADR 0026. Cross-OS: 100% portable (context,
+      time, sync, atomic).
+
+      Hedging is the one policy that runs the Operation CONCURRENTLY with itself,
+      so it is correct only on an idempotent Operation; HedgeConfig.Idempotent
+      makes the caller say so in code (ADR 0031's rule applied to a precondition
+      the SDK cannot check).
+
+      Package resilience — shared sentinel-wrapping helper.
     functions:
-      - in:
+      - doc: |-
+          NewCircuitBreaker returns a Runner guarding op with a Closed→Open→HalfOpen
+          breaker. Open calls return CircuitOpen until OpenDuration elapses; a
+          non-positive OpenDuration clamps to defaultOpenDuration, because a breaker
+          whose cooldown is zero admits the next call immediately and therefore
+          protects nothing (ADR 0031). An error rejected by cfg.Retryable is returned
+          verbatim and left out of the state machine entirely, so deterministic
+          failures cannot trip the breaker.
+        in:
           - name: cfg
             type: BreakerConfig
         name: NewCircuitBreaker
         out:
           - type: coreres.Runner
-      - in:
+      - doc: |-
+          NewBulkhead returns a Runner that admits at most maxConcurrent simultaneous
+          operations (clamped to >= 1). Excess calls return BulkheadFull immediately
+          (reject mode — no queuing).
+        in:
           - name: maxConcurrent
             type: int
         name: NewBulkhead
         out:
           - type: coreres.Runner
-      - in:
+      - doc: |-
+          NewFallback returns a Runner that runs cfg.Fallback when the Operation passed
+          to Run fails, and returns nil when the fallback succeeds — that masking IS
+          the policy. When both fail the result is FallbackFailed, carrying both
+          messages as fields so neither failure is lost.
+
+          A cancelled context is reported as itself, never as FallbackFailed: when it
+          is already dead after the primary the fallback does not run at all, and when
+          it dies WHILE the fallback runs, a failed fallback returns ctx.Err(). A
+          fallback that succeeds despite a late cancellation still returns nil — the
+          work was done.
+
+          A nil cfg.Fallback is refused: every call returns PolicyMisconfigured without
+          running the operation (ADR 0031). A fallback policy with no fallback would
+          run the primary and pass its error through unchanged — indistinguishable
+          from no policy at all, while the caller believes their plan B is in place.
+
+          The primary error is NOT surfaced when the fallback succeeds; that is what a
+          fallback is for. A caller who needs to know how often plan B fires
+          instruments the fallback Operation itself, which is an ordinary closure.
+        in:
           - name: cfg
             type: FallbackConfig
         name: NewFallback
         out:
           - type: coreres.Runner
-      - in:
+      - doc: |-
+          NewHedge returns a Runner that guards tail latency by DUPLICATING a slow
+          Operation: when the first attempt has been outstanding for cfg.Delay, a
+          second copy starts, and so on every cfg.Delay up to cfg.MaxHedges extra
+          copies. The first attempt to succeed wins and Run returns nil; the losers'
+          context is cancelled on the way out and their results are discarded.
+
+          # The Operation MUST be idempotent
+
+          Every other policy here runs the Operation at most once at a time; this one
+          runs copies CONCURRENTLY, so a non-idempotent Operation is not made slow by
+          hedging, it is made WRONG — two charges, two inserts, two outbound messages,
+          with the policy reporting one clean success. The SDK cannot detect
+          idempotence, so cfg.Idempotent is a mandatory in-code assertion rather than a
+          warning in prose: its zero value refuses the policy (ADR 0031).
+
+          # Hedging acts on latency, never on failure
+
+          An attempt that FAILS before cfg.Delay elapses ends the call with that error,
+          verbatim; no duplicate is issued. Reacting to a failure by launching another
+          attempt is retrying, and this package already has NewRetry — compose
+          NewRetry(NewHedge(op)) to get both. Keeping them separate is also what keeps
+          the duplication bounded by latency rather than by failure: a dependency that
+          is failing fast gets no extra traffic from this policy, only a slow one does.
+
+          # Load
+
+          cfg.MaxInFlight caps the duplicates in flight across all calls, so a
+          dependency that has gone slow cannot make every caller hedge at once. When
+          the cap is reached the duplicate is simply not issued and the call proceeds
+          on its first attempt alone — degrading to no-hedging, never to a rejection.
+
+          # A panic reaches the caller, with its original value
+
+          This is the one policy that runs the Operation on goroutines of its own, and
+          a panic that reaches the top of any goroutine ends the process — where under
+          every other policy the same panic reaches the caller's goroutine and is
+          contained by net/http or by the caller's own recover. So a copy's panic is
+          recovered on that copy's goroutine and re-raised from Run, on the caller's
+          goroutine, with the Operation's ORIGINAL value: the caller's recover compares
+          equal to exactly what was panicked with, and http.ErrAbortHandler still
+          aborts a handler silently instead of being logged as a crash.
+
+          What does NOT survive is the stack. The re-raised panic's stack is the
+          re-raise site inside Run, not the Operation's frame: a value re-raised on
+          another goroutine cannot carry the panicking goroutine's stack without being
+          wrapped, and wrapping it would break both http.ErrAbortHandler and value
+          equality. A copy that panics after Run has returned — a loser, once a winner
+          was found or the caller went away — is recovered and dropped; it never
+          reaches the caller and never ends the process.
+
+          The delay is measured on cfg.Clock — the wall clock when nil — so a test
+          issues a duplicate by advancing a clock.ManualClock past cfg.Delay.
+
+          Run costs one goroutine per attempt (including the first, so the delay stays
+          observable) and one ticker per call: this is the one policy in the package
+          that is not allocation-trivial, which is the price of racing. Neither cost
+          grows with cfg.MaxHedges, which bounds how many duplicates a call may issue
+          and nothing else.
+
+          A false cfg.Idempotent, a non-positive cfg.Delay, or a non-positive
+          cfg.MaxInFlight is refused: every call returns PolicyMisconfigured without
+          running the operation (ADR 0031). A cfg.MaxHedges below one clamps to one.
+        in:
           - name: cfg
             type: HedgeConfig
         name: NewHedge
         out:
           - type: coreres.Runner
-      - in:
+      - doc: |-
+          NewKeyedRateLimiter returns a Runner admitting at most cfg.Rate calls per
+          second, with a cfg.Burst allowance, PER KEY — the key being whatever cfg.Key
+          names for the call's context. A call whose bucket is empty is rejected with
+          RateLimited; the others are not.
+
+          At most cfg.MaxKeys keys are held: a new key beyond that forgets the least
+          recently used one. A key unused for cfg.IdleTimeout is forgotten too. A
+          forgotten key's next call starts over with a full bucket.
+
+          A Rate that is not a finite positive number, a nil Key, and a non-positive
+          MaxKeys or IdleTimeout are each refused: every call returns
+          PolicyMisconfigured, naming the field, without running the operation.
+        in:
           - name: cfg
             type: KeyedRateLimiterConfig
         name: NewKeyedRateLimiter
         out:
           - type: coreres.Runner
-      - in:
+      - doc: |-
+          NewRateLimiter returns a Runner that admits at most Rate calls/sec (with a
+          Burst allowance), rejecting excess calls with RateLimited. A Rate that is not
+          a finite positive number — zero, negative, NaN or infinite — is refused
+          rather than defaulted: every call returns PolicyMisconfigured without running
+          the operation (ADR 0031).
+        in:
           - name: cfg
             type: RateLimiterConfig
         name: NewRateLimiter
         out:
           - type: coreres.Runner
-      - in:
+      - doc: |-
+          NewRetry returns a Runner that retries op up to cfg.MaxAttempts times,
+          sleeping an exponentially-growing (capped) delay between attempts and aborting
+          early on ctx cancellation. The final attempt's error wraps as RetryExhausted.
+          An error rejected by cfg.Retryable ends the loop at once and is returned
+          verbatim, so a deterministic failure neither spends the budget nor hides
+          behind RetryExhausted.
+        in:
           - name: cfg
             type: RetryConfig
         name: NewRetry
         out:
           - type: coreres.Runner
-      - in:
+      - doc: |-
+          NewTimeout returns a Runner that fails an Operation with TimeoutExceeded if it
+          does not finish within d. The Operation MUST honour ctx for the deadline to
+          fire promptly (a ctx-ignoring op caps precision at op granularity).
+
+          A non-positive d is refused: every call returns PolicyMisconfigured without
+          running the operation (ADR 0031). context.WithTimeout(ctx, 0) yields an
+          already-expired context, so the previous behaviour failed even an
+          instantaneous operation with TimeoutExceeded — a policy that could never
+          admit anything, reporting it with the error it uses when it is working.
+        in:
           - name: d
             type: time.Duration
         name: NewTimeout
@@ -207,62 +431,264 @@ packages:
       kbackoff: github.com/kitsunium/sdk/internal/kernel/backoff
     path: github.com/kitsunium/sdk/internal/service/app/resilience
     types:
-      - name: BreakerConfig
+      - doc: |-
+          BreakerConfig parameterises NewCircuitBreaker. A non-positive FailureThreshold
+          defaults to 5; a non-positive OpenDuration defaults to 30s; a nil Clock
+          defaults to clock.System; a nil Retryable counts every error as a failure.
+        name: BreakerConfig
         struct:
           fields:
             - name: FailureThreshold
               type: int
-            - name: OpenDuration
+            - doc: |-
+                OpenDuration is how long an Open breaker rejects calls before admitting
+                one HalfOpen trial. A non-positive value clamps to 30s: a zero cooldown
+                would let the very next call through, which is a breaker that never
+                rejects anything and so protects nothing while the caller believes it
+                does (ADR 0031).
+              name: OpenDuration
               type: time.Duration
             - name: Clock
               type: clock.Clock
-            - name: Retryable
+            - doc: |-
+                Retryable classifies a non-nil operation error as a dependency failure
+                worth counting against the breaker's health. false means the error is
+                deterministic — the caller's own fault, not the dependency's — so it is
+                returned verbatim and folded into neither the failure count nor the
+                success path: a stream of HTTP 400s can no longer trip the breaker, and
+                one of them cannot close a HalfOpen breaker either. A nil predicate
+                counts every error as a failure, which is the pre-classifier behaviour.
+                Shares its shape with RetryConfig.Retryable so one classifier serves a
+                nested Retry(Breaker(op)) stack.
+              name: Retryable
               type: func(error) bool
-      - name: FallbackConfig
+      - doc: |-
+          FallbackConfig parameterises NewFallback. A nil Fallback is refused (there is
+          no defensible SDK-side substitute for the caller's own plan B); a nil
+          Retryable falls back on every primary failure.
+        name: FallbackConfig
         struct:
           fields:
-            - name: Fallback
+            - doc: |-
+                Fallback is the secondary Operation run when the primary one fails. It
+                has no default: a nil Fallback makes NewFallback return a policy that
+                refuses every call with PolicyMisconfigured (ADR 0031). The two values
+                the SDK could invent are both worse than a refusal — running the primary
+                and passing its error through is a policy that silently does nothing
+                while the caller believes their plan B is wired up, and a no-op fallback
+                that returns nil would report success for work that never happened.
+
+                It is an Operation, not a func(ctx, primaryErr) error, so that the whole
+                policy vocabulary composes on the fallback side too: the plan B can
+                itself be a Runner stack (NewRetry(...).Run, a second region's client
+                behind its own breaker) with no adapter. What the fallback would have
+                learned from the primary error is decided ahead of it, by Retryable.
+
+                The port carries no result value, so a "fallback VALUE" is expressed as
+                a closure assigning the default into the caller's own variable:
+
+                	var page []byte
+                	cfg := FallbackConfig{Fallback: func(context.Context) error {
+                		page = cachedPage
+                		return nil
+                	}}
+              name: Fallback
               type: coreres.Operation
-            - name: Retryable
+            - doc: |-
+                Retryable classifies a non-nil PRIMARY error as one worth falling back
+                on. false returns that error verbatim without running the fallback: a
+                deterministic failure — a malformed request, an authorisation refusal,
+                a policy misconfiguration — is the caller's own, and serving a cached
+                answer for it hides a bug behind a stale success. A nil predicate falls
+                back on every failure. It shares its shape with RetryConfig.Retryable
+                and BreakerConfig.Retryable, so one classifier serves a nested
+                Fallback(Retry(Breaker(op))) stack.
+              name: Retryable
               type: func(error) bool
-      - name: HedgeConfig
+      - doc: |-
+          HedgeConfig parameterises NewHedge. Three of its four knobs have no default:
+          Idempotent, Delay and MaxInFlight are refused when unset, because every value
+          the SDK could pick for them is either a guess at the caller's requirement or
+          a licence to duplicate load the caller never agreed to (ADR 0031). MaxHedges
+          is the one with an obvious floor and clamps to 1. A nil Clock measures the
+          delay on the wall clock.
+        name: HedgeConfig
         struct:
           fields:
-            - name: Idempotent
+            - doc: |-
+                Idempotent asserts that the guarded Operation is safe to run more than
+                once, concurrently, with at most one of the copies being observed. It
+                has no default: false — the zero value — makes NewHedge return a policy
+                that refuses every call with PolicyMisconfigured.
+
+                This is the one precondition in the package that is a property of the
+                CALLER'S CODE rather than of a number, and the SDK has no way to detect
+                it: a hedged non-idempotent Operation does not fail, it succeeds twice —
+                a double charge, a double insert, a duplicate outbound message — and
+                nothing in the policy or its errors will ever mention it. A doc comment
+                is the wrong instrument for a hazard whose symptom is silent success, so
+                the claim is made in code, at the construction site, where review sees
+                it and `grep -r 'Idempotent:'` enumerates every hedged call path in a
+                codebase. Requiring it (rather than defaulting it to true) also means a
+                caller cannot arrive at hedging by copying a config and deleting the
+                field.
+              name: Idempotent
               type: bool
-            - name: Delay
+            - doc: |-
+                Delay is how long the policy waits for an outstanding attempt before
+                issuing a duplicate. It has no default: a non-positive Delay makes
+                NewHedge return a policy that refuses every call with
+                PolicyMisconfigured.
+
+                Zero is the value that matters, because it is what forgetting the field
+                yields, and a zero-delay hedge duplicates EVERY call the instant it
+                starts — a load amplifier wearing a resilience policy's name, doing the
+                exact opposite of its job on the dependency it is supposed to protect.
+                It is refused rather than clamped for the same reason as
+                RateLimiterConfig.Rate: the useful value is the caller's own latency
+                distribution (a p95/p99 they measured), and an SDK-chosen one would
+                either hedge constantly or never.
+              name: Delay
               type: time.Duration
-            - name: MaxHedges
+            - doc: |-
+                MaxHedges is how many DUPLICATE attempts a single call may issue beyond
+                the first, one per Delay elapsed. It clamps to 1: a hedging policy that
+                may issue no duplicate is inert — it would run the primary attempt and
+                nothing else while claiming a tail-latency protection it does not
+                provide — and "issue at least one duplicate" is exactly the kind of
+                obvious floor that ADR 0031 clamps rather than refuses (cf. Burst,
+                NewBulkhead's limit).
+
+                There is no ceiling, because none is needed: the budget bounds how many
+                duplicates a call may issue and nothing else — no per-call allocation
+                grows with it. math.MaxInt therefore means "as many as the Delay and
+                MaxInFlight allow".
+              name: MaxHedges
               type: int
-            - name: MaxInFlight
+            - doc: |-
+                MaxInFlight bounds how many duplicate attempts this Runner may have
+                running at once, across all concurrent calls. It has no default: a
+                non-positive MaxInFlight makes NewHedge return a policy that refuses
+                every call with PolicyMisconfigured.
+
+                It is the answer to hedging's second hazard: a dependency that has gone
+                slow makes every in-flight call hedge at the same moment, so the policy
+                adds load precisely when the dependency has least to spare and deepens
+                the outage it was meant to hide. The cap counts duplicates only — the
+                first attempt of every call always runs, so reaching the cap degrades
+                the policy to no-hedging rather than rejecting the call. A caller who
+                wants rejection under saturation composes NewBulkhead, whose job that
+                is.
+
+                It is refused rather than defaulted because both directions of a guess
+                are harmful in this specific knob, which is the rarer case where neither
+                clamping nor defaulting has a safe side: a conservative SDK default
+                silently stops hedging under exactly the load the caller bought hedging
+                for (inert, ADR 0031's own failure mode), and a generous one hands back
+                the amplifier. The number is a capacity decision about the caller's
+                downstream, and only they hold it.
+              name: MaxInFlight
               type: int
-            - name: Clock
+            - doc: |-
+                Clock is what Delay is measured on. Nil means clock.System.
+
+                It exists so a test drives the race with a ManualClock — advancing past
+                Delay to issue the duplicate instead of sleeping through it, and
+                asserting that no duplicate is issued a nanosecond earlier. The retry,
+                the breaker and the rate limiters already take one; the hedge, the other
+                policy that measures a wait, did not.
+              name: Clock
               type: clock.Timed
-      - name: KeyedRateLimiterConfig
+      - doc: |-
+          KeyedRateLimiterConfig parameterises NewKeyedRateLimiter: a token bucket per
+          key, at most MaxKeys of them, each forgotten after IdleTimeout without a
+          call.
+
+          Four fields have no default and a zero in any of them is refused with
+          PolicyMisconfigured on every call (ADR 0031): Rate for the reason
+          RateLimiterConfig.Rate gives, and the three below because each of their
+          zeros has two readings and one of them silently disarms the limiter.
+        name: KeyedRateLimiterConfig
         struct:
           fields:
-            - name: Key
+            - doc: |-
+                Key names who a call is charged to — the authenticated user, the
+                client's address, a tenant. Calls whose keys differ never share a
+                bucket, which is the whole point: one client emptying its bucket is
+                refused while the others are not, so a single client cannot lock
+                everybody out of a sign-in endpoint the way one shared bucket lets it.
+
+                It is called once per Run, with the Run's context. It is required: a
+                limiter with nothing to key on is NewRateLimiter.
+              name: Key
               type: func(ctx context.Context) string
-            - name: Clock
+            - doc: |-
+                Clock reads time for every bucket and for idleness. Nil means
+                clock.System.
+              name: Clock
               type: clock.Clock
-            - name: Rate
+            - doc: |-
+                Rate is each key's sustained admission rate, in tokens per second. It
+                has no default, exactly as RateLimiterConfig.Rate has none.
+              name: Rate
               type: float64
-            - name: Burst
+            - doc: Burst is each key's bucket capacity, clamped to at least 1.
+              name: Burst
               type: int
-            - name: MaxKeys
+            - doc: |-
+                MaxKeys bounds how many keys are tracked at once; beyond it the least
+                recently used key is forgotten. It is required: its zero reads either
+                as "unbounded", which lets a stream of distinct keys grow the process
+                without limit, or as "none", which admits nothing. Size it above the
+                number of clients active within IdleTimeout — a key pushed out by
+                capacity comes back with a FULL bucket, so a flood of new keys buys
+                every evicted client a fresh burst.
+              name: MaxKeys
               type: int
-            - name: IdleTimeout
+            - doc: |-
+                IdleTimeout is how long a key may go without a call before it is
+                forgotten; its next call starts over with a full bucket. It slides: a
+                key in use is never forgotten for idleness. It is required: its zero
+                reads either as "forget at once", which gives every call a full bucket
+                and so limits nothing, or as "never".
+
+                Forgetting a key is observable only when IdleTimeout is shorter than the
+                time the bucket takes to refill (Burst / Rate): below that, a key that
+                comes back is admitted a burst it would not yet have earned.
+              name: IdleTimeout
               type: time.Duration
-      - name: RateLimiterConfig
+      - doc: |-
+          RateLimiterConfig parameterises NewRateLimiter. Burst is the bucket capacity
+          (clamped to >= 1); a nil Clock defaults to System.
+        name: RateLimiterConfig
         struct:
           fields:
-            - name: Rate
+            - doc: |-
+                Rate is the sustained admission rate in tokens per second. It has no
+                default: a Rate that is not a finite positive number — zero, negative,
+                NaN or infinite — makes NewRateLimiter return a policy that refuses
+                every call with PolicyMisconfigured. Any rate the SDK picked on
+                the caller's behalf would be a guess at their requirement, and a caller
+                who silently received one would believe they were limited at the rate
+                they intended (ADR 0031). Contrast Burst, which does have an obvious
+                floor — admit at least one call — and is therefore clamped.
+              name: Rate
               type: float64
             - name: Burst
               type: int
             - name: Clock
               type: clock.Clock
-      - name: RetryConfig
+      - doc: |-
+          RetryConfig parameterises NewRetry. A non-positive MaxAttempts clamps to 1; a
+          Multiplier of 1 or below (or NaN) defaults to 2; a zero MaxDelay means no
+          cap; a nil Retryable replays every error; a zero Jitter backs off
+          deterministically; a nil Clock waits on the wall clock.
+
+          BaseDelay, MaxDelay, Multiplier and Jitter are the four fields of
+          BackoffValue, under the same names and with the same meaning: NewRetry builds its curve
+          from them, so a loop that retries on its own terms and a Retry policy
+          configured alike wait alike.
+        name: RetryConfig
         struct:
           fields:
             - name: MaxAttempts
@@ -273,13 +699,192 @@ packages:
               type: time.Duration
             - name: Multiplier
               type: float64
-            - name: Retryable
+            - doc: |-
+                Retryable classifies a non-nil operation error as replayable. It is
+                consulted once per failed attempt: false returns that error verbatim —
+                no backoff, no further attempt, no RetryExhausted relabel — so a
+                deterministic failure (policy refusal, HTTP 400, invalid input) surfaces
+                as itself at the first attempt instead of costing the whole budget. A
+                nil predicate replays every error, which is the pre-classifier
+                behaviour. BreakerConfig accepts the same shape, so one classifier
+                serves a nested Retry(Breaker(op)) stack.
+              name: Retryable
               type: func(error) bool
-            - name: Jitter
+            - doc: |-
+                Jitter widens each backoff by a random fraction of itself, drawn
+                uniformly from [0, Jitter) and ADDED to the computed delay. 0 — the zero
+                value — is the deterministic backoff this policy has always had, so an
+                existing caller's timing is unchanged. 0.5 is the common choice: it
+                desynchronises callers that failed together without letting the average
+                wait stop growing monotonically. Values outside [0, 1] clamp into it.
+
+                It exists because deterministic backoff SYNCHRONISES the very callers it
+                is meant to spread. N clients that fail against one dependency at the
+                same instant retry at the same instant, N times over, and every retry
+                round lands as one burst on a dependency that is already struggling.
+                Jitter is what turns those bursts back into a distribution.
+
+                It applies AFTER the MaxDelay cap, deliberately: the cap bounds the
+                growth, and jitter spreads callers around the bound rather than being
+                squeezed flat against it. The consequence is worth stating — WHEN a cap is
+                configured, the effective ceiling on one wait becomes MaxDelay * (1 +
+                Jitter), not MaxDelay. A zero MaxDelay is no cap at all, so there is no
+                ceiling to raise: the backoff grows geometrically and the jitter widens
+                whatever it reaches, bounded only by what a time.Duration can represent.
+              name: Jitter
               type: float64
-            - name: Clock
+            - doc: |-
+                Clock is what the backoff waits on. Nil means clock.System.
+
+                It exists so a test drives the whole retry loop with a ManualClock —
+                advancing past each backoff instead of sleeping through it, and asserting
+                the exact wait rather than a wall-clock tolerance. The breaker and the
+                rate limiter have taken a clock since they shipped; the retry, which is
+                the one policy here that actually WAITS, did not.
+              name: Clock
               type: clock.Timed
-  - facade:
+  - doc: |-
+      Package resilience is the public facade for the SDK's reliability policies:
+      retry, circuit-breaker, rate-limit, bulkhead, timeout, fallback, and hedging.
+      Each constructor returns a [Runner] that guards an [Operation] (a ctx-aware
+      func); policies compose by nesting.
+
+      	r := resilience.NewRetry(resilience.RetryConfig{MaxAttempts: 3})
+      	b := resilience.NewCircuitBreaker(resilience.BreakerConfig{FailureThreshold: 5, OpenDuration: time.Second})
+      	err := r.Run(ctx, func(ctx context.Context) error {
+      	    return b.Run(ctx, callDownstream) // Retry(Breaker(op))
+      	})
+
+      Rejections surface typed sentinels (RetryExhausted / CircuitOpen / RateLimited
+      / BulkheadFull / TimeoutExceeded / FallbackFailed) matchable via
+      errs.HasReason / errs.HasCode.
+
+      # Classifying deterministic failures
+
+      Retry and the circuit-breaker act on transient failures. A deterministic one —
+      a policy refusal, an HTTP 400, invalid input — gains nothing from a replay and
+      says nothing about a dependency's health, yet by default both policies treat
+      every non-nil error as transient: the retry spends its whole budget on it and
+      hides it behind RetryExhausted, and the breaker counts it towards tripping.
+      Set the Retryable predicate on either config to tell the two apart. It takes
+      the same shape in both, so a nested Retry(Breaker(op)) shares one classifier.
+      The sentinel is the caller's own — this package exports none to classify
+      against, because only the caller knows which of their failures are
+      deterministic:
+
+      	var ErrBadRequest = errors.New("bad request") // declared by the caller
+
+      	transient := func(err error) bool { return !errors.Is(err, ErrBadRequest) }
+      	r := resilience.NewRetry(resilience.RetryConfig{MaxAttempts: 3, Retryable: transient})
+      	b := resilience.NewCircuitBreaker(resilience.BreakerConfig{FailureThreshold: 5, Retryable: transient})
+
+      A rejected error comes back verbatim: the retry stops at that attempt without
+      backoff and without the RetryExhausted relabel, and the breaker leaves its
+      state machine untouched. A nil predicate keeps the historical behaviour.
+      [FallbackConfig] takes the same predicate, where it decides whether a primary
+      failure is worth serving a substitute answer for.
+
+      # Falling back
+
+      [NewFallback] runs a second Operation when the first one fails, and reports
+      success when it works — that masking is the policy. The port carries no
+      result value, so a "fallback VALUE" is a closure assigning the caller's own
+      default:
+
+      	var page []byte
+      	f := resilience.NewFallback(resilience.FallbackConfig{
+      	    Fallback: func(context.Context) error { page = cachedPage; return nil },
+      	})
+      	err := f.Run(ctx, func(ctx context.Context) error { return fetchLive(ctx, &page) })
+
+      When BOTH halves fail, the result is FallbackFailed carrying both messages as
+      fields — never one of the two errors alone. Reporting only the fallback's
+      failure would never say what it was covering for, and reporting only the
+      primary's would never say that plan B was tried and also broke; either way
+      the outcome stops being diagnosable. A nil Fallback is refused (ADR 0031).
+
+      A cancelled context is the one exception, and it is reported as itself: when
+      it is already dead after the primary the fallback does not run at all, and
+      when it dies while the fallback runs, a failed fallback returns ctx.Err()
+      rather than FallbackFailed — neither dependency was at fault. A fallback that
+      succeeds despite a late cancellation still returns nil: the work was done.
+
+      # Hedging — for IDEMPOTENT operations only
+
+      [NewHedge] guards tail latency by duplicating a slow call: when an attempt
+      has been outstanding for Delay, a second copy starts, and the first to
+      succeed wins.
+
+      	h := resilience.NewHedge(resilience.HedgeConfig{
+      	    Idempotent:  true,               // asserted, not assumed — see below
+      	    Delay:       80 * time.Millisecond,
+      	    MaxHedges:   1,
+      	    MaxInFlight: 32,                 // duplicates in flight, all calls
+      	})
+
+      This is the only policy here that runs an Operation CONCURRENTLY with itself,
+      which makes it the only one that can corrupt rather than merely delay: a
+      non-idempotent Operation hedged is a double charge, a double insert, a
+      duplicate outbound message — and the policy reports one clean success. The
+      SDK cannot detect idempotence, so [HedgeConfig].Idempotent makes the claim
+      mandatory and in code: its zero value refuses the policy, so hedging is never
+      reached by copying a config and dropping a field, and `grep -r 'Idempotent:'`
+      enumerates every hedged call path in a codebase.
+
+      The second hazard is load. A dependency that has gone slow makes every
+      in-flight call want a duplicate at the same instant, so hedging can deepen
+      the outage it was meant to hide. Delay and MaxInFlight are both refused when
+      unset for that reason — a zero Delay duplicates every call, and an unbounded
+      MaxInFlight lets the duplicates scale with the outage. Reaching MaxInFlight
+      degrades the policy to no-hedging (the call proceeds on its first attempt);
+      it never turns into a rejection. Hedging also fires on latency ONLY: an
+      attempt that fails before Delay elapses ends the call with that error, since
+      replaying a failure is [NewRetry]'s job, and composing NewRetry(NewHedge(op))
+      is how you get both.
+
+      # Limiting per caller
+
+      [NewRateLimiter] is one bucket for every caller, which is right for a
+      dependency and wrong for an endpoint: one client guessing passwords empties
+      it and locks everybody out. [NewKeyedRateLimiter] keeps a bucket per key —
+      the authenticated user, the client's address — so one client is refused and
+      the others are not:
+
+      	limiter := resilience.NewKeyedRateLimiter(resilience.KeyedRateLimiterConfig{
+      	    Rate: 1, Burst: 5,                  // per key
+      	    Key:  func(ctx context.Context) string { return clientOf(ctx) },
+      	    MaxKeys:     10_000,                // keys held at once, least recently used forgotten
+      	    IdleTimeout: 10 * time.Minute,      // a key left alone this long starts over full
+      	})
+
+      The set of keys is bounded because the keys come from outside: a stream of
+      distinct addresses would otherwise grow the process without limit. Both
+      bounds are enforced on the calling goroutine — there is no sweeper. Key,
+      MaxKeys and IdleTimeout have no defaults and are refused at zero, since each
+      zero has a reading that disarms the limiter while every call keeps
+      succeeding. A key pushed out by capacity comes back with a full bucket, so
+      size MaxKeys above the number of clients active within IdleTimeout.
+
+      # Backing off on your own terms
+
+      [Backoff] is the curve [NewRetry] waits between attempts, published for the
+      loops that retry on their own terms — a supervised goroutine restarting
+      after a failure, an outbox rescheduling a delivery:
+
+      	wait := resilience.Backoff{BaseDelay: time.Second, MaxDelay: time.Minute}.Delay(failures)
+
+      Delay(n) is BaseDelay × Multiplier^(n−1), held at MaxDelay; a Multiplier of 1
+      or below doubles, and the growth stops at the ceiling — or at the longest
+      time.Duration — instead of wrapping negative, however large n is.
+
+      # Driving the retry and the hedge with a test clock
+
+      [RetryConfig].Clock is the time source the retry backs off on, and
+      [HedgeConfig].Clock the one the hedge measures its delay on. Leave them nil
+      in production; in a test, hand them a ManualClock from pkg/v1/clock and move
+      it past each backoff, or past the hedge delay, instead of sleeping through
+      it.
+    facade:
       - alias:
           - doc: Operation is the public alias for the ctx-aware unit of guarded work.
             name: Operation

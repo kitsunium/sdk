@@ -1,4 +1,3 @@
-// Package cache — the L1/L2 chain.
 package cache
 
 import (

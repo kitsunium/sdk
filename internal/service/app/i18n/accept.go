@@ -1,4 +1,3 @@
-// Package i18n — the RFC 9110 Accept-Language header parser.
 package i18n
 
 import "strings"

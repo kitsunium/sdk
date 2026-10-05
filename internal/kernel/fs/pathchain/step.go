@@ -1,5 +1,3 @@
-// Package pathchain — one COMPONENT of a resolved path, described rather than
-// traversed, with the mode of the directory it was found in beside it.
 package pathchain
 
 import "io/fs"

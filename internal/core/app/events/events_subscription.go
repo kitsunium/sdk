@@ -1,4 +1,3 @@
-// Package events — hosts SubscriptionValue and the Priority that orders it.
 package events
 
 // Priority orders the listeners registered for one event type. LOWER RUNS

@@ -1,9 +1,3 @@
-// Package nettransport — the config Decoder making tcp/udp/http reachable from a
-// config file via pkg/v1/observe/logger.FromConfig. Only the plain-data keys are
-// decodable (address / min_level / buffer_size); the Dialer and HTTPClient SSRF
-// seams are code-only and never come from a config blob. A malformed shape
-// yields the shared core/observe/logger/writer.WriterConfigInvalid (no per-package code), tagged
-// with the protocol only — never the offending value (secret gate).
 package nettransport
 
 import (

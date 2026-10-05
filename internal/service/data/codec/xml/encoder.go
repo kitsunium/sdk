@@ -1,4 +1,3 @@
-// Package xml — adapts *encoding/xml.Encoder to codec.Encoder.
 package xml
 
 import (

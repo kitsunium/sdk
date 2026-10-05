@@ -1,5 +1,3 @@
-// Package sql — hosts the per-transaction state every scope of one
-// transaction shares, and the context chain that finds it.
 package sql
 
 import (

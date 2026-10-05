@@ -1,4 +1,3 @@
-// Package kit — what an exposure takes, and what it exposes.
 package kit
 
 import "github.com/kitsunium/sdk/framework/model"

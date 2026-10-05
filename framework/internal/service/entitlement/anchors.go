@@ -1,31 +1,3 @@
-// Package entitlement — the trust anchors this verifier accepts, and why there
-// is more than one of them.
-//
-// # The rotation that had no in-band path
-//
-// One anchor is one key with no way out. An installation whose anchor must
-// change — because the vendor's signing key is being retired, or because it was
-// compromised — had no path in band: rosters signed by a new key B are refused
-// against the anchor A the binary links in, BEFORE anything reads the version
-// floor that would have told it to upgrade; and a release signed by B is refused
-// by the very installation that needs it. Blocked from both sides, with the only
-// remaining route out of band — an operator fetching a binary by hand.
-//
-// Accepting an ORDERED LIST of anchors is what opens that path: publish B, and
-// the installations carrying {A, B} take it while those carrying only {A} keep
-// reading A's rosters until they are updated. Neither side has to be updated
-// first, which is the whole of what rotation needs.
-//
-// # The tension, stated rather than hidden
-//
-// Every anchor on the list is a key whose compromise is ACCEPTED for as long as
-// it stays there. A list is therefore strictly more surface than a single key,
-// and the mitigation is not a mechanism — it is that the list is ORDERED, BOUNDED
-// at maxAnchors, and decided at BUILD time. Nothing at runtime can add to it: no
-// roster field, no environment variable, no cache file. A compromised key leaves
-// the list the way it entered — by shipping a build without it — and the bound is
-// what keeps that a decision somebody has to make rather than a slot that is
-// always free.
 package entitlement
 
 import (

@@ -1,6 +1,3 @@
-// Package async — declares the goroutine loop that consumes the
-// ring buffer and forwards entries to the downstream sink. Pulled into its
-// own file so async_sink.go stays focused on the Sink contract.
 package async
 
 import corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"

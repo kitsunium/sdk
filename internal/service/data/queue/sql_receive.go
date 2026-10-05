@@ -1,5 +1,3 @@
-// Package queue — the SQL broker's read path: leasing what is due, and
-// burying the leases whose consumers died with no attempt left.
 package queue
 
 import (

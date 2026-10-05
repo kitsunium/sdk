@@ -1,4 +1,3 @@
-// Package yaml — the hooks a Go type may implement to choose its YAML.
 package yaml
 
 import "reflect"

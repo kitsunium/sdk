@@ -1,4 +1,3 @@
-// Package kit — redaction: what a value shows once its secrets are hidden.
 package kit
 
 import (

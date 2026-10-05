@@ -1,11 +1,3 @@
-// Package docstore — the secondary indexes, kept beside the documents under
-// the store's own locks.
-//
-// An index is rebuilt from the documents when the store opens, and every
-// write — Put, Insert, Replace, Update, Delete — maintains it in the same
-// critical section that changes the document. A reader therefore never sees a
-// document and an index that disagree, and a write a unique index refuses
-// leaves both exactly as they were.
 package docstore
 
 import (

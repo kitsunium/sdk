@@ -1,4 +1,3 @@
-// Package git — the LineRangeValue value type: an inclusive run of changed lines.
 package git
 
 // LineRangeValue is an inclusive, 1-based range of source lines taken from a

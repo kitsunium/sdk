@@ -1,5 +1,3 @@
-// Package queue — the SQL broker's construction parameters, and the refusals
-// a configuration no SQL broker could run gets.
 package queue
 
 import (

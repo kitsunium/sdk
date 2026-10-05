@@ -1,4 +1,3 @@
-// Package kit — messages at rest: a queue's members sealed.
 package kit
 
 import (

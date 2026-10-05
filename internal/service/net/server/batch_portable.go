@@ -1,4 +1,3 @@
-// Package server — the portable datagram reader.
 package server
 
 import (

@@ -1,4 +1,3 @@
-// Package kit — what the privacy rules ask of a record's versions.
 package kit
 
 import (

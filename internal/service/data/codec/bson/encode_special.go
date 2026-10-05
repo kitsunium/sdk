@@ -1,5 +1,3 @@
-// Package bson — encoding of the codec's own value types and of the stdlib
-// types the codec knows: time.Time, url.URL and json.Number.
 package bson
 
 import (

@@ -1,4 +1,3 @@
-// Package net — the server's reported state.
 package net
 
 // StateValue is a snapshot of the server's lifecycle and listeners.

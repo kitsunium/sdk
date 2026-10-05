@@ -1,5 +1,3 @@
-// Package metrics — the one member of a collector's answer that is this
-// signal's own: the count an ExportMetricsServiceResponse reports rejected.
 package metrics
 
 import "github.com/kitsunium/sdk/internal/service/observe/internal/otlp"

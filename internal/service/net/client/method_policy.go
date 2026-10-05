@@ -1,4 +1,3 @@
-// Package client — the method allowlist policy.
 package client
 
 import (

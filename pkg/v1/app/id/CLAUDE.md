@@ -29,8 +29,10 @@ vendor entries in `pkg/go.sum`), cross-OS portable.
 ## Conventions
 
 - **Type aliases, not new types** (`Scheme = core/app/id.Scheme`).
-- **README generated** by gomarkdoc from the package doc comment (edit the doc
-  comment in `id.go`, run `make docs-readme`); the drift gate enforces it.
+- **README generated** by `tools/genindex` from `docs/api` (ADR 0167); the
+  package comment is in `doc.go`, which kit writes from `design/app/id.yaml`
+  (edit the design, run `kit gen`, then `make api` and `make docs-readme`); the
+  drift gate enforces it.
 - Frozen post-v1.0.0 (signatures + scheme string values).
 
 ## Why TypeID takes a constructor, not a scheme key
@@ -54,7 +56,7 @@ derived default.
 
 ## Generated
 
-`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/app/id.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the package comment and the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
+`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/app/id.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the declarations of their own, and `doc.go` — kit's too (ADR 0167) — the package comment. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
 
 ## Verification
 

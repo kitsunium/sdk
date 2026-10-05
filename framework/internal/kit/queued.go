@@ -1,4 +1,3 @@
-// Package kit — queued commands: a command run later, from its queue.
 package kit
 
 import (

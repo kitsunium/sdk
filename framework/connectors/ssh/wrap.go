@@ -1,20 +1,3 @@
-// Package ssh — the three shapes every error here is built with, so the
-// choice at a call site is which sentinel rather than which spelling.
-//
-// The split between the first two is whether this package DECIDED the failure
-// or was TOLD about one. A decision has no cause to carry — nothing failed, a
-// rule was applied to a filename or a mode — and the sentinel itself is the
-// whole of it. A report from outside has a cause that must survive, because
-// errors.Is(err, fs.ErrNotExist) and the text the operating system wrote are
-// the two things a wrapper most often destroys.
-//
-// They are a copy of framework/internal/service/entitlement's, and deliberately not an
-// import: that package is a separate Go module, so its unexported helpers are
-// unreachable from here, and exporting them would put three wrapping shapes on
-// the surface of a domain whose whole public API is a three-method port and a
-// facade. Thirty lines duplicated across a module boundary is the smaller cost,
-// and the two copies are pinned to the same behaviour by having the same tests
-// on both sides.
 package ssh
 
 import (

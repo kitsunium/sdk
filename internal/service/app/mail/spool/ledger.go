@@ -1,5 +1,3 @@
-// Package spool — the memory of what was delivered, which is what drops a
-// redelivery instead of sending a mail twice.
 package spool
 
 import "sync"

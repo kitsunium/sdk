@@ -1,5 +1,3 @@
-// Package group — the panic carried off a task's goroutine and re-raised in
-// the waiter.
 package group
 
 import (

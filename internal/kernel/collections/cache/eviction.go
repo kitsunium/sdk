@@ -1,5 +1,3 @@
-// Package cache — the key/value pair carried out of the locked section so the
-// OnEvict observer never runs while the cache mutex is held.
 package cache
 
 // evictionValue is one evicted key/value pair, captured BY VALUE at eviction

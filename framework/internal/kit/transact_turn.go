@@ -1,4 +1,3 @@
-// Package kit — the data's writer turn, where there are no transactions.
 package kit
 
 import (

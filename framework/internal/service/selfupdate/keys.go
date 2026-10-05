@@ -1,6 +1,3 @@
-// Package selfupdate — the vendor key list and the signature domain of ADR
-// 0150: several keys any of which verifies, and a manifest that names its tag
-// and its expiry.
 package selfupdate
 
 import (

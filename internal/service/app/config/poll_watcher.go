@@ -1,4 +1,3 @@
-// Package config — cross-OS poll watcher.
 package config
 
 import (

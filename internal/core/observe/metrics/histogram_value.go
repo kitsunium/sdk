@@ -1,9 +1,3 @@
-// Package metrics — the Histogram instrument.
-//
-// Package metrics — the exportable histogram point: an explicit-bucket
-// distribution.
-//
-// Package metrics — the Meter: the frozen instrument factory + collector.
 package metrics
 
 import coreotel "github.com/kitsunium/sdk/internal/core/observe/otel"

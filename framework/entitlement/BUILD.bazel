@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "entitlement",
-    srcs = ["entitlement.go"],
+    srcs = [
+        "doc.go",
+        "entitlement.go",
+    ],
     importpath = "github.com/kitsunium/sdk/framework/entitlement",
     visibility = ["//visibility:public"],
     deps = [

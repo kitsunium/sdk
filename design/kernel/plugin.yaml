@@ -1,8 +1,45 @@
 apiVersion: kit.kitsunium/design/v2
 domain: kernel/plugin
 packages:
-  - functions:
-      - in:
+  - doc: |-
+      Package plugin answers one question a process-wide registry must ask before
+      it publishes anything: is this value usable as an entry at all?
+
+      A registry stores values behind an interface and hands them back to every
+      caller for the life of the process. Two shapes satisfy such an interface at
+      compile time and cannot serve:
+
+        - a TYPED nil — (*gzipCompressor)(nil) is not == nil, so the guard every
+          registrar writes lets it through, it is stored, and every lookup returns
+          it. The failure surfaces at the first dispatch, arbitrarily far from the
+          registration that caused it;
+        - a value whose dynamic type is NOT COMPARABLE — a struct holding a slice,
+          a map or a function. Registries compare entries to tell an idempotent
+          re-registration from a conflict, and == on such a value is a runtime
+          panic naming Go's comparison rather than the duplicate plug-in.
+
+      Both are programming errors at import time, which is why the answer is a
+      reason string rather than an error: the registrar panics with its OWN
+      dotted-quad code and reason, and only borrows the sentence that says why.
+
+      Package plugin — Registry: the read-mostly, name-keyed table a process-wide
+      registry stores its plug-ins in, once Unusable has said they can be stored.
+    functions:
+      - doc: |-
+          Unusable reports why v cannot be published into a registry, or the empty
+          string when it can. The reason is a fragment meant to follow a colon in the
+          caller's own message, e.g. "nil *gzip.compressor".
+
+          It is deliberately not a predicate returning bool: a registrar that refuses
+          must say which of the two shapes it refused, because "nil Compressor" and
+          "Compressor is not comparable" are found by different searches and fixed in
+          different places.
+
+          The parameter is a type PARAMETER rather than an `any`, which costs the
+          caller nothing — every registrar passes its port and T is inferred — and
+          keeps the signature from claiming to accept anything in particular. What is
+          judged is the dynamic value either way: reflect sees through the boxing.
+        in:
           - name: v
             type: T
         name: Unusable
@@ -13,8 +50,40 @@ packages:
             name: T
     path: github.com/kitsunium/sdk/internal/kernel/plugin
     types:
-      - methods:
-          - in:
+      - doc: |-
+          Registry is a process-wide table of plug-ins keyed by name: written at import
+          time, read on every dispatch. A reader loads an immutable snapshot and takes
+          no lock; a writer copies the table, inserts, and publishes the copy under the
+          snapshot's writer lock, so a reader never observes a half-built map and two
+          writers never lose each other's entry.
+
+          It decides nothing a domain names. Publish REPORTS whether the name was
+          already held by a different value — the conflict — and the registrar refuses
+          it with its own dotted-quad code and reason, exactly as it does with
+          Unusable's answer. Re-publishing the SAME value is an idempotent no-op that
+          reports no conflict, which is what lets a plug-in package be imported through
+          two paths without turning a diamond dependency into a boot panic. Claim
+          reports the holder instead of a verdict, for a registrar that refuses every
+          second registration or names the holder in its refusal.
+
+          V must be comparable, and that is a runtime contract as much as a compile
+          one: when V is an interface, == on a dynamic value that is not comparable
+          panics inside Publish's duplicate check with Go's message rather than the
+          registrar's. A registrar asks Unusable first, which refuses exactly that
+          value, and a typed nil with it.
+
+          The zero value is ready to use. K is ordered so Names can answer in a stable
+          order rather than in map order.
+        methods:
+          - doc: |-
+              Publish inserts (name -> value) and reports whether name was already held by
+              a DIFFERENT value. On a conflict nothing changes: the first registration
+              stays, and the caller refuses the second with its own code. Re-publishing the
+              identical value changes nothing either, and is not a conflict.
+
+              The duplicate check and the publish are one atomic step: Publish is Claim
+              with the verdict a registry that tolerates a diamond import wants.
+            in:
               - name: name
                 type: K
               - name: value
@@ -23,7 +92,18 @@ packages:
             out:
               - type: bool
             recv: pointer
-          - in:
+          - doc: |-
+              Claim inserts (name -> value) when name is free. When name is taken, nothing
+              changes and Claim reports the value holding it — value itself or another.
+
+              Publish is Claim plus the verdict most registrars want. Claim serves the two
+              that want another one: a registrar for which ANY second registration is a
+              conflict, the identical value included, refuses on taken alone; and a
+              registrar whose refusal names the holder reads it here, from the same atomic
+              step that refused, rather than from a second Lookup.
+
+              The check and the insert are one atomic step.
+            in:
               - name: name
                 type: K
               - name: value
@@ -35,7 +115,11 @@ packages:
               - name: taken
                 type: bool
             recv: pointer
-          - in:
+          - doc: |-
+              Lookup returns the value registered under name, and whether there is one. A
+              miss returns V's zero value, so a caller checking only the value of an
+              interface-typed V would hold a nil — which is why found exists.
+            in:
               - name: name
                 type: K
             name: Lookup
@@ -45,7 +129,11 @@ packages:
               - name: found
                 type: bool
             recv: pointer
-          - name: Names
+          - doc: |-
+              Names returns every registered name in ascending order, or nil before the
+              first Publish or Claim. The slice is the caller's; it shares nothing with the
+              table.
+            name: Names
             out:
               - type: "[]K"
             recv: pointer

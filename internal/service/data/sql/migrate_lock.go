@@ -1,5 +1,3 @@
-// Package sql — hosts the migration lock: why it is the engine's own advisory
-// lock, and why it lives on a connection of its own.
 package sql
 
 import (

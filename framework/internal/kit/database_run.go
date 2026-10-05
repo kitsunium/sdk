@@ -1,4 +1,3 @@
-// Package kit — a database in a running app.
 package kit
 
 import (

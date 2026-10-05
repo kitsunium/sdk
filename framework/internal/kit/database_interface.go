@@ -1,5 +1,3 @@
-// Package kit — the interfaces of databases: the engine a connector gives, and
-// what kit asks of it.
 package kit
 
 import (

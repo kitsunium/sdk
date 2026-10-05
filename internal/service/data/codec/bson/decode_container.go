@@ -1,8 +1,3 @@
-// Package bson — decoding into the containers: slices, arrays, D, maps and
-// structs. Each follows the previous library's rules: a slice reuses its
-// backing array, an array keeps the elements a short value does not reach, a
-// map is added to rather than replaced, a struct keeps the fields the document
-// does not name.
 package bson
 
 import (

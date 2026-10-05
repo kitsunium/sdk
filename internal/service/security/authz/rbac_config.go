@@ -1,4 +1,3 @@
-// Package authz — hosts RBACConfig, the arguments NewRBAC is built from.
 package authz
 
 // RBACConfig configures [NewRBAC]: which request attribute carries the

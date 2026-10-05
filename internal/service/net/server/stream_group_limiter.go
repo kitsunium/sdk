@@ -1,4 +1,3 @@
-// Package server — the per-group connection ceiling.
 package server
 
 import (

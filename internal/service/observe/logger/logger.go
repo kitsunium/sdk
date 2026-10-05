@@ -1,6 +1,3 @@
-// Package logger — wires a core.Handler into a core.Logger. It
-// provides the thin loggerImpl that routes Log calls through the Handler's
-// Enabled fast-path and honours With-derived attrs via copy-on-write.
 package logger
 
 import (

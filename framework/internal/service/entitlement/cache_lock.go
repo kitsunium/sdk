@@ -1,21 +1,3 @@
-// Package entitlement - exclusion over the cache directory, which is the one
-// thing write-then-rename does not provide.
-//
-// Renaming a staged file over an installed one is atomic for a READER: nobody
-// ever observes half a bundle at the name they look for. It says nothing about
-// two WRITERS, and the ratchet is not a write — it is a read, a comparison and
-// a write, and the comparison is only worth anything if nothing moves between
-// it and the write it guards.
-//
-// The exclusion is also what lets a refresh land on Windows. There, replacing
-// a file another handle holds open is refused, and every file Go opens is held
-// that way: syscall.Open asks for FILE_SHARE_READ|FILE_SHARE_WRITE and never
-// FILE_SHARE_DELETE. Keeping readers and the writer off the bundle at the same
-// time removes the collision rather than retrying past it. Sharing DELETE from
-// the read side is NOT an alternative: measured on windows-latest, MoveFileEx
-// still refuses a destination held with FILE_SHARE_DELETE — see
-// Test_windowsRenameOverAnOpenDestination, which asserts all three share modes
-// on a real kernel, and ADR 0079's Deferred section for what is still open.
 package entitlement
 
 import (

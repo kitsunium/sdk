@@ -302,6 +302,38 @@ rules:
   # vocabulary — `logger/slogbridge` carries a real `slog.Handler` — and a
   # facade file that grows past the threshold later should be flagged and
   # added here deliberately rather than covered in advance.
+  KTN-COMMENT-PKGDOC:
+    # ADR 0167: a designed package's comment is the design's, and kit gen
+    # writes it into the package's doc.go ALONE, taking it out of every other
+    # file — go/doc joins every file's package comment, so a per-file one is
+    # a fragment of the package doc the design no longer holds, and
+    # `make api-check` fails on it (the pin files' package digest). The rule's
+    # "a descriptive comment before package in every file" is therefore the
+    # opposite of the law in the four trees the design covers; it still holds
+    # in tools/, e2e/ and scripts/, which the design does not.
+    exclude:
+      - "**/internal/**"
+      - "internal/**"
+      - "**/pkg/**"
+      - "pkg/**"
+      - "**/framework/**"
+      - "framework/**"
+      - "**/third-party/**"
+      - "third-party/**"
+
+  KTN-STRUCT-PARTITION:
+    # internal/core/data/sql's sql.go and sql_txoptions.go each lost their
+    # package-comment fragment to doc.go (ADR 0167) and fell under the rule's
+    # "small file" bound, which made TxFunc and TxOptionsValue read as one
+    # group split across two files. Their declarations did not move;
+    # colocating them is a change of its own, not a consequence of where a
+    # comment lives.
+    exclude:
+      - "**/internal/core/data/sql/sql.go"
+      - "internal/core/data/sql/sql.go"
+      - "**/internal/core/data/sql/sql_txoptions.go"
+      - "internal/core/data/sql/sql_txoptions.go"
+
   KTN-STRUCT-COHESION:
     exclude:
       - "**/pkg/v1/data/codec/codec.go"

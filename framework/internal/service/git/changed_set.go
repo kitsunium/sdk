@@ -1,5 +1,3 @@
-// Package git — the changed set: which files, line ranges and directories a
-// branch touched. The concrete implementation of the core coregit.ChangedSet port.
 package git
 
 import (

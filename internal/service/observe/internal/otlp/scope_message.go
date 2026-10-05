@@ -1,5 +1,3 @@
-// Package otlp — common.v1.InstrumentationScope, carried once per payload by
-// every signal.
 package otlp
 
 import coreotel "github.com/kitsunium/sdk/internal/core/observe/otel"

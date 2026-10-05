@@ -1,4 +1,3 @@
-// Package kit — the password policy of a store's fields.
 package kit
 
 import (

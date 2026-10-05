@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # internal/service/crypto/hash/stdhash/
 
 ## Purpose
@@ -18,7 +18,7 @@ public. Keyed integrity belongs to the MAC / AEAD / signature ports.
 
 | File | Role |
 |---|---|
-| `stdhash.go` | package doc only |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
 | `sha256_hasher.go` / `sha512_hasher.go` / `sha3_hasher.go` / `crc32c_hasher.go` / `fnv_hasher.go` | one empty-struct `Hasher` singleton per file (`Algorithm` / `New`), each self-registering via a package-level `var _ = corecrypto.RegisterHasher(…)`; `crc32c_hasher.go` also owns the shared `castagnoli` CRC-32C table |
 | `digest_writer.go` | `DigestWriter` — tees `Write` into a destination + a running hash; `Sum` / `SumHex` over everything written (`NewDigestWriter`) |
 | `verifying_reader.go` | `VerifyingReader` — hashes a stream and verifies it against an expected hex digest on the final (EOF) read only, surfacing the core `DigestMismatch` sentinel; never fails mid-stream (`NewVerifyingReader`) |

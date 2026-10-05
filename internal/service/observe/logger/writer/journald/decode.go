@@ -1,8 +1,3 @@
-// Package journald — the config Decoder making "journald" reachable from a
-// config file via pkg/v1/observe/logger.FromConfig. Only plain-data keys are decodable
-// (socket_path / min_level / buffer_size); the Dialer seam is code-only. A
-// malformed shape yields the shared core/observe/logger/writer.WriterConfigInvalid (no
-// per-package code), tagged with the writer name only — never the value.
 package journald
 
 import (

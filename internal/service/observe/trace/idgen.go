@@ -1,4 +1,3 @@
-// Package trace — minting the two identifiers.
 package trace
 
 import (

@@ -1,4 +1,3 @@
-// Package server — the listener bridge that lets net/http consume our accepts.
 package server
 
 import (

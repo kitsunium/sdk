@@ -1,4 +1,3 @@
-// Package client — the policy conjunction.
 package client
 
 import (

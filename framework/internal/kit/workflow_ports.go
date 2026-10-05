@@ -1,4 +1,3 @@
-// Package kit — the ports the workflow engine reaches a store through.
 package kit
 
 import (

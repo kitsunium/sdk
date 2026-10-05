@@ -1,8 +1,3 @@
-// Package errs — provides ParseCode, the strict canonical parser
-// for dotted-quad Code strings produced by Code.String(). The parser is
-// intentionally NOT compatible with the Padded() form — that would make
-// two textual representations round-trip to the same Code, violating the
-// single-canonical-form invariant declared in ADR 0005 §3.2.
 package errs
 
 // Canonical-form length and shape limits for ParseCode.

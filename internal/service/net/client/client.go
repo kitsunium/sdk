@@ -1,6 +1,3 @@
-// Package client is the outbound half of the SDK's network domain (ADR 0029):
-// an HTTP client whose read-only posture is enforced by the transport rather
-// than by the call site.
 package client
 
 import (

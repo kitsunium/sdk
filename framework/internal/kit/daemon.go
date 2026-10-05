@@ -1,5 +1,3 @@
-// Package kit — the daemon: what a running app knows of itself beyond its
-// nodes.
 package kit
 
 import (

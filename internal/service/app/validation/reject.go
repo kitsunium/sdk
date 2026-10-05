@@ -1,5 +1,3 @@
-// Package validation — the refusal helpers. Every refusal names what was
-// wrong in structured fields; the Public message stays a fixed literal.
 package validation
 
 import (

@@ -22,6 +22,15 @@ packages:
             name: CodeWriteFailed
             value: "0x00_03_0D_14"
         type: errs.Code
+    doc: |-
+      Package console declares the codes and sentinels of the logger's console
+      sink, internal/service/observe/logger/sink/console: range 0.3.13.*, allocated
+      to that engine (ADR 0005 service/observe/logger/sink/console block) and
+      declared here since ADR 0160, so the engine declares none.
+
+      Package console — declares the sentinels the console sink's constructor and
+      Write method return. Each var's name equals its errs.Define Reason in
+      SCREAMING_SNAKE form.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/observe/logger/sink/console
@@ -47,8 +56,20 @@ packages:
             private: service/observe/logger/sink/console.Write underlying io.Writer returned an error
             public: Console write failed
             reason: WRITE_FAILED
-  - functions:
-      - in:
+  - doc: |-
+      Package console implements a Sink that writes formatted records onto an
+      io.Writer (typically os.Stdout or os.Stderr) under a local mutex so
+      concurrent goroutines emit atomic lines. It is the default Sink shipped
+      by pkg/v1/observe/logger.Default.
+
+      The console sink intentionally ignores the originating RecordEvent — it
+      just streams the encoder's output verbatim. Sinks that need structured
+      metadata (CloudWatch, S3, Kafka) read it from r in their own packages.
+    functions:
+      - doc: |-
+          New constructs a Sink that writes to w. Every Write call acquires the
+          internal mutex so concurrent goroutines emit atomic lines.
+        in:
           - name: w
             type: io.Writer
         name: New
@@ -57,10 +78,12 @@ packages:
             type: corelogger.Sink
           - name: err
             type: error
-      - name: NewStderr
+      - doc: NewStderr is a convenience constructor binding the sink to os.Stderr.
+        name: NewStderr
         out:
           - type: corelogger.Sink
-      - name: NewStdout
+      - doc: NewStdout is a convenience constructor binding the sink to os.Stdout.
+        name: NewStdout
         out:
           - type: corelogger.Sink
     imports:

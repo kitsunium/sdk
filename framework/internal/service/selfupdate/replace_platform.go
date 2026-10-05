@@ -1,5 +1,3 @@
-// Package selfupdate — the one platform the replacement step refuses, and why
-// the refusal comes before anything is downloaded.
 package selfupdate
 
 import (

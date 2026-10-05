@@ -1,5 +1,3 @@
-// Package health — hosts the single-flight run that keeps a wedged check from
-// becoming a goroutine factory.
 package health
 
 import (

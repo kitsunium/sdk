@@ -1,5 +1,3 @@
-// Package kit — CLI commands: a short command of the product that Main runs
-// once, in the CLI profile, and whose status is the process's.
 package kit
 
 import (

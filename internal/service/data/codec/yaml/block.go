@@ -1,4 +1,3 @@
-// Package yaml — the block structure: mappings, sequences, keys and values.
 package yaml
 
 import (

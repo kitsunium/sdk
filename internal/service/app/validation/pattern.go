@@ -1,4 +1,3 @@
-// Package validation — the regular-expression constraint.
 package validation
 
 import (

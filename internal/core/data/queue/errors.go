@@ -1,15 +1,3 @@
-// Package queue — range 0.2.23.* (ADR 0054 core/data/queue block), and the
-// brokers' and the consumer engine's 0.3.53.* (ADR 0054 service/data/queue
-// block, declared here since ADR 0160).
-//
-// Package queue — the two ADR 0039 siblings that act on the dead-letter store:
-// sending a message there at once, and deciding what becomes of one there.
-//
-// Package queue — declares the sentinel *errs.Error port outcomes, and the
-// implementation outcomes of the brokers and the consumer engine in
-// internal/service/data/queue (ADR 0160: every code is declared in the core,
-// at the service's path). Each var's name equals its errs.Define Reason in
-// SCREAMING_SNAKE form.
 package queue
 
 // exitConfig matches sysexits EX_CONFIG (78). A refused policy or a

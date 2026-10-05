@@ -1,5 +1,3 @@
-// Package metrics — OTLP/JSON encoder: SnapshotValue to the bytes an OTLP
-// receiver accepts, implemented from the specification with encoding/json.
 package metrics
 
 import (

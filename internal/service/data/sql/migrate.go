@@ -1,5 +1,3 @@
-// Package sql — hosts the migration runner: the order, the version table, the
-// dry run, and the two directions.
 package sql
 
 import (

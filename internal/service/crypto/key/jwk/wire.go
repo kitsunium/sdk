@@ -1,8 +1,3 @@
-// Package jwk — the RFC 7517 JSON wire shapes and the base64url codec every
-// member goes through. Kept apart from the value type so nothing in jwk.go has
-// an exported-looking JSON surface: keyJSON is the ONLY struct with json tags,
-// and it is unexported, so encoding/json can never reach a KeyValue by
-// reflection.
 package jwk
 
 import (

@@ -1,5 +1,3 @@
-// Package trace — the two identifiers a trace is built out of, and the flag
-// byte that travels with them.
 package trace
 
 import (

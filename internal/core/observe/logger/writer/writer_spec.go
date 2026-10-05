@@ -1,5 +1,3 @@
-// Package writer — Spec value type, in its own file per the
-// one-exported-struct-per-file convention.
 package writer
 
 // Spec names a writer and carries its concrete config. It is the unit

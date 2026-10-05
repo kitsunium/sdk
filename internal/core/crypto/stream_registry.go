@@ -1,6 +1,3 @@
-// Package crypto — the StreamSealer port: chunked authenticated encryption.
-//
-// Package crypto — the process-wide StreamSealer registry + SealStream / OpenStream dispatch.
 package crypto
 
 import "io"

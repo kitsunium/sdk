@@ -6,9 +6,11 @@ Public facade for the SDK's **authorization** domain (ADR 0057): type aliases
 onto `internal/core/security/authz` and `internal/service/security/authz`, plus thin delegating
 constructors. It answers "may this subject do this to that" and nothing else.
 
-`README.md` is **generated** from this package's doc comment by `gomarkdoc`
-(rule 10 / ADR 0008). Consumer-facing prose belongs in `authz.go`'s package
-comment; maintainer rationale stays here.
+`README.md` is **written** by `tools/genindex` from the committed `docs/api`
+(`make docs-readme`, ADR 0167). Consumer-facing prose belongs in the package
+comment, in `doc.go`, which kit writes from `design/security/authz.yaml`: edit
+the design, run `kit gen`, then `make api` and `make docs-readme`. Maintainer
+rationale stays here.
 
 ## Surface
 
@@ -67,7 +69,7 @@ comment; maintainer rationale stays here.
 
 ## Generated
 
-`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/security/authz.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the package comment and the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
+`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/security/authz.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: `doc.go` holds the package comment, which kit writes from the design (ADR 0167), and the hand-written files the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
 
 ## Verification
 

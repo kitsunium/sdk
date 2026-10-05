@@ -1,5 +1,3 @@
-// Package scheduler — the parser's refusal helpers. Every rejection names what
-// was wrong in structured fields; the Public message stays a fixed literal.
 package scheduler
 
 import (
