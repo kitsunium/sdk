@@ -8,7 +8,7 @@ of log attributes, rendered with every secret the `Redactor` recognises replaced
 by `[redacted]`, within an exact byte bound, never mutating the input. The
 engine behind the `internal/core/security/redact` port (ADR 0160): `*Redactor`
 implements `coreredact.Redactor`, asserted at compile time in
-`redact_compliance.go`. Public facade:
+`decl_gen.go`, where kit writes the design's `implements:` (ADR 0170). Public facade:
 `pkg/v1/security/redact`.
 
 Stdlib (`encoding/json` for the wire form of a value, `encoding/json/jsontext`
@@ -23,13 +23,13 @@ since ADR 0160, with its values unchanged; this package raises it.
 | File | Role |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `Config` and `Redactor` — each struct with every field, unexported ones included; the assertion `Redactor → coreredact.Redactor`. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `redact.go` | `DefaultWords`, `Config`, `Redactor`, `NewRedactor`, `Name`, `bound` |
 | `plan.go` | the per-type plan: which members of a type's JSON form are secret by declaration, cached per `Redactor` |
 | `fields.go` | `writtenFields` — for a struct, the one field `encoding/json` writes under each member name, selected by `encoding/json`'s own rules (`jsonName`, level-by-level embedding, `dominant`) |
 | `json.go` | `JSON`, `Value` (both returning the core's `DocumentValue`), and the `copier` — a `jsontext` token stream re-emitted by hand so every byte is accounted against the bound |
 | `text.go` | `Text`, the URL-credential pattern (`credentials`, compiled at the first text holding "://" and "@", not at every program start), `clip` |
 | `attrs.go` | `Attrs` — an iterator over `(dotted key, text)` pairs, and the per-kind rendering |
-| `redact_compliance.go` | the compile-time assertion that `*Redactor` implements `coreredact.Redactor` |
 
 ## Why-this-shape
 

@@ -36,24 +36,6 @@ var (
 	newline = []byte("\n")
 )
 
-// EnvConfig parameterises [NewEnv].
-type EnvConfig struct {
-	// Prefix namespaces every variable: with "APP", the secret "smtp-url" is
-	// read from APP_SMTP_URL, or from the file APP_SMTP_URL_FILE names. The
-	// separating underscore belongs to the store, and a trailing one on Prefix
-	// is absorbed, so "APP" and "APP_" name the same namespace.
-	//
-	// Empty is allowed and means no namespace: "smtp-url" reads SMTP_URL. It
-	// is a legitimate choice — DATABASE_URL is a convention of its own — and
-	// Names then lists the whole environment, mapped to names, which is noise
-	// but never a value.
-	//
-	// A non-empty prefix must be uppercase ASCII letters, digits and '_', and
-	// must not start with a digit or consist of underscores alone: anything
-	// else is not a variable name a shell can export.
-	Prefix string
-}
-
 // envStore reads secrets from the process environment and never writes.
 type envStore struct {
 	// prefix is the normalised namespace: "" or "NAME_".

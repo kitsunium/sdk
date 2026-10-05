@@ -17,11 +17,10 @@ every evaluation verdict (`0.2.26.*`) are declared in
 
 | File | Surface |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `RuleValue`, `GrantValue`, `PermissionValue` and `RBACConfig` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `authz.go` | `Check` (the closure) · `Must` / `MustCondition` · the field-carrying `denied` helper |
 | `combine.go` | `DenyOverrides` — the one combining algorithm |
 | `rbac.go` | `PermissionValue` / `NewRBAC` + the inverted grant index |
-| `grant_value.go` | `GrantValue` — one row of the role → permissions table |
-| `rbac_config.go` | `RBACConfig` — the arguments `NewRBAC` is built from |
 | `abac.go` | `RuleValue` / `NewABAC` + the rule fold |
 | `conditions.go` | `AttrEquals` / `AttrIsTrue` / `AttrAtLeast` / `AttrContains` / `AttrMatchesSubject` |
 | `combinators.go` | `Not` / `AllOf` / `AnyOf` |

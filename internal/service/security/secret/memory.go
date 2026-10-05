@@ -14,14 +14,6 @@ import (
 // secrets, not thousands, so this avoids the first growth steps and no more.
 const initialSecrets int = 8
 
-// MemoryConfig parameterises [NewMemory]. Its zero value is a working store.
-type MemoryConfig struct {
-	// Clock stamps each version's Created. nil means clock.System; a test
-	// driving a Rotator passes the same ManualClock to both, so the store's
-	// stamps and the rotator's "now" are one timeline.
-	Clock clock.Clock
-}
-
 // memoryStore keeps every version in one map guarded by an RWMutex. It dies
 // with the process, which is the whole of its contract: it is the store for a
 // test, a development run, or a secret that is regenerated on every start and

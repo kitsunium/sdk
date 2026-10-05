@@ -23,6 +23,7 @@ declarations moved.
 
 | File | Holds |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `EnvConfig`, `FileConfig`, `Keyring`, `MemoryConfig`, `PolicySpec`, `RotatorConfig`, `Rotator`, `SubjectKeysConfig`, `SubjectKeys` and `RewrapValue` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `versions.go` | the argument checks every store shares (`checkPut`, `checkPrune`), `nextVersion`, `pruned` |
 | `memory.go` | `NewMemory` / `MemoryConfig` — a map under an RWMutex |
 | `env.go` | `NewEnv` / `EnvConfig` — read-only, the `NAME_FILE` convention |

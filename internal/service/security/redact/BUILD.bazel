@@ -6,12 +6,12 @@ go_library(
     name = "redact",
     srcs = [
         "attrs.go",
+        "decl_gen.go",
         "doc.go",
         "fields.go",
         "json.go",
         "plan.go",
         "redact.go",
-        "redact_compliance.go",
         "text.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/security/redact",

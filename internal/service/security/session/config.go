@@ -9,41 +9,6 @@ import (
 	coresession "github.com/kitsunium/sdk/internal/core/security/session"
 )
 
-// Config configures a store's two deadlines and its clock.
-//
-// # Both timeouts are required, and 0 is refused
-//
-// ADR 0031: a policy constructor never returns an inert policy. A zero timeout
-// read as "expires immediately" would produce a store in which every session is
-// already dead — a login loop with no error message anywhere, which is the
-// worst possible way to present a misconfiguration. There is also no default
-// the SDK could supply without inventing the caller's security requirement: how
-// long a session may idle, and how long it may live at all, are the whole
-// content of a session policy. So both are refused when non-positive, with
-// InvalidConfig naming the field.
-//
-// # The idle window must be SHORTER than the absolute ceiling
-//
-// The effective deadline is always the earlier of the two. An idle window equal
-// to or longer than the absolute ceiling can therefore never be the earlier
-// one: it would never bite, and the caller would believe they had configured a
-// sliding expiry they do not have. That is the same inert-policy failure ADR
-// 0031 describes, so it is refused at construction rather than accepted and
-// ignored.
-type Config struct {
-	// IdleTimeout is how long a session may go untouched before it dies. Every
-	// successful Load slides it forward from "now".
-	IdleTimeout time.Duration
-	// AbsoluteTimeout is how long a session may live at all, measured from the
-	// instant its identifier was minted. Nothing extends it — not a Load, not
-	// a Save. It is the ceiling the sliding window is clamped to.
-	AbsoluteTimeout time.Duration
-	// Clock is the time source. A nil Clock falls back to clock.System; a
-	// clock.ManualClock makes every expiry assertion deterministic and
-	// instant, which is why no test in this package sleeps.
-	Clock clock.Clock
-}
-
 // window is the validated deadline policy every store carries.
 func (c Config) window() window {
 	//: a nil clock is a working configuration, so it is filled, not refused.

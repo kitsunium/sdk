@@ -23,37 +23,6 @@ const recordMode fs.FileMode = 0o600
 // carrying any of them lets another account list — or worse — the secrets.
 const otherAccountBits fs.FileMode = 0o077
 
-// FileConfig parameterises [NewFile].
-//
-// Its zero value is deliberately NOT a working store: Dir must be stated,
-// because the directory IS the store, and a default one — the working
-// directory, the temporary directory — would put secrets wherever the process
-// happened to start, readable by whoever else uses that place.
-type FileConfig struct {
-	// Dir is the directory the store owns: one record per secret, published
-	// atomically, 0600, plus the lock files that serialise writers. It is
-	// created 0700 if absent, and REFUSED if it exists with any group or world
-	// permission bit — a secret directory another account can read is the
-	// whole compromise, and the store does not chmod it behind the operator's
-	// back.
-	Dir string
-	// Key, when set, SEALS every record with AES-256-GCM before it touches
-	// the disk, bound to the secret's name so a record copied under another
-	// name does not open. Nothing readable is written then — not the values,
-	// not the version numbers, not the timestamps; only the file names, which
-	// are the secret names.
-	//
-	// The zero Key means no encryption at rest, which is a legitimate choice
-	// on a volume that is already encrypted, and it is the choice a caller
-	// makes by leaving the field empty. A store opened with a Key refuses a
-	// record written without one, and the other way round, with
-	// RecordUnreadable — never by guessing which it was.
-	Key corecrypto.Key
-	// Clock stamps each version's Created and paces the wait for another
-	// process's lock. nil means clock.System.
-	Clock clock.Timed
-}
-
 // validate refuses a configuration no store could honour, before anything
 // touches the disk.
 func (c FileConfig) validate() error {

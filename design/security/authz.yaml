@@ -1153,7 +1153,8 @@ packages:
       coreauthz: github.com/kitsunium/sdk/internal/core/security/authz
     path: github.com/kitsunium/sdk/internal/service/security/authz
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           RuleValue is one attribute rule: which requests it is about, what it decides
           when it fires, and the condition under which it fires.
         name: RuleValue
@@ -1189,7 +1190,8 @@ packages:
                 always-true predicate themselves so it shows up in the diff.
               name: When
               type: coreauthz.Condition
-      - doc: |-
+      - decl: true
+        doc: |-
           GrantValue binds one role to the permissions it confers. The role name is
           the application's vocabulary and the SDK attaches no meaning to it: "admin"
           is a string like any other, and nothing here believes it is special.
@@ -1204,7 +1206,8 @@ packages:
                 role that grants nothing is a wiring mistake that fails closed silently.
               name: Permissions
               type: "[]PermissionValue"
-      - doc: |-
+      - decl: true
+        doc: |-
           PermissionValue is one (action, resource) pair a role confers. Both halves
           are compared by byte equality: there is no wildcard, no prefix and no
           separator the SDK knows about.
@@ -1219,7 +1222,8 @@ packages:
                 facts belong in the request's attributes, where an ABAC rule reads them.
               name: Resource
               type: string
-      - doc: |-
+      - decl: true
+        doc: |-
           RBACConfig configures [NewRBAC]: which request attribute carries the
           subject's roles, and what each role confers.
 

@@ -7,32 +7,6 @@ import (
 	coreauthz "github.com/kitsunium/sdk/internal/core/security/authz"
 )
 
-// RuleValue is one attribute rule: which requests it is about, what it decides
-// when it fires, and the condition under which it fires.
-type RuleValue struct {
-	// Name identifies the rule in diagnostics. It is required, it is written
-	// into the refusal's PRIVATE side and its fields, and it never reaches the
-	// wire — a public message naming the rule that refused tells the caller
-	// how many rules there are and which one to work around.
-	Name string
-	// Action and Resource select the requests this rule is about, by byte
-	// equality. A rule that does not match is not evaluated at all, so its
-	// condition never runs on a request it was not written for.
-	Action string
-	// Resource is the KIND of thing, matching [PermissionValue.Resource].
-	Resource string
-	// Effect is what the rule decides when [RuleValue.When] holds:
-	// [coreauthz.Allow] or [coreauthz.Deny]. [coreauthz.Abstain] — which is
-	// the zero value, so an unset Effect lands here — is refused at
-	// construction, because a rule that abstains when it fires is a rule that
-	// does nothing.
-	Effect coreauthz.Decision
-	// When is the predicate. It is required: a rule with no condition fires on
-	// every matching request, and the caller who wants that writes the
-	// always-true predicate themselves so it shows up in the diff.
-	When coreauthz.Condition
-}
-
 // NewABAC builds an attribute-based [coreauthz.Policy] over a fixed rule set.
 //
 // Rules whose Action and Resource do not match the request are skipped. Among

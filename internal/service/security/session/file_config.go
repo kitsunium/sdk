@@ -20,53 +20,6 @@ import (
 // that a contended one is not a spin.
 const DefaultPoll time.Duration = 25 * time.Millisecond
 
-// FileConfig configures the on-disk store. The two timeouts and the clock mean
-// exactly what they mean in [Config] — the fields are repeated rather than
-// embedded so a call site reads as one flat literal — and Dir and Key are the
-// two things only a persistent store needs.
-//
-// Key is REQUIRED and has no default. Every record is sealed with it before it
-// touches the disk, so a store built without one would write session contents
-// in plain text next to a filename an operator can list. There is no value the
-// SDK could invent here: a key it generated would be lost on restart, taking
-// every session with it, and a key derived from the directory name would not be
-// a key at all.
-type FileConfig struct {
-	// IdleTimeout is how long a session may go untouched. Refused when
-	// non-positive, and when it is not strictly shorter than AbsoluteTimeout.
-	IdleTimeout time.Duration
-	// AbsoluteTimeout is the ceiling from the identifier's minting instant.
-	AbsoluteTimeout time.Duration
-	// Clock is the time source; nil falls back to clock.System.
-	//
-	// It is [clock.Timed] rather than [clock.Clock] because this store both
-	// STAMPS and WAITS: the poll between lock attempts is armed on it, so a
-	// ManualClock makes contention deterministic and nothing here sleeps. The
-	// published shape changed while the module is v0, out loud, per ADR 0040 —
-	// clock.System and clock.ManualClock both satisfy it, so only a
-	// hand-written Clock-only double is affected.
-	Clock clock.Timed
-	// Dir is the directory records live in. It is created with mode 0700 if
-	// absent, and REFUSED if it exists with any group or world bit set — a
-	// session directory another user can read is the whole compromise.
-	Dir string
-	// Poll is the interval between attempts while ANOTHER PROCESS holds the
-	// store-wide lock. Zero means [DefaultPoll]; negative is refused.
-	//
-	// It exists because the lock is polled rather than waited on: a blocking
-	// flock(2) parks the thread inside a syscall no cancellation reaches, so a
-	// request whose caller has hung up could not stop waiting (ADR 0073). The
-	// interval is the clamp half of ADR 0031 — any value works, and the SDK
-	// picking one surprises nobody — while a negative one is refused, since it
-	// spells a caller who meant something the field cannot express.
-	Poll time.Duration
-	// Key is the 256-bit AEAD key every record is sealed under. The seal binds
-	// the record to its own filename, so an attacker with write access to the
-	// directory cannot make one session's ciphertext answer for another's
-	// identifier.
-	Key corecrypto.Key
-}
-
 // waiter resolves the WAITING half of the injected clock.
 //
 // Clock is [clock.Timed] because this store both stamps and waits, which is the

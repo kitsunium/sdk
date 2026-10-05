@@ -1353,7 +1353,8 @@ packages:
       jwk: github.com/kitsunium/sdk/internal/service/crypto/key/jwk
     path: github.com/kitsunium/sdk/internal/service/security/token
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           IssuerConfig configures a JWT issuer.
 
           The zero value is usable and safe: it stamps "iat", requires the caller to
@@ -1394,7 +1395,8 @@ packages:
                 time port (ADR 0039) — because issuing stamps instants and never waits.
               name: Clock
               type: clock.Clock
-      - doc: |-
+      - decl: true
+        doc: |-
           PasetoIssuerConfig configures a PASETO v4.public issuer.
 
           It is a flat struct rather than an [IssuerConfig] plus two extras, and the
@@ -1440,7 +1442,8 @@ packages:
                 clock.System.
               name: Clock
               type: clock.Clock
-      - doc: |-
+      - decl: true
+        doc: |-
           PasetoVerifierConfig configures a PASETO v4.public verifier.
 
           Like its issuing counterpart it is flat rather than an embedded
@@ -1500,7 +1503,8 @@ packages:
                 clock.System; a clock.ManualClock makes an expiry test deterministic.
               name: Clock
               type: clock.Clock
-      - doc: |-
+      - decl: true
+        doc: |-
           VerifierConfig configures a JWT verifier.
 
           The zero value is usable and strict: it requires an expiry, allows no clock

@@ -4,10 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
-	"sync"
 	"time"
 
-	corelock "github.com/kitsunium/sdk/internal/core/app/lock"
 	coresecret "github.com/kitsunium/sdk/internal/core/security/secret"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -25,26 +23,6 @@ const minRandomBytes int = 16
 
 // rotateLockPrefix namespaces the lock a rotator takes when it is given one.
 const rotateLockPrefix string = "kitsunium/secret-rotate/"
-
-// PolicySpec says how often a secret rotates, how many versions survive a
-// rotation, and how a new version is made. Every field is required; NewRotator
-// refuses the zero value of each, because none of them has a default the SDK
-// could choose on a caller's behalf (ADR 0031). pkg/v1/security/secret aliases it as
-// Policy.
-type PolicySpec struct {
-	// Every is the rotation interval, measured from the current version's
-	// Created. It must be positive.
-	Every time.Duration
-	// Keep is how many versions a rotation leaves, the new one included. It
-	// must be at least 2, so the version a rotation replaces still opens what
-	// it sealed; set it to cover the longest-lived box or signature in
-	// flight, divided by Every, plus one.
-	Keep int
-	// Generate makes a new version. [Random] is the generator for keys and
-	// tokens. An error or an empty value aborts the rotation with
-	// [coresecret.GenerateFailed]; nothing is stored and nothing is pruned.
-	Generate func() (coresecret.Value, error)
-}
 
 // Random returns a generator of n bytes from crypto/rand — the one a Keyring's
 // versions need with n = 32. An n below 16 bytes yields a generator that
@@ -69,76 +47,6 @@ func Random(n int) func() (coresecret.Value, error) {
 		//: NewValue copies, so the buffer can be cleared.
 		return coresecret.NewValue(raw), nil
 	}
-}
-
-// RotatorConfig parameterises [NewRotator]: the secret to rotate, where it
-// lives, the policy, and the three optional collaborators — a clock, a
-// cross-process lock, and a callback told of every rotation.
-type RotatorConfig struct {
-	// Store holds the secret. Required. A read-only store is accepted and
-	// every write it refuses surfaces as core/security/secret.ReadOnly.
-	Store coresecret.Store
-	// Name is the secret to rotate. Required.
-	Name string
-	// Policy is the schedule, the retention and the generator. Required.
-	Policy PolicySpec
-	// Clock decides when a rotation is due and paces Run. nil means
-	// clock.System. A test drives the rotator with a clock.ManualClock — the
-	// same one its store stamps Created with, so both read one timeline.
-	Clock clock.Timed
-	// Locker, when set, serialises rotations of this secret ACROSS PROCESSES:
-	// Ensure, Rotate and RotateIfDue take its lock, re-read the current
-	// version, and only then decide. Without it, two replicas sharing a file
-	// store can both find a rotation due and both perform it — nothing breaks,
-	// since both versions are kept keys, but a rotation is wasted and Keep
-	// counts it. One process needs no Locker: the rotator serialises its own
-	// calls.
-	Locker corelock.Locker
-	// OnRotate, when set, is told of every rotation this rotator performs,
-	// with the version it created. It runs on the rotating goroutine after
-	// the version is stored, the old ones pruned and every lock released, so
-	// it may call back into the rotator. Ensure creating the first version is
-	// not a rotation and does not call it.
-	OnRotate func(rotated coresecret.VersionValue)
-	// InUse, when set, reports the OLDEST version something still needs — for
-	// the root of a SubjectKeys, the oldest version a data key is still
-	// wrapped under: [SubjectKeys.OldestRoot] — or 0 when nothing does. A
-	// rotation then prunes no version at or above it, whatever Policy.Keep
-	// says: Keep becomes a floor, and the store holds more versions until the
-	// dependants move on (SubjectKeys.Rewrap). It is asked after the new
-	// version is stored and before the prune. Its error is returned as it is
-	// and nothing is pruned — the rotation happened, and the next one prunes
-	// again — because a version pruned while still needed destroys whatever
-	// depends on it, and no later call can bring it back.
-	InUse func(ctx context.Context) (oldest int, err error)
-}
-
-// Rotator mints new versions of one secret according to a [PolicySpec].
-//
-// It starts no goroutine. [Rotator.RotateIfDue] is one decision a caller can
-// drive from anything — a scheduler, a request, a start-up hook — and
-// [Rotator.Run] is the loop for a caller that wants one: it blocks on the
-// caller's goroutine, sleeps on the injected clock until the next rotation is
-// due, and returns when its context ends, so the caller that started it is the
-// one that joins it.
-type Rotator struct {
-	// store holds the secret.
-	store coresecret.Store
-	// name is the secret.
-	name string
-	// policy is validated.
-	policy PolicySpec
-	// clk decides and waits.
-	clk clock.Timed
-	// locker is nil unless cross-process serialisation was asked for.
-	locker corelock.Locker
-	// onRotate is nil unless a caller wants to be told.
-	onRotate func(rotated coresecret.VersionValue)
-	// inUse is nil unless something depends on versions a prune could take.
-	inUse func(ctx context.Context) (oldest int, err error)
-	// mu serialises this rotator's own decisions, so two goroutines of one
-	// process cannot both rotate one due secret.
-	mu sync.Mutex
 }
 
 // NewRotator validates cfg and returns a rotator. It refuses a nil store, a

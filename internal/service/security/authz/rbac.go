@@ -7,17 +7,6 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// PermissionValue is one (action, resource) pair a role confers. Both halves
-// are compared by byte equality: there is no wildcard, no prefix and no
-// separator the SDK knows about.
-type PermissionValue struct {
-	// Action is the verb, spelled exactly as the request will spell it.
-	Action string
-	// Resource is the KIND of thing — "article", not "article/42". Instance
-	// facts belong in the request's attributes, where an ABAC rule reads them.
-	Resource string
-}
-
 // NewRBAC builds a role-based [coreauthz.Policy] over a fixed grant table.
 //
 // # It returns Allow or Abstain, and almost never Deny

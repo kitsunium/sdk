@@ -84581,7 +84581,7 @@
         }
       ],
       "doc": "GrantValue binds one role to the permissions it confers. The role name is\nthe application's vocabulary and the SDK attaches no meaning to it: \"admin\"\nis a string like any other, and nothing here believes it is special.\n",
-      "file": "internal/service/security/authz/grant_value.go",
+      "file": "internal/service/security/authz/decl_gen.go",
       "layer": "service",
       "family": "security"
     },
@@ -84665,7 +84665,7 @@
         }
       ],
       "doc": "PermissionValue is one (action, resource) pair a role confers. Both halves\nare compared by byte equality: there is no wildcard, no prefix and no\nseparator the SDK knows about.\n",
-      "file": "internal/service/security/authz/rbac.go",
+      "file": "internal/service/security/authz/decl_gen.go",
       "layer": "service",
       "family": "security"
     },
@@ -84689,7 +84689,7 @@
         }
       ],
       "doc": "RBACConfig configures [NewRBAC]: which request attribute carries the\nsubject's roles, and what each role confers.\n\nNeither member has a default and both are refused when empty, so a policy\nthis package hands back can always answer the question it was built for. A\ngrant table is data the CALLER writes — there is no file format for it and\nno parser, because a rule set is a Go value in this domain (ADR 0057 §D1).\n",
-      "file": "internal/service/security/authz/rbac_config.go",
+      "file": "internal/service/security/authz/decl_gen.go",
       "layer": "service",
       "family": "security"
     },
@@ -84728,7 +84728,7 @@
         }
       ],
       "doc": "RuleValue is one attribute rule: which requests it is about, what it decides\nwhen it fires, and the condition under which it fires.\n",
-      "file": "internal/service/security/authz/abac.go",
+      "file": "internal/service/security/authz/decl_gen.go",
       "layer": "service",
       "family": "security"
     },
@@ -84762,7 +84762,7 @@
         }
       ],
       "doc": "Config says what a Redactor treats as secret. Its zero value is usable:\nthe default words, the \"redact\" tag, no extra field rule, errors rendered\nby their own text.\n",
-      "file": "internal/service/security/redact/redact.go",
+      "file": "internal/service/security/redact/decl_gen.go",
       "layer": "service",
       "family": "security"
     },
@@ -84798,7 +84798,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Redactor applies one Config. It is safe for concurrent use, and it caches\nwhat it learns about each Go type — which of its fields are secret — for\nits own lifetime, so build one per configuration and keep it.\n",
-      "file": "internal/service/security/redact/redact.go",
+      "file": "internal/service/security/redact/decl_gen.go",
       "layer": "service",
       "family": "security"
     },
@@ -84882,7 +84882,7 @@
         }
       ],
       "doc": "EnvConfig parameterises [NewEnv].\n",
-      "file": "internal/service/security/secret/env.go",
+      "file": "internal/service/security/secret/decl_gen.go",
       "layer": "service",
       "family": "security"
     },
@@ -84911,7 +84911,7 @@
         }
       ],
       "doc": "FileConfig parameterises [NewFile].\n\nIts zero value is deliberately NOT a working store: Dir must be stated,\nbecause the directory IS the store, and a default one — the working\ndirectory, the temporary directory — would put secrets wherever the process\nhappened to start, readable by whoever else uses that place.\n",
-      "file": "internal/service/security/secret/file_config.go",
+      "file": "internal/service/security/secret/decl_gen.go",
       "layer": "service",
       "family": "security"
     },
@@ -84935,7 +84935,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Keyring sees the versions of ONE secret as keys, so a rotation never breaks\nwhat was sealed or signed before it:\n\n  - the NEWEST version seals and signs;\n  - EVERY kept version still opens and verifies, because each box and each\n    signature carries the number of the version that made it;\n  - a version stops opening only when it is pruned — the only way to retire\n    a key, and the one a rotation's Keep decides.\n\nA version is key material and must be exactly one crypto.Key long (derived\nfrom corecrypto.KeyLen). Generate the versions with Random(corecrypto.KeyLen);\na password stored under a keyring's\nname is refused with [coresecret.KeyMaterialInvalid] rather than stretched, because\nstretching would hide that it was never random. Each version is split by\nHKDF-SHA256 into an AES-256-GCM key and an HMAC-SHA256 key, so sealing and\nsigning never share a key — and, for the subject keys a keyring is the root\nof (ADR 0142), into a third key that wraps them, which Seal never uses.\n\nA box is [0x01][version, 4 bytes big-endian][crypto box]; a signature is\n[0x01][version][32-byte tag]. The version is not secret — it names a key,\nand anyone holding a box can read it.\n\nIt holds no state but the store and the name, reads the store on every\ncall, and is safe for concurrent use.\n",
-      "file": "internal/service/security/secret/keyring.go",
+      "file": "internal/service/security/secret/decl_gen.go",
       "layer": "service",
       "family": "security"
     },
@@ -85006,7 +85006,7 @@
         }
       ],
       "doc": "MemoryConfig parameterises [NewMemory]. Its zero value is a working store.\n",
-      "file": "internal/service/security/secret/memory.go",
+      "file": "internal/service/security/secret/decl_gen.go",
       "layer": "service",
       "family": "security"
     },
@@ -85119,7 +85119,7 @@
         }
       ],
       "doc": "PolicySpec says how often a secret rotates, how many versions survive a\nrotation, and how a new version is made. Every field is required; NewRotator\nrefuses the zero value of each, because none of them has a default the SDK\ncould choose on a caller's behalf (ADR 0031). pkg/v1/security/secret aliases it as\nPolicy.\n",
-      "file": "internal/service/security/secret/rotator.go",
+      "file": "internal/service/security/secret/decl_gen.go",
       "layer": "service",
       "family": "security"
     },
@@ -85170,7 +85170,7 @@
         }
       ],
       "doc": "RewrapValue reports what one [SubjectKeys.Rewrap] pass did, key by key.\n\npkg/v1/security/secret aliases it as RewrapReport.\n",
-      "file": "internal/service/security/secret/subjectrewrap.go",
+      "file": "internal/service/security/secret/decl_gen.go",
       "layer": "service",
       "family": "security"
     },
@@ -85182,7 +85182,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Rotator mints new versions of one secret according to a [PolicySpec].\n\nIt starts no goroutine. [Rotator.RotateIfDue] is one decision a caller can\ndrive from anything — a scheduler, a request, a start-up hook — and\n[Rotator.Run] is the loop for a caller that wants one: it blocks on the\ncaller's goroutine, sleeps on the injected clock until the next rotation is\ndue, and returns when its context ends, so the caller that started it is the\none that joins it.\n",
-      "file": "internal/service/security/secret/rotator.go",
+      "file": "internal/service/security/secret/decl_gen.go",
       "layer": "service",
       "family": "security"
     },
@@ -85296,7 +85296,7 @@
         }
       ],
       "doc": "RotatorConfig parameterises [NewRotator]: the secret to rotate, where it\nlives, the policy, and the three optional collaborators — a clock, a\ncross-process lock, and a callback told of every rotation.\n",
-      "file": "internal/service/security/secret/rotator.go",
+      "file": "internal/service/security/secret/decl_gen.go",
       "layer": "service",
       "family": "security"
     },
@@ -85308,7 +85308,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "SubjectKeys keeps one data key per subject — a person, a tenant, a record,\nwhatever the caller files keys under — and seals and opens under it:\n\n  - a data key is 32 bytes from crypto/rand, made by the first Seal for its\n    subject, wrapped under the root keyring's newest version, bound to its\n    subject, and filed in the store;\n  - a box names its subject and the identifier of the key that sealed it,\n    and is bound to whatever the caller passes as binding — where the value\n    lies — so a box moved elsewhere does not open;\n  - [SubjectKeys.Destroy] deletes a subject's key: every box sealed under\n    it, wherever it was copied, stops opening. NIST SP 800-88r2 calls this a\n    cryptographic erase;\n  - a rotation of the root re-wraps one small key per subject\n    ([SubjectKeys.Rewrap]) and never touches a box.\n\nIt is safe for concurrent use.\n",
-      "file": "internal/service/security/secret/subjectkeys.go",
+      "file": "internal/service/security/secret/decl_gen.go",
       "layer": "service",
       "family": "security"
     },
@@ -85412,7 +85412,7 @@
         }
       ],
       "doc": "SubjectKeysConfig parameterises [NewSubjectKeys]: the root that wraps every\ndata key, the store that keeps them, and how many opened keys this process\nmay keep, for how long.\n",
-      "file": "internal/service/security/secret/subjectkeys.go",
+      "file": "internal/service/security/secret/decl_gen.go",
       "layer": "service",
       "family": "security"
     },
@@ -85453,7 +85453,7 @@
         }
       ],
       "doc": "Config configures a store's two deadlines and its clock.\n\n# Both timeouts are required, and 0 is refused\n\nADR 0031: a policy constructor never returns an inert policy. A zero timeout\nread as \"expires immediately\" would produce a store in which every session is\nalready dead — a login loop with no error message anywhere, which is the\nworst possible way to present a misconfiguration. There is also no default\nthe SDK could supply without inventing the caller's security requirement: how\nlong a session may idle, and how long it may live at all, are the whole\ncontent of a session policy. So both are refused when non-positive, with\nInvalidConfig naming the field.\n\n# The idle window must be SHORTER than the absolute ceiling\n\nThe effective deadline is always the earlier of the two. An idle window equal\nto or longer than the absolute ceiling can therefore never be the earlier\none: it would never bite, and the caller would believe they had configured a\nsliding expiry they do not have. That is the same inert-policy failure ADR\n0031 describes, so it is refused at construction rather than accepted and\nignored.\n",
-      "file": "internal/service/security/session/config.go",
+      "file": "internal/service/security/session/decl_gen.go",
       "layer": "service",
       "family": "security"
     },
@@ -85510,7 +85510,7 @@
         }
       ],
       "doc": "FileConfig configures the on-disk store. The two timeouts and the clock mean\nexactly what they mean in [Config] — the fields are repeated rather than\nembedded so a call site reads as one flat literal — and Dir and Key are the\ntwo things only a persistent store needs.\n\nKey is REQUIRED and has no default. Every record is sealed with it before it\ntouches the disk, so a store built without one would write session contents\nin plain text next to a filename an operator can list. There is no value the\nSDK could invent here: a key it generated would be lost on restart, taking\nevery session with it, and a key derived from the directory name would not be\na key at all.\n",
-      "file": "internal/service/security/session/file_config.go",
+      "file": "internal/service/security/session/decl_gen.go",
       "layer": "service",
       "family": "security"
     },
@@ -85629,7 +85629,7 @@
         }
       ],
       "doc": "IssuerConfig configures a JWT issuer.\n\nThe zero value is usable and safe: it stamps \"iat\", requires the caller to\nsupply an expiry, and refuses to mint a token that would never expire.\n",
-      "file": "internal/service/security/token/issuer_config.go",
+      "file": "internal/service/security/token/decl_gen.go",
       "layer": "service",
       "family": "security"
     },
@@ -85858,7 +85858,7 @@
         }
       ],
       "doc": "PasetoIssuerConfig configures a PASETO v4.public issuer.\n\nIt is a flat struct rather than an [IssuerConfig] plus two extras, and the\nmissing fields are the point: PASETO has no header parameters, so there is\nnothing for Type or KeyID to set. Embedding the JWS config would have\npublished two knobs this format silently ignores, and a configuration field\nthat does nothing is a bug waiting for somebody to set it. The equivalent of\na \"kid\" here is [PasetoIssuerConfig.Footer], which the signature covers.\n\nThe zero value is usable and safe: it stamps \"iat\", requires the caller to\nsupply an expiry, and refuses to mint a token that would never expire.\n",
-      "file": "internal/service/security/token/paseto_issuer_config.go",
+      "file": "internal/service/security/token/decl_gen.go",
       "layer": "service",
       "family": "security"
     },
@@ -85922,7 +85922,7 @@
         }
       ],
       "doc": "PasetoVerifierConfig configures a PASETO v4.public verifier.\n\nLike its issuing counterpart it is flat rather than an embedded\n[VerifierConfig], and the absent knobs are deliberate: PASETO has no \"typ\"\nto require and no \"kid\" to select on, so RequireType and MaxKeyCandidates\nwould be fields this format ignores.\n\nThe zero value is usable and strict: it requires an expiry, allows no clock\nskew, checks no issuer or audience, expects no footer, and applies the\ndefault bounds.\n",
-      "file": "internal/service/security/token/paseto_verifier_config.go",
+      "file": "internal/service/security/token/decl_gen.go",
       "layer": "service",
       "family": "security"
     },
@@ -85986,7 +85986,7 @@
         }
       ],
       "doc": "VerifierConfig configures a JWT verifier.\n\nThe zero value is usable and strict: it requires an expiry, allows no clock\nskew, checks no issuer or audience (there is none to check against), and\napplies the default bounds.\n",
-      "file": "internal/service/security/token/verifier_config.go",
+      "file": "internal/service/security/token/decl_gen.go",
       "layer": "service",
       "family": "security"
     },

@@ -262,7 +262,8 @@ packages:
       coreredact: github.com/kitsunium/sdk/internal/core/security/redact
     path: github.com/kitsunium/sdk/internal/service/security/redact
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Config says what a Redactor treats as secret. Its zero value is usable:
           the default words, the "redact" tag, no extra field rule, errors rendered
           by their own text.
@@ -295,10 +296,13 @@ packages:
                 redactor that recognises nothing by name is a formatter.
               name: Words
               type: "[]string"
-      - doc: |-
+      - decl: true
+        doc: |-
           Redactor applies one Config. It is safe for concurrent use, and it caches
           what it learns about each Go type — which of its fields are secret — for
           its own lifetime, so build one per configuration and keep it.
+        implements:
+          - coreredact.Redactor
         methods:
           - doc: |-
               Attrs renders log attributes as display text, one (key, text) pair at a
@@ -403,7 +407,18 @@ packages:
             recv: pointer
         name: Redactor
         struct:
-          unexported: true
+          fields:
+            - name: field
+              type: func(field reflect.StructField) bool
+            - name: error
+              type: func(err error) string
+            - comment: reflect.Type → *plan
+              name: plans
+              type: sync.Map
+            - name: tag
+              type: string
+            - name: words
+              type: "[]string"
   - doc: |-
       Package redact renders values, JSON documents, text and log attributes for
       DISPLAY with their secrets replaced, within a byte bound, never touching

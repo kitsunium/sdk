@@ -49,8 +49,8 @@ exactly as trustworthy as the key itself.
 | File | Surface |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `IssuerConfig`, `PasetoIssuerConfig`, `PasetoVerifierConfig` and `VerifierConfig` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `token.go` | the shared bounds (`DefaultMaxTokenLen`, `MaxTokenLenCeiling`, `DefaultMaxClaimDepth`, `MaxKeyCandidatesCeiling`, `MaxLeeway`) |
-| `issuer_config.go` / `verifier_config.go` | `IssuerConfig` / `VerifierConfig` |
 | `paseto_issuer_config.go` / `paseto_verifier_config.go` | the FLAT PASETO configs + their projections onto the shared policy |
 | `policy.go` / `bounds_value.go` | `policyValue` — the validated, defaults-applied verification policy |
 | `validate.go` | the shared post-authentication claim checks + `stampIssuedClaims` |

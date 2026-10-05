@@ -66,37 +66,6 @@ const (
 // bytes, and a box's version cannot be edited in its header.
 const bindingPrefix string = "kitsunium/secret keyring v1\x00"
 
-// Keyring sees the versions of ONE secret as keys, so a rotation never breaks
-// what was sealed or signed before it:
-//
-//   - the NEWEST version seals and signs;
-//   - EVERY kept version still opens and verifies, because each box and each
-//     signature carries the number of the version that made it;
-//   - a version stops opening only when it is pruned — the only way to retire
-//     a key, and the one a rotation's Keep decides.
-//
-// A version is key material and must be exactly one crypto.Key long (derived
-// from corecrypto.KeyLen). Generate the versions with Random(corecrypto.KeyLen);
-// a password stored under a keyring's
-// name is refused with [coresecret.KeyMaterialInvalid] rather than stretched, because
-// stretching would hide that it was never random. Each version is split by
-// HKDF-SHA256 into an AES-256-GCM key and an HMAC-SHA256 key, so sealing and
-// signing never share a key — and, for the subject keys a keyring is the root
-// of (ADR 0142), into a third key that wraps them, which Seal never uses.
-//
-// A box is [0x01][version, 4 bytes big-endian][crypto box]; a signature is
-// [0x01][version][32-byte tag]. The version is not secret — it names a key,
-// and anyone holding a box can read it.
-//
-// It holds no state but the store and the name, reads the store on every
-// call, and is safe for concurrent use.
-type Keyring struct {
-	// store holds the versions.
-	store coresecret.Store
-	// name is the secret whose versions are the keys.
-	name string
-}
-
 // NewKeyring returns the keyring over the versions of name in store. It
 // refuses a nil store and a malformed name at construction; it does not
 // require the secret to exist yet — a Rotator's Ensure, or any Put, creates

@@ -8,30 +8,6 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// RewrapValue reports what one [SubjectKeys.Rewrap] pass did, key by key.
-//
-// pkg/v1/security/secret aliases it as RewrapReport.
-type RewrapValue struct {
-	// Root is the root version the pass wrapped under: the newest it read.
-	Root int
-	// Current counts the keys already wrapped under Root, each opened to
-	// prove it, and the keys a later rotation already wrapped under a newer
-	// version, which the next pass checks.
-	Current int
-	// Rewrapped counts the keys the pass moved to Root.
-	Rewrapped int
-	// Skipped counts the keys destroyed, or re-wrapped by another writer,
-	// while the pass ran. They are left as they are: a re-wrap never brings
-	// back a destroyed key.
-	Skipped int
-	// Unreadable counts the keys that did not unwrap as one data key —
-	// wrapped under a version no longer kept, under another root secret or
-	// for another purpose, altered, or not one key long — and the entries
-	// whose subject is outside the grammar. They are left as they are, and
-	// the pass returns [coresecret.SubjectKeyUnreadable].
-	Unreadable int
-}
-
 // rewrapOutcome is what the pass did with one key.
 type rewrapOutcome uint8
 

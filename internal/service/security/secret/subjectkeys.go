@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
-	"time"
 
 	corecrypto "github.com/kitsunium/sdk/internal/core/crypto"
 	coresecret "github.com/kitsunium/sdk/internal/core/security/secret"
@@ -27,56 +26,6 @@ const (
 	// subjectIDLabel derives the identifier every such box carries.
 	subjectIDLabel string = "kitsunium/secret subject id v1\x00"
 )
-
-// SubjectKeysConfig parameterises [NewSubjectKeys]: the root that wraps every
-// data key, the store that keeps them, and how many opened keys this process
-// may keep, for how long.
-type SubjectKeysConfig struct {
-	// Root wraps every data key: a Keyring over the root secret. Its newest
-	// version wraps each new key and every kept version unwraps, so a
-	// rotation breaks nothing; [SubjectKeys.Rewrap] moves every key to the
-	// newest version, and RotatorConfig.InUse keeps a version from being
-	// pruned while a key is still wrapped under it. Required.
-	Root *Keyring
-	// Store keeps the wrapped keys, one per subject. Required.
-	Store coresecret.SubjectKeyStore
-	// CacheSize is how many opened keys this process keeps, the least
-	// recently used evicted first. Zero keeps none: every Seal and Open
-	// reads the store and unwraps. Negative is refused.
-	CacheSize int
-	// CacheTTL is how long an opened key stays cached. It is required with a
-	// cache and refused without one, because it is a promise about erasure: a
-	// key another PROCESS destroyed keeps opening — and sealing — here for up
-	// to CacheTTL. A key destroyed through this value leaves its cache at once.
-	CacheTTL time.Duration
-	// Clock times the cache. nil means clock.System.
-	Clock clock.Clock
-}
-
-// SubjectKeys keeps one data key per subject — a person, a tenant, a record,
-// whatever the caller files keys under — and seals and opens under it:
-//
-//   - a data key is 32 bytes from crypto/rand, made by the first Seal for its
-//     subject, wrapped under the root keyring's newest version, bound to its
-//     subject, and filed in the store;
-//   - a box names its subject and the identifier of the key that sealed it,
-//     and is bound to whatever the caller passes as binding — where the value
-//     lies — so a box moved elsewhere does not open;
-//   - [SubjectKeys.Destroy] deletes a subject's key: every box sealed under
-//     it, wherever it was copied, stops opening. NIST SP 800-88r2 calls this a
-//     cryptographic erase;
-//   - a rotation of the root re-wraps one small key per subject
-//     ([SubjectKeys.Rewrap]) and never touches a box.
-//
-// It is safe for concurrent use.
-type SubjectKeys struct {
-	// root wraps and unwraps every data key.
-	root *Keyring
-	// store keeps them.
-	store coresecret.SubjectKeyStore
-	// cache keeps opened keys for a bounded time.
-	cache *keyCache
-}
 
 // NewSubjectKeys validates cfg and returns the engine. It refuses a nil root,
 // a nil store, a negative cache size, a cache without a CacheTTL and a

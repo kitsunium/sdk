@@ -23,6 +23,7 @@ exactly as ADR 0018 §(a) prescribes.
 | File | Surface |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `Config` and `FileConfig` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `session.go` | `wrapAs` (origin-wins sentinel + cause as a field) + the `aesgcm` blank import |
 | `config.go` | `Config` (memory) + `validateWindow` — the shared ADR 0031 refusals |
 | `file_config.go` | `FileConfig` (+ `Dir`, `Key`) + its `validate` |

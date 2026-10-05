@@ -1237,7 +1237,8 @@ packages:
       coresession: github.com/kitsunium/sdk/internal/core/security/session
     path: github.com/kitsunium/sdk/internal/service/security/session
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Config configures a store's two deadlines and its clock.
 
           # Both timeouts are required, and 0 is refused
@@ -1279,7 +1280,8 @@ packages:
                 instant, which is why no test in this package sleeps.
               name: Clock
               type: clock.Clock
-      - doc: |-
+      - decl: true
+        doc: |-
           FileConfig configures the on-disk store. The two timeouts and the clock mean
           exactly what they mean in [Config] — the fields are repeated rather than
           embedded so a call site reads as one flat literal — and Dir and Key are the

@@ -1,10 +1,8 @@
 package redact
 
 import (
-	"reflect"
 	"slices"
 	"strings"
-	"sync"
 
 	coreredact "github.com/kitsunium/sdk/internal/core/security/redact"
 )
@@ -29,41 +27,6 @@ var defaultWords = []string{
 func DefaultWords() []string {
 	//: a copy: the package's own list is never handed out.
 	return slices.Clone(defaultWords)
-}
-
-// Config says what a Redactor treats as secret. Its zero value is usable:
-// the default words, the "redact" tag, no extra field rule, errors rendered
-// by their own text.
-type Config struct {
-	// Field is an extra rule: it reports whether a struct field is secret
-	// by declaration, beyond the tag — a field bound to a cookie, a field
-	// bound to a header whose name is a secret's. Nil adds nothing. It is
-	// called once per field per type, when the type is first seen.
-	Field func(field reflect.StructField) bool
-	// Error renders an error found in a log attribute. Nil uses the error's
-	// own text, scrubbed and cut like any other text. A framework that
-	// shows only an error's wire-safe half passes its own.
-	Error func(err error) string
-	// Tag is the struct tag key whose comma-separated options, when one of
-	// them is "secret", declare a field secret: Tag "kit" reads
-	// `kit:"secret"` and `kit:"other,secret"`. Empty means "redact".
-	Tag string
-	// Words are the fragments of a member or attribute name that make it a
-	// secret, matched case-insensitively anywhere in the name. Nil or empty
-	// means DefaultWords — there is no way to recognise NO name, because a
-	// redactor that recognises nothing by name is a formatter.
-	Words []string
-}
-
-// Redactor applies one Config. It is safe for concurrent use, and it caches
-// what it learns about each Go type — which of its fields are secret — for
-// its own lifetime, so build one per configuration and keep it.
-type Redactor struct {
-	field func(field reflect.StructField) bool
-	error func(err error) string
-	plans sync.Map // reflect.Type → *plan
-	tag   string
-	words []string
 }
 
 // NewRedactor returns a Redactor applying cfg.
