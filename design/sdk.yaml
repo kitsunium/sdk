@@ -18,7 +18,7 @@ project:
   # refuses the project under any other kit, by name, and `make regen`
   # (scripts/regen.sh) refuses to run one. No part of the design's digest.
   kit:
-    version: v0.1.0-rc.7
+    version: v0.1.0-rc.8
   surface: closed
   # Every doc comment is the design's (ADR 0167): kit gen writes each doc
   # slot of a designed declaration and each package's doc.go.
