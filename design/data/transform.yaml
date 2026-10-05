@@ -425,6 +425,7 @@ packages:
           - name: level
             type: int
         name: NewZlibCompressor
+        impl: newZlibCompressor
         out:
           - type: coretransform.Compressor
     imports:

@@ -68,14 +68,9 @@ func New() codec.Codec {
 	return Codec
 }
 
-// NewWithEscape returns a fresh CSV codec with the formula-injection
-// mitigation toggled on or off. Use this constructor when the encoded
-// output will be opened in a spreadsheet app (Excel, LibreOffice,
-// Google Sheets): without the mitigation an attacker-influenced cell
-// starting with "=" evaluates as a formula at open time, which is
-// OWASP CSV Injection (CWE-1236). The returned codec is not registered
-// with the core/data/codec singleton registry.
-func NewWithEscape(escape bool) codec.Codec {
+// newWithEscape is NewWithEscape's body: decl_gen.go writes NewWithEscape, from the
+// design, as one call of it.
+func newWithEscape(escape bool) codec.Codec {
 	//: fresh instance so callers who want the mitigation do not affect the
 	//: registered singleton or any other consumer.
 	return &csvCodec{escapeFormulas: escape}

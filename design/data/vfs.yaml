@@ -628,6 +628,7 @@ packages:
           before it can assert anything, and the value of this type is that a test
           double costs one line.
         name: NewMem
+        impl: newMem
         out:
           - type: corevfs.FullFS
       - doc: |-

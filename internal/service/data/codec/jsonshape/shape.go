@@ -42,17 +42,16 @@ func (k Kind) String() string {
 	return kindNames[k]
 }
 
-// MarshalText writes the kind's name, so a shape encodes as readable JSON.
-func (k Kind) MarshalText() ([]byte, error) {
+// marshalText is Kind.MarshalText's body: decl_gen.go writes Kind.MarshalText, from the
+// design, as one call of it.
+func (k Kind) marshalText() ([]byte, error) {
 	//: the name, as text.
 	return []byte(k.String()), nil
 }
 
-// Of describes the values of t on the wire. A nil t — the type of a nil
-// interface — is Any. Of never fails: what encoding/json refuses is described
-// as Unsupported where it occurs. Every call returns a new tree, which the
-// caller may keep and change.
-func Of(t reflect.Type) *ShapeValue {
+// of is Of's body: decl_gen.go writes Of, from the
+// design, as one call of it.
+func of(t reflect.Type) *ShapeValue {
 	//: a fresh walk: nothing on its path yet.
 	return newWalker().shape(t, false)
 }

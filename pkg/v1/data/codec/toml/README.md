@@ -126,7 +126,7 @@ type LocalDate struct {
 ```
 
 <a name="LocalDate.AsTime"></a>
-### func \(LocalDate\) [AsTime](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/toml/localtime.go>)
+### func \(LocalDate\) [AsTime](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/toml/decl_gen.go>)
 
 ```go
 func (LocalDate) AsTime(zone *time.Location) time.Time
@@ -135,7 +135,7 @@ func (LocalDate) AsTime(zone *time.Location) time.Time
 AsTime returns the day at midnight in zone.
 
 <a name="LocalDate.MarshalText"></a>
-### func \(LocalDate\) [MarshalText](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/toml/localtime.go>)
+### func \(LocalDate\) [MarshalText](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/toml/decl_gen.go>)
 
 ```go
 func (LocalDate) MarshalText() ([]byte, error)
@@ -189,7 +189,7 @@ func (LocalDateTime) AsTime(zone *time.Location) time.Time
 AsTime returns the date-time in zone.
 
 <a name="LocalDateTime.MarshalText"></a>
-### func \(LocalDateTime\) [MarshalText](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/toml/localtime.go>)
+### func \(LocalDateTime\) [MarshalText](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/toml/decl_gen.go>)
 
 ```go
 func (LocalDateTime) MarshalText() ([]byte, error)
@@ -244,7 +244,7 @@ type LocalTime struct {
 ```
 
 <a name="LocalTime.MarshalText"></a>
-### func \(LocalTime\) [MarshalText](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/toml/localtime.go>)
+### func \(LocalTime\) [MarshalText](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/toml/decl_gen.go>)
 
 ```go
 func (LocalTime) MarshalText() ([]byte, error)

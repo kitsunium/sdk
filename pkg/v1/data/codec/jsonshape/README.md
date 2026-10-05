@@ -208,7 +208,7 @@ type Kind uint8
 ```
 
 <a name="Kind.MarshalText"></a>
-### func \(Kind\) [MarshalText](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/jsonshape/shape.go>)
+### func \(Kind\) [MarshalText](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/jsonshape/decl_gen.go>)
 
 ```go
 func (Kind) MarshalText() ([]byte, error)

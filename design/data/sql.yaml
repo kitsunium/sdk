@@ -1317,6 +1317,7 @@ packages:
           - name: table
             type: string
         name: FileLockSQL
+        impl: fileLockSQL
         out:
           - type: string
       - doc: |-
@@ -1403,6 +1404,7 @@ packages:
           - name: cause
             type: error
         name: NewWithheld
+        impl: newWithheld
         out:
           - type: Withheld
     imports:
@@ -1569,6 +1571,7 @@ packages:
             recv: value
           - doc: Unwrap hands errors.Is and errors.As the driver's own error.
             name: Unwrap
+            impl: unwrap
             out:
               - type: error
             recv: value

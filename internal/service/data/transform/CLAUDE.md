@@ -52,6 +52,7 @@ refactor that quietly turned one into the other would fail rather than ship.
 
 | File | Surface |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declaration of ; `NewZlibCompressor`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
 | `gzip.go`    | `GzipCompressor` singleton + `gzipCompressor` (Algorithm "gzip") |
 | `flate.go`   | `FlateCompressor` singleton + `flateCompressor` (Algorithm "flate") |
 | `zlib.go`    | `ZlibCompressor` singleton + `NewZlibCompressor(level)` + `zlibCompressor` (Algorithm "zlib") |

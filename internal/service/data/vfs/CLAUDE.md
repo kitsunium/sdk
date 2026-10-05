@@ -17,6 +17,7 @@ package declares no code and restates them in its wrap helpers.
 | File | What lives there |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declaration of ; `NewMem`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
 | `vfs.go` | `verdict`, and the `failRead` / `failWrite` / `failPublish` wrap helpers |
 | `os.go` | `NewOS`, the read half (delegating to `os.Root`), the write guards, and `Close` — `io.Closer` by type assertion (ADR 0039), releasing the root's descriptor rather than waiting for `os.Root`'s finalizer |
 | `os_write.go` | `WriteFile`, `MkdirAll`, `Remove`, `RemoveAll` — the non-atomic verbs |

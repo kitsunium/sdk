@@ -43,13 +43,9 @@ type memFS struct {
 	nodes map[string]*memNode
 }
 
-// NewMem returns an empty in-memory filesystem containing only its root.
-//
-// It takes no arguments on purpose. Every knob it could offer — a clock, a
-// size cap, a starting tree — would be a knob a consumer's test has to set
-// before it can assert anything, and the value of this type is that a test
-// double costs one line.
-func NewMem() corevfs.FullFS {
+// newMem is NewMem's body: decl_gen.go writes NewMem, from the
+// design, as one call of it.
+func newMem() corevfs.FullFS {
 	//: the root exists from the start, so an empty filesystem is still
 	//: walkable and fs.WalkDir(fsys, ".") does not fail on line one.
 	return &memFS{nodes: map[string]*memNode{

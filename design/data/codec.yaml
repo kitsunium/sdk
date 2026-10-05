@@ -382,6 +382,7 @@ packages:
           - name: t
             type: reflect.Type
         name: Of
+        impl: of
         out:
           - type: "*ShapeValue"
       - doc: "For describes the values of T on the wire: Of(reflect.TypeFor[T]())."
@@ -403,6 +404,7 @@ packages:
             recv: value
           - doc: MarshalText writes the kind's name, so a shape encodes as readable JSON.
             name: MarshalText
+            impl: marshalText
             out:
               - type: "[]byte"
               - type: error

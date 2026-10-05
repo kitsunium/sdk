@@ -74909,7 +74909,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "IsZero reports whether b is the empty generic binary — what omitempty\nleaves out.\n",
-      "file": "internal/service/data/codec/bson/types.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75150,7 +75150,7 @@
       "spelled": "func(other DBPointer) bool",
       "canonical": "func(other github.com/kitsunium/sdk/internal/service/data/codec/bson.DBPointer) bool",
       "doc": "Equal reports whether p and other name the same namespace and identifier.\n",
-      "file": "internal/service/data/codec/bson/types.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75163,7 +75163,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "IsZero reports whether p is the empty pointer — what omitempty leaves out.\n",
-      "file": "internal/service/data/codec/bson/types.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75214,7 +75214,7 @@
       "spelled": "func() time.Time",
       "canonical": "func() time.Time",
       "doc": "Time returns the instant dt denotes, in the local time zone; call UTC on it\nfor the zone BSON stores.\n",
-      "file": "internal/service/data/codec/bson/types.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75252,7 +75252,7 @@
       "spelled": "func() (high uint64, low uint64)",
       "canonical": "func() (high uint64, low uint64)",
       "doc": "GetBytes returns the two halves NewDecimal128 takes.\n",
-      "file": "internal/service/data/codec/bson/decimal.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75278,7 +75278,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "IsNaN reports whether d is a NaN, quiet or signalling, whatever its sign.\n",
-      "file": "internal/service/data/codec/bson/decimal.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75291,7 +75291,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "IsZero reports whether d is the zero value — all sixteen bytes zero. It is\nnot a numeric test: \"0\", \"0E+3\" and \"-0\" are zeros IsZero does not report.\n",
-      "file": "internal/service/data/codec/bson/decimal.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75426,7 +75426,7 @@
       "spelled": "func(t time.Time) DateTime",
       "canonical": "func(t time.Time) github.com/kitsunium/sdk/internal/service/data/codec/bson.DateTime",
       "doc": "NewDateTimeFromTime returns the DateTime t falls in, truncated to the\nmillisecond: the instant a time.Time is written as.\n",
-      "file": "internal/service/data/codec/bson/types.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75438,7 +75438,7 @@
       "spelled": "func(high uint64, low uint64) Decimal128",
       "canonical": "func(high uint64, low uint64) github.com/kitsunium/sdk/internal/service/data/codec/bson.Decimal128",
       "doc": "NewDecimal128 returns the decimal whose BID encoding is high (the first\neight bytes, as a uint64) and low (the last eight).\n",
-      "file": "internal/service/data/codec/bson/decimal.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75487,7 +75487,7 @@
       "spelled": "func() string",
       "canonical": "func() string",
       "doc": "Hex returns the 24-digit lowercase hexadecimal form of id.\n",
-      "file": "internal/service/data/codec/bson/objectid.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75500,7 +75500,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "IsZero reports whether id is NilObjectID — what omitempty leaves out.\n",
-      "file": "internal/service/data/codec/bson/objectid.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75639,7 +75639,7 @@
       "spelled": "func(other Regex) bool",
       "canonical": "func(other github.com/kitsunium/sdk/internal/service/data/codec/bson.Regex) bool",
       "doc": "Equal reports whether r and other have the same pattern and options.\n",
-      "file": "internal/service/data/codec/bson/types.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75652,7 +75652,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "IsZero reports whether r is the empty regex — what omitempty leaves out.\n",
-      "file": "internal/service/data/codec/bson/types.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75740,7 +75740,7 @@
       "spelled": "func(other Timestamp) int",
       "canonical": "func(other github.com/kitsunium/sdk/internal/service/data/codec/bson.Timestamp) int",
       "doc": "Compare returns -1 when t is before other, +1 when it is after, 0 when equal.\n",
-      "file": "internal/service/data/codec/bson/types.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75753,7 +75753,7 @@
       "spelled": "func(other Timestamp) bool",
       "canonical": "func(other github.com/kitsunium/sdk/internal/service/data/codec/bson.Timestamp) bool",
       "doc": "Equal reports whether t and other are the same timestamp.\n",
-      "file": "internal/service/data/codec/bson/types.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75766,7 +75766,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "IsZero reports whether t is the zero timestamp — what omitempty leaves out.\n",
-      "file": "internal/service/data/codec/bson/types.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75838,7 +75838,7 @@
       "spelled": "func(escape bool) codec.Codec",
       "canonical": "func(escape bool) github.com/kitsunium/sdk/internal/core/data/codec.Codec",
       "doc": "NewWithEscape returns a fresh CSV codec with the formula-injection\nmitigation toggled on or off. Use this constructor when the encoded\noutput will be opened in a spreadsheet app (Excel, LibreOffice,\nGoogle Sheets): without the mitigation an attacker-influenced cell\nstarting with \"=\" evaluates as a formula at open time, which is\nOWASP CSV Injection (CWE-1236). The returned codec is not registered\nwith the core/data/codec singleton registry.\n",
-      "file": "internal/service/data/codec/csv/codec.go",
+      "file": "internal/service/data/codec/csv/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -76223,7 +76223,7 @@
       "spelled": "func() ([]byte, error)",
       "canonical": "func() ([]byte, error)",
       "doc": "MarshalText writes the kind's name, so a shape encodes as readable JSON.\n",
-      "file": "internal/service/data/codec/jsonshape/shape.go",
+      "file": "internal/service/data/codec/jsonshape/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -76287,7 +76287,7 @@
       "spelled": "func(t reflect.Type) *ShapeValue",
       "canonical": "func(t reflect.Type) *github.com/kitsunium/sdk/internal/service/data/codec/jsonshape.ShapeValue",
       "doc": "Of describes the values of t on the wire. A nil t — the type of a nil\ninterface — is Any. Of never fails: what encoding/json refuses is described\nas Unsupported where it occurs. Every call returns a new tree, which the\ncaller may keep and change.\n",
-      "file": "internal/service/data/codec/jsonshape/shape.go",
+      "file": "internal/service/data/codec/jsonshape/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -76909,7 +76909,7 @@
       "spelled": "func(zone *time.Location) time.Time",
       "canonical": "func(zone *time.Location) time.Time",
       "doc": "AsTime returns the day at midnight in zone.\n",
-      "file": "internal/service/data/codec/toml/localtime.go",
+      "file": "internal/service/data/codec/toml/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -76922,7 +76922,7 @@
       "spelled": "func() ([]byte, error)",
       "canonical": "func() ([]byte, error)",
       "doc": "MarshalText returns the day as String writes it.\n",
-      "file": "internal/service/data/codec/toml/localtime.go",
+      "file": "internal/service/data/codec/toml/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -76998,7 +76998,7 @@
       "spelled": "func() ([]byte, error)",
       "canonical": "func() ([]byte, error)",
       "doc": "MarshalText returns the date-time as String writes it.\n",
-      "file": "internal/service/data/codec/toml/localtime.go",
+      "file": "internal/service/data/codec/toml/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -77076,7 +77076,7 @@
       "spelled": "func() ([]byte, error)",
       "canonical": "func() ([]byte, error)",
       "doc": "MarshalText returns the time as String writes it.\n",
-      "file": "internal/service/data/codec/toml/localtime.go",
+      "file": "internal/service/data/codec/toml/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -78359,7 +78359,7 @@
       "spelled": "func(table string) string",
       "canonical": "func(table string) string",
       "doc": "FileLockSQL renders the statement that makes a SQLite transaction take the\ndatabase file's write lock at once, where BEGIN — which database/sql sends\nas SQLite's deferred form — takes none.\n\nIt is a DELETE that matches no row. SQLite starts the write transaction a\nwrite statement needs when the statement STARTS, before its WHERE clause is\nweighed, so the lock is taken and nothing is changed (ADR 0140). Two\ntransactions take it: the migration runner's, naming its version table —\nthe one table it knows exists at that point, since it creates it first in\nthe same transaction — and the queue's lease, naming its queue's table\nbefore its first read, so the read cannot answer from a snapshot the update\nafter it would be refused for.\n\ntable is interpolated exactly as given — bare, as the runner's validated\nversion table is, or already quoted, as the queue's is — and must have been\nvalidated at construction, which is the whole defence of an interpolated\nidentifier.\n",
-      "file": "internal/service/data/sql/dialect_sql.go",
+      "file": "internal/service/data/sql/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -78441,7 +78441,7 @@
       "spelled": "func(cause error) Withheld",
       "canonical": "func(cause error) github.com/kitsunium/sdk/internal/service/data/sql.Withheld",
       "doc": "NewWithheld returns cause withheld: reachable by errors.Is and errors.As,\nabsent from Error().\n",
-      "file": "internal/service/data/sql/withheld.go",
+      "file": "internal/service/data/sql/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -78525,7 +78525,7 @@
       "spelled": "func() error",
       "canonical": "func() error",
       "doc": "Unwrap hands errors.Is and errors.As the driver's own error.\n",
-      "file": "internal/service/data/sql/withheld.go",
+      "file": "internal/service/data/sql/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -78561,7 +78561,7 @@
       "spelled": "func(level int) coretransform.Compressor",
       "canonical": "func(level int) github.com/kitsunium/sdk/internal/core/data/transform.Compressor",
       "doc": "NewZlibCompressor returns a zlib Compressor encoding at level, which may be\nzlib.DefaultCompression, zlib.HuffmanOnly, or any value from zlib.BestSpeed to\nzlib.BestCompression. Anything else — including zlib.NoCompression, which the\nstdlib accepts but which stores the payload verbatim — is clamped to\nzlib.DefaultCompression, so no configuration can hand back a compressor that\nsilently does not compress (ADR 0031). The result is NOT registered; the\nregistry entry is the default-level ZlibCompressor singleton.\n",
-      "file": "internal/service/data/transform/zlib.go",
+      "file": "internal/service/data/transform/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -78585,7 +78585,7 @@
       "spelled": "func() corevfs.FullFS",
       "canonical": "func() github.com/kitsunium/sdk/internal/core/data/vfs.FullFS",
       "doc": "NewMem returns an empty in-memory filesystem containing only its root.\n\nIt takes no arguments on purpose. Every knob it could offer — a clock, a\nsize cap, a starting tree — would be a knob a consumer's test has to set\nbefore it can assert anything, and the value of this type is that a test\ndouble costs one line.\n",
-      "file": "internal/service/data/vfs/mem.go",
+      "file": "internal/service/data/vfs/decl_gen.go",
       "layer": "service",
       "family": "data"
     },

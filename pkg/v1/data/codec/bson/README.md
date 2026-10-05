@@ -439,7 +439,7 @@ func (Binary) Equal(other Binary) bool
 Equal reports whether b and other hold the same subtype and bytes.
 
 <a name="Binary.IsZero"></a>
-### func \(Binary\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/types.go>)
+### func \(Binary\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/decl_gen.go>)
 
 ```go
 func (Binary) IsZero() bool
@@ -512,7 +512,7 @@ type DBPointer struct {
 ```
 
 <a name="DBPointer.Equal"></a>
-### func \(DBPointer\) [Equal](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/types.go>)
+### func \(DBPointer\) [Equal](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/decl_gen.go>)
 
 ```go
 func (DBPointer) Equal(other DBPointer) bool
@@ -521,7 +521,7 @@ func (DBPointer) Equal(other DBPointer) bool
 Equal reports whether p and other name the same namespace and identifier.
 
 <a name="DBPointer.IsZero"></a>
-### func \(DBPointer\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/types.go>)
+### func \(DBPointer\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/decl_gen.go>)
 
 ```go
 func (DBPointer) IsZero() bool
@@ -563,7 +563,7 @@ func (DateTime) MarshalJSON() ([]byte, error)
 MarshalJSON writes dt as encoding/json writes the UTC time.Time it denotes.
 
 <a name="DateTime.Time"></a>
-### func \(DateTime\) [Time](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/types.go>)
+### func \(DateTime\) [Time](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/decl_gen.go>)
 
 ```go
 func (DateTime) Time() time.Time
@@ -596,7 +596,7 @@ type Decimal128 struct{}
 ```
 
 <a name="Decimal128.GetBytes"></a>
-### func \(Decimal128\) [GetBytes](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/decimal.go>)
+### func \(Decimal128\) [GetBytes](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/decl_gen.go>)
 
 ```go
 func (Decimal128) GetBytes() (high uint64, low uint64)
@@ -614,7 +614,7 @@ func (Decimal128) IsInf() int
 IsInf returns +1 for +Infinity, -1 for -Infinity, and 0 otherwise.
 
 <a name="Decimal128.IsNaN"></a>
-### func \(Decimal128\) [IsNaN](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/decimal.go>)
+### func \(Decimal128\) [IsNaN](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/decl_gen.go>)
 
 ```go
 func (Decimal128) IsNaN() bool
@@ -623,7 +623,7 @@ func (Decimal128) IsNaN() bool
 IsNaN reports whether d is a NaN, quiet or signalling, whatever its sign.
 
 <a name="Decimal128.IsZero"></a>
-### func \(Decimal128\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/decimal.go>)
+### func \(Decimal128\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/decl_gen.go>)
 
 ```go
 func (Decimal128) IsZero() bool
@@ -769,7 +769,7 @@ type ObjectID[12] byte
 ```
 
 <a name="ObjectID.Hex"></a>
-### func \(ObjectID\) [Hex](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/objectid.go>)
+### func \(ObjectID\) [Hex](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/decl_gen.go>)
 
 ```go
 func (ObjectID) Hex() string
@@ -778,7 +778,7 @@ func (ObjectID) Hex() string
 Hex returns the 24-digit lowercase hexadecimal form of id.
 
 <a name="ObjectID.IsZero"></a>
-### func \(ObjectID\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/objectid.go>)
+### func \(ObjectID\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/decl_gen.go>)
 
 ```go
 func (ObjectID) IsZero() bool
@@ -861,7 +861,7 @@ type Regex struct {
 ```
 
 <a name="Regex.Equal"></a>
-### func \(Regex\) [Equal](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/types.go>)
+### func \(Regex\) [Equal](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/decl_gen.go>)
 
 ```go
 func (Regex) Equal(other Regex) bool
@@ -870,7 +870,7 @@ func (Regex) Equal(other Regex) bool
 Equal reports whether r and other have the same pattern and options.
 
 <a name="Regex.IsZero"></a>
-### func \(Regex\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/types.go>)
+### func \(Regex\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/decl_gen.go>)
 
 ```go
 func (Regex) IsZero() bool
@@ -941,7 +941,7 @@ func (Timestamp) Before(other Timestamp) bool
 Before reports whether t is earlier than other.
 
 <a name="Timestamp.Compare"></a>
-### func \(Timestamp\) [Compare](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/types.go>)
+### func \(Timestamp\) [Compare](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/decl_gen.go>)
 
 ```go
 func (Timestamp) Compare(other Timestamp) int
@@ -950,7 +950,7 @@ func (Timestamp) Compare(other Timestamp) int
 Compare returns -1 when t is before other, +1 when it is after, 0 when equal.
 
 <a name="Timestamp.Equal"></a>
-### func \(Timestamp\) [Equal](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/types.go>)
+### func \(Timestamp\) [Equal](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/decl_gen.go>)
 
 ```go
 func (Timestamp) Equal(other Timestamp) bool
@@ -959,7 +959,7 @@ func (Timestamp) Equal(other Timestamp) bool
 Equal reports whether t and other are the same timestamp.
 
 <a name="Timestamp.IsZero"></a>
-### func \(Timestamp\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/types.go>)
+### func \(Timestamp\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/bson/decl_gen.go>)
 
 ```go
 func (Timestamp) IsZero() bool

@@ -6,9 +6,9 @@ import (
 	"fmt"
 )
 
-// NewWithheld returns cause withheld: reachable by errors.Is and errors.As,
-// absent from Error().
-func NewWithheld(cause error) Withheld {
+// newWithheld is NewWithheld's body: decl_gen.go writes NewWithheld, from the
+// design, as one call of it.
+func newWithheld(cause error) Withheld {
 	//: the cause, as the driver returned it.
 	return Withheld{cause: cause}
 }
@@ -46,8 +46,9 @@ func (w Withheld) Error() string {
 	return fmt.Sprintf("%T (the driver's text is withheld)", w.cause)
 }
 
-// Unwrap hands errors.Is and errors.As the driver's own error.
-func (w Withheld) Unwrap() error {
+// unwrap is Withheld.Unwrap's body: decl_gen.go writes Withheld.Unwrap, from the
+// design, as one call of it.
+func (w Withheld) unwrap() error {
 	//: the cause, as the driver returned it.
 	return w.cause
 }

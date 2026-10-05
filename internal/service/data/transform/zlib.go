@@ -21,14 +21,9 @@ type zlibCompressor struct {
 	level int
 }
 
-// NewZlibCompressor returns a zlib Compressor encoding at level, which may be
-// zlib.DefaultCompression, zlib.HuffmanOnly, or any value from zlib.BestSpeed to
-// zlib.BestCompression. Anything else — including zlib.NoCompression, which the
-// stdlib accepts but which stores the payload verbatim — is clamped to
-// zlib.DefaultCompression, so no configuration can hand back a compressor that
-// silently does not compress (ADR 0031). The result is NOT registered; the
-// registry entry is the default-level ZlibCompressor singleton.
-func NewZlibCompressor(level int) coretransform.Compressor {
+// newZlibCompressor is NewZlibCompressor's body: decl_gen.go writes NewZlibCompressor, from the
+// design, as one call of it.
+func newZlibCompressor(level int) coretransform.Compressor {
 	//: clamp at construction so the returned Compressor always compresses.
 	return zlibCompressor{level: usableZlibLevel(level)}
 }

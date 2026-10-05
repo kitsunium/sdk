@@ -82,6 +82,7 @@ packages:
           - name: escape
             type: bool
         name: NewWithEscape
+        impl: newWithEscape
         out:
           - type: codec.Codec
     imports:

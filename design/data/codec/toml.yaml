@@ -171,6 +171,7 @@ packages:
               - name: zone
                 type: "*time.Location"
             name: AsTime
+            impl: asTime
             out:
               - type: time.Time
             recv: value
@@ -181,6 +182,7 @@ packages:
             recv: value
           - doc: MarshalText returns the day as String writes it.
             name: MarshalText
+            impl: marshalText
             out:
               - type: "[]byte"
               - type: error
@@ -222,6 +224,7 @@ packages:
             recv: value
           - doc: MarshalText returns the time as String writes it.
             name: MarshalText
+            impl: marshalText
             out:
               - type: "[]byte"
               - type: error
@@ -278,6 +281,7 @@ packages:
             recv: value
           - doc: MarshalText returns the date-time as String writes it.
             name: MarshalText
+            impl: marshalText
             out:
               - type: "[]byte"
               - type: error

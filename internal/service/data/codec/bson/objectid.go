@@ -32,8 +32,9 @@ func ObjectIDFromHex(s string) (ObjectID, error) {
 	return id, nil
 }
 
-// Hex returns the 24-digit lowercase hexadecimal form of id.
-func (id ObjectID) Hex() string {
+// hex is ObjectID.Hex's body: decl_gen.go writes ObjectID.Hex, from the
+// design, as one call of it.
+func (id ObjectID) hex() string {
 	var buf [objectIDHexLen]byte
 	hex.Encode(buf[:], id[:])
 	//: one allocation, the string itself.
@@ -46,8 +47,9 @@ func (id ObjectID) String() string {
 	return `ObjectID("` + id.Hex() + `")`
 }
 
-// IsZero reports whether id is NilObjectID — what omitempty leaves out.
-func (id ObjectID) IsZero() bool {
+// isZero is ObjectID.IsZero's body: decl_gen.go writes ObjectID.IsZero, from the
+// design, as one call of it.
+func (id ObjectID) isZero() bool {
 	//: arrays compare by value.
 	return id == NilObjectID
 }

@@ -51,21 +51,23 @@ const (
 	decimalExponentSaturation int = 100_000_000
 )
 
-// NewDecimal128 returns the decimal whose BID encoding is high (the first
-// eight bytes, as a uint64) and low (the last eight).
-func NewDecimal128(high, low uint64) Decimal128 {
+// newDecimal128 is NewDecimal128's body: decl_gen.go writes NewDecimal128, from the
+// design, as one call of it.
+func newDecimal128(high, low uint64) Decimal128 {
 	//: the two halves verbatim.
 	return Decimal128{h: high, l: low}
 }
 
-// GetBytes returns the two halves NewDecimal128 takes.
-func (d Decimal128) GetBytes() (high, low uint64) {
+// getBytes is Decimal128.GetBytes's body: decl_gen.go writes Decimal128.GetBytes, from the
+// design, as one call of it.
+func (d Decimal128) getBytes() (high, low uint64) {
 	//: the two halves verbatim.
 	return d.h, d.l
 }
 
-// IsNaN reports whether d is a NaN, quiet or signalling, whatever its sign.
-func (d Decimal128) IsNaN() bool {
+// isNaN is Decimal128.IsNaN's body: decl_gen.go writes Decimal128.IsNaN, from the
+// design, as one call of it.
+func (d Decimal128) isNaN() bool {
 	//: the five combination bits all set.
 	return d.h&decimalNaNBits == decimalNaNBits
 }
@@ -86,9 +88,9 @@ func (d Decimal128) IsInf() int {
 	return 1
 }
 
-// IsZero reports whether d is the zero value — all sixteen bytes zero. It is
-// not a numeric test: "0", "0E+3" and "-0" are zeros IsZero does not report.
-func (d Decimal128) IsZero() bool {
+// isZero is Decimal128.IsZero's body: decl_gen.go writes Decimal128.IsZero, from the
+// design, as one call of it.
+func (d Decimal128) isZero() bool {
 	//: both halves zero.
 	return d.h == 0 && d.l == 0
 }

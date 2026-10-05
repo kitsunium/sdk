@@ -290,6 +290,7 @@ packages:
           - name: low
             type: uint64
         name: NewDecimal128
+        impl: newDecimal128
         out:
           - type: Decimal128
       - doc: |-
@@ -323,6 +324,7 @@ packages:
           - name: t
             type: time.Time
         name: NewDateTimeFromTime
+        impl: newDateTimeFromTime
         out:
           - type: DateTime
     imports:
@@ -338,6 +340,7 @@ packages:
         methods:
           - doc: GetBytes returns the two halves NewDecimal128 takes.
             name: GetBytes
+            impl: getBytes
             out:
               - name: high
               - name: low
@@ -345,6 +348,7 @@ packages:
             recv: value
           - doc: IsNaN reports whether d is a NaN, quiet or signalling, whatever its sign.
             name: IsNaN
+            impl: isNaN
             out:
               - type: bool
             recv: value
@@ -357,6 +361,7 @@ packages:
               IsZero reports whether d is the zero value — all sixteen bytes zero. It is
               not a numeric test: "0", "0E+3" and "-0" are zeros IsZero does not report.
             name: IsZero
+            impl: isZero
             out:
               - type: bool
             recv: value
@@ -400,6 +405,7 @@ packages:
         methods:
           - doc: Hex returns the 24-digit lowercase hexadecimal form of id.
             name: Hex
+            impl: hex
             out:
               - type: string
             recv: value
@@ -410,6 +416,7 @@ packages:
             recv: value
           - doc: IsZero reports whether id is NilObjectID — what omitempty leaves out.
             name: IsZero
+            impl: isZero
             out:
               - type: bool
             recv: value
@@ -503,6 +510,7 @@ packages:
               IsZero reports whether b is the empty generic binary — what omitempty
               leaves out.
             name: IsZero
+            impl: isZero
             out:
               - type: bool
             recv: value
@@ -545,6 +553,7 @@ packages:
               Time returns the instant dt denotes, in the local time zone; call UTC on it
               for the zone BSON stores.
             name: Time
+            impl: time
             out:
               - type: time.Time
             recv: value
@@ -582,11 +591,13 @@ packages:
               - name: other
                 type: Regex
             name: Equal
+            impl: equal
             out:
               - type: bool
             recv: value
           - doc: IsZero reports whether r is the empty regex — what omitempty leaves out.
             name: IsZero
+            impl: isZero
             out:
               - type: bool
             recv: value
@@ -614,11 +625,13 @@ packages:
               - name: other
                 type: DBPointer
             name: Equal
+            impl: equal
             out:
               - type: bool
             recv: value
           - doc: IsZero reports whether p is the empty pointer — what omitempty leaves out.
             name: IsZero
+            impl: isZero
             out:
               - type: bool
             recv: value
@@ -687,11 +700,13 @@ packages:
               - name: other
                 type: Timestamp
             name: Equal
+            impl: equal
             out:
               - type: bool
             recv: value
           - doc: IsZero reports whether t is the zero timestamp — what omitempty leaves out.
             name: IsZero
+            impl: isZero
             out:
               - type: bool
             recv: value
@@ -700,6 +715,7 @@ packages:
               - name: other
                 type: Timestamp
             name: Compare
+            impl: compare
             out:
               - type: int
             recv: value
