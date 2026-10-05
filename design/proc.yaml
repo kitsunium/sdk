@@ -2660,7 +2660,8 @@ packages:
       kernelerrs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/pkg/v1/proc
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Capability identifies one process-supervision capability whose native backend
           is present on some platforms and absent on others.
         methods:

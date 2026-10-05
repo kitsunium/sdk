@@ -15,15 +15,6 @@ import (
 // mistake HTTP made with "deflate", refused here before it can be made.
 const S2Algorithm coretransform.Algorithm = "s2"
 
-// S2Compressor is the concrete core/data/transform.Compressor for the s2 block
-// format. Unlike the zstd scheme it holds no encoder or decoder — s2's block
-// API is a pair of free functions — so the value is stateless apart from its
-// ceiling and needs no Close.
-type S2Compressor struct {
-	// maxDecompressedBytes is the ceiling this compressor refuses past.
-	maxDecompressedBytes int64
-}
-
 // S2 is the registered s2 singleton, built at DefaultMaxDecompressedBytes.
 var S2 = coretransform.Register(mustS2())
 

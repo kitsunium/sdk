@@ -2362,6 +2362,32 @@ packages:
       vfs: github.com/kitsunium/sdk/pkg/v1/data/vfs
     path: github.com/kitsunium/sdk/framework/internal/kit
     types:
+      - doc: CommandLineConfigurer tunes a CLI command.
+        interface:
+          unexported: true
+        name: CommandLineConfigurer
+      - doc: |-
+          CommandConfigurer configures a command: [Queued]; the options every operation
+          takes — [Auth], [AuthOptional], [RateLimit], [RateLimitPerClient],
+          [Timeout], [Bulkhead]; and, for a queued one, [MaxDeliveries] and
+          [Parallelism].
+        interface:
+          unexported: true
+        name: CommandConfigurer
+      - doc: AppConfigurer configures an app. Options win over the environment.
+        interface:
+          unexported: true
+        name: AppConfigurer
+      - doc: "DatabaseConfigurer configures a database: [Keeps], [Migrations]."
+        interface:
+          unexported: true
+        name: DatabaseConfigurer
+      - doc: |-
+          Keeper is what a database keeps: a service — every store it declares —,
+          a store, or a module (ADR 0008) — every store of its services.
+        interface:
+          unexported: true
+        name: Keeper
       - decl: true
         doc: |-
           AttrsProvider is what the app's auth data says about the caller to the
@@ -2785,10 +2811,6 @@ packages:
               type: "[]string"
             - name: opts
               type: cliOptions
-      - doc: CommandLineConfigurer tunes a CLI command.
-        interface:
-          unexported: true
-        name: CommandLineConfigurer
       - decl: true
         doc: |-
           Command changes something: a typed input, a typed result, and one handler
@@ -2937,18 +2959,6 @@ packages:
           - name: C
           - constraint: any
             name: R
-      - doc: |-
-          CommandConfigurer configures a command: [Queued]; the options every operation
-          takes — [Auth], [AuthOptional], [RateLimit], [RateLimitPerClient],
-          [Timeout], [Bulkhead]; and, for a queued one, [MaxDeliveries] and
-          [Parallelism].
-        interface:
-          unexported: true
-        name: CommandConfigurer
-      - doc: AppConfigurer configures an app. Options win over the environment.
-        interface:
-          unexported: true
-        name: AppConfigurer
       - decl: true
         doc: |-
           DatabaseURLValue is what a database's URL points at, as its engine describes it
@@ -3019,16 +3029,6 @@ packages:
                 - type: "*stdsql.DB"
                 - type: error
         name: Engine
-      - doc: "DatabaseConfigurer configures a database: [Keeps], [Migrations]."
-        interface:
-          unexported: true
-        name: DatabaseConfigurer
-      - doc: |-
-          Keeper is what a database keeps: a service — every store it declares —,
-          a store, or a module (ADR 0008) — every store of its services.
-        interface:
-          unexported: true
-        name: Keeper
       - decl: true
         doc: |-
           EmptyValue is the request or the response of an endpoint that has none. An
@@ -3100,12 +3100,6 @@ packages:
           - name: Req
           - constraint: any
             name: Resp
-      - doc: EndpointConfigurer configures an endpoint; each is an [ExposeConfigurer] too.
-        interface:
-          embeds:
-            - ExposeConfigurer
-          unexported: true
-        name: EndpointConfigurer
       - decl: true
         doc: |-
           OperationOption configures an endpoint, a command or a query alike: the
@@ -3181,14 +3175,6 @@ packages:
               name: Message
               tag: json:"message"
               type: string
-      - doc: |-
-          ExposeConfigurer configures an exposure ([Command.Expose], [Query.Expose]):
-          every [EndpointConfigurer] — [Name], [MaxBody], [RateLimitPerClient]… — and
-          the markers that say who may run an operation declaring no rule of its
-          own: [Anyone], [AnyUser].
-        interface:
-          unexported: true
-        name: ExposeConfigurer
       - decl: true
         doc: |-
           Job is scheduled work: a piece of the daemon's internal loop. It runs on
@@ -3294,10 +3280,6 @@ packages:
               type: map[*ipc.Conn]bool
             - name: conns
               type: sync.WaitGroup
-      - doc: ListenerConfigurer tunes a listener.
-        interface:
-          unexported: true
-        name: ListenerConfigurer
       - decl: true
         doc: |-
           Loop is a declared loop of the daemon: kit owns the wait, the product owns
@@ -3349,10 +3331,6 @@ packages:
             - doc: Topic is the topic node that woke the loop, for a topic wake.
               name: Topic
               type: string
-      - doc: LoopConfigurer configures a declared loop.
-        interface:
-          unexported: true
-        name: LoopConfigurer
       - decl: true
         doc: |-
           Routine is a loop written by hand: a function that runs until its context
@@ -3456,10 +3434,6 @@ packages:
                 the attempt that sent it to the spool's report that it was sent.
               name: composed
               type: map[string][]byte
-      - doc: MailerConfigurer configures a mailer.
-        interface:
-          unexported: true
-        name: MailerConfigurer
       - decl: true
         doc: |-
           Module is a set of services a product mounts as one: [NewModule] declares
@@ -3510,36 +3484,6 @@ packages:
                 does.
               name: prefix
               type: atomic.Pointer[string]
-      - doc: |-
-          ModuleConfigurer is what a module is made of: its services, the modules it
-          requires ([Requires]), and the migrations of the data it keeps outside
-          kit's stores ([Migrations]).
-        interface:
-          unexported: true
-        name: ModuleConfigurer
-      - doc: "MountConfigurer configures the mount of a module: [Prefix], [Bind]."
-        interface:
-          unexported: true
-        name: MountConfigurer
-      - doc: |-
-          Operation takes a typed request and answers a typed response: an
-          endpoint, a port — and, with ADR 0005, a command or a query. It is what
-          [Fallback] and [Bind] give a port, and what [Replace] replaces in a test;
-          a request or a response of other types does not compile. Its methods are
-          unexported: only kit implements it.
-
-          Every operation is a node of the graph, and runs in a span of its own
-          through its whole pipeline — authentication, validation, policies, the
-          Studio's mocks — whoever calls it.
-        interface:
-          embeds:
-            - node
-          unexported: true
-        name: Operation
-        typeParams:
-          - name: Req
-          - constraint: any
-            name: Resp
       - decl: true
         doc: |-
           PasswordPolicyService is the policy of one secret field that holds a password's
@@ -3619,12 +3563,6 @@ packages:
         typeParams:
           - constraint: any
             name: T
-      - doc: |-
-          PasswordConfigurer configures a password policy: [MinLength], [NotReused],
-          [NotCommon].
-        interface:
-          unexported: true
-        name: PasswordConfigurer
       - decl: true
         doc: |-
           PortService is an operation a service needs and does not implement: a typed
@@ -3663,14 +3601,6 @@ packages:
             - doc: fallback is the port's kit.Fallback, nil without one.
               name: fallback
               type: Operation[Req, Resp]
-        typeParams:
-          - name: Req
-          - constraint: any
-            name: Resp
-      - doc: "PortConfigurer configures a port: [Fallback]."
-        interface:
-          unexported: true
-        name: PortConfigurer
         typeParams:
           - name: Req
           - constraint: any
@@ -3771,13 +3701,6 @@ packages:
           - name: Q
           - constraint: any
             name: R
-      - doc: |-
-          QueryConfigurer configures a query: the options every operation takes —
-          [Auth], [AuthOptional], [RateLimit], [RateLimitPerClient], [Timeout],
-          [Bulkhead].
-        interface:
-          unexported: true
-        name: QueryConfigurer
       - decl: true
         doc: |-
           RecordsService is one store's records without their type. Get returns a record
@@ -4053,10 +3976,6 @@ packages:
               type: sync.Mutex
             - name: run
               type: "*secretRun"
-      - doc: SecretConfigurer configures a secret.
-        interface:
-          unexported: true
-        name: SecretConfigurer
       - decl: true
         doc: |-
           Service is a bounded context of the product: it owns its building blocks —
@@ -4590,10 +4509,6 @@ packages:
           embeds:
             - string | bool | int | int64 | float64 | time.Duration | []string
         name: SettingValue
-      - doc: SettingConfigurer configures a setting.
-        interface:
-          unexported: true
-        name: SettingConfigurer
       - decl: true
         doc: |-
           Frontend is static assets the product serves: a single page application,
@@ -4612,10 +4527,6 @@ packages:
               type: fs.FS
             - name: files
               type: int
-      - doc: StaticConfigurer configures a frontend.
-        interface:
-          unexported: true
-        name: StaticConfigurer
       - decl: true
         doc: |-
           StoreService is a typed, keyed collection of entities. Every read returns a copy
@@ -4986,10 +4897,6 @@ packages:
         typeParams:
           - constraint: any
             name: T
-      - doc: StoreConfigurer configures a store.
-        interface:
-          unexported: true
-        name: StoreConfigurer
       - decl: true
         doc: |-
           TopicService is an asynchronous channel of messages of type T. Every subscription
@@ -5053,10 +4960,6 @@ packages:
         typeParams:
           - constraint: any
             name: T
-      - doc: SubscriptionConfigurer configures a subscription.
-        interface:
-          unexported: true
-        name: SubscriptionConfigurer
       - decl: true
         doc: |-
           DeliveryOption configures a queue's deliveries: a subscription's, or a
@@ -5419,6 +5322,103 @@ packages:
             name: E
           - constraint: comparable
             name: S
+      - doc: EndpointConfigurer configures an endpoint; each is an [ExposeConfigurer] too.
+        interface:
+          embeds:
+            - ExposeConfigurer
+          unexported: true
+        name: EndpointConfigurer
+      - doc: |-
+          ExposeConfigurer configures an exposure ([Command.Expose], [Query.Expose]):
+          every [EndpointConfigurer] — [Name], [MaxBody], [RateLimitPerClient]… — and
+          the markers that say who may run an operation declaring no rule of its
+          own: [Anyone], [AnyUser].
+        interface:
+          unexported: true
+        name: ExposeConfigurer
+      - doc: ListenerConfigurer tunes a listener.
+        interface:
+          unexported: true
+        name: ListenerConfigurer
+      - doc: LoopConfigurer configures a declared loop.
+        interface:
+          unexported: true
+        name: LoopConfigurer
+      - doc: MailerConfigurer configures a mailer.
+        interface:
+          unexported: true
+        name: MailerConfigurer
+      - doc: |-
+          ModuleConfigurer is what a module is made of: its services, the modules it
+          requires ([Requires]), and the migrations of the data it keeps outside
+          kit's stores ([Migrations]).
+        interface:
+          unexported: true
+        name: ModuleConfigurer
+      - doc: "MountConfigurer configures the mount of a module: [Prefix], [Bind]."
+        interface:
+          unexported: true
+        name: MountConfigurer
+      - doc: |-
+          Operation takes a typed request and answers a typed response: an
+          endpoint, a port — and, with ADR 0005, a command or a query. It is what
+          [Fallback] and [Bind] give a port, and what [Replace] replaces in a test;
+          a request or a response of other types does not compile. Its methods are
+          unexported: only kit implements it.
+
+          Every operation is a node of the graph, and runs in a span of its own
+          through its whole pipeline — authentication, validation, policies, the
+          Studio's mocks — whoever calls it.
+        interface:
+          embeds:
+            - node
+          unexported: true
+        name: Operation
+        typeParams:
+          - name: Req
+          - constraint: any
+            name: Resp
+      - doc: |-
+          PasswordConfigurer configures a password policy: [MinLength], [NotReused],
+          [NotCommon].
+        interface:
+          unexported: true
+        name: PasswordConfigurer
+      - doc: "PortConfigurer configures a port: [Fallback]."
+        interface:
+          unexported: true
+        name: PortConfigurer
+        typeParams:
+          - name: Req
+          - constraint: any
+            name: Resp
+      - doc: |-
+          QueryConfigurer configures a query: the options every operation takes —
+          [Auth], [AuthOptional], [RateLimit], [RateLimitPerClient], [Timeout],
+          [Bulkhead].
+        interface:
+          unexported: true
+        name: QueryConfigurer
+      - doc: SecretConfigurer configures a secret.
+        interface:
+          unexported: true
+        name: SecretConfigurer
+      - doc: SettingConfigurer configures a setting.
+        interface:
+          unexported: true
+        name: SettingConfigurer
+      - doc: StaticConfigurer configures a frontend.
+        interface:
+          unexported: true
+        name: StaticConfigurer
+      - doc: StoreConfigurer configures a store.
+        interface:
+          unexported: true
+        name: StoreConfigurer
+      - doc: SubscriptionConfigurer configures a subscription.
+        interface:
+          unexported: true
+        name: SubscriptionConfigurer
     variables:
       - doc: |-
           Privacy is kit's own service: the data keys, the legal holds and the

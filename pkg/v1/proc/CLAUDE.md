@@ -131,3 +131,7 @@ done
 `systemd/notify/`, `systemd/listen/` — each documents its own facade in its
 `CLAUDE.md`; `systemd/CLAUDE.md` names the two protocols and why they are
 grouped.
+
+## Declarations
+
+`decl_gen.go` is written by kit gen from the design (ADR 0170): the declaration of `Capability`. Their methods, constructors and helpers stay hand-written, in the files this document names.

@@ -14,13 +14,6 @@ import (
 // the same way here.
 const ZstdAlgorithm coretransform.Algorithm = "zstd"
 
-// ZstdLevel names a zstd compression level. The four values are the four the
-// library actually implements; an unrecognised value CLAMPS to ZstdDefault,
-// because every level round-trips the caller's bytes identically and so trades
-// ratio against CPU rather than carrying the caller's intent (ADR 0031 §clamp,
-// the same call internal/service/data/transform makes for the zlib level).
-type ZstdLevel int
-
 const (
 	// ZstdFastest is the throughput end of the scale (library level 1).
 	ZstdFastest ZstdLevel = 1
@@ -34,26 +27,6 @@ const (
 	// sub-one-percent ratio gain; measure your own corpus before going past it.
 	ZstdBest ZstdLevel = 11
 )
-
-// ZstdCompressor is the concrete core/data/transform.Compressor for the zstd wire
-// format. It holds a shared encoder and decoder because building either per
-// call would re-allocate the window buffers on every payload; both are
-// documented safe for concurrent EncodeAll / DecodeAll, so one value serves the
-// whole process.
-//
-// It is a POINTER type, unlike the stateless stdlib schemes. Registry
-// re-registration therefore compares pointer identity, which keeps
-// core/data/transform.Register's idempotent-republish path working for the singleton
-// and turns a second, distinct compressor claiming "zstd" into the boot-time
-// panic it is meant to be.
-type ZstdCompressor struct {
-	// enc is the shared encoder; EncodeAll appends to dst natively.
-	enc *zstd.Encoder
-	// dec is the shared decoder, built with the output ceiling baked in.
-	dec *zstd.Decoder
-	// maxDecompressedBytes is the ceiling, retained for the reported field.
-	maxDecompressedBytes int64
-}
 
 // Zstd is the registered zstd singleton, built at DefaultMaxDecompressedBytes.
 // Binding the registration result to a named var is the convention the sibling

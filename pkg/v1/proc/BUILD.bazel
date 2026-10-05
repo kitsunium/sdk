@@ -6,6 +6,7 @@ go_library(
     name = "proc",
     srcs = [
         "capability.go",
+        "decl_gen.go",
         "doc.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/proc",

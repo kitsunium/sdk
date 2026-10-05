@@ -10,18 +10,6 @@ import (
 	"github.com/kitsunium/sdk/internal/service/observe/logger/sink/console"
 )
 
-// SinkConfig carries the construction parameters accepted by NewWithSink.
-// A zero-valued SinkConfig{Sink: s} is enough to ship records through s at
-// LevelInfo using the default text encoder bound to the real wall clock.
-type SinkConfig struct {
-	// Sink is the destination transport; nil yields SinkConfigRequired.
-	Sink Sink
-	// Encoder formats records into bytes; nil falls back to the text encoder.
-	Encoder Encoder
-	// MinLevel is the minimum severity emitted; zero value is LevelInfo.
-	MinLevel Level
-}
-
 // NewWithSink builds a Logger forwarding records through cfg.Sink and
 // formatting them with cfg.Encoder. It is the port-and-adapter entry point
 // for callers that want full control over both the format (Encoder) and

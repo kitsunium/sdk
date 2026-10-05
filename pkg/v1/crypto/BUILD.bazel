@@ -6,6 +6,7 @@ go_library(
     name = "crypto",
     srcs = [
         "crypto.go",
+        "decl_gen.go",
         "doc.go",
         "facade_gen.go",
     ],

@@ -183,7 +183,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "S2Compressor is the concrete core/data/transform.Compressor for the s2 block\nformat. Unlike the zstd scheme it holds no encoder or decoder — s2's block\nAPI is a pair of free functions — so the value is stateless apart from its\nceiling and needs no Close.\n",
-      "file": "s2.go",
+      "file": "decl_gen.go",
       "layer": "thirdparty"
     },
     {
@@ -293,7 +293,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "ZstdCompressor is the concrete core/data/transform.Compressor for the zstd wire\nformat. It holds a shared encoder and decoder because building either per\ncall would re-allocate the window buffers on every payload; both are\ndocumented safe for concurrent EncodeAll / DecodeAll, so one value serves the\nwhole process.\n\nIt is a POINTER type, unlike the stateless stdlib schemes. Registry\nre-registration therefore compares pointer identity, which keeps\ncore/data/transform.Register's idempotent-republish path working for the singleton\nand turns a second, distinct compressor claiming \"zstd\" into the boot-time\npanic it is meant to be.\n",
-      "file": "zstd.go",
+      "file": "decl_gen.go",
       "layer": "thirdparty"
     },
     {
@@ -392,7 +392,7 @@
       "spelled": "int",
       "canonical": "int",
       "doc": "ZstdLevel names a zstd compression level. The four values are the four the\nlibrary actually implements; an unrecognised value CLAMPS to ZstdDefault,\nbecause every level round-trips the caller's bytes identically and so trades\nratio against CPU rather than carrying the caller's intent (ADR 0031 §clamp,\nthe same call internal/service/data/transform makes for the zlib level).\n",
-      "file": "zstd.go",
+      "file": "decl_gen.go",
       "layer": "thirdparty"
     }
   ]

@@ -5,6 +5,7 @@ package(default_visibility = ["//visibility:public"])
 go_library(
     name = "hash",
     srcs = [
+        "decl_gen.go",
         "doc.go",
         "facade_gen.go",
         "hash.go",

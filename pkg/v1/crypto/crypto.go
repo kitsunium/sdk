@@ -32,14 +32,6 @@ const XChaCha20Poly1305 Algorithm = "xchacha20poly1305"
 // defaultAlgorithm is the scheme Seal uses when the caller does not pick one.
 const defaultAlgorithm Algorithm = AESGCM
 
-// Algorithm is the stable identifier of an AEAD scheme. Use it with SealAs. It
-// is a defined type distinct from the other crypto-family Algorithm types (hash,
-// mac, sign, …), so the compiler rejects feeding a hash or signature constant
-// into an AEAD call (V104) — the seven registries are separate keyspaces, and
-// the type system now enforces that separation the way typed Format/Level
-// discipline does elsewhere.
-type Algorithm corecrypto.Algorithm
-
 // Seal encrypts plaintext under k using the default algorithm (AES-256-GCM),
 // binding aad, and returns a self-describing box. The nonce is generated and
 // embedded for you. Pass nil aad when unused.

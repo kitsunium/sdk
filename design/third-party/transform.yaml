@@ -197,6 +197,7 @@ packages:
     imports:
       coretransform: github.com/kitsunium/sdk/internal/core/data/transform
       errs: github.com/kitsunium/sdk/internal/kernel/errs
+      zstd: github.com/klauspost/compress/zstd
     path: github.com/kitsunium/sdk/third-party/transform
     sentinels:
       - var:
@@ -238,7 +239,8 @@ packages:
             public: maxDecompressedBytes must be a positive byte count
             reason: LIMIT_MISCONFIGURED
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           S2Compressor is the concrete core/data/transform.Compressor for the s2 block
           format. Unlike the zstd scheme it holds no encoder or decoder — s2's block
           API is a pair of free functions — so the value is stateless apart from its
@@ -299,8 +301,12 @@ packages:
             recv: pointer
         name: S2Compressor
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - doc: maxDecompressedBytes is the ceiling this compressor refuses past.
+              name: maxDecompressedBytes
+              type: int64
+      - decl: true
+        doc: |-
           ZstdLevel names a zstd compression level. The four values are the four the
           library actually implements; an unrecognised value CLAMPS to ZstdDefault,
           because every level round-trips the caller's bytes identically and so trades
@@ -308,7 +314,8 @@ packages:
           the same call internal/service/data/transform makes for the zlib level).
         name: ZstdLevel
         underlying: int
-      - doc: |-
+      - decl: true
+        doc: |-
           ZstdCompressor is the concrete core/data/transform.Compressor for the zstd wire
           format. It holds a shared encoder and decoder because building either per
           call would re-allocate the window buffers on every payload; both are
@@ -377,7 +384,16 @@ packages:
             recv: pointer
         name: ZstdCompressor
         struct:
-          unexported: true
+          fields:
+            - doc: enc is the shared encoder; EncodeAll appends to dst natively.
+              name: enc
+              type: "*zstd.Encoder"
+            - doc: dec is the shared decoder, built with the output ceiling baked in.
+              name: dec
+              type: "*zstd.Decoder"
+            - doc: maxDecompressedBytes is the ceiling, retained for the reported field.
+              name: maxDecompressedBytes
+              type: int64
     variables:
       - doc: S2 is the registered s2 singleton, built at DefaultMaxDecompressedBytes.
         name: S2

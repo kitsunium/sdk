@@ -11,13 +11,6 @@ import (
 // HMACSHA256 is HMAC (RFC 2104) over SHA-256 — the detached-MAC default.
 const HMACSHA256 Algorithm = "hmac-sha256"
 
-// Algorithm is the stable identifier of a MAC scheme. It is a defined type
-// distinct from the other crypto-family Algorithm types (hash, sign, kdf, …), so
-// the compiler rejects feeding a hash or signature constant into a MAC call
-// (V104) — the seven registries are separate keyspaces, and the type system now
-// enforces that separation the way typed Format/Level discipline does elsewhere.
-type Algorithm corecrypto.Algorithm
-
 // Tag returns the authentication tag over message under key for the named
 // scheme. An unregistered algorithm returns UnknownMACAlgorithm; a registered
 // scheme cannot fail (the redacting Key pins the length).

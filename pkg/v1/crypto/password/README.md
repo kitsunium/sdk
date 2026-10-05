@@ -101,7 +101,7 @@ func Verify(password []byte, phc string) (ok bool, err error)
 Verify reports whether password matches the stored PHC hash, comparing in constant time. The scheme is read from phc. A malformed phc or unregistered scheme returns an error; a genuine mismatch is (false, nil).
 
 <a name="Algorithm"></a>
-## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/password/password.go>)
+## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/password/decl_gen.go>)
 
 Algorithm is the stable identifier of a password-hashing scheme; it is also the PHC id segment of hashes that scheme produces. It is a defined type distinct from the other crypto-family Algorithm types (hash, mac, kdf, …), so the compiler rejects feeding a hash or KDF constant into a password call (V104) — the seven registries are separate keyspaces, and the type system now enforces that separation the way typed Format/Level discipline does elsewhere.
 

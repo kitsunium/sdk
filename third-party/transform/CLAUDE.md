@@ -188,6 +188,7 @@ without revisiting that ratio would make the guard bite legitimate traffic.
 | File | Surface |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `S2Compressor`, `ZstdLevel` and `ZstdCompressor` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `transform.go` | `DefaultMaxDecompressedBytes`, `checkLimit` |
 | `zstd.go` | `Zstd` singleton, `ZstdCompressor`, `NewZstdCompressor`, `ZstdLevel`, `encoderLevel`, `isLimitError` |
 | `s2.go` | `S2` singleton, `S2Compressor`, `NewS2Compressor` |

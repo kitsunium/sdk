@@ -102,7 +102,7 @@ func Subkey(a Algorithm, secret []byte, salt []byte, info string, length int) (s
 Subkey derives a length-byte subkey from secret using the named scheme. salt is optional domain randomness (nil is allowed); info is a context label that binds the subkey to its purpose. An unregistered algorithm returns UnknownKDFAlgorithm; an over-long length returns DerivationFailed.
 
 <a name="Algorithm"></a>
-## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/kdf/kdf.go>)
+## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/kdf/decl_gen.go>)
 
 Algorithm is the stable identifier of a key-derivation scheme. It is a defined type distinct from the other crypto-family Algorithm types (hash, mac, sign, …), so the compiler rejects feeding a hash or MAC constant into a KDF call (V104) — the seven registries are separate keyspaces, and the type system now enforces that separation the way typed Format/Level discipline does elsewhere.
 

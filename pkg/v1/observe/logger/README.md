@@ -1106,7 +1106,7 @@ type CloudWatchConfig struct {
 ```
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/logger.go>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/decl_gen.go>)
 
 Config carries the construction parameters accepted by NewText. Two destination forms are supported — pick the one that fits:
 
@@ -1822,7 +1822,7 @@ func (Sink) Write(ctx context.Context, r RecordEvent, p []byte) (n int, err erro
 Write delivers the formatted byte payload p plus the originating record to the underlying transport. Sinks MAY ignore p and re-serialise from r when their wire protocol differs from the encoder's output (e.g. a CloudWatch sink reads r.Time directly to populate the AWS request).
 
 <a name="SinkConfig"></a>
-## type [SinkConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/sink.go>)
+## type [SinkConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/decl_gen.go>)
 
 SinkConfig carries the construction parameters accepted by NewWithSink. A zero-valued SinkConfig{Sink: s} is enough to ship records through s at LevelInfo using the default text encoder bound to the real wall clock.
 
@@ -1838,7 +1838,7 @@ type SinkConfig struct {
 ```
 
 <a name="TopologyConfig"></a>
-## type [TopologyConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/topology.go>)
+## type [TopologyConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/decl_gen.go>)
 
 TopologyConfig is the decoded logger configuration: a global Level (parsed by the same names the level package prints — "debug" / "info" / "warn" / "error", case-insensitive, empty defaults to info) and the ordered Writers fanned out to. FromConfig unmarshals a config blob into a TopologyConfig via a consumer-registered codec, then resolves each entry against the writer registry. The Config role suffix marks it a config DTO (KTN-STRUCT-ROLE).
 
@@ -1920,7 +1920,7 @@ type TraceContextSource func(ctx context.Context) (trace TraceContextValue)
 ```
 
 <a name="WriterEntryConfig"></a>
-## type [WriterEntryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/writer_entry.go>)
+## type [WriterEntryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/decl_gen.go>)
 
 WriterEntryConfig names one writer in a TopologyConfig and carries its raw option map as decoded from the config blob. Name MUST match a writer registered via a blank-import; Options is the per-writer option bag handed to the writer's Decoder (when it implements one) or passed straight to the factory's Open otherwise. Option values are never echoed into an error — the SECRET GATE redacts them. The Config role suffix marks it a config DTO (KTN-STRUCT-ROLE).
 

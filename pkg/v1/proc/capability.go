@@ -14,10 +14,6 @@ import (
 // message falls back to a capability-less form when naming them would exceed it.
 const maxPublicLen int = 120
 
-// Capability identifies one process-supervision capability whose native backend
-// is present on some platforms and absent on others.
-type Capability int
-
 // The supervisable capabilities, one per platform-sensitive proc primitive.
 const (
 	// CapProcessSpawn is spawning + supervising a child process (process.Start).

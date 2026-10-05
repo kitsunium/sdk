@@ -219,3 +219,7 @@ cd pkg/v1 && GOWORK=off go test -race -cover ./observe/logger/...
 ```
 
 `logger_external_test.go` covers the happy path + `WriterRequired`; `sink_external_test.go` covers `NewWithSink` / `SinkConfigRequired` / `Multi` / `Build` / `LogAttrs` / `WithGroup`; `builder_external_test.go` exercises the chainable hot path; `version_external_test.go` pins `FrameworkVersion()` non-empty contract.
+
+## Declarations
+
+`decl_gen.go` is written by kit gen from the design (ADR 0170): the declarations of `Config`, `SinkConfig`, `TopologyConfig` and `WriterEntryConfig` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names.

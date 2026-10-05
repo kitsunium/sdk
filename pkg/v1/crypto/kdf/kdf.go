@@ -13,13 +13,6 @@ import (
 // separation from a strong secret.
 const HKDFSHA256 Algorithm = "hkdf-sha256"
 
-// Algorithm is the stable identifier of a key-derivation scheme. It is a defined
-// type distinct from the other crypto-family Algorithm types (hash, mac, sign,
-// …), so the compiler rejects feeding a hash or MAC constant into a KDF call
-// (V104) — the seven registries are separate keyspaces, and the type system now
-// enforces that separation the way typed Format/Level discipline does elsewhere.
-type Algorithm corecrypto.Algorithm
-
 // Subkey derives a length-byte subkey from secret using the named scheme. salt
 // is optional domain randomness (nil is allowed); info is a context label that
 // binds the subkey to its purpose. An unregistered algorithm returns

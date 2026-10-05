@@ -131,3 +131,7 @@ cd pkg/v1 && GOWORK=off go test -race -cover ./crypto/...
 
 `agree/`, `hash/`, `kdf/`, `mac/`, `password/`, `sign/` — each documents its own
 facade in its `CLAUDE.md`.
+
+## Declarations
+
+`decl_gen.go` is written by kit gen from the design (ADR 0170): the declaration of `Algorithm`. Their methods, constructors and helpers stay hand-written, in the files this document names.

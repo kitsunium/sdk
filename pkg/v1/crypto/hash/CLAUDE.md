@@ -84,3 +84,7 @@ bazel test --config=race //pkg/v1/crypto/hash:hash_test
 # Fallback
 cd pkg/v1 && GOWORK=off go test -race -cover ./crypto/hash/...
 ```
+
+## Declarations
+
+`decl_gen.go` is written by kit gen from the design (ADR 0170): the declaration of `Algorithm`. Their methods, constructors and helpers stay hand-written, in the files this document names.

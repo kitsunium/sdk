@@ -152,7 +152,7 @@ func Supported(c Capability) bool
 Supported reports whether cap has a native backend on the current GOOS. It is pure, allocation-free and race-clean: it consults runtime.GOOS only, never a runtime delegation probe (see the package doc on cgroup.Available()).
 
 <a name="Capability"></a>
-## type [Capability](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/capability.go>)
+## type [Capability](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/decl_gen.go>)
 
 Capability identifies one process-supervision capability whose native backend is present on some platforms and absent on others.
 

@@ -2,37 +2,12 @@ package logger
 
 import (
 	"context"
-	"io"
 	"os"
 	"time"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	svclogger "github.com/kitsunium/sdk/internal/service/observe/logger"
 )
-
-// Config carries the construction parameters accepted by NewText.
-// Two destination forms are supported — pick the one that fits:
-//
-//   - Writer single — Writer: w. Records go to that one writer.
-//   - Writers fan-out — Writers: []io.Writer{a, b, c}. Records broadcast
-//     to every writer in order; per-branch failures are joined under
-//     FANOUT_WRITE_FAILED. Use this when you want stderr AND a log file
-//     in one go (a common ops pattern) without dropping to NewWithSink.
-//
-// When BOTH are set, Writers wins and Writer is ignored. Use whichever
-// reads more naturally at the call site. Construction returns
-// WriterRequired (1.1.0.1) when neither field carries any writer.
-type Config struct {
-	// Writer is the single-destination convenience field; nil triggers
-	// WriterRequired unless Writers carries at least one entry.
-	Writer io.Writer
-	// Writers is the multi-destination fan-out field; non-empty wires
-	// the records through logger.Multi over per-writer console sinks.
-	// Nil/empty falls back to Writer.
-	Writers []io.Writer
-	// MinLevel is the minimum severity emitted; zero value is LevelInfo.
-	MinLevel Level
-}
 
 // NewText builds a text-format Logger writing to cfg.Writer (single) OR
 // cfg.Writers (fan-out) filtered at cfg.MinLevel. NewText intentionally

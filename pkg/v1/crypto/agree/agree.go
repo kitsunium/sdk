@@ -18,14 +18,6 @@ const kdfAlgorithm corecrypto.Algorithm = "hkdf-sha256"
 // X25519 is Diffie-Hellman over Curve25519 (RFC 7748) — the modern default.
 const X25519 Algorithm = "x25519"
 
-// Algorithm is the stable identifier of a key-agreement scheme. It is a defined
-// type distinct from the other crypto-family Algorithm types (hash, mac, sign,
-// …), so the compiler rejects feeding a hash or signature constant into an
-// agreement call (V104) — the seven registries are separate keyspaces, and the
-// type system now enforces that separation the way typed Format/Level discipline
-// does elsewhere.
-type Algorithm corecrypto.Algorithm
-
 // GenerateKey draws a fresh keypair for the named scheme, returning the raw
 // public and private key bytes. An unregistered algorithm returns
 // UnknownAgreementAlgorithm; treat priv as a secret and zero it when done.

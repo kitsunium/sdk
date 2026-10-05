@@ -2176,7 +2176,8 @@ packages:
       keyenvelope: github.com/kitsunium/sdk/internal/service/crypto/key/keyenvelope
     path: github.com/kitsunium/sdk/pkg/v1/crypto
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Algorithm is the stable identifier of an AEAD scheme. Use it with SealAs. It
           is a defined type distinct from the other crypto-family Algorithm types (hash,
           mac, sign, …), so the compiler rejects feeding a hash or signature constant
@@ -2296,7 +2297,8 @@ packages:
       corecrypto: github.com/kitsunium/sdk/internal/core/crypto
     path: github.com/kitsunium/sdk/pkg/v1/crypto/agree
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Algorithm is the stable identifier of a key-agreement scheme. It is a defined
           type distinct from the other crypto-family Algorithm types (hash, mac, sign,
           …), so the compiler rejects feeding a hash or signature constant into an
@@ -2461,7 +2463,8 @@ packages:
       stdhash: github.com/kitsunium/sdk/internal/service/crypto/hash/stdhash
     path: github.com/kitsunium/sdk/pkg/v1/crypto/hash
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Algorithm is the stable identifier of a hash scheme. It is a defined type
           distinct from the other crypto-family Algorithm types (mac, sign, kdf, …), so
           the compiler rejects feeding a MAC or signature constant into a hash call
@@ -2591,7 +2594,8 @@ packages:
       keytree: github.com/kitsunium/sdk/internal/service/crypto/kdf/keytree
     path: github.com/kitsunium/sdk/pkg/v1/crypto/kdf
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Algorithm is the stable identifier of a key-derivation scheme. It is a defined
           type distinct from the other crypto-family Algorithm types (hash, mac, sign,
           …), so the compiler rejects feeding a hash or MAC constant into a KDF call
@@ -2708,7 +2712,8 @@ packages:
       corecrypto: github.com/kitsunium/sdk/internal/core/crypto
     path: github.com/kitsunium/sdk/pkg/v1/crypto/mac
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Algorithm is the stable identifier of a MAC scheme. It is a defined type
           distinct from the other crypto-family Algorithm types (hash, sign, kdf, …), so
           the compiler rejects feeding a hash or signature constant into a MAC call
@@ -2838,7 +2843,8 @@ packages:
       corecrypto: github.com/kitsunium/sdk/internal/core/crypto
     path: github.com/kitsunium/sdk/pkg/v1/crypto/password
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Algorithm is the stable identifier of a password-hashing scheme; it is also
           the PHC id segment of hashes that scheme produces. It is a defined type
           distinct from the other crypto-family Algorithm types (hash, mac, kdf, …), so
@@ -2951,7 +2957,8 @@ packages:
       corecrypto: github.com/kitsunium/sdk/internal/core/crypto
     path: github.com/kitsunium/sdk/pkg/v1/crypto/sign
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Algorithm is the stable identifier of a signature scheme. It is a defined type
           distinct from the other crypto-family Algorithm types (hash, mac, kdf, …), so
           the compiler rejects feeding a hash or MAC constant into a signature call

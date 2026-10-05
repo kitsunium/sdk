@@ -93856,7 +93856,7 @@
       "spelled": "string",
       "canonical": "string",
       "doc": "Algorithm is the stable identifier of an AEAD scheme. Use it with SealAs. It\nis a defined type distinct from the other crypto-family Algorithm types (hash,\nmac, sign, …), so the compiler rejects feeding a hash or signature constant\ninto an AEAD call (V104) — the seven registries are separate keyspaces, and\nthe type system now enforces that separation the way typed Format/Level\ndiscipline does elsewhere.\n",
-      "file": "pkg/v1/crypto/crypto.go",
+      "file": "pkg/v1/crypto/decl_gen.go",
       "layer": "public",
       "family": "crypto"
     },
@@ -94004,7 +94004,7 @@
       "spelled": "string",
       "canonical": "string",
       "doc": "Algorithm is the stable identifier of a key-agreement scheme. It is a defined\ntype distinct from the other crypto-family Algorithm types (hash, mac, sign,\n…), so the compiler rejects feeding a hash or signature constant into an\nagreement call (V104) — the seven registries are separate keyspaces, and the\ntype system now enforces that separation the way typed Format/Level discipline\ndoes elsewhere.\n",
-      "file": "pkg/v1/crypto/agree/agree.go",
+      "file": "pkg/v1/crypto/agree/decl_gen.go",
       "layer": "public",
       "family": "crypto"
     },
@@ -94092,7 +94092,7 @@
       "spelled": "string",
       "canonical": "string",
       "doc": "Algorithm is the stable identifier of a hash scheme. It is a defined type\ndistinct from the other crypto-family Algorithm types (mac, sign, kdf, …), so\nthe compiler rejects feeding a MAC or signature constant into a hash call\n(V104) — the seven registries are separate keyspaces, and the type system now\nenforces that separation the way typed Format/Level discipline does elsewhere.\n",
-      "file": "pkg/v1/crypto/hash/hash.go",
+      "file": "pkg/v1/crypto/hash/decl_gen.go",
       "layer": "public",
       "family": "crypto"
     },
@@ -94255,7 +94255,7 @@
       "spelled": "string",
       "canonical": "string",
       "doc": "Algorithm is the stable identifier of a key-derivation scheme. It is a defined\ntype distinct from the other crypto-family Algorithm types (hash, mac, sign,\n…), so the compiler rejects feeding a hash or MAC constant into a KDF call\n(V104) — the seven registries are separate keyspaces, and the type system now\nenforces that separation the way typed Format/Level discipline does elsewhere.\n",
-      "file": "pkg/v1/crypto/kdf/kdf.go",
+      "file": "pkg/v1/crypto/kdf/decl_gen.go",
       "layer": "public",
       "family": "crypto"
     },
@@ -94356,7 +94356,7 @@
       "spelled": "string",
       "canonical": "string",
       "doc": "Algorithm is the stable identifier of a MAC scheme. It is a defined type\ndistinct from the other crypto-family Algorithm types (hash, sign, kdf, …), so\nthe compiler rejects feeding a hash or signature constant into a MAC call\n(V104) — the seven registries are separate keyspaces, and the type system now\nenforces that separation the way typed Format/Level discipline does elsewhere.\n",
-      "file": "pkg/v1/crypto/mac/mac.go",
+      "file": "pkg/v1/crypto/mac/decl_gen.go",
       "layer": "public",
       "family": "crypto"
     },
@@ -94444,7 +94444,7 @@
       "spelled": "string",
       "canonical": "string",
       "doc": "Algorithm is the stable identifier of a password-hashing scheme; it is also\nthe PHC id segment of hashes that scheme produces. It is a defined type\ndistinct from the other crypto-family Algorithm types (hash, mac, kdf, …), so\nthe compiler rejects feeding a hash or KDF constant into a password call\n(V104) — the seven registries are separate keyspaces, and the type system now\nenforces that separation the way typed Format/Level discipline does elsewhere.\n",
-      "file": "pkg/v1/crypto/password/password.go",
+      "file": "pkg/v1/crypto/password/decl_gen.go",
       "layer": "public",
       "family": "crypto"
     },
@@ -94517,7 +94517,7 @@
       "spelled": "string",
       "canonical": "string",
       "doc": "Algorithm is the stable identifier of a signature scheme. It is a defined type\ndistinct from the other crypto-family Algorithm types (hash, mac, kdf, …), so\nthe compiler rejects feeding a hash or MAC constant into a signature call\n(V104) — the seven registries are separate keyspaces, and the type system now\nenforces that separation the way typed Format/Level discipline does elsewhere.\n",
-      "file": "pkg/v1/crypto/sign/sign.go",
+      "file": "pkg/v1/crypto/sign/decl_gen.go",
       "layer": "public",
       "family": "crypto"
     },
@@ -104816,7 +104816,7 @@
         }
       ],
       "doc": "Config carries the construction parameters accepted by NewText.\nTwo destination forms are supported — pick the one that fits:\n\n  - Writer single — Writer: w. Records go to that one writer.\n  - Writers fan-out — Writers: []io.Writer{a, b, c}. Records broadcast\n    to every writer in order; per-branch failures are joined under\n    FANOUT_WRITE_FAILED. Use this when you want stderr AND a log file\n    in one go (a common ops pattern) without dropping to NewWithSink.\n\nWhen BOTH are set, Writers wins and Writer is ignored. Use whichever\nreads more naturally at the call site. Construction returns\nWriterRequired (1.1.0.1) when neither field carries any writer.\n",
-      "file": "pkg/v1/observe/logger/logger.go",
+      "file": "pkg/v1/observe/logger/decl_gen.go",
       "layer": "public",
       "family": "observe"
     },
@@ -105573,7 +105573,7 @@
         }
       ],
       "doc": "SinkConfig carries the construction parameters accepted by NewWithSink.\nA zero-valued SinkConfig{Sink: s} is enough to ship records through s at\nLevelInfo using the default text encoder bound to the real wall clock.\n",
-      "file": "pkg/v1/observe/logger/sink.go",
+      "file": "pkg/v1/observe/logger/decl_gen.go",
       "layer": "public",
       "family": "observe"
     },
@@ -105680,7 +105680,7 @@
         }
       ],
       "doc": "TopologyConfig is the decoded logger configuration: a global Level (parsed by\nthe same names the level package prints — \"debug\" / \"info\" / \"warn\" /\n\"error\", case-insensitive, empty defaults to info) and the ordered Writers\nfanned out to. FromConfig unmarshals a config blob into a TopologyConfig via a\nconsumer-registered codec, then resolves each entry against the writer\nregistry. The Config role suffix marks it a config DTO (KTN-STRUCT-ROLE).\n",
-      "file": "pkg/v1/observe/logger/topology.go",
+      "file": "pkg/v1/observe/logger/decl_gen.go",
       "layer": "public",
       "family": "observe"
     },
@@ -105821,7 +105821,7 @@
         }
       ],
       "doc": "WriterEntryConfig names one writer in a TopologyConfig and carries its raw\noption map as decoded from the config blob. Name MUST match a writer\nregistered via a blank-import; Options is the per-writer option bag handed to\nthe writer's Decoder (when it implements one) or passed straight to the\nfactory's Open otherwise. Option values are never echoed into an error — the\nSECRET GATE redacts them. The Config role suffix marks it a config DTO\n(KTN-STRUCT-ROLE).\n",
-      "file": "pkg/v1/observe/logger/writer_entry.go",
+      "file": "pkg/v1/observe/logger/decl_gen.go",
       "layer": "public",
       "family": "observe"
     },
@@ -109284,7 +109284,7 @@
       "spelled": "int",
       "canonical": "int",
       "doc": "Capability identifies one process-supervision capability whose native backend\nis present on some platforms and absent on others.\n",
-      "file": "pkg/v1/proc/capability.go",
+      "file": "pkg/v1/proc/decl_gen.go",
       "layer": "public",
       "family": "proc"
     },

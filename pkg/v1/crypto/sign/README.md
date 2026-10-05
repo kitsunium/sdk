@@ -87,7 +87,7 @@ func Verify(a Algorithm, pub []byte, message []byte, sig []byte) (ok bool, err e
 Verify reports whether sig is a valid signature for message under pub for the named scheme. An unregistered algorithm returns (false, UnknownSignatureAlgorithm); an invalid signature is (false, nil).
 
 <a name="Algorithm"></a>
-## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/sign/sign.go>)
+## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/sign/decl_gen.go>)
 
 Algorithm is the stable identifier of a signature scheme. It is a defined type distinct from the other crypto-family Algorithm types (hash, mac, kdf, …), so the compiler rejects feeding a hash or MAC constant into a signature call (V104) — the seven registries are separate keyspaces, and the type system now enforces that separation the way typed Format/Level discipline does elsewhere.
 

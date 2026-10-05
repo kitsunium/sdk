@@ -160,7 +160,7 @@ func WrapKey(passphrase []byte, dek Key) (envelope string, err error)
 WrapKey seals the data key dek at rest under passphrase, returning the frozen "$kenv$" envelope string. The KEK is stretched from passphrase with PBKDF2-SHA256 and the dek is sealed under AES-256-GCM; the envelope header is bound as AAD so tampering is detected on UnwrapKey.
 
 <a name="Algorithm"></a>
-## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/crypto.go>)
+## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/decl_gen.go>)
 
 Algorithm is the stable identifier of an AEAD scheme. Use it with SealAs. It is a defined type distinct from the other crypto-family Algorithm types (hash, mac, sign, …), so the compiler rejects feeding a hash or signature constant into an AEAD call (V104) — the seven registries are separate keyspaces, and the type system now enforces that separation the way typed Format/Level discipline does elsewhere.
 

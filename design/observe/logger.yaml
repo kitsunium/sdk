@@ -2720,7 +2720,8 @@ packages:
             public: Logger topology config is invalid
             reason: TOPOLOGY_INVALID
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Config carries the construction parameters accepted by NewText.
           Two destination forms are supported — pick the one that fits:
 
@@ -2750,7 +2751,8 @@ packages:
             - doc: MinLevel is the minimum severity emitted; zero value is LevelInfo.
               name: MinLevel
               type: Level
-      - doc: |-
+      - decl: true
+        doc: |-
           SinkConfig carries the construction parameters accepted by NewWithSink.
           A zero-valued SinkConfig{Sink: s} is enough to ship records through s at
           LevelInfo using the default text encoder bound to the real wall clock.
@@ -2766,7 +2768,8 @@ packages:
             - doc: MinLevel is the minimum severity emitted; zero value is LevelInfo.
               name: MinLevel
               type: Level
-      - doc: |-
+      - decl: true
+        doc: |-
           TopologyConfig is the decoded logger configuration: a global Level (parsed by
           the same names the level package prints — "debug" / "info" / "warn" /
           "error", case-insensitive, empty defaults to info) and the ordered Writers
@@ -2784,7 +2787,8 @@ packages:
               name: Writers
               tag: json:"writers" yaml:"writers" toml:"writers"
               type: "[]WriterEntryConfig"
-      - doc: |-
+      - decl: true
+        doc: |-
           WriterEntryConfig names one writer in a TopologyConfig and carries its raw
           option map as decoded from the config blob. Name MUST match a writer
           registered via a blank-import; Options is the per-writer option bag handed to

@@ -95,7 +95,7 @@ func SharedKey(a Algorithm, priv []byte, peerPub []byte, info string) (key Key, 
 SharedKey derives a redacting 32-byte symmetric Key from priv and peerPub for the named scheme, binding info as HKDF domain separation. The raw DH secret is HKDF'd and never returned. An unregistered scheme returns UnknownAgreementAlgorithm; a low-order/garbage peerPub returns AgreementFailed.
 
 <a name="Algorithm"></a>
-## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/agree/agree.go>)
+## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/agree/decl_gen.go>)
 
 Algorithm is the stable identifier of a key-agreement scheme. It is a defined type distinct from the other crypto-family Algorithm types (hash, mac, sign, …), so the compiler rejects feeding a hash or signature constant into an agreement call (V104) — the seven registries are separate keyspaces, and the type system now enforces that separation the way typed Format/Level discipline does elsewhere.
 

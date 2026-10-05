@@ -133,7 +133,7 @@ func SumHex(a Algorithm, data []byte) (digest string, err error)
 SumHex returns Sum as canonical lowercase hex — the frozen string form for content IDs and cache keys.
 
 <a name="Algorithm"></a>
-## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/hash/hash.go>)
+## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/hash/decl_gen.go>)
 
 Algorithm is the stable identifier of a hash scheme. It is a defined type distinct from the other crypto-family Algorithm types (mac, sign, kdf, …), so the compiler rejects feeding a MAC or signature constant into a hash call (V104) — the seven registries are separate keyspaces, and the type system now enforces that separation the way typed Format/Level discipline does elsewhere.
 

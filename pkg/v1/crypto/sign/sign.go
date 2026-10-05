@@ -9,13 +9,6 @@ import (
 	_ "github.com/kitsunium/sdk/internal/service/crypto/sign/ed25519sig"
 )
 
-// Algorithm is the stable identifier of a signature scheme. It is a defined type
-// distinct from the other crypto-family Algorithm types (hash, mac, kdf, …), so
-// the compiler rejects feeding a hash or MAC constant into a signature call
-// (V104) — the seven registries are separate keyspaces, and the type system now
-// enforces that separation the way typed Format/Level discipline does elsewhere.
-type Algorithm corecrypto.Algorithm
-
 // Ed25519 is the EdDSA signature scheme over Curve25519 (RFC 8032): a 256-bit
 // public key, fast constant-time verification, and no parameter choices.
 const Ed25519 Algorithm = "ed25519"
