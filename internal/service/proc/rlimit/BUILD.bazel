@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "rlimit",
     srcs = [
+        "decl_gen.go",
         "doc.go",
         "rlimit.go",
         "rlimit_linux.go",

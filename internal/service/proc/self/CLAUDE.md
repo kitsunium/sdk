@@ -19,7 +19,7 @@ outside the SDK.
 | File | Role |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
-| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `BuildValue`, `ModuleValue`, `StatsValue` and `DistributionValue` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `BuildValue`, `ModuleValue`, `StatsValue` and `DistributionValue` — each struct with every field, unexported ones included; `BuildValue.Module` and `DistributionValue.Count`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
 | `build.go` | `BuildValue` + `Module(path)`, `ModuleValue`, `ReadBuild`, `ParseBuild`, and the three readings of a recorded version (`fromVersion`, `mainModule`, `dependency`) |
 | `stats.go` | `StatsValue`, `DistributionValue` + `Count` / `Quantile`, `ReadStats`, the runtime/metrics names, `lastGC`, `runtimeCPU` |
 | `cputime_unix.go` | `cpuTime` from `getrusage(RUSAGE_SELF)` — user plus system, every thread |

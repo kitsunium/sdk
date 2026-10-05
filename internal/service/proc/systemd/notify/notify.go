@@ -178,14 +178,16 @@ func Ready() error {
 	return Notify(map[string]string{"READY": "1"})
 }
 
-// ReadyContext is [Ready] bounded by ctx — see [NotifyContext].
-func ReadyContext(ctx context.Context) error {
+// readyContext is ReadyContext's body: decl_gen.go writes ReadyContext, from the
+// design, as one call of it.
+func readyContext(ctx context.Context) error {
 	//: READY=1 is the canonical startup-complete signal.
 	return NotifyContext(ctx, map[string]string{"READY": "1"})
 }
 
-// StatusContext is [Status] bounded by ctx — see [NotifyContext].
-func StatusContext(ctx context.Context, msg string) error {
+// statusContext is StatusContext's body: decl_gen.go writes StatusContext, from the
+// design, as one call of it.
+func statusContext(ctx context.Context, msg string) error {
 	//: STATUS carries human-readable progress; the value is sent verbatim.
 	return NotifyContext(ctx, map[string]string{"STATUS": msg})
 }

@@ -1691,6 +1691,7 @@ packages:
           cgroup file is readable (any non-Linux host) or none declares a cap, or when
           the derived limit is implausibly small.
         name: Apply
+        impl: apply
         out:
           - type: coreproc.MemoryLimitValue
     imports:
@@ -1884,6 +1885,7 @@ packages:
           - name: limits
             type: map[coreproc.Resource]coreproc.LimitValue
         name: Apply
+        impl: apply
         out:
           - type: error
       - doc: |-
@@ -1898,6 +1900,7 @@ packages:
           - name: limits
             type: map[coreproc.Resource]coreproc.LimitValue
         name: PrepareSysProcAttr
+        impl: prepareSysProcAttr
         out:
           - type: error
     imports:
@@ -1972,6 +1975,7 @@ packages:
               - name: path
                 type: string
             name: Module
+            impl: module
             out:
               - name: found
                 type: ModuleValue
@@ -2157,6 +2161,7 @@ packages:
         methods:
           - doc: Count returns how many observations the distribution holds.
             name: Count
+            impl: count
             out:
               - type: uint64
             recv: value
@@ -2483,6 +2488,7 @@ packages:
           - name: ctx
             type: context.Context
         name: ReadyContext
+        impl: readyContext
         out:
           - type: error
       - doc: StatusContext is [Status] bounded by ctx — see [NotifyContext].
@@ -2492,6 +2498,7 @@ packages:
           - name: msg
             type: string
         name: StatusContext
+        impl: statusContext
         out:
           - type: error
       - doc: |-

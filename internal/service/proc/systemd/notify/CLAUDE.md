@@ -125,3 +125,7 @@ container (same-process `SO_PASSCRED` send). The Linux listener tests fail,
 never skip, when `Listen` cannot bind; off Linux,
 `TestListenUnsupportedOffLinuxTagged` (`sdnotify_other_test.go`, `!linux`)
 asserts the typed `UnsupportedPlatform` with no listener and no path.
+
+## Declarations
+
+`decl_gen.go` is written by kit gen from the design (ADR 0170): the declaration of ; `ReadyContext` and `StatusContext`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name.

@@ -54,18 +54,9 @@ const int64Bits int = 64
 // the kill.
 const minimumLimitBytes int64 = 64 << 20
 
-// Apply derives the Go soft memory limit from the cgroup allowance and installs
-// it, reporting what it read, what it derived, and what decided the outcome.
-//
-// The allowance is the tightest cap governing this process: resolved from
-// /proc/self/cgroup so a child cgroup is honoured, then minimised across its
-// ancestors and across both hierarchies on a hybrid host.
-//
-// It leaves the runtime default untouched — and says which of the three reasons
-// applied — when the operator set GOMEMLIMIT to a non-empty value, when no
-// cgroup file is readable (any non-Linux host) or none declares a cap, or when
-// the derived limit is implausibly small.
-func Apply() coreproc.MemoryLimitValue {
+// apply is Apply's body: decl_gen.go writes Apply, from the
+// design, as one call of it.
+func apply() coreproc.MemoryLimitValue {
 	//: Return the computed result to the caller.
 	return applyFrom(os.LookupEnv, os.ReadFile, debug.SetMemoryLimit)
 }

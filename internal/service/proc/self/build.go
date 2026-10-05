@@ -27,9 +27,9 @@ const (
 	settingTrue string = "true"
 )
 
-// Module returns the module whose path is path — the main module or one of
-// the dependencies — and whether the build contains it.
-func (b *BuildValue) Module(path string) (found ModuleValue, ok bool) {
+// module is BuildValue.Module's body: decl_gen.go writes BuildValue.Module, from the
+// design, as one call of it.
+func (b *BuildValue) module(path string) (found ModuleValue, ok bool) {
 	//: the main module answers for its own path.
 	if b.Main.Path == path {
 		//: the module being built.

@@ -524,11 +524,13 @@ packages:
             recv: pointer
           - doc: Addr is the listener's address.
             name: Addr
+            impl: addr
             out:
               - type: net.Addr
             recv: pointer
           - doc: Path is the socket's path.
             name: Path
+            impl: path
             out:
               - type: string
             recv: pointer

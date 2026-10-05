@@ -6,6 +6,7 @@ go_library(
     name = "memlimit",
     srcs = [
         "cgroup.go",
+        "decl_gen.go",
         "doc.go",
         "memlimit.go",
     ],

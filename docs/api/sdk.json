@@ -83479,7 +83479,7 @@
       "spelled": "func() net.Addr",
       "canonical": "func() net.Addr",
       "doc": "Addr is the listener's address.\n",
-      "file": "internal/service/proc/ipc/ipc.go",
+      "file": "internal/service/proc/ipc/decl_gen.go",
       "layer": "service",
       "family": "proc"
     },
@@ -83505,7 +83505,7 @@
       "spelled": "func() string",
       "canonical": "func() string",
       "doc": "Path is the socket's path.\n",
-      "file": "internal/service/proc/ipc/ipc.go",
+      "file": "internal/service/proc/ipc/decl_gen.go",
       "layer": "service",
       "family": "proc"
     },
@@ -83566,7 +83566,7 @@
       "spelled": "func() coreproc.MemoryLimitValue",
       "canonical": "func() github.com/kitsunium/sdk/internal/core/proc.MemoryLimitValue",
       "doc": "Apply derives the Go soft memory limit from the cgroup allowance and installs\nit, reporting what it read, what it derived, and what decided the outcome.\n\nThe allowance is the tightest cap governing this process: resolved from\n/proc/self/cgroup so a child cgroup is honoured, then minimised across its\nancestors and across both hierarchies on a hybrid host.\n\nIt leaves the runtime default untouched — and says which of the three reasons\napplied — when the operator set GOMEMLIMIT to a non-empty value, when no\ncgroup file is readable (any non-Linux host) or none declares a cap, or when\nthe derived limit is implausibly small.\n",
-      "file": "internal/service/proc/memlimit/memlimit.go",
+      "file": "internal/service/proc/memlimit/decl_gen.go",
       "layer": "service",
       "family": "proc"
     },
@@ -83750,7 +83750,7 @@
       "spelled": "func(pid int, limits map[coreproc.Resource]coreproc.LimitValue) error",
       "canonical": "func(pid int, limits map[github.com/kitsunium/sdk/internal/core/proc.Resource]github.com/kitsunium/sdk/internal/core/proc.LimitValue) error",
       "doc": "Apply sets the soft/hard ceilings in limits on the process identified by pid.\nA pid of 0 (or the caller's own pid) targets the calling process via\nsetrlimit(2); any other pid targets that process via prlimit64(2), which\nneeds CAP_SYS_RESOURCE. An unmapped Resource yields UnknownResource and a\nfailing syscall yields RlimitFailed; off Linux every call yields\nUnsupportedPlatform.\n",
-      "file": "internal/service/proc/rlimit/rlimit.go",
+      "file": "internal/service/proc/rlimit/decl_gen.go",
       "layer": "service",
       "family": "proc"
     },
@@ -83762,7 +83762,7 @@
       "spelled": "func(limits map[coreproc.Resource]coreproc.LimitValue) error",
       "canonical": "func(limits map[github.com/kitsunium/sdk/internal/core/proc.Resource]github.com/kitsunium/sdk/internal/core/proc.LimitValue) error",
       "doc": "PrepareSysProcAttr validates limits and reports whether they can be applied,\nreturning the same typed errors Apply would. It performs no syscall and\nmutates nothing: Go's os/exec SysProcAttr carries no rlimit field, so the\ncaller applies limits post-fork from the child (see Apply with pid 0) rather\nthan declaratively through SysProcAttr. Use it to fail fast — at Spec\nconstruction time — on a Resource this platform cannot honour, before a\nprocess is ever spawned.\n",
-      "file": "internal/service/proc/rlimit/rlimit.go",
+      "file": "internal/service/proc/rlimit/decl_gen.go",
       "layer": "service",
       "family": "proc"
     },
@@ -83809,7 +83809,7 @@
       "spelled": "func(path string) (found ModuleValue, ok bool)",
       "canonical": "func(path string) (found github.com/kitsunium/sdk/internal/service/proc/self.ModuleValue, ok bool)",
       "doc": "Module returns the module whose path is path — the main module or one of\nthe dependencies — and whether the build contains it.\n",
-      "file": "internal/service/proc/self/build.go",
+      "file": "internal/service/proc/self/decl_gen.go",
       "layer": "service",
       "family": "proc"
     },
@@ -83846,7 +83846,7 @@
       "spelled": "func() uint64",
       "canonical": "func() uint64",
       "doc": "Count returns how many observations the distribution holds.\n",
-      "file": "internal/service/proc/self/stats.go",
+      "file": "internal/service/proc/self/decl_gen.go",
       "layer": "service",
       "family": "proc"
     },
@@ -84377,7 +84377,7 @@
       "spelled": "func(ctx context.Context) error",
       "canonical": "func(ctx context.Context) error",
       "doc": "ReadyContext is [Ready] bounded by ctx — see [NotifyContext].\n",
-      "file": "internal/service/proc/systemd/notify/notify.go",
+      "file": "internal/service/proc/systemd/notify/decl_gen.go",
       "layer": "service",
       "family": "proc"
     },
@@ -84413,7 +84413,7 @@
       "spelled": "func(ctx context.Context, msg string) error",
       "canonical": "func(ctx context.Context, msg string) error",
       "doc": "StatusContext is [Status] bounded by ctx — see [NotifyContext].\n",
-      "file": "internal/service/proc/systemd/notify/notify.go",
+      "file": "internal/service/proc/systemd/notify/decl_gen.go",
       "layer": "service",
       "family": "proc"
     },

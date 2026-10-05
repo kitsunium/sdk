@@ -99,11 +99,13 @@ func (l *Listener) Refused() int64 {
 	return l.refused
 }
 
-// Addr is the listener's address.
-func (l *Listener) Addr() net.Addr { return l.ln.Addr() }
+// addr is Listener.Addr's body: decl_gen.go writes Listener.Addr, from the
+// design, as one call of it.
+func (l *Listener) addr() net.Addr { return l.ln.Addr() }
 
-// Path is the socket's path.
-func (l *Listener) Path() string { return l.cfg.Path }
+// path is Listener.Path's body: decl_gen.go writes Listener.Path, from the
+// design, as one call of it.
+func (l *Listener) path() string { return l.cfg.Path }
 
 // Close stops accepting and removes the socket file (a named pipe vanishes
 // with its last handle).
