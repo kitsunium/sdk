@@ -20,9 +20,10 @@ go_test(
     size = "small",
     srcs = [
         "api_gen_test.go",
+        "perf_fixtures_test.go",
+        "perf_gen_test.go",
         "snapshot_bench_test.go",
         "snapshot_external_test.go",
-        "snapshot_integration_test.go",
     ],
     deps = [":snapshot"],
 )

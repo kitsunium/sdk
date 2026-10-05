@@ -55,5 +55,6 @@ fresh-buffer capacity via the package recycler), `buffer_bench_test.go` (warm
 `Get`, the `Get`/write/`Put` round trip, and the round trip under
 `RunParallel` — the numbers are in `BENCH.md`; there is no isolated `Put`
 benchmark, because a `Put` without its `Get` measures pool growth). The
-zero-alloc steady-state of `Get`/`Put` is gated by `recycler`'s
-`TestZeroAllocInvariant` (race-off).
+zero-alloc steady-state of `Get`/`Put` is the design's budget on `Get`
+(`allocs: 0`, ADR 0165): `perf_fixtures_test.go` holds its fixture, and the
+`perf_gen_test.go` kit gen writes counts it, race off.

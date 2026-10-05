@@ -17,7 +17,8 @@
 //     heap allocation per emit, not 0. The variadic Info/Warn/... path
 //     costs the same 1 (its variadic slice). Prefer Build for
 //     ergonomics; it is not an allocation-free guarantee. Measured in
-//     BENCH.md and pinned by TestV116BuildSendAllocatesOnePerEmit.
+//     BENCH.md and pinned by its design contract (allocsMin: 1 on
+//     Build, ADR 0165).
 //   - Composable transport. A Logger is wired from a Sink (where bytes
 //     go) + an Encoder (how bytes are formatted). Fan-out, async, route,
 //     failover, sample, recover middleware compose around a Sink —

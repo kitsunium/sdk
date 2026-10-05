@@ -53,9 +53,10 @@ Logger ── Handler (genericHandler / TextHandler)
   allocation per emit once `recordPool` is warm — the pool recycles the
   `*chainBuilder` and its attrs scratchpad, but the handler clones that
   scratchpad (`mergeAttrs` / `slices.Clone`) on every `Send`, so one slice
-  escapes. Measured in `pkg/v1/observe/logger/BENCH.md`; pinned by
-  `TestV116BuildSendAllocatesOnePerEmit` (which runs only in the race-off
-  alloc lane — see root `CLAUDE.md` rule 12).
+  escapes. Measured in `pkg/v1/observe/logger/BENCH.md`; pinned by the
+  design contract on `logger.Build` (`allocsMin: 1`, ADR 0165), which kit
+  gen writes as `TestPerfAllocsBuildSend` — run only in the race-off alloc
+  lane, see root `CLAUDE.md` rule 12.
 
 ## Contents
 
@@ -115,7 +116,7 @@ Logger ── Handler (genericHandler / TextHandler)
   rather than itself. `TestAnOwningLoggerReleasesWhatItOwnsOnce`.
 - **A `!race` alloc guard covers this.** `TestT34TraceCorrelationAddsNoAllocation`
   in `pkg/v1/observe/logger` asserts **exactly 1** alloc/op on all three emission paths,
-  in and out of a span — stricter than `TestV116BuildSendAllocatesOnePerEmit`,
+  in and out of a span — stricter than `TestPerfAllocsBuildSend`,
   which only asserts `>= 1`. Same race-off alloc lane; profiled in
   `pkg/v1/observe/logger/BENCH.md`.
 
@@ -166,7 +167,7 @@ slate whose capacity was not a compile-time constant, so from three branches up
 they heap-allocated on every record on the completely healthy path — a
 `recover`→`failover(4)`→`multi(4)` emit measured 3 allocs/op. Both now declare
 the slate nil, and every stack in the report is back to **1 alloc/op** at every
-depth and width. `TestV116BuildSendAllocatesOnePerEmit` and
+depth and width. `TestPerfAllocsBuildSend` and
 `TestT34TraceCorrelationAddsNoAllocation` were not touched and still pass.
 
 The report also splits where an emit's time actually goes: the encoder was

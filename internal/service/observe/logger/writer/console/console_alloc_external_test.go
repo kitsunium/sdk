@@ -4,7 +4,7 @@
 // allocation claim, which is nothing, gated.
 //
 // The root CLAUDE.md sells the logger on "one alloc per emit" and pins it in
-// pkg/v1/observe/logger with TestV116BuildSendAllocatesOnePerEmit. That test ends at
+// pkg/v1/observe/logger with TestPerfAllocsBuildSend. That test ends at
 // the handler. Nobody had ever asked what a WRITER adds underneath it, and this
 // is the console half of the answer: the allocation profile of a full emit
 // attributes 99.53 % of its objects to the handler's attrs clone and 0 to the

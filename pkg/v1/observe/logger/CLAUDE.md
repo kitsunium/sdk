@@ -48,8 +48,11 @@ BENCH.md       — the emit-path benchmarks (logger_bench_test.go), then a separ
                  trace-correlation run (ADR 0062)
 USES.md        — the interactive use-case tabs a Go doc comment cannot render
 *_test.go      — *_external_test.go suites, fromconfig / witherror internal suites,
-                 and the three `!race` *_integration_test.go allocation gates (builder,
-                 fanout, tracecontext) run by the alloc lane
+                 the two `!race` *_integration_test.go differential allocation gates
+                 (fanout, tracecontext), and the design contracts (ADR 0165):
+                 perf_fixtures_test.go, hand-written, and perf_gen_test.go, kit's —
+                 Build's floor of one allocation an emit and an extraction that
+                 allocates nothing — all run by the alloc lane
 ```
 
 `README.md` is the consumer-facing quickstart (text-on-stderr example, custom sink topology, Builder hot path).

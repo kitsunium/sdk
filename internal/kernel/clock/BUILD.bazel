@@ -35,6 +35,8 @@ go_test(
         "clock_external_test.go",
         "clock_internal_test.go",
         "manual_external_test.go",
+        "perf_fixtures_test.go",
+        "perf_gen_test.go",
         "synctest_external_test.go",
         "waiter_external_test.go",
     ],
