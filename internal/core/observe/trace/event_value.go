@@ -1,3 +1,6 @@
+// Package trace — declares the sentinel *errs.Error values. Each var's name
+// equals its errs.Define Reason in SCREAMING_SNAKE form.
+//
 // Package trace — Event: a timestamped point inside a span.
 package trace
 

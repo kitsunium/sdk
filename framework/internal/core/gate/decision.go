@@ -1,3 +1,5 @@
+// Package gate — the dotted-quad code range this domain owns.
+//
 // Package gate — what the gate decided, and why.
 package gate
 

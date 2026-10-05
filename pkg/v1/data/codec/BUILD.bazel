@@ -13,9 +13,8 @@ go_library(
     name = "codec",
     srcs = [
         "codec.go",
-        "codes.go",
+        "codes_gen.go",
         "compressed.go",
-        "errors.go",
         "multipart.go",
         "promote.go",
     ],

@@ -1,7 +1,75 @@
 apiVersion: kit.kitsunium/design/v2
 domain: security/authz
 packages:
-  - constants:
+  - codes:
+      - const:
+          - doc: |-
+              CodePermissionDenied identifies the single refusal this domain produces. It
+              is the code every non-[Allow] outcome converts to — an explicit [Deny], an
+              all-[Abstain] evaluation, a policy that could not be evaluated — because a
+              caller who can tell those apart from the outside learns the shape of the
+              policy set.
+            name: CodePermissionDenied
+            note: "range: 0.2.26.0 - 0.2.26.255"
+            value: "0x00_02_1A_01"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeAttributeMissing identifies a rule that named an attribute the request
+              does not carry. It is an evaluation FAILURE, never a false comparison: the
+              rule did not run, so nothing about it was satisfied.
+            name: CodeAttributeMissing
+            value: "0x00_02_1A_02"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeAttributeKindMismatch identifies an attribute that is present but not
+              the kind the rule compares — a text rule against a number, a flag rule
+              against a set. Like an absent attribute, it means the rule did not run.
+            name: CodeAttributeKindMismatch
+            value: "0x00_02_1A_03"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodePolicyMisconfigured identifies a policy that cannot be evaluated because
+              of how it was assembled: a nil [Policy] in a composition, or a [Policy] that
+              returned a [Decision] outside the three named states.
+            name: CodePolicyMisconfigured
+            value: "0x00_02_1A_04"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeGrantInvalid identifies an RBAC grant table refused at construction: no
+              roles attribute named, no grants, an unnamed role, a role that confers
+              nothing, or a permission with an empty half.
+            name: CodeGrantInvalid
+            note: |-
+              range: 0.3.56.0 - 0.3.56.255
+
+              The construction refusals of the engine in internal/service/security/authz.
+              The range was allocated in the service layer (LL = 3) and is declared here,
+              beside the domain's verdicts, since ADR 0160: LL records the layer that
+              allocated a range, not the directory its declaration lives in, so the values
+              never change.
+            value: "0x00_03_38_01"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeRuleInvalid identifies an ABAC rule set refused at construction: no
+              rules, an unnamed rule, an empty action or resource, a nil condition, or an
+              effect that is neither Allow nor Deny.
+            name: CodeRuleInvalid
+            value: "0x00_03_38_02"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeConditionInvalid identifies a condition constructor refused at
+              construction: an empty attribute name, an empty set member, a nil inner
+              condition, or a combinator over no conditions at all.
+            name: CodeConditionInvalid
+            value: "0x00_03_38_03"
+        type: errs.Code
+    constants:
       - name: KindInvalid
         type: AttrKind
         value: "0"
@@ -17,27 +85,6 @@ packages:
       - name: KindStrings
         type: AttrKind
         value: "4"
-      - name: CodePermissionDenied
-        type: errs.Code
-        value: "0x00_02_1A_01"
-      - name: CodeAttributeMissing
-        type: errs.Code
-        value: "0x00_02_1A_02"
-      - name: CodeAttributeKindMismatch
-        type: errs.Code
-        value: "0x00_02_1A_03"
-      - name: CodePolicyMisconfigured
-        type: errs.Code
-        value: "0x00_02_1A_04"
-      - name: CodeGrantInvalid
-        type: errs.Code
-        value: "0x00_03_38_01"
-      - name: CodeRuleInvalid
-        type: errs.Code
-        value: "0x00_03_38_02"
-      - name: CodeConditionInvalid
-        type: errs.Code
-        value: "0x00_03_38_03"
       - name: Abstain
         type: Decision
         value: "0"
@@ -94,6 +141,144 @@ packages:
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/security/authz
+    sentinels:
+      - note: |-
+          Every verdict in the first block below carries the SAME Public sentence,
+          "Access to the requested resource is denied", spelled out at each call site
+          because the registry audit requires the argument to be a string literal.
+
+          The repetition is the point, and it is a security property rather than an
+          oversight: a refusal message that explains itself is a description of the
+          policy set, delivered to the party the policy exists to keep out. "You are
+          not an admin" names the role model. "Missing attribute department" names an
+          attribute and tells the attacker which value to forge next. "Denied by rule
+          7" tells them how many rules there are and which one to work around.
+
+          The diagnosis is not lost — it is moved. Every sentinel carries a distinct
+          Private, the call site attaches structured fields, and both reach the
+          operator through errs.PrivateOf / errs.FieldsOf, which pkg/v1's own docs
+          forbid putting on the wire. What crosses the boundary is one sentence that
+          is true of every refusal and specific to none — and a test pins that the
+          four Publics stay byte-identical.
+        var:
+          - code: CodePermissionDenied
+            doc: |-
+              PermissionDenied is the refusal. It is what internal/service/security/authz.Check
+              returns for an explicit Deny, for an evaluation in which every policy
+              abstained, and for one that could not be completed — three causes, one
+              error, one code, one sentence.
+
+              The fields distinguish them for the operator: "outcome" is "deny",
+              "abstain" or "unevaluable", and an unevaluable outcome also carries the
+              underlying code and reason. errs.HasCode(err, CodePermissionDenied)
+              therefore answers true for every refusal, which is what a framework
+              routes on.
+            name: PermissionDenied
+            options:
+              - errs.WithHTTPStatus(httpForbidden)
+            private: "core/security/authz: the request was refused; the fields carry the outcome, the subject, the action, the resource and — when the evaluation failed — the underlying code"
+            public: Access to the requested resource is denied
+            reason: PERMISSION_DENIED
+          - code: CodeAttributeMissing
+            doc: |-
+              AttributeMissing is returned by a [Condition] whose rule names an
+              attribute the request does not carry.
+
+              It exists as its own code because the alternative is the defect this
+              domain was written to prevent: reporting an absent attribute as a failed
+              comparison. `department == "finance"` on a subject with no department is
+              not false — it is unanswerable, and answering false lets a request that
+              carries NO attributes at all walk past every rule of that shape. Every
+              combinator treats it as absorbing, so it cannot be laundered into a
+              grant by a Not, an AnyOf, or a rule whose effect happens to be Deny.
+            name: AttributeMissing
+            options:
+              - errs.WithHTTPStatus(httpForbidden)
+            private: "core/security/authz: a rule named an attribute the request does not carry; the fields name the attribute and the rule"
+            public: Access to the requested resource is denied
+            reason: ATTRIBUTE_MISSING
+          - code: CodeAttributeKindMismatch
+            doc: |-
+              AttributeKindMismatch is returned by a [Condition] whose attribute is
+              present but carries another kind — a number where the rule compares
+              text, a set where it reads a flag.
+
+              It is the same failure as an absent attribute wearing a different hat:
+              the comparison did not happen. A kind mismatch is normally a wiring bug
+              on the producing side, so it is reported rather than coerced; coercing
+              would make "42" and 42 the same attribute in one direction and not the
+              other, which is how a rule starts matching requests it was never
+              written for.
+            name: AttributeKindMismatch
+            options:
+              - errs.WithHTTPStatus(httpForbidden)
+            private: "core/security/authz: an attribute is present but not the kind the rule compares; the fields name the attribute, the wanted kind and the kind found"
+            public: Access to the requested resource is denied
+            reason: ATTRIBUTE_KIND_MISMATCH
+          - code: CodePolicyMisconfigured
+            doc: |-
+              PolicyMisconfigured is returned when a composition cannot be evaluated
+              because of how it was built: a nil [Policy] among its members, or a
+              member that returned a [Decision] outside the three named states.
+
+              Both are treated as [Deny] and reported, never skipped. Skipping a nil
+              policy would silently shrink the policy set — the one edit an attacker
+              would most like to make — and treating an out-of-contract Decision as
+              anything but a refusal would let a numeric conversion authorize.
+            name: PolicyMisconfigured
+            options:
+              - errs.WithHTTPStatus(httpForbidden)
+              - errs.WithExitCode(exitConfig)
+            private: "core/security/authz: a policy could not be evaluated as assembled — a nil member, or a decision outside allow/deny/abstain; the fields carry the position and the value"
+            public: Access to the requested resource is denied
+            reason: POLICY_MISCONFIGURED
+          - code: CodeGrantInvalid
+            doc: |-
+              GrantInvalid is returned by NewRBAC for a grant table that could never
+              grant correctly. The fields name the offending row and role.
+            name: GrantInvalid
+            note: |-
+              The engine's construction refusals (0.3.56.*). They are raised by
+              internal/service/security/authz while a policy is being ASSEMBLED — their
+              Private names that package, the one that raises them — and declared here
+              since ADR 0160, so every code of the domain is in one place.
+
+              These three carry a Public that describes a server-side configuration
+              fault rather than the neutral refusal sentence the verdicts above use.
+              That is deliberate and is not a leak: a construction error is returned to
+              the process that is starting up, on a path where no request exists yet
+              and no client is listening. It never becomes a response, so it may be
+              specific. Every one is a permanent wiring fault — the same arguments are
+              refused forever, and the fix is a code change at the call site — so all
+              three carry EX_CONFIG.
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "service/security/authz: NewRBAC received a grant table it cannot honour; the fields carry the detail, the row index and the role"
+            public: The role grant table is not usable and was refused
+            reason: GRANT_INVALID
+          - code: CodeRuleInvalid
+            doc: |-
+              RuleInvalid is returned by NewABAC for a rule set that could never
+              decide correctly. The fields name the offending rule and its position.
+            name: RuleInvalid
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "service/security/authz: NewABAC received a rule it cannot honour; the fields carry the detail, the rule index and the rule name"
+            public: The attribute rule set is not usable and was refused
+            reason: RULE_INVALID
+          - code: CodeConditionInvalid
+            doc: |-
+              ConditionInvalid is returned by a condition constructor whose arguments
+              it cannot honour. It is never an evaluation outcome: an attribute that
+              is absent or of the wrong kind is AttributeMissing or
+              AttributeKindMismatch, and both of those are refusals of a REQUEST,
+              while this is a refusal of the RULE.
+            name: ConditionInvalid
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "service/security/authz: a condition constructor received an empty key, an empty member, a nil condition or an empty set; the fields carry the detail"
+            public: The condition cannot be built from the given arguments
+            reason: CONDITION_INVALID
     types:
       - name: AttrKind
         underlying: uint8
@@ -194,21 +379,6 @@ packages:
         name: RequestValue
         struct:
           unexported: true
-    variables:
-      - name: PermissionDenied
-        type: "*errs.Error"
-      - name: AttributeMissing
-        type: "*errs.Error"
-      - name: AttributeKindMismatch
-        type: "*errs.Error"
-      - name: PolicyMisconfigured
-        type: "*errs.Error"
-      - name: GrantInvalid
-        type: "*errs.Error"
-      - name: RuleInvalid
-        type: "*errs.Error"
-      - name: ConditionInvalid
-        type: "*errs.Error"
   - functions:
       - in:
           - name: rules

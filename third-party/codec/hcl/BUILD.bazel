@@ -12,8 +12,7 @@ go_library(
     name = "hcl",
     srcs = [
         "codec.go",
-        "codes.go",
-        "errors.go",
+        "codes_gen.go",
     ],
     importpath = "github.com/kitsunium/sdk/third-party/codec/hcl",
     visibility = ["//visibility:public"],

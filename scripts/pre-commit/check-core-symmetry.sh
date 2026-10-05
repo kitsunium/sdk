@@ -61,10 +61,11 @@
 #       engine, observe/otel, declares no code (it takes the caller's sentinel)
 #       and is not judged.
 #
-# codeRangeOwners is read from internal/kernel/errs/
-# registry_ownership_external_test.go, the hand-maintained table the ownership
-# audit holds every declaration to (ADR 0035), so "the ranges this package
-# owns" is the audit's own answer, not a second reading of the constants.
+# codeRangeOwners is read from internal/kernel/errs/codes_gen_test.go, the
+# table the ownership audit holds every declaration to (ADR 0035) — kit writes
+# it from design/sdk.yaml's codes.ranges, a block authored apart from the codes
+# (ADR 0164) —, so "the ranges this package owns" is the audit's own answer,
+# not a second reading of the constants.
 #
 # The guard fails CLOSED, like its siblings: a layer that is missing, a find
 # that errors, a tree with no package, a file grep cannot read, or an owner
@@ -77,7 +78,7 @@ cd "$root"
 
 service="internal/service"
 core="internal/core"
-owners_file="internal/kernel/errs/registry_ownership_external_test.go"
+owners_file="internal/kernel/errs/codes_gen_test.go"
 errs_import="github.com/kitsunium/sdk/internal/kernel/errs"
 
 # The families of ADR 0155, as the layers group them.

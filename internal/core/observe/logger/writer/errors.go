@@ -12,29 +12,6 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-var (
-	// WriterUnknownName is returned by Open when no factory is registered
-	// under the requested Name — typically a missing blank-import.
-	WriterUnknownName = errs.Define(CodeWriterUnknownName, "WRITER_UNKNOWN_NAME",
-		"No writer is registered under that name",
-		"core/observe/logger/writer.Open: name absent from registry; blank-import the writer's package to register it")
-
-	// WriterConfigInvalid is the shared sentinel every factory returns when
-	// the supplied Config is of the wrong concrete type. Factories attach an
-	// errs Field naming the writer so the offender is identifiable.
-	WriterConfigInvalid = errs.Define(CodeWriterConfigInvalid, "WRITER_CONFIG_INVALID",
-		"Writer configuration has the wrong type",
-		"core/observe/logger/writer factory received a Config of an unexpected concrete type")
-
-	// DuplicateRegistration is the conflict Register refuses at boot: a
-	// distinct factory already holds the Name a second one claims. Register
-	// panics with conflictText of it, so the panic carries the dotted-quad
-	// header AND the Name that collided.
-	DuplicateRegistration = errs.Define(CodeDuplicateRegistration, "DUPLICATE_REGISTRATION",
-		"A writer is already registered under that name",
-		"core/observe/logger/writer.Register: a distinct factory already holds this Name")
-)
-
 // conflictText renders a registry conflict for the boot panic that reports it:
 // the typed error's header and Public, then each field it carries, quoted.
 // Error() never renders a field (rule 4), and the panic is the only place an

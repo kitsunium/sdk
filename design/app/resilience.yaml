@@ -1,28 +1,58 @@
 apiVersion: kit.kitsunium/design/v2
 domain: app/resilience
 packages:
-  - constants:
-      - name: CodeRetryExhausted
+  - codes:
+      - const:
+          - doc: |-
+              CodeRetryExhausted identifies a retry policy that used its whole attempt
+              budget without a success (the last attempt's error is the wrap cause).
+            name: CodeRetryExhausted
+            note: "range: 0.2.8.0 - 0.2.8.255"
+            value: "0x00_02_08_01"
         type: errs.Code
-        value: "0x00_02_08_01"
-      - name: CodeCircuitOpen
+      - const:
+          - doc: |-
+              CodeCircuitOpen identifies a call rejected fast because the circuit breaker is
+              in the Open state (the downstream is presumed unhealthy).
+            name: CodeCircuitOpen
+            value: "0x00_02_08_02"
         type: errs.Code
-        value: "0x00_02_08_02"
-      - name: CodeRateLimited
+      - const:
+          - doc: |-
+              CodeRateLimited identifies a call rejected (or whose wait was cancelled)
+              because the rate limiter had no token available.
+            name: CodeRateLimited
+            value: "0x00_02_08_03"
         type: errs.Code
-        value: "0x00_02_08_03"
-      - name: CodeBulkheadFull
+      - const:
+          - doc: |-
+              CodeBulkheadFull identifies a call rejected because the bulkhead's concurrency
+              slots were all occupied.
+            name: CodeBulkheadFull
+            value: "0x00_02_08_04"
         type: errs.Code
-        value: "0x00_02_08_04"
-      - name: CodeTimeoutExceeded
+      - const:
+          - doc: |-
+              CodeTimeoutExceeded identifies an operation that did not complete within the
+              timeout policy's deadline.
+            name: CodeTimeoutExceeded
+            value: "0x00_02_08_05"
         type: errs.Code
-        value: "0x00_02_08_05"
-      - name: CodePolicyMisconfigured
+      - const:
+          - doc: |-
+              CodePolicyMisconfigured identifies a policy built with a configuration it
+              cannot honour, whose every call is refused without running the operation.
+            name: CodePolicyMisconfigured
+            value: "0x00_02_08_06"
         type: errs.Code
-        value: "0x00_02_08_06"
-      - name: CodeFallbackFailed
+      - const:
+          - doc: |-
+              CodeFallbackFailed identifies a fallback policy whose primary AND secondary
+              operations both failed on a live context (both errors travel as fields —
+              neither is dropped). A cancellation is reported as ctx.Err() instead.
+            name: CodeFallbackFailed
+            value: "0x00_02_08_07"
         type: errs.Code
-        value: "0x00_02_08_07"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/app/resilience
@@ -46,24 +76,79 @@ packages:
             out:
               - type: error
         name: Runner
+    sentinels:
+      - var:
+          - code: CodeRetryExhausted
+            doc: RetryExhausted wraps the final attempt's error after the retry budget ran out.
+            name: RetryExhausted
+            options:
+              - errs.WithExitCode(exitUnavailable)
+            private: "service/app/resilience: retry budget exhausted; the wrap cause is the last attempt's error"
+            public: The operation failed after exhausting all retries
+            reason: RETRY_EXHAUSTED
+          - code: CodeCircuitOpen
+            doc: CircuitOpen is returned when the breaker is Open and the call is rejected fast.
+            name: CircuitOpen
+            options:
+              - errs.WithExitCode(exitUnavailable)
+              - errs.WithHTTPStatus(httpUnavailable)
+            private: "service/app/resilience: breaker in Open state — downstream presumed unhealthy"
+            public: The circuit breaker is open; the call was rejected
+            reason: CIRCUIT_OPEN
+          - code: CodeRateLimited
+            doc: RateLimited is returned when no token was available (or the wait was cancelled).
+            name: RateLimited
+            options:
+              - errs.WithExitCode(exitUnavailable)
+              - errs.WithHTTPStatus(httpTooManyRequests)
+            private: "service/app/resilience: no rate-limit token available"
+            public: The call was rejected by the rate limiter
+            reason: RATE_LIMITED
+          - code: CodeBulkheadFull
+            doc: BulkheadFull is returned when every concurrency slot is occupied.
+            name: BulkheadFull
+            options:
+              - errs.WithExitCode(exitUnavailable)
+              - errs.WithHTTPStatus(httpUnavailable)
+            private: "service/app/resilience: all bulkhead concurrency slots occupied"
+            public: The call was rejected because the bulkhead is full
+            reason: BULKHEAD_FULL
+          - code: CodePolicyMisconfigured
+            doc: |-
+              PolicyMisconfigured is returned by every call to a policy that was built
+              with a configuration it cannot honour, in place of running the operation.
+              Unlike its siblings it is permanent, not transient (ADR 0031): the fix is
+              a code change at the construction site, never a retry.
+            name: PolicyMisconfigured
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "service/app/resilience: policy built with a configuration it cannot honour; the fields name the policy and the knob"
+            public: The reliability policy was misconfigured and refused the call
+            reason: POLICY_MISCONFIGURED
+          - code: CodeTimeoutExceeded
+            doc: TimeoutExceeded is returned when the operation outran the timeout deadline.
+            name: TimeoutExceeded
+            options:
+              - errs.WithExitCode(exitUnavailable)
+              - errs.WithHTTPStatus(httpGatewayTimeout)
+            private: "service/app/resilience: operation did not complete before the deadline"
+            public: The operation exceeded its timeout
+            reason: TIMEOUT_EXCEEDED
+          - code: CodeFallbackFailed
+            doc: |-
+              FallbackFailed is returned when the primary operation AND the fallback
+              both failed. It is the policy's own outcome rather than either half's
+              error, so that neither can be dropped and neither can hijack the code:
+              both messages travel as the "primary" and "fallback" fields.
+            name: FallbackFailed
+            options:
+              - errs.WithExitCode(exitUnavailable)
+            private: "service/app/resilience: primary and fallback both failed; the fields carry both messages"
+            public: The operation and its fallback both failed
+            reason: FALLBACK_FAILED
     types:
       - name: Operation
         underlying: func(ctx context.Context) error
-    variables:
-      - name: RetryExhausted
-        type: "*errs.Error"
-      - name: CircuitOpen
-        type: "*errs.Error"
-      - name: RateLimited
-        type: "*errs.Error"
-      - name: BulkheadFull
-        type: "*errs.Error"
-      - name: PolicyMisconfigured
-        type: "*errs.Error"
-      - name: TimeoutExceeded
-        type: "*errs.Error"
-      - name: FallbackFailed
-        type: "*errs.Error"
   - aliases:
       - name: BackoffValue
         target: kbackoff.Value

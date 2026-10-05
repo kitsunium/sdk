@@ -4,37 +4,94 @@ packages:
   - aliases:
       - name: FS
         target: fs.FS
-    constants:
-      - name: CodeInvalidPath
+    codes:
+      - const:
+          - doc: |-
+              CodeInvalidPath identifies a name that is not a valid filesystem path for
+              this domain: rooted, empty, backslash-separated, or carrying a "." or ".."
+              element. It is the LEXICAL half of the confinement guarantee.
+            name: CodeInvalidPath
+            note: "range: 0.2.25.0 - 0.2.25.255"
+            value: "0x00_02_19_01"
         type: errs.Code
-        value: "0x00_02_19_01"
-      - name: CodeInvalidPermission
+      - const:
+          - doc: |-
+              CodeInvalidPermission identifies a file mode that cannot be honoured as
+              written: zero — which the SDK refuses to read as "pick a default" — or bits
+              outside fs.ModePerm, which would make a typo able to mint a setuid file.
+            name: CodeInvalidPermission
+            value: "0x00_02_19_02"
         type: errs.Code
-        value: "0x00_02_19_02"
-      - name: CodePathEscaped
+      - const:
+          - doc: |-
+              CodePathEscaped identifies a lexically valid name that resolved OUTSIDE the
+              filesystem's root — a symbolic link pointing away from the tree, or a
+              traversal the operating system refused. It is the half fs.ValidPath cannot
+              see.
+            name: CodePathEscaped
+            value: "0x00_02_19_03"
         type: errs.Code
-        value: "0x00_02_19_03"
-      - name: CodeReadFailed
+      - const:
+          - doc: |-
+              CodeReadFailed identifies an open, stat or directory listing the filesystem
+              refused. The cause is wrapped rather than replaced, so errors.Is against
+              fs.ErrNotExist and fs.ErrPermission keeps answering.
+            name: CodeReadFailed
+            value: "0x00_02_19_04"
         type: errs.Code
-        value: "0x00_02_19_04"
-      - name: CodeWriteFailed
+      - const:
+          - doc: |-
+              CodeWriteFailed identifies a create, write, mkdir or remove the filesystem
+              refused. As with CodeReadFailed the cause stays in the chain.
+            name: CodeWriteFailed
+            value: "0x00_02_19_05"
         type: errs.Code
-        value: "0x00_02_19_05"
-      - name: CodePublishFailed
+      - const:
+          - doc: |-
+              CodePublishFailed identifies an atomic publication that did not complete.
+              Its contract is the interesting part: the previous content is intact and no
+              temporary file survives.
+            name: CodePublishFailed
+            value: "0x00_02_19_06"
         type: errs.Code
-        value: "0x00_02_19_06"
-      - name: CodeNotRegularFile
+      - const:
+          - doc: |-
+              CodeNotRegularFile identifies a name that exists and is not a regular file,
+              where writing it would replace a directory, a device or a socket.
+            name: CodeNotRegularFile
+            value: "0x00_02_19_07"
         type: errs.Code
-        value: "0x00_02_19_07"
-      - name: CodeDirectoryNotEmpty
+      - const:
+          - doc: |-
+              CodeDirectoryNotEmpty identifies a Remove aimed at a directory that still
+              has entries. RemoveAll is the call that was wanted.
+            name: CodeDirectoryNotEmpty
+            value: "0x00_02_19_08"
         type: errs.Code
-        value: "0x00_02_19_08"
-      - name: CodeRootUnavailable
+      - const:
+          - doc: |-
+              CodeRootUnavailable identifies a root directory that could not be opened, or
+              that is not a directory at all. It is reported by the constructor, so the
+              refusal arrives where the program is wired rather than at the first write.
+            name: CodeRootUnavailable
+            note: |-
+              range: 0.3.55.0 - 0.3.55.255 — the two outcomes a CONCRETE filesystem can
+              produce and an abstract one cannot, allocated by the service layer (LL = 3)
+              and declared here since ADR 0160: a code keeps the value its layer allocated
+              when its declaration moves.
+            value: "0x00_03_37_01"
         type: errs.Code
-        value: "0x00_03_37_01"
-      - name: CodeDirectorySyncFailed
+      - const:
+          - doc: |-
+              CodeDirectorySyncFailed identifies the ONE failure that arrives after a
+              successful rename: the directory entry could not be flushed to the device.
+
+              It is a separate code from PublishFailed because it means the opposite
+              thing. PublishFailed says nothing changed; this says the new content IS
+              visible and may not survive a power loss.
+            name: CodeDirectorySyncFailed
+            value: "0x00_03_37_02"
         type: errs.Code
-        value: "0x00_03_37_02"
     functions:
       - in:
           - name: name
@@ -178,27 +235,141 @@ packages:
           - WritableFS
           - AtomicWriter
         name: FullFS
-    variables:
-      - name: InvalidPath
-        type: "*errs.Error"
-      - name: InvalidPermission
-        type: "*errs.Error"
-      - name: PathEscaped
-        type: "*errs.Error"
-      - name: ReadFailed
-        type: "*errs.Error"
-      - name: WriteFailed
-        type: "*errs.Error"
-      - name: PublishFailed
-        type: "*errs.Error"
-      - name: NotRegularFile
-        type: "*errs.Error"
-      - name: DirectoryNotEmpty
-        type: "*errs.Error"
-      - name: RootUnavailable
-        type: "*errs.Error"
-      - name: DirectorySyncFailed
-        type: "*errs.Error"
+    sentinels:
+      - var:
+          - code: CodeInvalidPath
+            doc: |-
+              InvalidPath is returned for a name outside the fs.ValidPath grammar,
+              and by [ValidateWritePath] for the root itself.
+
+              It is a REFUSAL rather than a cleanup. Normalising "../../etc/passwd"
+              into something safe is the single most reliable way to ship a
+              traversal bug: every normaliser is a small parser, every small parser
+              has a case its author did not think of, and the caller never learns
+              that the path it asked for is not the path it got.
+            name: InvalidPath
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "core/data/vfs: name violates fs.ValidPath (rooted, empty, backslash-separated, or carrying a . or .. element) or targets the root; refused, never normalised"
+            public: That path is not usable on this filesystem
+            reason: INVALID_PATH
+          - code: CodeInvalidPermission
+            doc: |-
+              InvalidPermission is returned for a zero file mode, or one carrying
+              bits outside fs.ModePerm.
+
+              ADR 0031's refusing half: any mode the SDK invented here would be
+              arbitrary. 0644 and 0600 differ by who may read the bytes, and the
+              caller is the only party that knows what the bytes are — so a zero is
+              read as "the field was never filled in", which it almost always is.
+            name: InvalidPermission
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "core/data/vfs: perm is zero (refused, never defaulted — ADR 0031) or carries bits outside fs.ModePerm such as setuid, setgid or sticky"
+            public: A file mode is required and must be a plain permission mode
+            reason: INVALID_PERMISSION
+          - code: CodePathEscaped
+            doc: |-
+              PathEscaped is returned when a lexically valid name resolved outside
+              the filesystem's root.
+
+              fs.ValidPath cannot see this: every element of "link/secret" is legal,
+              and whether it leaves the tree depends on what "link" points at, which
+              is a runtime property of the filesystem and not of the string.
+            name: PathEscaped
+            options:
+              - errs.WithExitCode(exitNoPerm)
+            private: "core/data/vfs: the name resolved outside the root — a symbolic link pointing away from the tree, or a traversal the kernel refused"
+            public: That path leaves the filesystem it was resolved against
+            reason: PATH_ESCAPED
+          - code: CodeReadFailed
+            doc: |-
+              ReadFailed is returned when an open, stat or directory listing was
+              refused. The cause stays in the error chain, so a caller may still ask
+              errors.Is(err, fs.ErrNotExist) and get the answer io/fs would give.
+            name: ReadFailed
+            options:
+              - errs.WithExitCode(exitIOErr)
+            private: "core/data/vfs: open, stat or readdir failed; the *fs.PathError cause is wrapped, not replaced, so errors.Is against fs.ErrNotExist still answers"
+            public: The filesystem could not read that path
+            reason: READ_FAILED
+          - code: CodeWriteFailed
+            doc: |-
+              WriteFailed is returned when a create, write, mkdir or remove was
+              refused. Like [ReadFailed] it keeps the cause reachable.
+            name: WriteFailed
+            options:
+              - errs.WithExitCode(exitIOErr)
+            private: "core/data/vfs: create, write, mkdir or remove failed; the *fs.PathError cause is wrapped, not replaced"
+            public: The filesystem could not write that path
+            reason: WRITE_FAILED
+          - code: CodePublishFailed
+            doc: |-
+              PublishFailed is returned when an atomic publication did not complete.
+
+              Its guarantee is the whole point of the domain and is asserted by a
+              test, not by this comment: on this error the bytes previously at the
+              name are unchanged and no temporary file survives. It is therefore
+              safe to retry, and safe to give up.
+            name: PublishFailed
+            options:
+              - errs.WithExitCode(exitIOErr)
+            private: "core/data/vfs: atomic publication aborted; the previous content is intact and the temporary was removed — the operation is safe to retry"
+            public: The filesystem could not publish that file
+            reason: PUBLISH_FAILED
+          - code: CodeNotRegularFile
+            doc: |-
+              NotRegularFile is returned when a name exists and is not a regular
+              file. Writing it would replace a directory, a device or a socket, and
+              no caller has ever meant that by WriteFile.
+            name: NotRegularFile
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "core/data/vfs: the name resolves to a directory, device, socket or symlink; a write there would destroy an object of a different kind"
+            public: That path already holds something other than a file
+            reason: NOT_REGULAR_FILE
+          - code: CodeDirectoryNotEmpty
+            doc: |-
+              DirectoryNotEmpty is returned by Remove for a directory that still has
+              entries — POSIX ENOTEMPTY, made typed and made identical in both
+              implementations so a memory filesystem is a faithful double.
+            name: DirectoryNotEmpty
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "core/data/vfs: Remove targets one file or one EMPTY directory; RemoveAll is the recursive call"
+            public: That directory still has entries in it
+            reason: DIRECTORY_NOT_EMPTY
+          - code: CodeRootUnavailable
+            doc: |-
+              RootUnavailable is returned by NewOS when the root cannot be opened.
+
+              It is a CONSTRUCTION-time refusal on purpose: a filesystem whose root
+              does not exist will fail every call it is ever given, and the useful
+              place to learn that is where the program is assembled, not on the first
+              request that happens to write something.
+            name: RootUnavailable
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "service/data/vfs: os.OpenRoot failed — the path is absent, is not a directory, or is not searchable by this process"
+            public: The filesystem root could not be opened
+            reason: ROOT_UNAVAILABLE
+          - code: CodeDirectorySyncFailed
+            doc: |-
+              DirectorySyncFailed is returned when the rename succeeded and the
+              parent directory could not be flushed afterwards.
+
+              It deliberately does NOT roll back. The rename has already happened, so
+              the new content is what every reader sees; undoing it would mean a
+              second non-atomic write to repair a durability problem, which is how a
+              good file gets replaced by a worse one. The caller is told exactly what
+              is true — published, not proven durable — and decides whether that is
+              acceptable for its data.
+            name: DirectorySyncFailed
+            options:
+              - errs.WithExitCode(exitIOErr)
+            private: "service/data/vfs: fsync on the parent directory failed AFTER a successful rename; the content is visible and may not survive a power loss — deliberately not rolled back"
+            public: The file was published but the directory entry was not flushed
+            reason: DIRECTORY_SYNC_FAILED
   - functions:
       - name: NewMem
         out:

@@ -1,21 +1,35 @@
 apiVersion: kit.kitsunium/design/v2
 domain: observe/logger/middleware/sample
 packages:
-  - constants:
-      - name: CodeSampleRateInvalid
+  - codes:
+      - const:
+          - doc: CodeSampleRateInvalid identifies a New call with a non-positive rate.
+            name: CodeSampleRateInvalid
+            note: "range: 0.3.20.0 - 0.3.20.255"
+            value: "0x00_03_14_01"
         type: errs.Code
-        value: "0x00_03_14_01"
-      - name: CodeSampleDownstreamNil
+      - const:
+          - doc: CodeSampleDownstreamNil identifies a New call made with a nil downstream.
+            name: CodeSampleDownstreamNil
+            value: "0x00_03_14_02"
         type: errs.Code
-        value: "0x00_03_14_02"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/observe/logger/middleware/sample
-    variables:
-      - name: RateInvalid
-        type: "*errs.Error"
-      - name: DownstreamNil
-        type: "*errs.Error"
+    sentinels:
+      - var:
+          - code: CodeSampleRateInvalid
+            doc: RateInvalid is returned when New receives a non-positive rate.
+            name: RateInvalid
+            private: service/observe/logger/middleware/sample.New called with rate <= 0
+            public: Sample rate must be a positive integer
+            reason: SAMPLE_RATE_INVALID
+          - code: CodeSampleDownstreamNil
+            doc: DownstreamNil is returned when New receives a nil downstream sink.
+            name: DownstreamNil
+            private: service/observe/logger/middleware/sample.New called with nil downstream
+            public: Sample sink requires a non-nil downstream
+            reason: SAMPLE_DOWNSTREAM_NIL
   - functions:
       - in:
           - name: downstream

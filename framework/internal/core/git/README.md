@@ -78,7 +78,7 @@ var (
 ```
 
 <a name="ChangedSet"></a>
-## type [ChangedSet](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/git.go#L37-L51>)
+## type [ChangedSet](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/git.go#L41-L55>)
 
 ChangedSet reports what a branch changed, at the three granularities a caller can ask about. It is FROZEN at four methods.
 
@@ -130,7 +130,7 @@ func (r LineRangeValue) Contains(line int) bool
 Contains reports whether line falls inside the range. Both bounds are inclusive, which is what makes a single\-line hunk \(Start == End\) match.
 
 <a name="ResolutionValue"></a>
-## type [ResolutionValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/git.go#L71-L88>)
+## type [ResolutionValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/git.go#L75-L92>)
 
 ResolutionValue is the outcome of resolving what a branch changed.
 
@@ -163,7 +163,7 @@ type ResolutionValue struct {
 ```
 
 <a name="ResolutionValue.Degraded"></a>
-### func \(\*ResolutionValue\) [Degraded](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/git.go#L101>)
+### func \(\*ResolutionValue\) [Degraded](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/git/git.go#L105>)
 
 ```go
 func (r *ResolutionValue) Degraded() bool

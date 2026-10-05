@@ -1,34 +1,155 @@
 apiVersion: kit.kitsunium/design/v2
 domain: app/lock
 packages:
-  - constants:
-      - name: CodeLockMisconfigured
+  - codes:
+      - const:
+          - doc: |-
+              CodeLockMisconfigured identifies a locker refused AT CONSTRUCTION because
+              its configuration cannot be honoured — most importantly a lease TTL that is
+              not positive.
+
+              A zero TTL is refused rather than read as "expires immediately" or as "never
+              expires". Both readings are defensible and they are opposites, so whichever
+              the SDK picked would be wrong for half its callers, and wrong SILENTLY: a
+              lock granted with an already-elapsed lease reports success on every call and
+              excludes nobody. This is ADR 0031's refuse half at its sharpest.
+            name: CodeLockMisconfigured
+            note: "range: 0.2.21.0 - 0.2.21.255"
+            value: "0x00_02_15_01"
         type: errs.Code
-        value: "0x00_02_15_01"
-      - name: CodeLockNotHeld
+      - const:
+          - doc: |-
+              CodeLockNotHeld identifies an Extend or a Release from a holder that no
+              longer owns the lock — its lease expired and someone else took it.
+
+              It is never a cosmetic outcome. On Extend it means the caller is inside a
+              section another holder also believes it owns. On Release it means the call
+              released nothing, deliberately: releasing under a name that now belongs to
+              someone else would unlock THEIR critical section.
+            name: CodeLockNotHeld
+            value: "0x00_02_15_02"
         type: errs.Code
-        value: "0x00_02_15_02"
-      - name: CodeLockBackendFailed
+      - const:
+          - doc: |-
+              CodeLockBackendFailed identifies a locker that could not answer at all — the
+              medium, the filesystem, the process it depends on.
+
+              A lock simply being HELD is not this: TryAcquire reports that as
+              (nil, false, nil), because a caller that offered to give up immediately has
+              had its offer accepted and nothing went wrong.
+            name: CodeLockBackendFailed
+            value: "0x00_02_15_03"
         type: errs.Code
-        value: "0x00_02_15_03"
-      - name: CodeLockNameRejected
+      - const:
+          - doc: |-
+              CodeLockNameRejected identifies a lock name a locker refuses: the empty
+              string, or one longer than the backend can represent.
+
+              An empty name is refused rather than accepted as a legitimate key, because
+              it is what an uninitialised variable produces: accepting it would silently
+              serialise every unrelated caller in the program through one lock, which
+              looks like a mysterious performance collapse and never like a bug.
+            name: CodeLockNameRejected
+            value: "0x00_02_15_04"
         type: errs.Code
-        value: "0x00_02_15_04"
-      - name: CodeLockFenceCorrupt
+      - const:
+          - doc: |-
+              CodeLockFenceCorrupt identifies a fence ledger no further token can be
+              issued from: its contents are not a decimal counter (`condition=unparseable`)
+              or they are the one counter with no successor (`condition=exhausted`).
+
+              It is refused rather than repaired. "Repairing" it means restarting the
+              counter, and a restarted fencing token is not a fencing token at all: the
+              numbers it issues have already been seen by the protected resource, so the
+              resource accepts a stale holder's write believing it to be current. A lock
+              that cannot prove monotonicity says so instead of issuing numbers that look
+              fine.
+
+              The two conditions share a code because they share that remedy exactly: stop,
+              and have a human look at the ledger. Splitting them would ask every caller to
+              learn a second code for the same instruction.
+            name: CodeLockFenceCorrupt
+            note: |-
+              range: 0.3.51.0 - 0.3.51.255
+
+              The concrete lockers' outcomes. The range was allocated to
+              internal/service/app/lock, whose lockers raise these codes, and it is
+              declared here with the port's so that every code of the domain is in one
+              place (ADR 0160). A code keeps the value its allocation gave it whichever
+              layer declares it, so the layer byte still reads 3.
+            value: "0x00_03_33_01"
         type: errs.Code
-        value: "0x00_03_33_01"
-      - name: CodeLockDirectoryUnsafe
+      - const:
+          - doc: |-
+              CodeLockDirectoryUnsafe identifies a lock directory that is world-writable
+              without the sticky bit.
+
+              The exposure is not the counter — it is the inode. Anyone able to unlink the
+              lock file can replace it with a fresh one, after which a new process flocks
+              the NEW inode while the old holder still flocks the old one, and the two
+              hold "the same" lock simultaneously. The sticky bit is what makes a shared
+              directory such as /tmp safe, so it is accepted; its absence is not.
+            name: CodeLockDirectoryUnsafe
+            value: "0x00_03_33_02"
         type: errs.Code
-        value: "0x00_03_33_02"
-      - name: CodeLockKeepaliveLost
+      - const:
+          - doc: |-
+              CodeLockKeepaliveLost identifies a background renewal that failed.
+
+              It marks the point at which the caller stopped holding the lock while still
+              running inside the section it protects. It is carried as a context CAUSE
+              rather than a return value, because the whole purpose of a keepalive is to
+              tell work that is already in progress — and the only channel that reaches
+              in-progress work is its context.
+            name: CodeLockKeepaliveLost
+            value: "0x00_03_33_03"
         type: errs.Code
-        value: "0x00_03_33_03"
-      - name: CodeLockPathRedirected
+      - const:
+          - doc: |-
+              CodeLockPathRedirected identifies a lock path that is not a file but an
+              indirection to one: a symbolic link on Unix, a reparse point on Windows.
+
+              The lock filename is the SHA-256 of the lock name, which makes it
+              derived from no caller-supplied string, and in the same stroke PREDICTABLE —
+              and predictable is what the attack needs.
+              An indirection planted there sends the flock and the fencing ledger to a
+              file the attacker chose, so the victim's lock and the attacker's own lock
+              cover different inodes while both report success: two processes inside one
+              section, neither blocked, nothing logged. It also hands the attacker the
+              fencing token, since the ledger the victim increments is the attacker's file.
+
+              It is NOT the core's LOCK_BACKEND_FAILED. Nothing failed — a deliberate
+              substitution succeeded, and reading it as a medium fault invites the one
+              response that is wrong here, a retry. It is its own code for the same reason
+              [CodeLockDirectoryUnsafe] is: the remedy is a human looking at the directory.
+            name: CodeLockPathRedirected
+            value: "0x00_03_33_04"
         type: errs.Code
-        value: "0x00_03_33_04"
-      - name: CodeLockFileReplaced
+      - const:
+          - doc: |-
+              CodeLockFileReplaced identifies a held lock whose FILE is no longer the one
+              its name leads to: the entry was unlinked, or replaced by a different file,
+              while this holder still had it open and locked.
+
+              The exclusion is gone at that moment, silently. The holder's flock still
+              covers an inode nothing names, so the next process to acquire creates a
+              fresh file, locks THAT, reads a fence ledger that starts again at zero, and
+              is told it holds the lock — while the first holder is still inside the
+              section believing the same thing. Measured: two holders, two inodes, both
+              reporting fence 1.
+
+              It is separate from [CodeLockDirectoryUnsafe] because it is a different
+              question asked at a different time. That code refuses a directory at
+              construction on its mode; this one reports a lock that WAS taken and is no
+              longer exclusive, in a directory whose mode the rule accepts — 0777|sticky,
+              which is what /tmp is, lets the entry's own owner unlink it.
+
+              It is reported and never repaired. Re-acquiring would hand the caller a
+              second lease over the new file while the old one is still locked, which is
+              the split-brain spelled deliberately.
+            name: CodeLockFileReplaced
+            value: "0x00_03_33_05"
         type: errs.Code
-        value: "0x00_03_33_05"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/app/lock
@@ -179,25 +300,167 @@ packages:
               - type: bool
               - type: error
         name: Locker
-    variables:
-      - name: LockMisconfigured
-        type: "*errs.Error"
-      - name: LockNotHeld
-        type: "*errs.Error"
-      - name: LockBackendFailed
-        type: "*errs.Error"
-      - name: LockNameRejected
-        type: "*errs.Error"
-      - name: LockFenceCorrupt
-        type: "*errs.Error"
-      - name: LockDirectoryUnsafe
-        type: "*errs.Error"
-      - name: LockKeepaliveLost
-        type: "*errs.Error"
-      - name: LockPathRedirected
-        type: "*errs.Error"
-      - name: LockFileReplaced
-        type: "*errs.Error"
+    sentinels:
+      - var:
+          - code: CodeLockMisconfigured
+            doc: |-
+              LockMisconfigured is returned by a locker CONSTRUCTOR whose
+              configuration it cannot honour.
+
+              The load-bearing case is a non-positive lease TTL, and it is refused
+              rather than defaulted for a reason that does not apply to most policies:
+              the two natural readings of a zero TTL — "already expired" and "never
+              expires" — are exact opposites, and a locker built on the first one
+              still answers every call successfully while excluding nobody at all.
+              Nothing downstream can tell that apart from a lock nobody contends.
+
+              Refusing at CONSTRUCTION rather than at the first Acquire is the other
+              half: it puts the failure where the program is wired, in the process's
+              first second, instead of in the middle of the first contended section.
+            name: LockMisconfigured
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "core/app/lock: a locker constructor received a TTL, a directory or a poll interval it cannot honour; the fields name the option and the value"
+            public: The lock cannot be built from the given configuration
+            reason: LOCK_MISCONFIGURED
+          - code: CodeLockNotHeld
+            doc: |-
+              LockNotHeld is returned by Extend or Release when the caller's lease has
+              been taken over by another holder.
+
+              From Extend it is the single most important error this domain can
+              produce: it is the SDK telling a caller that it is executing inside a
+              critical section someone else also believes they own. It must abort the
+              protected work, not log and continue — the lock cannot be re-taken
+              "quickly" to fix it, because the other holder is already inside.
+
+              From Release it means the call deliberately released NOTHING. The
+              alternative — unlocking whatever currently sits under that name — would
+              have this caller end another caller's critical section on its way out.
+            name: LockNotHeld
+            private: "core/app/lock: Extend or Release ran against a lease whose lock has since been acquired by another holder; the fields name the lock and the fencing tokens involved"
+            public: The lease is no longer held by this caller
+            reason: LOCK_NOT_HELD
+          - code: CodeLockBackendFailed
+            doc: |-
+              LockBackendFailed is returned when the locker itself could not serve the
+              operation. A lock being HELD is not this — TryAcquire reports that as
+              (nil, false, nil).
+            name: LockBackendFailed
+            private: "core/app/lock: a locker failed for a reason of its own rather than reporting the lock as held; the fields name the operation and the lock"
+            public: The lock backend could not serve the operation
+            reason: LOCK_BACKEND_FAILED
+          - code: CodeLockNameRejected
+            doc: |-
+              LockNameRejected is returned for a name the locker refuses.
+
+              The empty string is the case that matters, and it is refused because it
+              is what an uninitialised variable holds. Accepting it would funnel every
+              caller that forgot to set a name through one shared lock — correct-looking,
+              silent, and indistinguishable from contention nobody can explain.
+            name: LockNameRejected
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "core/app/lock: Acquire or TryAcquire received an empty name or one the backend cannot represent; the fields name the offending part"
+            public: The lock name is not usable as given
+            reason: LOCK_NAME_REJECTED
+          - code: CodeLockFenceCorrupt
+            doc: |-
+              LockFenceCorrupt is returned when the on-disk fence ledger cannot yield
+              the next token: it does not read as a decimal counter, or it reads as
+              the one counter that has no successor.
+
+              Nothing is repaired and no lease is granted. Restarting the counter
+              would hand out numbers the protected resource has already accepted,
+              which turns the one mechanism that survives a stalled holder into a
+              mechanism that endorses one. A counter allowed to wrap does the same
+              thing, silently and in order.
+            name: LockFenceCorrupt
+            note: |-
+              The outcomes the concrete lockers emit — the in-process locker and the file
+              locker of internal/service/app/lock. They are declared here, with the
+              port's, so that the domain's codes and sentinels are in one place
+              (ADR 0160).
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "service/app/lock: the lock file's contents are not a decimal fencing counter, or are the one counter that cannot be advanced without wrapping; the fields name the path, the offending bytes' length and which of the two conditions it is"
+            public: The lock's fencing ledger is not readable
+            reason: LOCK_FENCE_CORRUPT
+          - code: CodeLockDirectoryUnsafe
+            doc: |-
+              LockDirectoryUnsafe is returned by NewFileLocker for a directory that is
+              world-writable without the sticky bit.
+
+              Such a directory lets any account unlink the lock file and create a new
+              one in its place. The next process flocks a different inode from the one
+              the current holder is flocking, both are told they hold the lock, and
+              neither can observe the other — the exact failure this domain exists to
+              prevent, reachable without any race at all.
+            name: LockDirectoryUnsafe
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "service/app/lock: the directory is world-writable and not sticky, so its lock files can be replaced by any account; the fields name the path and the mode"
+            public: The lock directory's permissions do not protect the lock files
+            reason: LOCK_DIRECTORY_UNSAFE
+          - code: CodeLockKeepaliveLost
+            doc: |-
+              LockKeepaliveLost is the context CAUSE published by the Keepalive of
+              internal/service/app/lock when a renewal fails.
+
+              It is deliberately not a return value. A keepalive exists to inform work
+              that has ALREADY STARTED, and the only channel that reaches such work is
+              its context — so the loss arrives as a cancellation the protected
+              operation is already selecting on, and `context.Cause` says why.
+            name: LockKeepaliveLost
+            private: "service/app/lock: a background Extend failed, so the derived context was cancelled with this cause; the fields name the lock and the fencing token that was lost"
+            public: The lease could not be renewed and is no longer held
+            reason: LOCK_KEEPALIVE_LOST
+          - code: CodeLockPathRedirected
+            doc: |-
+              LockPathRedirected is returned by the file locker when the lock path is
+              an indirection rather than a file: a symbolic link on Unix, a reparse
+              point on Windows.
+
+              The substitution merges two locks into one or splits one into two, with
+              no error on any path: the victim's lock lands on the attacker's target,
+              the attacker's own lock lands on the real name, and both processes are
+              told they hold it. The fencing token goes with it — the ledger the
+              victim increments is the attacker's file, so the number handed to the
+              protected resource is a number the attacker chose.
+
+              The directory rule does not reach this. [LockDirectoryUnsafe] refuses a
+              directory in which an existing entry can be UNLINKED by anyone; this
+              attack creates an entry at a name nobody has taken yet, which the sticky
+              bit permits and 0777|sticky — what /tmp is — explicitly accepts.
+            name: LockPathRedirected
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "service/app/lock: a symbolic link or reparse point occupies the lock file's path, so the lock and its fencing ledger would land on a file chosen by whoever planted it; the fields name the path, the kind of indirection and what the kernel reported"
+            public: The lock path is a link rather than a file
+            reason: LOCK_PATH_REDIRECTED
+          - code: CodeLockFileReplaced
+            doc: |-
+              LockFileReplaced is returned when the file a lease holds is no longer
+              the file its name leads to.
+
+              It is the one exposure of the file locker that is DETECTED rather than
+              prevented, and the doc comment on internal/service/app/lock's identity.go
+              says so at length. In a world-writable sticky directory the account that
+              created the lock file owns that entry, so it may unlink it — including
+              while another process holds the lock. No flag on the open stops that:
+              the descriptor outlives the name by design, on every kernel.
+
+              What ships instead is that the holder finds out. Acquire refuses a lock
+              whose file was swapped between the open and the flock, and Extend
+              refuses once the swap has happened — so a Keepalive cancels the
+              protected work's context with this cause rather than letting it run on
+              inside a section it no longer owns.
+            name: LockFileReplaced
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "service/app/lock: the lock file this lease holds was unlinked or replaced while it was held, so the next acquisition locks a different inode and a fresh fencing ledger; the fields name the path, the lock, the fencing token and which of the two conditions was observed"
+            public: The lock file is no longer the file its name leads to
+            reason: LOCK_FILE_REPLACED
   - functions:
       - in:
           - name: cfg

@@ -1,16 +1,30 @@
 apiVersion: kit.kitsunium/design/v2
 domain: observe/logger/middleware/route
 packages:
-  - constants:
-      - name: CodeRouteNoMatch
+  - codes:
+      - const:
+          - doc: |-
+              CodeRouteNoMatch identifies a Write call whose record matched none of
+              the registered predicates. The default sink (when configured) handles
+              this case; without a default the Write returns this sentinel.
+            name: CodeRouteNoMatch
+            note: "range: 0.3.18.0 - 0.3.18.255"
+            value: "0x00_03_12_01"
         type: errs.Code
-        value: "0x00_03_12_01"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/observe/logger/middleware/route
-    variables:
-      - name: NoMatch
-        type: "*errs.Error"
+    sentinels:
+      - var:
+          - code: CodeRouteNoMatch
+            doc: |-
+              NoMatch is returned by Write when no predicate matched the record AND
+              no default sink was configured. Callers that want a catch-all should
+              pass a default sink to New so writes never silently disappear.
+            name: NoMatch
+            private: service/observe/logger/middleware/route.Write found no matching predicate and no default sink
+            public: No route predicate matched the record
+            reason: ROUTE_NO_MATCH
   - functions:
       - in:
           - name: fallback

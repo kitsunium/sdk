@@ -1,21 +1,35 @@
 apiVersion: kit.kitsunium/design/v2
 domain: data/codec/xml
 packages:
-  - constants:
-      - name: CodeXMLMarshalFailed
+  - codes:
+      - const:
+          - doc: CodeXMLMarshalFailed identifies a failure inside encoding/xml.Marshal.
+            name: CodeXMLMarshalFailed
+            note: "range: 0.3.3.0 - 0.3.3.255"
+            value: "0x00_03_03_01"
         type: errs.Code
-        value: "0x00_03_03_01"
-      - name: CodeXMLUnmarshalFailed
+      - const:
+          - doc: CodeXMLUnmarshalFailed identifies a failure inside encoding/xml.Unmarshal.
+            name: CodeXMLUnmarshalFailed
+            value: "0x00_03_03_02"
         type: errs.Code
-        value: "0x00_03_03_02"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/data/codec/xml
-    variables:
-      - name: MarshalFailed
-        type: "*errs.Error"
-      - name: UnmarshalFailed
-        type: "*errs.Error"
+    sentinels:
+      - var:
+          - code: CodeXMLMarshalFailed
+            doc: MarshalFailed wraps a failure from encoding/xml.Marshal.
+            name: MarshalFailed
+            private: "service/data/codec/xml: encoding/xml.Marshal returned an error"
+            public: XML encoding failed
+            reason: MARSHAL_FAILED
+          - code: CodeXMLUnmarshalFailed
+            doc: UnmarshalFailed wraps a failure from encoding/xml.Unmarshal.
+            name: UnmarshalFailed
+            private: "service/data/codec/xml: encoding/xml.Unmarshal returned an error"
+            public: XML decoding failed
+            reason: UNMARSHAL_FAILED
   - functions:
       - name: New
         out:

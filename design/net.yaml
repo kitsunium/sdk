@@ -1,109 +1,258 @@
 apiVersion: kit.kitsunium/design/v2
 domain: net
 packages:
-  - constants:
-      - name: CodeListenFailed
+  - codes:
+      - const:
+          - doc: CodeListenFailed identifies a listener that could not be bound to its address.
+            name: CodeListenFailed
+            note: "range: 0.2.11.0 - 0.2.11.255"
+            value: "0x00_02_0B_01"
         type: errs.Code
-        value: "0x00_02_0B_01"
-      - name: CodeInvalidAddress
+      - const:
+          - doc: |-
+              CodeInvalidAddress identifies a listen or dial address that is syntactically
+              unusable (empty host and port, malformed socket path, negative port).
+            name: CodeInvalidAddress
+            value: "0x00_02_0B_02"
         type: errs.Code
-        value: "0x00_02_0B_02"
-      - name: CodeUnsupportedNetwork
+      - const:
+          - doc: |-
+              CodeUnsupportedNetwork identifies a network name the domain does not serve
+              (anything outside tcp, tcp4, tcp6, udp, udp4, udp6, unix, unixgram, unixpacket).
+            name: CodeUnsupportedNetwork
+            value: "0x00_02_0B_03"
         type: errs.Code
-        value: "0x00_02_0B_03"
-      - name: CodeServerClosed
+      - const:
+          - doc: |-
+              CodeServerClosed identifies work refused because the server already stopped
+              accepting; it is the expected terminal outcome of a graceful shutdown.
+            name: CodeServerClosed
+            value: "0x00_02_0B_04"
         type: errs.Code
-        value: "0x00_02_0B_04"
-      - name: CodeAlreadyStarted
+      - const:
+          - doc: CodeAlreadyStarted identifies a Start call on a server that is already serving.
+            name: CodeAlreadyStarted
+            value: "0x00_02_0B_05"
         type: errs.Code
-        value: "0x00_02_0B_05"
-      - name: CodeNotStarted
+      - const:
+          - doc: |-
+              CodeNotStarted identifies an operation that requires a running server on one
+              that has not been started.
+            name: CodeNotStarted
+            value: "0x00_02_0B_06"
         type: errs.Code
-        value: "0x00_02_0B_06"
-      - name: CodeHandlerMissing
+      - const:
+          - doc: CodeHandlerMissing identifies a listener group that was bound without a handler.
+            name: CodeHandlerMissing
+            value: "0x00_02_0B_07"
         type: errs.Code
-        value: "0x00_02_0B_07"
-      - name: CodeHandlerPanic
+      - const:
+          - doc: |-
+              CodeHandlerPanic identifies a panic recovered inside a handler; the connection
+              is closed but the process survives.
+            name: CodeHandlerPanic
+            value: "0x00_02_0B_08"
         type: errs.Code
-        value: "0x00_02_0B_08"
-      - name: CodeConnLimitReached
+      - const:
+          - doc: |-
+              CodeConnLimitReached identifies a connection rejected because the group's
+              concurrency ceiling was saturated.
+            name: CodeConnLimitReached
+            value: "0x00_02_0B_09"
         type: errs.Code
-        value: "0x00_02_0B_09"
-      - name: CodeDrainTimeout
+      - const:
+          - doc: |-
+              CodeDrainTimeout identifies a shutdown whose drain budget expired with
+              connections still in flight; the remainder is closed hard.
+            name: CodeDrainTimeout
+            value: "0x00_02_0B_0A"
         type: errs.Code
-        value: "0x00_02_0B_0A"
-      - name: CodeGroupUnknown
+      - const:
+          - doc: CodeGroupUnknown identifies a lookup for a listener group that was never declared.
+            name: CodeGroupUnknown
+            value: "0x00_02_0B_0B"
         type: errs.Code
-        value: "0x00_02_0B_0B"
-      - name: CodeGroupDuplicate
+      - const:
+          - doc: |-
+              CodeGroupDuplicate identifies a second declaration of an already-declared
+              listener group name.
+            name: CodeGroupDuplicate
+            value: "0x00_02_0B_0C"
         type: errs.Code
-        value: "0x00_02_0B_0C"
-      - name: CodeSocketAdoptFailed
+      - const:
+          - doc: |-
+              CodeSocketAdoptFailed identifies an inherited socket that could not be adopted
+              from the supervisor.
+            name: CodeSocketAdoptFailed
+            value: "0x00_02_0B_0D"
         type: errs.Code
-        value: "0x00_02_0B_0D"
-      - name: CodePacketTooLarge
+      - const:
+          - doc: CodePacketTooLarge identifies a datagram longer than the group's accepted size.
+            name: CodePacketTooLarge
+            value: "0x00_02_0B_0E"
         type: errs.Code
-        value: "0x00_02_0B_0E"
-      - name: CodeTLSMaterialInvalid
+      - const:
+          - doc: |-
+              CodeTLSMaterialInvalid identifies TLS material that is absent, malformed, or
+              yields no usable certificate; it is never downgraded to an empty trust store.
+            name: CodeTLSMaterialInvalid
+            value: "0x00_02_0B_0F"
         type: errs.Code
-        value: "0x00_02_0B_0F"
-      - name: CodeTLSHandshakeFailed
+      - const:
+          - doc: CodeTLSHandshakeFailed identifies a TLS or mTLS handshake that did not complete.
+            name: CodeTLSHandshakeFailed
+            value: "0x00_02_0B_10"
         type: errs.Code
-        value: "0x00_02_0B_10"
-      - name: CodeRequestDenied
+      - const:
+          - doc: |-
+              CodeRequestDenied identifies an outbound request refused by the transport
+              policy before it left the process.
+            name: CodeRequestDenied
+            value: "0x00_02_0B_11"
         type: errs.Code
-        value: "0x00_02_0B_11"
-      - name: CodeResponseTooLarge
+      - const:
+          - doc: |-
+              CodeResponseTooLarge identifies a response body that exceeded the configured
+              read ceiling.
+            name: CodeResponseTooLarge
+            value: "0x00_02_0B_12"
         type: errs.Code
-        value: "0x00_02_0B_12"
-      - name: CodeCallFailed
+      - const:
+          - doc: CodeCallFailed identifies an outbound call that did not produce a response.
+            name: CodeCallFailed
+            value: "0x00_02_0B_13"
         type: errs.Code
-        value: "0x00_02_0B_13"
-      - name: CodeTooManyRedirects
+      - const:
+          - doc: CodeTooManyRedirects identifies an outbound call that exceeded its redirect budget.
+            name: CodeTooManyRedirects
+            value: "0x00_02_0B_14"
         type: errs.Code
-        value: "0x00_02_0B_14"
-      - name: CodeInvalidDuration
+      - const:
+          - doc: |-
+              CodeInvalidDuration identifies a configuration duration that is neither a Go
+              duration literal nor an integer nanosecond count.
+            name: CodeInvalidDuration
+            value: "0x00_02_0B_15"
         type: errs.Code
-        value: "0x00_02_0B_15"
-      - name: CodeUnsafePath
+      - const:
+          - doc: |-
+              CodeUnsafePath identifies an outbound path carrying a dot segment, literal or
+              percent-encoded. Such a path is refused before any allowlist pattern is tried,
+              because an anchored pattern like ^/v1/supi/[^/]+$ happily matches "/v1/supi/.."
+              which the upstream then normalises to a different resource.
+            name: CodeUnsafePath
+            value: "0x00_02_0B_16"
         type: errs.Code
-        value: "0x00_02_0B_16"
-      - name: CodeSSEFieldInvalid
+      - const:
+          - doc: |-
+              CodeSSEFieldInvalid identifies a Server-Sent Events frame the wire format
+              cannot carry: a line terminator inside an id, an event name or a comment
+              (the format has no escape — a newline SPLITS a value, so an id carrying one
+              would silently become a different id plus a stray field), a negative retry,
+              a retry under one millisecond (the wire field is an integer millisecond
+              count, and truncating to zero would say "reconnect immediately"), or a frame
+              with no field set at all.
+            name: CodeSSEFieldInvalid
+            value: "0x00_02_0B_17"
         type: errs.Code
-        value: "0x00_02_0B_17"
-      - name: CodeSSEFlushUnsupported
+      - const:
+          - doc: |-
+              CodeSSEFlushUnsupported identifies a ResponseWriter that cannot be flushed.
+              Server-Sent Events is a streaming format: without a flush every event sits in
+              the transport buffer until the handler returns, which for an endless stream
+              means the client receives nothing, ever.
+            name: CodeSSEFlushUnsupported
+            value: "0x00_02_0B_18"
         type: errs.Code
-        value: "0x00_02_0B_18"
-      - name: CodeSSEStreamClosed
+      - const:
+          - doc: |-
+              CodeSSEStreamClosed identifies a send on a stream that has already ended —
+              the client disconnected, the server began draining, or the handler closed it.
+            name: CodeSSEStreamClosed
+            value: "0x00_02_0B_19"
         type: errs.Code
-        value: "0x00_02_0B_19"
-      - name: CodeSSEStreamMisconfigured
+      - const:
+          - doc: |-
+              CodeSSEStreamMisconfigured identifies a stream option the domain refuses to
+              interpret rather than guess at: a negative keep-alive interval or a negative
+              per-write budget (ADR 0031).
+            name: CodeSSEStreamMisconfigured
+            value: "0x00_02_0B_1A"
         type: errs.Code
-        value: "0x00_02_0B_1A"
-      - name: CodeWSHandshakeFailed
+      - const:
+          - doc: |-
+              CodeWSHandshakeFailed identifies an HTTP request that is not a valid RFC 6455
+              opening handshake: wrong method, absent or non-"websocket" Upgrade token, a
+              Connection header without "Upgrade", a Sec-WebSocket-Key that does not decode
+              to sixteen bytes, a Sec-WebSocket-Version other than 13, or an Origin the
+              server's policy refuses. The response is written before this is returned, so
+              the handler has nothing left to answer.
+            name: CodeWSHandshakeFailed
+            value: "0x00_02_0B_1B"
         type: errs.Code
-        value: "0x00_02_0B_1B"
-      - name: CodeWSUpgradeUnsupported
+      - const:
+          - doc: |-
+              CodeWSUpgradeUnsupported identifies a ResponseWriter whose connection cannot
+              be taken over — an HTTP/2 request, or a middleware wrapper that hides
+              http.Hijacker. WebSocket is not a response format: it replaces HTTP on the
+              socket, so without the hijack there is nothing to upgrade.
+            name: CodeWSUpgradeUnsupported
+            value: "0x00_02_0B_1C"
         type: errs.Code
-        value: "0x00_02_0B_1C"
-      - name: CodeWSProtocolViolation
+      - const:
+          - doc: |-
+              CodeWSProtocolViolation identifies a frame RFC 6455 forbids: an unmasked
+              client frame (§5.1), a set reserved bit or reserved opcode (§5.2), a
+              fragmented or oversized control frame (§5.5), a non-minimal length encoding
+              (§5.2), a continuation with no message in progress or a new data frame
+              interrupting one (§5.4), or a malformed close payload (§5.5.1). Each fails
+              the connection.
+            name: CodeWSProtocolViolation
+            value: "0x00_02_0B_1D"
         type: errs.Code
-        value: "0x00_02_0B_1D"
-      - name: CodeWSMessageTooLarge
+      - const:
+          - doc: |-
+              CodeWSMessageTooLarge identifies a frame or an accumulated message beyond the
+              connection's configured ceiling. The frame's announced length is checked
+              BEFORE any buffer is sized from it, because a 64-bit length field a peer
+              chooses is an out-of-memory condition one allocation away.
+            name: CodeWSMessageTooLarge
+            value: "0x00_02_0B_1E"
         type: errs.Code
-        value: "0x00_02_0B_1E"
-      - name: CodeWSInvalidPayload
+      - const:
+          - doc: |-
+              CodeWSInvalidPayload identifies a payload the protocol cannot carry: a text
+              message or close reason that is not valid UTF-8 (§8.1), a close code that
+              must never appear on the wire (1004, 1005, 1006, 1015 and the unallocated
+              ranges — §7.4.2), or a close reason past the control-frame ceiling.
+            name: CodeWSInvalidPayload
+            value: "0x00_02_0B_1F"
         type: errs.Code
-        value: "0x00_02_0B_1F"
-      - name: CodeWSConnClosed
+      - const:
+          - doc: |-
+              CodeWSConnClosed identifies an operation on a connection that has ended — the
+              peer sent Close, the server began draining, the handler closed it, or the
+              socket died. It is the terminal outcome a receive loop runs until.
+            name: CodeWSConnClosed
+            value: "0x00_02_0B_20"
         type: errs.Code
-        value: "0x00_02_0B_20"
-      - name: CodeWSConnMisconfigured
+      - const:
+          - doc: |-
+              CodeWSConnMisconfigured identifies a connection option the domain refuses to
+              interpret rather than guess at: a negative ping interval or write budget, or
+              a non-positive size ceiling (ADR 0031).
+            name: CodeWSConnMisconfigured
+            value: "0x00_02_0B_21"
         type: errs.Code
-        value: "0x00_02_0B_21"
-      - name: CodeStaticMisconfigured
+      - const:
+          - doc: |-
+              CodeStaticMisconfigured identifies a static file handler refused at
+              construction: no file tree to serve, a security header value the handler
+              will not send, or a Referrer-Policy token no browser recognises (ADR 0130).
+            name: CodeStaticMisconfigured
+            value: "0x00_02_0B_22"
         type: errs.Code
-        value: "0x00_02_0B_22"
+    constants:
       - name: PhaseNew
         type: Phase
         value: "0"
@@ -392,6 +541,348 @@ packages:
             out:
               - type: error
         name: Policy
+    sentinels:
+      - var:
+          - code: CodeListenFailed
+            doc: ListenFailed is returned when a listener could not be bound.
+            name: ListenFailed
+            options:
+              - errs.WithExitCode(exitUnavailable)
+            private: "core/net: binding a listener failed; the wrap cause is the OS error"
+            public: The server could not bind its listening address
+            reason: LISTEN_FAILED
+          - code: CodeInvalidAddress
+            doc: InvalidAddress is returned for a syntactically unusable address.
+            name: InvalidAddress
+            options:
+              - errs.WithExitCode(exitUsage)
+            private: "core/net: the supplied host:port or socket path could not be parsed"
+            public: The network address is not valid
+            reason: INVALID_ADDRESS
+          - code: CodeUnsupportedNetwork
+            doc: UnsupportedNetwork is returned for a network name outside the served set.
+            name: UnsupportedNetwork
+            options:
+              - errs.WithExitCode(exitUsage)
+            private: "core/net: network outside {tcp,tcp4,tcp6,udp,udp4,udp6,unix,unixgram,unixpacket}"
+            public: The network type is not supported
+            reason: UNSUPPORTED_NETWORK
+          - code: CodeServerClosed
+            doc: ServerClosed is returned once the server has stopped accepting work.
+            name: ServerClosed
+            options:
+              - errs.WithExitCode(exitUnavailable)
+            private: "core/net: the server stopped accepting; this is the terminal state of a graceful shutdown"
+            public: The server is closed
+            reason: SERVER_CLOSED
+          - code: CodeAlreadyStarted
+            doc: AlreadyStarted is returned by Start on a server that is already serving.
+            name: AlreadyStarted
+            options:
+              - errs.WithExitCode(exitSoftware)
+            private: "core/net: Start called on a server whose phase is already Serving"
+            public: The server is already started
+            reason: ALREADY_STARTED
+          - code: CodeNotStarted
+            doc: NotStarted is returned when an operation requires a running server.
+            name: NotStarted
+            options:
+              - errs.WithExitCode(exitSoftware)
+            private: "core/net: the operation requires a running server"
+            public: The server is not started
+            reason: NOT_STARTED
+          - code: CodeHandlerMissing
+            doc: HandlerMissing is returned when a group was bound without a handler.
+            name: HandlerMissing
+            options:
+              - errs.WithExitCode(exitUsage)
+            private: "core/net: a group reached Start with a nil handler"
+            public: The listener group has no handler
+            reason: HANDLER_MISSING
+          - code: CodeHandlerPanic
+            doc: HandlerPanic wraps a panic recovered inside a handler.
+            name: HandlerPanic
+            options:
+              - errs.WithExitCode(exitSoftware)
+            private: "core/net: a handler panicked; the connection was closed and the process kept running"
+            public: The connection handler failed unexpectedly
+            reason: HANDLER_PANIC
+          - code: CodeConnLimitReached
+            doc: ConnLimitReached is returned when the group's connection ceiling is full.
+            name: ConnLimitReached
+            options:
+              - errs.WithExitCode(exitTempFail)
+            private: "core/net: the group's concurrency ceiling rejected the connection"
+            public: The server is at its connection limit
+            reason: CONN_LIMIT_REACHED
+          - code: CodeDrainTimeout
+            doc: DrainTimeout is returned when the shutdown drain budget expired.
+            name: DrainTimeout
+            options:
+              - errs.WithExitCode(exitTempFail)
+            private: "core/net: connections were still in flight when the drain budget expired"
+            public: The server did not drain before its deadline
+            reason: DRAIN_TIMEOUT
+          - code: CodeGroupUnknown
+            doc: GroupUnknown is returned for a lookup of an undeclared group.
+            name: GroupUnknown
+            options:
+              - errs.WithExitCode(exitUsage)
+            private: "core/net: no group is registered under that name"
+            public: The listener group is not declared
+            reason: GROUP_UNKNOWN
+          - code: CodeGroupDuplicate
+            doc: GroupDuplicate is returned for a second declaration of one group name.
+            name: GroupDuplicate
+            options:
+              - errs.WithExitCode(exitUsage)
+            private: "core/net: a group with that name already exists on this server"
+            public: The listener group is already declared
+            reason: GROUP_DUPLICATE
+          - code: CodeSocketAdoptFailed
+            doc: SocketAdoptFailed is returned when an inherited socket could not be adopted.
+            name: SocketAdoptFailed
+            options:
+              - errs.WithExitCode(exitOSErr)
+            private: "core/net: a supervisor-passed descriptor could not be turned into a listener"
+            public: An inherited socket could not be adopted
+            reason: SOCKET_ADOPT_FAILED
+          - code: CodePacketTooLarge
+            doc: |-
+              PacketTooLarge names the reason a datagram beyond the group's accepted
+              size is dropped. It is deliberately not returned to anyone: a read loop
+              has no caller, so the drop is reported through
+              StateValue.OversizedPackets. The sentinel stays because it is what gives
+              that count a documented name in the registry.
+            name: PacketTooLarge
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "core/net: the received datagram exceeded the group's maximum packet size"
+            public: The datagram is larger than the accepted size
+            reason: PACKET_TOO_LARGE
+          - code: CodeTLSMaterialInvalid
+            doc: |-
+              TLSMaterialInvalid is returned for absent, malformed, or empty TLS material.
+              It is deliberately loud: an unusable bundle must never degrade into a trust
+              store that silently verifies nothing.
+            name: TLSMaterialInvalid
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "core/net: the certificate, key, or CA bundle yielded no usable material"
+            public: The TLS material is missing or invalid
+            reason: TLS_MATERIAL_INVALID
+          - code: CodeTLSHandshakeFailed
+            doc: TLSHandshakeFailed is returned when a TLS or mTLS handshake did not complete.
+            name: TLSHandshakeFailed
+            options:
+              - errs.WithExitCode(exitUnavailable)
+            private: "core/net: the TLS or mTLS handshake did not complete"
+            public: The TLS handshake failed
+            reason: TLS_HANDSHAKE_FAILED
+          - code: CodeRequestDenied
+            doc: |-
+              RequestDenied is returned when the transport policy refused an outbound call.
+              The public message never names the refused path, so a denial cannot leak the
+              shape of the private API surface through a log line.
+            name: RequestDenied
+            options:
+              - errs.WithExitCode(exitNoPerm)
+            private: "core/net: the transport policy refused the outbound request"
+            public: The request was refused by policy
+            reason: REQUEST_DENIED
+          - code: CodeResponseTooLarge
+            doc: ResponseTooLarge is returned when a response body exceeded the read ceiling.
+            name: ResponseTooLarge
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "core/net: the response body exceeded the configured maximum size"
+            public: The response is larger than the accepted size
+            reason: RESPONSE_TOO_LARGE
+          - code: CodeCallFailed
+            doc: CallFailed is returned when an outbound call produced no response.
+            name: CallFailed
+            options:
+              - errs.WithExitCode(exitUnavailable)
+            private: "core/net: the outbound call did not produce a response"
+            public: The outbound call failed
+            reason: CALL_FAILED
+          - code: CodeTooManyRedirects
+            doc: TooManyRedirects is returned when a call exceeded its redirect budget.
+            name: TooManyRedirects
+            options:
+              - errs.WithExitCode(exitUnavailable)
+            private: "core/net: the redirect chain was longer than the configured maximum"
+            public: The outbound call exceeded its redirect budget
+            reason: TOO_MANY_REDIRECTS
+          - code: CodeInvalidDuration
+            doc: |-
+              InvalidDuration is returned for a configuration duration that parses as
+              neither a Go duration literal nor an integer nanosecond count.
+            name: InvalidDuration
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "core/net: the value is neither a Go duration literal nor a nanosecond count"
+            public: The duration value is not valid
+            reason: INVALID_DURATION
+          - code: CodeUnsafePath
+            doc: |-
+              UnsafePath is returned for a path carrying a dot segment in any form. It is
+              evaluated before the allowlist, because Go normalises dot segments neither
+              in url.URL nor in the transport, so an anchored pattern alone is not enough.
+            name: UnsafePath
+            options:
+              - errs.WithExitCode(exitNoPerm)
+            private: "core/net: the path carries a literal or percent-encoded dot segment"
+            public: The request path is not in normalised form
+            reason: UNSAFE_PATH
+          - code: CodeSSEFieldInvalid
+            doc: |-
+              SSEFieldInvalid is returned for a Server-Sent Events frame the wire format
+              cannot carry. The format has no escape mechanism: a newline inside a value
+              SPLITS it rather than being quoted, so an id or an event name carrying one
+              would arrive as a different value plus a stray field. It is refused, never
+              truncated — a silently shortened id is a resume token that points at the
+              wrong place.
+            name: SSEFieldInvalid
+            options:
+              - errs.WithExitCode(exitUsage)
+            private: "core/net: an SSE frame carried a line terminator in a single-line field, an unrepresentable retry, or no field at all"
+            public: The event cannot be represented in the event-stream format
+            reason: SSE_FIELD_INVALID
+          - code: CodeSSEFlushUnsupported
+            doc: |-
+              SSEFlushUnsupported is returned when the ResponseWriter cannot be flushed.
+              Without a flush the events accumulate in the transport buffer and reach the
+              client only when the handler returns, so an endless stream delivers nothing
+              at all — the failure is total and silent, which is why it is refused at
+              construction rather than discovered in production.
+            name: SSEFlushUnsupported
+            options:
+              - errs.WithExitCode(exitSoftware)
+            private: "core/net: the http.ResponseWriter implements neither Flush nor http.Flusher"
+            public: The response cannot be streamed
+            reason: SSE_FLUSH_UNSUPPORTED
+          - code: CodeSSEStreamClosed
+            doc: |-
+              SSEStreamClosed is returned by a send on a stream that has already ended:
+              the client disconnected, the server began draining, or the handler closed
+              it. It is the terminal outcome a streaming handler loops until.
+            name: SSEStreamClosed
+            options:
+              - errs.WithExitCode(exitUnavailable)
+            private: "core/net: the SSE stream ended — peer gone, server draining, or closed by the handler"
+            public: The event stream is closed
+            reason: SSE_STREAM_CLOSED
+          - code: CodeSSEStreamMisconfigured
+            doc: |-
+              SSEStreamMisconfigured is returned for a stream option the domain refuses
+              to interpret rather than guess at (ADR 0031). A zero keep-alive interval is
+              CLAMPED to the domain default, because a working keep-alive needs no
+              explanation; a negative one is REFUSED, because no value the SDK invented
+              for it would be defensible and "never" already has an explicit spelling.
+            name: SSEStreamMisconfigured
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "core/net: a negative keep-alive interval or write budget was supplied"
+            public: The event stream options are not valid
+            reason: SSE_STREAM_MISCONFIGURED
+          - code: CodeWSHandshakeFailed
+            doc: |-
+              WSHandshakeFailed is returned when an HTTP request is not a valid RFC 6455
+              opening handshake. The upgrade is refused with an HTTP status rather than
+              a Close frame, because at that point there is no WebSocket connection to
+              close — the response is still an ordinary HTTP one.
+            name: WSHandshakeFailed
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "core/net: the request does not satisfy RFC 6455 §4.2.1, or its origin was refused"
+            public: The WebSocket handshake is not valid
+            reason: WS_HANDSHAKE_FAILED
+          - code: CodeWSUpgradeUnsupported
+            doc: |-
+              WSUpgradeUnsupported is returned when the response's connection cannot be
+              hijacked. It is deliberately distinct from a failed handshake: the request
+              was fine and the peer did nothing wrong — this stack cannot take over the
+              socket, which is a deployment fact (HTTP/2, or a middleware that wraps the
+              ResponseWriter without forwarding Unwrap), not a client error.
+            name: WSUpgradeUnsupported
+            options:
+              - errs.WithExitCode(exitSoftware)
+            private: "core/net: the http.ResponseWriter exposes no http.Hijacker, so the socket cannot be taken over"
+            public: The connection cannot be upgraded
+            reason: WS_UPGRADE_UNSUPPORTED
+          - code: CodeWSProtocolViolation
+            doc: |-
+              WSProtocolViolation is returned for a frame RFC 6455 forbids. Every case it
+              covers FAILS THE CONNECTION rather than being skipped: a peer that sent a
+              frame this endpoint ignored believes it said something, and the two would
+              be desynchronised from that point on.
+            name: WSProtocolViolation
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "core/net: the frame violates RFC 6455 framing — masking, reserved bits/opcodes, control-frame shape, minimal length, or fragmentation order"
+            public: The WebSocket frame is not valid
+            reason: WS_PROTOCOL_VIOLATION
+          - code: CodeWSMessageTooLarge
+            doc: |-
+              WSMessageTooLarge is returned when a frame or a reassembled message exceeds
+              the connection's ceiling. The check runs against the ANNOUNCED length,
+              before any buffer is sized from it: allocating from a 64-bit integer the
+              peer chose is a denial of service in one line.
+            name: WSMessageTooLarge
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "core/net: the frame or the accumulated message exceeded the configured ceiling"
+            public: The WebSocket message is larger than the accepted size
+            reason: WS_MESSAGE_TOO_LARGE
+          - code: CodeWSInvalidPayload
+            doc: |-
+              WSInvalidPayload is returned for a payload the protocol cannot carry: text
+              that is not UTF-8, a close code that must never be sent, or a close reason
+              past the control-frame ceiling. It is one sentinel for both directions on
+              purpose — the rule a peer broke is the rule this endpoint must not break.
+            name: WSInvalidPayload
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "core/net: invalid UTF-8, an unsendable close code, or an oversized close reason"
+            public: The WebSocket payload is not valid
+            reason: WS_INVALID_PAYLOAD
+          - code: CodeWSConnClosed
+            doc: |-
+              WSConnClosed is returned by any operation on a connection that has ended.
+              It is the terminal outcome a receive loop runs until, and it carries the
+              close code the peer sent when there was one.
+            name: WSConnClosed
+            options:
+              - errs.WithExitCode(exitUnavailable)
+            private: "core/net: the connection ended — peer close, server draining, closed by the handler, or a dead socket"
+            public: The WebSocket connection is closed
+            reason: WS_CONN_CLOSED
+          - code: CodeWSConnMisconfigured
+            doc: |-
+              WSConnMisconfigured is returned for an option the domain refuses to
+              interpret rather than guess at (ADR 0031). A zero ping interval is CLAMPED
+              to the domain default, because a working heartbeat needs no explanation; a
+              negative one is REFUSED, and "never" has its own spelling.
+            name: WSConnMisconfigured
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "core/net: a negative interval or budget, or a non-positive size ceiling, was supplied"
+            public: The WebSocket options are not valid
+            reason: WS_CONN_MISCONFIGURED
+          - code: CodeStaticMisconfigured
+            doc: |-
+              StaticMisconfigured is returned when a static file handler is built with
+              nothing it can serve safely: no file tree, a header value carrying a
+              control character, or a Referrer-Policy token no browser knows — which a
+              browser ignores, silently falling back to a weaker default. The "option"
+              field names which (ADR 0130).
+            name: StaticMisconfigured
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "core/net: a nil file tree, a header value with a control character, or an unknown Referrer-Policy token"
+            public: The static file handler configuration is not valid
+            reason: STATIC_MISCONFIGURED
     types:
       - methods:
           - name: String
@@ -769,75 +1260,6 @@ packages:
             recv: value
         name: WSOpCode
         underlying: byte
-    variables:
-      - name: ListenFailed
-        type: "*errs.Error"
-      - name: InvalidAddress
-        type: "*errs.Error"
-      - name: UnsupportedNetwork
-        type: "*errs.Error"
-      - name: ServerClosed
-        type: "*errs.Error"
-      - name: AlreadyStarted
-        type: "*errs.Error"
-      - name: NotStarted
-        type: "*errs.Error"
-      - name: HandlerMissing
-        type: "*errs.Error"
-      - name: HandlerPanic
-        type: "*errs.Error"
-      - name: ConnLimitReached
-        type: "*errs.Error"
-      - name: DrainTimeout
-        type: "*errs.Error"
-      - name: GroupUnknown
-        type: "*errs.Error"
-      - name: GroupDuplicate
-        type: "*errs.Error"
-      - name: SocketAdoptFailed
-        type: "*errs.Error"
-      - name: PacketTooLarge
-        type: "*errs.Error"
-      - name: TLSMaterialInvalid
-        type: "*errs.Error"
-      - name: TLSHandshakeFailed
-        type: "*errs.Error"
-      - name: RequestDenied
-        type: "*errs.Error"
-      - name: ResponseTooLarge
-        type: "*errs.Error"
-      - name: CallFailed
-        type: "*errs.Error"
-      - name: TooManyRedirects
-        type: "*errs.Error"
-      - name: InvalidDuration
-        type: "*errs.Error"
-      - name: UnsafePath
-        type: "*errs.Error"
-      - name: SSEFieldInvalid
-        type: "*errs.Error"
-      - name: SSEFlushUnsupported
-        type: "*errs.Error"
-      - name: SSEStreamClosed
-        type: "*errs.Error"
-      - name: SSEStreamMisconfigured
-        type: "*errs.Error"
-      - name: WSHandshakeFailed
-        type: "*errs.Error"
-      - name: WSUpgradeUnsupported
-        type: "*errs.Error"
-      - name: WSProtocolViolation
-        type: "*errs.Error"
-      - name: WSMessageTooLarge
-        type: "*errs.Error"
-      - name: WSInvalidPayload
-        type: "*errs.Error"
-      - name: WSConnClosed
-        type: "*errs.Error"
-      - name: WSConnMisconfigured
-        type: "*errs.Error"
-      - name: StaticMisconfigured
-        type: "*errs.Error"
   - functions:
       - in:
           - name: cfg

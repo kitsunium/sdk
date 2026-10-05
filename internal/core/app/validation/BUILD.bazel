@@ -5,7 +5,7 @@ package(default_visibility = ["//internal/core:core_consumers"])
 go_library(
     name = "validation",
     srcs = [
-        "codes.go",
+        "codes_gen.go",
         "errors.go",
         "path.go",
         "report.go",

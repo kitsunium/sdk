@@ -90,7 +90,7 @@ exports it as a type alias for legacy call sites). This package ships two:
 
 This package owns no code range — `0.3.2.*` belongs to
 `internal/service/data/codec/json` in `codeRangeOwners`
-(`internal/kernel/errs/registry_ownership_external_test.go`) — and ships no
+(`design/sdk.yaml`'s `codes.ranges`, which kit writes into `internal/kernel/errs/codes_gen_test.go` (ADR 0164)) — and ships no
 sentinels: encoding never fails (an unhandled `Kind` degrades to `?`, a quoted
 `"?"` in JSON).
 

@@ -1,21 +1,42 @@
 apiVersion: kit.kitsunium/design/v2
 domain: observe/logger/middleware/recover
 packages:
-  - constants:
-      - name: CodeRecoverPanicked
+  - codes:
+      - const:
+          - doc: |-
+              CodeRecoverPanicked identifies a Write call where the wrapped downstream
+              sink panicked. The sentinel wraps a fmt.Errorf-style string of the panic
+              value so callers can treat panics as ordinary errors.
+            name: CodeRecoverPanicked
+            note: "range: 0.3.21.0 - 0.3.21.255"
+            value: "0x00_03_15_01"
         type: errs.Code
-        value: "0x00_03_15_01"
-      - name: CodeRecoverDownstreamNil
+      - const:
+          - doc: CodeRecoverDownstreamNil identifies a New call made with a nil downstream.
+            name: CodeRecoverDownstreamNil
+            value: "0x00_03_15_02"
         type: errs.Code
-        value: "0x00_03_15_02"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/observe/logger/middleware/recover
-    variables:
-      - name: Panicked
-        type: "*errs.Error"
-      - name: DownstreamNil
-        type: "*errs.Error"
+    sentinels:
+      - var:
+          - code: CodeRecoverPanicked
+            doc: |-
+              Panicked is returned when the wrapped downstream sink panics during
+              Write / Flush / Close. The error's Fields carries panic_type (the
+              recovered value's dynamic type name); the rendered panic value lives in
+              the error's log-only Private field, never in Fields.
+            name: Panicked
+            private: service/observe/logger/middleware/recover caught a panic from the downstream sink
+            public: Wrapped sink panicked
+            reason: RECOVER_PANICKED
+          - code: CodeRecoverDownstreamNil
+            doc: DownstreamNil is returned when New receives a nil downstream sink.
+            name: DownstreamNil
+            private: service/observe/logger/middleware/recover.New called with nil downstream
+            public: Recover sink requires a non-nil downstream
+            reason: RECOVER_DOWNSTREAM_NIL
   - functions:
       - in:
           - name: downstream

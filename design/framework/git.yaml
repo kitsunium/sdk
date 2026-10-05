@@ -73,19 +73,59 @@ packages:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       svcgit: github.com/kitsunium/sdk/framework/internal/service/git
     path: github.com/kitsunium/sdk/framework/git
-  - constants:
-      - name: CodeRepositoryUnresolved
+  - codes:
+      - const:
+          - doc: |-
+              CodeRepositoryUnresolved identifies a path that is not inside a repository the
+              implementation can read, or a repository probe that failed outright.
+            name: CodeRepositoryUnresolved
+            value: "0x00_02_21_01"
         type: errs.Code
-        value: "0x00_02_21_01"
-      - name: CodeCommandFailed
+      - const:
+          - doc: |-
+              CodeCommandFailed identifies a version-control command that exited non-zero.
+              The stderr tail travels in Private, never in Public.
+            name: CodeCommandFailed
+            value: "0x00_02_21_02"
         type: errs.Code
-        value: "0x00_02_21_02"
-      - name: CodePathAbsent
+      - const:
+          - doc: |-
+              CodePathAbsent identifies a path that does not exist at the requested commit,
+              which is distinct from a path that exists and is empty.
+            name: CodePathAbsent
+            value: "0x00_02_21_03"
         type: errs.Code
-        value: "0x00_02_21_03"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/framework/internal/core/git
+    sentinels:
+      - var:
+          - code: CodeRepositoryUnresolved
+            doc: |-
+              RepositoryUnresolved is returned when a path is not inside a readable
+              repository, or when the probe that would have told us failed.
+            name: RepositoryUnresolved
+            private: "core/git: the repository probe failed or the path lies outside any repository"
+            public: the path is not inside a readable repository
+            reason: REPOSITORY_UNRESOLVED
+          - code: CodeCommandFailed
+            doc: |-
+              CommandFailed is returned when a version-control command exits non-zero.
+              The command line and its stderr are attached as Private: they can name
+              branches, paths and remotes, none of which belongs on a wire-safe surface.
+            name: CommandFailed
+            private: "core/git: the version-control command exited non-zero"
+            public: the version-control command failed
+            reason: COMMAND_FAILED
+          - code: CodePathAbsent
+            doc: |-
+              PathAbsent is returned when a path does not exist at the requested commit.
+              It is deliberately distinct from a successful read of an empty file: a
+              caller reconstructing history has to tell "deleted" from "emptied".
+            name: PathAbsent
+            private: "core/git: the requested path is absent from the requested commit's tree"
+            public: the path does not exist at that commit
+            reason: PATH_ABSENT
     types:
       - interface:
           methods:
@@ -148,13 +188,6 @@ packages:
               type: int
             - name: End
               type: int
-    variables:
-      - name: RepositoryUnresolved
-        type: "*errs.Error"
-      - name: CommandFailed
-        type: "*errs.Error"
-      - name: PathAbsent
-        type: "*errs.Error"
   - functions:
       - in:
           - name: repoRoot

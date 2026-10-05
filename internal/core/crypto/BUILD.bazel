@@ -7,7 +7,7 @@ go_library(
     srcs = [
         "agreement_registry.go",
         "algorithm.go",
-        "codes.go",
+        "codes_gen.go",
         "deriver_registry.go",
         "design_gen.go",
         "errors.go",

@@ -1,3 +1,6 @@
+// Package i18n — ranges 0.2.30.* (ADR 0063 core/app/i18n block) and 0.3.60.*
+// (ADR 0063 service/app/i18n block, declared here since ADR 0160).
+//
 // Package i18n — the CLDR plural operands of a quantity.
 package i18n
 

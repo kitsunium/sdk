@@ -594,6 +594,127 @@ Package kit — the ports the workflow engine reaches a store through.
 
 ## Constants
 
+<a name="CodeStoreDecode"></a>The framework's own failures carry SDK error codes in 0.4.2.\* — layer 4 is the framework's, PP 2 this package \(ADR 0147 §3\) — so a product keeps the whole application range 0x40–0x7F for its own codes. Match them with errs.HasCode. Their Public text is the only part that may reach a caller; none of them is a 4xx, so a caller only ever reads "internal error".
+
+```go
+const (
+    CodeStoreDecode  errs.Code = 0x00_04_02_01 // 0.4.2.1 — a stored entity no longer decodes into its type
+    CodeStoreEncode  errs.Code = 0x00_04_02_02 // 0.4.2.2 — an entity does not encode to JSON
+    CodeStorePersist errs.Code = 0x00_04_02_03 // 0.4.2.3 — the store file could not be written
+    CodeStoreLoad    errs.Code = 0x00_04_02_04 // 0.4.2.4 — the store file could not be read at start
+    CodeStoreIndex   errs.Code = 0x00_04_02_05 // 0.4.2.5 — the stored entities break a unique index, or a key function panicked
+    CodeTopicEncode  errs.Code = 0x00_04_02_06 // 0.4.2.6 — a message does not encode to JSON
+    CodeTopicPublish errs.Code = 0x00_04_02_07 // 0.4.2.7 — a subscription's queue refused a message
+    CodeQueueOpen    errs.Code = 0x00_04_02_08 // 0.4.2.8 — a subscription's queue could not be opened
+    CodeUndecodable  errs.Code = 0x00_04_02_09 // 0.4.2.9 — a delivered message does not decode
+    CodeHandlerPanic errs.Code = 0x00_04_02_0A // 0.4.2.10 — a subscription handler panicked
+    CodeNotMounted   errs.Code = 0x00_04_02_0B // 0.4.2.11 — a subscription's topic is not mounted in the app
+    CodeWorkflowLoad errs.Code = 0x00_04_02_0C // 0.4.2.12 — a workflow's bookkeeping could not be read at start
+
+    // A workflow hook panicked: an OnEnter hook fails its transition with it,
+    // an OnTransition hook is reported and the transition stands.
+    CodeWorkflowHookPanic errs.Code = 0x00_04_02_0D // 0.4.2.13
+
+    // An OnEnter hook changed the state its entity was entering, or the
+    // entity's key: the transition is refused.
+    CodeWorkflowHookChange errs.Code = 0x00_04_02_0E // 0.4.2.14
+
+    // An OnEnter hook fired its own workflow: refused, where it would wait
+    // for itself.
+    CodeWorkflowReentrant errs.Code = 0x00_04_02_0F // 0.4.2.15
+    CodeAppConfig         errs.Code = 0x00_04_02_10 // 0.4.2.16 — the app's configuration cannot be applied
+    CodeAppRunning        errs.Code = 0x00_04_02_11 // 0.4.2.17 — the app, or one of its services, is already running
+    CodeAppListen         errs.Code = 0x00_04_02_12 // 0.4.2.18 — the app could not listen on its address
+
+    // Mailers.
+    CodeMailConfig errs.Code = 0x00_04_02_13 // 0.4.2.19 — KIT_SMTP_URL cannot be used
+    CodeMailEncode errs.Code = 0x00_04_02_14 // 0.4.2.20 — a mail does not encode for the outbox
+    CodeMailQueue  errs.Code = 0x00_04_02_15 // 0.4.2.21 — the outbox could not be opened, or refused a mail
+
+    // Deprecated: kit no longer returns it. The outbox is the SDK's mail
+    // spool, which dead-letters a record that does not decode itself
+    // (MessageUndecodable, in pkg/v1/app/mail/spool).
+    CodeMailUndecodable errs.Code = 0x00_04_02_16 // 0.4.2.22
+    CodeMailPanic       errs.Code = 0x00_04_02_17 // 0.4.2.23 — a delivery attempt panicked
+
+    // Loops.
+    CodeLoopPanic      errs.Code = 0x00_04_02_18 // 0.4.2.24 — a loop's function panicked
+    CodeLoopNotMounted errs.Code = 0x00_04_02_19 // 0.4.2.25 — a loop wakes on a topic whose service is not mounted in the app
+    CodeLoopStart      errs.Code = 0x00_04_02_1A // 0.4.2.26 — a hand-written loop's supervisor refused to start
+
+    // Secrets.
+    CodeSecretStore   errs.Code = 0x00_04_02_1B // 0.4.2.27 — the environment's secret store cannot be used: KIT_SECRETS, KIT_SECRETS_KEY
+    CodeSecretMissing errs.Code = 0x00_04_02_1C // 0.4.2.28 — a declared secret is found nowhere
+    CodeSecretRead    errs.Code = 0x00_04_02_1D // 0.4.2.29 — a secret's store refused to read it
+    CodeSecretRotate  errs.Code = 0x00_04_02_1E // 0.4.2.30 — a generated secret could not be made or rotated
+
+    // Databases, ADR 0004.
+    CodeDatabaseOpen        errs.Code = 0x00_04_02_1F // 0.4.2.31 — a database's engine could not open its pool
+    CodeDatabaseMigrate     errs.Code = 0x00_04_02_20 // 0.4.2.32 — a database's migrations did not apply, or wait for `migrate up`
+    CodeDatabaseUnavailable errs.Code = 0x00_04_02_21 // 0.4.2.33 — a database did not answer
+    CodeDatabaseConfig      errs.Code = 0x00_04_02_22 // 0.4.2.34 — a database's URL or tuning cannot be used
+
+    // A transaction wrote a store another database keeps than the one it
+    // belongs to — the data directory counting as one: refused, Invalid.
+    CodeTransactionSpan errs.Code = 0x00_04_02_42 // 0.4.2.66
+
+    // Privacy (ADR 0006).
+    CodePrivacyKey     errs.Code = 0x00_04_02_23 // 0.4.2.35 — kit's index key cannot be read, made or derived
+    CodePrivacyErase   errs.Code = 0x00_04_02_24 // 0.4.2.36 — an erasure failed: the store's Anonymise function panicked
+    CodePrivacyJournal errs.Code = 0x00_04_02_25 // 0.4.2.37 — the privacy journal cannot be read or written
+    CodePrivacyData    errs.Code = 0x00_04_02_26 // 0.4.2.38 — the privacy command cannot open the data: the product runs, or keeps it in memory
+
+    // History (ADR 0007).
+    CodeHistoryLoad  errs.Code = 0x00_04_02_27 // 0.4.2.39 — a store's history cannot be opened at start
+    CodeHistoryWrite errs.Code = 0x00_04_02_28 // 0.4.2.40 — a store's history cannot be written: the record's write is refused with it
+    CodeHistoryRead  errs.Code = 0x00_04_02_29 // 0.4.2.41 — a store's history cannot be read
+    CodePasswordHash errs.Code = 0x00_04_02_2A // 0.4.2.42 — a password cannot be hashed, or a stored hash cannot be read
+
+    // Commands and queries.
+    CodeCommandReentrant errs.Code = 0x00_04_02_2B // 0.4.2.43 — a handler dispatched its own command with its own key: refused, never a deadlock
+    CodeCommandKey       errs.Code = 0x00_04_02_2C // 0.4.2.44 — a command's key could not be held
+    CodeCommandQueue     errs.Code = 0x00_04_02_2D // 0.4.2.45 — a queued command's queue could not be opened, or refused a dispatch
+    CodeCommandEncode    errs.Code = 0x00_04_02_2E // 0.4.2.46 — a queued command's input does not encode for its queue
+
+    // Watches (ADR 0008).
+    CodeWatchQueue errs.Code = 0x00_04_02_2F // 0.4.2.47 — a watch's queue could not be opened, or refused a notice: the write stands, its notice is lost
+
+    // Sealing at rest (ADR 0006, step 3).
+    CodeSealKey    errs.Code = 0x00_04_02_3D // 0.4.2.61 — kit's data keys cannot be reached: data-key, or kit's own store of data keys
+    CodeSealWrite  errs.Code = 0x00_04_02_3E // 0.4.2.62 — a member could not be sealed: the write is refused, nothing changed
+    CodeSealOpen   errs.Code = 0x00_04_02_3F // 0.4.2.63 — a sealed member does not open: altered, moved, or its data key does not unwrap
+    CodeSealRewrap errs.Code = 0x00_04_02_40 // 0.4.2.64 — data-key's rotation could not re-wrap every data key: the old version is kept
+    CodeSealShred  errs.Code = 0x00_04_02_41 // 0.4.2.65 — an erasure could not destroy a data key: the erasure's rewrite stands
+
+    // Revisions (ADR 0007 §3).
+    CodeRevisionRead   errs.Code = 0x00_04_02_43 // 0.4.2.67 — a record's versions cannot be read, or two of them compared
+    CodeRevisionWrite  errs.Code = 0x00_04_02_44 // 0.4.2.68 — a record's versions cannot be rewritten: an erasure's, a hold's, a rollback's
+    CodeRevisionDecode errs.Code = 0x00_04_02_45 // 0.4.2.69 — a version no longer decodes into the store's type: Revisions, Revision and Restore refuse it
+
+    // The framework's own signals and refusals, typed since the move into the
+    // SDK (rule 2: no fmt.Errorf, no errors.New in production code).
+    CodeJobOverlapped  errs.Code = 0x00_04_02_31 // 0.4.2.49 — a scheduled job's run was skipped: the previous one is still going
+    CodeHistoryMoved   errs.Code = 0x00_04_02_32 // 0.4.2.50 — an undo ended: another write changed the history since
+    CodeNotSource      errs.Code = 0x00_04_02_33 // 0.4.2.51 — the source endpoint's name holds no regular file
+    CodePasswordMoved  errs.Code = 0x00_04_02_34 // 0.4.2.52 — a password write ended: another write changed the hash since
+    CodeNothingToErase errs.Code = 0x00_04_02_35 // 0.4.2.53 — an erasure's update found nothing to erase
+    CodeKeyRekeyed     errs.Code = 0x00_04_02_36 // 0.4.2.54 — an erasure's update would change a key that depends on personal data
+    CodeMigrateRefused errs.Code = 0x00_04_02_37 // 0.4.2.55 — the migrate command cannot do what it was asked
+    CodeCatalogue      errs.Code = 0x00_04_02_38 // 0.4.2.56 — the framework's own message catalogues disagree
+    CodeRetentionPanic errs.Code = 0x00_04_02_39 // 0.4.2.57 — a store's retention function panicked
+
+    // The signals kit ends one of its own steps with and catches itself — a
+    // caller never receives one —, typed when the SDK made rule 2 a gate
+    // (make guard), where they had been stdlib errors.
+    CodeSealErased         errs.Code = 0x00_04_02_46 // 0.4.2.70 — a sealed value's data key is destroyed: kit reads the value as its zero value
+    CodeSealKeyMoved       errs.Code = 0x00_04_02_47 // 0.4.2.71 — a data key's replacement ended: another write changed the wrapped key since
+    CodeResealInPlace      errs.Code = 0x00_04_02_48 // 0.4.2.72 — a write that changed nothing ended, for the record to be sealed again in place: no version
+    CodeResealMoved        errs.Code = 0x00_04_02_49 // 0.4.2.73 — a reseal in place ended: another write changed the record since
+    CodeWorkflowNotInPlace errs.Code = 0x00_04_02_4A // 0.4.2.74 — a transition's write in place ended: it changes more than the state, so it makes a version
+    CodeTransactionPanic   errs.Code = 0x00_04_02_4B // 0.4.2.75 — a transaction's function, or a function held until its commit, panicked: the panic continues
+)
+```
+
 <a name="EnvDev"></a>The environments.
 
 ```go
@@ -622,116 +743,6 @@ const (
     WireTimeout     = "deadline_exceeded"
     WireCanceled    = "canceled"
     WireInternal    = "internal"
-)
-```
-
-<a name="CodeStoreDecode"></a>The framework's own failures carry SDK error codes in 0.4.2.\* — layer 4 is the framework's, PP 2 this package \(ADR 0147 §3\) — so a product keeps the whole application range 0x40–0x7F for its own codes. Match them with errs.HasCode. Their Public text is the only part that may reach a caller; none of them is a 4xx, so a caller only ever reads "internal error".
-
-```go
-const (
-    CodeStoreDecode  errs.Code = 0x00_04_02_01 // 0.4.2.1 — a stored entity no longer decodes into its type
-    CodeStoreEncode  errs.Code = 0x00_04_02_02 // 0.4.2.2 — an entity does not encode to JSON
-    CodeStorePersist errs.Code = 0x00_04_02_03 // 0.4.2.3 — the store file could not be written
-    CodeStoreLoad    errs.Code = 0x00_04_02_04 // 0.4.2.4 — the store file could not be read at start
-    CodeStoreIndex   errs.Code = 0x00_04_02_05 // 0.4.2.5 — the stored entities break a unique index, or a key function panicked
-    CodeTopicEncode  errs.Code = 0x00_04_02_06 // 0.4.2.6 — a message does not encode to JSON
-    CodeTopicPublish errs.Code = 0x00_04_02_07 // 0.4.2.7 — a subscription's queue refused a message
-    CodeQueueOpen    errs.Code = 0x00_04_02_08 // 0.4.2.8 — a subscription's queue could not be opened
-    CodeUndecodable  errs.Code = 0x00_04_02_09 // 0.4.2.9 — a delivered message does not decode
-    CodeHandlerPanic errs.Code = 0x00_04_02_0A // 0.4.2.10 — a subscription handler panicked
-    CodeNotMounted   errs.Code = 0x00_04_02_0B // 0.4.2.11 — a subscription's topic is not mounted in the app
-    CodeWorkflowLoad errs.Code = 0x00_04_02_0C // 0.4.2.12 — a workflow's bookkeeping could not be read at start
-    // A workflow hook panicked: an OnEnter hook fails its transition with it,
-    // an OnTransition hook is reported and the transition stands.
-    CodeWorkflowHookPanic errs.Code = 0x00_04_02_0D // 0.4.2.13
-    // An OnEnter hook changed the state its entity was entering, or the
-    // entity's key: the transition is refused.
-    CodeWorkflowHookChange errs.Code = 0x00_04_02_0E // 0.4.2.14
-    // An OnEnter hook fired its own workflow: refused, where it would wait
-    // for itself.
-    CodeWorkflowReentrant errs.Code = 0x00_04_02_0F // 0.4.2.15
-    CodeAppConfig         errs.Code = 0x00_04_02_10 // 0.4.2.16 — the app's configuration cannot be applied
-    CodeAppRunning        errs.Code = 0x00_04_02_11 // 0.4.2.17 — the app, or one of its services, is already running
-    CodeAppListen         errs.Code = 0x00_04_02_12 // 0.4.2.18 — the app could not listen on its address
-
-    // Mailers.
-    CodeMailConfig errs.Code = 0x00_04_02_13 // 0.4.2.19 — KIT_SMTP_URL cannot be used
-    CodeMailEncode errs.Code = 0x00_04_02_14 // 0.4.2.20 — a mail does not encode for the outbox
-    CodeMailQueue  errs.Code = 0x00_04_02_15 // 0.4.2.21 — the outbox could not be opened, or refused a mail
-    // Deprecated: kit no longer returns it. The outbox is the SDK's mail
-    // spool, which dead-letters a record that does not decode itself
-    // (MessageUndecodable, in pkg/v1/app/mail/spool).
-    CodeMailUndecodable errs.Code = 0x00_04_02_16 // 0.4.2.22
-    CodeMailPanic       errs.Code = 0x00_04_02_17 // 0.4.2.23 — a delivery attempt panicked
-
-    // Loops.
-    CodeLoopPanic      errs.Code = 0x00_04_02_18 // 0.4.2.24 — a loop's function panicked
-    CodeLoopNotMounted errs.Code = 0x00_04_02_19 // 0.4.2.25 — a loop wakes on a topic whose service is not mounted in the app
-    CodeLoopStart      errs.Code = 0x00_04_02_1A // 0.4.2.26 — a hand-written loop's supervisor refused to start
-
-    // Secrets.
-    CodeSecretStore   errs.Code = 0x00_04_02_1B // 0.4.2.27 — the environment's secret store cannot be used: KIT_SECRETS, KIT_SECRETS_KEY
-    CodeSecretMissing errs.Code = 0x00_04_02_1C // 0.4.2.28 — a declared secret is found nowhere
-    CodeSecretRead    errs.Code = 0x00_04_02_1D // 0.4.2.29 — a secret's store refused to read it
-    CodeSecretRotate  errs.Code = 0x00_04_02_1E // 0.4.2.30 — a generated secret could not be made or rotated
-
-    // Databases, ADR 0004.
-    CodeDatabaseOpen        errs.Code = 0x00_04_02_1F // 0.4.2.31 — a database's engine could not open its pool
-    CodeDatabaseMigrate     errs.Code = 0x00_04_02_20 // 0.4.2.32 — a database's migrations did not apply, or wait for `migrate up`
-    CodeDatabaseUnavailable errs.Code = 0x00_04_02_21 // 0.4.2.33 — a database did not answer
-    CodeDatabaseConfig      errs.Code = 0x00_04_02_22 // 0.4.2.34 — a database's URL or tuning cannot be used
-    // A transaction wrote a store another database keeps than the one it
-    // belongs to — the data directory counting as one: refused, Invalid.
-    CodeTransactionSpan errs.Code = 0x00_04_02_42 // 0.4.2.66
-    // Privacy (ADR 0006).
-    CodePrivacyKey     errs.Code = 0x00_04_02_23 // 0.4.2.35 — kit's index key cannot be read, made or derived
-    CodePrivacyErase   errs.Code = 0x00_04_02_24 // 0.4.2.36 — an erasure failed: the store's Anonymise function panicked
-    CodePrivacyJournal errs.Code = 0x00_04_02_25 // 0.4.2.37 — the privacy journal cannot be read or written
-    CodePrivacyData    errs.Code = 0x00_04_02_26 // 0.4.2.38 — the privacy command cannot open the data: the product runs, or keeps it in memory
-    // History (ADR 0007).
-    CodeHistoryLoad  errs.Code = 0x00_04_02_27 // 0.4.2.39 — a store's history cannot be opened at start
-    CodeHistoryWrite errs.Code = 0x00_04_02_28 // 0.4.2.40 — a store's history cannot be written: the record's write is refused with it
-    CodeHistoryRead  errs.Code = 0x00_04_02_29 // 0.4.2.41 — a store's history cannot be read
-    CodePasswordHash errs.Code = 0x00_04_02_2A // 0.4.2.42 — a password cannot be hashed, or a stored hash cannot be read
-    // Commands and queries.
-    CodeCommandReentrant errs.Code = 0x00_04_02_2B // 0.4.2.43 — a handler dispatched its own command with its own key: refused, never a deadlock
-    CodeCommandKey       errs.Code = 0x00_04_02_2C // 0.4.2.44 — a command's key could not be held
-    CodeCommandQueue     errs.Code = 0x00_04_02_2D // 0.4.2.45 — a queued command's queue could not be opened, or refused a dispatch
-    CodeCommandEncode    errs.Code = 0x00_04_02_2E // 0.4.2.46 — a queued command's input does not encode for its queue
-    // Watches (ADR 0008).
-    CodeWatchQueue errs.Code = 0x00_04_02_2F // 0.4.2.47 — a watch's queue could not be opened, or refused a notice: the write stands, its notice is lost
-    // Sealing at rest (ADR 0006, step 3).
-    CodeSealKey    errs.Code = 0x00_04_02_3D // 0.4.2.61 — kit's data keys cannot be reached: data-key, or kit's own store of data keys
-    CodeSealWrite  errs.Code = 0x00_04_02_3E // 0.4.2.62 — a member could not be sealed: the write is refused, nothing changed
-    CodeSealOpen   errs.Code = 0x00_04_02_3F // 0.4.2.63 — a sealed member does not open: altered, moved, or its data key does not unwrap
-    CodeSealRewrap errs.Code = 0x00_04_02_40 // 0.4.2.64 — data-key's rotation could not re-wrap every data key: the old version is kept
-    CodeSealShred  errs.Code = 0x00_04_02_41 // 0.4.2.65 — an erasure could not destroy a data key: the erasure's rewrite stands
-    // Revisions (ADR 0007 §3).
-    CodeRevisionRead   errs.Code = 0x00_04_02_43 // 0.4.2.67 — a record's versions cannot be read, or two of them compared
-    CodeRevisionWrite  errs.Code = 0x00_04_02_44 // 0.4.2.68 — a record's versions cannot be rewritten: an erasure's, a hold's, a rollback's
-    CodeRevisionDecode errs.Code = 0x00_04_02_45 // 0.4.2.69 — a version no longer decodes into the store's type: Revisions, Revision and Restore refuse it
-
-    // The framework's own signals and refusals, typed since the move into the
-    // SDK (rule 2: no fmt.Errorf, no errors.New in production code).
-    CodeJobOverlapped  errs.Code = 0x00_04_02_31 // 0.4.2.49 — a scheduled job's run was skipped: the previous one is still going
-    CodeHistoryMoved   errs.Code = 0x00_04_02_32 // 0.4.2.50 — an undo ended: another write changed the history since
-    CodeNotSource      errs.Code = 0x00_04_02_33 // 0.4.2.51 — the source endpoint's name holds no regular file
-    CodePasswordMoved  errs.Code = 0x00_04_02_34 // 0.4.2.52 — a password write ended: another write changed the hash since
-    CodeNothingToErase errs.Code = 0x00_04_02_35 // 0.4.2.53 — an erasure's update found nothing to erase
-    CodeKeyRekeyed     errs.Code = 0x00_04_02_36 // 0.4.2.54 — an erasure's update would change a key that depends on personal data
-    CodeMigrateRefused errs.Code = 0x00_04_02_37 // 0.4.2.55 — the migrate command cannot do what it was asked
-    CodeCatalogue      errs.Code = 0x00_04_02_38 // 0.4.2.56 — the framework's own message catalogues disagree
-    CodeRetentionPanic errs.Code = 0x00_04_02_39 // 0.4.2.57 — a store's retention function panicked
-
-    // The signals kit ends one of its own steps with and catches itself — a
-    // caller never receives one —, typed when the SDK made rule 2 a gate
-    // (make guard), where they had been stdlib errors.
-    CodeSealErased         errs.Code = 0x00_04_02_46 // 0.4.2.70 — a sealed value's data key is destroyed: kit reads the value as its zero value
-    CodeSealKeyMoved       errs.Code = 0x00_04_02_47 // 0.4.2.71 — a data key's replacement ended: another write changed the wrapped key since
-    CodeResealInPlace      errs.Code = 0x00_04_02_48 // 0.4.2.72 — a write that changed nothing ended, for the record to be sealed again in place: no version
-    CodeResealMoved        errs.Code = 0x00_04_02_49 // 0.4.2.73 — a reseal in place ended: another write changed the record since
-    CodeWorkflowNotInPlace errs.Code = 0x00_04_02_4A // 0.4.2.74 — a transition's write in place ended: it changes more than the state, so it makes a version
-    CodeTransactionPanic   errs.Code = 0x00_04_02_4B // 0.4.2.75 — a transaction's function, or a function held until its commit, panicked: the panic continues
 )
 ```
 
@@ -957,7 +968,7 @@ func RegisterConfigFormat(ext, format string)
 RegisterConfigFormat lets configuration files of extension ext be read with the SDK codec format. framework/kit/config/yaml and config/toml call it as they are imported; a product never does.
 
 <a name="ScopeKey"></a>
-## func [ScopeKey](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/scope.go#L67>)
+## func [ScopeKey](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/scope.go#L63>)
 
 ```go
 func ScopeKey(scopes ...ScopeValue) (string, error)
@@ -986,7 +997,7 @@ func SocketPathFor(product, service, name string, scopes ...ScopeValue) (string,
 SocketPathFor is the socket of the listener name of service in product — the binary's name for a role of one, else the app's —, placed by default and named after scopes \(SocketPer\): the one rule, for a client of another process role that does not import the daemon's declarations \(D22\) — it names the three words and the scopes its contract states. The service is its qualified name for a module's.
 
 <a name="Stop"></a>
-## func [Stop](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/app_profiles.go#L92>)
+## func [Stop](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/app_profiles.go#L88>)
 
 ```go
 func Stop(ctx context.Context) bool
@@ -1311,7 +1322,7 @@ func Env(env string) AppConfigurer
 Env selects the environment, instead of KIT\_ENV.
 
 <a name="IdleStop"></a>
-### func [IdleStop](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/app_profiles.go#L65>)
+### func [IdleStop](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/app_profiles.go#L61>)
 
 ```go
 func IdleStop(d time.Duration) AppConfigurer
@@ -1354,7 +1365,7 @@ app := kit.NewApp("vigie", identity.Service).
 A module is mounted once per app: mounted again, its prefix is the last one given, and its bindings join the others, the last of a port winning.
 
 <a name="Profile"></a>
-### func [Profile](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/app_profiles.go#L59>)
+### func [Profile](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/app_profiles.go#L55>)
 
 ```go
 func Profile(p string) AppConfigurer
@@ -1398,7 +1409,7 @@ func Set(name string, value any) AppConfigurer
 Set gives the setting name a value in code, over the environment and the files: a value of the setting's type, or its text as a variable would hold it. It is for tests.
 
 <a name="Singleton"></a>
-### func [Singleton](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/app_profiles.go#L73>)
+### func [Singleton](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/app_profiles.go#L69>)
 
 ```go
 func Singleton(scope string) AppConfigurer
@@ -1407,7 +1418,7 @@ func Singleton(scope string) AppConfigurer
 Singleton keeps one process of the app alive per scope on this machine: the start takes an exclusive file lock named after scope in the app's runtime directory \(pkg/v1/app/lock: flock, LockFileEx\) and holds it until the process ends. A second process refuses to start with CodeSingletonHeld — for a daemon's client, the sign to talk to the one that runs. The kernel drops the lock with a dead process.
 
 <a name="SingletonPer"></a>
-### func [SingletonPer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/app_profiles.go#L83>)
+### func [SingletonPer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/app_profiles.go#L79>)
 
 ```go
 func SingletonPer(scopes ...ScopeValue) AppConfigurer
@@ -1524,7 +1535,7 @@ func (b *Binary) Talks(from, to, contractName string) *Binary
 Talks declares that role from talks to role to through contract — "\<name\>/v\<major\>". It is the only edge two roles may have.
 
 <a name="CLI"></a>
-## type [CLI](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/cli.go#L53-L59>)
+## type [CLI](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/cli.go#L50-L56>)
 
 CLI is a short command\-line command of the product: it runs once, in the CLI profile, and exits with its status. Main runs it when the process's first argument is its name.
 
@@ -1535,7 +1546,7 @@ type CLI struct {
 ```
 
 <a name="CLIFunc"></a>
-## type [CLIFunc](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/cli.go#L48>)
+## type [CLIFunc](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/cli.go#L45>)
 
 CLIFunc is a CLI command's body: its arguments after its name, and the streams; it returns the process exit status \(0 success, 64 usage, 70 software — the sysexits a shell script branches on\).
 
@@ -1678,7 +1689,7 @@ Queued sends a command to the background. Dispatch returns once the command's ow
 Delivery is at least once: Queued is the product's promise that the handler tolerates a redelivery, and a [Command.Key](<#Command.Key>) narrows the duplicates without removing them. The handler runs in the dispatcher's trace, as the user who dispatched it \([UserID](<#UserID>)\); what the auth handler said about that user is not queued. A queued command's input is a contract with the messages already queued: add a field, never rename one.
 
 <a name="CommandLineConfigurer"></a>
-## type [CommandLineConfigurer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/cli.go#L62-L65>)
+## type [CommandLineConfigurer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/cli.go#L59-L62>)
 
 CommandLineConfigurer tunes a CLI command.
 
@@ -1689,7 +1700,7 @@ type CommandLineConfigurer interface {
 ```
 
 <a name="DefaultCommand"></a>
-### func [DefaultCommand](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/cli.go#L90>)
+### func [DefaultCommand](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/cli.go#L87>)
 
 ```go
 func DefaultCommand() CommandLineConfigurer
@@ -1700,7 +1711,7 @@ DefaultCommand makes the command Main's default: it runs with every argument whe
 IFACE\-OPAQUE: CLIOption is sealed — its one method is unexported — so only this package makes one, and a caller only passes it to CLI.
 
 <a name="FailSafe"></a>
-### func [FailSafe](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/cli.go#L100>)
+### func [FailSafe](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/cli.go#L97>)
 
 ```go
 func FailSafe() CommandLineConfigurer
@@ -1938,7 +1949,7 @@ Erase erases every record whose subject is one of ids, in every store of the app
 What kit seals at rest, it erases cryptographically too \(ADR 0006 §4\): a held record is moved under a data key of its own, then the data key of each identity, and every data key the erased records were sealed under, is destroyed — every copy of what they sealed stops opening: a store's former values, a dead letter, a backup. An erasure that failed in a store destroys nothing: its retry does.
 
 <a name="Error"></a>
-## type [Error](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L166-L177>)
+## type [Error](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L55-L66>)
 
 Error is an error a product returns to its callers. Message travels on the wire; the cause attached with [Error.Wrap](<#Error.Wrap>) is logged and never sent.
 
@@ -1959,7 +1970,7 @@ type Error struct {
 ```
 
 <a name="Conflict"></a>
-### func [Conflict](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L225>)
+### func [Conflict](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L114>)
 
 ```go
 func Conflict(message string) *Error
@@ -1968,7 +1979,7 @@ func Conflict(message string) *Error
 Conflict reports a request the resource's current state refuses \(409\).
 
 <a name="Forbidden"></a>
-### func [Forbidden](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L235>)
+### func [Forbidden](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L124>)
 
 ```go
 func Forbidden(message string) *Error
@@ -1977,7 +1988,7 @@ func Forbidden(message string) *Error
 Forbidden reports a caller who may not do this \(403\).
 
 <a name="Invalid"></a>
-### func [Invalid](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L215>)
+### func [Invalid](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L104>)
 
 ```go
 func Invalid(message string) *Error
@@ -1986,7 +1997,7 @@ func Invalid(message string) *Error
 Invalid reports a request the caller must change before retrying \(400\).
 
 <a name="NewError"></a>
-### func [NewError](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L315>)
+### func [NewError](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L204>)
 
 ```go
 func NewError(status int, code, message string) *Error
@@ -1995,7 +2006,7 @@ func NewError(status int, code, message string) *Error
 NewError is an error answered with the HTTP status, carrying the wire code and the message a caller reads.
 
 <a name="NotFound"></a>
-### func [NotFound](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L220>)
+### func [NotFound](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L109>)
 
 ```go
 func NotFound(message string) *Error
@@ -2004,7 +2015,7 @@ func NotFound(message string) *Error
 NotFound reports that the addressed resource does not exist \(404\).
 
 <a name="Unauthenticated"></a>
-### func [Unauthenticated](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L230>)
+### func [Unauthenticated](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L119>)
 
 ```go
 func Unauthenticated(message string) *Error
@@ -2013,7 +2024,7 @@ func Unauthenticated(message string) *Error
 Unauthenticated reports a caller who did not prove who they are \(401\).
 
 <a name="Unavailable"></a>
-### func [Unavailable](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L240>)
+### func [Unavailable](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L129>)
 
 ```go
 func Unavailable(message string) *Error
@@ -2022,7 +2033,7 @@ func Unavailable(message string) *Error
 Unavailable reports a transient failure worth retrying later \(503\).
 
 <a name="Error.Error"></a>
-### func \(\*Error\) [Error](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L202>)
+### func \(\*Error\) [Error](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L91>)
 
 ```go
 func (e *Error) Error() string
@@ -2031,7 +2042,7 @@ func (e *Error) Error() string
 Error renders the code and the message. It never renders the cause.
 
 <a name="Error.Unwrap"></a>
-### func \(\*Error\) [Unwrap](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L205>)
+### func \(\*Error\) [Unwrap](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L94>)
 
 ```go
 func (e *Error) Unwrap() error
@@ -2040,7 +2051,7 @@ func (e *Error) Unwrap() error
 Unwrap returns the cause, so errors.Is and errors.As see through an Error.
 
 <a name="Error.Wrap"></a>
-### func \(\*Error\) [Wrap](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L208>)
+### func \(\*Error\) [Wrap](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L97>)
 
 ```go
 func (e *Error) Wrap(cause error) *Error
@@ -2934,7 +2945,7 @@ type Routine struct {
 ```
 
 <a name="ScopeValue"></a>
-## type [ScopeValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/scope.go#L28-L33>)
+## type [ScopeValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/scope.go#L24-L29>)
 
 ScopeValue is one part of a path computed at the start: the user, the executable, a configuration directory. Two processes share a singleton or a socket when every scope gives them the same value.
 
@@ -2945,7 +2956,7 @@ type ScopeValue struct {
 ```
 
 <a name="PerEnv"></a>
-### func [PerEnv](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/scope.go#L53>)
+### func [PerEnv](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/scope.go#L49>)
 
 ```go
 func PerEnv(name, fallback string) ScopeValue
@@ -3141,7 +3152,7 @@ AuthHandler declares the app's authentication handler. The handler returns the u
 The handler runs only for a request that carries at least one of the credentials' cookies or headers; a request with none is anonymous without asking it.
 
 <a name="Service.CLI"></a>
-### func \(\*Service\) [CLI](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/cli.go#L108>)
+### func \(\*Service\) [CLI](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/cli.go#L105>)
 
 ```go
 func (s *Service) CLI(name, doc string, fn CLIFunc, opts ...CommandLineConfigurer) *CLI
@@ -3460,7 +3471,7 @@ Root serves the sub\-directory dir of the file system rather than its root — "
 IFACE\-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
 <a name="StdioValue"></a>
-## type [StdioValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/cli.go#L36-L43>)
+## type [StdioValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/cli.go#L33-L40>)
 
 StdioValue is where a CLI command reads and writes: the process's own streams under Main, buffers in a test.
 
@@ -3899,7 +3910,7 @@ func UserID(ctx context.Context) (UID, bool)
 UserID returns the authenticated caller of the request ctx serves, and whether there is one. An in\-process [EndpointService.Call](<#EndpointService.Call>) carries its caller's user along.
 
 <a name="ViolationMessage"></a>
-## type [ViolationMessage](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L181-L188>)
+## type [ViolationMessage](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L70-L77>)
 
 ViolationMessage is one validation rule a request failed: where, which rule, and why — never the value.
 

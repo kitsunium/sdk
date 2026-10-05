@@ -39,8 +39,8 @@ order, so `go doc` reads it as before.
 | `sql_dialect.go` | `Dialect` + `DialectUnknown/Postgres/MySQL/SQLite` + `String` / `Valid` / `SupportsAdvisoryLock` + the engine's vocabulary `Placeholder` / `QuoteIdent` / `ForUpdate` / `ForUpdateSkipLocked` + `ParseDialect` |
 | `sql_txoptions.go` | `TxOptionsValue` — `Isolation` / `ReadOnly` + `IsZero` / `StdOptions` |
 | `sql_migration.go` | `Step func(ctx, Executor) error`, `MigrationValue` + `Validate`, `Irreversible` |
-| `codes.go` | `Code*` constants — range 0.2.24.*, then the service's 0.3.54.* |
-| `errors.go` | `UnknownDialect` / `DialectRefused` / `NestedIsolation` / `InvalidMigration` / `MigrationIrreversible`, then the 17 run outcomes — `ConfigInvalid`, `PoolMisconfigured`, `BeginFailed`, `CommitFailed`, `RollbackFailed`, `SavepointFailed`, `TxPoisoned`, `TxClosed`, `HealthCheckFailed`, `HealthCheckTimeout`, `MigrationFailed`, `MigrationOutOfOrder`, `MigrationLockUnsupported`, `MigrationLockTimeout`, `MigrationUnknownVersion`, `VersionTableInvalid`, `DuplicateMigration` (`errs.Define`) |
+| `codes_gen.go` | `Code*` constants — range 0.2.24.*, then the service's 0.3.54.*; `UnknownDialect` / `DialectRefused` / `NestedIsolation` / `InvalidMigration` / `MigrationIrreversible`, then the 17 run outcomes — `ConfigInvalid`, `PoolMisconfigured`, `BeginFailed`, `CommitFailed`, `RollbackFailed`, `SavepointFailed`, `TxPoisoned`, `TxClosed`, `HealthCheckFailed`, `HealthCheckTimeout`, `MigrationFailed`, `MigrationOutOfOrder`, `MigrationLockUnsupported`, `MigrationLockTimeout`, `MigrationUnknownVersion`, `VersionTableInvalid`, `DuplicateMigration` (`errs.Define`) — written by kit gen from `design/data/sql.yaml` (ADR 0164) |
+| `errors.go` | hand-written beside them: `exitConfig`, `exitTempFail`, `httpUnavailable` |
 
 ## Conventions
 

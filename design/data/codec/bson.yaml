@@ -1,36 +1,85 @@
 apiVersion: kit.kitsunium/design/v2
 domain: data/codec/bson
 packages:
-  - constants:
-      - name: CodeBSONMarshalFailed
+  - codes:
+      - const:
+          - doc: |-
+              CodeBSONMarshalFailed identifies a value Marshal or Append cannot encode: a
+              top level that is not a document, a type BSON has no representation for, a
+              string that is not UTF-8, a key holding a NUL, or an error a MarshalBSON
+              method returned.
+            name: CodeBSONMarshalFailed
+            note: "range: 0.3.36.0 - 0.3.36.255"
+            value: "0x00_03_24_01"
         type: errs.Code
-        value: "0x00_03_24_01"
-      - name: CodeBSONUnmarshalFailed
+      - const:
+          - doc: |-
+              CodeBSONUnmarshalFailed identifies input Unmarshal refuses: bytes that are
+              not one well-formed BSON document, or a value the target cannot hold.
+            name: CodeBSONUnmarshalFailed
+            value: "0x00_03_24_02"
         type: errs.Code
-        value: "0x00_03_24_02"
-      - name: CodeBSONSizeExceeded
+      - const:
+          - doc: |-
+              CodeBSONSizeExceeded identifies an Unmarshal input whose length exceeds the
+              10 MiB hard cap (CWE-400 memory-exhaustion defence before any byte is read).
+            name: CodeBSONSizeExceeded
+            value: "0x00_03_24_03"
         type: errs.Code
-        value: "0x00_03_24_03"
-      - name: CodeBSONDepthExceeded
+      - const:
+          - doc: |-
+              CodeBSONDepthExceeded identifies a document or value nested deeper than
+              maxBSONNestedLevels, in either direction (CWE-674 stack-exhaustion defence;
+              on the encode side it is also what a cyclic value runs into).
+            name: CodeBSONDepthExceeded
+            value: "0x00_03_24_04"
         type: errs.Code
-        value: "0x00_03_24_04"
-      - name: CodeBSONValueInvalid
+      - const:
+          - doc: |-
+              CodeBSONValueInvalid identifies a BSON value type that cannot be built from
+              what it was given: a malformed ObjectID hex string, a decimal128 string that
+              is not a number or not exactly representable, a JSON form of either that is
+              neither of the shapes accepted.
+            name: CodeBSONValueInvalid
+            value: "0x00_03_24_05"
         type: errs.Code
-        value: "0x00_03_24_05"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/data/codec/bson
-    variables:
-      - name: MarshalFailed
-        type: "*errs.Error"
-      - name: UnmarshalFailed
-        type: "*errs.Error"
-      - name: SizeExceeded
-        type: "*errs.Error"
-      - name: DepthExceeded
-        type: "*errs.Error"
-      - name: ValueInvalid
-        type: "*errs.Error"
+    sentinels:
+      - var:
+          - code: CodeBSONMarshalFailed
+            doc: MarshalFailed marks a value Marshal or Append cannot encode.
+            name: MarshalFailed
+            private: "service/data/codec/bson: the value has no BSON encoding"
+            public: BSON encoding failed
+            reason: BSON_MARSHAL_FAILED
+          - code: CodeBSONUnmarshalFailed
+            doc: UnmarshalFailed marks input Unmarshal refuses.
+            name: UnmarshalFailed
+            private: "service/data/codec/bson: the input is not a well-formed BSON document the target can hold"
+            public: BSON decoding failed
+            reason: BSON_UNMARSHAL_FAILED
+          - code: CodeBSONSizeExceeded
+            doc: SizeExceeded marks an Unmarshal input over the 10 MiB hard cap.
+            name: SizeExceeded
+            private: "service/data/codec/bson: len(data) exceeds maxBSONBytes"
+            public: BSON input exceeds size limit
+            reason: BSON_SIZE_EXCEEDED
+          - code: CodeBSONDepthExceeded
+            doc: |-
+              DepthExceeded marks a document or value nested deeper than the codec
+              reads or writes.
+            name: DepthExceeded
+            private: "service/data/codec/bson: nesting exceeds maxBSONNestedLevels"
+            public: BSON nesting depth exceeds limit
+            reason: BSON_DEPTH_EXCEEDED
+          - code: CodeBSONValueInvalid
+            doc: ValueInvalid marks a BSON value type that cannot be built from its input.
+            name: ValueInvalid
+            private: "service/data/codec/bson: the input does not describe a value of this BSON type"
+            public: BSON value is invalid
+            reason: BSON_VALUE_INVALID
   - constants:
       - name: BinaryGeneric
         type: byte

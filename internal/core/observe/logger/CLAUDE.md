@@ -5,7 +5,7 @@
 
 Interface layer of the SDK's structured logger. Defines the four ports between the caller-facing `Logger`, the formatting `Handler`, the format-side `Encoder` and the transport-side `Sink`, plus the immutable value types they carry. No runtime behaviour lives here — concrete implementations sit under `internal/service/observe/logger/{encoder,sink,middleware,writer}/`. This directory carries no `README.md`: the human-readable surface doc is the public facade's generated `pkg/v1/observe/logger/README.md`, and this file captures the engineering rules.
 
-Code ranges: `0.2.1.*` reserved (ADR 0005 §Registry) and still empty — `codeRangeOwners` carries no entry for it; and `0.3.1.*`, the range ADR 0005 allocated to the logger ENGINE, declared here since ADR 0160 §2 (`codes.go`, `errors.go`). A code keeps its value when its declaration moves: `LL = 3` records the layer that allocated the range, and `codeRangeOwners` maps `0x00_03_01_00` to this directory.
+Code ranges: `0.2.1.*` reserved (ADR 0005 §Registry) and still empty — `codeRangeOwners` carries no entry for it; and `0.3.1.*`, the range ADR 0005 allocated to the logger ENGINE, declared here since ADR 0160 §2 (`codes_gen.go`). A code keeps its value when its declaration moves: `LL = 3` records the layer that allocated the range, and `codeRangeOwners` maps `0x00_03_01_00` to this directory.
 
 The engine's sinks, middlewares and writers mirror the same way: each one's codes live in the core package at its own path beneath this one — `middleware/{async, encwrite, failover, multi, recover, route, sample, tee}`, `sink/{console, file, syslog}` and `writer/{journald, nettransport, rotfile}` — packages that hold codes and sentinels and nothing else.
 
@@ -17,7 +17,7 @@ port or its doc comment changes in the design, then `kit gen`, then `make api`
 They moved there from `logger.go`, `handler.go`, `encoder.go` and `sink.go`,
 content moved and never deleted. The four files, left with nothing but their
 package comment, are gone (rule 5): `encoder.go`'s comment now closes
-`codes.go`'s, `handler.go`'s opens `kind.go`'s, and `logger.go`'s and
+`codes_gen.go`'s, `handler.go`'s opens `kind.go`'s, and `logger.go`'s and
 `sink.go`'s open and close `record.go`'s — go/doc joins every file's package
 comment in file-name order, so `go doc` reads it as before.
 
@@ -30,8 +30,8 @@ comment in file-name order, so `go doc` reads it as before.
 | `trace_context.go` | `TraceContextValue{TraceID [16]byte; SpanID [8]byte}` + `IsValid()` + `AppendTraceIDHex` / `AppendSpanIDHex`; the `TraceContextSource func(ctx) TraceContextValue` port; `TraceIDKey`/`SpanIDKey` (`"trace_id"`/`"span_id"`) and the four length constants (ADR 0062) |
 | `value.go` | `Value` discriminated union + typed constructors (`StringValue` / `Int64Value` / `IntValue` / `Uint64Value` / `Float64Value` / `BoolValue` / `DurationValue` / `TimeValue` / `GroupValue` / `AnyValue`, and `NewValue`, an alias of `AnyValue`) and accessors |
 | `kind.go` | `Kind int8` + `KindAny`/`KindBool`/`KindDuration`/`KindFloat64`/`KindInt64`/`KindString`/`KindTime`/`KindUint64`/`KindGroup` + `String()` |
-| `codes.go` | `Code*` constants — range `0.3.1.*`, the engine's (`CodeWriterNil`, `CodeHandlerNil`, `CodeEncoderNil`, `CodeSinkRequired`, `CodeCtxCancelled`, `CodeWriteFailed`) |
-| `errors.go` | the sentinels `internal/service/observe/logger` returns — `WriterNil`, `HandlerNil`, `EncoderNil`, `SinkRequired`, `CtxCancelled`, `WriteFailed` (exit 74, EX_IOERR) |
+| `codes_gen.go` | `Code*` constants — range `0.3.1.*`, the engine's (`CodeWriterNil`, `CodeHandlerNil`, `CodeEncoderNil`, `CodeSinkRequired`, `CodeCtxCancelled`, `CodeWriteFailed`); the sentinels `internal/service/observe/logger` returns — `WriterNil`, `HandlerNil`, `EncoderNil`, `SinkRequired`, `CtxCancelled`, `WriteFailed` (exit 74, EX_IOERR) — written by kit gen from `design/observe/logger.yaml` (ADR 0164) |
+| `errors.go` | hand-written beside them: `exitIOErr` |
 
 Sub-packages, beneath this one because they are the logger's own (ADR 0155):
 

@@ -1,67 +1,152 @@
 apiVersion: kit.kitsunium/design/v2
 domain: crypto
 packages:
-  - constants:
-      - name: CodeDuplicateRegistration
+  - codes:
+      - const:
+          - doc: |-
+              CodeDuplicateRegistration identifies an init-time collision on a scheme
+              registry; two distinct schemes tried to claim the same Algorithm or wire id.
+              Surfaced via panic at boot through the DuplicateRegistration sentinel.
+            name: CodeDuplicateRegistration
+            note: "range: 0.2.4.0 - 0.2.4.255"
+            value: "0x00_02_04_01"
         type: errs.Code
-        value: "0x00_02_04_01"
-      - name: CodeUnknownAlgorithm
+      - const:
+          - doc: |-
+              CodeUnknownAlgorithm identifies a Seal/SealAs call naming an Algorithm that no
+              imported package has registered.
+            name: CodeUnknownAlgorithm
+            value: "0x00_02_04_02"
         type: errs.Code
-        value: "0x00_02_04_02"
-      - name: CodeInvalidKey
+      - const:
+          - doc: |-
+              CodeInvalidKey identifies a NewKey call whose input was not exactly KeyLen
+              bytes, or a cipher that rejected the key material.
+            name: CodeInvalidKey
+            value: "0x00_02_04_03"
         type: errs.Code
-        value: "0x00_02_04_03"
-      - name: CodeDecryptionFailed
+      - const:
+          - doc: |-
+              CodeDecryptionFailed identifies any Open failure — bad authentication tag,
+              malformed framing, unknown wire id, or wrong key. It is deliberately
+              undifferentiated so Open cannot become a padding/format oracle.
+            name: CodeDecryptionFailed
+            value: "0x00_02_04_04"
         type: errs.Code
-        value: "0x00_02_04_04"
-      - name: CodeEntropyFailed
+      - const:
+          - doc: |-
+              CodeEntropyFailed identifies a crypto/rand failure while generating a nonce in
+              Seal — a host entropy fault, not a caller error.
+            name: CodeEntropyFailed
+            value: "0x00_02_04_05"
         type: errs.Code
-        value: "0x00_02_04_05"
-      - name: CodeUnknownHashAlgorithm
+      - const:
+          - doc: |-
+              CodeUnknownHashAlgorithm identifies a Sum/SumHex call naming a hash Algorithm
+              that no imported package has registered.
+            name: CodeUnknownHashAlgorithm
+            value: "0x00_02_04_06"
         type: errs.Code
-        value: "0x00_02_04_06"
-      - name: CodeUnknownSignatureAlgorithm
+      - const:
+          - doc: |-
+              CodeUnknownSignatureAlgorithm identifies a Sign/Verify/GenerateKey call naming
+              an Algorithm that no imported signature package has registered.
+            name: CodeUnknownSignatureAlgorithm
+            value: "0x00_02_04_07"
         type: errs.Code
-        value: "0x00_02_04_07"
-      - name: CodeSigningFailed
+      - const:
+          - doc: |-
+              CodeSigningFailed identifies a Sign call whose private key was not well-formed
+              for the scheme (e.g. the wrong length) — a caller data error, not a fault.
+            name: CodeSigningFailed
+            value: "0x00_02_04_08"
         type: errs.Code
-        value: "0x00_02_04_08"
-      - name: CodeKeyGenerationFailed
+      - const:
+          - doc: |-
+              CodeKeyGenerationFailed identifies a crypto/rand failure while generating a
+              signing keypair in GenerateKey — a host entropy fault, not a caller error.
+            name: CodeKeyGenerationFailed
+            value: "0x00_02_04_09"
         type: errs.Code
-        value: "0x00_02_04_09"
-      - name: CodeUnknownKDFAlgorithm
+      - const:
+          - doc: |-
+              CodeUnknownKDFAlgorithm identifies a Subkey call naming a key-derivation
+              Algorithm that no imported package has registered.
+            name: CodeUnknownKDFAlgorithm
+            value: "0x00_02_04_0A"
         type: errs.Code
-        value: "0x00_02_04_0A"
-      - name: CodeDerivationFailed
+      - const:
+          - doc: |-
+              CodeDerivationFailed identifies a Subkey call whose requested length exceeds
+              the scheme's maximum output — a caller data error, not a fault.
+            name: CodeDerivationFailed
+            value: "0x00_02_04_0B"
         type: errs.Code
-        value: "0x00_02_04_0B"
-      - name: CodeUnknownPasswordAlgorithm
+      - const:
+          - doc: |-
+              CodeUnknownPasswordAlgorithm identifies a HashPassword/VerifyPassword call
+              whose Algorithm (or PHC id segment) no imported package has registered.
+            name: CodeUnknownPasswordAlgorithm
+            value: "0x00_02_04_0C"
         type: errs.Code
-        value: "0x00_02_04_0C"
-      - name: CodePasswordHashFailed
+      - const:
+          - doc: |-
+              CodePasswordHashFailed identifies a crypto/rand failure while generating a
+              password salt in HashPassword — a host entropy fault, not a caller error.
+            name: CodePasswordHashFailed
+            value: "0x00_02_04_0D"
         type: errs.Code
-        value: "0x00_02_04_0D"
-      - name: CodeInvalidPasswordHash
+      - const:
+          - doc: |-
+              CodeInvalidPasswordHash identifies a stored PHC string that cannot be parsed
+              during VerifyPassword — server-side data corruption, not a password mismatch.
+            name: CodeInvalidPasswordHash
+            value: "0x00_02_04_0E"
         type: errs.Code
-        value: "0x00_02_04_0E"
-      - name: CodeUnknownMACAlgorithm
+      - const:
+          - doc: |-
+              CodeUnknownMACAlgorithm identifies a MACTag/MACVerify call naming a MAC
+              Algorithm that no imported package has registered.
+            name: CodeUnknownMACAlgorithm
+            value: "0x00_02_04_0F"
         type: errs.Code
-        value: "0x00_02_04_0F"
-      - name: CodeUnknownAgreementAlgorithm
+      - const:
+          - doc: |-
+              CodeUnknownAgreementAlgorithm identifies a GenerateAgreementKey/AgreementShared
+              call naming a key-agreement Algorithm that no imported package has registered.
+            name: CodeUnknownAgreementAlgorithm
+            value: "0x00_02_04_10"
         type: errs.Code
-        value: "0x00_02_04_10"
-      - name: CodeAgreementFailed
+      - const:
+          - doc: |-
+              CodeAgreementFailed identifies an AgreementShared call whose scheme rejected
+              the inputs (e.g. a low-order peer point) — wrapped, never leaking key bytes.
+            name: CodeAgreementFailed
+            value: "0x00_02_04_11"
         type: errs.Code
-        value: "0x00_02_04_11"
-      - name: CodeStreamTruncated
+      - const:
+          - doc: |-
+              CodeStreamTruncated identifies a streaming Open that hit EOF before the
+              final-flag chunk — the stream was cut short, not legitimately ended.
+            name: CodeStreamTruncated
+            value: "0x00_02_04_12"
         type: errs.Code
-        value: "0x00_02_04_12"
-      - name: CodeInvalidKeyEnvelope
+      - const:
+          - doc: |-
+              CodeInvalidKeyEnvelope identifies a structurally invalid key-envelope string
+              passed to UnwrapKey — a corrupt $kenv$ frame, NOT a wrong-passphrase oracle.
+            name: CodeInvalidKeyEnvelope
+            value: "0x00_02_04_13"
         type: errs.Code
-        value: "0x00_02_04_13"
-      - name: CodeDigestMismatch
+      - const:
+          - doc: |-
+              CodeDigestMismatch identifies a VerifyingReader whose computed digest did not
+              match the expected hex at EOF. The digest is public, so the mismatch is
+              non-oracle — it surfaces only on the terminal read, never mid-stream.
+            name: CodeDigestMismatch
+            value: "0x00_02_04_14"
         type: errs.Code
-        value: "0x00_02_04_14"
+    constants:
       - name: KeyLen
         type: int
         value: "32"
@@ -800,6 +885,192 @@ packages:
               - type: io.Reader
               - type: error
         name: StreamSealer
+    sentinels:
+      - var:
+          - code: CodeUnknownAlgorithm
+            doc: |-
+              UnknownAlgorithm is returned by Seal/SealAs when no AEAD is registered
+              under the requested Algorithm — typically a missing blank-import.
+            name: UnknownAlgorithm
+            private: "core/crypto.Seal: algorithm absent from registry; blank-import the scheme's package to register it"
+            public: No AEAD is registered under that algorithm
+            reason: UNKNOWN_ALGORITHM
+          - code: CodeInvalidKey
+            doc: |-
+              InvalidKey is returned by NewKey when the supplied material is not
+              exactly KeyLen bytes (or by an AEAD when the cipher rejects the key).
+            name: InvalidKey
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "core/crypto.NewKey: key must be exactly KeyLen bytes"
+            public: Encryption key has the wrong length
+            reason: INVALID_KEY
+          - code: CodeDecryptionFailed
+            doc: |-
+              DecryptionFailed is the single non-oracle error returned by Open for any
+              failure — bad tag, malformed framing, unknown wire id, or wrong key.
+            name: DecryptionFailed
+            options:
+              - errs.WithHTTPStatus(httpBadRequest)
+              - errs.WithExitCode(exitDataErr)
+            private: "core/crypto.Open: authentication, framing, or key check failed (cause withheld to avoid an oracle)"
+            public: Decryption failed
+            reason: DECRYPTION_FAILED
+          - code: CodeEntropyFailed
+            doc: |-
+              EntropyFailed wraps a crypto/rand failure while generating a Seal nonce;
+              it signals a host entropy fault rather than a caller error.
+            name: EntropyFailed
+            private: "core/crypto.Seal: crypto/rand.Read failed while generating a nonce"
+            public: Could not gather entropy for encryption
+            reason: ENTROPY_FAILED
+          - code: CodeUnknownHashAlgorithm
+            doc: |-
+              UnknownHashAlgorithm is returned by Sum/SumHex when no Hasher is
+              registered under the requested Algorithm — typically a missing blank-import.
+            name: UnknownHashAlgorithm
+            private: "core/crypto.Sum: hash algorithm absent from registry; blank-import the hasher's package to register it"
+            public: No hasher is registered under that algorithm
+            reason: UNKNOWN_HASH_ALGORITHM
+          - code: CodeUnknownSignatureAlgorithm
+            doc: |-
+              UnknownSignatureAlgorithm is returned by Sign/Verify/GenerateKey when no
+              Signer is registered under the requested Algorithm — usually a missing
+              blank-import of the scheme's package.
+            name: UnknownSignatureAlgorithm
+            private: "core/crypto.Sign: signature algorithm absent from registry; blank-import the signer's package to register it"
+            public: No signer is registered under that algorithm
+            reason: UNKNOWN_SIGNATURE_ALGORITHM
+          - code: CodeSigningFailed
+            doc: |-
+              SigningFailed is returned by Sign when the supplied private key is not
+              well-formed for the scheme (e.g. the wrong length).
+            name: SigningFailed
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "core/crypto.Sign: private key is not valid for the scheme (wrong length or encoding)"
+            public: Signing key is malformed
+            reason: SIGNING_FAILED
+          - code: CodeKeyGenerationFailed
+            doc: |-
+              KeyGenerationFailed wraps a crypto/rand failure while generating a signing
+              keypair; it signals a host entropy fault rather than a caller error.
+            name: KeyGenerationFailed
+            private: "core/crypto.GenerateKey: crypto/rand failed while generating a signing keypair"
+            public: Could not gather entropy for key generation
+            reason: KEY_GENERATION_FAILED
+          - code: CodeUnknownKDFAlgorithm
+            doc: |-
+              UnknownKDFAlgorithm is returned by Subkey when no Deriver is registered
+              under the requested Algorithm — usually a missing blank-import.
+            name: UnknownKDFAlgorithm
+            private: "core/crypto.Subkey: KDF algorithm absent from registry; blank-import the deriver's package to register it"
+            public: No key-derivation function is registered under that algorithm
+            reason: UNKNOWN_KDF_ALGORITHM
+          - code: CodeDerivationFailed
+            doc: |-
+              DerivationFailed is returned by Subkey when the requested length exceeds
+              the scheme's maximum output (e.g. HKDF's 255*HashLen ceiling).
+            name: DerivationFailed
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "core/crypto.Subkey: requested length exceeds the scheme's maximum output"
+            public: Requested derived-key length is too large
+            reason: DERIVATION_FAILED
+          - code: CodeUnknownPasswordAlgorithm
+            doc: |-
+              UnknownPasswordAlgorithm is returned by HashPassword/VerifyPassword when no
+              PasswordHasher is registered under the requested Algorithm or PHC id —
+              usually a missing blank-import.
+            name: UnknownPasswordAlgorithm
+            private: "core/crypto.VerifyPassword: password scheme absent from registry; blank-import the hasher's package to register it"
+            public: No password hasher is registered under that algorithm
+            reason: UNKNOWN_PASSWORD_ALGORITHM
+          - code: CodePasswordHashFailed
+            doc: |-
+              PasswordHashFailed wraps a crypto/rand failure while generating a password
+              salt; it signals a host entropy fault rather than a caller error.
+            name: PasswordHashFailed
+            private: "core/crypto.HashPassword: crypto/rand failed while generating a salt"
+            public: Could not gather entropy for password hashing
+            reason: PASSWORD_HASH_FAILED
+          - code: CodeInvalidPasswordHash
+            doc: |-
+              InvalidPasswordHash is returned by VerifyPassword when the stored PHC
+              string cannot be parsed — server-side data corruption, never a mismatch.
+            name: InvalidPasswordHash
+            private: "core/crypto.VerifyPassword: stored PHC string is not well-formed for its scheme"
+            public: Stored password hash is malformed
+            reason: INVALID_PASSWORD_HASH
+          - code: CodeUnknownMACAlgorithm
+            doc: |-
+              UnknownMACAlgorithm is returned by MACTag/MACVerify when no MAC is
+              registered under the requested Algorithm — typically a missing blank-import.
+            name: UnknownMACAlgorithm
+            private: "core/crypto.MACTag: MAC algorithm absent from registry; blank-import the scheme's package to register it"
+            public: No MAC is registered under that algorithm
+            reason: UNKNOWN_MAC_ALGORITHM
+          - code: CodeUnknownAgreementAlgorithm
+            doc: |-
+              UnknownAgreementAlgorithm is returned by GenerateAgreementKey/AgreementShared
+              when no Agreement scheme is registered under the requested Algorithm.
+            name: UnknownAgreementAlgorithm
+            private: "core/crypto.AgreementShared: agreement algorithm absent from registry; blank-import the scheme's package to register it"
+            public: No key-agreement scheme is registered under that algorithm
+            reason: UNKNOWN_AGREEMENT_ALGORITHM
+          - code: CodeAgreementFailed
+            doc: |-
+              AgreementFailed wraps an AgreementShared fault where the scheme rejected the
+              inputs (e.g. a low-order peer point); it never leaks key bytes.
+            name: AgreementFailed
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "core/crypto.AgreementShared: the scheme rejected the inputs (cause withheld of key bytes)"
+            public: Key agreement failed to derive a shared secret
+            reason: AGREEMENT_FAILED
+          - code: CodeStreamTruncated
+            doc: |-
+              StreamTruncated is returned by a streaming Open reader when the stream ends
+              before its final-flag chunk — a truncated or tampered stream, not a clean EOF.
+            name: StreamTruncated
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "core/crypto.OpenStream: reader hit EOF before decrypting the final-flag chunk"
+            public: The authenticated stream was truncated before its final chunk
+            reason: STREAM_TRUNCATED
+          - code: CodeInvalidKeyEnvelope
+            doc: |-
+              InvalidKeyEnvelope is returned by UnwrapKey when the supplied $kenv$ string
+              is structurally invalid (bad field count, magic, version, kdf/aead id, or
+              base64). It signals corruption only — a wrong passphrase surfaces the
+              non-oracle DecryptionFailed instead, so this is no key/password oracle.
+            name: InvalidKeyEnvelope
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "service/crypto/key/keyenvelope.UnwrapKey: $kenv$ string is not well-formed"
+            public: Key envelope is malformed
+            reason: INVALID_KEY_ENVELOPE
+          - code: CodeDigestMismatch
+            doc: |-
+              DigestMismatch is returned by a VerifyingReader on its final (EOF) read when
+              the computed digest does not match the expected value. The digest is public,
+              so the comparison is non-oracle and surfaces only at the terminal read.
+            name: DigestMismatch
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "service/crypto/hash/stdhash.VerifyingReader: computed digest differs from the expected hex at EOF"
+            public: Stream digest does not match the expected value
+            reason: DIGEST_MISMATCH
+          - code: CodeDuplicateRegistration
+            doc: |-
+              DuplicateRegistration is the conflict every registrar refuses at boot: a
+              distinct scheme already holds the Algorithm — or, for an AEAD, the wire
+              id — a second one claims. The registrar panics with conflictText of it,
+              so the panic carries the dotted-quad header AND the key that collided.
+            name: DuplicateRegistration
+            private: "core/crypto: a distinct scheme already holds this Algorithm, or this AEAD wire id"
+            public: A scheme is already registered under that algorithm or wire id
+            reason: DUPLICATE_REGISTRATION
     types:
       - methods:
           - name: String
@@ -830,47 +1101,6 @@ packages:
         name: Key
         struct:
           unexported: true
-    variables:
-      - name: UnknownAlgorithm
-        type: "*errs.Error"
-      - name: InvalidKey
-        type: "*errs.Error"
-      - name: DecryptionFailed
-        type: "*errs.Error"
-      - name: EntropyFailed
-        type: "*errs.Error"
-      - name: UnknownHashAlgorithm
-        type: "*errs.Error"
-      - name: UnknownSignatureAlgorithm
-        type: "*errs.Error"
-      - name: SigningFailed
-        type: "*errs.Error"
-      - name: KeyGenerationFailed
-        type: "*errs.Error"
-      - name: UnknownKDFAlgorithm
-        type: "*errs.Error"
-      - name: DerivationFailed
-        type: "*errs.Error"
-      - name: UnknownPasswordAlgorithm
-        type: "*errs.Error"
-      - name: PasswordHashFailed
-        type: "*errs.Error"
-      - name: InvalidPasswordHash
-        type: "*errs.Error"
-      - name: UnknownMACAlgorithm
-        type: "*errs.Error"
-      - name: UnknownAgreementAlgorithm
-        type: "*errs.Error"
-      - name: AgreementFailed
-        type: "*errs.Error"
-      - name: StreamTruncated
-        type: "*errs.Error"
-      - name: InvalidKeyEnvelope
-        type: "*errs.Error"
-      - name: DigestMismatch
-        type: "*errs.Error"
-      - name: DuplicateRegistration
-        type: "*errs.Error"
   - imports:
       corecrypto: github.com/kitsunium/sdk/internal/core/crypto
     path: github.com/kitsunium/sdk/internal/service/crypto/aead/aesgcm

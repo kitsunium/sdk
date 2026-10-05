@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "storetest",
-    srcs = ["storetest.go"],
+    srcs = [
+        "codes_gen.go",
+        "storetest.go",
+    ],
     importpath = "github.com/kitsunium/sdk/framework/kit/storetest",
     visibility = ["//visibility:public"],
     deps = [

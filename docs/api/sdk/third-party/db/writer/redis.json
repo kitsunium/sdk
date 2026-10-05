@@ -39,7 +39,7 @@
         "public": "Redis writer failed to append a log batch"
       },
       "doc": "AddFailed wraps a failed pipelined XADD batch.\n",
-      "file": "errors.go",
+      "file": "codes_gen.go",
       "layer": "thirdparty"
     },
     {
@@ -55,7 +55,7 @@
         "public": "Redis writer could not initialise its client"
       },
       "doc": "ClientInitFailed wraps a failure to build the client: a missing\nsocket/stream or an unresolvable credential provider.\n",
-      "file": "errors.go",
+      "file": "codes_gen.go",
       "layer": "thirdparty"
     },
     {
@@ -70,7 +70,7 @@
         "value": "0.3.34.1"
       },
       "doc": "CodeRedisClientInitFailed identifies a failure to build the Redis client\nat Open time (missing socket/stream or an unresolvable credential provider).\nExitCode defaults to 74 (EX_IOERR).\n",
-      "file": "codes.go",
+      "file": "codes_gen.go",
       "layer": "thirdparty"
     },
     {
@@ -85,7 +85,7 @@
         "value": "0.3.34.2"
       },
       "doc": "CodeRedisXAddFailed identifies a failed pipelined XADD batch on the\ndrainer goroutine. ExitCode defaults to 74 (EX_IOERR).\n",
-      "file": "codes.go",
+      "file": "codes_gen.go",
       "layer": "thirdparty"
     },
     {

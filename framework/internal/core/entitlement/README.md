@@ -159,12 +159,14 @@ var (
     ErrNoLicense = errs.Define(CodeNoLicence, "NO_LICENCE",
         "no entitlement key was found on this machine",
         "core/entitlement: no key material for any subject")
+
     // ErrRosterUnsigned reports that the roster carried no valid vendor
     // signature. This is the spoofing signal: a substituted endpoint cannot
     // produce one.
     ErrRosterUnsigned = errs.Define(CodeRosterUnsigned, "ROSTER_UNSIGNED",
         "the roster is not signed by the expected vendor",
         "core/entitlement: the roster signature did not verify against the vendor key")
+
     // ErrRosterStale reports that the roster verified but no longer
     // authorises anything. It bounds how long a revoked client keeps working
     // offline, and how long a hostile endpoint can replay a genuine roster.
@@ -186,11 +188,13 @@ var (
     ErrRosterStale = errs.Define(CodeRosterStale, "ROSTER_STALE",
         "the roster has expired",
         "core/entitlement: the roster verified but no longer authorises — its own window has closed, or a newer signed decision has superseded it")
+
     // ErrRevoked reports that the licence UUID is absent from a roster that
     // was itself valid — the subject was removed upstream.
     ErrRevoked = errs.Define(CodeRevoked, "REVOKED",
         "this entitlement has been revoked",
         "core/entitlement: the subject is absent from a roster that was itself valid")
+
     // ErrLicenseExpired reports that the subject's own validity window has
     // closed, even though the roster itself is fresh and still lists them.
     // Distinct from ErrRosterStale (the whole roster's signing freshness)
@@ -199,6 +203,7 @@ var (
     ErrLicenseExpired = errs.Define(CodeLicenceExpired, "LICENCE_EXPIRED",
         "this entitlement has expired",
         "core/entitlement: the subject's own validity window has closed")
+
     // ErrKeyMismatch reports that the local key does not match the
     // fingerprint the roster records for this UUID, which is what a copied
     // .pub file looks like: the public half is published, so possession of
@@ -206,6 +211,7 @@ var (
     ErrKeyMismatch = errs.Define(CodeKeyMismatch, "KEY_MISMATCH",
         "the local key does not match the published fingerprint",
         "core/entitlement: the local key fingerprint differs from the roster's")
+
     // ErrRosterUnreachable reports that no origin could be reached AND no
     // usable bundle was cached, so no authorization decision could be made at
     // all. It is deliberately distinct from a refusal: the caller knows
@@ -218,6 +224,7 @@ var (
     ErrRosterUnreachable = errs.Define(CodeRosterUnreachable, "ROSTER_UNREACHABLE",
         "the roster could not be reached",
         "core/entitlement: no origin answered and nothing was cached — cannot decide, which is not the same as no")
+
     // ErrAmbiguousLicense reports that the key directory holds more than one
     // usable licence identity, so which one this machine presents cannot be
     // decided here. It is deliberately distinct from ErrNoLicense: the
@@ -230,6 +237,7 @@ var (
     ErrAmbiguousLicense = errs.Define(CodeAmbiguousLicence, "AMBIGUOUS_LICENCE",
         "more than one entitlement identity is present on this machine",
         "core/entitlement: several subjects are enrolled and no automatic choice is safe")
+
     // ErrCIUnverifiable reports that a claim of running inside CI could not
     // be authenticated: no token, a malformed one, a bad signature, or one
     // minted for someone else. It never means "not in CI" — it means the
@@ -238,6 +246,7 @@ var (
     ErrCIUnverifiable = errs.Define(CodeCIUnverifiable, "CI_UNVERIFIABLE",
         "this run could not be proven to be a CI run",
         "core/entitlement: the CI provenance token was absent or unverifiable")
+
     // ErrCIUnknownKey reports that the token names a signing key the fetched
     // key set does not publish — a key rotated out from under a token still in
     // flight, or a forgery. Distinct from ErrCIUnverifiable because the two
@@ -256,17 +265,20 @@ var (
     ErrCIUnknownKey = errs.Define(CodeCIUnknownKey, "CI_UNKNOWN_KEY",
         "the CI token is signed by a key the issuer does not publish",
         "core/entitlement: no JWKS entry matched the token's kid")
+
     // ErrCINotEntitled reports that the CI run authenticated, but the account
     // it belongs to is not one the roster covers. The token is genuine; the
     // licence simply does not extend to it.
     ErrCINotEntitled = errs.Define(CodeCINotEntitled, "CI_NOT_ENTITLED",
         "this CI account is not covered by an entitlement",
         "core/entitlement: the roster carries no CI seat for this account")
+
     // ErrNoPossession reports that the private half could not be exercised,
     // so holding the public key was never turned into proof of ownership.
     ErrNoPossession = errs.Define(CodeNoPossession, "NO_POSSESSION",
         "possession of the private key could not be proven",
         "core/entitlement: the possession challenge was not answered correctly")
+
     // ErrClockRegressed reports that this machine's clock reads EARLIER than
     // the newest vendor-signed instant it has ever authenticated.
     //
@@ -283,6 +295,7 @@ var (
     ErrClockRegressed = errs.Define(CodeClockRegressed, "CLOCK_REGRESSED",
         "this machine's clock is behind the last signed document it verified",
         "core/entitlement: the anti-rollback ratchet refused a clock earlier than the recorded high-water mark")
+
     // ErrUpdateRequired reports that the roster demands a newer binary than
     // this one. It is NOT a licence failure — the subject is perfectly
     // entitled — so it carries its own sentinel and its own exit code: the
@@ -295,7 +308,7 @@ var (
 ```
 
 <a name="GrantDeadline"></a>
-## func [GrantDeadline](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/grant.go#L88>)
+## func [GrantDeadline](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/grant.go#L96>)
 
 ```go
 func GrantDeadline(verifiedAt time.Time, bounds ...time.Time) time.Time
@@ -316,7 +329,7 @@ Variadic rather than a fourth parameter so the two existing call sites compile u
 checkTiming allows clockSkew when ADMITTING an Actions token, which is the permissive direction and the right one there: refusing a genuine token over two minutes of drift would break a working runner. Adding the same allowance to a BOUND would run the opposite way — it would extend the grant past the proof — so the bound is the claim as written.
 
 <a name="BoundProver"></a>
-## type [BoundProver](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/entitlement.go#L114-L128>)
+## type [BoundProver](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/entitlement.go#L116-L130>)
 
 BoundProver is Identity's sibling for the one claim the three methods cannot make: possession of the key the ROSTER authorised, rather than of whatever this machine holds at the moment it is asked.
 
@@ -366,7 +379,7 @@ type CIEntitlementValue struct {
 ```
 
 <a name="GrantValue"></a>
-## type [GrantValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/grant.go#L19-L53>)
+## type [GrantValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/grant.go#L27-L61>)
 
 GrantValue records a verification that succeeded, and how long that verification may be remembered.
 
@@ -411,7 +424,7 @@ type GrantValue struct {
 ```
 
 <a name="GrantValue.Deadline"></a>
-### func \(\*GrantValue\) [Deadline](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/grant.go#L127>)
+### func \(\*GrantValue\) [Deadline](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/grant.go#L135>)
 
 ```go
 func (g *GrantValue) Deadline() time.Time
@@ -430,7 +443,7 @@ Expired is defined in terms of this method rather than repeating the fallback, b
 A POINTER receiver for the same reason Expired has one — see there.
 
 <a name="GrantValue.Expired"></a>
-### func \(\*GrantValue\) [Expired](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/grant.go#L173>)
+### func \(\*GrantValue\) [Expired](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/grant.go#L181>)
 
 ```go
 func (g *GrantValue) Expired(now time.Time) bool
@@ -451,7 +464,7 @@ A POINTER receiver on a read\-only method, which is unusual and deliberate: the 
 It is a method\-set change and therefore a source\-level API change, named here rather than left to be discovered: Expired is no longer in GrantValue's VALUE method set, so a NON\-ADDRESSABLE grant — a map entry, a composite literal used inline — stops compiling against it. Every caller in this repository holds an addressable grant, and pkg/license has no consumer outside the module, which is what makes the trade payable; a released SDK would not.
 
 <a name="Identity"></a>
-## type [Identity](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/entitlement.go#L55-L77>)
+## type [Identity](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/entitlement.go#L57-L79>)
 
 Identity is the machine's half of the proof: which subject this machine claims to be, and evidence that it holds the private key the roster publishes a fingerprint for.
 

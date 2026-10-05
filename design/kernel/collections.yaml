@@ -130,16 +130,23 @@ packages:
         typeParams:
           - constraint: any
             name: T
-  - constants:
-      - name: CodeRingFull
+  - codes:
+      - const:
+          - doc: CodeRingFull identifies a TryWrite call on a saturated ring buffer.
+            name: CodeRingFull
+            note: "range: 0.1.3.0 - 0.1.3.255"
+            value: "0x00_01_03_01"
         type: errs.Code
-        value: "0x00_01_03_01"
-      - name: CodeRingEmpty
+      - const:
+          - doc: CodeRingEmpty identifies a TryRead call on an empty ring buffer.
+            name: CodeRingEmpty
+            value: "0x00_01_03_02"
         type: errs.Code
-        value: "0x00_01_03_02"
-      - name: CodeRingCapZero
+      - const:
+          - doc: CodeRingCapZero identifies a New call made with a non-positive capacity.
+            name: CodeRingCapZero
+            value: "0x00_01_03_03"
         type: errs.Code
-        value: "0x00_01_03_03"
     functions:
       - in:
           - name: capacity
@@ -156,6 +163,31 @@ packages:
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/kernel/collections/ring
+    sentinels:
+      - var:
+          - code: CodeRingFull
+            doc: |-
+              Full is returned by TryWrite when the ring has no slot available; the
+              caller decides whether to drop, block, or retry depending on its
+              upstream policy (e.g. async sink's DropOldest / DropNewest).
+            name: Full
+            private: internal/kernel/collections/ring.TryWrite called on a full ring
+            public: Ring buffer is at capacity
+            reason: RING_FULL
+          - code: CodeRingEmpty
+            doc: |-
+              Empty is returned by TryRead when no item is available; the caller
+              decides whether to spin, sleep, or block on a wake signal.
+            name: Empty
+            private: internal/kernel/collections/ring.TryRead called on an empty ring
+            public: Ring buffer is empty
+            reason: RING_EMPTY
+          - code: CodeRingCapZero
+            doc: CapZero is returned by New when the requested capacity is non-positive.
+            name: CapZero
+            private: internal/kernel/collections/ring.New called with cap <= 0
+            public: Ring buffer capacity must be positive
+            reason: RING_CAP_ZERO
     types:
       - interface:
           methods:
@@ -184,13 +216,6 @@ packages:
         typeParams:
           - constraint: any
             name: T
-    variables:
-      - name: Full
-        type: "*errs.Error"
-      - name: Empty
-        type: "*errs.Error"
-      - name: CapZero
-        type: "*errs.Error"
   - aliases:
       - name: Heap
         target: kheap.Heap[T]

@@ -1,4 +1,6 @@
 // Package yaml — adapts yaml.v3's *Encoder to codec.Encoder.
+//
+// Package yaml — declares the sentinel *errs.Error values for the full YAML codec.
 package yaml
 
 import (

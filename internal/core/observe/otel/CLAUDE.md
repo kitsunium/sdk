@@ -57,7 +57,7 @@ it for nothing else:
 | `internal/core/observe/trace` | `ValidateAttrs`, `SortAttrs`, `NormalizeResource` | `INVALID_ATTRIBUTE` `0.2.20.7` — new; a span's refusal used to borrow the metrics code because the model lived there |
 
 Owning a code here was considered and refused. The range table
-(`internal/kernel/errs/registry_ownership_external_test.go`) grants a whole
+(`design/sdk.yaml`'s `codes.ranges`, which kit writes into `internal/kernel/errs/codes_gen_test.go` (ADR 0164)) grants a whole
 `MM.LL.PP` slot to one package, so `0.2.9.4` cannot move here without moving the
 rest of the metrics slot with it, and a NEW shared code would have changed the
 value `pkg/v1/observe/metrics.InvalidAttribute` documents — codes never change.

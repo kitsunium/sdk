@@ -50,7 +50,7 @@ The split is the same one ADR 0079 drew through the domain: core names the opera
 
 The code and its sentinel share a file rather than the codes.go / errors.go pair the larger service packages use: with exactly one of each, splitting them puts a two\-member group across two files and nothing else in either, which is what KTN\-STRUCT\-PARTITION is for.
 
-Hand\-registered in codeRangeOwners \(ADR 0035\) and in //:audit\_sources, so a code declared here that reaches into another package's range fails the build rather than passing quietly.
+Registered in design/sdk.yaml's codes.ranges, which kit writes into codeRangeOwners \(ADR 0035, ADR 0164\), and in //:audit\_sources, so a code declared here that reaches into another package's range fails the build rather than passing quietly.
 
 The Public below is wire\-safe and names no path: the public half is the one documented safe to put in a response body, and every input this package has is a publication endpoint, an untrusted document or a directory on somebody's disk. Where it happened lives in Private and in Fields, and diagnose renders them for the one place here that is a log rather than a wire.
 

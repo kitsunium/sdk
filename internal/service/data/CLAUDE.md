@@ -50,7 +50,7 @@ the family, `security/secret` publishes its records through `vfs`, and
 | `vfs/` | `NewOS`, confined by `os.Root`, and `NewMem`, with the five-step atomic publication (ADR 0056) | `core/data/vfs` | `0.3.55.*`, declared in `core/data/vfs` | `pkg/v1/data/vfs` |
 
 Every range above kept its value when its package moved (ADR 0160):
-`codeRangeOwners` (`internal/kernel/errs/registry_ownership_external_test.go`)
+`codeRangeOwners` (`design/sdk.yaml`'s `codes.ranges`, which kit writes into `internal/kernel/errs/codes_gen_test.go` (ADR 0164))
 names the new directories under the same keys, and `//:audit_sources` lists
 them by their new labels. Every range of this family — each codec's,
 `cache`'s, `docstore`'s, `queue`'s, `sql`'s, `transform`'s and `vfs`'s — is

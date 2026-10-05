@@ -5,9 +5,9 @@ package(default_visibility = ["//visibility:public"])
 go_library(
     name = "slogbridge",
     srcs = [
+        "codes_gen.go",
         "convert.go",
         "handler.go",
-        "logger.go",
         "slogbridge.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/observe/logger/slogbridge",

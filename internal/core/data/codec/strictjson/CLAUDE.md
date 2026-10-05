@@ -11,8 +11,8 @@ Stdlib-only: this package imports `internal/kernel/errs` and nothing else.
 
 | File | Declares |
 |---|---|
-| `codes.go` | 8 `errs.Code` constants, range `0.3.72.*` |
-| `errors.go` | 8 `errs.Define` sentinels, one per code |
+| `codes_gen.go` | 8 `errs.Code` constants, range `0.3.72.*`; 8 `errs.Define` sentinels, one per code — written by kit gen from `design/data/codec/strictjson.yaml` (ADR 0164) |
+| `errors.go` | hand-written beside them: `exitDataErr`, `exitIOErr`, `exitSoftware`, `httpBadRequest`, `httpContentTooLarge`, `httpUnsupportedMediaType` |
 
 ## Error codes (range `0.3.72.*`)
 

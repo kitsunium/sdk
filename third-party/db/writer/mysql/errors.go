@@ -1,3 +1,5 @@
+// Package mysql — range 0.3.32.* (ADR 0015 service slot 0x20).
+//
 // Package mysql — declares the sentinels returned by the MySQL writer's
 // constructor and INSERT path. Each var's name equals its errs.Define Reason in
 // SCREAMING_SNAKE form (short names per the AWS-writer convention; the package
@@ -9,21 +11,6 @@ import "github.com/kitsunium/sdk/internal/kernel/errs"
 
 // exitIOErr matches sysexits EX_IOERR — a database failure is an I/O problem.
 const exitIOErr int = 74
-
-var (
-	// ClientInitFailed wraps a failure to build the sql handle: nil/invalid
-	// credentials or a sql.Open failure.
-	ClientInitFailed = errs.Define(CodeMySQLClientInitFailed, "CLIENT_INIT_FAILED",
-		"MySQL writer could not initialise its client",
-		"third-party/db/writer/mysql: credentials missing/unresolvable or sql.Open failed",
-		errs.WithExitCode(exitIOErr))
-
-	// InsertFailed wraps a failed batch INSERT.
-	InsertFailed = errs.Define(CodeMySQLInsertFailed, "INSERT_FAILED",
-		"MySQL writer failed to insert a log batch",
-		"third-party/db/writer/mysql: the multi-row INSERT returned an error",
-		errs.WithExitCode(exitIOErr))
-)
 
 // wrapClientInit wraps cause under the client-init sentinel. The DSN is never
 // attached (it embeds the password).

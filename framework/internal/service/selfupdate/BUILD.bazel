@@ -7,7 +7,7 @@ go_library(
     srcs = [
         "candidate.go",
         "checksum.go",
-        "codes.go",
+        "codes_gen.go",
         "consent.go",
         "consent_product.go",
         "diagnose.go",

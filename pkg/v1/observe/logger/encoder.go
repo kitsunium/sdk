@@ -1,3 +1,5 @@
+// Package logger — range 1.1.0.* (ADR 0005 pkg/v1/observe/logger block).
+//
 // Package logger — adds ergonomic Encoder constructors to the public facade.
 // The Encoder type alias itself lives in sink.go; this file contributes the
 // named constructors (NewTextEncoder / NewJSONEncoder) so consumers can build

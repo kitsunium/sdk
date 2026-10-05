@@ -1,5 +1,9 @@
 //go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /framework/internal/core/git .
 
+// Package git — the error-code range owned by this domain (ADR 0005 §Registry).
+//
+// Package git — the sentinels every implementation of this domain returns.
+//
 // Package git is the version-control contract: what "the set a branch changed"
 // is, and what a resolution of it reports.
 //

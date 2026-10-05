@@ -1118,6 +1118,13 @@ packages:
   - aliases:
       - name: MailSummary
         target: MailSummaryMessage
+    codes:
+      - const:
+          - doc: CodeInvalidID identifies an ID the grammar of [IDPattern] does not match.
+            name: CodeInvalidID
+            note: "range: 0.4.1.0 - 0.4.1.255"
+            value: "0x00_04_01_01"
+        type: errs.Code
     constants:
       - name: ContainerProcess
         value: "\"process\""
@@ -1244,9 +1251,6 @@ packages:
       - name: EdgeRenders
         type: EdgeKind
         value: "\"renders\""
-      - name: CodeInvalidID
-        type: errs.Code
-        value: "0x00_04_01_01"
       - name: EventHello
         type: EventType
         value: "\"hello\""
@@ -1802,8 +1806,22 @@ packages:
           - type: string
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
+      http: net/http
       json: encoding/json
     path: github.com/kitsunium/sdk/framework/model/internal/core
+    sentinels:
+      - var:
+          - code: CodeInvalidID
+            doc: |-
+              InvalidID is returned by [ParseID] for a string the ID grammar does not
+              match. Its "part" field names what failed — the kind, the service name, the
+              node name —, never the input.
+            name: InvalidID
+            options:
+              - errs.WithHTTPStatus(http.StatusBadRequest)
+            private: "framework/model.ParseID: the input does not match IDPattern; the part field names the failing component"
+            public: The node identifier is not valid
+            reason: INVALID_ID
     types:
       - name: ArchitectureMessage
         struct:
@@ -4234,7 +4252,5 @@ packages:
               tag: json:"node,omitempty"
               type: string
     variables:
-      - name: InvalidID
-        type: "*errs.Error"
       - name: IDPattern
         type: string

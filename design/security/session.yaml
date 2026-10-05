@@ -1,52 +1,136 @@
 apiVersion: kit.kitsunium/design/v2
 domain: security/session
 packages:
-  - constants:
-      - name: CodeNotFound
+  - codes:
+      - const:
+          - doc: |-
+              CodeNotFound identifies a lookup for an identifier that names no live
+              session — never minted, already destroyed, or dropped after expiring.
+            name: CodeNotFound
+            note: "range: 0.2.14.0 - 0.2.14.255"
+            value: "0x00_02_0E_01"
         type: errs.Code
-        value: "0x00_02_0E_01"
-      - name: CodeExpired
+      - const:
+          - doc: |-
+              CodeExpired identifies a session that was found but whose deadline had
+              already passed. The record is dropped as it is reported, so the same
+              identifier answers CodeNotFound on the next call.
+            name: CodeExpired
+            value: "0x00_02_0E_02"
         type: errs.Code
-        value: "0x00_02_0E_02"
-      - name: CodeInvalidID
+      - const:
+          - doc: |-
+              CodeInvalidID identifies an identifier that is not well formed: the wrong
+              length, not unpadded base64url, or the zero value.
+            name: CodeInvalidID
+            value: "0x00_02_0E_03"
         type: errs.Code
-        value: "0x00_02_0E_03"
-      - name: CodeInvalidConfig
+      - const:
+          - doc: |-
+              CodeInvalidConfig identifies a store configuration that could never work —
+              a non-positive timeout, an idle window that the absolute ceiling makes
+              unreachable, a missing directory or key (ADR 0031).
+            name: CodeInvalidConfig
+            value: "0x00_02_0E_04"
         type: errs.Code
-        value: "0x00_02_0E_04"
-      - name: CodeIdentifierCollision
+      - const:
+          - doc: |-
+              CodeIdentifierCollision identifies a freshly minted identifier that already
+              names a live session. It means the entropy source is broken, and it is
+              refused rather than reused: reusing it would hand one caller's session to
+              another, and would silently disable the rotation Regenerate exists for.
+            name: CodeIdentifierCollision
+            value: "0x00_02_0E_05"
         type: errs.Code
-        value: "0x00_02_0E_05"
-      - name: CodeEntropyFailed
+      - const:
+          - doc: |-
+              CodeEntropyFailed identifies a failure to read the random bytes an
+              identifier is made of. No identifier is minted from a partial read.
+            name: CodeEntropyFailed
+            value: "0x00_02_0E_06"
         type: errs.Code
-        value: "0x00_02_0E_06"
-      - name: CodeStoreUnavailable
+      - const:
+          - doc: |-
+              CodeStoreUnavailable identifies a backend that could not be read or written:
+              a permission error, a full disk, a vanished directory.
+            name: CodeStoreUnavailable
+            value: "0x00_02_0E_07"
         type: errs.Code
-        value: "0x00_02_0E_07"
-      - name: CodeSealInvalid
+      - const:
+          - doc: |-
+              CodeSealInvalid identifies a sealed value that did not open. It is the single
+              non-oracle verdict for every cause — tampering, truncation, the wrong key,
+              the wrong purpose — so a forger learns nothing from which one they hit.
+            name: CodeSealInvalid
+            value: "0x00_02_0E_08"
         type: errs.Code
-        value: "0x00_02_0E_08"
-      - name: CodeFixationRefused
+      - const:
+          - doc: |-
+              CodeFixationRefused identifies a Save that would have bound a different
+              subject to an existing identifier. Changing principal without rotating the
+              identifier is session fixation, so the write is refused rather than applied
+              or silently reduced to a data-only write.
+            name: CodeFixationRefused
+            value: "0x00_02_0E_09"
         type: errs.Code
-        value: "0x00_02_0E_09"
-      - name: CodeRecordCorrupt
+      - const:
+          - doc: |-
+              CodeRecordCorrupt identifies a stored record that could not be turned back
+              into a session: the seal did not open, the frame did not parse, or the
+              record named a digest other than the one it was filed under.
+            name: CodeRecordCorrupt
+            note: |-
+              range: 0.3.46.0 - 0.3.46.255
+
+              The refusals specific to the engines in internal/service/security/session —
+              the file store's location and lock, the payload caps, the sealer's purpose.
+              The range was allocated in the service layer (LL = 3) and is declared here,
+              beside the domain's verdicts, since ADR 0160: LL records the layer that
+              allocated a range, not the directory its declaration lives in, so the values
+              never change.
+            value: "0x00_03_2E_01"
         type: errs.Code
-        value: "0x00_03_2E_01"
-      - name: CodeDirectoryUnsafe
+      - const:
+          - doc: |-
+              CodeDirectoryUnsafe identifies a location that cannot hold a session record
+              safely — a directory readable beyond its owner, or a filesystem that accepts
+              a 0600 request and does not enforce it.
+            name: CodeDirectoryUnsafe
+            value: "0x00_03_2E_02"
         type: errs.Code
-        value: "0x00_03_2E_02"
-      - name: CodeLockFailed
+      - const:
+          - doc: |-
+              CodeLockFailed identifies a failure to take the store-wide exclusive lock.
+              The operation is refused rather than attempted unserialised.
+            name: CodeLockFailed
+            value: "0x00_03_2E_03"
         type: errs.Code
-        value: "0x00_03_2E_03"
-      - name: CodePayloadTooLarge
+      - const:
+          - doc: |-
+              CodePayloadTooLarge identifies a session payload above the store's key-count
+              or per-string caps, or a subject above the per-string cap. The bound is
+              checked before the write it would fund.
+            name: CodePayloadTooLarge
+            value: "0x00_03_2E_04"
         type: errs.Code
-        value: "0x00_03_2E_04"
-      - name: CodeInvalidPurpose
+      - const:
+          - doc: |-
+              CodeInvalidPurpose identifies a sealer built without a purpose string, which
+              would silently drop the domain separation between two things sealed under one
+              key.
+            name: CodeInvalidPurpose
+            value: "0x00_03_2E_05"
         type: errs.Code
-        value: "0x00_03_2E_05"
-      - name: CodePathRedirected
+      - const:
+          - doc: |-
+              CodePathRedirected identifies a store location reached through an
+              indirection the file store refuses to follow: a link at the lock file's
+              name, a link at a component of Dir planted where any account could have
+              planted it, or a Dir that stopped naming the directory the store opened.
+            name: CodePathRedirected
+            value: "0x00_03_2E_06"
         type: errs.Code
-        value: "0x00_03_2E_06"
+    constants:
       - name: IDLen
         type: int
         value: "32"
@@ -269,6 +353,211 @@ packages:
               - name: err
                 type: error
         name: Sweeper
+    sentinels:
+      - var:
+          - code: CodeNotFound
+            doc: |-
+              NotFound is returned by Load, and by Regenerate, for an identifier that
+              names no live session.
+            name: NotFound
+            options:
+              - errs.WithHTTPStatus(httpUnauthorized)
+            private: "core/security/session: no live record under the presented identifier's digest — never minted, destroyed, or swept"
+            public: No session matches that identifier
+            reason: NOT_FOUND
+          - code: CodeExpired
+            doc: |-
+              Expired is returned when the record existed but its deadline had passed.
+              It is distinct from NotFound because the two need different operator
+              responses — a spike in Expired is a timeout that is too short, a spike in
+              NotFound is a store that is losing records. Telling them apart leaks
+              nothing usable: an identifier is 256 random bits, so an attacker cannot
+              reach either answer by guessing.
+            name: Expired
+            options:
+              - errs.WithHTTPStatus(httpUnauthorized)
+            private: "core/security/session: the record's effective deadline — the earlier of the idle and absolute deadlines — is in the past; the record is dropped as this is reported"
+            public: That session has expired
+            reason: EXPIRED
+          - code: CodeInvalidID
+            doc: |-
+              InvalidID is returned by ParseID and NewID for a malformed identifier,
+              and by any Store method handed the zero ID.
+            name: InvalidID
+            options:
+              - errs.WithHTTPStatus(httpUnauthorized)
+            private: "core/security/session: identifier must be exactly IDLen bytes in unpadded base64url; the decoder's own message is dropped because it can echo attacker input"
+            public: That is not a valid session identifier
+            reason: INVALID_ID
+          - code: CodeInvalidConfig
+            doc: |-
+              InvalidConfig is returned by every store constructor for a configuration
+              it cannot honour. ADR 0031: a zero timeout is refused at construction,
+              never accepted as "expires immediately" — a store where every session is
+              already dead is the inert-policy failure, and it would present as a
+              login loop nobody can debug.
+            name: InvalidConfig
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "core/security/session: a timeout is non-positive, the idle window is not shorter than the absolute ceiling, or a required directory or key is missing; the fields name which"
+            public: The session store configuration is not usable
+            reason: INVALID_CONFIG
+          - code: CodeIdentifierCollision
+            doc: |-
+              IdentifierCollision is returned by New and Regenerate when the minted
+              identifier already names a live session. At 256 bits this cannot happen
+              by chance, so it means the entropy source is broken — and the honest
+              answer to a broken entropy source is to refuse, not to carry on with a
+              predictable identifier.
+            name: IdentifierCollision
+            private: "core/security/session: a freshly minted identifier already names a live record — at 256 bits this is a broken random source, not chance; nothing is overwritten"
+            public: The session store could not mint a unique identifier
+            reason: IDENTIFIER_COLLISION
+          - code: CodeEntropyFailed
+            doc: EntropyFailed is returned when the random source could not be read.
+            name: EntropyFailed
+            private: "core/security/session: the random source returned an error or a short read; no identifier is minted from partial entropy"
+            public: The session store could not generate a secure identifier
+            reason: ENTROPY_FAILED
+          - code: CodeStoreUnavailable
+            doc: |-
+              StoreUnavailable is returned when the backend itself failed. It carries
+              EX_TEMPFAIL and 503 because retrying is meaningful, which is exactly what
+              separates it from InvalidConfig.
+            name: StoreUnavailable
+            options:
+              - errs.WithExitCode(exitTempFail)
+              - errs.WithHTTPStatus(httpUnavailable)
+            private: "core/security/session: the backend could not be read or written; the fields name the operation, never the path or the identifier"
+            public: The session store is unavailable
+            reason: STORE_UNAVAILABLE
+          - code: CodeSealInvalid
+            doc: |-
+              SealInvalid is returned by Sealer.Open for every failure, without
+              distinguishing them. One verdict for tampering, truncation, a wrong key
+              and a wrong purpose is what keeps Open from becoming an oracle — the same
+              posture crypto.DecryptionFailed takes for the AEAD it is built on.
+            name: SealInvalid
+            options:
+              - errs.WithHTTPStatus(httpUnauthorized)
+            private: "core/security/session: sealed value failed to open — tampered, truncated, wrong key or wrong purpose, deliberately not distinguished"
+            public: That session value could not be opened
+            reason: SEAL_INVALID
+          - code: CodeFixationRefused
+            doc: |-
+              FixationRefused is returned by Save when the value's subject differs from
+              the stored record's. Rebinding a principal onto an identifier that is
+              already in circulation IS session fixation, so the write is refused
+              loudly. Regenerate is the operation that was wanted: it mints a new
+              identifier, carries the data across, and destroys the old record.
+            name: FixationRefused
+            private: "core/security/session: Save was given a subject the stored record does not have; call Regenerate, which rotates the identifier as it rebinds"
+            public: A session's subject cannot be changed without a new identifier
+            reason: FIXATION_REFUSED
+          - code: CodeRecordCorrupt
+            doc: |-
+              RecordCorrupt is returned when a stored record cannot be read back. It
+              is deliberately ONE verdict for four causes — a tampered file, a
+              truncated file, the wrong store key, and a file moved onto another
+              session's digest — because distinguishing them would tell whoever
+              arranged the tampering which half of the attempt already worked.
+
+              It maps to 401, not 500: whatever happened to the file, the caller's
+              session is not usable, and that is what the request needs to know.
+            name: RecordCorrupt
+            note: |-
+              The engines' own refusals (0.3.46.*). They are raised by
+              internal/service/security/session — their Private names that package, the
+              one that raises them — and declared here since ADR 0160, so every code of
+              the domain is in one place. As above, no Public string names a path, an
+              identifier, a subject or a data key: everything a session store handles
+              is either a secret or somebody's personal data.
+            options:
+              - errs.WithExitCode(exitDataErr)
+              - errs.WithHTTPStatus(httpUnauthorized)
+            private: "service/security/session: record failed to open or decode — tampered, truncated, wrong key, or filed under another digest; deliberately not distinguished"
+            public: That session could not be read
+            reason: RECORD_CORRUPT
+          - code: CodeDirectoryUnsafe
+            doc: |-
+              DirectoryUnsafe is returned by NewFileStore for a location that cannot
+              hold a session record safely, and during a write for a filesystem that
+              accepted a 0600 request without enforcing it.
+
+              It refuses rather than repairing. A chmod would hide how long the records
+              were exposed, and on the filesystems this check exists to catch it would
+              report success while changing nothing — a repair that cannot be verified
+              is not a repair.
+            name: DirectoryUnsafe
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "service/security/session: the directory or a record carries a group or world permission bit; refused rather than chmod'ed, and the fields carry the mode that was required"
+            public: The session store location is not private enough to use
+            reason: DIRECTORY_UNSAFE
+          - code: CodeLockFailed
+            doc: |-
+              LockFailed is returned when the store-wide exclusive lock could not be
+              taken. The operation is refused rather than run unserialised: without the
+              lock the store cannot promise that a read-modify-write is indivisible,
+              and quietly dropping that promise is worse than failing the request.
+            name: LockFailed
+            options:
+              - errs.WithExitCode(exitTempFail)
+            private: "service/security/session: flock on the store-wide lock descriptor failed; the operation was refused rather than run without serialisation"
+            public: The session store is busy
+            reason: LOCK_FAILED
+          - code: CodePayloadTooLarge
+            doc: |-
+              PayloadTooLarge is returned by Save for a payload above the store's caps,
+              and by Regenerate — in both stores, before anything is minted — for a
+              subject longer than the per-string cap, which the file store's frame
+              could not read back. A session store holds per-user state on the request
+              path; an unbounded payload there is a memory-exhaustion vector with a
+              very cheap trigger, so the bound is a refusal rather than a truncation —
+              silently dropping keys would report success for a write that did not
+              happen, and a truncated subject would name a different principal.
+            name: PayloadTooLarge
+            options:
+              - errs.WithHTTPStatus(httpPayloadTooLarge)
+            private: "service/security/session: payload or subject exceeds the key-count or per-string cap; the offending key or subject is NOT named because it is caller data"
+            public: That session holds more data than the store accepts
+            reason: PAYLOAD_TOO_LARGE
+          - code: CodeInvalidPurpose
+            doc: |-
+              InvalidPurpose is returned by NewSealer for an empty purpose. The purpose
+              is the domain separator between two things sealed under one key; reading
+              "" as "no separation needed" would be an inert policy in ADR 0031's exact
+              sense, and there is no default the SDK could invent that would mean
+              anything.
+            name: InvalidPurpose
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "service/security/session: NewSealer needs a purpose string to bind as additional authenticated data; an empty one would drop domain separation silently"
+            public: A sealer needs a non-empty purpose
+            reason: INVALID_PURPOSE
+          - code: CodePathRedirected
+            doc: |-
+              PathRedirected is returned by NewFileStore when the store's location is
+              reached through an indirection it refuses to follow.
+
+              Three shapes, one remedy — a human looks at the directory, and no retry
+              helps, which is why it is not StoreUnavailable: a symbolic link at the
+              lock file's name, which would put the store-wide lock — and, when it
+              dangles, a file the store creates — wherever the link points; a link at
+              a component of Dir planted in a directory any account can write, which
+              would move every record into a tree its planter chose; and a Dir that no
+              longer names the directory the store opened, because it was swapped
+              between the check and the open.
+
+              A link at a RECORD's name is not this: that one is RecordCorrupt, the
+              single verdict for every record the store did not write, so a planted
+              link reads exactly like any other tampering.
+            name: PathRedirected
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "service/security/session: an indirection the store refuses — a link at the lock file, a link at a component of Dir planted where any account could, or Dir swapped while opening; the fields name the component, the kind and the target"
+            public: The session store location is reached through a link
+            reason: PATH_REDIRECTED
     types:
       - methods:
           - name: Reveal
@@ -394,37 +683,6 @@ packages:
               type: time.Time
             - name: Data
               type: map[string]string
-    variables:
-      - name: NotFound
-        type: "*errs.Error"
-      - name: Expired
-        type: "*errs.Error"
-      - name: InvalidID
-        type: "*errs.Error"
-      - name: InvalidConfig
-        type: "*errs.Error"
-      - name: IdentifierCollision
-        type: "*errs.Error"
-      - name: EntropyFailed
-        type: "*errs.Error"
-      - name: StoreUnavailable
-        type: "*errs.Error"
-      - name: SealInvalid
-        type: "*errs.Error"
-      - name: FixationRefused
-        type: "*errs.Error"
-      - name: RecordCorrupt
-        type: "*errs.Error"
-      - name: DirectoryUnsafe
-        type: "*errs.Error"
-      - name: LockFailed
-        type: "*errs.Error"
-      - name: PayloadTooLarge
-        type: "*errs.Error"
-      - name: InvalidPurpose
-        type: "*errs.Error"
-      - name: PathRedirected
-        type: "*errs.Error"
   - constants:
       - name: DefaultPoll
         type: time.Duration

@@ -1,21 +1,40 @@
 apiVersion: kit.kitsunium/design/v2
 domain: observe/logger/middleware/failover
 packages:
-  - constants:
-      - name: CodeFailoverExhausted
+  - codes:
+      - const:
+          - doc: |-
+              CodeFailoverExhausted identifies a Write call where every downstream
+              sink in the failover chain returned a non-nil error. The sentinel wraps
+              errors.Join of the per-sink failures so callers can inspect each cause.
+            name: CodeFailoverExhausted
+            note: "range: 0.3.19.0 - 0.3.19.255"
+            value: "0x00_03_13_01"
         type: errs.Code
-        value: "0x00_03_13_01"
-      - name: CodeFailoverEmpty
+      - const:
+          - doc: CodeFailoverEmpty identifies a New call made with zero downstream sinks.
+            name: CodeFailoverEmpty
+            value: "0x00_03_13_02"
         type: errs.Code
-        value: "0x00_03_13_02"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/observe/logger/middleware/failover
-    variables:
-      - name: Exhausted
-        type: "*errs.Error"
-      - name: Empty
-        type: "*errs.Error"
+    sentinels:
+      - var:
+          - code: CodeFailoverExhausted
+            doc: |-
+              Exhausted wraps an errors.Join of every per-sink failure when the
+              failover chain has tried every downstream Sink without success.
+            name: Exhausted
+            private: service/observe/logger/middleware/failover.Write tried every downstream sink and aggregated their errors
+            public: All failover sinks returned an error
+            reason: FAILOVER_EXHAUSTED
+          - code: CodeFailoverEmpty
+            doc: Empty is returned when New is invoked without any downstream sinks.
+            name: Empty
+            private: service/observe/logger/middleware/failover.New called with zero sinks
+            public: Failover requires at least one downstream sink
+            reason: FAILOVER_EMPTY
   - functions:
       - in:
           - name: branches

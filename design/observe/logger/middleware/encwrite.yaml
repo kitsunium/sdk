@@ -1,21 +1,44 @@
 apiVersion: kit.kitsunium/design/v2
 domain: observe/logger/middleware/encwrite
 packages:
-  - constants:
-      - name: CodeEncWriteSealFailed
+  - codes:
+      - const:
+          - doc: |-
+              CodeEncWriteSealFailed identifies a record whose per-sink subkey could not be
+              derived or whose bytes could not be sealed before delivery to the downstream
+              sink.
+            name: CodeEncWriteSealFailed
+            note: "range: 0.3.28.0 - 0.3.28.255"
+            value: "0x00_03_1C_01"
         type: errs.Code
-        value: "0x00_03_1C_01"
-      - name: CodeFramingFailed
+      - const:
+          - doc: |-
+              CodeFramingFailed identifies a sealed box too large for the 4-byte big-endian
+              length prefix the byte framing prepends.
+            name: CodeFramingFailed
+            value: "0x00_03_1C_02"
         type: errs.Code
-        value: "0x00_03_1C_02"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/observe/logger/middleware/encwrite
-    variables:
-      - name: EncWriteSealFailed
-        type: "*errs.Error"
-      - name: FramingFailed
-        type: "*errs.Error"
+    sentinels:
+      - var:
+          - code: CodeEncWriteSealFailed
+            doc: |-
+              EncWriteSealFailed wraps a subkey-derivation or Seal failure raised while
+              encrypting a record's bytes before delivery to the downstream sink.
+            name: EncWriteSealFailed
+            private: "service/observe/logger/middleware/encwrite: Subkey derivation or Seal returned an error"
+            public: Encrypting middleware could not seal the record
+            reason: ENC_WRITE_SEAL_FAILED
+          - code: CodeFramingFailed
+            doc: |-
+              FramingFailed wraps a length-prefix framing failure — the sealed box is
+              too large for the 4-byte big-endian length prefix.
+            name: FramingFailed
+            private: "service/observe/logger/middleware/encwrite: sealed box length exceeds the uint32 length prefix"
+            public: Encrypting middleware could not frame the sealed record
+            reason: FRAMING_FAILED
   - functions:
       - in:
           - name: cfg

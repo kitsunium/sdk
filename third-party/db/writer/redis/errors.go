@@ -1,3 +1,5 @@
+// Package redis — range 0.3.34.* (ADR 0015 service slot 0x22).
+//
 // Package redis — declares the sentinels returned by the Redis writer's
 // constructor and XADD path. Each var's name equals its errs.Define Reason in
 // SCREAMING_SNAKE form (short names per the AWS-writer convention; the package
@@ -9,21 +11,6 @@ import "github.com/kitsunium/sdk/internal/kernel/errs"
 
 // exitIOErr matches sysexits EX_IOERR — a Redis failure is an I/O problem.
 const exitIOErr int = 74
-
-var (
-	// ClientInitFailed wraps a failure to build the client: a missing
-	// socket/stream or an unresolvable credential provider.
-	ClientInitFailed = errs.Define(CodeRedisClientInitFailed, "CLIENT_INIT_FAILED",
-		"Redis writer could not initialise its client",
-		"third-party/db/writer/redis: socket/stream missing or credentials unresolvable",
-		errs.WithExitCode(exitIOErr))
-
-	// AddFailed wraps a failed pipelined XADD batch.
-	AddFailed = errs.Define(CodeRedisXAddFailed, "ADD_FAILED",
-		"Redis writer failed to append a log batch",
-		"third-party/db/writer/redis: the pipelined XADD returned an error",
-		errs.WithExitCode(exitIOErr))
-)
 
 // wrapClientInit wraps cause under the client-init sentinel. The socket path /
 // credentials are never attached.

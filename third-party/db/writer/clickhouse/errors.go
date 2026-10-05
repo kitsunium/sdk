@@ -1,3 +1,5 @@
+// Package clickhouse — range 0.3.33.* (ADR 0015 service slot 0x21).
+//
 // Package clickhouse — declares the sentinels returned by the ClickHouse
 // writer's constructor and INSERT path. Each var's name equals its errs.Define
 // Reason in SCREAMING_SNAKE form (short names per the AWS-writer convention; the
@@ -9,21 +11,6 @@ import "github.com/kitsunium/sdk/internal/kernel/errs"
 
 // exitIOErr matches sysexits EX_IOERR — a database failure is an I/O problem.
 const exitIOErr int = 74
-
-var (
-	// ClientInitFailed wraps a failure to build the sql handle: an invalid table
-	// or an unresolvable credential provider.
-	ClientInitFailed = errs.Define(CodeCHClientInitFailed, "CLIENT_INIT_FAILED",
-		"ClickHouse writer could not initialise its client",
-		"third-party/db/writer/clickhouse: invalid table or credentials unresolvable",
-		errs.WithExitCode(exitIOErr))
-
-	// InsertFailed wraps a failed batch INSERT.
-	InsertFailed = errs.Define(CodeCHInsertFailed, "INSERT_FAILED",
-		"ClickHouse writer failed to insert a log batch",
-		"third-party/db/writer/clickhouse: the multi-row INSERT returned an error",
-		errs.WithExitCode(exitIOErr))
-)
 
 // wrapClientInit wraps cause under the client-init sentinel. The credentials are
 // never attached.

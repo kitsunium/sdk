@@ -1,67 +1,143 @@
 apiVersion: kit.kitsunium/design/v2
 domain: data/docstore
 packages:
-  - constants:
-      - name: CodeDocumentNotFound
+  - codes:
+      - const:
+          - doc: |-
+              CodeDocumentNotFound identifies a read, an update, a replacement or a
+              deletion of a key the store holds no document under, and a unique-index
+              lookup that finds nobody.
+            name: CodeDocumentNotFound
+            note: "range: 0.3.80.0 - 0.3.80.255"
+            value: "0x00_03_50_01"
         type: errs.Code
-        value: "0x00_03_50_01"
-      - name: CodeDocumentExists
+      - const:
+          - doc: |-
+              CodeDocumentExists identifies an insertion under a key the store already
+              holds a document under.
+            name: CodeDocumentExists
+            value: "0x00_03_50_02"
         type: errs.Code
-        value: "0x00_03_50_02"
-      - name: CodeUniqueKeyTaken
+      - const:
+          - doc: |-
+              CodeUniqueKeyTaken identifies a write a unique index refuses: another
+              document already holds one of its keys in that index.
+            name: CodeUniqueKeyTaken
+            value: "0x00_03_50_03"
         type: errs.Code
-        value: "0x00_03_50_03"
-      - name: CodeDocumentKeyEmpty
+      - const:
+          - doc: |-
+              CodeDocumentKeyEmpty identifies a document whose key function returned the
+              empty string.
+            name: CodeDocumentKeyEmpty
+            value: "0x00_03_50_04"
         type: errs.Code
-        value: "0x00_03_50_04"
-      - name: CodeDocumentKeyChanged
+      - const:
+          - doc: |-
+              CodeDocumentKeyChanged identifies an update whose function changed the key
+              of the document it was given.
+            name: CodeDocumentKeyChanged
+            value: "0x00_03_50_05"
         type: errs.Code
-        value: "0x00_03_50_05"
-      - name: CodeIndexUnknown
+      - const:
+          - doc: CodeIndexUnknown identifies a lookup in an index the store never declared.
+            name: CodeIndexUnknown
+            value: "0x00_03_50_06"
         type: errs.Code
-        value: "0x00_03_50_06"
-      - name: CodeIndexNotUnique
+      - const:
+          - doc: |-
+              CodeIndexNotUnique identifies a single-document lookup in an index that may
+              file several documents under one key.
+            name: CodeIndexNotUnique
+            value: "0x00_03_50_07"
         type: errs.Code
-        value: "0x00_03_50_07"
-      - name: CodeDocumentUndecodable
+      - const:
+          - doc: |-
+              CodeDocumentUndecodable identifies a stored document that no longer decodes
+              into the store's type.
+            name: CodeDocumentUndecodable
+            value: "0x00_03_50_08"
         type: errs.Code
-        value: "0x00_03_50_08"
-      - name: CodeDocumentUnencodable
+      - const:
+          - doc: CodeDocumentUnencodable identifies a value encoding/json cannot encode.
+            name: CodeDocumentUnencodable
+            value: "0x00_03_50_09"
         type: errs.Code
-        value: "0x00_03_50_09"
-      - name: CodePersistFailed
+      - const:
+          - doc: CodePersistFailed identifies a write the filesystem did not make durable.
+            name: CodePersistFailed
+            value: "0x00_03_50_0A"
         type: errs.Code
-        value: "0x00_03_50_0A"
-      - name: CodeLoadFailed
+      - const:
+          - doc: |-
+              CodeLoadFailed identifies a store whose files could not be read or are not
+              a store's files.
+            name: CodeLoadFailed
+            value: "0x00_03_50_0B"
         type: errs.Code
-        value: "0x00_03_50_0B"
-      - name: CodeIndexBroken
+      - const:
+          - doc: |-
+              CodeIndexBroken identifies stored documents that break a unique index, or
+              an index key function that panicked while the store was opening.
+            name: CodeIndexBroken
+            value: "0x00_03_50_0C"
         type: errs.Code
-        value: "0x00_03_50_0C"
-      - name: CodeStoreClosed
+      - const:
+          - doc: CodeStoreClosed identifies a call on a store that has been closed.
+            name: CodeStoreClosed
+            value: "0x00_03_50_0D"
         type: errs.Code
-        value: "0x00_03_50_0D"
-      - name: CodeStoreMisconfigured
+      - const:
+          - doc: CodeStoreMisconfigured identifies a configuration no store could honour.
+            name: CodeStoreMisconfigured
+            value: "0x00_03_50_0E"
         type: errs.Code
-        value: "0x00_03_50_0E"
-      - name: CodeWriteUnconfirmed
+      - const:
+          - doc: |-
+              CodeWriteUnconfirmed identifies a write the filesystem published but could
+              not confirm durable: the directory flush after the rename failed. The write
+              took effect — every reader of the files sees it, and so does the store.
+            name: CodeWriteUnconfirmed
+            value: "0x00_03_50_0F"
         type: errs.Code
-        value: "0x00_03_50_0F"
-      - name: CodeStatementFailed
+      - const:
+          - doc: |-
+              CodeStatementFailed identifies a call the SQL store's database did not
+              complete: it could not be reached, or it refused a statement for a reason
+              that is not one of the store's own refusals. The driver's error travels
+              beside it, withheld from its text.
+            name: CodeStatementFailed
+            value: "0x00_03_50_10"
         type: errs.Code
-        value: "0x00_03_50_10"
-      - name: CodeKeyTooLong
+      - const:
+          - doc: |-
+              CodeKeyTooLong identifies a write whose store key, or one of whose index
+              keys, is longer than the SQL store's key columns hold.
+            name: CodeKeyTooLong
+            value: "0x00_03_50_11"
         type: errs.Code
-        value: "0x00_03_50_11"
-      - name: CodeVersionsNotKept
+      - const:
+          - doc: |-
+              CodeVersionsNotKept identifies a call on a document's versions to a store
+              that keeps none: its configuration's Versions is zero.
+            name: CodeVersionsNotKept
+            value: "0x00_03_50_12"
         type: errs.Code
-        value: "0x00_03_50_12"
-      - name: CodeVersionNotFound
+      - const:
+          - doc: |-
+              CodeVersionNotFound identifies a read of a version its document does not
+              keep: never made, or pruned.
+            name: CodeVersionNotFound
+            value: "0x00_03_50_13"
         type: errs.Code
-        value: "0x00_03_50_13"
-      - name: CodeVersionsRewriteRefused
+      - const:
+          - doc: |-
+              CodeVersionsRewriteRefused identifies a rewrite of a document's versions
+              whose function returned what a rewrite may not: a version it was not given,
+              out of order, with another instant, or that is not JSON.
+            name: CodeVersionsRewriteRefused
+            value: "0x00_03_50_14"
         type: errs.Code
-        value: "0x00_03_50_14"
     functions:
       - in:
           - name: name
@@ -558,6 +634,229 @@ packages:
         typeParams:
           - constraint: any
             name: T
+    sentinels:
+      - var:
+          - code: CodeDocumentNotFound
+            doc: |-
+              DocumentNotFound is a miss: no document under that key, or no document
+              holding that key in a unique index.
+            name: DocumentNotFound
+            options:
+              - errs.WithHTTPStatus(httpNotFound)
+            private: "service/data/docstore: the store holds no document under the key, or the unique index files nobody under it; the fields name the store and the index, never the key"
+            public: No document has this key
+            reason: DOCUMENT_NOT_FOUND
+          - code: CodeDocumentExists
+            doc: DocumentExists refuses an insertion under a key already taken.
+            name: DocumentExists
+            options:
+              - errs.WithHTTPStatus(httpConflict)
+            private: "service/data/docstore: Insert refuses a key the store already holds; Put replaces, Insert never does"
+            public: A document already has this key
+            reason: DOCUMENT_EXISTS
+          - code: CodeUniqueKeyTaken
+            doc: |-
+              UniqueKeyTaken refuses a write a unique index cannot file: another
+              document already holds one of its keys in that index. Nothing changed.
+            name: UniqueKeyTaken
+            options:
+              - errs.WithHTTPStatus(httpConflict)
+            private: "service/data/docstore: the write was refused before anything changed; the index field names the unique index, never the key"
+            public: Another document already has this key in a unique index
+            reason: UNIQUE_KEY_TAKEN
+          - code: CodeDocumentKeyEmpty
+            doc: DocumentKeyEmpty refuses a document whose key is the empty string.
+            name: DocumentKeyEmpty
+            options:
+              - errs.WithHTTPStatus(httpBadRequest)
+            private: "service/data/docstore: the store's key function returned the empty string"
+            public: A document's key cannot be empty
+            reason: DOCUMENT_KEY_EMPTY
+          - code: CodeDocumentKeyChanged
+            doc: |-
+              DocumentKeyChanged refuses an update whose function changed the key of
+              the document it was handed. Nothing changed.
+            name: DocumentKeyChanged
+            options:
+              - errs.WithHTTPStatus(httpBadRequest)
+            private: "service/data/docstore: the update function returned a document whose key differs from the one it was given; delete and insert to rename"
+            public: An update cannot change a document's key
+            reason: DOCUMENT_KEY_CHANGED
+          - code: CodeIndexUnknown
+            doc: IndexUnknown refuses a lookup in an index the store never declared.
+            name: IndexUnknown
+            options:
+              - errs.WithHTTPStatus(httpBadRequest)
+            private: "service/data/docstore: Lookup or Find named an index absent from the store's Config; the index field names it"
+            public: The store has no index of this name
+            reason: INDEX_UNKNOWN
+          - code: CodeIndexNotUnique
+            doc: |-
+              IndexNotUnique refuses a single-document lookup in an index that may
+              file several documents under one key.
+            name: IndexNotUnique
+            options:
+              - errs.WithHTTPStatus(httpBadRequest)
+            private: "service/data/docstore: Lookup returns one document and was given a multi-valued index; the index field names it"
+            public: "The index is not unique: read it with Find"
+            reason: INDEX_NOT_UNIQUE
+          - code: CodeDocumentUndecodable
+            doc: |-
+              DocumentUndecodable reports a stored document that no longer fits the
+              store's type — the type changed under data an older program wrote. The
+              decoder's own error travels as a field, never as the origin.
+            name: DocumentUndecodable
+            options:
+              - errs.WithHTTPStatus(httpInternalServerError)
+              - errs.WithExitCode(exitDataErr)
+            private: "service/data/docstore: encoding/json could not decode a stored document into the store's type; the fields name the store and the cause"
+            public: A stored document does not match its type
+            reason: DOCUMENT_UNDECODABLE
+          - code: CodeDocumentUnencodable
+            doc: |-
+              DocumentUnencodable refuses a value encoding/json cannot encode — a
+              channel, a function, a cycle. Nothing changed.
+            name: DocumentUnencodable
+            options:
+              - errs.WithHTTPStatus(httpInternalServerError)
+            private: "service/data/docstore: encoding/json refused the value; the fields name the store and the cause"
+            public: The document cannot be encoded
+            reason: DOCUMENT_UNENCODABLE
+          - code: CodePersistFailed
+            doc: |-
+              PersistFailed reports a write the filesystem did not make durable. The
+              store is unchanged: memory and disk still agree on the previous state.
+            name: PersistFailed
+            options:
+              - errs.WithHTTPStatus(httpInternalServerError)
+              - errs.WithExitCode(exitIOErr)
+            private: "service/data/docstore: the filesystem refused a publication; nothing changed in memory, and the fields name the store and the step"
+            public: The document could not be written to storage
+            reason: PERSIST_FAILED
+          - code: CodeWriteUnconfirmed
+            doc: |-
+              WriteUnconfirmed reports a write the filesystem published but could
+              not confirm durable — vfs's DirectorySyncFailed: the rename happened,
+              the flush of the directory that records it did not. It is not
+              PersistFailed, because the write TOOK EFFECT: the file shows it, so the
+              store applies it too rather than disagree with its own files. What is
+              in doubt is only whether it survives a power loss.
+            name: WriteUnconfirmed
+            options:
+              - errs.WithHTTPStatus(httpInternalServerError)
+              - errs.WithExitCode(exitIOErr)
+            private: "service/data/docstore: the publication's rename succeeded and the directory flush failed; the write stands in memory and on disk, and may not survive a power loss"
+            public: The document was stored, but its durability could not be confirmed
+            reason: WRITE_UNCONFIRMED
+          - code: CodeLoadFailed
+            doc: |-
+              LoadFailed refuses to open a store whose files cannot be read, are not
+              a store's files, or keep versions the store was not opened to keep.
+            name: LoadFailed
+            options:
+              - errs.WithHTTPStatus(httpInternalServerError)
+              - errs.WithExitCode(exitDataErr)
+            private: "service/data/docstore: Open could not read or parse the snapshot, the versions file or an overlay entry, or found versions it does not keep; the fields name the file and the problem"
+            public: The store's files could not be loaded
+            reason: LOAD_FAILED
+          - code: CodeIndexBroken
+            doc: |-
+              IndexBroken refuses to open a store whose documents break a unique
+              index — the index was added after the data, or a file was edited — or
+              whose index key function panicked. A unique index that does not hold
+              would be a lie every Lookup tells.
+            name: IndexBroken
+            options:
+              - errs.WithHTTPStatus(httpInternalServerError)
+              - errs.WithExitCode(exitDataErr)
+            private: "service/data/docstore: two stored documents share a key in a unique index, or a key function panicked while the indexes were rebuilt; the fields name the index"
+            public: The stored documents break a unique index
+            reason: INDEX_BROKEN
+          - code: CodeStoreClosed
+            doc: StoreClosed refuses a call on a store that has been closed.
+            name: StoreClosed
+            options:
+              - errs.WithHTTPStatus(httpServiceUnavailable)
+            private: "service/data/docstore: Close was called; open the store again to use it"
+            public: The store is closed
+            reason: STORE_CLOSED
+          - code: CodeStoreMisconfigured
+            doc: |-
+              StoreMisconfigured refuses a configuration no store could honour: no
+              key function, an index without a name, a function or a unique one, a
+              filesystem without a path, a negative Versions, a Held without
+              Versions; for the SQL store, a transactor that cannot join or defer, an
+              unknown dialect, a table name that is not one.
+            name: StoreMisconfigured
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "service/data/docstore: Open or OpenSQL refused its Config; the fields name the setting and the problem"
+            public: The document store cannot be opened as configured
+            reason: STORE_MISCONFIGURED
+          - code: CodeStatementFailed
+            doc: |-
+              StatementFailed reports a call the SQL store's database did not
+              complete: it could not be reached, its context ended, or it refused a
+              statement for a reason that is none of the store's own refusals. What
+              the call was writing did not take effect.
+
+              The driver's error travels beside it under errors.Join, reachable by
+              errors.Is and errors.As — a context's deadline included — and WITHHELD
+              from its text: a driver quotes the row a constraint refused, and that
+              row holds a key (ADR 0139).
+            name: StatementFailed
+            options:
+              - errs.WithHTTPStatus(httpServiceUnavailable)
+              - errs.WithExitCode(exitTempFail)
+            private: "service/data/docstore: a SQL statement failed; the driver's error is joined beside this one, its text withheld, and the fields name the table and the step"
+            public: The store's database did not complete the request
+            reason: STATEMENT_FAILED
+          - code: CodeKeyTooLong
+            doc: |-
+              KeyTooLong refuses a write to the SQL store whose store key, or one of
+              whose index keys, is longer than its key columns hold. It is refused
+              before any statement, because MySQL outside strict mode would truncate
+              the key rather than refuse it — and a truncated key is another key.
+            name: KeyTooLong
+            options:
+              - errs.WithHTTPStatus(httpBadRequest)
+            private: "service/data/docstore: a store key or an index key exceeds MaxSQLKeyLen bytes; the fields name the store, the index and the limit, never the key"
+            public: A key is longer than the store can keep
+            reason: KEY_TOO_LONG
+          - code: CodeVersionsNotKept
+            doc: |-
+              VersionsNotKept refuses a call on a document's versions — Versions,
+              Version, RewriteVersions — to a store whose configuration keeps none.
+              Answering the current document as its only version would tell the
+              caller a history exists and is empty, which is not what happened.
+            name: VersionsNotKept
+            options:
+              - errs.WithHTTPStatus(httpBadRequest)
+            private: "service/data/docstore: the store was opened with Versions zero, so it records no version and reads none; the fields name the store"
+            public: This store keeps no versions
+            reason: VERSIONS_NOT_KEPT
+          - code: CodeVersionNotFound
+            doc: |-
+              VersionNotFound is a miss on a version: the document holds no version of
+              that number — it was never made, or a write pruned it.
+            name: VersionNotFound
+            options:
+              - errs.WithHTTPStatus(httpNotFound)
+            private: "service/data/docstore: the document exists and keeps no version of the number asked for, never made or pruned; the fields name the store and the number, never the key"
+            public: The document keeps no version of this number
+            reason: VERSION_NOT_FOUND
+          - code: CodeVersionsRewriteRefused
+            doc: |-
+              VersionsRewriteRefused refuses what a rewrite's function returned: a
+              rewrite may drop a former version and change what one holds and what
+              its writer said, never add one, reorder them or change when one was
+              made. Nothing changed.
+            name: VersionsRewriteRefused
+            options:
+              - errs.WithHTTPStatus(httpBadRequest)
+            private: "service/data/docstore: the rewrite function returned a version it was not given, out of order, with another instant, or that is not JSON; the fields name the store and the problem"
+            public: A rewrite of versions may only drop or rewrite the versions it was given
+            reason: VERSIONS_REWRITE_REFUSED
     types:
       - name: IndexSpec
         struct:
@@ -596,47 +895,6 @@ packages:
               type: map[string]string
             - name: InPlace
               type: bool
-    variables:
-      - name: DocumentNotFound
-        type: "*errs.Error"
-      - name: DocumentExists
-        type: "*errs.Error"
-      - name: UniqueKeyTaken
-        type: "*errs.Error"
-      - name: DocumentKeyEmpty
-        type: "*errs.Error"
-      - name: DocumentKeyChanged
-        type: "*errs.Error"
-      - name: IndexUnknown
-        type: "*errs.Error"
-      - name: IndexNotUnique
-        type: "*errs.Error"
-      - name: DocumentUndecodable
-        type: "*errs.Error"
-      - name: DocumentUnencodable
-        type: "*errs.Error"
-      - name: PersistFailed
-        type: "*errs.Error"
-      - name: WriteUnconfirmed
-        type: "*errs.Error"
-      - name: LoadFailed
-        type: "*errs.Error"
-      - name: IndexBroken
-        type: "*errs.Error"
-      - name: StoreClosed
-        type: "*errs.Error"
-      - name: StoreMisconfigured
-        type: "*errs.Error"
-      - name: StatementFailed
-        type: "*errs.Error"
-      - name: KeyTooLong
-        type: "*errs.Error"
-      - name: VersionsNotKept
-        type: "*errs.Error"
-      - name: VersionNotFound
-        type: "*errs.Error"
-      - name: VersionsRewriteRefused
-        type: "*errs.Error"
   - constants:
       - name: DefaultFoldAt
         type: int

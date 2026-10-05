@@ -1,34 +1,73 @@
 apiVersion: kit.kitsunium/design/v2
 domain: proc/ipc
 packages:
-  - constants:
-      - name: CodeMisconfigured
+  - codes:
+      - const:
+          - doc: |-
+              CodeMisconfigured identifies a configuration no endpoint can be built from:
+              an empty or relative path, one longer than the kernel's sun_path, a UID or
+              GID list holding a negative value.
+            name: CodeMisconfigured
+            note: "range: 0.3.91.0 - 0.3.91.255"
+            value: "0x00_03_5B_01"
         type: errs.Code
-        value: "0x00_03_5B_01"
-      - name: CodeDirectoryUnsafe
+      - const:
+          - doc: |-
+              CodeDirectoryUnsafe identifies a socket directory another account could
+              plant an entry in or read through: not a directory, a link, not owned by
+              this process's user, or writable by its group or by anyone.
+            name: CodeDirectoryUnsafe
+            value: "0x00_03_5B_02"
         type: errs.Code
-        value: "0x00_03_5B_02"
-      - name: CodeInUse
+      - const:
+          - doc: CodeInUse identifies a socket path a live process already answers on.
+            name: CodeInUse
+            value: "0x00_03_5B_03"
         type: errs.Code
-        value: "0x00_03_5B_03"
-      - name: CodeListenFailed
+      - const:
+          - doc: CodeListenFailed identifies a listen the kernel refused.
+            name: CodeListenFailed
+            value: "0x00_03_5B_04"
         type: errs.Code
-        value: "0x00_03_5B_04"
-      - name: CodePeerRefused
+      - const:
+          - doc: |-
+              CodePeerRefused identifies a peer whose kernel-reported identity is not
+              this process's user nor in the allow-lists.
+            name: CodePeerRefused
+            value: "0x00_03_5B_05"
         type: errs.Code
-        value: "0x00_03_5B_05"
-      - name: CodeDialFailed
+      - const:
+          - doc: CodeDialFailed identifies a dial that did not reach a listener.
+            name: CodeDialFailed
+            value: "0x00_03_5B_06"
         type: errs.Code
-        value: "0x00_03_5B_06"
-      - name: CodeEndpointForeign
+      - const:
+          - doc: |-
+              CodeEndpointForeign identifies a socket file owned by another account: a
+              client refuses to talk to what may be an impostor.
+            name: CodeEndpointForeign
+            value: "0x00_03_5B_07"
         type: errs.Code
-        value: "0x00_03_5B_07"
-      - name: CodeClosed
+      - const:
+          - doc: CodeClosed identifies an Accept on a listener that was closed.
+            name: CodeClosed
+            value: "0x00_03_5B_08"
         type: errs.Code
-        value: "0x00_03_5B_08"
-      - name: CodePathUnsafe
+      - const:
+          - doc: |-
+              CodePathUnsafe identifies a socket path another account could steer: a
+              component ABOVE the socket's directory, or the directory holding it, lets
+              another account decide where the path leads — a link planted where anybody
+              can write, a directory another account created there, or an entry anybody
+              can replace. The socket directory's own entry stays [CodeDirectoryUnsafe]'s.
+
+              It is its own code, as LOCK_PATH_REDIRECTED is lock's (ADR 0083), because
+              the remedy differs: DIRECTORY_UNSAFE asks for a chmod or a chown, this asks
+              a human to look at a component that may be an attack in progress — or to
+              move the socket under the directory the engine's RuntimeDir names.
+            name: CodePathUnsafe
+            value: "0x00_03_5B_09"
         type: errs.Code
-        value: "0x00_03_5B_09"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/proc/ipc
@@ -87,6 +126,73 @@ packages:
               - type: "*Conn"
               - type: error
         name: Dialer
+    sentinels:
+      - var:
+          - code: CodeMisconfigured
+            doc: Misconfigured refuses a configuration no endpoint can be built from.
+            name: Misconfigured
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "service/proc/ipc: empty or relative path, path beyond sun_path, or a negative UID/GID; the rule field says which"
+            public: The private socket is misconfigured
+            reason: MISCONFIGURED
+          - code: CodeDirectoryUnsafe
+            doc: DirectoryUnsafe refuses a socket directory another account could reach.
+            name: DirectoryUnsafe
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "service/proc/ipc: the directory is a link, not a directory, not ours, or group/world writable; the rule field says which"
+            public: The private socket's directory is not private
+            reason: DIRECTORY_UNSAFE
+          - code: CodeInUse
+            doc: InUse refuses to listen where a live process already answers.
+            name: InUse
+            private: "service/proc/ipc: a dial to the existing socket succeeded, so it was not removed"
+            public: Another process already listens on this private socket
+            reason: IN_USE
+          - code: CodeListenFailed
+            doc: ListenFailed reports a listen the kernel refused.
+            name: ListenFailed
+            private: "service/proc/ipc: net.Listen or the chmod after it failed; the cause is in the chain"
+            public: The private socket could not be opened
+            reason: LISTEN_FAILED
+          - code: CodePeerRefused
+            doc: |-
+              PeerRefused reports a connection from an account the listener does not
+              admit. It is returned to no one but the listener's observer: the
+              connection is closed without a word.
+            name: PeerRefused
+            private: "service/proc/ipc: the kernel-reported UID/GID is neither ours nor in the allow-lists; uid and gid fields"
+            public: The peer is not allowed on this private socket
+            reason: PEER_REFUSED
+          - code: CodeDialFailed
+            doc: DialFailed reports a dial that reached no listener.
+            name: DialFailed
+            private: "service/proc/ipc: the dial failed or timed out; the cause is in the chain"
+            public: The private socket did not answer
+            reason: DIAL_FAILED
+          - code: CodeEndpointForeign
+            doc: EndpointForeign refuses a socket file another account owns.
+            name: EndpointForeign
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "service/proc/ipc: the socket file's owner is not this process's user nor an allowed one; the uid field names it"
+            public: The private socket belongs to another account
+            reason: ENDPOINT_FOREIGN
+          - code: CodeClosed
+            doc: Closed reports an Accept on a closed listener.
+            name: Closed
+            private: "service/proc/ipc: Accept after Close"
+            public: The private socket is closed
+            reason: CLOSED
+          - code: CodePathUnsafe
+            doc: PathUnsafe refuses a socket path another account could steer.
+            name: PathUnsafe
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "service/proc/ipc: a component above the socket's directory is a link planted where anybody can write, a directory another account owns there, or an entry anybody can replace; the path, dir, kind and container fields say which, target and uid where they apply"
+            public: The private socket's path runs through a directory another account controls
+            reason: PATH_UNSAFE
     types:
       - name: PeerValue
         struct:
@@ -107,25 +213,6 @@ packages:
               type: net.Conn
             - name: Peer
               type: PeerValue
-    variables:
-      - name: Misconfigured
-        type: "*errs.Error"
-      - name: DirectoryUnsafe
-        type: "*errs.Error"
-      - name: InUse
-        type: "*errs.Error"
-      - name: ListenFailed
-        type: "*errs.Error"
-      - name: PeerRefused
-        type: "*errs.Error"
-      - name: DialFailed
-        type: "*errs.Error"
-      - name: EndpointForeign
-        type: "*errs.Error"
-      - name: Closed
-        type: "*errs.Error"
-      - name: PathUnsafe
-        type: "*errs.Error"
   - functions:
       - in:
           - name: cfg

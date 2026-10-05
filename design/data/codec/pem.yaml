@@ -1,26 +1,50 @@
 apiVersion: kit.kitsunium/design/v2
 domain: data/codec/pem
 packages:
-  - constants:
-      - name: CodePEMMarshalFailed
+  - codes:
+      - const:
+          - doc: CodePEMMarshalFailed identifies a failure inside encoding/pem.Encode.
+            name: CodePEMMarshalFailed
+            note: "range: 0.3.10.0 - 0.3.10.255"
+            value: "0x00_03_0A_01"
         type: errs.Code
-        value: "0x00_03_0A_01"
-      - name: CodePEMUnmarshalFailed
+      - const:
+          - doc: |-
+              CodePEMUnmarshalFailed identifies a failure inside encoding/pem.Decode
+              (no PEM block found in input).
+            name: CodePEMUnmarshalFailed
+            value: "0x00_03_0A_02"
         type: errs.Code
-        value: "0x00_03_0A_02"
-      - name: CodePEMValueInvalid
+      - const:
+          - doc: |-
+              CodePEMValueInvalid identifies a Marshal call that did not receive a *pem.Block
+              or an Unmarshal call whose target is not a **pem.Block.
+            name: CodePEMValueInvalid
+            value: "0x00_03_0A_03"
         type: errs.Code
-        value: "0x00_03_0A_03"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/data/codec/pem
-    variables:
-      - name: MarshalFailed
-        type: "*errs.Error"
-      - name: UnmarshalFailed
-        type: "*errs.Error"
-      - name: ValueInvalid
-        type: "*errs.Error"
+    sentinels:
+      - var:
+          - code: CodePEMMarshalFailed
+            doc: MarshalFailed wraps a failure from encoding/pem.Encode.
+            name: MarshalFailed
+            private: "service/data/codec/pem: encoding/pem.Encode returned an error"
+            public: PEM encoding failed
+            reason: MARSHAL_FAILED
+          - code: CodePEMUnmarshalFailed
+            doc: UnmarshalFailed fires when no PEM block could be decoded from the input.
+            name: UnmarshalFailed
+            private: "service/data/codec/pem: encoding/pem.Decode returned no block"
+            public: PEM decoding failed
+            reason: UNMARSHAL_FAILED
+          - code: CodePEMValueInvalid
+            doc: ValueInvalid fires when the caller does not pass a *pem.Block / **pem.Block.
+            name: ValueInvalid
+            private: "service/data/codec/pem: Marshal/Unmarshal argument is not *pem.Block"
+            public: PEM codec requires a *pem.Block value
+            reason: VALUE_INVALID
   - aliases:
       - name: Block
         target: stdpem.Block

@@ -1,67 +1,170 @@
 apiVersion: kit.kitsunium/design/v2
 domain: app/mail
 packages:
-  - constants:
+  - codes:
+      - const:
+          - doc: |-
+              CodeHeaderInjection identifies a header name or value carrying CR, LF or
+              NUL. It is THE failure of this domain: RFC 5322 §2.2 terminates a field with
+              CRLF, so those two octets do not corrupt a header, they end it and begin one
+              the caller never wrote.
+            name: CodeHeaderInjection
+            note: "range: 0.2.31.0 - 0.2.31.255"
+            value: "0x00_02_1F_01"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeInvalidAddress identifies an addr-spec outside the dot-atom subset of
+              RFC 5322 §3.4.1 that this domain accepts: empty, missing or repeating "@",
+              carrying a space or an angle bracket, or exceeding the RFC 5321 §4.5.3.1
+              octet limits.
+            name: CodeInvalidAddress
+            value: "0x00_02_1F_02"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeMissingSender identifies a Message with no From mailbox. RFC 5322 §3.6
+              makes the originator field mandatory, and an empty From is what an unfilled
+              struct looks like.
+            name: CodeMissingSender
+            value: "0x00_02_1F_03"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeNoRecipients identifies a Message whose To, Cc and Bcc are all empty.
+              SMTP has no RCPT TO to issue, so the send could only ever fail — it fails
+              here instead, before a socket is opened.
+            name: CodeNoRecipients
+            value: "0x00_02_1F_04"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeEmptyBody identifies a Message with no text, no HTML and no attachment.
+              A zero body is not "send an empty mail", it is a struct nobody filled in.
+            name: CodeEmptyBody
+            value: "0x00_02_1F_05"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeReservedHeader identifies an extra header whose name the composer owns.
+              Letting one through would either emit the field twice — RFC 5322 §3.6 allows
+              exactly one From, Date or Subject — or let a caller spell Bcc by hand, which
+              is the injection attack with the SDK's own cooperation.
+            name: CodeReservedHeader
+            value: "0x00_02_1F_06"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeInvalidAttachment identifies an attachment the composer cannot render:
+              no filename, an unparseable media type, an inline part with no body to be
+              referenced from, or a Content-ID outside the addr-spec grammar RFC 2392 §2
+              borrows for cid: URLs.
+            name: CodeInvalidAttachment
+            value: "0x00_02_1F_07"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeHeaderTooLong identifies a header line that cannot be folded under the
+              RFC 5322 §2.1.1 hard limit of 998 octets. Folding is only legal at existing
+              whitespace (§2.2.3), so a single token longer than the limit has no legal
+              fold point and is refused rather than cut.
+            name: CodeHeaderTooLong
+            value: "0x00_02_1F_08"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeUnsupportedAddress identifies a syntactically plausible address this
+              domain deliberately does not carry: a non-ASCII addr-spec (RFC 6531
+              SMTPUTF8) or a quoted local-part. Both are legal mail and neither is
+              supported, so they are named rather than mangled into something deliverable
+              to the wrong mailbox.
+            name: CodeUnsupportedAddress
+            value: "0x00_02_1F_09"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeComposeFailed identifies a MIME body the composer could not assemble:
+              an encoder that refused a byte, or a media type mime.ParseMediaType would
+              not accept.
+            name: CodeComposeFailed
+            note: |-
+              range: 0.3.61.0 - 0.3.61.255
+
+              The outcomes of composition and of the SMTP session. The range was allocated
+              to internal/service/app/mail, which raises these codes, and it is declared
+              here with the message refusals so that every code of the domain is in one
+              place (ADR 0160). A code keeps the value its allocation gave it whichever
+              layer declares it, so the layer byte still reads 3.
+            value: "0x00_03_3D_01"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeInvalidConfig identifies an SMTP transport that cannot be constructed as
+              written: no host, a port outside 1-65535, or — the one that matters — a
+              TLSMode left at its zero value.
+            name: CodeInvalidConfig
+            value: "0x00_03_3D_02"
+        type: errs.Code
+      - const:
+          - doc: CodeDialFailed identifies a TCP connection that was never established.
+            name: CodeDialFailed
+            value: "0x00_03_3D_03"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeGreetingFailed identifies a server that answered the connection but not
+              the SMTP conversation: a refused greeting, a refused EHLO, or a QUIT the
+              server never acknowledged.
+            name: CodeGreetingFailed
+            value: "0x00_03_3D_04"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeTLSRequired identifies a session that could not be encrypted because the
+              server never offered STARTTLS. It is a REFUSAL and never a downgrade.
+            name: CodeTLSRequired
+            value: "0x00_03_3D_05"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeTLSFailed identifies a TLS handshake or STARTTLS command the server or
+              the certificate chain refused.
+            name: CodeTLSFailed
+            value: "0x00_03_3D_06"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeAuthInsecure identifies credentials that would have travelled over an
+              unencrypted session. The refusal happens BEFORE the AUTH command is written.
+            name: CodeAuthInsecure
+            value: "0x00_03_3D_07"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeAuthFailed identifies credentials the server rejected, or a server that
+              advertised no AUTH mechanism at all.
+            name: CodeAuthFailed
+            value: "0x00_03_3D_08"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeSendRefused identifies a MAIL, RCPT or DATA command the server answered
+              with a failure reply.
+            name: CodeSendRefused
+            value: "0x00_03_3D_09"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeInvalidURL identifies an SMTP URL ParseURL could not read: not a URL, a
+              scheme other than smtp or smtps, a path, a fragment, an unknown or repeated
+              parameter, a tls mode it does not know, no host, or a port out of range.
+            name: CodeInvalidURL
+            value: "0x00_03_3D_0A"
+        type: errs.Code
+    constants:
       - name: DefaultAttachmentType
         type: string
         value: "\"application/octet-stream\""
-      - name: CodeHeaderInjection
-        type: errs.Code
-        value: "0x00_02_1F_01"
-      - name: CodeInvalidAddress
-        type: errs.Code
-        value: "0x00_02_1F_02"
-      - name: CodeMissingSender
-        type: errs.Code
-        value: "0x00_02_1F_03"
-      - name: CodeNoRecipients
-        type: errs.Code
-        value: "0x00_02_1F_04"
-      - name: CodeEmptyBody
-        type: errs.Code
-        value: "0x00_02_1F_05"
-      - name: CodeReservedHeader
-        type: errs.Code
-        value: "0x00_02_1F_06"
-      - name: CodeInvalidAttachment
-        type: errs.Code
-        value: "0x00_02_1F_07"
-      - name: CodeHeaderTooLong
-        type: errs.Code
-        value: "0x00_02_1F_08"
-      - name: CodeUnsupportedAddress
-        type: errs.Code
-        value: "0x00_02_1F_09"
-      - name: CodeComposeFailed
-        type: errs.Code
-        value: "0x00_03_3D_01"
-      - name: CodeInvalidConfig
-        type: errs.Code
-        value: "0x00_03_3D_02"
-      - name: CodeDialFailed
-        type: errs.Code
-        value: "0x00_03_3D_03"
-      - name: CodeGreetingFailed
-        type: errs.Code
-        value: "0x00_03_3D_04"
-      - name: CodeTLSRequired
-        type: errs.Code
-        value: "0x00_03_3D_05"
-      - name: CodeTLSFailed
-        type: errs.Code
-        value: "0x00_03_3D_06"
-      - name: CodeAuthInsecure
-        type: errs.Code
-        value: "0x00_03_3D_07"
-      - name: CodeAuthFailed
-        type: errs.Code
-        value: "0x00_03_3D_08"
-      - name: CodeSendRefused
-        type: errs.Code
-        value: "0x00_03_3D_09"
-      - name: CodeInvalidURL
-        type: errs.Code
-        value: "0x00_03_3D_0A"
       - name: HeaderFrom
         type: string
         value: "\"From\""
@@ -221,6 +324,272 @@ packages:
           - BatchSender
           - Outbox
         name: FullTransport
+    sentinels:
+      - var:
+          - code: CodeHeaderInjection
+            doc: |-
+              HeaderInjection is returned when a header name or value carries CR, LF
+              or NUL.
+
+              It is a REFUSAL and never a repair. mime.QEncoding.Encode would turn the
+              CRLF into "=0D=0A" and mime.FormatMediaType would percent-escape it —
+              both produce a deliverable message that is not the one the caller wrote,
+              and both report success. A caller who learns nothing cannot fix the
+              input, and the next message carries the same payload.
+
+              The Public names no value. "Subject" is safe to say; the string an
+              attacker put in it is not.
+            name: HeaderInjection
+            options:
+              - errs.WithExitCode(exitNoPerm)
+            private: "core/app/mail: header name or value contains CR, LF or NUL — RFC 5322 §2.2 ends a field at CRLF, so the remainder would become headers the caller never wrote; refused, never sanitised"
+            public: A message header contains a line break and was refused
+            reason: HEADER_INJECTION
+          - code: CodeInvalidAddress
+            doc: |-
+              InvalidAddress is returned for an addr-spec outside the dot-atom subset
+              of RFC 5322 §3.4.1 this domain accepts, or outside the RFC 5321 §4.5.3.1
+              octet limits (64 for the local part, 255 for the domain).
+            name: InvalidAddress
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "core/app/mail: addr-spec is empty, has no single @, carries a space, angle bracket or control byte, or exceeds the RFC 5321 §4.5.3.1 length limits"
+            public: A mail address in that message is not usable
+            reason: INVALID_ADDRESS
+          - code: CodeMissingSender
+            doc: MissingSender is returned for a Message whose From carries no address.
+            name: MissingSender
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "core/app/mail: Message.From is the zero Address; RFC 5322 §3.6 makes the originator field mandatory and there is no defensible default"
+            public: A message must name the mailbox it is from
+            reason: MISSING_SENDER
+          - code: CodeNoRecipients
+            doc: |-
+              NoRecipients is returned when To, Cc and Bcc are all empty.
+
+              The refusal happens before any socket is opened. An SMTP session with no
+              RCPT TO cannot succeed, so the only thing dialling first would buy is a
+              slower, less specific failure.
+            name: NoRecipients
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "core/app/mail: To, Cc and Bcc are all empty, so the SMTP session would have no RCPT TO to issue"
+            public: A message must name at least one recipient
+            reason: NO_RECIPIENTS
+          - code: CodeEmptyBody
+            doc: |-
+              EmptyBody is returned for a Message with no text, no HTML and no
+              attachment — ADR 0031's refusing half, applied to content.
+            name: EmptyBody
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "core/app/mail: Text, HTML and Attachments are all empty; a zero body is an unfilled struct rather than a decision to send nothing"
+            public: A message must carry text, HTML or an attachment
+            reason: EMPTY_BODY
+          - code: CodeReservedHeader
+            doc: |-
+              ReservedHeader is returned when Message.Headers names a field the
+              composer owns.
+
+              Two different failures share this refusal. Emitting From, Date or Subject
+              twice violates RFC 5322 §3.6, which permits exactly one of each, and
+              leaves every receiver free to pick a different one. And spelling "Bcc"
+              by hand is the injection this domain exists to stop, arriving through the
+              front door instead.
+            name: ReservedHeader
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "core/app/mail: Headers names a composer-owned field (From, To, Cc, Bcc, Reply-To, Subject, Date, Message-ID, MIME-Version or a Content-* field)"
+            public: That header is set by the mail composer and cannot be overridden
+            reason: RESERVED_HEADER
+          - code: CodeInvalidAttachment
+            doc: |-
+              InvalidAttachment is returned for an attachment the composer cannot
+              render: no filename, an unparseable media type, a malformed Content-ID,
+              or an inline part in a message with no body for its cid: to be
+              referenced from.
+            name: InvalidAttachment
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "core/app/mail: attachment has no filename, an unparseable media type, a Content-ID outside the RFC 2392 §2 grammar, or is inline in a message with no text or HTML body to reference it"
+            public: An attachment on that message is not usable
+            reason: INVALID_ATTACHMENT
+          - code: CodeHeaderTooLong
+            doc: |-
+              HeaderTooLong is returned when a header line cannot be folded under the
+              RFC 5322 §2.1.1 hard limit of 998 octets.
+
+              Folding inserts CRLF before existing whitespace (§2.2.3) — unfolding
+              removes the CRLF and keeps the whitespace, so the value survives exactly.
+              A token with no whitespace in it has no legal fold point, and truncating
+              it would deliver a different value while reporting success.
+            name: HeaderTooLong
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "core/app/mail: a header line exceeds the RFC 5322 §2.1.1 limit of 998 octets and contains no whitespace to fold at; refused rather than truncated"
+            public: A message header is too long to fold and was refused
+            reason: HEADER_TOO_LONG
+          - code: CodeUnsupportedAddress
+            doc: |-
+              UnsupportedAddress is returned for a non-ASCII addr-spec (RFC 6531
+              SMTPUTF8) or a quoted local-part.
+
+              Both are legal mail. Neither is carried here, and saying so BY NAME is
+              the point: SMTPUTF8 must be negotiated with the server, net/smtp does
+              not negotiate it, and the alternative to refusing is punycoding a domain
+              or dropping accents from a local part — which delivers, silently, to a
+              different mailbox.
+            name: UnsupportedAddress
+            options:
+              - errs.WithExitCode(exitUnavailable)
+            private: "core/app/mail: non-ASCII addr-spec (RFC 6531 SMTPUTF8) or quoted local-part; refused by name rather than transliterated into a deliverable but different address"
+            public: That address form is not supported by this mail transport
+            reason: UNSUPPORTED_ADDRESS
+          - code: CodeComposeFailed
+            doc: |-
+              ComposeFailed is returned when the MIME body could not be assembled.
+
+              It is deliberately rare: everything a caller can get wrong is refused by
+              the message guards with a specific verdict, so reaching this one means
+              an encoder or a media-type parser refused something those guards
+              accepted — which is a defect in the composer, not in the caller's
+              message.
+            name: ComposeFailed
+            note: |-
+              The outcomes of composition and of the SMTP session, raised by
+              internal/service/app/mail. They are declared here, with the message
+              refusals, so that the domain's codes and sentinels are in one place
+              (ADR 0160). A server's reply text is third-party data of unbounded length
+              that this SDK did not write; it travels as a log-only field and never into
+              a message a caller might render.
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "service/app/mail: a MIME encoder, a multipart writer or mime.ParseMediaType refused input the core/app/mail guards accepted — the cause travels as a field"
+            public: The message could not be assembled into a MIME body
+            reason: COMPOSE_FAILED
+          - code: CodeInvalidConfig
+            doc: |-
+              InvalidConfig is returned by the SMTP constructor for a configuration
+              that cannot be honoured as written.
+
+              The zero TLSMode is the interesting member. It is REFUSED rather than
+              read as a default, because both candidate defaults are wrong: choosing
+              encryption silently breaks every caller pointing at a plaintext relay on
+              a private network, and choosing none silently ships credentials in the
+              clear for everyone else. ADR 0031's refusing half, applied where the
+              SDK genuinely cannot know.
+            name: InvalidConfig
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "service/app/mail: empty Host, Port outside 1-65535, or TLS left at its zero value — the zero is refused because neither 'encrypt' nor 'do not' is a safe guess (ADR 0031)"
+            public: The SMTP transport configuration is not usable as written
+            reason: INVALID_CONFIG
+          - code: CodeDialFailed
+            doc: |-
+              DialFailed is returned when the TCP connection was never established, or
+              was severed by the caller's context before the greeting.
+            name: DialFailed
+            options:
+              - errs.WithExitCode(exitNoHost)
+            private: "service/app/mail: TCP dial failed, timed out, or the context was cancelled before the SMTP greeting; the dial error travels as a field"
+            public: The mail server could not be reached
+            reason: DIAL_FAILED
+          - code: CodeGreetingFailed
+            doc: |-
+              GreetingFailed is returned when the connection opened and the SMTP
+              conversation did not: a refused greeting, a refused EHLO, a QUIT the
+              server never acknowledged.
+            name: GreetingFailed
+            options:
+              - errs.WithExitCode(exitTempFail)
+            private: "service/app/mail: the 220 greeting, the EHLO/HELO exchange or the closing QUIT was refused or malformed; the server reply travels as a field"
+            public: The mail server did not accept the SMTP conversation
+            reason: GREETING_FAILED
+          - code: CodeTLSRequired
+            doc: |-
+              TLSRequired is returned when the transport is configured for STARTTLS
+              and the server never advertised it.
+
+              This is the defect the domain refuses to have. "Opportunistic STARTTLS"
+              — encrypt if offered, continue in the clear if not — is the shape almost
+              every mail library ships, and it means an active attacker strips the
+              advertisement and reads everything, including the credentials, while the
+              caller's logs show a successful send. There is no configuration here
+              that produces that behaviour, and adding one is not a feature request.
+            name: TLSRequired
+            options:
+              - errs.WithExitCode(exitNoPerm)
+            private: "service/app/mail: TLSStartTLS was configured and the EHLO response advertised no STARTTLS extension; refused, never downgraded to cleartext"
+            public: The mail server did not offer the encryption this transport requires
+            reason: TLS_REQUIRED
+          - code: CodeTLSFailed
+            doc: |-
+              TLSFailed is returned when STARTTLS or the implicit handshake was
+              attempted and did not complete: a refused command, an untrusted chain, a
+              name that does not match.
+            name: TLSFailed
+            options:
+              - errs.WithExitCode(exitNoPerm)
+            private: "service/app/mail: the STARTTLS command was refused, or the TLS handshake failed on trust, name or version; the handshake error travels as a field"
+            public: The connection to the mail server could not be encrypted
+            reason: TLS_FAILED
+          - code: CodeAuthInsecure
+            doc: |-
+              AuthInsecure is returned when credentials were configured for a session
+              that is not encrypted — at CONSTRUCTION when TLS is disabled outright,
+              and again before the AUTH command when the session turned out not to be
+              encrypted after all.
+
+              The second check is not redundant, and net/smtp is the reason. Its
+              PlainAuth carves out an exception for a server named localhost —
+              "isLocalhost(server.Name)" — and sends the password in the clear to it.
+              That is defensible for the stdlib's audience and indefensible for a
+              transport in a container, where the relay one hop away IS 127.0.0.1 and
+              the network between them is a bridge somebody else can join.
+            name: AuthInsecure
+            options:
+              - errs.WithExitCode(exitNoPerm)
+            private: "service/app/mail: Username is set on a session that is not encrypted; refused before the AUTH command is written, including for a localhost relay where net/smtp.PlainAuth would have sent it"
+            public: Credentials cannot be sent over an unencrypted mail session
+            reason: AUTH_INSECURE
+          - code: CodeAuthFailed
+            doc: |-
+              AuthFailed is returned when the server rejected the credentials, or
+              advertised no AUTH mechanism to offer them through.
+            name: AuthFailed
+            options:
+              - errs.WithExitCode(exitNoPerm)
+            private: "service/app/mail: the AUTH exchange was refused, or the EHLO response advertised no AUTH extension; the server reply travels as a field and the credential never leaves this process's memory"
+            public: The mail server rejected the credentials
+            reason: AUTH_FAILED
+          - code: CodeSendRefused
+            doc: |-
+              SendRefused is returned when MAIL, RCPT or DATA was answered with a
+              failure reply.
+
+              It carries the SMTP reply as a log-only field, never as Public: a reply
+              is third-party text of unbounded length that may name a recipient, and
+              Public is the half that travels to strangers.
+            name: SendRefused
+            options:
+              - errs.WithExitCode(exitTempFail)
+            private: "service/app/mail: MAIL FROM, RCPT TO or DATA was answered with a failure reply; the command and the server's reply travel as log-only fields"
+            public: The mail server refused the message
+            reason: SEND_REFUSED
+          - code: CodeInvalidURL
+            doc: |-
+              InvalidURL is returned by ParseURL for a URL it cannot read. It names the
+              clause that failed and NEVER the URL: an SMTP URL carries the password
+              in its userinfo, and every part of it — the host, the port, a parameter
+              name — is quoted by no refusal, because a URL that failed to parse is
+              exactly the one whose parts are not where they should be.
+            name: InvalidURL
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "service/app/mail: ParseURL refused the URL; the problem field names the clause, and the URL itself is never repeated because it carries the password"
+            public: The SMTP URL is not usable as written
+            reason: INVALID_URL
     types:
       - methods:
           - name: IsZero
@@ -298,45 +667,6 @@ packages:
               type: string
             - name: To
               type: "[]string"
-    variables:
-      - name: HeaderInjection
-        type: "*errs.Error"
-      - name: InvalidAddress
-        type: "*errs.Error"
-      - name: MissingSender
-        type: "*errs.Error"
-      - name: NoRecipients
-        type: "*errs.Error"
-      - name: EmptyBody
-        type: "*errs.Error"
-      - name: ReservedHeader
-        type: "*errs.Error"
-      - name: InvalidAttachment
-        type: "*errs.Error"
-      - name: HeaderTooLong
-        type: "*errs.Error"
-      - name: UnsupportedAddress
-        type: "*errs.Error"
-      - name: ComposeFailed
-        type: "*errs.Error"
-      - name: InvalidConfig
-        type: "*errs.Error"
-      - name: DialFailed
-        type: "*errs.Error"
-      - name: GreetingFailed
-        type: "*errs.Error"
-      - name: TLSRequired
-        type: "*errs.Error"
-      - name: TLSFailed
-        type: "*errs.Error"
-      - name: AuthInsecure
-        type: "*errs.Error"
-      - name: AuthFailed
-        type: "*errs.Error"
-      - name: SendRefused
-        type: "*errs.Error"
-      - name: InvalidURL
-        type: "*errs.Error"
   - constants:
       - name: DefaultCaptureKeep
         type: int

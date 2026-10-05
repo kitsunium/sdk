@@ -39,6 +39,7 @@ go_test(
         "code_bench_test.go",
         "code_external_test.go",
         "code_internal_test.go",
+        "codes_gen_test.go",
         "error_bench_test.go",
         "error_external_test.go",
         "error_internal_test.go",

@@ -21,7 +21,8 @@ keeps its value when it moves (ADR 0160). Imports: the standard library and
 | `policy.go` | `PolicyValue`, `Exempt`, `Validate` |
 | `decision.go` | `DecisionValue`, `Outcome` |
 | `update_action.go` | `UpdateAction` — refuse, apply, warn |
-| `codes.go` / `errors.go` | the range and its one refusal |
+| `codes_gen.go` | the range and its one refusal — written by kit gen from `design/framework/gate.yaml` (ADR 0164) |
+| `errors.go` | hand-written beside them: `misconfigured` |
 
 ## Why-this-shape
 

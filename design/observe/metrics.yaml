@@ -1,64 +1,159 @@
 apiVersion: kit.kitsunium/design/v2
 domain: observe/metrics
 packages:
-  - constants:
+  - codes:
+      - const:
+          - doc: |-
+              CodeUnknownExporter identifies an Export/Lookup naming an exporter that no
+              imported package has registered.
+            name: CodeUnknownExporter
+            note: "range: 0.2.9.0 - 0.2.9.255"
+            value: "0x00_02_09_01"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeExportFailed identifies an exporter that returned an error while shipping
+              a snapshot (the exporter's cause rides the wrap trail).
+            name: CodeExportFailed
+            value: "0x00_02_09_02"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeInstrumentKindConflict identifies a Meter call reusing a name already
+              bound to a DIFFERENT instrument kind (e.g. a Counter name fetched as a Gauge,
+              or as an UpDownCounter, which is a different monotonicity on one metric).
+            name: CodeInstrumentKindConflict
+            value: "0x00_02_09_03"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeInvalidAttribute identifies an instrument fetched with an attribute set
+              that cannot name a series: an attribute with an empty Key, the same Key
+              twice, or a value no constructor ever set (AttrKindInvalid).
+            name: CodeInvalidAttribute
+            value: "0x00_02_09_04"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeDuplicateRegistration identifies a boot-time Exporter registry collision:
+              a nil exporter, or a distinct exporter claiming an already-registered Name.
+            name: CodeDuplicateRegistration
+            value: "0x00_02_09_05"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeInvalidTemporality identifies a MeterConfig carrying a Temporality that
+              is none of the three declared constants — reachable only by a deliberate cast.
+            name: CodeInvalidTemporality
+            value: "0x00_02_09_06"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeInvalidDescription identifies a Describe call carrying an empty
+              description — a call that would document nothing (ADR 0067).
+            name: CodeInvalidDescription
+            value: "0x00_02_09_07"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeDescriptionConflict identifies a second, DIFFERENT description bound to
+              an instrument name that already has one. A description belongs to the name,
+              so two of them means one of the two wiring sites is wrong (ADR 0067).
+            name: CodeDescriptionConflict
+            value: "0x00_02_09_08"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeInvalidMetricName identifies an instrument name the Prometheus text
+              exposition format cannot carry: it does not match [a-zA-Z_:][a-zA-Z0-9_:]*.
+            name: CodeInvalidMetricName
+            note: |-
+              range: 0.3.45.0 - 0.3.45.255 — allocated to the metrics engine,
+              internal/service/observe/metrics (ADR 0005 service/observe/metrics block),
+              and declared here since ADR 0160: the engine returns these and declares
+              none. Every one of them is about a wire — Prometheus text or OTLP — the
+              engine writes.
+            value: "0x00_03_2D_01"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeInvalidLabelName identifies an attribute key the Prometheus text
+              exposition format cannot carry: it does not match [a-zA-Z_][a-zA-Z0-9_]* (a
+              metric name may hold a colon, a label name may not — and neither may hold the
+              dot every OTel-conventional attribute key is spelled with).
+            name: CodeInvalidLabelName
+            value: "0x00_03_2D_02"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeReservedLabelName identifies a syntactically legal attribute key that the
+              exposition format or the Prometheus server reserves for its own use: the "__"
+              prefix, or "le" on a histogram, where it names the bucket's upper bound.
+            name: CodeReservedLabelName
+            value: "0x00_03_2D_03"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeUnsupportedTemporality identifies a snapshot that is not cumulative —
+              delta, or an unresolved temporality — handed to the Prometheus exporter,
+              whose exposition format has no temporality field and whose server reads
+              every counter as cumulative.
+            name: CodeUnsupportedTemporality
+            value: "0x00_03_2D_04"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeOTLPUnresolvedTemporality identifies a snapshot handed to the OTLP/JSON
+              encoder carrying a temporality that is neither delta nor cumulative. The
+              schema's AGGREGATION_TEMPORALITY_UNSPECIFIED "MUST not be used", so there is
+              no honest integer to emit.
+            name: CodeOTLPUnresolvedTemporality
+            value: "0x00_03_2D_05"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeOTLPInvalidBucketLayout identifies a histogram point whose buckets OTLP
+              cannot express: a count array that is not one longer than the bounds array,
+              or bounds that are non-finite or not strictly increasing.
+            name: CodeOTLPInvalidBucketLayout
+            value: "0x00_03_2D_06"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeOTLPEndpointInvalid identifies an OTLP/HTTP exporter configured with an
+              endpoint that is not an absolute http(s) URL carrying a path — the address
+              the POST would otherwise be sent to blind.
+            name: CodeOTLPEndpointInvalid
+            value: "0x00_03_2D_07"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeOTLPExportRejected identifies a collector that refused the payload
+              PERMANENTLY: an HTTP status outside the specification's retryable set, so
+              replaying the same bytes would fail the same way.
+            name: CodeOTLPExportRejected
+            value: "0x00_03_2D_08"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeOTLPExportUnavailable identifies a TRANSIENT OTLP/HTTP failure — a
+              transport fault, or one of the four statuses the specification lists as
+              retryable. The same bytes may succeed later.
+            name: CodeOTLPExportUnavailable
+            value: "0x00_03_2D_09"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeOTLPPartialSuccess identifies a collector that accepted the request
+              (HTTP 200) but rejected some of its data points. The specification forbids
+              retrying it, so the loss is reported rather than replayed.
+            name: CodeOTLPPartialSuccess
+            value: "0x00_03_2D_0A"
+        type: errs.Code
+    constants:
       - name: OverflowAttrKey
         type: string
         value: "\"sdk_metric_overflow\""
-      - name: CodeUnknownExporter
-        type: errs.Code
-        value: "0x00_02_09_01"
-      - name: CodeExportFailed
-        type: errs.Code
-        value: "0x00_02_09_02"
-      - name: CodeInstrumentKindConflict
-        type: errs.Code
-        value: "0x00_02_09_03"
-      - name: CodeInvalidAttribute
-        type: errs.Code
-        value: "0x00_02_09_04"
-      - name: CodeDuplicateRegistration
-        type: errs.Code
-        value: "0x00_02_09_05"
-      - name: CodeInvalidTemporality
-        type: errs.Code
-        value: "0x00_02_09_06"
-      - name: CodeInvalidDescription
-        type: errs.Code
-        value: "0x00_02_09_07"
-      - name: CodeDescriptionConflict
-        type: errs.Code
-        value: "0x00_02_09_08"
-      - name: CodeInvalidMetricName
-        type: errs.Code
-        value: "0x00_03_2D_01"
-      - name: CodeInvalidLabelName
-        type: errs.Code
-        value: "0x00_03_2D_02"
-      - name: CodeReservedLabelName
-        type: errs.Code
-        value: "0x00_03_2D_03"
-      - name: CodeUnsupportedTemporality
-        type: errs.Code
-        value: "0x00_03_2D_04"
-      - name: CodeOTLPUnresolvedTemporality
-        type: errs.Code
-        value: "0x00_03_2D_05"
-      - name: CodeOTLPInvalidBucketLayout
-        type: errs.Code
-        value: "0x00_03_2D_06"
-      - name: CodeOTLPEndpointInvalid
-        type: errs.Code
-        value: "0x00_03_2D_07"
-      - name: CodeOTLPExportRejected
-        type: errs.Code
-        value: "0x00_03_2D_08"
-      - name: CodeOTLPExportUnavailable
-        type: errs.Code
-        value: "0x00_03_2D_09"
-      - name: CodeOTLPPartialSuccess
-        type: errs.Code
-        value: "0x00_03_2D_0A"
       - name: DefaultScopeName
         type: string
         value: "\"github.com/kitsunium/sdk/pkg/v1/observe/metrics\""
@@ -401,6 +496,139 @@ packages:
           - UpDownMeter
           - AsyncMeter
         name: FullMeter
+    sentinels:
+      - var:
+          - code: CodeUnknownExporter
+            doc: UnknownExporter is returned when no Exporter is registered under a Name.
+            name: UnknownExporter
+            private: "core/observe/metrics.Export: exporter absent from registry; blank-import the exporter's package"
+            public: No metrics exporter is registered under that name
+            reason: UNKNOWN_EXPORTER
+          - code: CodeExportFailed
+            doc: ExportFailed wraps an exporter's failure while shipping a snapshot.
+            name: ExportFailed
+            private: "core/observe/metrics.Export: the registered exporter returned an error"
+            public: The metrics exporter failed to ship the snapshot
+            reason: EXPORT_FAILED
+          - code: CodeInstrumentKindConflict
+            doc: InstrumentKindConflict is returned when a name is reused for a different kind.
+            name: InstrumentKindConflict
+            private: "service/observe/metrics: a name bound to one instrument kind was fetched as another"
+            public: That instrument name is already registered with a different kind
+            reason: INSTRUMENT_KIND_CONFLICT
+          - code: CodeInvalidAttribute
+            doc: InvalidAttribute is the panic sentinel for an unusable attribute set.
+            name: InvalidAttribute
+            private: "service/observe/metrics: an attribute set must name each dimension once, with a non-empty key and a value from String/Bool/Int64/Float64"
+            public: An attribute key is empty or repeated, or its value was never set
+            reason: INVALID_ATTRIBUTE
+          - code: CodeDuplicateRegistration
+            doc: DuplicateRegistration is the boot-time Exporter-registry panic sentinel.
+            name: DuplicateRegistration
+            private: "core/observe/metrics.RegisterExporter: a distinct exporter already claims this name, or a nil exporter was supplied"
+            public: An exporter is already registered under that name
+            reason: DUPLICATE_REGISTRATION
+          - code: CodeInvalidTemporality
+            doc: |-
+              InvalidTemporality is the panic sentinel for a Temporality that is none
+              of the three declared constants.
+            name: InvalidTemporality
+            private: "core/observe/metrics: Temporality must be Unspecified, Delta or Cumulative; any other value came from a cast"
+            public: That aggregation temporality is not one this SDK declares
+            reason: INVALID_TEMPORALITY
+          - code: CodeInvalidDescription
+            doc: InvalidDescription is the panic sentinel for an empty Describe.
+            name: InvalidDescription
+            private: "service/observe/metrics: Describer.Describe was handed \"\"; a description that documents nothing is the inert call ADR 0031 bans"
+            public: An instrument description must not be empty
+            reason: INVALID_DESCRIPTION
+          - code: CodeDescriptionConflict
+            doc: |-
+              DescriptionConflict is the panic sentinel for two different descriptions
+              bound to one instrument name.
+            name: DescriptionConflict
+            private: "service/observe/metrics: a description belongs to the name; re-describing with identical text is idempotent, differing text is a wiring defect"
+            public: That instrument name already carries a different description
+            reason: DESCRIPTION_CONFLICT
+          - code: CodeInvalidMetricName
+            doc: |-
+              InvalidMetricName is returned when an instrument name cannot be spelled
+              as a Prometheus metric name.
+            name: InvalidMetricName
+            private: "service/observe/metrics: the Prometheus exposition format requires [a-zA-Z_:][a-zA-Z0-9_:]*; rename the instrument at its call site"
+            public: An instrument name is not a valid Prometheus metric name
+            reason: INVALID_METRIC_NAME
+          - code: CodeInvalidLabelName
+            doc: |-
+              InvalidLabelName is returned when an attribute key cannot be spelled as
+              a Prometheus label name.
+            name: InvalidLabelName
+            private: "service/observe/metrics: the Prometheus exposition format requires [a-zA-Z_][a-zA-Z0-9_]* for a label name — no colon, and no dot, so an OTel-conventional dotted key cannot be carried"
+            public: An attribute key is not a valid Prometheus label name
+            reason: INVALID_LABEL_NAME
+          - code: CodeReservedLabelName
+            doc: ReservedLabelName is returned when an attribute key is legal but reserved.
+            name: ReservedLabelName
+            private: "service/observe/metrics: a \"__\" prefix is reserved for the server's internal labels, and \"le\" is reserved for a histogram's bucket bound"
+            public: An attribute key is reserved by the Prometheus exposition format
+            reason: RESERVED_LABEL_NAME
+          - code: CodeUnsupportedTemporality
+            doc: |-
+              UnsupportedTemporality is returned when a snapshot that is not
+              cumulative — delta, or an unresolved temporality — is handed to the
+              Prometheus exporter.
+            name: UnsupportedTemporality
+            private: "service/observe/metrics: the text exposition format has no temporality field and the server reads every counter as cumulative; build the meter with TemporalityCumulative for this exporter"
+            public: The Prometheus exposition format carries cumulative metrics only
+            reason: UNSUPPORTED_TEMPORALITY
+          - code: CodeOTLPUnresolvedTemporality
+            doc: |-
+              OTLPUnresolvedTemporality is returned when a snapshot's temporality has
+              no OTLP enum value.
+            name: OTLPUnresolvedTemporality
+            private: "service/observe/metrics: the OTLP AggregationTemporality enum spells only delta (1) and cumulative (2); UNSPECIFIED is documented as MUST NOT be used, so a Meter resolves the knob at construction and a hand-built snapshot must too"
+            public: That aggregation temporality has no OTLP representation
+            reason: OTLP_UNRESOLVED_TEMPORALITY
+          - code: CodeOTLPInvalidBucketLayout
+            doc: |-
+              OTLPInvalidBucketLayout is returned when a histogram point's buckets
+              cannot be spelled as explicit_bounds plus bucket_counts.
+            name: OTLPInvalidBucketLayout
+            private: "service/observe/metrics: OTLP requires bucket_counts to be one longer than explicit_bounds and explicit_bounds to be strictly increasing and finite; the bucket above the last declared bound is already the +Inf overflow"
+            public: That histogram's buckets have no OTLP representation
+            reason: OTLP_INVALID_BUCKET_LAYOUT
+          - code: CodeOTLPEndpointInvalid
+            doc: |-
+              OTLPEndpointInvalid is returned by NewOTLPHTTPExporter when the
+              configured endpoint cannot be a metrics collector URL.
+            name: OTLPEndpointInvalid
+            private: "service/observe/metrics: OTLP/HTTP takes a full URL used as-is, so it must carry the signal path (metrics.OTLPMetricsPath); a bare host would POST to the root and collect 404s"
+            public: The OTLP endpoint is not an absolute http or https URL with a path
+            reason: OTLP_ENDPOINT_INVALID
+          - code: CodeOTLPExportRejected
+            doc: |-
+              OTLPExportRejected is returned when a collector refuses the payload with
+              a status the specification marks non-retryable.
+            name: OTLPExportRejected
+            private: "service/observe/metrics: the collector answered a 4xx/5xx outside the retryable set, so the same bytes will fail again; check the payload, the headers and the collector's own logs"
+            public: The OTLP collector rejected the metrics payload
+            reason: OTLP_EXPORT_REJECTED
+          - code: CodeOTLPExportUnavailable
+            doc: |-
+              OTLPExportUnavailable is returned when an OTLP/HTTP export fails in a way
+              the specification says may be retried.
+            name: OTLPExportUnavailable
+            private: "service/observe/metrics: a transport fault or one of HTTP 429/502/503/504; compose resilience.NewRetry with Retryable: metrics.OTLPRetryable rather than looping here"
+            public: The OTLP collector is unreachable or overloaded
+            reason: OTLP_EXPORT_UNAVAILABLE
+          - code: CodeOTLPPartialSuccess
+            doc: |-
+              OTLPPartialSuccess is returned when a collector accepts the request but
+              rejects some of its data points.
+            name: OTLPPartialSuccess
+            private: "service/observe/metrics: the response carried partialSuccess.rejectedDataPoints; the specification forbids retrying it, so the rejected points are lost and the cause is at the collector"
+            public: The OTLP collector accepted the request but rejected some data points
+            reason: OTLP_PARTIAL_SUCCESS
     types:
       - methods:
           - name: String
@@ -499,43 +727,6 @@ packages:
             recv: value
         name: Temporality
         underlying: uint8
-    variables:
-      - name: UnknownExporter
-        type: "*errs.Error"
-      - name: ExportFailed
-        type: "*errs.Error"
-      - name: InstrumentKindConflict
-        type: "*errs.Error"
-      - name: InvalidAttribute
-        type: "*errs.Error"
-      - name: DuplicateRegistration
-        type: "*errs.Error"
-      - name: InvalidTemporality
-        type: "*errs.Error"
-      - name: InvalidDescription
-        type: "*errs.Error"
-      - name: DescriptionConflict
-        type: "*errs.Error"
-      - name: InvalidMetricName
-        type: "*errs.Error"
-      - name: InvalidLabelName
-        type: "*errs.Error"
-      - name: ReservedLabelName
-        type: "*errs.Error"
-      - name: UnsupportedTemporality
-        type: "*errs.Error"
-      - name: OTLPUnresolvedTemporality
-        type: "*errs.Error"
-      - name: OTLPInvalidBucketLayout
-        type: "*errs.Error"
-      - name: OTLPEndpointInvalid
-        type: "*errs.Error"
-      - name: OTLPExportRejected
-        type: "*errs.Error"
-      - name: OTLPExportUnavailable
-        type: "*errs.Error"
-      - name: OTLPPartialSuccess
-        type: "*errs.Error"
   - constants:
       - name: DefaultMaxSeriesPerInstrument
         type: int

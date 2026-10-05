@@ -6,7 +6,7 @@ go_library(
     name = "s3",
     srcs = [
         "client.go",
-        "codes.go",
+        "codes_gen.go",
         "cred_adapter.go",
         "errors.go",
         "s3.go",

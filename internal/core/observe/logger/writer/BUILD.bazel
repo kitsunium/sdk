@@ -5,7 +5,7 @@ package(default_visibility = ["//internal/core:core_consumers"])
 go_library(
     name = "writer",
     srcs = [
-        "codes.go",
+        "codes_gen.go",
         "config_clickhouse.go",
         "config_cloudwatch.go",
         "config_console.go",

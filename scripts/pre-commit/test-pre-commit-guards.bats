@@ -290,7 +290,7 @@ mksymroot() {
     internal/service/observe/internal/otlp internal/service/observe/metrics \
     internal/core/app/widget/level internal/core/net \
     internal/core/observe/otel internal/core/observe/metrics
-  cat >internal/kernel/errs/registry_ownership_external_test.go <<'EOF'
+  cat >internal/kernel/errs/codes_gen_test.go <<'EOF'
 package errs_test
 
 var codeRangeOwners = map[uint64]string{
@@ -362,7 +362,7 @@ EOF
 # key, $2 the owning directory. awk rather than sed, whose newline in a
 # replacement is not one on every BSD.
 add_owner() {
-  owners=internal/kernel/errs/registry_ownership_external_test.go
+  owners=internal/kernel/errs/codes_gen_test.go
   awk -v entry="	$1: \"$2\"," '/^}$/ { print entry } { print }' "$owners" >owners.tmp
   mv owners.tmp "$owners"
 }
@@ -517,7 +517,7 @@ EOF
 # Fails closed: without codeRangeOwners, (c) has nothing to judge against.
 @test "core-symmetry: a tree without codeRangeOwners is refused, not passed" {
   mksymroot
-  rm internal/kernel/errs/registry_ownership_external_test.go
+  rm internal/kernel/errs/codes_gen_test.go
 
   run "$SCRIPTS/check-core-symmetry.sh" "$WORK"
 

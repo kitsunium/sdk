@@ -1,26 +1,52 @@
 apiVersion: kit.kitsunium/design/v2
 domain: data/codec/ndjson
 packages:
-  - constants:
-      - name: CodeNDJSONMarshalFailed
+  - codes:
+      - const:
+          - doc: |-
+              CodeNDJSONMarshalFailed identifies a failure inside encoding/json.Marshal
+              when encoding a single NDJSON record.
+            name: CodeNDJSONMarshalFailed
+            note: "range: 0.3.11.0 - 0.3.11.255"
+            value: "0x00_03_0B_01"
         type: errs.Code
-        value: "0x00_03_0B_01"
-      - name: CodeNDJSONUnmarshalFailed
+      - const:
+          - doc: |-
+              CodeNDJSONUnmarshalFailed identifies a failure inside encoding/json.Unmarshal
+              when decoding a single NDJSON record.
+            name: CodeNDJSONUnmarshalFailed
+            value: "0x00_03_0B_02"
         type: errs.Code
-        value: "0x00_03_0B_02"
-      - name: CodeNDJSONValueInvalid
+      - const:
+          - doc: |-
+              CodeNDJSONValueInvalid identifies a Marshal / Unmarshal call whose target is
+              not a slice (NDJSON models a stream of records).
+            name: CodeNDJSONValueInvalid
+            value: "0x00_03_0B_03"
         type: errs.Code
-        value: "0x00_03_0B_03"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/data/codec/ndjson
-    variables:
-      - name: MarshalFailed
-        type: "*errs.Error"
-      - name: UnmarshalFailed
-        type: "*errs.Error"
-      - name: ValueInvalid
-        type: "*errs.Error"
+    sentinels:
+      - var:
+          - code: CodeNDJSONMarshalFailed
+            doc: MarshalFailed wraps a failure from encoding/json.Marshal on a single record.
+            name: MarshalFailed
+            private: "service/data/codec/ndjson: encoding/json.Marshal returned an error on a record"
+            public: NDJSON encoding failed
+            reason: MARSHAL_FAILED
+          - code: CodeNDJSONUnmarshalFailed
+            doc: UnmarshalFailed wraps a failure from encoding/json.Unmarshal on a single record.
+            name: UnmarshalFailed
+            private: "service/data/codec/ndjson: encoding/json.Unmarshal returned an error on a record"
+            public: NDJSON decoding failed
+            reason: UNMARSHAL_FAILED
+          - code: CodeNDJSONValueInvalid
+            doc: ValueInvalid fires when the caller does not pass a slice target.
+            name: ValueInvalid
+            private: "service/data/codec/ndjson: Marshal/Unmarshal called with a non-slice argument"
+            public: NDJSON codec requires a slice target
+            reason: VALUE_INVALID
   - functions:
       - name: New
         out:

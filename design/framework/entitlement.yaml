@@ -160,52 +160,102 @@ packages:
         type: "*errs.Error"
       - name: ErrUpdateRequired
         type: "*errs.Error"
-  - constants:
-      - name: CodeNoLicence
+  - codes:
+      - const:
+          - doc: CodeNoLicence identifies a machine with no entitlement key at all.
+            name: CodeNoLicence
+            note: "range: 0.2.35.0 - 0.2.35.255"
+            value: "0x00_02_23_01"
         type: errs.Code
-        value: "0x00_02_23_01"
-      - name: CodeRosterUnsigned
+      - const:
+          - doc: |-
+              CodeRosterUnsigned identifies a roster carrying no valid vendor signature.
+              It is the spoofing signal: a substituted endpoint cannot produce one.
+            name: CodeRosterUnsigned
+            value: "0x00_02_23_02"
         type: errs.Code
-        value: "0x00_02_23_02"
-      - name: CodeRosterStale
+      - const:
+          - doc: |-
+              CodeRosterStale identifies a roster that verified but whose validity window
+              has closed.
+            name: CodeRosterStale
+            value: "0x00_02_23_03"
         type: errs.Code
-        value: "0x00_02_23_03"
-      - name: CodeRevoked
+      - const:
+          - doc: CodeRevoked identifies a subject absent from a roster that was itself valid.
+            name: CodeRevoked
+            value: "0x00_02_23_04"
         type: errs.Code
-        value: "0x00_02_23_04"
-      - name: CodeLicenceExpired
+      - const:
+          - doc: CodeLicenceExpired identifies a subject whose own validity window has closed.
+            name: CodeLicenceExpired
+            value: "0x00_02_23_05"
         type: errs.Code
-        value: "0x00_02_23_05"
-      - name: CodeKeyMismatch
+      - const:
+          - doc: |-
+              CodeKeyMismatch identifies a local key that does not match the fingerprint
+              the roster publishes for this subject.
+            name: CodeKeyMismatch
+            value: "0x00_02_23_06"
         type: errs.Code
-        value: "0x00_02_23_06"
-      - name: CodeRosterUnreachable
+      - const:
+          - doc: |-
+              CodeRosterUnreachable identifies a fetch that could not decide either way.
+              It reports "cannot decide", never "no" — the distinction is the whole point.
+            name: CodeRosterUnreachable
+            value: "0x00_02_23_07"
         type: errs.Code
-        value: "0x00_02_23_07"
-      - name: CodeAmbiguousLicence
+      - const:
+          - doc: |-
+              CodeAmbiguousLicence identifies more than one entitlement identity on one
+              machine, which no automatic choice can resolve safely.
+            name: CodeAmbiguousLicence
+            value: "0x00_02_23_08"
         type: errs.Code
-        value: "0x00_02_23_08"
-      - name: CodeCIUnverifiable
+      - const:
+          - doc: CodeCIUnverifiable identifies a CI run whose provenance could not be proven.
+            name: CodeCIUnverifiable
+            value: "0x00_02_23_09"
         type: errs.Code
-        value: "0x00_02_23_09"
-      - name: CodeCIUnknownKey
+      - const:
+          - doc: |-
+              CodeCIUnknownKey identifies a CI token signed by a key the issuer does not
+              publish.
+            name: CodeCIUnknownKey
+            value: "0x00_02_23_0A"
         type: errs.Code
-        value: "0x00_02_23_0A"
-      - name: CodeCINotEntitled
+      - const:
+          - doc: CodeCINotEntitled identifies a CI account the roster does not cover.
+            name: CodeCINotEntitled
+            value: "0x00_02_23_0B"
         type: errs.Code
-        value: "0x00_02_23_0B"
-      - name: CodeNoPossession
+      - const:
+          - doc: |-
+              CodeNoPossession identifies a holder who could not prove possession of the
+              private half of the published key.
+            name: CodeNoPossession
+            value: "0x00_02_23_0C"
         type: errs.Code
-        value: "0x00_02_23_0C"
-      - name: CodeClockRegressed
+      - const:
+          - doc: |-
+              CodeClockRegressed identifies a machine whose clock is behind the last signed
+              document it verified — the anti-rollback ratchet.
+            name: CodeClockRegressed
+            value: "0x00_02_23_0D"
         type: errs.Code
-        value: "0x00_02_23_0D"
-      - name: CodeUpdateRequired
+      - const:
+          - doc: CodeUpdateRequired identifies a build below the floor the roster mandates.
+            name: CodeUpdateRequired
+            value: "0x00_02_23_0E"
         type: errs.Code
-        value: "0x00_02_23_0E"
-      - name: CodeProductInvalid
+      - const:
+          - doc: |-
+              CodeProductInvalid identifies a ProductValue whose origin list could not
+              survive the day it is needed — see ProductValue.Validate.
+            name: CodeProductInvalid
+            value: "0x00_02_23_0F"
         type: errs.Code
-        value: "0x00_02_23_0F"
+    constants:
       - name: RosterLifetime
         type: time.Duration
         value: "86400000000000"
@@ -222,6 +272,191 @@ packages:
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/framework/internal/core/entitlement
+    sentinels:
+      - doc: |-
+          Sentinel errors distinguishing why authorization failed. Callers map them
+          to exit codes, so each one names a distinct operator situation rather than
+          a generic failure.
+        var:
+          - code: CodeNoLicence
+            doc: |-
+              ErrNoLicense reports that no licence key was found on this machine.
+              The caller has never enrolled, or the key was removed.
+            name: ErrNoLicense
+            private: "core/entitlement: no key material for any subject"
+            public: no entitlement key was found on this machine
+            reason: NO_LICENCE
+          - code: CodeRosterUnsigned
+            doc: |-
+              ErrRosterUnsigned reports that the roster carried no valid vendor
+              signature. This is the spoofing signal: a substituted endpoint cannot
+              produce one.
+            name: ErrRosterUnsigned
+            private: "core/entitlement: the roster signature did not verify against the vendor key"
+            public: the roster is not signed by the expected vendor
+            reason: ROSTER_UNSIGNED
+          - code: CodeRosterStale
+            doc: |-
+              ErrRosterStale reports that the roster verified but no longer
+              authorises anything. It bounds how long a revoked client keeps working
+              offline, and how long a hostile endpoint can replay a genuine roster.
+
+              Those are the same bound, and cache.go is what finally made the first
+              half of that sentence describe something: an offline client re-reads
+              the last bundle it authenticated and is refused HERE the moment that
+              bundle's window closes — at most RosterLifetime after it was signed,
+              whoever is replaying it and from wherever.
+
+              TWO conditions reach it, and the second is the other half of that
+              replay bound rather than a separate situation. A window that has
+              CLOSED is the absolute one. A roster SUPERSEDED by a newer signed
+              decision this machine has already accepted is the relative one: its
+              own window may be wide open, and it is still the replay of a statement
+              the vendor has since replaced. Only the `condition` field says which,
+              because the resolving action does not differ — publish, or fetch, a
+              current roster.
+            name: ErrRosterStale
+            private: "core/entitlement: the roster verified but no longer authorises — its own window has closed, or a newer signed decision has superseded it"
+            public: the roster has expired
+            reason: ROSTER_STALE
+          - code: CodeRevoked
+            doc: |-
+              ErrRevoked reports that the licence UUID is absent from a roster that
+              was itself valid — the subject was removed upstream.
+            name: ErrRevoked
+            private: "core/entitlement: the subject is absent from a roster that was itself valid"
+            public: this entitlement has been revoked
+            reason: REVOKED
+          - code: CodeLicenceExpired
+            doc: |-
+              ErrLicenseExpired reports that the subject's own validity window has
+              closed, even though the roster itself is fresh and still lists them.
+              Distinct from ErrRosterStale (the whole roster's signing freshness)
+              and from ErrRevoked (removed from the roster entirely): renewal, not
+              rotation or re-enrolment, is what resolves this one.
+            name: ErrLicenseExpired
+            private: "core/entitlement: the subject's own validity window has closed"
+            public: this entitlement has expired
+            reason: LICENCE_EXPIRED
+          - code: CodeKeyMismatch
+            doc: |-
+              ErrKeyMismatch reports that the local key does not match the
+              fingerprint the roster records for this UUID, which is what a copied
+              .pub file looks like: the public half is published, so possession of
+              it proves nothing.
+            name: ErrKeyMismatch
+            private: "core/entitlement: the local key fingerprint differs from the roster's"
+            public: the local key does not match the published fingerprint
+            reason: KEY_MISMATCH
+          - code: CodeRosterUnreachable
+            doc: |-
+              ErrRosterUnreachable reports that no origin could be reached AND no
+              usable bundle was cached, so no authorization decision could be made at
+              all. It is deliberately distinct from a refusal: the caller knows
+              nothing, rather than knowing the answer is no.
+
+              It names the NETWORK even when the cache is what failed last. The cache
+              is a fallback nobody configured and most operators have never heard of;
+              pointing them at it would send them to fix the wrong thing, when what
+              happened is that every publication point was unreachable.
+            name: ErrRosterUnreachable
+            private: "core/entitlement: no origin answered and nothing was cached — cannot decide, which is not the same as no"
+            public: the roster could not be reached
+            reason: ROSTER_UNREACHABLE
+          - code: CodeAmbiguousLicence
+            doc: |-
+              ErrAmbiguousLicense reports that the key directory holds more than one
+              usable licence identity, so which one this machine presents cannot be
+              decided here. It is deliberately distinct from ErrNoLicense: the
+              machine is enrolled, possibly several times over, and the fix is to
+              remove the identities that do not belong rather than to enrol.
+
+              Guessing was the previous behaviour — the lexicographically first UUID
+              won — which let a stray .pub decide which licence got verified, which
+              one a rotation overwrote, and which one `license status` reported.
+            name: ErrAmbiguousLicense
+            private: "core/entitlement: several subjects are enrolled and no automatic choice is safe"
+            public: more than one entitlement identity is present on this machine
+            reason: AMBIGUOUS_LICENCE
+          - code: CodeCIUnverifiable
+            doc: |-
+              ErrCIUnverifiable reports that a claim of running inside CI could not
+              be authenticated: no token, a malformed one, a bad signature, or one
+              minted for someone else. It never means "not in CI" — it means the
+              claim was not provable, and the caller falls back to the ordinary
+              device path rather than granting a free seat.
+            name: ErrCIUnverifiable
+            private: "core/entitlement: the CI provenance token was absent or unverifiable"
+            public: this run could not be proven to be a CI run
+            reason: CI_UNVERIFIABLE
+          - code: CodeCIUnknownKey
+            doc: |-
+              ErrCIUnknownKey reports that the token names a signing key the fetched
+              key set does not publish — a key rotated out from under a token still in
+              flight, or a forgery. Distinct from ErrCIUnverifiable because the two
+              send an operator to different places: this one says the issuer's key set
+              and the token disagree, which is the issuer's side of the exchange.
+
+              It used to promise a remedy the client applies itself — "refresh the key
+              set once, since GitHub rotates keys, then refuse if it still does not
+              appear". No implementation does that and none is expected to: the
+              verifier holds no key-set cache, so it already fetches the published set
+              fresh on every verification and a rotation is picked up by the next one.
+              A second fetch inside one verification would re-read a URL it read
+              seconds earlier, which cannot make an endpoint publish a kid it does not
+              publish. See the service's publishedJWKS for the argument in full; a
+              sentinel must not advertise a mechanism nobody implements.
+            name: ErrCIUnknownKey
+            private: "core/entitlement: no JWKS entry matched the token's kid"
+            public: the CI token is signed by a key the issuer does not publish
+            reason: CI_UNKNOWN_KEY
+          - code: CodeCINotEntitled
+            doc: |-
+              ErrCINotEntitled reports that the CI run authenticated, but the account
+              it belongs to is not one the roster covers. The token is genuine; the
+              licence simply does not extend to it.
+            name: ErrCINotEntitled
+            private: "core/entitlement: the roster carries no CI seat for this account"
+            public: this CI account is not covered by an entitlement
+            reason: CI_NOT_ENTITLED
+          - code: CodeNoPossession
+            doc: |-
+              ErrNoPossession reports that the private half could not be exercised,
+              so holding the public key was never turned into proof of ownership.
+            name: ErrNoPossession
+            private: "core/entitlement: the possession challenge was not answered correctly"
+            public: possession of the private key could not be proven
+            reason: NO_POSSESSION
+          - code: CodeClockRegressed
+            doc: |-
+              ErrClockRegressed reports that this machine's clock reads EARLIER than
+              the newest vendor-signed instant it has ever authenticated.
+
+              It is the one statement about time this package can make without the
+              network, and it is worth making because the alternative is to believe a
+              clock the holder controls. A roster is signed evidence that time was at
+              least its IssuedAt; a clock that has since moved backwards past that
+              point is either broken or being moved, and both are the holder's to fix.
+
+              What it does NOT catch is a FROZEN clock: parked exactly on the mark,
+              nothing local can tell that time has passed. Nor does it survive
+              deletion — the mark lives on a disk its holder owns. It bounds the
+              careless case and the casual one, which is this package's whole remit.
+            name: ErrClockRegressed
+            private: "core/entitlement: the anti-rollback ratchet refused a clock earlier than the recorded high-water mark"
+            public: this machine's clock is behind the last signed document it verified
+            reason: CLOCK_REGRESSED
+          - code: CodeUpdateRequired
+            doc: |-
+              ErrUpdateRequired reports that the roster demands a newer binary than
+              this one. It is NOT a licence failure — the subject is perfectly
+              entitled — so it carries its own sentinel and its own exit code: the
+              resolving action is an upgrade, and telling somebody their licence is
+              broken when it is not would send them to the wrong place entirely.
+            name: ErrUpdateRequired
+            private: "core/entitlement: the running build is below the floor the roster mandates"
+            public: a newer version is required
+            reason: UPDATE_REQUIRED
     types:
       - interface:
           methods:
@@ -346,39 +581,22 @@ packages:
             - name: ExpiresAt
               tag: json:"exp"
               type: time.Time
-    variables:
-      - name: ErrNoLicense
-        type: "*errs.Error"
-      - name: ErrRosterUnsigned
-        type: "*errs.Error"
-      - name: ErrRosterStale
-        type: "*errs.Error"
-      - name: ErrRevoked
-        type: "*errs.Error"
-      - name: ErrLicenseExpired
-        type: "*errs.Error"
-      - name: ErrKeyMismatch
-        type: "*errs.Error"
-      - name: ErrRosterUnreachable
-        type: "*errs.Error"
-      - name: ErrAmbiguousLicense
-        type: "*errs.Error"
-      - name: ErrCIUnverifiable
-        type: "*errs.Error"
-      - name: ErrCIUnknownKey
-        type: "*errs.Error"
-      - name: ErrCINotEntitled
-        type: "*errs.Error"
-      - name: ErrNoPossession
-        type: "*errs.Error"
-      - name: ErrClockRegressed
-        type: "*errs.Error"
-      - name: ErrUpdateRequired
-        type: "*errs.Error"
-  - constants:
-      - name: CodeCacheUnwritable
+  - codes:
+      - const:
+          - doc: |-
+              CodeCacheUnwritable identifies an offline cache that could not be replaced.
+
+              It is never a refusal. The verification that produced the bundle already
+              succeeded, and what is lost is the next start-up's ability to answer without
+              the network — which is why rememberRoster logs it and carries on rather than
+              returning it. The code exists so that line has something to name, and so the
+              step that failed (mkdir, create, write, close, rename) travels as a field
+              instead of as prose.
+            name: CodeCacheUnwritable
+            note: "range: 0.3.67.0 - 0.3.67.255"
+            value: "0x00_03_43_01"
         type: errs.Code
-        value: "0x00_03_43_01"
+    constants:
       - name: ActionsJWKSURL
         type: string
         value: "\"https://token.actions.githubusercontent.com/.well-known/jwks\""
@@ -557,6 +775,22 @@ packages:
       http: net/http
       rsa: crypto/rsa
     path: github.com/kitsunium/sdk/framework/internal/service/entitlement
+    sentinels:
+      - var:
+          - code: CodeCacheUnwritable
+            doc: |-
+              CacheUnwritable is returned when the offline bundle cannot be replaced.
+
+              It is deliberately NOT a refusal, and nothing upstream treats it as
+              one: the verification that produced these bytes has already succeeded,
+              and a cache nobody can write costs the offline fallback and nothing
+              else. rememberRoster logs it and carries on, which is the whole of its
+              reachability — pinned by
+              Test_rememberRoster_keepsWhatItCanAndSurvivesWhatItCannot.
+            name: CacheUnwritable
+            private: "service/entitlement: staging or installing the cached bundle failed; the fields name the step and the path"
+            public: the offline entitlement cache could not be written
+            reason: CACHE_UNWRITABLE
     types:
       - name: BundleValue
         struct:
@@ -752,7 +986,5 @@ packages:
             - name: Required
               type: string
     variables:
-      - name: CacheUnwritable
-        type: "*errs.Error"
       - name: RoughtimeServers
         type: "[]RoughtimeServerValue"

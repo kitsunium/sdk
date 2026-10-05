@@ -1,3 +1,12 @@
+// Package id — ranges 0.2.7.* (ADR 0024 core/app/id block) and 0.3.39.*
+// (ADR 0024 service/app/id block, declared here since ADR 0160).
+//
+// Package id — declares the sentinels of the domain: those the Generator
+// facade returns, and those the concrete schemes raise. A registry sentinel's
+// name equals its errs.Define Reason in SCREAMING_SNAKE form; a scheme
+// sentinel's Reason is its Code constant's name, minus Code, in the same form
+// (ADR 0020's namespaced derivation: CodeIDMalformed → ID_MALFORMED).
+//
 // Package id declares the identifier-generation port of the SDK: the Generator
 // contract and the typed Scheme string under which a generator registers. It is
 // a core sibling beside codec, writer, crypto, logger, transform, and proc

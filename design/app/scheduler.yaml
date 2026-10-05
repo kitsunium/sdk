@@ -1,34 +1,85 @@
 apiVersion: kit.kitsunium/design/v2
 domain: app/scheduler
 packages:
-  - constants:
-      - name: CodeInvalidEntry
+  - codes:
+      - const:
+          - doc: |-
+              CodeInvalidEntry identifies an Add refused because the entry could never
+              run: an empty name, a nil Job, or a nil Schedule.
+            name: CodeInvalidEntry
+            note: "range: 0.2.12.0 - 0.2.12.255"
+            value: "0x00_02_0C_01"
         type: errs.Code
-        value: "0x00_02_0C_01"
-      - name: CodeDuplicateJob
+      - const:
+          - doc: |-
+              CodeDuplicateJob identifies an Add refused because the entry's name is
+              already registered on this Scheduler.
+            name: CodeDuplicateJob
+            value: "0x00_02_0C_02"
         type: errs.Code
-        value: "0x00_02_0C_02"
-      - name: CodeSchedulerRunning
+      - const:
+          - doc: |-
+              CodeSchedulerRunning identifies an Add or a second Run refused because the
+              Scheduler is already running.
+            name: CodeSchedulerRunning
+            value: "0x00_02_0C_03"
         type: errs.Code
-        value: "0x00_02_0C_03"
-      - name: CodeJobPanicked
+      - const:
+          - doc: |-
+              CodeJobPanicked identifies a Job that panicked; the scheduler recovered,
+              reported it as this entry's result, and kept running.
+            name: CodeJobPanicked
+            value: "0x00_02_0C_04"
         type: errs.Code
-        value: "0x00_02_0C_04"
-      - name: CodeInvalidExpression
+      - const:
+          - doc: |-
+              CodeInvalidExpression identifies a cron expression this parser understands
+              the shape of but cannot accept: a malformed field, a value outside its
+              field's range, an inverted range, a non-positive step.
+            name: CodeInvalidExpression
+            note: |-
+              range: 0.3.43.0 - 0.3.43.255
+
+              The parser's refusals of a schedule. The range was allocated to
+              internal/service/app/scheduler, which raises these codes while it parses a
+              cron expression or an interval, and it is declared here with the
+              registration refusals so that every code of the domain is in one place
+              (ADR 0160). A code keeps the value its allocation gave it whichever layer
+              declares it, so the layer byte still reads 3.
+            value: "0x00_03_2B_01"
         type: errs.Code
-        value: "0x00_03_2B_01"
-      - name: CodeUnsupportedSyntax
+      - const:
+          - doc: |-
+              CodeUnsupportedSyntax identifies a cron construct that exists in some other
+              dialect and that this parser refuses BY NAME rather than by guessing: a
+              six-field (seconds) expression, @reboot, @every, and the Quartz L / W / # /
+              ? operators.
+            name: CodeUnsupportedSyntax
+            value: "0x00_03_2B_02"
         type: errs.Code
-        value: "0x00_03_2B_02"
-      - name: CodeUnreachableSchedule
+      - const:
+          - doc: |-
+              CodeUnreachableSchedule identifies a syntactically valid expression that
+              matches no instant on the calendar — "31 April", "30 February" — and is
+              therefore refused at construction rather than registered as a job that would
+              never run.
+            name: CodeUnreachableSchedule
+            value: "0x00_03_2B_03"
         type: errs.Code
-        value: "0x00_03_2B_03"
-      - name: CodeInvalidLocation
+      - const:
+          - doc: |-
+              CodeInvalidLocation identifies a nil *time.Location handed to
+              ParseInLocation, which is what an unchecked time.LoadLocation looks like.
+            name: CodeInvalidLocation
+            value: "0x00_03_2B_04"
         type: errs.Code
-        value: "0x00_03_2B_04"
-      - name: CodeInvalidInterval
+      - const:
+          - doc: |-
+              CodeInvalidInterval identifies a non-positive duration handed to Every,
+              which would be a schedule due infinitely often.
+            name: CodeInvalidInterval
+            value: "0x00_03_2B_05"
         type: errs.Code
-        value: "0x00_03_2B_05"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/app/scheduler
@@ -65,6 +116,100 @@ packages:
             out:
               - type: error
         name: Scheduler
+    sentinels:
+      - var:
+          - code: CodeInvalidEntry
+            doc: InvalidEntry is returned by Add for an entry that could never run.
+            name: InvalidEntry
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "core/app/scheduler: entry has an empty name, a nil Job or a nil Schedule; the field names which"
+            public: The scheduler entry is not runnable and was refused
+            reason: INVALID_ENTRY
+          - code: CodeDuplicateJob
+            doc: DuplicateJob is returned by Add when the entry's name is already taken.
+            name: DuplicateJob
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "core/app/scheduler: entry names are unique per Scheduler; the field carries the name"
+            public: A job is already registered under that name
+            reason: DUPLICATE_JOB
+          - code: CodeSchedulerRunning
+            doc: |-
+              SchedulerRunning is returned by Add, and by a second Run, while the
+              Scheduler is running. The entry set is fixed for the duration of a Run
+              so the loop needs no wake-up channel and no lock on its hot path; adding
+              between runs is allowed.
+            name: SchedulerRunning
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "core/app/scheduler: the entry set is frozen for the duration of a Run; add before Run, or after it returns"
+            public: The scheduler is already running
+            reason: SCHEDULER_RUNNING
+          - code: CodeJobPanicked
+            doc: |-
+              JobPanicked is the result Err for a Job that panicked. The scheduler
+              recovers it rather than letting it reach the runtime, because one job's
+              bug must not take the process — and every other job — down with it. The
+              recovered value travels as a field; it is never the wrap origin, so a
+              panicking job cannot hijack this code.
+            name: JobPanicked
+            private: "core/app/scheduler: job panicked; the scheduler recovered and kept running — the fields carry the job name and the panic value"
+            public: The scheduled job panicked and was recovered
+            reason: JOB_PANICKED
+          - code: CodeInvalidExpression
+            doc: |-
+              InvalidExpression is returned by Parse for a malformed or out-of-range
+              cron field.
+            name: InvalidExpression
+            note: |-
+              The parser's refusals of a schedule the caller wrote down, raised by
+              internal/service/app/scheduler. They are declared here, with the
+              registration refusals, so that the domain's codes and sentinels are in one
+              place (ADR 0160).
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "service/app/scheduler: cron field malformed or out of range; the fields name the field, the item and the accepted range"
+            public: The cron expression is not valid
+            reason: INVALID_EXPRESSION
+          - code: CodeUnsupportedSyntax
+            doc: |-
+              UnsupportedSyntax is returned by Parse for a construct this subset
+              refuses by name instead of interpreting. Refusing loudly is the whole
+              point: a parser that silently ignores a Quartz "L" would run a job on
+              the wrong day and report success.
+            name: UnsupportedSyntax
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "service/app/scheduler: five-field POSIX cron plus @yearly/@monthly/@weekly/@daily/@hourly only; the fields name what was rejected"
+            public: That cron syntax is outside the accepted subset
+            reason: UNSUPPORTED_SYNTAX
+          - code: CodeUnreachableSchedule
+            doc: |-
+              UnreachableSchedule is returned by Parse for a valid expression that
+              matches no instant within the search horizon.
+            name: UnreachableSchedule
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "service/app/scheduler: expression parsed but no instant matches within the horizon — e.g. day 31 of a 30-day month"
+            public: The cron expression matches no date on the calendar
+            reason: UNREACHABLE_SCHEDULE
+          - code: CodeInvalidLocation
+            doc: InvalidLocation is returned by ParseInLocation for a nil location.
+            name: InvalidLocation
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "service/app/scheduler: ParseInLocation needs a non-nil *time.Location; use Parse for UTC"
+            public: A time zone is required and none was given
+            reason: INVALID_LOCATION
+          - code: CodeInvalidInterval
+            doc: InvalidInterval is returned by Every for a non-positive duration.
+            name: InvalidInterval
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "service/app/scheduler: Every needs a positive period; a non-positive one is due infinitely often"
+            public: The interval must be greater than zero
+            reason: INVALID_INTERVAL
     types:
       - name: Job
         underlying: func(ctx context.Context) error
@@ -98,25 +243,6 @@ packages:
               type: bool
             - name: Err
               type: error
-    variables:
-      - name: InvalidEntry
-        type: "*errs.Error"
-      - name: DuplicateJob
-        type: "*errs.Error"
-      - name: SchedulerRunning
-        type: "*errs.Error"
-      - name: JobPanicked
-        type: "*errs.Error"
-      - name: InvalidExpression
-        type: "*errs.Error"
-      - name: UnsupportedSyntax
-        type: "*errs.Error"
-      - name: UnreachableSchedule
-        type: "*errs.Error"
-      - name: InvalidLocation
-        type: "*errs.Error"
-      - name: InvalidInterval
-        type: "*errs.Error"
   - functions:
       - in:
           - name: expr

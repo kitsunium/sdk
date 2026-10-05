@@ -6,9 +6,8 @@ go_library(
     name = "batcher",
     srcs = [
         "batcher.go",
-        "codes.go",
+        "codes_gen.go",
         "config.go",
-        "errors.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/kernel/concur/batcher",
     visibility = [

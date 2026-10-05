@@ -589,7 +589,7 @@ type Encoder = encoder.Encoder
 ```
 
 <a name="NewJSONEncoder"></a>
-### func [NewJSONEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/encoder.go#L25>)
+### func [NewJSONEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/encoder.go#L27>)
 
 ```go
 func NewJSONEncoder() Encoder
@@ -598,7 +598,7 @@ func NewJSONEncoder() Encoder
 NewJSONEncoder returns a structured single\-line JSON encoder, rendering each record as one encoding/json\-compatible object per line: \{"ts":…,"level":…,"msg":…,\<flat attrs\>\}. Grouped attributes flatten to dotted keys \("g1.g2.key"\) to match the text encoder's convention. Pass it to NewWithSink via SinkConfig.Encoder for machine\-readable output.
 
 <a name="NewTextEncoder"></a>
-### func [NewTextEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/encoder.go#L15>)
+### func [NewTextEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/encoder.go#L17>)
 
 ```go
 func NewTextEncoder() Encoder
@@ -625,7 +625,7 @@ type FileConfig = corewriter.FileConfig
 ```
 
 <a name="Format"></a>
-## type [Format](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/fromconfig.go#L21>)
+## type [Format](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/fromconfig.go#L24>)
 
 Format is the typed wire\-format identifier accepted by FromConfig. It is a stable alias onto the core codec dispatch surface, so a consumer names a format with the same string values the codec facade exposes.
 
@@ -810,7 +810,7 @@ Without that import the file/console Names do not resolve and DefaultMulti retur
 Like every Logger NewMulti returns, it owns the writers it opened and implements io.Closer: Close releases the console writer and the file.
 
 <a name="FromConfig"></a>
-### func [FromConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/fromconfig.go#L38>)
+### func [FromConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/fromconfig.go#L41>)
 
 ```go
 func FromConfig(format Format, raw []byte) (lg Logger, err error)

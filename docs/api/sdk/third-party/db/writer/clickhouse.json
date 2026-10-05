@@ -39,7 +39,7 @@
         "public": "ClickHouse writer could not initialise its client"
       },
       "doc": "ClientInitFailed wraps a failure to build the sql handle: an invalid table\nor an unresolvable credential provider.\n",
-      "file": "errors.go",
+      "file": "codes_gen.go",
       "layer": "thirdparty"
     },
     {
@@ -54,7 +54,7 @@
         "value": "0.3.33.1"
       },
       "doc": "CodeCHClientInitFailed identifies a failure to build the database/sql handle\nat Open time (nil/invalid table or an unresolvable credential provider).\nExitCode defaults to 74 (EX_IOERR).\n",
-      "file": "codes.go",
+      "file": "codes_gen.go",
       "layer": "thirdparty"
     },
     {
@@ -69,7 +69,7 @@
         "value": "0.3.33.2"
       },
       "doc": "CodeCHInsertFailed identifies a failed batch INSERT on the drainer goroutine.\nExitCode defaults to 74 (EX_IOERR).\n",
-      "file": "codes.go",
+      "file": "codes_gen.go",
       "layer": "thirdparty"
     },
     {
@@ -85,7 +85,7 @@
         "public": "ClickHouse writer failed to insert a log batch"
       },
       "doc": "InsertFailed wraps a failed batch INSERT.\n",
-      "file": "errors.go",
+      "file": "codes_gen.go",
       "layer": "thirdparty"
     },
     {

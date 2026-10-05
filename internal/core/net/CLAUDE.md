@@ -39,8 +39,8 @@ adapter.
 
 | File | Surface |
 |---|---|
-| `codes.go` | the 34 `Code` constants, `0.2.11.1` – `0.2.11.34` |
-| `errors.go` | the matching `*errs.Error` sentinels + the local sysexits constants |
+| `codes_gen.go` | the 34 `Code` constants, `0.2.11.1` – `0.2.11.34`; the matching `*errs.Error` sentinels — written by kit gen from `design/net.yaml` (ADR 0164) |
+| `errors.go` | the local sysexits constants the sentinels name: `exitUsage`, `exitDataErr`, `exitUnavailable`, `exitSoftware`, `exitOSErr`, `exitTempFail`, `exitNoPerm`, `exitConfig` |
 | `wrap.go` | `wrapAs(sentinel, cause, fields...)` — origin-wins sentinel wrapping |
 | `identity.go` | `IdentityValue` — the opaque, redacting TLS identity + `NewIdentityValue` |
 | `identity_params.go` | `IdentityParams` — in-memory TLS material |

@@ -16,7 +16,7 @@ span and phase change on it when `KIT_TELEMETRY` names a socket at the start
 | `exporter.go` | the exporter's behaviour: `NewExporter(*ExporterConfig)`, `Ref`, `Instance`, `Emit` — the bounded ring, one CAS per event, drop and count when full —, `Start`, `Stop`, `Dropped`, `Sent`, the handshake line; a client whose close fails is logged, never returned |
 | `telemetry_interface.go` | `Emitter` (the port a product emits to), and the exporter's narrow views of its listener (`accepter`) and of a client (`writer`) |
 | `exporter_compliance.go` | `var _ Emitter = (*Exporter)(nil)` |
-| `codes.go` / `errors.go` | `0.4.3.1` `MISCONFIGURED`, `0.4.3.2` `RUNNING` |
+| `codes_gen.go` | `0.4.3.1` `MISCONFIGURED`, `0.4.3.2` `RUNNING` — written by kit gen from `design/framework/telemetry.yaml` (ADR 0164) |
 | `BENCH.md` | `Emit` 11 ns / 0 allocs, `Nop` 3 ns |
 
 ## Rules

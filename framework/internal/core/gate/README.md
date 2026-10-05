@@ -67,7 +67,7 @@ const CodePolicyInvalid errs.Code = 0x00_02_24_01 // 0.2.36.1
 ```
 
 <a name="DecisionValue"></a>
-## type [DecisionValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/gate/decision.go#L51-L79>)
+## type [DecisionValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/gate/decision.go#L53-L81>)
 
 DecisionValue is what the gate concluded about one invocation.
 
@@ -106,7 +106,7 @@ type DecisionValue struct {
 ```
 
 <a name="Outcome"></a>
-## type [Outcome](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/gate/decision.go#L9>)
+## type [Outcome](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/gate/decision.go#L11>)
 
 Outcome is what the caller should do with an invocation.
 
@@ -137,7 +137,7 @@ const (
 ```
 
 <a name="Outcome.String"></a>
-### func \(Outcome\) [String](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/gate/decision.go#L29>)
+### func \(Outcome\) [String](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/gate/decision.go#L31>)
 
 ```go
 func (o Outcome) String() string

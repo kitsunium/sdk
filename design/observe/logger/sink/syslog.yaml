@@ -1,41 +1,97 @@
 apiVersion: kit.kitsunium/design/v2
 domain: observe/logger/sink/syslog
 packages:
-  - constants:
-      - name: CodeSyslogAddrEmpty
+  - codes:
+      - const:
+          - doc: CodeSyslogAddrEmpty identifies a New call made with an empty address.
+            name: CodeSyslogAddrEmpty
+            note: "range: 0.3.15.0 - 0.3.15.255"
+            value: "0x00_03_0F_01"
         type: errs.Code
-        value: "0x00_03_0F_01"
-      - name: CodeSyslogDialFailed
+      - const:
+          - doc: CodeSyslogDialFailed identifies a New call whose net.Dial failed.
+            name: CodeSyslogDialFailed
+            value: "0x00_03_0F_02"
         type: errs.Code
-        value: "0x00_03_0F_02"
-      - name: CodeSyslogWriteFailed
+      - const:
+          - doc: |-
+              CodeSyslogWriteFailed identifies a Write call whose underlying net.Conn
+              returned a non-nil error; ExitCode defaults to 74 (EX_IOERR) for this case.
+            name: CodeSyslogWriteFailed
+            value: "0x00_03_0F_03"
         type: errs.Code
-        value: "0x00_03_0F_03"
-      - name: CodeSyslogCloseFailed
+      - const:
+          - doc: |-
+              CodeSyslogCloseFailed identifies a Close call whose net.Conn.Close returned
+              an error; surfaces network teardown failures so callers can react.
+            name: CodeSyslogCloseFailed
+            value: "0x00_03_0F_04"
         type: errs.Code
-        value: "0x00_03_0F_04"
-      - name: CodeSyslogProtoInvalid
+      - const:
+          - doc: |-
+              CodeSyslogProtoInvalid identifies a New call with an unsupported network.
+              Only "udp" and "tcp" are accepted today.
+            name: CodeSyslogProtoInvalid
+            value: "0x00_03_0F_05"
         type: errs.Code
-        value: "0x00_03_0F_05"
-      - name: CodeSyslogCtxCancelled
+      - const:
+          - doc: |-
+              CodeSyslogCtxCancelled identifies a Write or Flush call whose context was
+              already done. Wraps the stdlib context error so the typed-errors-only SDK
+              rule is satisfied and consumers can HasCode / errors.Is against it.
+            name: CodeSyslogCtxCancelled
+            value: "0x00_03_0F_06"
         type: errs.Code
-        value: "0x00_03_0F_06"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/observe/logger/sink/syslog
-    variables:
-      - name: AddrEmpty
-        type: "*errs.Error"
-      - name: ProtoInvalid
-        type: "*errs.Error"
-      - name: DialFailed
-        type: "*errs.Error"
-      - name: WriteFailed
-        type: "*errs.Error"
-      - name: CloseFailed
-        type: "*errs.Error"
-      - name: CtxCancelled
-        type: "*errs.Error"
+    sentinels:
+      - var:
+          - code: CodeSyslogAddrEmpty
+            doc: AddrEmpty is returned when New receives an empty network address.
+            name: AddrEmpty
+            private: service/observe/logger/sink/syslog.New called with empty address
+            public: Syslog sink requires a non-empty address
+            reason: SYSLOG_ADDR_EMPTY
+          - code: CodeSyslogProtoInvalid
+            doc: ProtoInvalid is returned when New receives an unsupported network.
+            name: ProtoInvalid
+            private: service/observe/logger/sink/syslog.New called with unsupported network
+            public: Syslog sink supports only 'udp' or 'tcp'
+            reason: SYSLOG_PROTO_INVALID
+          - code: CodeSyslogDialFailed
+            doc: DialFailed wraps a net.Dial failure at construction time.
+            name: DialFailed
+            options:
+              - errs.WithExitCode(exitIOErr)
+            private: "service/observe/logger/sink/syslog.New: net.Dial returned an error"
+            public: Syslog sink could not dial the destination
+            reason: SYSLOG_DIAL_FAILED
+          - code: CodeSyslogWriteFailed
+            doc: WriteFailed wraps the underlying net.Conn.Write error at Write time.
+            name: WriteFailed
+            options:
+              - errs.WithExitCode(exitIOErr)
+            private: service/observe/logger/sink/syslog.Write underlying net.Conn returned an error
+            public: Syslog write failed
+            reason: SYSLOG_WRITE_FAILED
+          - code: CodeSyslogCloseFailed
+            doc: CloseFailed wraps the underlying net.Conn.Close error at Close time.
+            name: CloseFailed
+            options:
+              - errs.WithExitCode(exitIOErr)
+            private: service/observe/logger/sink/syslog.Close underlying net.Conn.Close returned an error
+            public: Syslog close failed
+            reason: SYSLOG_CLOSE_FAILED
+          - code: CodeSyslogCtxCancelled
+            doc: |-
+              CtxCancelled wraps a context that was already done when Write or
+              Flush was entered. Provided as a typed sentinel so consumers match
+              via HasCode / errors.Is without reaching for stdlib context errors.
+            name: CtxCancelled
+            private: service/observe/logger/sink/syslog.Write or Flush saw a cancelled context
+            public: Syslog sink aborted due to cancellation
+            reason: SYSLOG_CTX_CANCELLED
   - functions:
       - in:
           - name: network

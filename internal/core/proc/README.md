@@ -24,7 +24,7 @@ package directly.
 - **Value types** (`Spec`, `ExitValue`, `LimitValue`, `NotificationValue`,
   `Signal`, `Resource`) are immutable and carry no policy.
 - **Errors**: the whole domain shares one dotted-quad PP octet (`0.2.6.*`); every
-  sentinel is declared in `errors.go` and only wrapped downstream.
+  sentinel is declared in `codes_gen.go` (written by kit gen from the design, ADR 0164) and only wrapped downstream.
 
 ## Platform
 

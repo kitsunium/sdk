@@ -14,10 +14,6 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
 
-// CodeScopeUnknown reports a scope whose value could not be read at the
-// start: no current user, no executable path, no configuration directory.
-const CodeScopeUnknown errs.Code = 0x00_04_02_3C // 0.4.2.60 — a scope's value could not be read
-
 // scopeKeyBytes is how many bytes of the scopes' SHA-256 name a lock or a
 // socket: 16 hex digits keep a socket path under sun_path.
 const scopeKeyBytes int = 8

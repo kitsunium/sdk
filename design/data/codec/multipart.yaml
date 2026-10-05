@@ -1,41 +1,98 @@
 apiVersion: kit.kitsunium/design/v2
 domain: data/codec/multipart
 packages:
-  - constants:
-      - name: CodeMultipartMarshalFailed
+  - codes:
+      - const:
+          - doc: |-
+              CodeMultipartMarshalFailed identifies a failure while writing a
+              multipart/form-data body — a part header, a part body, or the JSON
+              intermediate produced for the JSON-mediated single-part shape.
+            name: CodeMultipartMarshalFailed
+            note: "range: 0.3.41.0 - 0.3.41.255"
+            value: "0x00_03_29_01"
         type: errs.Code
-        value: "0x00_03_29_01"
-      - name: CodeMultipartUnmarshalFailed
+      - const:
+          - doc: |-
+              CodeMultipartUnmarshalFailed identifies a failure while parsing a
+              multipart/form-data body: a malformed part header, a part with no form-data
+              name, a missing closing delimiter, or a JSON-mediated part whose payload is
+              not valid JSON.
+            name: CodeMultipartUnmarshalFailed
+            value: "0x00_03_29_02"
         type: errs.Code
-        value: "0x00_03_29_02"
-      - name: CodeMultipartValueInvalid
+      - const:
+          - doc: |-
+              CodeMultipartValueInvalid identifies a Marshal / Unmarshal / Encode call
+              whose argument shape the codec cannot honour — an Unmarshal target that is
+              not a non-nil pointer, a Part carrying no field name, or a Part whose Name,
+              FileName or ContentType carries a CR, LF or NUL (field "field" names which).
+            name: CodeMultipartValueInvalid
+            value: "0x00_03_29_03"
         type: errs.Code
-        value: "0x00_03_29_03"
-      - name: CodeMultipartBoundaryInvalid
+      - const:
+          - doc: |-
+              CodeMultipartBoundaryInvalid identifies a boundary the codec cannot use:
+              caller-supplied but outside the RFC 2046 charset / length, or absent from a
+              body whose first delimiter line could not be recovered.
+            name: CodeMultipartBoundaryInvalid
+            value: "0x00_03_29_04"
         type: errs.Code
-        value: "0x00_03_29_04"
-      - name: CodeMultipartLimitExceeded
+      - const:
+          - doc: |-
+              CodeMultipartLimitExceeded identifies a payload that crossed one of the
+              configured bounds — per-part bytes, part count, or aggregate bytes.
+            name: CodeMultipartLimitExceeded
+            value: "0x00_03_29_05"
         type: errs.Code
-        value: "0x00_03_29_05"
-      - name: CodeMultipartLimitsInvalid
+      - const:
+          - doc: |-
+              CodeMultipartLimitsInvalid identifies a Limits value the codec refuses to
+              interpret: a negative bound is neither a bound nor a documented default,
+              and guessing which one the caller meant is exactly what ADR 0031 forbids.
+            name: CodeMultipartLimitsInvalid
+            value: "0x00_03_29_06"
         type: errs.Code
-        value: "0x00_03_29_06"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/data/codec/multipart
-    variables:
-      - name: MarshalFailed
-        type: "*errs.Error"
-      - name: UnmarshalFailed
-        type: "*errs.Error"
-      - name: ValueInvalid
-        type: "*errs.Error"
-      - name: BoundaryInvalid
-        type: "*errs.Error"
-      - name: LimitExceeded
-        type: "*errs.Error"
-      - name: LimitsInvalid
-        type: "*errs.Error"
+    sentinels:
+      - var:
+          - code: CodeMultipartMarshalFailed
+            doc: MarshalFailed wraps a failure raised while writing a part.
+            name: MarshalFailed
+            private: "service/data/codec/multipart: mime/multipart returned an error while writing a part"
+            public: multipart encoding failed
+            reason: MARSHAL_FAILED
+          - code: CodeMultipartUnmarshalFailed
+            doc: UnmarshalFailed wraps a failure raised while parsing a body.
+            name: UnmarshalFailed
+            private: "service/data/codec/multipart: mime/multipart returned an error while reading a part"
+            public: multipart decoding failed
+            reason: UNMARSHAL_FAILED
+          - code: CodeMultipartValueInvalid
+            doc: ValueInvalid fires when the caller's argument shape cannot be honoured.
+            name: ValueInvalid
+            private: "service/data/codec/multipart: Marshal/Unmarshal called with an unusable argument"
+            public: multipart codec rejected the value shape
+            reason: VALUE_INVALID
+          - code: CodeMultipartBoundaryInvalid
+            doc: BoundaryInvalid fires when no usable RFC 2046 boundary is available.
+            name: BoundaryInvalid
+            private: "service/data/codec/multipart: boundary absent from the body or outside the RFC 2046 charset"
+            public: multipart boundary is missing or invalid
+            reason: BOUNDARY_INVALID
+          - code: CodeMultipartLimitExceeded
+            doc: LimitExceeded fires when a payload crosses one of the configured bounds.
+            name: LimitExceeded
+            private: "service/data/codec/multipart: part size, part count or aggregate size crossed its bound"
+            public: multipart payload exceeds a configured limit
+            reason: LIMIT_EXCEEDED
+          - code: CodeMultipartLimitsInvalid
+            doc: LimitsInvalid fires when a Limits value carries a negative bound.
+            name: LimitsInvalid
+            private: "service/data/codec/multipart: a negative bound is neither a limit nor a request for the default"
+            public: multipart limits are not usable
+            reason: LIMITS_INVALID
   - constants:
       - name: JSONPartName
         type: string

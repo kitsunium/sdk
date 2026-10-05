@@ -1,3 +1,5 @@
+// Package codec — range 0.2.2.* (ADR 0005 core/data/codec block).
+//
 // Package codec — declares the registry's boot-time sentinel. Its var name
 // equals its errs.Define Reason in SCREAMING_SNAKE form.
 package codec
@@ -8,14 +10,6 @@ import (
 
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
-
-// DuplicateRegistration is the conflict Register refuses at boot: a distinct
-// codec already holds the Format name, MIME type or extension a second one
-// claims. It is never returned — Register panics with conflictText of it, so
-// the panic carries the dotted-quad header AND the key that collided.
-var DuplicateRegistration = errs.Define(CodeDuplicateRegistration, "DUPLICATE_REGISTRATION",
-	"A codec is already registered under that name, MIME type or extension",
-	"core/data/codec.Register: a distinct codec already holds this Format name, MIME type or extension")
 
 // conflictText renders a registry conflict for the boot panic that reports it:
 // the typed error's header and Public, then each field it carries, quoted.

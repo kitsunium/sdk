@@ -1,5 +1,7 @@
 //go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /pkg/v1/observe/logger/slogbridge .
 
+// Package slogbridge — range 1.1.1.* (ADR 0005 pkg/v1/observe/logger/slogbridge block).
+//
 // Package slogbridge adapts an SDK [logger.Logger] to log/slog so a foreign
 // API that accepts only a *slog.Logger emits through the SDK pipeline.
 //

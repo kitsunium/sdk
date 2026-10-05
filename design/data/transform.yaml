@@ -1,34 +1,92 @@
 apiVersion: kit.kitsunium/design/v2
 domain: data/transform
 packages:
-  - constants:
-      - name: CodeUnknownCompressor
+  - codes:
+      - const:
+          - doc: |-
+              CodeUnknownCompressor identifies a Lookup/Decompress call naming an Algorithm
+              that no imported package has registered. It is also surfaced via panic at
+              boot on a duplicate registration (see registry.go), not only as a sentinel.
+            name: CodeUnknownCompressor
+            note: "range: 0.2.5.0 - 0.2.5.255"
+            value: "0x00_02_05_01"
         type: errs.Code
-        value: "0x00_02_05_01"
-      - name: CodeCompressionFailed
+      - const:
+          - doc: |-
+              CodeCompressionFailed identifies a Compress call whose underlying compressor
+              returned an error — typically a writer fault while flushing the stream.
+            name: CodeCompressionFailed
+            value: "0x00_02_05_02"
         type: errs.Code
-        value: "0x00_02_05_02"
-      - name: CodeDecompressionFailed
+      - const:
+          - doc: |-
+              CodeDecompressionFailed identifies a Decompress call whose underlying
+              decompressor returned an error — malformed input or a truncated stream.
+            name: CodeDecompressionFailed
+            value: "0x00_02_05_03"
         type: errs.Code
-        value: "0x00_02_05_03"
-      - name: CodeCompressedFrameInvalid
+      - const:
+          - doc: |-
+              CodeCompressedFrameInvalid identifies a malformed compressed frame OR a
+              tripped decompression-bomb guard (max output size / max expansion ratio). It
+              is owned by the pkg/v1/data/codec frame layer (a later commit); declared here so
+              the 0.2.5.* block is allocated in one place per ADR 0014.
+            name: CodeCompressedFrameInvalid
+            value: "0x00_02_05_04"
         type: errs.Code
-        value: "0x00_02_05_04"
-      - name: CodeDuplicateRegistration
+      - const:
+          - doc: |-
+              CodeDuplicateRegistration identifies a boot-time collision on the Compressor
+              registry: a nil scheme, or a distinct scheme claiming an already-registered
+              Algorithm. It is surfaced via panic at boot (see registry.go). Its reason is
+              DUPLICATE_REGISTRATION so the bracket header "[<code> <REASON>]" stays a valid
+              (code,reason) pairing per ADR 0005 §Semantics — mirroring the codec registry's
+              CodeDuplicateRegistration (0.2.2.1).
+            name: CodeDuplicateRegistration
+            value: "0x00_02_05_05"
         type: errs.Code
-        value: "0x00_02_05_05"
-      - name: CodeDecompressedTooLarge
+      - const:
+          - doc: |-
+              CodeDecompressedTooLarge identifies a stream whose plaintext exceeded the
+              ceiling the CALLER supplied to BoundedDecompressor.DecompressBounded. It is
+              distinct from the scheme sentinels (GZIP_FAILED and friends) on purpose: a
+              corrupt body and a body that is merely too big are different facts, and a
+              caller that imposed the ceiling is the only one able to say which of the two
+              its own limit produced. Collapsing them would force that caller to report a
+              malformed stream for one whose only established fault is its size.
+            name: CodeDecompressedTooLarge
+            value: "0x00_02_05_06"
         type: errs.Code
-        value: "0x00_02_05_06"
-      - name: CodeGzipFailed
+      - const:
+          - doc: |-
+              CodeGzipFailed identifies a failure inside compress/gzip during either a
+              Compress (writer) or Decompress (reader) operation; the wrap trail and the
+              COMPRESSION_FAILED / DECOMPRESSION_FAILED sentinels distinguish the
+              direction.
+            name: CodeGzipFailed
+            note: |-
+              range: 0.3.26.0 - 0.3.26.255 (0x1a) — the stdlib schemes' codes, allocated by
+              the service layer (LL = 3) and declared here since ADR 0160: a code keeps the
+              value its layer allocated when its declaration moves.
+            value: "0x00_03_1A_01"
         type: errs.Code
-        value: "0x00_03_1A_01"
-      - name: CodeFlateFailed
+      - const:
+          - doc: |-
+              CodeFlateFailed identifies a failure inside compress/flate during either a
+              Compress (writer) or Decompress (reader) operation.
+            name: CodeFlateFailed
+            value: "0x00_03_1A_02"
         type: errs.Code
-        value: "0x00_03_1A_02"
-      - name: CodeZlibFailed
+      - const:
+          - doc: |-
+              CodeZlibFailed identifies a failure inside compress/zlib during either a
+              Compress (writer) or Decompress (reader) operation. It is distinct from
+              CodeFlateFailed because the zlib envelope (RFC 1950) is a distinct wire format
+              from the raw DEFLATE stream (RFC 1951): a stream rejected under one scheme is
+              routinely valid under the other, so the two must be told apart at the code.
+            name: CodeZlibFailed
+            value: "0x00_03_1A_03"
         type: errs.Code
-        value: "0x00_03_1A_03"
     functions:
       - in:
           - name: c
@@ -134,6 +192,92 @@ packages:
               - name: err
                 type: error
         name: BoundedDecompressor
+    sentinels:
+      - var:
+          - code: CodeUnknownCompressor
+            doc: |-
+              UnknownCompressor is returned when no Compressor is registered under the
+              requested Algorithm — typically a missing blank-import of the scheme.
+            name: UnknownCompressor
+            private: "core/data/transform.Lookup: algorithm absent from registry; blank-import the scheme's package to register it"
+            public: No compressor is registered under that algorithm
+            reason: UNKNOWN_COMPRESSOR
+          - code: CodeCompressionFailed
+            doc: |-
+              CompressionFailed wraps a failure from a compressor's underlying writer
+              (e.g. compress/gzip or compress/flate) while encoding the payload.
+            name: CompressionFailed
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "core/data/transform.Compress: the underlying compressor returned an error"
+            public: Compression failed
+            reason: COMPRESSION_FAILED
+          - code: CodeDecompressionFailed
+            doc: |-
+              DecompressionFailed wraps a failure from a decompressor's underlying
+              reader while decoding the payload — malformed or truncated input.
+            name: DecompressionFailed
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "core/data/transform.Decompress: the underlying decompressor returned an error"
+            public: Decompression failed
+            reason: DECOMPRESSION_FAILED
+          - code: CodeCompressedFrameInvalid
+            doc: |-
+              CompressedFrameInvalid is returned for a malformed compressed frame or a
+              tripped decompression-bomb guard. The pkg/v1/data/codec frame layer (a later
+              commit) is its emitter; defined here so the 0.2.5.* block lands in one place.
+            name: CompressedFrameInvalid
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "core/data/transform: compressed-frame header is malformed or the decompression-bomb guard tripped"
+            public: Compressed frame is malformed or exceeds the safety bound
+            reason: COMPRESSED_FRAME_INVALID
+          - code: CodeDecompressedTooLarge
+            doc: |-
+              DecompressedTooLarge reports that a stream's plaintext exceeded the
+              ceiling its caller passed to DecompressBounded. It establishes exactly
+              that and nothing more: more than max plaintext bytes were produced. It
+              does NOT report a well-formed stream — the decode stops at the ceiling,
+              so the trailer is never reached and the bytes past it are never read.
+              Claiming well-formedness here would be claiming the result of work this
+              error exists to avoid doing.
+            name: DecompressedTooLarge
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "core/data/transform.DecompressBounded: plaintext exceeded the caller-supplied max"
+            public: Decompressed payload exceeds the caller's ceiling
+            reason: DECOMPRESSED_TOO_LARGE
+          - code: CodeDuplicateRegistration
+            doc: |-
+              DuplicateRegistration is the boot-time panic sentinel for the Compressor
+              registry: a nil scheme or a distinct scheme claiming a taken Algorithm. Its
+              reason matches the bracket-header word so code 0.2.5.5 resolves to
+              DUPLICATE_REGISTRATION — never the unrelated UNKNOWN_COMPRESSOR (0.2.5.1).
+            name: DuplicateRegistration
+            private: "core/data/transform.Register: a distinct scheme already claims this algorithm, or a nil scheme was supplied"
+            public: A compressor is already registered under that algorithm
+            reason: DUPLICATE_REGISTRATION
+          - code: CodeGzipFailed
+            doc: GzipFailed wraps a failure from compress/gzip (Compress or Decompress).
+            name: GzipFailed
+            private: "service/data/transform: compress/gzip returned an error"
+            public: gzip transform failed
+            reason: GZIP_FAILED
+          - code: CodeFlateFailed
+            doc: FlateFailed wraps a failure from compress/flate (Compress or Decompress).
+            name: FlateFailed
+            private: "service/data/transform: compress/flate returned an error"
+            public: flate transform failed
+            reason: FLATE_FAILED
+          - code: CodeZlibFailed
+            doc: |-
+              ZlibFailed wraps a failure from compress/zlib (Compress or Decompress),
+              including a failed Adler-32 check the raw-DEFLATE scheme cannot detect.
+            name: ZlibFailed
+            private: "service/data/transform: compress/zlib returned an error"
+            public: zlib transform failed
+            reason: ZLIB_FAILED
     types:
       - methods:
           - name: String
@@ -146,25 +290,6 @@ packages:
             recv: value
         name: Algorithm
         underlying: string
-    variables:
-      - name: UnknownCompressor
-        type: "*errs.Error"
-      - name: CompressionFailed
-        type: "*errs.Error"
-      - name: DecompressionFailed
-        type: "*errs.Error"
-      - name: CompressedFrameInvalid
-        type: "*errs.Error"
-      - name: DecompressedTooLarge
-        type: "*errs.Error"
-      - name: DuplicateRegistration
-        type: "*errs.Error"
-      - name: GzipFailed
-        type: "*errs.Error"
-      - name: FlateFailed
-        type: "*errs.Error"
-      - name: ZlibFailed
-        type: "*errs.Error"
   - functions:
       - in:
           - name: level

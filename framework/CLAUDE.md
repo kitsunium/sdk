@@ -39,7 +39,7 @@ the analyzer, the generator, `kit check`.
    hand. `scripts/check-layer-deps.sh` asserts it on the build graph, and
    asserts that nothing below imports the framework.
 2. **Codes.** Layer `4`: `0.4.PP.*`, one `PP` per package, recorded in
-   `codeRangeOwners` (`internal/kernel/errs/registry_ownership_external_test.go`)
+   `codeRangeOwners` (`design/sdk.yaml`'s `codes.ranges`, which kit writes into `internal/kernel/errs/codes_gen_test.go` (ADR 0164))
    in the change that introduces the codes; every package with codes is in
    `//:audit_sources`. The one exception is a code that MOVED here: the four
    distribution domains brought `0.2.33.*`–`0.2.36.*` and `0.3.65.*`–`0.3.67.*`

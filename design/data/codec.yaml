@@ -1,22 +1,42 @@
 apiVersion: kit.kitsunium/design/v2
 domain: data/codec
 packages:
-  - constants:
-      - name: CodeDuplicateRegistration
+  - codes:
+      - const:
+          - doc: |-
+              CodeDuplicateRegistration identifies an init-time collision on the codec
+              registry; two codecs tried to claim the same Name.
+            name: CodeDuplicateRegistration
+            note: "range: 0.2.2.0 - 0.2.2.255"
+            value: "0x00_02_02_01"
         type: errs.Code
-        value: "0x00_02_02_01"
-      - name: CodeEmptyInput
+      - const:
+          - doc: CodeEmptyInput identifies Unmarshal being called with a zero-byte slice.
+            name: CodeEmptyInput
+            value: "0x00_02_02_02"
         type: errs.Code
-        value: "0x00_02_02_02"
-      - name: CodeTargetInvalid
+      - const:
+          - doc: |-
+              CodeTargetInvalid identifies Unmarshal being called with a target that is
+              not a non-nil pointer to a storable value.
+            name: CodeTargetInvalid
+            value: "0x00_02_02_03"
         type: errs.Code
-        value: "0x00_02_02_03"
-      - name: CodeValueInvalid
+      - const:
+          - doc: |-
+              CodeValueInvalid identifies Marshal being called on a value the codec
+              cannot serialise (channel, function, unsupported map key).
+            name: CodeValueInvalid
+            value: "0x00_02_02_04"
         type: errs.Code
-        value: "0x00_02_02_04"
-      - name: CodeCodecNil
+      - const:
+          - doc: |-
+              CodeCodecNil identifies a Register call made with a nil Codec — a
+              nil-argument programmer error distinct from a duplicate registration.
+              Surfaced via panic at boot (see registry.go), mirroring writer.CodeWriterNil.
+            name: CodeCodecNil
+            value: "0x00_02_02_05"
         type: errs.Code
-        value: "0x00_02_02_05"
     functions:
       - in:
           - name: c
@@ -172,6 +192,18 @@ packages:
               - name: ok
                 type: bool
         name: Decoder
+    sentinels:
+      - var:
+          - code: CodeDuplicateRegistration
+            doc: |-
+              DuplicateRegistration is the conflict Register refuses at boot: a distinct
+              codec already holds the Format name, MIME type or extension a second one
+              claims. It is never returned — Register panics with conflictText of it, so
+              the panic carries the dotted-quad header AND the key that collided.
+            name: DuplicateRegistration
+            private: "core/data/codec.Register: a distinct codec already holds this Format name, MIME type or extension"
+            public: A codec is already registered under that name, MIME type or extension
+            reason: DUPLICATE_REGISTRATION
     types:
       - methods:
           - name: Known
@@ -184,9 +216,6 @@ packages:
             recv: value
         name: Format
         underlying: string
-    variables:
-      - name: DuplicateRegistration
-        type: "*errs.Error"
   - constants:
       - name: Any
         type: Kind
@@ -311,6 +340,35 @@ packages:
         target: multipart.Form
       - name: MultipartPart
         target: multipart.Part
+    codes:
+      - const:
+          - doc: CodeUnknownFormat fires when a Format is not registered in the registry.
+            name: CodeUnknownFormat
+            note: "range: 1.2.0.0 - 1.2.0.255"
+            value: "0x01_02_00_01"
+        type: v1errs.Code
+      - const:
+          - doc: |-
+              CodeCodecUnavailable fires when a codec entry exists but is unusable
+              (e.g., blank import missing or build tag not active).
+            name: CodeCodecUnavailable
+            value: "0x01_02_00_02"
+        type: v1errs.Code
+      - const:
+          - doc: |-
+              CodeStreamingUnsupported fires when NewEncoder / NewDecoder is called on
+              a codec that does not implement StreamingCodec.
+            name: CodeStreamingUnsupported
+            value: "0x01_02_00_03"
+        type: v1errs.Code
+      - const:
+          - doc: |-
+              CodePromoteFailed fires when the facade's JSON-bridge promotion path
+              cannot serve the request (unknown Format with no promotion strategy,
+              or a malformed container after the codec populated it).
+            name: CodePromoteFailed
+            value: "0x01_02_00_04"
+        type: v1errs.Code
     constants:
       - name: JSON
         type: Format
@@ -384,18 +442,6 @@ packages:
       - name: Multipart
         type: Format
         value: "\"multipart\""
-      - name: CodeUnknownFormat
-        type: v1errs.Code
-        value: "0x01_02_00_01"
-      - name: CodeCodecUnavailable
-        type: v1errs.Code
-        value: "0x01_02_00_02"
-      - name: CodeStreamingUnsupported
-        type: v1errs.Code
-        value: "0x01_02_00_03"
-      - name: CodePromoteFailed
-        type: v1errs.Code
-        value: "0x01_02_00_04"
       - name: Gzip
         type: CompressAlgorithm
         value: "\"gzip\""
@@ -516,15 +562,42 @@ packages:
       transform: github.com/kitsunium/sdk/pkg/v1/data/transform
       v1errs: github.com/kitsunium/sdk/pkg/v1/errs
     path: github.com/kitsunium/sdk/pkg/v1/data/codec
-    variables:
-      - name: UnknownFormat
-        type: "*errs.Error"
-      - name: CodecUnavailable
-        type: "*errs.Error"
-      - name: StreamingUnsupported
-        type: "*errs.Error"
-      - name: PromoteFailed
-        type: "*errs.Error"
+    sentinels:
+      - var:
+          - code: CodeUnknownFormat
+            doc: |-
+              UnknownFormat is returned when Marshal / Unmarshal / NewEncoder /
+              NewDecoder receives a Format that no codec has registered.
+            name: UnknownFormat
+            private: "pkg/v1/data/codec: Lookup returned false for the requested Format"
+            public: codec format is not registered
+            reason: UNKNOWN_FORMAT
+          - code: CodeCodecUnavailable
+            doc: |-
+              CodecUnavailable is returned when the registry entry exists but the
+              codec itself cannot be used (reserved for future gating).
+            name: CodecUnavailable
+            private: "pkg/v1/data/codec: registered codec cannot serve the request"
+            public: codec is registered but unavailable
+            reason: CODEC_UNAVAILABLE
+          - code: CodeStreamingUnsupported
+            doc: |-
+              StreamingUnsupported is returned when NewEncoder / NewDecoder is
+              called on a codec that does not implement StreamingCodec.
+            name: StreamingUnsupported
+            private: "pkg/v1/data/codec: target codec is not a core/data/codec.StreamingCodec"
+            public: codec does not support streaming
+            reason: STREAMING_UNSUPPORTED
+          - code: CodePromoteFailed
+            doc: |-
+              PromoteFailed is returned when the facade's JSON-bridge promotion
+              cannot serve the request — either the Format has no promotion
+              strategy registered, or the codec populated a container whose
+              shape no longer matches what the wrap stage produced.
+            name: PromoteFailed
+            private: "pkg/v1/data/codec: JSON-bridge promotion path could not serve the request"
+            public: codec promotion failed
+            reason: PROMOTE_FAILED
   - aliases:
       - name: Kind
         target: svcjsonshape.Kind

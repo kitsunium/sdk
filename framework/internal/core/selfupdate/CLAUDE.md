@@ -19,11 +19,11 @@ value when it moves (ADR 0160). Imports: the standard library and
 | `selfupdate.go` | the package doc: why the ORDER of the trust chain is the contract |
 | `selfupdate_interface.go` | `Getter` (network), `FileSystem` (disk), `Copier` (the stream between) |
 | `update_value.go` | `UpdateValue`, `CandidateValue` |
-| `codes.go` / `errors.go` | the range and its eighteen sentinels |
+| `codes_gen.go` | the range and its eighteen sentinels — written by kit gen from `design/framework/selfupdate.yaml` (ADR 0164) |
 
 ## Why-this-shape
 
-- **The order is the security property, and `errors.go` states it.** A detached
+- **The order is the security property, and `codes_gen.go` states it.** A detached
   signature over the checksum manifest, then the archive's digest against that
   now-authenticated manifest, then the disk. A digest checked against an
   unauthenticated manifest proves nothing — whoever can substitute the archive

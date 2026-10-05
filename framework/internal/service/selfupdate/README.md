@@ -289,7 +289,7 @@ var (
 ```
 
 <a name="StdinIsTerminal"></a>
-## func [StdinIsTerminal](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/consent.go#L214>)
+## func [StdinIsTerminal](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/consent.go#L228>)
 
 ```go
 func StdinIsTerminal() bool
@@ -510,7 +510,7 @@ type SourceValue struct {
 ```
 
 <a name="SourceValue.AuthoriseUnattendedUpgrade"></a>
-### func \(SourceValue\) [AuthoriseUnattendedUpgrade](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/consent.go#L52>)
+### func \(SourceValue\) [AuthoriseUnattendedUpgrade](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/consent.go#L66>)
 
 ```go
 func (s SourceValue) AuthoriseUnattendedUpgrade(out io.Writer, in io.Reader, interactive bool) bool
@@ -532,7 +532,7 @@ func (s SourceValue) AutoUpgradeEnv() string
 AutoUpgradeEnv is the variable authorising an upgrade the user did not ask for, e.g. MY\_TOOL\_AUTO\_UPGRADE.
 
 <a name="SourceValue.ExplainUpgradeFailure"></a>
-### func \(SourceValue\) [ExplainUpgradeFailure](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/consent.go#L105>)
+### func \(SourceValue\) [ExplainUpgradeFailure](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/consent.go#L119>)
 
 ```go
 func (s SourceValue) ExplainUpgradeFailure(out io.Writer, action string, err error)
@@ -545,7 +545,7 @@ It exists because exit.Code's message parameter only reaches the structured \-\-
 It prints THREE things, in descending order of how far they may travel: the error's public sentence, which is wire\-safe and says what happened; its diagnostic half — fields and the cause's own words — which says where and why and is for this terminal and the log, never for a response body; and the advice, which is what to do about it.
 
 <a name="SourceValue.ExplainUpgradeRefusal"></a>
-### func \(SourceValue\) [ExplainUpgradeRefusal](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/consent.go#L79>)
+### func \(SourceValue\) [ExplainUpgradeRefusal](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/consent.go#L93>)
 
 ```go
 func (s SourceValue) ExplainUpgradeRefusal(out io.Writer)

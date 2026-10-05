@@ -79,7 +79,7 @@ var LoggerRequired = errs.Define(CodeLoggerRequired, "LOGGER_REQUIRED",
 ```
 
 <a name="New"></a>
-## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/slogbridge/slogbridge.go#L111>)
+## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/slogbridge/slogbridge.go#L113>)
 
 ```go
 func New(lg logger.Logger) (sl *slog.Logger, err error)
@@ -90,7 +90,7 @@ New returns a \*slog.Logger writing through lg — the one\-liner a caller hands
 A nil lg returns [LoggerRequired](<#LoggerRequired>) \(1.1.1.1\).
 
 <a name="NewHandler"></a>
-## func [NewHandler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/slogbridge/slogbridge.go#L96>)
+## func [NewHandler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/slogbridge/slogbridge.go#L98>)
 
 ```go
 func NewHandler(lg logger.Logger) (h slog.Handler, err error)

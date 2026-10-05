@@ -1,21 +1,43 @@
 apiVersion: kit.kitsunium/design/v2
 domain: observe/logger/middleware/tee
 packages:
-  - constants:
-      - name: CodeTeeAllBranchesFailed
+  - codes:
+      - const:
+          - doc: |-
+              CodeTeeAllBranchesFailed identifies a record that every primary sink
+              rejected — the trigger for routing it to the dead-letter spill sink.
+            name: CodeTeeAllBranchesFailed
+            note: "range: 0.3.29.0 - 0.3.29.255"
+            value: "0x00_03_1D_01"
         type: errs.Code
-        value: "0x00_03_1D_01"
-      - name: CodeSpillFailed
+      - const:
+          - doc: |-
+              CodeSpillFailed identifies a failure to deliver an all-primaries-failed
+              record to the dead-letter spill sink.
+            name: CodeSpillFailed
+            value: "0x00_03_1D_02"
         type: errs.Code
-        value: "0x00_03_1D_02"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/observe/logger/middleware/tee
-    variables:
-      - name: AllBranchesFailed
-        type: "*errs.Error"
-      - name: SpillFailed
-        type: "*errs.Error"
+    sentinels:
+      - var:
+          - code: CodeTeeAllBranchesFailed
+            doc: |-
+              AllBranchesFailed wraps an errors.Join of every primary failure when
+              every primary sink rejected the record.
+            name: AllBranchesFailed
+            private: "service/observe/logger/middleware/tee: all primary sinks failed to write the record"
+            public: every primary sink rejected the record
+            reason: ALL_BRANCHES_FAILED
+          - code: CodeSpillFailed
+            doc: |-
+              SpillFailed wraps the spill cause when the dead-letter sink rejected a
+              record that every primary had already failed.
+            name: SpillFailed
+            private: "service/observe/logger/middleware/tee: the dead-letter spill sink rejected the record"
+            public: failed to spill record to the dead-letter sink
+            reason: SPILL_FAILED
   - functions:
       - in:
           - name: cfg

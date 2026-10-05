@@ -46,7 +46,7 @@
         "public": "CloudWatch writer could not initialise its AWS client"
       },
       "doc": "ClientInitFailed wraps an AWS SDK client construction failure at Open\ntime (bad region, unreachable credential source, …).\n",
-      "file": "writer/cloudwatch/errors.go",
+      "file": "writer/cloudwatch/codes_gen.go",
       "layer": "thirdparty"
     },
     {
@@ -61,7 +61,7 @@
         "value": "0.3.25.2"
       },
       "doc": "CodeCWClientInitFailed identifies a failure building the AWS CloudWatch Logs\nclient from the supplied region / credentials at Open time.\n",
-      "file": "writer/cloudwatch/codes.go",
+      "file": "writer/cloudwatch/codes_gen.go",
       "layer": "thirdparty"
     },
     {
@@ -76,7 +76,7 @@
         "value": "0.3.25.21"
       },
       "doc": "CodeCWEventRejected identifies a single event dropped before delivery because\nits timestamp falls outside the PutLogEvents per-event bounds (older than 14\ndays or more than 2 hours in the future). The event is dropped and surfaced\nvia OnError instead of failing the whole batch.\n",
-      "file": "writer/cloudwatch/codes.go",
+      "file": "writer/cloudwatch/codes_gen.go",
       "layer": "thirdparty"
     },
     {
@@ -91,7 +91,7 @@
         "value": "0.3.25.20"
       },
       "doc": "CodeCWPutFailed identifies a failed PutLogEvents delivery of a batched set of\nlog events.\n",
-      "file": "writer/cloudwatch/codes.go",
+      "file": "writer/cloudwatch/codes_gen.go",
       "layer": "thirdparty"
     },
     {
@@ -107,7 +107,7 @@
         "public": "CloudWatch writer dropped a log event with an out-of-range timestamp"
       },
       "doc": "EventRejected reports one event dropped before delivery because its\ntimestamp is outside the PutLogEvents per-event window (older than 14 days\nor more than 2 hours ahead). The whole batch still ships; only the\nout-of-window event is discarded and routed to OnError.\n",
-      "file": "writer/cloudwatch/errors.go",
+      "file": "writer/cloudwatch/codes_gen.go",
       "layer": "thirdparty"
     },
     {
@@ -123,7 +123,7 @@
         "public": "CloudWatch writer failed to deliver a log batch"
       },
       "doc": "PutFailed wraps a failed PutLogEvents delivery of a batch.\n",
-      "file": "writer/cloudwatch/errors.go",
+      "file": "writer/cloudwatch/codes_gen.go",
       "layer": "thirdparty"
     },
     {
@@ -150,7 +150,7 @@
         "public": "S3 writer could not initialise its AWS client"
       },
       "doc": "ClientInitFailed wraps an AWS SDK config/client construction failure at\nOpen time (bad region, unreachable credential source, …).\n",
-      "file": "writer/s3/errors.go",
+      "file": "writer/s3/codes_gen.go",
       "layer": "thirdparty"
     },
     {
@@ -165,7 +165,7 @@
         "value": "0.3.35.2"
       },
       "doc": "CodeS3ClientInitFailed identifies a failure building the AWS S3 client from\nthe supplied region / credentials at Open time.\n",
-      "file": "writer/s3/codes.go",
+      "file": "writer/s3/codes_gen.go",
       "layer": "thirdparty"
     },
     {
@@ -180,7 +180,7 @@
         "value": "0.3.35.20"
       },
       "doc": "CodeS3PutFailed identifies a failed PutObject upload of a batched log object.\n",
-      "file": "writer/s3/codes.go",
+      "file": "writer/s3/codes_gen.go",
       "layer": "thirdparty"
     },
     {
@@ -196,7 +196,7 @@
         "public": "S3 writer failed to upload a log batch"
       },
       "doc": "PutFailed wraps a failed PutObject upload of a batched log object.\n",
-      "file": "writer/s3/errors.go",
+      "file": "writer/s3/codes_gen.go",
       "layer": "thirdparty"
     },
     {

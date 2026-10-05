@@ -23,7 +23,7 @@ else (framework/CLAUDE.md rule 1).
 | `roster.go` | `RosterValue` (+ its lookups `SubjectFor` / `CIEntitlementFor`), `SubjectValue`, `CIEntitlementValue`, `RosterLifetime` |
 | `grant.go` | `GrantValue` (+ `Deadline` / `Expired`) — what a successful verification hands back — and `GrantDeadline` |
 | `origin.go` | `OriginValue` — one place a roster is published |
-| `codes.go` / `errors.go` | the range (fifteen codes) and its fourteen sentinels |
+| `codes_gen.go` | the range (fifteen codes) and its fourteen sentinels — written by kit gen from `design/framework/entitlement.yaml` (ADR 0164) |
 | `grant_internal_test.go` | the three dates a grant is bounded by |
 | `roster_internal_test.go` | the public/private split of both roster lookups |
 | `port_internal_test.go` | the freeze, guarded by a compile rather than by a comment |

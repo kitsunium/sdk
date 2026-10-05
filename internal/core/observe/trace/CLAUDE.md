@@ -59,8 +59,7 @@ file-name order, so `go doc` reads it as before.
 | `scope.go` | `DefaultScopeName` + `NormalizeScope` (the shared rule, with this signal's default) |
 | `attrs.go` | this signal's half of the shared attribute model: `ValidateAttrs` / `SortAttrs` / `NormalizeResource`, delegating the RULES to `internal/core/observe/otel` and refusing with this package's `InvalidAttribute` |
 | `exporter.go` | `ExporterName` + the `SpanExporter` registry (`RegisterExporter` / `LookupExporter` / `AvailableExporters` / `Export`) over `internal/kernel/plugin.Registry`, the table `core/observe/metrics`' exporter registry runs on too |
-| `codes.go` | `Code*` constants — range 0.2.20.*, and the engine's 0.3.50.* |
-| `errors.go` | `InvalidTraceParent` / `InvalidTraceState` / `UnknownExporter` / `ExportFailed` / `DuplicateRegistration` / `InvalidSpanName` / `InvalidAttribute`; and the engine's `EntropyFailed` / `InvalidSampleRatio` / `OTLPInvalidSpanContext` / `OTLPSpanNotEnded` / `OTLPEndpointInvalid` / `OTLPExportRejected` / `OTLPExportUnavailable` / `OTLPPartialSuccess` |
+| `codes_gen.go` | `Code*` constants — range 0.2.20.*, and the engine's 0.3.50.*; `InvalidTraceParent` / `InvalidTraceState` / `UnknownExporter` / `ExportFailed` / `DuplicateRegistration` / `InvalidSpanName` / `InvalidAttribute`; and the engine's `EntropyFailed` / `InvalidSampleRatio` / `OTLPInvalidSpanContext` / `OTLPSpanNotEnded` / `OTLPEndpointInvalid` / `OTLPExportRejected` / `OTLPExportUnavailable` / `OTLPPartialSuccess` — written by kit gen from `design/observe/trace.yaml` (ADR 0164) |
 
 ## The one rule everything else follows from
 

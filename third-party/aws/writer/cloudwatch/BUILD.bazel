@@ -6,7 +6,7 @@ go_library(
     name = "cloudwatch",
     srcs = [
         "client.go",
-        "codes.go",
+        "codes_gen.go",
         "cred_adapter.go",
         "cw.go",
         "cwsink.go",

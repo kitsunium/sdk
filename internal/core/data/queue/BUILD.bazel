@@ -6,7 +6,7 @@ go_library(
     name = "queue",
     srcs = [
         "capability.go",
-        "codes.go",
+        "codes_gen.go",
         "design_gen.go",
         "errors.go",
         "message.go",

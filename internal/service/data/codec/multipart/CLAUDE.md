@@ -195,7 +195,7 @@ package always emitted; only the declaration moved.
 | `0.3.41.6` | `LimitsInvalid`    | a negative `LimitsConfig` field (ADR 0031 refusal) — field carries `knob` |
 
 The range is allocated to this package in `codeRangeOwners`
-(`internal/kernel/errs/registry_ownership_external_test.go`, ADR 0035).
+(`design/sdk.yaml`'s `codes.ranges`, which kit writes into `internal/kernel/errs/codes_gen_test.go` (ADR 0164), ADR 0035).
 
 ## Extensions
 

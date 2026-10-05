@@ -1,34 +1,93 @@
 apiVersion: kit.kitsunium/design/v2
 domain: app/cli
 packages:
-  - constants:
-      - name: CodeInvalidCommand
+  - codes:
+      - const:
+          - doc: |-
+              CodeInvalidCommand identifies a declaration refused because the command
+              could never be reached or could never run: a blank name, a name carrying a
+              space or leading "-", a child with no summary, or neither a Run nor any
+              Commands.
+            name: CodeInvalidCommand
+            note: "range: 0.2.32.0 - 0.2.32.255"
+            value: "0x00_02_20_01"
         type: errs.Code
-        value: "0x00_02_20_01"
-      - name: CodeAmbiguousCommand
+      - const:
+          - doc: |-
+              CodeAmbiguousCommand identifies a declaration refused for carrying BOTH a
+              Run and Commands, where the meaning of an existing command line would change
+              the day a child is added.
+            name: CodeAmbiguousCommand
+            value: "0x00_02_20_02"
         type: errs.Code
-        value: "0x00_02_20_02"
-      - name: CodeDuplicateCommand
+      - const:
+          - doc: |-
+              CodeDuplicateCommand identifies a declaration refused because two children
+              of one group share a name, so the resolver could only ever reach one of
+              them.
+            name: CodeDuplicateCommand
+            value: "0x00_02_20_03"
         type: errs.Code
-        value: "0x00_02_20_03"
-      - name: CodeReservedFlag
+      - const:
+          - doc: |-
+              CodeReservedFlag identifies a declaration refused because its Binder bound
+              "h" or "help", the two names the domain answers itself.
+            name: CodeReservedFlag
+            value: "0x00_02_20_04"
         type: errs.Code
-        value: "0x00_02_20_04"
-      - name: CodeUnknownCommand
+      - const:
+          - doc: |-
+              CodeUnknownCommand identifies an argument vector naming a sub-command the
+              group does not declare. The group's help — which lists every name it DOES
+              declare — has been written to the diagnostic stream by the time this is
+              returned.
+            name: CodeUnknownCommand
+            note: |-
+              range: 0.3.62.0 - 0.3.62.255
+
+              The engine's outcomes. The range was allocated to internal/service/app/cli,
+              which raises these codes while it resolves and runs a command line, and it
+              is declared here with the declaration refusals so that every code of the
+              domain is in one place (ADR 0160). A code keeps the value its allocation
+              gave it whichever layer declares it, so the layer byte still reads 3.
+            value: "0x00_03_3E_01"
         type: errs.Code
-        value: "0x00_03_3E_01"
-      - name: CodeMissingCommand
+      - const:
+          - doc: |-
+              CodeMissingCommand identifies a group invoked with no sub-command at all. A
+              group has no action of its own, so this is an incomplete command line and
+              never a successful no-op.
+            name: CodeMissingCommand
+            value: "0x00_03_3E_02"
         type: errs.Code
-        value: "0x00_03_3E_02"
-      - name: CodeInvalidFlags
+      - const:
+          - doc: |-
+              CodeInvalidFlags identifies a flag vector package flag refused: an unknown
+              flag, a missing value, or a value its flag.Value could not parse. flag's own
+              text is preserved in Private, never in Public, because it quotes the
+              operator's value verbatim.
+            name: CodeInvalidFlags
+            value: "0x00_03_3E_03"
         type: errs.Code
-        value: "0x00_03_3E_03"
-      - name: CodeCommandPanicked
+      - const:
+          - doc: |-
+              CodeCommandPanicked identifies an Action whose goroutine panicked; the
+              engine recovered it, captured the originating stack, and turned it into this
+              command's failure so main still gets a typed exit status instead of the
+              runtime's 2.
+            name: CodeCommandPanicked
+            value: "0x00_03_3E_04"
         type: errs.Code
-        value: "0x00_03_3E_04"
-      - name: CodeHelpWriteFailed
+      - const:
+          - doc: |-
+              CodeHelpWriteFailed identifies a help request (-h) whose answer the
+              diagnostic stream did not take: a closed pipe, a full disk, a writer that
+              accepted only part of the page. Asking a question is not a failure, but an
+              answer nobody received is, so this is EX_IOERR and not the 0 a delivered
+              help earns.
+            name: CodeHelpWriteFailed
+            value: "0x00_03_3E_05"
         type: errs.Code
-        value: "0x00_03_3E_05"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/app/cli
@@ -58,6 +117,147 @@ packages:
             out:
               - type: error
         name: Executor
+    sentinels:
+      - var:
+          - code: CodeInvalidCommand
+            doc: |-
+              InvalidCommand is returned by the constructor for a command that could
+              never be reached or could never run. The fields name the path and the
+              clause that failed.
+
+              "Neither Run nor Commands" is the case worth naming: it is the inert
+              declaration ADR 0031 refuses. A name an operator can type that does
+              nothing looks configured, reports success, and is discovered only by
+              somebody wondering why the tool did not do the thing.
+            name: InvalidCommand
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "core/app/cli: blank or unreachable name, missing summary, or neither Run nor Commands; the fields name the path and the clause"
+            public: The command declaration is not runnable and was refused
+            reason: INVALID_COMMAND
+          - code: CodeAmbiguousCommand
+            doc: |-
+              AmbiguousCommand is returned by the constructor for a command carrying
+              both a Run and Commands.
+
+              The refusal is not fastidiousness. With both, `tool db migrate` means
+              "run db with the positional argument migrate" — until somebody adds a
+              child named migrate, at which point the identical command line means
+              something else, in a release that changed no line of db's own code. A
+              declaration whose meaning depends on which siblings exist today is the
+              same class of failure as prefix matching, and it is refused for the same
+              reason.
+            name: AmbiguousCommand
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "core/app/cli: Run and Commands are both set; adding a child would silently change what an existing command line means"
+            public: A command may declare an action or sub-commands, not both
+            reason: AMBIGUOUS_COMMAND
+          - code: CodeDuplicateCommand
+            doc: |-
+              DuplicateCommand is returned by the constructor when two children of one
+              group share a name. The resolver stops at the first match, so the second
+              declaration would be unreachable code that looks reachable.
+            name: DuplicateCommand
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "core/app/cli: sibling names are unique per group; the fields carry the parent path and the repeated name"
+            public: Two sub-commands are declared under the same name
+            reason: DUPLICATE_COMMAND
+          - code: CodeReservedFlag
+            doc: |-
+              ReservedFlag is returned by the constructor when a Binder bound "h" or
+              "help".
+
+              The domain answers both names itself, and it must: package flag reports
+              an undefined -h as flag.ErrHelp rather than as a parse failure, and that
+              is the ONLY signal distinguishing "the operator asked for help" (exit 0)
+              from "the operator got it wrong" (exit 64). A command that binds -h
+              takes that signal away, and the engine would report a successful parse
+              where an operator expected a help page.
+            name: ReservedFlag
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "core/app/cli: a Binder bound h or help; the engine needs flag.ErrHelp to tell a help request from a usage error"
+            public: The flag names -h and -help are answered by the SDK
+            reason: RESERVED_FLAG
+          - code: CodeUnknownCommand
+            doc: |-
+              UnknownCommand is returned when a token does not name any child of the
+              group that was reached.
+
+              There is deliberately no "did you mean …?". The group's help has already
+              been written, and it lists every name that WOULD have worked — which is
+              the complete answer, cannot be wrong, and costs no edit-distance table
+              to keep correct. A suggestion is a second answer that can differ from
+              the first.
+            name: UnknownCommand
+            note: |-
+              The engine's verdicts on a command line, raised by internal/service/app/cli
+              as it resolves an argument vector and runs the command it names. They are
+              declared here, with the declaration refusals, so that the domain's codes and
+              sentinels are in one place (ADR 0160).
+            options:
+              - errs.WithExitCode(exitUsage)
+            private: "service/app/cli: the token names no child of this group; the fields carry the group path and the token"
+            public: That sub-command does not exist
+            reason: UNKNOWN_COMMAND
+          - code: CodeMissingCommand
+            doc: |-
+              MissingCommand is returned when a group is invoked with nothing after
+              its flags.
+
+              It is a failure and not a quiet success on purpose: a group declares no
+              action, so `tool db` did nothing, and a script that read exit status 0
+              there would treat "I forgot the verb" as "the migration ran".
+            name: MissingCommand
+            options:
+              - errs.WithExitCode(exitUsage)
+            private: "service/app/cli: a group has no action of its own; the field carries the group path and its help was written"
+            public: This command needs a sub-command
+            reason: MISSING_COMMAND
+          - code: CodeInvalidFlags
+            doc: |-
+              InvalidFlags is returned when package flag refuses the vector.
+
+              flag's own message quotes the operator's value ("invalid value \"abc\"
+              for flag -n"), so it lives in a field and in Private and never in
+              Public, which is the wire-safe half.
+            name: InvalidFlags
+            options:
+              - errs.WithExitCode(exitUsage)
+            private: "service/app/cli: flag.FlagSet.Parse refused the vector; the fields carry the command path and flag's own text"
+            public: The flags for this command could not be parsed
+            reason: INVALID_FLAGS
+          - code: CodeCommandPanicked
+            doc: |-
+              CommandPanicked is the failure of an Action that panicked.
+
+              It is recovered rather than left to the runtime for one reason that is
+              not "hiding the bug": a panicking Go program exits with status 2, which
+              sysexits gives no meaning and which several supervisors read as a usage
+              error. Nothing is lost — the recovered value AND the stack of the
+              goroutine that actually failed both travel as fields — and what changes
+              is that main, rather than the runtime, decides what the process does
+              next. It keeps the default EX_SOFTWARE (70): the command line was fine.
+            name: CommandPanicked
+            private: "service/app/cli: the Action panicked; the fields carry the command path, the panic value and the originating stack"
+            public: The command panicked and was recovered
+            reason: COMMAND_PANICKED
+          - code: CodeHelpWriteFailed
+            doc: |-
+              HelpWriteFailed is returned when -h asked for the help and the
+              diagnostic stream did not take it.
+
+              Only the -h path returns it. After a bad command line the usage error is
+              the verdict and the help is the actionable half of it, so a failed write
+              there does not replace the status the operator's mistake earned.
+            name: HelpWriteFailed
+            options:
+              - errs.WithExitCode(exitIOErr)
+            private: "service/app/cli: the diagnostic stream refused the help -h asked for, or took part of it; the fields carry the command path"
+            public: The help could not be written
+            reason: HELP_WRITE_FAILED
     types:
       - name: Action
         underlying: func(ctx context.Context, invocation InvocationValue) error
@@ -99,25 +299,6 @@ packages:
               type: "[]*flag.FlagSet"
             - name: Output
               type: io.Writer
-    variables:
-      - name: InvalidCommand
-        type: "*errs.Error"
-      - name: AmbiguousCommand
-        type: "*errs.Error"
-      - name: DuplicateCommand
-        type: "*errs.Error"
-      - name: ReservedFlag
-        type: "*errs.Error"
-      - name: UnknownCommand
-        type: "*errs.Error"
-      - name: MissingCommand
-        type: "*errs.Error"
-      - name: InvalidFlags
-        type: "*errs.Error"
-      - name: CommandPanicked
-        type: "*errs.Error"
-      - name: HelpWriteFailed
-        type: "*errs.Error"
   - functions:
       - in:
           - name: cfg

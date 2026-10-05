@@ -1,31 +1,87 @@
 apiVersion: kit.kitsunium/design/v2
 domain: observe/logger/writer/rotfile
 packages:
-  - constants:
-      - name: CodeRotFileOpenFailed
+  - codes:
+      - const:
+          - doc: |-
+              CodeRotFileOpenFailed identifies a (re)open whose os.OpenFile invocation
+              failed or whose target resolved to a symlink (CWE-59). It fires both at
+              construction and on every reopen after a rotation, so the symlink/0600
+              hardening re-runs for the freshly created Path.
+            name: CodeRotFileOpenFailed
+            note: "range: 0.3.27.0 - 0.3.27.255"
+            value: "0x00_03_1B_01"
         type: errs.Code
-        value: "0x00_03_1B_01"
-      - name: CodeRotFileRotateFailed
+      - const:
+          - doc: |-
+              CodeRotFileRotateFailed identifies a rotation step that failed — the
+              rename shift across the .N backups, the optional gzip compaction, or the
+              0600 chmod of a rotated sibling.
+            name: CodeRotFileRotateFailed
+            value: "0x00_03_1B_02"
         type: errs.Code
-        value: "0x00_03_1B_02"
-      - name: CodeRotFileWriteFailed
+      - const:
+          - doc: |-
+              CodeRotFileWriteFailed identifies a Write whose underlying *os.File
+              returned an error; ExitCode defaults to 74 (EX_IOERR).
+            name: CodeRotFileWriteFailed
+            value: "0x00_03_1B_03"
         type: errs.Code
-        value: "0x00_03_1B_03"
-      - name: CodeRotFileDecodeFailed
+      - const:
+          - doc: |-
+              CodeRotFileDecodeFailed identifies a config-map value of an unexpected shape
+              while decoding a "rotfile" writer entry from a config file (the Decoder
+              path). It is a configuration error (EX_CONFIG 78), distinct from the I/O
+              sentinels, and never echoes the offending value (secret gate).
+            name: CodeRotFileDecodeFailed
+            value: "0x00_03_1B_04"
         type: errs.Code
-        value: "0x00_03_1B_04"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/observe/logger/writer/rotfile
-    variables:
-      - name: RotFileOpenFailed
-        type: "*errs.Error"
-      - name: RotFileRotateFailed
-        type: "*errs.Error"
-      - name: RotFileWriteFailed
-        type: "*errs.Error"
-      - name: RotFileDecodeFailed
-        type: "*errs.Error"
+    sentinels:
+      - var:
+          - code: CodeRotFileOpenFailed
+            doc: |-
+              RotFileOpenFailed wraps an os.OpenFile failure (or a refused symlink)
+              at construction time and on every reopen after a rotation.
+            name: RotFileOpenFailed
+            options:
+              - errs.WithExitCode(exitIOErr)
+            private: "service/observe/logger/writer/rotfile: os.OpenFile failed or the path is a symlink"
+            public: Rotating file sink could not open the destination file
+            reason: ROT_FILE_OPEN_FAILED
+          - code: CodeRotFileRotateFailed
+            doc: |-
+              RotFileRotateFailed wraps a failure during the rename shift, the gzip
+              compaction, or the 0600 chmod of a rotated sibling.
+            name: RotFileRotateFailed
+            options:
+              - errs.WithExitCode(exitIOErr)
+            private: "service/observe/logger/writer/rotfile: a rename, gzip, or chmod step in the rotation cycle failed"
+            public: Rotating file sink failed to rotate the destination file
+            reason: ROT_FILE_ROTATE_FAILED
+          - code: CodeRotFileWriteFailed
+            doc: |-
+              RotFileWriteFailed wraps the underlying *os.File.Write error at Write
+              time.
+            name: RotFileWriteFailed
+            options:
+              - errs.WithExitCode(exitIOErr)
+            private: "service/observe/logger/writer/rotfile: underlying *os.File returned an error"
+            public: Rotating file write failed
+            reason: ROT_FILE_WRITE_FAILED
+          - code: CodeRotFileDecodeFailed
+            doc: |-
+              RotFileDecodeFailed flags a config-map value of an unexpected shape while
+              decoding a "rotfile" writer entry from a config file. It is redacted —
+              the offending value is never echoed (secret gate).
+            name: RotFileDecodeFailed
+            options:
+              - errs.WithExitCode(exitConfigErr)
+            private: "service/observe/logger/writer/rotfile: a config map value had an unexpected shape"
+            public: Rotating file sink could not decode its configuration
+            reason: ROT_FILE_DECODE_FAILED
   - aliases:
       - name: Config
         target: writer.RotFileConfig

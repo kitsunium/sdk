@@ -1,3 +1,6 @@
+// Package logger — declares pkg/v1/observe/logger's sentinels. Each var's
+// name equals its errs.Define Reason in SCREAMING_SNAKE form.
+//
 // Package logger — exposes FromConfig, the capstone of the config-driven writer
 // subsystem (ADR 0014 §D5): it builds a fully wired Logger from a config blob
 // with zero Go glue. The blob is decoded by a codec the CONSUMER already

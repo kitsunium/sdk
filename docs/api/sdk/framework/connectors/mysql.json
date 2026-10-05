@@ -38,7 +38,7 @@
         "value": "0.4.17.1"
       },
       "doc": "CodeURLMalformed identifies a URL the driver cannot read (ADR 0147: layer 4,\none PP per connector).\n",
-      "file": "mysql.go",
+      "file": "codes_gen.go",
       "layer": "framework"
     },
     {

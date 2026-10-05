@@ -1,3 +1,6 @@
+// Package codec — declares the sentinel *errs.Error values the
+// facade emits when dispatch fails.
+//
 // Package codec — the multipart/form-data value types, and the one helper a
 // consumer needs to send what Marshal(Multipart, …) returns. The format is a
 // container whose delimiter lives in the Content-Type header, which the Codec

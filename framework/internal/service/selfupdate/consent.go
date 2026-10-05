@@ -1,3 +1,17 @@
+// Package selfupdate — range 0.3.66.* (ADR 0005 §Registry, allocated in
+// codeRangeOwners per ADR 0035).
+//
+// The domain's own range is 0.2.34.* and it holds every refusal the CONTRACT
+// names: an unsigned release, a digest that does not match, a redirect this
+// build will not follow. Those are the outcomes a caller of framework/selfupdate
+// branches on, and none of them is redeclared here.
+//
+// What lives in this range is the other half — the failures an IMPLEMENTATION
+// has and a contract does not: a JSON body that will not decode, a tar that
+// will not open, a temp file that cannot be created next to the running
+// binary. The core has no vocabulary for them because a different
+// implementation of the same port would fail in different places.
+//
 // Package selfupdate — consent: whether a caller that did not ask to upgrade
 // may nonetheless replace this binary, and the advice printed when it may not.
 // Package updater — CONSENT for an upgrade nobody typed.

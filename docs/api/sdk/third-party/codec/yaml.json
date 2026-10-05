@@ -38,7 +38,7 @@
         "value": "0.3.77.1"
       },
       "doc": "CodeYAMLFullMarshalFailed identifies a failure encoding a value through\ngopkg.in/yaml.v3 (a MarshalYAML hook that failed, or a stream whose writer\nfailed).\n",
-      "file": "codes.go",
+      "file": "codes_gen.go",
       "layer": "thirdparty"
     },
     {
@@ -53,7 +53,7 @@
         "value": "0.3.77.2"
       },
       "doc": "CodeYAMLFullUnmarshalFailed identifies a failure decoding through\ngopkg.in/yaml.v3: a syntax error, a value its target cannot hold, or an\ninput over the 10 MiB cap.\n",
-      "file": "codes.go",
+      "file": "codes_gen.go",
       "layer": "thirdparty"
     },
     {
@@ -92,7 +92,7 @@
         "public": "YAML encoding failed"
       },
       "doc": "MarshalFailed marks a gopkg.in/yaml.v3 encode failure.\n",
-      "file": "errors.go",
+      "file": "codes_gen.go",
       "layer": "thirdparty"
     },
     {
@@ -119,7 +119,7 @@
         "public": "YAML decoding failed"
       },
       "doc": "UnmarshalFailed marks a gopkg.in/yaml.v3 decode failure, or an input over\nthe 10 MiB cap.\n",
-      "file": "errors.go",
+      "file": "codes_gen.go",
       "layer": "thirdparty"
     }
   ]

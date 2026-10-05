@@ -10,13 +10,293 @@ packages:
         target: model.PersonalData
       - name: Edit
         target: model.Edit
+    codes:
+      - const:
+          - comment: 0.4.2.58 — another process of the app holds its singleton lock
+            doc: |-
+              CodeSingletonHeld reports a start refused because another process of the
+              app holds its singleton lock.
+            name: CodeSingletonHeld
+            value: "0x00_04_02_3A"
+        type: errs.Code
+      - const:
+          - comment: 0.4.2.59 — a CLI command exited with a non-zero status
+            doc: CodeCLIFailed marks the span of a CLI command that exited non-zero.
+            name: CodeCLIFailed
+            value: "0x00_04_02_3B"
+        type: errs.Code
+      - const:
+          - comment: 0.4.2.1 — a stored entity no longer decodes into its type
+            name: CodeStoreDecode
+            value: "0x00_04_02_01"
+          - comment: 0.4.2.2 — an entity does not encode to JSON
+            name: CodeStoreEncode
+            value: "0x00_04_02_02"
+          - comment: 0.4.2.3 — the store file could not be written
+            name: CodeStorePersist
+            value: "0x00_04_02_03"
+          - comment: 0.4.2.4 — the store file could not be read at start
+            name: CodeStoreLoad
+            value: "0x00_04_02_04"
+          - comment: 0.4.2.5 — the stored entities break a unique index, or a key function panicked
+            name: CodeStoreIndex
+            value: "0x00_04_02_05"
+          - comment: 0.4.2.6 — a message does not encode to JSON
+            name: CodeTopicEncode
+            value: "0x00_04_02_06"
+          - comment: 0.4.2.7 — a subscription's queue refused a message
+            name: CodeTopicPublish
+            value: "0x00_04_02_07"
+          - comment: 0.4.2.8 — a subscription's queue could not be opened
+            name: CodeQueueOpen
+            value: "0x00_04_02_08"
+          - comment: 0.4.2.9 — a delivered message does not decode
+            name: CodeUndecodable
+            value: "0x00_04_02_09"
+          - comment: 0.4.2.10 — a subscription handler panicked
+            name: CodeHandlerPanic
+            value: "0x00_04_02_0A"
+          - comment: 0.4.2.11 — a subscription's topic is not mounted in the app
+            name: CodeNotMounted
+            value: "0x00_04_02_0B"
+          - comment: 0.4.2.12 — a workflow's bookkeeping could not be read at start
+            name: CodeWorkflowLoad
+            value: "0x00_04_02_0C"
+          - doc: |-
+              A workflow hook panicked: an OnEnter hook fails its transition with it,
+              an OnTransition hook is reported and the transition stands.
+            name: CodeWorkflowHookPanic
+            value: "0x00_04_02_0D"
+          - doc: |-
+              An OnEnter hook changed the state its entity was entering, or the
+              entity's key: the transition is refused.
+            name: CodeWorkflowHookChange
+            value: "0x00_04_02_0E"
+          - doc: |-
+              An OnEnter hook fired its own workflow: refused, where it would wait
+              for itself.
+            name: CodeWorkflowReentrant
+            value: "0x00_04_02_0F"
+          - comment: 0.4.2.16 — the app's configuration cannot be applied
+            name: CodeAppConfig
+            value: "0x00_04_02_10"
+          - comment: 0.4.2.17 — the app, or one of its services, is already running
+            name: CodeAppRunning
+            value: "0x00_04_02_11"
+          - comment: 0.4.2.18 — the app could not listen on its address
+            name: CodeAppListen
+            value: "0x00_04_02_12"
+          - comment: 0.4.2.19 — KIT_SMTP_URL cannot be used
+            doc: Mailers.
+            name: CodeMailConfig
+            value: "0x00_04_02_13"
+          - comment: 0.4.2.20 — a mail does not encode for the outbox
+            name: CodeMailEncode
+            value: "0x00_04_02_14"
+          - comment: 0.4.2.21 — the outbox could not be opened, or refused a mail
+            name: CodeMailQueue
+            value: "0x00_04_02_15"
+          - doc: |-
+              Deprecated: kit no longer returns it. The outbox is the SDK's mail
+              spool, which dead-letters a record that does not decode itself
+              (MessageUndecodable, in pkg/v1/app/mail/spool).
+            name: CodeMailUndecodable
+            value: "0x00_04_02_16"
+          - comment: 0.4.2.23 — a delivery attempt panicked
+            name: CodeMailPanic
+            value: "0x00_04_02_17"
+          - comment: 0.4.2.24 — a loop's function panicked
+            doc: Loops.
+            name: CodeLoopPanic
+            value: "0x00_04_02_18"
+          - comment: 0.4.2.25 — a loop wakes on a topic whose service is not mounted in the app
+            name: CodeLoopNotMounted
+            value: "0x00_04_02_19"
+          - comment: 0.4.2.26 — a hand-written loop's supervisor refused to start
+            name: CodeLoopStart
+            value: "0x00_04_02_1A"
+          - comment: "0.4.2.27 — the environment's secret store cannot be used: KIT_SECRETS, KIT_SECRETS_KEY"
+            doc: Secrets.
+            name: CodeSecretStore
+            value: "0x00_04_02_1B"
+          - comment: 0.4.2.28 — a declared secret is found nowhere
+            name: CodeSecretMissing
+            value: "0x00_04_02_1C"
+          - comment: 0.4.2.29 — a secret's store refused to read it
+            name: CodeSecretRead
+            value: "0x00_04_02_1D"
+          - comment: 0.4.2.30 — a generated secret could not be made or rotated
+            name: CodeSecretRotate
+            value: "0x00_04_02_1E"
+          - comment: 0.4.2.31 — a database's engine could not open its pool
+            doc: Databases, ADR 0004.
+            name: CodeDatabaseOpen
+            value: "0x00_04_02_1F"
+          - comment: 0.4.2.32 — a database's migrations did not apply, or wait for `migrate up`
+            name: CodeDatabaseMigrate
+            value: "0x00_04_02_20"
+          - comment: 0.4.2.33 — a database did not answer
+            name: CodeDatabaseUnavailable
+            value: "0x00_04_02_21"
+          - comment: 0.4.2.34 — a database's URL or tuning cannot be used
+            name: CodeDatabaseConfig
+            value: "0x00_04_02_22"
+          - doc: |-
+              A transaction wrote a store another database keeps than the one it
+              belongs to — the data directory counting as one: refused, Invalid.
+            name: CodeTransactionSpan
+            value: "0x00_04_02_42"
+          - comment: 0.4.2.35 — kit's index key cannot be read, made or derived
+            doc: Privacy (ADR 0006).
+            name: CodePrivacyKey
+            value: "0x00_04_02_23"
+          - comment: "0.4.2.36 — an erasure failed: the store's Anonymise function panicked"
+            name: CodePrivacyErase
+            value: "0x00_04_02_24"
+          - comment: 0.4.2.37 — the privacy journal cannot be read or written
+            name: CodePrivacyJournal
+            value: "0x00_04_02_25"
+          - comment: "0.4.2.38 — the privacy command cannot open the data: the product runs, or keeps it in memory"
+            name: CodePrivacyData
+            value: "0x00_04_02_26"
+          - comment: 0.4.2.39 — a store's history cannot be opened at start
+            doc: History (ADR 0007).
+            name: CodeHistoryLoad
+            value: "0x00_04_02_27"
+          - comment: "0.4.2.40 — a store's history cannot be written: the record's write is refused with it"
+            name: CodeHistoryWrite
+            value: "0x00_04_02_28"
+          - comment: 0.4.2.41 — a store's history cannot be read
+            name: CodeHistoryRead
+            value: "0x00_04_02_29"
+          - comment: 0.4.2.42 — a password cannot be hashed, or a stored hash cannot be read
+            name: CodePasswordHash
+            value: "0x00_04_02_2A"
+          - comment: "0.4.2.43 — a handler dispatched its own command with its own key: refused, never a deadlock"
+            doc: Commands and queries.
+            name: CodeCommandReentrant
+            value: "0x00_04_02_2B"
+          - comment: 0.4.2.44 — a command's key could not be held
+            name: CodeCommandKey
+            value: "0x00_04_02_2C"
+          - comment: 0.4.2.45 — a queued command's queue could not be opened, or refused a dispatch
+            name: CodeCommandQueue
+            value: "0x00_04_02_2D"
+          - comment: 0.4.2.46 — a queued command's input does not encode for its queue
+            name: CodeCommandEncode
+            value: "0x00_04_02_2E"
+          - comment: "0.4.2.47 — a watch's queue could not be opened, or refused a notice: the write stands, its notice is lost"
+            doc: Watches (ADR 0008).
+            name: CodeWatchQueue
+            value: "0x00_04_02_2F"
+          - comment: "0.4.2.61 — kit's data keys cannot be reached: data-key, or kit's own store of data keys"
+            doc: Sealing at rest (ADR 0006, step 3).
+            name: CodeSealKey
+            value: "0x00_04_02_3D"
+          - comment: "0.4.2.62 — a member could not be sealed: the write is refused, nothing changed"
+            name: CodeSealWrite
+            value: "0x00_04_02_3E"
+          - comment: "0.4.2.63 — a sealed member does not open: altered, moved, or its data key does not unwrap"
+            name: CodeSealOpen
+            value: "0x00_04_02_3F"
+          - comment: "0.4.2.64 — data-key's rotation could not re-wrap every data key: the old version is kept"
+            name: CodeSealRewrap
+            value: "0x00_04_02_40"
+          - comment: "0.4.2.65 — an erasure could not destroy a data key: the erasure's rewrite stands"
+            name: CodeSealShred
+            value: "0x00_04_02_41"
+          - comment: 0.4.2.67 — a record's versions cannot be read, or two of them compared
+            doc: Revisions (ADR 0007 §3).
+            name: CodeRevisionRead
+            value: "0x00_04_02_43"
+          - comment: "0.4.2.68 — a record's versions cannot be rewritten: an erasure's, a hold's, a rollback's"
+            name: CodeRevisionWrite
+            value: "0x00_04_02_44"
+          - comment: "0.4.2.69 — a version no longer decodes into the store's type: Revisions, Revision and Restore refuse it"
+            name: CodeRevisionDecode
+            value: "0x00_04_02_45"
+          - comment: "0.4.2.49 — a scheduled job's run was skipped: the previous one is still going"
+            doc: |-
+              The framework's own signals and refusals, typed since the move into the
+              SDK (rule 2: no fmt.Errorf, no errors.New in production code).
+            name: CodeJobOverlapped
+            value: "0x00_04_02_31"
+          - comment: "0.4.2.50 — an undo ended: another write changed the history since"
+            name: CodeHistoryMoved
+            value: "0x00_04_02_32"
+          - comment: 0.4.2.51 — the source endpoint's name holds no regular file
+            name: CodeNotSource
+            value: "0x00_04_02_33"
+          - comment: "0.4.2.52 — a password write ended: another write changed the hash since"
+            name: CodePasswordMoved
+            value: "0x00_04_02_34"
+          - comment: 0.4.2.53 — an erasure's update found nothing to erase
+            name: CodeNothingToErase
+            value: "0x00_04_02_35"
+          - comment: 0.4.2.54 — an erasure's update would change a key that depends on personal data
+            name: CodeKeyRekeyed
+            value: "0x00_04_02_36"
+          - comment: 0.4.2.55 — the migrate command cannot do what it was asked
+            name: CodeMigrateRefused
+            value: "0x00_04_02_37"
+          - comment: 0.4.2.56 — the framework's own message catalogues disagree
+            name: CodeCatalogue
+            value: "0x00_04_02_38"
+          - comment: 0.4.2.57 — a store's retention function panicked
+            name: CodeRetentionPanic
+            value: "0x00_04_02_39"
+          - comment: "0.4.2.70 — a sealed value's data key is destroyed: kit reads the value as its zero value"
+            doc: |-
+              The signals kit ends one of its own steps with and catches itself — a
+              caller never receives one —, typed when the SDK made rule 2 a gate
+              (make guard), where they had been stdlib errors.
+            name: CodeSealErased
+            value: "0x00_04_02_46"
+          - comment: "0.4.2.71 — a data key's replacement ended: another write changed the wrapped key since"
+            name: CodeSealKeyMoved
+            value: "0x00_04_02_47"
+          - comment: "0.4.2.72 — a write that changed nothing ended, for the record to be sealed again in place: no version"
+            name: CodeResealInPlace
+            value: "0x00_04_02_48"
+          - comment: "0.4.2.73 — a reseal in place ended: another write changed the record since"
+            name: CodeResealMoved
+            value: "0x00_04_02_49"
+          - comment: "0.4.2.74 — a transition's write in place ended: it changes more than the state, so it makes a version"
+            name: CodeWorkflowNotInPlace
+            value: "0x00_04_02_4A"
+          - comment: "0.4.2.75 — a transaction's function, or a function held until its commit, panicked: the panic continues"
+            name: CodeTransactionPanic
+            value: "0x00_04_02_4B"
+        doc: |-
+          The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is
+          the framework's, PP 2 this package (ADR 0147 §3) — so a product keeps
+          the whole application range 0x40–0x7F for its own codes. Match them with
+          errs.HasCode. Their Public text is the only part that may reach a caller;
+          none of them is a 4xx, so a caller only ever reads "internal error".
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeProfileRead reports a profile of the process that could not be written
+              or read back. It is in the framework's 0.4.2.* range.
+            name: CodeProfileRead
+            note: |-
+              Profiles: the process's heap and goroutines, folded onto the graph. The
+              SDK's profiling package captures, decodes, folds and groups them, behind
+              the profiler framework/kit/studio plugs in (plug.StudioProfiler); kit
+              says whose work each sample was. A heap sample is charged to the node
+              whose code is on its stack. Dev only: the routes live behind the Studio's
+              guard, which only an app that imports the Studio mounts.
+            value: "0x00_04_02_30"
+        type: errs.Code
+      - const:
+          - comment: 0.4.2.60 — a scope's value could not be read
+            doc: |-
+              CodeScopeUnknown reports a scope whose value could not be read at the
+              start: no current user, no executable path, no configuration directory.
+            name: CodeScopeUnknown
+            value: "0x00_04_02_3C"
+        type: errs.Code
     constants:
-      - name: CodeSingletonHeld
-        type: errs.Code
-        value: "0x00_04_02_3A"
-      - name: CodeCLIFailed
-        type: errs.Code
-        value: "0x00_04_02_3B"
       - name: EnvDev
         value: "\"dev\""
       - name: EnvProduction
@@ -48,222 +328,6 @@ packages:
         value: "\"canceled\""
       - name: WireInternal
         value: "\"internal\""
-      - name: CodeStoreDecode
-        type: errs.Code
-        value: "0x00_04_02_01"
-      - name: CodeStoreEncode
-        type: errs.Code
-        value: "0x00_04_02_02"
-      - name: CodeStorePersist
-        type: errs.Code
-        value: "0x00_04_02_03"
-      - name: CodeStoreLoad
-        type: errs.Code
-        value: "0x00_04_02_04"
-      - name: CodeStoreIndex
-        type: errs.Code
-        value: "0x00_04_02_05"
-      - name: CodeTopicEncode
-        type: errs.Code
-        value: "0x00_04_02_06"
-      - name: CodeTopicPublish
-        type: errs.Code
-        value: "0x00_04_02_07"
-      - name: CodeQueueOpen
-        type: errs.Code
-        value: "0x00_04_02_08"
-      - name: CodeUndecodable
-        type: errs.Code
-        value: "0x00_04_02_09"
-      - name: CodeHandlerPanic
-        type: errs.Code
-        value: "0x00_04_02_0A"
-      - name: CodeNotMounted
-        type: errs.Code
-        value: "0x00_04_02_0B"
-      - name: CodeWorkflowLoad
-        type: errs.Code
-        value: "0x00_04_02_0C"
-      - name: CodeWorkflowHookPanic
-        type: errs.Code
-        value: "0x00_04_02_0D"
-      - name: CodeWorkflowHookChange
-        type: errs.Code
-        value: "0x00_04_02_0E"
-      - name: CodeWorkflowReentrant
-        type: errs.Code
-        value: "0x00_04_02_0F"
-      - name: CodeAppConfig
-        type: errs.Code
-        value: "0x00_04_02_10"
-      - name: CodeAppRunning
-        type: errs.Code
-        value: "0x00_04_02_11"
-      - name: CodeAppListen
-        type: errs.Code
-        value: "0x00_04_02_12"
-      - name: CodeMailConfig
-        type: errs.Code
-        value: "0x00_04_02_13"
-      - name: CodeMailEncode
-        type: errs.Code
-        value: "0x00_04_02_14"
-      - name: CodeMailQueue
-        type: errs.Code
-        value: "0x00_04_02_15"
-      - name: CodeMailUndecodable
-        type: errs.Code
-        value: "0x00_04_02_16"
-      - name: CodeMailPanic
-        type: errs.Code
-        value: "0x00_04_02_17"
-      - name: CodeLoopPanic
-        type: errs.Code
-        value: "0x00_04_02_18"
-      - name: CodeLoopNotMounted
-        type: errs.Code
-        value: "0x00_04_02_19"
-      - name: CodeLoopStart
-        type: errs.Code
-        value: "0x00_04_02_1A"
-      - name: CodeSecretStore
-        type: errs.Code
-        value: "0x00_04_02_1B"
-      - name: CodeSecretMissing
-        type: errs.Code
-        value: "0x00_04_02_1C"
-      - name: CodeSecretRead
-        type: errs.Code
-        value: "0x00_04_02_1D"
-      - name: CodeSecretRotate
-        type: errs.Code
-        value: "0x00_04_02_1E"
-      - name: CodeDatabaseOpen
-        type: errs.Code
-        value: "0x00_04_02_1F"
-      - name: CodeDatabaseMigrate
-        type: errs.Code
-        value: "0x00_04_02_20"
-      - name: CodeDatabaseUnavailable
-        type: errs.Code
-        value: "0x00_04_02_21"
-      - name: CodeDatabaseConfig
-        type: errs.Code
-        value: "0x00_04_02_22"
-      - name: CodeTransactionSpan
-        type: errs.Code
-        value: "0x00_04_02_42"
-      - name: CodePrivacyKey
-        type: errs.Code
-        value: "0x00_04_02_23"
-      - name: CodePrivacyErase
-        type: errs.Code
-        value: "0x00_04_02_24"
-      - name: CodePrivacyJournal
-        type: errs.Code
-        value: "0x00_04_02_25"
-      - name: CodePrivacyData
-        type: errs.Code
-        value: "0x00_04_02_26"
-      - name: CodeHistoryLoad
-        type: errs.Code
-        value: "0x00_04_02_27"
-      - name: CodeHistoryWrite
-        type: errs.Code
-        value: "0x00_04_02_28"
-      - name: CodeHistoryRead
-        type: errs.Code
-        value: "0x00_04_02_29"
-      - name: CodePasswordHash
-        type: errs.Code
-        value: "0x00_04_02_2A"
-      - name: CodeCommandReentrant
-        type: errs.Code
-        value: "0x00_04_02_2B"
-      - name: CodeCommandKey
-        type: errs.Code
-        value: "0x00_04_02_2C"
-      - name: CodeCommandQueue
-        type: errs.Code
-        value: "0x00_04_02_2D"
-      - name: CodeCommandEncode
-        type: errs.Code
-        value: "0x00_04_02_2E"
-      - name: CodeWatchQueue
-        type: errs.Code
-        value: "0x00_04_02_2F"
-      - name: CodeSealKey
-        type: errs.Code
-        value: "0x00_04_02_3D"
-      - name: CodeSealWrite
-        type: errs.Code
-        value: "0x00_04_02_3E"
-      - name: CodeSealOpen
-        type: errs.Code
-        value: "0x00_04_02_3F"
-      - name: CodeSealRewrap
-        type: errs.Code
-        value: "0x00_04_02_40"
-      - name: CodeSealShred
-        type: errs.Code
-        value: "0x00_04_02_41"
-      - name: CodeRevisionRead
-        type: errs.Code
-        value: "0x00_04_02_43"
-      - name: CodeRevisionWrite
-        type: errs.Code
-        value: "0x00_04_02_44"
-      - name: CodeRevisionDecode
-        type: errs.Code
-        value: "0x00_04_02_45"
-      - name: CodeJobOverlapped
-        type: errs.Code
-        value: "0x00_04_02_31"
-      - name: CodeHistoryMoved
-        type: errs.Code
-        value: "0x00_04_02_32"
-      - name: CodeNotSource
-        type: errs.Code
-        value: "0x00_04_02_33"
-      - name: CodePasswordMoved
-        type: errs.Code
-        value: "0x00_04_02_34"
-      - name: CodeNothingToErase
-        type: errs.Code
-        value: "0x00_04_02_35"
-      - name: CodeKeyRekeyed
-        type: errs.Code
-        value: "0x00_04_02_36"
-      - name: CodeMigrateRefused
-        type: errs.Code
-        value: "0x00_04_02_37"
-      - name: CodeCatalogue
-        type: errs.Code
-        value: "0x00_04_02_38"
-      - name: CodeRetentionPanic
-        type: errs.Code
-        value: "0x00_04_02_39"
-      - name: CodeSealErased
-        type: errs.Code
-        value: "0x00_04_02_46"
-      - name: CodeSealKeyMoved
-        type: errs.Code
-        value: "0x00_04_02_47"
-      - name: CodeResealInPlace
-        type: errs.Code
-        value: "0x00_04_02_48"
-      - name: CodeResealMoved
-        type: errs.Code
-        value: "0x00_04_02_49"
-      - name: CodeWorkflowNotInPlace
-        type: errs.Code
-        value: "0x00_04_02_4A"
-      - name: CodeTransactionPanic
-        type: errs.Code
-        value: "0x00_04_02_4B"
-      - name: CodeProfileRead
-        type: errs.Code
-        value: "0x00_04_02_30"
       - name: Personal
         type: Mark
         value: "\"personal\""
@@ -273,9 +337,6 @@ packages:
       - name: Moderated
         type: Mark
         value: "\"moderated\""
-      - name: CodeScopeUnknown
-        type: errs.Code
-        value: "0x00_04_02_3C"
     functions:
       - in:
           - name: name
@@ -3882,13 +3943,20 @@ packages:
         type: Scope
       - name: PerConfigDir
         type: Scope
-  - constants:
+  - codes:
+      - const:
+          - doc: |-
+              CodeRolledBack is the code of the error a case returns from a transaction's
+              function to roll it back — the suite's own, in the framework's range: layer
+              4, PP 4 this package (ADR 0147 §3). A store never returns it; the case that
+              returned it expects kit.Transact to hand it back.
+            name: CodeRolledBack
+            value: "0x00_04_04_01"
+        type: errs.Code
+    constants:
       - name: App
         type: string
         value: "\"storetest\""
-      - name: CodeRolledBack
-        type: errs.Code
-        value: "0x00_04_04_01"
     functions:
       - in:
           - name: t

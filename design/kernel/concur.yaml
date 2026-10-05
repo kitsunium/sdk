@@ -1,13 +1,18 @@
 apiVersion: kit.kitsunium/design/v2
 domain: kernel/concur
 packages:
-  - constants:
-      - name: CodeBatcherClosed
+  - codes:
+      - const:
+          - doc: CodeBatcherClosed identifies an Add or Flush call made after Close.
+            name: CodeBatcherClosed
+            note: "range: 0.1.5.0 - 0.1.5.255"
+            value: "0x00_01_05_01"
         type: errs.Code
-        value: "0x00_01_05_01"
-      - name: CodeBatcherDeliverFailed
+      - const:
+          - doc: CodeBatcherDeliverFailed identifies a deliver closure that returned an error.
+            name: CodeBatcherDeliverFailed
+            value: "0x00_01_05_02"
         type: errs.Code
-        value: "0x00_01_05_02"
     functions:
       - in:
           - name: deliver
@@ -24,6 +29,24 @@ packages:
       clock: github.com/kitsunium/sdk/internal/kernel/clock
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/kernel/concur/batcher
+    sentinels:
+      - var:
+          - code: CodeBatcherClosed
+            doc: |-
+              BatcherClosed is returned by Add (and Flush) once Close has run; the
+              batcher no longer accepts items and its ticker, if any, has been joined.
+            name: BatcherClosed
+            private: "internal/kernel/concur/batcher: Add/Flush called after Close"
+            public: Batcher is closed
+            reason: BATCHER_CLOSED
+          - code: CodeBatcherDeliverFailed
+            doc: |-
+              BatcherDeliverFailed wraps a deliver closure error so callers can route on
+              the typed sentinel; the original cause stays reachable via errors.Is.
+            name: BatcherDeliverFailed
+            private: "internal/kernel/concur/batcher: the deliver closure returned an error"
+            public: Batcher delivery failed
+            reason: BATCHER_DELIVER_FAILED
     types:
       - name: Sink
         typeParams:
@@ -78,11 +101,6 @@ packages:
         typeParams:
           - constraint: any
             name: T
-    variables:
-      - name: BatcherClosed
-        type: "*errs.Error"
-      - name: BatcherDeliverFailed
-        type: "*errs.Error"
   - functions:
       - name: Get
         out:

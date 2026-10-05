@@ -1,44 +1,115 @@
 apiVersion: kit.kitsunium/design/v2
 domain: third-party/aws
 packages:
-  - constants:
-      - name: CodeCWClientInitFailed
+  - codes:
+      - const:
+          - doc: |-
+              CodeCWClientInitFailed identifies a failure building the AWS CloudWatch Logs
+              client from the supplied region / credentials at Open time.
+            name: CodeCWClientInitFailed
+            note: |-
+              range: 0.3.25.0 - 0.3.25.255
+
+              : Canonical allocation (ADR 0006/0015): serial .2 ClientInit, serial .20 Put.
+              : The two sentinels below are the only codes this writer ever mints.
+            value: "0x00_03_19_02"
         type: errs.Code
-        value: "0x00_03_19_02"
-      - name: CodeCWPutFailed
+      - const:
+          - doc: |-
+              CodeCWPutFailed identifies a failed PutLogEvents delivery of a batched set of
+              log events.
+            name: CodeCWPutFailed
+            value: "0x00_03_19_14"
         type: errs.Code
-        value: "0x00_03_19_14"
-      - name: CodeCWEventRejected
+      - const:
+          - doc: |-
+              CodeCWEventRejected identifies a single event dropped before delivery because
+              its timestamp falls outside the PutLogEvents per-event bounds (older than 14
+              days or more than 2 hours in the future). The event is dropped and surfaced
+              via OnError instead of failing the whole batch.
+            name: CodeCWEventRejected
+            value: "0x00_03_19_15"
         type: errs.Code
-        value: "0x00_03_19_15"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       writer: github.com/kitsunium/sdk/internal/core/observe/logger/writer
     path: github.com/kitsunium/sdk/third-party/aws/writer/cloudwatch
+    sentinels:
+      - var:
+          - code: CodeCWClientInitFailed
+            doc: |-
+              ClientInitFailed wraps an AWS SDK client construction failure at Open
+              time (bad region, unreachable credential source, …).
+            name: ClientInitFailed
+            private: "third-party/aws/writer/cloudwatch.Open: aws client construction failed"
+            public: CloudWatch writer could not initialise its AWS client
+            reason: CLIENT_INIT_FAILED
+          - code: CodeCWPutFailed
+            doc: PutFailed wraps a failed PutLogEvents delivery of a batch.
+            name: PutFailed
+            options:
+              - errs.WithExitCode(exitIOErr)
+            private: "third-party/aws/writer/cloudwatch: PutLogEvents returned an error while flushing a batch"
+            public: CloudWatch writer failed to deliver a log batch
+            reason: PUT_FAILED
+          - code: CodeCWEventRejected
+            doc: |-
+              EventRejected reports one event dropped before delivery because its
+              timestamp is outside the PutLogEvents per-event window (older than 14 days
+              or more than 2 hours ahead). The whole batch still ships; only the
+              out-of-window event is discarded and routed to OnError.
+            name: EventRejected
+            private: "third-party/aws/writer/cloudwatch: event timestamp outside the PutLogEvents 14d-past / 2h-future window"
+            public: CloudWatch writer dropped a log event with an out-of-range timestamp
+            reason: EVENT_REJECTED
     variables:
       - name: Writer
         type: writer.Factory
-      - name: ClientInitFailed
-        type: "*errs.Error"
-      - name: PutFailed
-        type: "*errs.Error"
-      - name: EventRejected
-        type: "*errs.Error"
-  - constants:
-      - name: CodeS3ClientInitFailed
+  - codes:
+      - const:
+          - doc: |-
+              CodeS3ClientInitFailed identifies a failure building the AWS S3 client from
+              the supplied region / credentials at Open time.
+            name: CodeS3ClientInitFailed
+            note: |-
+              range: 0.3.35.0 - 0.3.35.255
+
+              s3 was re-allocated off PP octet 0x18 (0.3.24.*) to 0x23 (0.3.35.*) to clear
+              the V92/V99 collision with internal/service/data/codec/baseenc, which legitimately
+              owns 0x18. The former CodeS3ClientInitFailed=0.3.24.2 and
+              baseenc.CodeBaseEncUnmarshalFailed were the exact same uint32, conflating an
+              S3 client-init failure with a base-encoding unmarshal failure under HasCode /
+              NewPrefixMatcher routing. The codes were ambiguous, never a stable contract,
+              so there is no compat alias (an alias would preserve the ambiguity).
+            value: "0x00_03_23_02"
         type: errs.Code
-        value: "0x00_03_23_02"
-      - name: CodeS3PutFailed
+      - const:
+          - doc: CodeS3PutFailed identifies a failed PutObject upload of a batched log object.
+            name: CodeS3PutFailed
+            value: "0x00_03_23_14"
         type: errs.Code
-        value: "0x00_03_23_14"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       writer: github.com/kitsunium/sdk/internal/core/observe/logger/writer
     path: github.com/kitsunium/sdk/third-party/aws/writer/s3
+    sentinels:
+      - var:
+          - code: CodeS3ClientInitFailed
+            doc: |-
+              ClientInitFailed wraps an AWS SDK config/client construction failure at
+              Open time (bad region, unreachable credential source, …).
+            name: ClientInitFailed
+            private: "third-party/aws/writer/s3.Open: aws config/client construction failed"
+            public: S3 writer could not initialise its AWS client
+            reason: CLIENT_INIT_FAILED
+          - code: CodeS3PutFailed
+            doc: PutFailed wraps a failed PutObject upload of a batched log object.
+            name: PutFailed
+            options:
+              - errs.WithExitCode(exitIOErr)
+            private: "third-party/aws/writer/s3: PutObject returned an error while flushing a batch"
+            public: S3 writer failed to upload a log batch
+            reason: PUT_FAILED
     variables:
-      - name: ClientInitFailed
-        type: "*errs.Error"
-      - name: PutFailed
-        type: "*errs.Error"
       - name: Writer
         type: writer.Factory

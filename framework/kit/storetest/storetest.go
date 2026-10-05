@@ -59,12 +59,6 @@ const (
 	pollEvery time.Duration = 10 * time.Millisecond
 )
 
-// CodeRolledBack is the code of the error a case returns from a transaction's
-// function to roll it back — the suite's own, in the framework's range: layer
-// 4, PP 4 this package (ADR 0147 §3). A store never returns it; the case that
-// returned it expects kit.Transact to hand it back.
-const CodeRolledBack errs.Code = 0x00_04_04_01 // 0.4.4.1
-
 var (
 	// errRolled rolls a transaction back.
 	errRolled = errs.New(CodeRolledBack, "ROLLED_BACK", "the case rolled its transaction back",
