@@ -4,7 +4,7 @@ go 1.27.1
 
 require (
 	github.com/hashicorp/hcl/v2 v2.24.0
-	github.com/kitsunium/sdk v0.0.0-00010101000000-000000000000
+	github.com/kitsunium/sdk v0.19.0
 )
 
 require (
@@ -19,5 +19,3 @@ require (
 	golang.org/x/text v0.41.0 // indirect
 	golang.org/x/tools v0.49.0 // indirect
 )
-
-replace github.com/kitsunium/sdk => ../../..
