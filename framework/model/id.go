@@ -83,9 +83,8 @@ func binaryID(binary string) string {
 	return core.BinaryID(binary)
 }
 
-// roleID is RoleID's body: decl_gen.go writes RoleID, from the
-// design, as one call of it.
-func roleID(binary, role string) string {
+// RoleID is the ID of one process role of a binary.
+func RoleID(binary, role string) string {
 	return core.RoleID(binary, role)
 }
 

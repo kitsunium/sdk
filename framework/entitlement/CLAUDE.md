@@ -174,4 +174,4 @@ bazel test --config=race //framework/internal/service/entitlement:entitlement_te
 
 ## Declarations
 
-`decl_gen.go` is written by kit gen from the design (ADR 0170): `NewWithAnchors`, `NewWithGetter`, `RequiresUpdate` and `UpdateRefusal`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name.
+`decl_gen.go` is written by kit gen from the design (ADR 0170): `NewWithAnchors`, `NewWithGetter` and `RequiresUpdate`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name.

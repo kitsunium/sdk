@@ -421,7 +421,6 @@ packages:
           - name: floor
             type: string
         name: UpdateRefusal
-        impl: updateRefusal
         out:
           - type: error
     imports:

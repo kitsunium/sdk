@@ -1316,7 +1316,6 @@ packages:
           - name: path
             type: string
         name: FSSource
-        impl: fsSource
         out:
           - type: Source
     imports:

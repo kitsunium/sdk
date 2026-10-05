@@ -824,7 +824,6 @@ packages:
               - name: key
                 type: string
             name: Get
-            impl: get
             out:
               - name: value
                 type: string

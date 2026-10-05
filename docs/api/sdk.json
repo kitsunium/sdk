@@ -3133,7 +3133,7 @@
       "spelled": "func(current string, floor string) error",
       "canonical": "func(current string, floor string) error",
       "doc": "UpdateRefusal builds the typed refusal for a build below the roster's floor.\n\nIt takes the running build's version and the minimum the roster requires, and\nreturns an *UpdateRequiredError carrying both.\n",
-      "file": "framework/entitlement/decl_gen.go",
+      "file": "framework/entitlement/entitlement.go",
       "layer": "framework"
     },
     {
@@ -7168,7 +7168,7 @@
       "spelled": "func(message string) *Error",
       "canonical": "func(message string) *github.com/kitsunium/sdk/framework/internal/kit.Error",
       "doc": "Conflict reports a request the resource's current state refuses (409).\n",
-      "file": "framework/internal/kit/decl_gen.go",
+      "file": "framework/internal/kit/errors.go",
       "layer": "framework"
     },
     {
@@ -7729,7 +7729,7 @@
       "spelled": "func(message string) *Error",
       "canonical": "func(message string) *github.com/kitsunium/sdk/framework/internal/kit.Error",
       "doc": "Forbidden reports a caller who may not do this (403).\n",
-      "file": "framework/internal/kit/decl_gen.go",
+      "file": "framework/internal/kit/errors.go",
       "layer": "framework"
     },
     {
@@ -7840,7 +7840,7 @@
       "spelled": "func(message string) *Error",
       "canonical": "func(message string) *github.com/kitsunium/sdk/framework/internal/kit.Error",
       "doc": "Invalid reports a request the caller must change before retrying (400).\n",
-      "file": "framework/internal/kit/decl_gen.go",
+      "file": "framework/internal/kit/errors.go",
       "layer": "framework"
     },
     {
@@ -8488,7 +8488,7 @@
       "spelled": "func(message string) *Error",
       "canonical": "func(message string) *github.com/kitsunium/sdk/framework/internal/kit.Error",
       "doc": "NotFound reports that the addressed resource does not exist (404).\n",
-      "file": "framework/internal/kit/decl_gen.go",
+      "file": "framework/internal/kit/errors.go",
       "layer": "framework"
     },
     {
@@ -10049,7 +10049,7 @@
       "spelled": "func(message string) *Error",
       "canonical": "func(message string) *github.com/kitsunium/sdk/framework/internal/kit.Error",
       "doc": "Unauthenticated reports a caller who did not prove who they are (401).\n",
-      "file": "framework/internal/kit/decl_gen.go",
+      "file": "framework/internal/kit/errors.go",
       "layer": "framework"
     },
     {
@@ -10060,7 +10060,7 @@
       "spelled": "func(message string) *Error",
       "canonical": "func(message string) *github.com/kitsunium/sdk/framework/internal/kit.Error",
       "doc": "Unavailable reports a transient failure worth retrying later (503).\n",
-      "file": "framework/internal/kit/decl_gen.go",
+      "file": "framework/internal/kit/errors.go",
       "layer": "framework"
     },
     {
@@ -19607,7 +19607,7 @@
       "spelled": "func(binary string, role string) string",
       "canonical": "func(binary string, role string) string",
       "doc": "RoleID is the ID of one process role of a binary.\n",
-      "file": "framework/model/decl_gen.go",
+      "file": "framework/model/id.go",
       "layer": "framework"
     },
     {
@@ -39375,7 +39375,7 @@
       "spelled": "func() (violation ViolationValue, ok bool)",
       "canonical": "func() (violation github.com/kitsunium/sdk/internal/core/app/validation.ViolationValue, ok bool)",
       "doc": "First returns the earliest violation and whether there was one. Constraints\nreport in the order they were composed, so \"first\" is the outermost rule on\nthe earliest field — the one a stop-at-first caller wants.\n",
-      "file": "internal/core/app/validation/decl_gen.go",
+      "file": "internal/core/app/validation/report.go",
       "layer": "core",
       "family": "app"
     },
@@ -62652,7 +62652,7 @@
       "spelled": "func() (value bool, ok bool)",
       "canonical": "func() (value bool, ok bool)",
       "doc": "BoolValue returns the flag payload. ok is false when the attribute is not\n[KindBool] — and this is the accessor where ignoring ok is most expensive,\nsince false is both \"the flag is off\" and \"there is no flag\".\n",
-      "file": "internal/core/security/authz/decl_gen.go",
+      "file": "internal/core/security/authz/attr_value.go",
       "layer": "core",
       "family": "security"
     },
@@ -62678,7 +62678,7 @@
       "spelled": "func() (value int64, ok bool)",
       "canonical": "func() (value int64, ok bool)",
       "doc": "Int64Value returns the whole-number payload. ok is false when the attribute\nis not [KindInt64].\n",
-      "file": "internal/core/security/authz/decl_gen.go",
+      "file": "internal/core/security/authz/attr_value.go",
       "layer": "core",
       "family": "security"
     },
@@ -62717,7 +62717,7 @@
       "spelled": "func() (value string, ok bool)",
       "canonical": "func() (value string, ok bool)",
       "doc": "StringValue returns the text payload. ok is false when the attribute is not\n[KindString] — the caller MUST check it: the zero string is a legitimate\ntext value, so the returned value alone cannot report a mismatch.\n",
-      "file": "internal/core/security/authz/decl_gen.go",
+      "file": "internal/core/security/authz/attr_value.go",
       "layer": "core",
       "family": "security"
     },
@@ -63147,7 +63147,7 @@
       "spelled": "func(key string) (attr AttrValue, ok bool)",
       "canonical": "func(key string) (attr github.com/kitsunium/sdk/internal/core/security/authz.AttrValue, ok bool)",
       "doc": "Attr resolves an attribute by name. ok is false when the request does not\ncarry it — which callers MUST NOT read as a zero-valued attribute.\n\nThis two-value shape is the whole reason the attribute bag is not exported\nas a map. \"The subject has no department\" and \"nobody told us the subject's\ndepartment\" are different facts, and a rule that cannot tell them apart\ngrants access to every request that simply omitted the attribute.\n",
-      "file": "internal/core/security/authz/decl_gen.go",
+      "file": "internal/core/security/authz/request_value.go",
       "layer": "core",
       "family": "security"
     },
@@ -65215,7 +65215,7 @@
       "spelled": "func(key string) (value string, ok bool)",
       "canonical": "func(key string) (value string, ok bool)",
       "doc": "Get reads one datum. The second return distinguishes \"absent\" from \"present\nand empty\", which a bare \"\" cannot.\n",
-      "file": "internal/core/security/session/decl_gen.go",
+      "file": "internal/core/security/session/session_value.go",
       "layer": "core",
       "family": "security"
     },
@@ -76223,7 +76223,7 @@
       "spelled": "func() ([]byte, error)",
       "canonical": "func() ([]byte, error)",
       "doc": "MarshalText writes the kind's name, so a shape encodes as readable JSON.\n",
-      "file": "internal/service/data/codec/jsonshape/decl_gen.go",
+      "file": "internal/service/data/codec/jsonshape/shape.go",
       "layer": "service",
       "family": "data"
     },
@@ -86368,7 +86368,7 @@
       "spelled": "func(fsys fs.FS, format string, path string) Source",
       "canonical": "func(fsys io/fs.FS, format string, path string) github.com/kitsunium/sdk/pkg/v1/app/config.Source",
       "doc": "FSSource returns a Source reading path inside fsys and parsing it as format\n— [FileSource] over an io/fs.FS, such as an embed.FS. path is an io/fs name:\nslash-separated and unrooted. It fails with SourceFailed exactly where\nFileSource does, a file fsys does not hold included, and a nil fsys is\nrefused when the source loads. A traced load reports it as [LayerFile] with\npath as the detail.\n",
-      "file": "pkg/v1/app/config/decl_gen.go",
+      "file": "pkg/v1/app/config/config.go",
       "layer": "public",
       "family": "app"
     },
@@ -105938,7 +105938,7 @@
       "spelled": "func(lg logger.Logger) (h slog.Handler, err error)",
       "canonical": "func(lg github.com/kitsunium/sdk/pkg/v1/observe/logger.Logger) (h log/slog.Handler, err error)",
       "doc": "NewHandler returns an slog.Handler that forwards every record to lg.\n\nA nil lg returns [LoggerRequired] (1.1.1.1) rather than a handler that\nsilently discards: this package exists to guarantee one pipeline, and a\nbridge to nowhere would defeat the guarantee at the exact moment a caller\nbelieved it held.\n",
-      "file": "pkg/v1/observe/logger/slogbridge/decl_gen.go",
+      "file": "pkg/v1/observe/logger/slogbridge/slogbridge.go",
       "layer": "public",
       "family": "observe"
     },

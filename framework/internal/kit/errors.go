@@ -70,39 +70,33 @@ func (e *Error) wrap(cause error) *Error {
 	return &c
 }
 
-// invalid is Invalid's body: decl_gen.go writes Invalid, from the
-// design, as one call of it.
-func invalid(message string) *Error {
+// Invalid reports a request the caller must change before retrying (400).
+func Invalid(message string) *Error {
 	return NewError(http.StatusBadRequest, WireInvalid, message)
 }
 
-// notFound is NotFound's body: decl_gen.go writes NotFound, from the
-// design, as one call of it.
-func notFound(message string) *Error {
+// NotFound reports that the addressed resource does not exist (404).
+func NotFound(message string) *Error {
 	return NewError(http.StatusNotFound, WireNotFound, message)
 }
 
-// conflict is Conflict's body: decl_gen.go writes Conflict, from the
-// design, as one call of it.
-func conflict(message string) *Error {
+// Conflict reports a request the resource's current state refuses (409).
+func Conflict(message string) *Error {
 	return NewError(http.StatusConflict, WireConflict, message)
 }
 
-// unauthenticated is Unauthenticated's body: decl_gen.go writes Unauthenticated, from the
-// design, as one call of it.
-func unauthenticated(message string) *Error {
+// Unauthenticated reports a caller who did not prove who they are (401).
+func Unauthenticated(message string) *Error {
 	return NewError(http.StatusUnauthorized, WireUnauth, message)
 }
 
-// forbidden is Forbidden's body: decl_gen.go writes Forbidden, from the
-// design, as one call of it.
-func forbidden(message string) *Error {
+// Forbidden reports a caller who may not do this (403).
+func Forbidden(message string) *Error {
 	return NewError(http.StatusForbidden, WireForbidden, message)
 }
 
-// unavailable is Unavailable's body: decl_gen.go writes Unavailable, from the
-// design, as one call of it.
-func unavailable(message string) *Error {
+// Unavailable reports a transient failure worth retrying later (503).
+func Unavailable(message string) *Error {
 	return NewError(http.StatusServiceUnavailable, WireUnavailable, message)
 }
 

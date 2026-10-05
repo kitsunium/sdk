@@ -266,7 +266,6 @@ packages:
               report in the order they were composed, so "first" is the outermost rule on
               the earliest field — the one a stop-at-first caller wants.
             name: First
-            impl: first
             out:
               - name: violation
                 type: ViolationValue

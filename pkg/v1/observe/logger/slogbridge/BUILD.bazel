@@ -7,7 +7,6 @@ go_library(
     srcs = [
         "codes_gen.go",
         "convert.go",
-        "decl_gen.go",
         "doc.go",
         "handler.go",
         "slogbridge.go",

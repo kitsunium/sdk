@@ -93,7 +93,7 @@ New returns a \*slog.Logger writing through lg — the one-liner a caller hands 
 A nil lg returns [LoggerRequired](#LoggerRequired) (1.1.1.1).
 
 <a name="NewHandler"></a>
-## func [NewHandler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/slogbridge/decl_gen.go>)
+## func [NewHandler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/slogbridge/slogbridge.go>)
 
 ```go
 func NewHandler(lg logger.Logger) (h slog.Handler, err error)

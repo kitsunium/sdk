@@ -443,7 +443,6 @@ packages:
               [KindString] — the caller MUST check it: the zero string is a legitimate
               text value, so the returned value alone cannot report a mismatch.
             name: StringValue
-            impl: stringValue
             out:
               - name: value
                 type: string
@@ -454,7 +453,6 @@ packages:
               Int64Value returns the whole-number payload. ok is false when the attribute
               is not [KindInt64].
             name: Int64Value
-            impl: int64Value
             out:
               - name: value
                 type: int64
@@ -466,7 +464,6 @@ packages:
               [KindBool] — and this is the accessor where ignoring ok is most expensive,
               since false is both "the flag is off" and "there is no flag".
             name: BoolValue
-            impl: boolValue
             out:
               - name: value
               - name: ok
@@ -704,7 +701,6 @@ packages:
               - name: key
                 type: string
             name: Attr
-            impl: attr
             out:
               - name: attr
                 type: AttrValue

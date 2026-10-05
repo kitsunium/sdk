@@ -44,9 +44,14 @@ func (r RequestValue) Resource() string {
 	return r.resource
 }
 
-// attr is RequestValue.Attr's body: decl_gen.go writes RequestValue.Attr, from the
-// design, as one call of it.
-func (r RequestValue) attr(key string) (attr AttrValue, ok bool) {
+// Attr resolves an attribute by name. ok is false when the request does not
+// carry it — which callers MUST NOT read as a zero-valued attribute.
+//
+// This two-value shape is the whole reason the attribute bag is not exported
+// as a map. "The subject has no department" and "nobody told us the subject's
+// department" are different facts, and a rule that cannot tell them apart
+// grants access to every request that simply omitted the attribute.
+func (r RequestValue) Attr(key string) (attr AttrValue, ok bool) {
 	//: a nil map reads as empty, so no branch is needed for the no-attrs case.
 	attr, ok = r.attrs[key]
 	//: hand back both halves; the caller decides what absence means.

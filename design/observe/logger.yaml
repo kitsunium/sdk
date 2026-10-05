@@ -2957,7 +2957,6 @@ packages:
           - name: lg
             type: logger.Logger
         name: NewHandler
-        impl: newHandler
         out:
           - name: h
             type: slog.Handler

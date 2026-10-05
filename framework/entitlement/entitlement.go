@@ -259,9 +259,11 @@ func requiresUpdate(current, floor string) bool {
 	return svcent.RequiresUpdate(current, floor)
 }
 
-// updateRefusal is UpdateRefusal's body: decl_gen.go writes UpdateRefusal, from the
-// design, as one call of it.
-func updateRefusal(current, floor string) error {
+// UpdateRefusal builds the typed refusal for a build below the roster's floor.
+//
+// It takes the running build's version and the minimum the roster requires, and
+// returns an *UpdateRequiredError carrying both.
+func UpdateRefusal(current, floor string) error {
 	//: delegate verbatim to the service implementation.
 	return svcent.UpdateRefusal(current, floor)
 }

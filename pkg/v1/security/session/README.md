@@ -614,7 +614,7 @@ func (Session) ExpiresAt() time.Time
 ExpiresAt reports the EFFECTIVE deadline: the earlier of the absolute ceiling and the sliding idle window. The two are never reconciled by averaging or by preferring the later one — the earlier deadline always wins, which is what makes the absolute timeout a ceiling rather than a suggestion.
 
 <a name="Session.Get"></a>
-### func \(Session\) [Get](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/session/decl_gen.go>)
+### func \(Session\) [Get](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/session/session_value.go>)
 
 ```go
 func (Session) Get(key string) (value string, ok bool)

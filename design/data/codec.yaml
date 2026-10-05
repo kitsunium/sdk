@@ -404,7 +404,6 @@ packages:
             recv: value
           - doc: MarshalText writes the kind's name, so a shape encodes as readable JSON.
             name: MarshalText
-            impl: marshalText
             out:
               - type: "[]byte"
               - type: error

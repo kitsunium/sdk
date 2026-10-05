@@ -2307,7 +2307,6 @@ packages:
           - name: role
             type: string
         name: RoleID
-        impl: roleID
         out:
           - type: string
       - doc: LibraryID is the ID of a library.

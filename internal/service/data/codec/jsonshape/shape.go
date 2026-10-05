@@ -42,9 +42,8 @@ func (k Kind) String() string {
 	return kindNames[k]
 }
 
-// marshalText is Kind.MarshalText's body: decl_gen.go writes Kind.MarshalText, from the
-// design, as one call of it.
-func (k Kind) marshalText() ([]byte, error) {
+// MarshalText writes the kind's name, so a shape encodes as readable JSON.
+func (k Kind) MarshalText() ([]byte, error) {
 	//: the name, as text.
 	return []byte(k.String()), nil
 }

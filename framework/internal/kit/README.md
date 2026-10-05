@@ -1614,7 +1614,7 @@ app := kit.NewApp("todo", ...).With(kit.ConfigFiles(configFiles))
 ```
 
 <a name="Conflict"></a>
-## func [Conflict](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
+## func [Conflict](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go>)
 
 ```go
 func Conflict(message string) *Error
@@ -1797,7 +1797,7 @@ var Enforcer = Service.Port[Measure, Applied]("enforcer", kit.Fallback(QueueAPI)
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
 <a name="Forbidden"></a>
-## func [Forbidden](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
+## func [Forbidden](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go>)
 
 ```go
 func Forbidden(message string) *Error
@@ -1873,7 +1873,7 @@ func Index[T any](name string, keys func(T) []string) StoreConfigurer
 Index declares an index where an entity may have several keys and a key several entities — the users a task is shared with. [StoreService.Find](#StoreService.Find) reads it. Empty keys are not indexed.
 
 <a name="Invalid"></a>
-## func [Invalid](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
+## func [Invalid](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go>)
 
 ```go
 func Invalid(message string) *Error
@@ -2215,7 +2215,7 @@ NotCommon refuses a password among the ten thousand most common ones — the SDK
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
 <a name="NotFound"></a>
-## func [NotFound](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
+## func [NotFound](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go>)
 
 ```go
 func NotFound(message string) *Error
@@ -2628,7 +2628,7 @@ On a database the transaction is the database's own, at its default isolation. O
 A command's handler runs in one already ([NoTransaction](#NoTransaction) opts out), and so does a workflow's transition.
 
 <a name="Unauthenticated"></a>
-## func [Unauthenticated](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
+## func [Unauthenticated](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go>)
 
 ```go
 func Unauthenticated(message string) *Error
@@ -2637,7 +2637,7 @@ func Unauthenticated(message string) *Error
 Unauthenticated reports a caller who did not prove who they are (401).
 
 <a name="Unavailable"></a>
-## func [Unavailable](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/decl_gen.go>)
+## func [Unavailable](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go>)
 
 ```go
 func Unavailable(message string) *Error

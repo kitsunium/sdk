@@ -2521,7 +2521,7 @@ func QualifiedService(module string, service string) string
 QualifiedService is the name a module gives a service it lists: the module's own name for the service named like it, "\<module>.\<service>" otherwise. The runtime and the analyzer both qualify with it.
 
 <a name="RoleID"></a>
-## func [RoleID](<https://github.com/kitsunium/sdk/blob/main/framework/model/decl_gen.go>)
+## func [RoleID](<https://github.com/kitsunium/sdk/blob/main/framework/model/id.go>)
 
 ```go
 func RoleID(binary string, role string) string

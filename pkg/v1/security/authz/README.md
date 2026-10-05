@@ -528,7 +528,7 @@ type Attr struct{}
 ```
 
 <a name="Attr.BoolValue"></a>
-### func \(Attr\) [BoolValue](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/authz/decl_gen.go>)
+### func \(Attr\) [BoolValue](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/authz/attr_value.go>)
 
 ```go
 func (Attr) BoolValue() (value bool, ok bool)
@@ -548,7 +548,7 @@ Contains reports whether a [KindStrings](#KindStrings) attribute holds want. ok 
 It exists so membership does not have to allocate: \[AttrValue.StringsValue] clones, and membership is the single hottest attribute read in the domain — every RBAC evaluation performs one per role.
 
 <a name="Attr.Int64Value"></a>
-### func \(Attr\) [Int64Value](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/authz/decl_gen.go>)
+### func \(Attr\) [Int64Value](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/authz/attr_value.go>)
 
 ```go
 func (Attr) Int64Value() (value int64, ok bool)
@@ -575,7 +575,7 @@ func (Attr) Kind() AttrKind
 Kind returns the type the attribute carries.
 
 <a name="Attr.StringValue"></a>
-### func \(Attr\) [StringValue](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/authz/decl_gen.go>)
+### func \(Attr\) [StringValue](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/authz/attr_value.go>)
 
 ```go
 func (Attr) StringValue() (value string, ok bool)
@@ -776,7 +776,7 @@ func (Request) Action() string
 Action returns the verb being attempted.
 
 <a name="Request.Attr"></a>
-### func \(Request\) [Attr](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/authz/decl_gen.go>)
+### func \(Request\) [Attr](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/authz/request_value.go>)
 
 ```go
 func (Request) Attr(key string) (attr AttrValue, ok bool)

@@ -14,9 +14,13 @@ func fileSource(format, path string) Source {
 	return svcconfig.FileSource(codec.Format(format), path)
 }
 
-// fsSource is FSSource's body: decl_gen.go writes FSSource, from the
-// design, as one call of it.
-func fsSource(fsys fs.FS, format, path string) Source {
+// FSSource returns a Source reading path inside fsys and parsing it as format
+// — [FileSource] over an io/fs.FS, such as an embed.FS. path is an io/fs name:
+// slash-separated and unrooted. It fails with SourceFailed exactly where
+// FileSource does, a file fsys does not hold included, and a nil fsys is
+// refused when the source loads. A traced load reports it as [LayerFile] with
+// path as the detail.
+func FSSource(fsys fs.FS, format, path string) Source {
 	//: delegate, converting the format name to the codec key type.
 	return svcconfig.FSSource(fsys, codec.Format(format), path)
 }

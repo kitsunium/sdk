@@ -6,9 +6,13 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
 
-// newHandler is NewHandler's body: decl_gen.go writes NewHandler, from the
-// design, as one call of it.
-func newHandler(lg logger.Logger) (h slog.Handler, err error) {
+// NewHandler returns an slog.Handler that forwards every record to lg.
+//
+// A nil lg returns [LoggerRequired] (1.1.1.1) rather than a handler that
+// silently discards: this package exists to guarantee one pipeline, and a
+// bridge to nowhere would defeat the guarantee at the exact moment a caller
+// believed it held.
+func NewHandler(lg logger.Logger) (h slog.Handler, err error) {
 	//: refuse the nil Logger explicitly — mirrors NewText's WriterRequired
 	//: contract, where defaulting silently was the documented mistake.
 	if lg == nil {

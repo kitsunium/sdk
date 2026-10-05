@@ -1172,7 +1172,6 @@ packages:
           - name: message
             type: string
         name: Invalid
-        impl: invalid
         out:
           - type: "*Error"
       - doc: NotFound reports that the addressed resource does not exist (404).
@@ -1180,7 +1179,6 @@ packages:
           - name: message
             type: string
         name: NotFound
-        impl: notFound
         out:
           - type: "*Error"
       - doc: Conflict reports a request the resource's current state refuses (409).
@@ -1188,7 +1186,6 @@ packages:
           - name: message
             type: string
         name: Conflict
-        impl: conflict
         out:
           - type: "*Error"
       - doc: Unauthenticated reports a caller who did not prove who they are (401).
@@ -1196,7 +1193,6 @@ packages:
           - name: message
             type: string
         name: Unauthenticated
-        impl: unauthenticated
         out:
           - type: "*Error"
       - doc: Forbidden reports a caller who may not do this (403).
@@ -1204,7 +1200,6 @@ packages:
           - name: message
             type: string
         name: Forbidden
-        impl: forbidden
         out:
           - type: "*Error"
       - doc: Unavailable reports a transient failure worth retrying later (503).
@@ -1212,7 +1207,6 @@ packages:
           - name: message
             type: string
         name: Unavailable
-        impl: unavailable
         out:
           - type: "*Error"
       - doc: |-

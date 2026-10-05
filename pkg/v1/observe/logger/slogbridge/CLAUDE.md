@@ -45,7 +45,6 @@ package needs them (ADR 0033). `slogbridge.New` itself carries a documented
 | File | Role |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
-| `decl_gen.go` | written by kit gen from the design (ADR 0170): `NewHandler`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
 | `slogbridge.go` | `NewHandler` / `New` |
 | `handler.go` | the `slog.Handler` implementation (`Enabled` / `Handle` / `WithAttrs` / `WithGroup`) |
 | `convert.go` | `toLevel`, `qualifyKey` / `qualifyGroup`, `appendAttr` / `appendGroup`, `convert` |

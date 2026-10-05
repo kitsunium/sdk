@@ -26,9 +26,10 @@ func (r ReportValue) ok() bool {
 	return len(r) == 0
 }
 
-// first is ReportValue.First's body: decl_gen.go writes ReportValue.First, from the
-// design, as one call of it.
-func (r ReportValue) first() (violation ViolationValue, ok bool) {
+// First returns the earliest violation and whether there was one. Constraints
+// report in the order they were composed, so "first" is the outermost rule on
+// the earliest field — the one a stop-at-first caller wants.
+func (r ReportValue) First() (violation ViolationValue, ok bool) {
 	//: an OK report has no first violation to hand back.
 	if len(r) == 0 {
 		//: the zero ViolationValue with ok=false; callers must check ok.

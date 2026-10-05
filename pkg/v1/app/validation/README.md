@@ -415,7 +415,7 @@ It returns a genuine nil interface when the report is OK. That is why ReportValu
 The error carries the violation COUNT and the list of paths, never the messages and never the values: the full report is the report. A caller that needs every message keeps the ReportValue; the error is the interop shape.
 
 <a name="Report.First"></a>
-### func \(Report\) [First](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/validation/decl_gen.go>)
+### func \(Report\) [First](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/validation/report.go>)
 
 ```go
 func (Report) First() (violation ViolationValue, ok bool)

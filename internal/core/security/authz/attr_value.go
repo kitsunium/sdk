@@ -59,9 +59,10 @@ func (a AttrValue) Kind() AttrKind {
 	return a.kind
 }
 
-// stringValue is AttrValue.StringValue's body: decl_gen.go writes AttrValue.StringValue, from the
-// design, as one call of it.
-func (a AttrValue) stringValue() (value string, ok bool) {
+// StringValue returns the text payload. ok is false when the attribute is not
+// [KindString] — the caller MUST check it: the zero string is a legitimate
+// text value, so the returned value alone cannot report a mismatch.
+func (a AttrValue) StringValue() (value string, ok bool) {
 	//: a mismatch returns the zero value AND false, never one or the other.
 	if a.kind != KindString {
 		//: not text — report the mismatch rather than an empty string.
@@ -71,9 +72,9 @@ func (a AttrValue) stringValue() (value string, ok bool) {
 	return a.text, true
 }
 
-// int64Value is AttrValue.Int64Value's body: decl_gen.go writes AttrValue.Int64Value, from the
-// design, as one call of it.
-func (a AttrValue) int64Value() (value int64, ok bool) {
+// Int64Value returns the whole-number payload. ok is false when the attribute
+// is not [KindInt64].
+func (a AttrValue) Int64Value() (value int64, ok bool) {
 	//: a mismatch returns the zero value AND false, never one or the other.
 	if a.kind != KindInt64 {
 		//: not a number — report the mismatch rather than a zero.
@@ -83,9 +84,10 @@ func (a AttrValue) int64Value() (value int64, ok bool) {
 	return a.number, true
 }
 
-// boolValue is AttrValue.BoolValue's body: decl_gen.go writes AttrValue.BoolValue, from the
-// design, as one call of it.
-func (a AttrValue) boolValue() (value, ok bool) {
+// BoolValue returns the flag payload. ok is false when the attribute is not
+// [KindBool] — and this is the accessor where ignoring ok is most expensive,
+// since false is both "the flag is off" and "there is no flag".
+func (a AttrValue) BoolValue() (value, ok bool) {
 	//: a mismatch returns the zero value AND false, never one or the other.
 	if a.kind != KindBool {
 		//: not a flag — report the mismatch rather than a false.

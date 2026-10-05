@@ -499,7 +499,7 @@ RequiresUpdate reports whether current is below the floor a roster mandates.
 It takes the running build's version and the minimum the roster requires — an empty floor requires nothing — and reports whether the build is below it.
 
 <a name="UpdateRefusal"></a>
-## func [UpdateRefusal](<https://github.com/kitsunium/sdk/blob/main/framework/entitlement/decl_gen.go>)
+## func [UpdateRefusal](<https://github.com/kitsunium/sdk/blob/main/framework/entitlement/entitlement.go>)
 
 ```go
 func UpdateRefusal(current string, floor string) error

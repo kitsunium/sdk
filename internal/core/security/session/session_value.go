@@ -97,9 +97,9 @@ func (s SessionValue) isZero() bool {
 	return s.id.IsZero()
 }
 
-// get is SessionValue.Get's body: decl_gen.go writes SessionValue.Get, from the
-// design, as one call of it.
-func (s SessionValue) get(key string) (value string, ok bool) {
+// Get reads one datum. The second return distinguishes "absent" from "present
+// and empty", which a bare "" cannot.
+func (s SessionValue) Get(key string) (value string, ok bool) {
 	//: a nil map reads as empty, so no guard is needed.
 	value, ok = s.data[key]
 	//: absent keys report ok == false.
