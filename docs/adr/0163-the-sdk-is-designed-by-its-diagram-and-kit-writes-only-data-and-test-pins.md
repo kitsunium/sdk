@@ -171,8 +171,6 @@ is governed by a private tool without depending on it.
 
 ### 4. An API change needs kit; a doc edit does not
 
-> **Amended by ADR 0167**: a doc edit is now a design edit followed by `kit gen`, and needs kit too — the doc comments of every designed symbol and every package comment are the design's, held to the code by the pin markers' doc digests. The text below is the record of what held until then.
-
 Stated plainly, because it is the cost of this decision:
 
 - **An API change needs kit**, which is not public: edit the design file of
@@ -314,8 +312,6 @@ project file, kit's view of every module equals `docs/api` byte for byte,
 layer and family included.
 
 ### 12. The docs portal is built from `docs/api`
-
-> **Amended by ADR 0167**: the READMEs are no longer gomarkdoc's — `tools/genindex -write-readmes` writes them from docs/api.
 
 - The ⌘K index of each release that has `docs/api` is
   `symbols-<release>-<major>.json`, written by `docs/site/scripts/gen-symbols.mjs`

@@ -134,11 +134,10 @@ disagree, the ADR's own text is the decision and this list is corrected.
     reproduced on the shipped code before it is fixed, a guard is tested with
     its accepting rows beside its refusing ones, and a number in a document was
     measured, never deduced. (ADR 0034, 0049, 0053, 0058, 0081, 0082, 0083)
-28. **Documentation is generated or checked, never trusted.** Doc comments
-    are the design's and the pin markers' digests hold the code to them,
-    READMEs are written from docs/api, indexes are checked against the files on
-    disk, and a doc travels with the code in the same change. (ADR 0008, 0138,
-    0167; root `CLAUDE.md` rule 11)
+28. **Documentation is generated or checked, never trusted.** READMEs come from
+    doc comments, indexes are checked against the files on disk, and a doc
+    travels with the code in the same change. (ADR 0008, 0138; root `CLAUDE.md`
+    rule 11)
 
 ### 2. An incident's rule lives in the package it hit
 

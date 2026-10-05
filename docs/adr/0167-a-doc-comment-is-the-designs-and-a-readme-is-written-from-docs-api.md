@@ -169,7 +169,8 @@ and carries no timestamp or absolute path, and a test writes it twice.
     any edit rewrote every README); an example shows its body, not a
     synthesized `package main`; doc headings carry no `{#id}`;
   - not shown — what docs/api does not record: a declaration's initializer
-    expression and a sentinel's private text (gomarkdoc printed the source),
+    expression, a sentinel's private text and its options — an exit code set
+    by `errs.WithExitCode` among them — (gomarkdoc printed the source),
     the line comments beside a constant (313 in `pkg/` and `framework/`, every
     one beside a doc, most of them a code's dotted quad, now shown as the
     code), the doc of a `const ( … )` / `var ( … )` block whose every member
@@ -178,7 +179,7 @@ and carries no timestamp or absolute path, and a test writes it twice.
   `## Constants|Variables|func |type ` heading and its removal of `## Index`
   are unchanged.
 
-## Consequences
+## Consequences / Semantics
 
 - One source for every doc: the design. The code, docs/api, the READMEs and
   the portal are written from it, in that order, and each step is checked
