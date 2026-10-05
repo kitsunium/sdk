@@ -28,5 +28,8 @@ cat "$table"
 # where the next conversion would move the most.
 printf '\nmost declared by hand:\n'
 awk 'NR > 1 && $1 != "total" { print $4, $2, $1 }' "$table" |
-  LC_ALL=C sort -k1,1nr -k3,3 | head -n 10 |
+  LC_ALL=C sort -k1,1nr -k3,3 |
+  # awk reads the whole stream: head would close it early, and sort, sent
+  # SIGPIPE, would fail the report under pipefail.
+  awk 'NR <= 10' |
   awk '{ printf "  %6d of %6d  %s\n", $1, $2, $3 }'
