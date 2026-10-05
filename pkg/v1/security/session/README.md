@@ -172,7 +172,7 @@ var (
 ```
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/session/session.go#L189>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/session/facade_gen.go#L40>)
 
 Config is the public alias for the memory store's construction parameters.
 
@@ -181,7 +181,7 @@ type Config = svcsession.Config
 ```
 
 <a name="FileConfig"></a>
-## type [FileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/session/session.go#L195>)
+## type [FileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/session/facade_gen.go#L46>)
 
 FileConfig is the public alias for the file store's construction parameters. Its Key field takes a pkg/v1/crypto.Key, and its Clock is a clock.Timed because the store both stamps time and waits on it — the poll between lock attempts is armed on it, so a test drives contention without sleeping.
 
@@ -190,7 +190,7 @@ type FileConfig = svcsession.FileConfig
 ```
 
 <a name="ID"></a>
-## type [ID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/session/session.go#L165>)
+## type [ID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/session/facade_gen.go#L16>)
 
 ID is the public alias for the opaque, redacting session identifier.
 
@@ -199,7 +199,7 @@ type ID = coresession.ID
 ```
 
 <a name="NewID"></a>
-### func [NewID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/session/session.go#L288>)
+### func [NewID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/session/facade_gen.go#L135>)
 
 ```go
 func NewID(raw []byte) (id ID, err error)
@@ -208,7 +208,7 @@ func NewID(raw []byte) (id ID, err error)
 NewID builds an ID from exactly [IDLen](<#IDLen>) raw bytes. Most callers want [ParseID](<#ParseID>); this is for a Store implementation that holds raw identifier bytes.
 
 <a name="ParseID"></a>
-### func [ParseID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/session/session.go#L280>)
+### func [ParseID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/session/facade_gen.go#L128>)
 
 ```go
 func ParseID(encoded string) (id ID, err error)
@@ -217,7 +217,7 @@ func ParseID(encoded string) (id ID, err error)
 ParseID decodes the canonical form produced by [ID](<#ID>).Reveal — unpadded base64url over exactly [IDLen](<#IDLen>) bytes. It is the inbound path: whatever arrives from a cookie reaches the domain through here, and anything that is not exactly that shape is refused before it can be used as a lookup key.
 
 <a name="Sealer"></a>
-## type [Sealer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/session/session.go#L186>)
+## type [Sealer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/session/facade_gen.go#L37>)
 
 Sealer is the public alias for the port that renders an [ID](<#ID>) as an opaque, tamper\-evident cookie VALUE. It does not write cookies.
 
@@ -226,7 +226,7 @@ type Sealer = coresession.Sealer
 ```
 
 <a name="NewSealer"></a>
-### func [NewSealer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/session/session.go#L271>)
+### func [NewSealer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/session/facade_gen.go#L120>)
 
 ```go
 func NewSealer(key corecrypto.Key, purpose string) (sealer Sealer, err error)
@@ -235,7 +235,7 @@ func NewSealer(key corecrypto.Key, purpose string) (sealer Sealer, err error)
 NewSealer returns a Sealer binding key and purpose. purpose is required: it is the domain separator between two things sealed under one key, and an empty one is refused rather than read as "no separation needed".
 
 <a name="Session"></a>
-## type [Session](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/session/session.go#L168>)
+## type [Session](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/session/facade_gen.go#L19>)
 
 Session is the public alias for the immutable session a Store hands back.
 
@@ -244,7 +244,7 @@ type Session = coresession.SessionValue
 ```
 
 <a name="NewSession"></a>
-### func [NewSession](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/session/session.go#L296>)
+### func [NewSession](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/session/facade_gen.go#L142>)
 
 ```go
 func NewSession(state State) (session Session, err error)
@@ -253,7 +253,7 @@ func NewSession(state State) (session Session, err error)
 NewSession builds an immutable [Session](<#Session>) from a [State](<#State>). It is what a framework implementing its own [Store](<#Store>) returns; ordinary callers get sessions from a store and never call this.
 
 <a name="State"></a>
-## type [State](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/session/session.go#L174>)
+## type [State](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/session/facade_gen.go#L25>)
 
 State is the public alias for the exported description [NewSession](<#NewSession>) builds a [Session](<#Session>) from. It exists so a framework can implement [Store](<#Store>) over its own backend; it is not a way around the fixation rule, since [Store](<#Store>).Save refuses a subject the stored record does not have.
 
@@ -262,7 +262,7 @@ type State = coresession.StateValue
 ```
 
 <a name="Store"></a>
-## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/session/session.go#L178>)
+## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/session/facade_gen.go#L29>)
 
 Store is the public alias for the session\-lifetime port. Its method set is frozen: new capabilities arrive as sibling interfaces \(ADR 0039\).
 
@@ -271,7 +271,7 @@ type Store = coresession.Store
 ```
 
 <a name="NewFileStore"></a>
-### func [NewFileStore](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/session/session.go#L263>)
+### func [NewFileStore](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/session/facade_gen.go#L113>)
 
 ```go
 func NewFileStore(cfg FileConfig) (store Store, err error)
@@ -280,7 +280,7 @@ func NewFileStore(cfg FileConfig) (store Store, err error)
 NewFileStore returns a Store keeping one sealed file per session in cfg.Dir. It refuses — at construction — an unusable configuration, an unsafe directory, a location reached through a link anybody could have planted \([PathRedirected](<#NotFound>)\), and a platform without flock\(2\), enforced Unix permissions and a directory flush.
 
 <a name="NewMemoryStore"></a>
-### func [NewMemoryStore](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/session/session.go#L253>)
+### func [NewMemoryStore](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/session/facade_gen.go#L104>)
 
 ```go
 func NewMemoryStore(cfg Config) (store Store, err error)
@@ -289,7 +289,7 @@ func NewMemoryStore(cfg Config) (store Store, err error)
 NewMemoryStore returns a Store keeping every session in this process's memory. It refuses a Config it cannot honour and never returns an inert store.
 
 <a name="Sweeper"></a>
-## type [Sweeper](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/session/session.go#L182>)
+## type [Sweeper](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/session/facade_gen.go#L33>)
 
 Sweeper is the public alias for the first such sibling — a store that can drop its expired records on demand.
 

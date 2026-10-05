@@ -385,240 +385,383 @@ packages:
           fields:
             - name: StopAtFirst
               type: bool
-  - aliases:
-      - name: Constraint
-        target: corevalidation.Constraint[T]
-        typeParams:
-          - constraint: any
-            name: T
-      - name: Violation
-        target: corevalidation.ViolationValue
-      - name: Report
-        target: corevalidation.ReportValue
-      - name: StructConfig
-        target: svcvalidation.StructConfig
-    constants:
-      - name: RootPath
-        type: string
-        value: "\"\""
-      - name: Unbounded
-        type: int
-        value: "-1"
-      - name: CodeRequired
-        type: errs.Code
-        value: "0x00_03_2F_01"
-      - name: CodeOutOfRange
-        type: errs.Code
-        value: "0x00_03_2F_02"
-      - name: CodeLengthOutOfRange
-        type: errs.Code
-        value: "0x00_03_2F_03"
-      - name: CodeNotInSet
-        type: errs.Code
-        value: "0x00_03_2F_04"
-      - name: CodePatternMismatch
-        type: errs.Code
-        value: "0x00_03_2F_05"
-    functions:
-      - in:
-          - name: base
-          - name: name
+  - facade:
+      - const:
+          - doc: |-
+              RootPath is the path of the value handed to a validator, before any
+              descent. A violation reported there is about the value as a whole.
+            name: RootPath
+            reexport: corevalidation.RootPath
             type: string
-        name: JoinField
-        out:
-          - type: string
-      - in:
-          - name: base
-            type: string
-          - name: index
+            typed: true
+            value: "\"\""
+          - doc: Unbounded is the [Length] / [Count] upper bound that means "no ceiling".
+            name: Unbounded
+            reexport: svcvalidation.Unbounded
             type: int
-        name: JoinIndex
-        out:
-          - type: string
-      - in:
-          - name: constraints
-            type: Constraint[T]
-        name: All
-        out:
-          - type: Constraint[T]
-        typeParams:
-          - constraint: any
-            name: T
-        variadic: true
-      - in:
-          - name: constraints
-            type: Constraint[T]
-        name: First
-        out:
-          - type: Constraint[T]
-        typeParams:
-          - constraint: any
-            name: T
-        variadic: true
-      - in:
-          - name: value
-            type: T
-          - name: constraints
-            type: Constraint[T]
-        name: Check
-        out:
-          - type: error
-        typeParams:
-          - constraint: any
-            name: T
-        variadic: true
-      - in:
-          - name: constraint
-            type: Constraint[T]
-          - name: err
-            type: error
-        name: Must
-        out:
-          - type: Constraint[T]
-        typeParams:
-          - constraint: any
-            name: T
-      - in:
-          - name: name
-            type: string
-          - name: get
-            type: func(T) F
-          - name: constraints
-            type: Constraint[F]
-        name: Field
-        out:
-          - name: constraint
-            type: Constraint[T]
-          - name: err
-            type: error
-        typeParams:
-          - name: T
-          - constraint: any
-            name: F
-        variadic: true
-      - in:
-          - name: name
-            type: string
-          - name: get
-            type: func(T) []E
-          - name: constraints
-            type: Constraint[E]
-        name: Each
-        out:
-          - name: constraint
-            type: Constraint[T]
-          - name: err
-            type: error
-        typeParams:
-          - name: T
-          - constraint: any
-            name: E
-        variadic: true
-      - name: Required
-        out:
-          - type: Constraint[T]
-        typeParams:
-          - constraint: comparable
-            name: T
-      - in:
-          - name: lo
-            type: T
-        name: AtLeast
-        out:
-          - type: Constraint[T]
-        typeParams:
-          - constraint: cmp.Ordered
-            name: T
-      - in:
-          - name: hi
-            type: T
-        name: AtMost
-        out:
-          - type: Constraint[T]
-        typeParams:
-          - constraint: cmp.Ordered
-            name: T
-      - in:
-          - name: lo
-          - name: hi
-            type: T
-        name: Between
-        out:
-          - name: constraint
-            type: Constraint[T]
-          - name: err
-            type: error
-        typeParams:
-          - constraint: cmp.Ordered
-            name: T
-      - in:
-          - name: minRunes
-          - name: maxRunes
-            type: int
-        name: Length
-        out:
-          - name: constraint
-            type: Constraint[string]
-          - name: err
-            type: error
-      - in:
-          - name: minLen
-          - name: maxLen
-            type: int
-        name: Count
-        out:
-          - name: constraint
-            type: Constraint[[]E]
-          - name: err
-            type: error
-        typeParams:
-          - constraint: any
-            name: E
-      - in:
-          - name: allowed
-            type: T
-        name: OneOf
-        out:
-          - name: constraint
-            type: Constraint[T]
-          - name: err
-            type: error
-        typeParams:
-          - constraint: comparable
-            name: T
-        variadic: true
-      - in:
-          - name: pattern
-            type: string
-        name: Matches
-        out:
-          - name: constraint
-            type: Constraint[string]
-          - name: err
-            type: error
-      - in:
-          - name: cfg
-            type: StructConfig
-        name: Struct
-        out:
-          - name: constraint
-            type: Constraint[T]
-          - name: err
-            type: error
-        typeParams:
-          - constraint: any
-            name: T
+            typed: true
+            value: "-1"
+          - doc: CodeRequired identifies an absent value.
+            name: CodeRequired
+            reexport: corevalidation.CodeRequired
+            type: errs.Code
+            typed: true
+            value: "0x00_03_2F_01"
+          - doc: CodeOutOfRange identifies an ordered value outside its bounds.
+            name: CodeOutOfRange
+            reexport: corevalidation.CodeOutOfRange
+            type: errs.Code
+            typed: true
+            value: "0x00_03_2F_02"
+          - doc: CodeLengthOutOfRange identifies a size outside its bounds.
+            name: CodeLengthOutOfRange
+            reexport: corevalidation.CodeLengthOutOfRange
+            type: errs.Code
+            typed: true
+            value: "0x00_03_2F_03"
+          - doc: CodeNotInSet identifies a value outside its allowed set.
+            name: CodeNotInSet
+            reexport: corevalidation.CodeNotInSet
+            type: errs.Code
+            typed: true
+            value: "0x00_03_2F_04"
+          - doc: CodePatternMismatch identifies a string that did not match its pattern.
+            name: CodePatternMismatch
+            reexport: corevalidation.CodePatternMismatch
+            type: errs.Code
+            typed: true
+            value: "0x00_03_2F_05"
+      - var:
+          - doc: |-
+              Failed is the error a non-empty Report converts to. Its HTTP status is
+              422: the request was syntactically fine and semantically wrong, which is
+              what a failed validation is — not a 500.
+            name: Failed
+            reexport: corevalidation.ValidationFailed
+            type: "*errs.Error"
+          - doc: |-
+              Misconfigured is returned by a constraint CONSTRUCTOR whose arguments it
+              cannot honour — an inverted interval, an empty set, a bad pattern.
+            name: Misconfigured
+            reexport: corevalidation.ConstraintMisconfigured
+            type: "*errs.Error"
+          - doc: InvalidRule is returned by Struct when a validate tag cannot be compiled.
+            name: InvalidRule
+            reexport: corevalidation.InvalidRule
+            type: "*errs.Error"
+          - doc: UnsupportedTarget is returned by Struct when T is not a struct type.
+            name: UnsupportedTarget
+            reexport: corevalidation.UnsupportedTarget
+            type: "*errs.Error"
+      - alias:
+          - doc: |-
+              Constraint is the public alias for the value-checking port. It is a FUNC
+              type, so it cannot grow a method and break a downstream implementer
+              (ADR 0039).
+            name: Constraint
+            target: corevalidation.Constraint[T]
+            typeParams:
+              - constraint: any
+                name: T
+      - alias:
+          - doc: Violation is the public alias for one located failure.
+            name: Violation
+            target: corevalidation.ViolationValue
+      - alias:
+          - doc: |-
+              Report is the public alias for everything one validation found wrong. Its
+              zero value — nil — is a passing report.
+            name: Report
+            target: corevalidation.ReportValue
+      - alias:
+          - doc: StructConfig is the public alias for a compiled struct validator's options.
+            name: StructConfig
+            target: svcvalidation.StructConfig
+      - func:
+          doc: |-
+            JoinField extends a path with a member name — JoinField("user", "zip") is
+            "user.zip". The grammar does not quote, so a member name that itself
+            contains '.', '[' or ']' yields a path indistinguishable from a nested or
+            indexed one.
+          forward: corevalidation.JoinField
+          in:
+            - name: base
+            - name: name
+              type: string
+          name: JoinField
+          out:
+            - type: string
+      - func:
+          doc: |-
+            JoinIndex extends a path with an element position — JoinIndex("a", 2) is
+            "a[2]".
+          forward: corevalidation.JoinIndex
+          in:
+            - name: base
+              type: string
+            - name: index
+              type: int
+          name: JoinIndex
+          out:
+            - type: string
+      - func:
+          doc: |-
+            All runs every constraint and reports everything they found. It is the
+            default shape of the engine; All with no constraint accepts everything.
+          forward: svcvalidation.All
+          in:
+            - name: constraints
+              type: Constraint[T]
+          name: All
+          out:
+            - type: Constraint[T]
+          typeParams:
+            - constraint: any
+              name: T
+          variadic: true
+      - func:
+          doc: |-
+            First runs the constraints in order and stops at the one that refuses. It is
+            a real short-circuit, not a filtered report.
+          forward: svcvalidation.First
+          in:
+            - name: constraints
+              type: Constraint[T]
+          name: First
+          out:
+            - type: Constraint[T]
+          typeParams:
+            - constraint: any
+              name: T
+          variadic: true
+      - func:
+          doc: |-
+            Check runs constraints against value at the root path and converts the
+            result to the SDK error model — the one-line bridge to config.Validator.
+          forward: svcvalidation.Check
+          in:
+            - name: value
+              type: T
+            - name: constraints
+              type: Constraint[T]
+          name: Check
+          out:
+            - type: error
+          typeParams:
+            - constraint: any
+              name: T
+          variadic: true
+      - func:
+          doc: |-
+            Must returns constraint, panicking when err is non-nil. It is the
+            regexp.MustCompile idiom, for a package-level validator built from literals
+            at init. Do NOT use it on a bound that comes from configuration.
+          forward: svcvalidation.Must
+          in:
+            - name: constraint
+              type: Constraint[T]
+            - name: err
+              type: error
+          name: Must
+          out:
+            - type: Constraint[T]
+          typeParams:
+            - constraint: any
+              name: T
+      - func:
+          doc: |-
+            Field applies constraints to a member of T reached through get, locating
+            every violation at the parent path extended by name. It uses no reflection.
+          forward: svcvalidation.Field
+          in:
+            - name: name
+              type: string
+            - name: get
+              type: func(T) F
+            - name: constraints
+              type: Constraint[F]
+          name: Field
+          out:
+            - name: constraint
+              type: Constraint[T]
+            - name: err
+              type: error
+          typeParams:
+            - name: T
+            - constraint: any
+              name: F
+          variadic: true
+      - func:
+          doc: |-
+            Each applies constraints to every element of a slice member of T reached
+            through get, locating each element's violations at "name[i]".
+          forward: svcvalidation.Each
+          in:
+            - name: name
+              type: string
+            - name: get
+              type: func(T) []E
+            - name: constraints
+              type: Constraint[E]
+          name: Each
+          out:
+            - name: constraint
+              type: Constraint[T]
+            - name: err
+              type: error
+          typeParams:
+            - name: T
+            - constraint: any
+              name: E
+          variadic: true
+      - func:
+          doc: |-
+            Required refuses the zero value of T. It cannot distinguish "not supplied"
+            from "supplied as zero" — declare the field as a pointer when that matters.
+          forward: svcvalidation.Required[T]
+          name: Required
+          out:
+            - type: Constraint[T]
+          typeParams:
+            - constraint: comparable
+              name: T
+      - func:
+          doc: |-
+            AtLeast refuses a value below lo; the bound is inclusive. It is the
+            programmatic spelling of the `min=` struct tag, and both report the rule
+            "min".
+          forward: svcvalidation.AtLeast
+          in:
+            - name: lo
+              type: T
+          name: AtLeast
+          out:
+            - type: Constraint[T]
+          typeParams:
+            - constraint: cmp.Ordered
+              name: T
+      - func:
+          doc: |-
+            AtMost refuses a value above hi; the bound is inclusive. It is the
+            programmatic spelling of the `max=` struct tag.
+          forward: svcvalidation.AtMost
+          in:
+            - name: hi
+              type: T
+          name: AtMost
+          out:
+            - type: Constraint[T]
+          typeParams:
+            - constraint: cmp.Ordered
+              name: T
+      - func:
+          doc: |-
+            Between refuses a value outside [lo, hi]. lo > hi is refused at
+            construction: an inverted interval is satisfied by nothing.
+          forward: svcvalidation.Between
+          in:
+            - name: lo
+            - name: hi
+              type: T
+          name: Between
+          out:
+            - name: constraint
+              type: Constraint[T]
+            - name: err
+              type: error
+          typeParams:
+            - constraint: cmp.Ordered
+              name: T
+      - func:
+          doc: |-
+            Length refuses a string whose RUNE count falls outside [min, max]. max may
+            be [Unbounded]. It counts runes, not grapheme clusters.
+          forward: svcvalidation.Length
+          in:
+            - name: minRunes
+            - name: maxRunes
+              type: int
+          name: Length
+          out:
+            - name: constraint
+              type: Constraint[string]
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            Count refuses a slice whose element count falls outside [min, max]. max may
+            be [Unbounded]. Count(1, Unbounded) is how presence is expressed for a slice.
+          forward: svcvalidation.Count[E]
+          in:
+            - name: minLen
+            - name: maxLen
+              type: int
+          name: Count
+          out:
+            - name: constraint
+              type: Constraint[[]E]
+            - name: err
+              type: error
+          typeParams:
+            - constraint: any
+              name: E
+      - func:
+          doc: |-
+            OneOf refuses a value absent from allowed. An empty allowed set is refused
+            at construction: it is a forgotten argument, not a permissive rule.
+          forward: svcvalidation.OneOf
+          in:
+            - name: allowed
+              type: T
+          name: OneOf
+          out:
+            - name: constraint
+              type: Constraint[T]
+            - name: err
+              type: error
+          typeParams:
+            - constraint: comparable
+              name: T
+          variadic: true
+      - func:
+          doc: |-
+            Matches refuses a string the pattern does not match. The pattern is compiled
+            at construction, and Go's RE2 has no backtracking — a pattern cannot be
+            turned into a denial of service by the value it is shown.
+          forward: svcvalidation.Matches
+          in:
+            - name: pattern
+              type: string
+          name: Matches
+          out:
+            - name: constraint
+              type: Constraint[string]
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            Struct compiles the `validate` tags of T into a Constraint, caching the plan
+            per (type, mode).
+
+            Accepted: required, min, max, minlen, maxlen, mincount, maxcount,
+            oneof=a|b|c, dive. Refused BY NAME, each saying what to do instead: pattern
+            / regex (a regexp cannot live in a comma-separated tag), email, url, uuid,
+            dive into a map, and any unknown rule.
+          forward: svcvalidation.Struct[T]
+          in:
+            - name: cfg
+              type: StructConfig
+          name: Struct
+          out:
+            - name: constraint
+              type: Constraint[T]
+            - name: err
+              type: error
+          typeParams:
+            - constraint: any
+              name: T
     imports:
       corevalidation: github.com/kitsunium/sdk/internal/core/app/validation
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       svcvalidation: github.com/kitsunium/sdk/internal/service/app/validation
     path: github.com/kitsunium/sdk/pkg/v1/app/validation
-    variables:
-      - name: Failed
-        type: "*errs.Error"
-      - name: Misconfigured
-        type: "*errs.Error"
-      - name: InvalidRule
-        type: "*errs.Error"
-      - name: UnsupportedTarget
-        type: "*errs.Error"

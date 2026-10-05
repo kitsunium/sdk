@@ -386,113 +386,218 @@ packages:
               type: time.Duration
             - name: Clock
               type: clock.Clock
-  - aliases:
-      - name: Cache
-        target: kcache.Cache[K, V]
-        typeParams:
-          - constraint: comparable
-            name: K
-          - constraint: any
-            name: V
-      - name: Config
-        target: kcache.Config[K, V]
-        typeParams:
-          - constraint: comparable
-            name: K
-          - constraint: any
-            name: V
-      - name: Stats
-        target: kcache.StatsValue
-      - name: Entry
-        target: corecache.EntryValue[V]
-        typeParams:
-          - constraint: any
-            name: V
-      - name: Store
-        target: corecache.Store[V]
-        typeParams:
-          - constraint: any
-            name: V
-      - name: EntryFetcher
-        target: corecache.EntryFetcher[V]
-        typeParams:
-          - constraint: any
-            name: V
-      - name: Tagger
-        target: corecache.Tagger
-      - name: Fill
-        target: corecache.Fill[V]
-        typeParams:
-          - constraint: any
-            name: V
-      - name: Loader
-        target: corecache.Loader[V]
-        typeParams:
-          - constraint: any
-            name: V
-      - name: MemoryConfig
-        target: svccache.MemoryConfig
-      - name: ChainConfig
-        target: svccache.ChainConfig
-    constants:
-      - name: NoExpiry
-        type: time.Duration
-        value: "-1"
-    functions:
-      - in:
-          - name: cfg
-            type: Config[K, V]
-        name: New
-        out:
-          - type: "*Cache[K, V]"
-        typeParams:
-          - constraint: comparable
-            name: K
-          - constraint: any
-            name: V
-      - in:
-          - name: cfg
-            type: MemoryConfig
-        name: NewMemory
-        out:
-          - name: store
-            type: Store[V]
-          - name: err
-            type: error
-        typeParams:
-          - constraint: any
-            name: V
-      - in:
-          - name: cfg
-            type: ChainConfig
-          - name: tiers
-            type: Store[V]
-        name: NewChain
-        out:
-          - name: store
-            type: Store[V]
-          - name: err
-            type: error
-        typeParams:
-          - constraint: any
-            name: V
-        variadic: true
+  - facade:
+      - const:
+          - doc: |-
+              NoExpiry is the [Entry].TTL that stores an entry with no deadline.
+
+              It is deliberately distinct from the zero TTL, which means "use the store's
+              default". A store with a one-minute default holding one entry that must
+              never expire is a real combination, and reading both meanings out of 0 would
+              make the second one unsayable.
+            name: NoExpiry
+            reexport: corecache.NoExpiry
+            type: time.Duration
+            typed: true
+            value: "-1"
+      - alias:
+          - doc: Cache is the public alias for the generic LRU+TTL primitive.
+            name: Cache
+            target: kcache.Cache[K, V]
+            typeParams:
+              - constraint: comparable
+                name: K
+              - constraint: any
+                name: V
+      - alias:
+          - doc: Config is the public alias for the primitive's constructor configuration.
+            name: Config
+            target: kcache.Config[K, V]
+            typeParams:
+              - constraint: comparable
+                name: K
+              - constraint: any
+                name: V
+      - alias:
+          - doc: Stats is the public alias for the primitive's counters snapshot.
+            name: Stats
+            target: kcache.StatsValue
+      - func:
+          doc: New builds a [Cache] from cfg. A nil cfg.Clock defaults to the system clock.
+          forward: kcache.NewCache
+          in:
+            - name: cfg
+              type: Config[K, V]
+          name: New
+          out:
+            - type: "*Cache[K, V]"
+          typeParams:
+            - constraint: comparable
+              name: K
+            - constraint: any
+              name: V
+      - alias:
+          - doc: |-
+              Entry is what a caller stores: the value, its lifetime, and the tags by
+              which it can later be invalidated in bulk.
+            name: Entry
+            target: corecache.EntryValue[V]
+            typeParams:
+              - constraint: any
+                name: V
+      - alias:
+          - doc: |-
+              Store is the cache port: Fetch, Set, Delete.
+
+              The method set is FROZEN at three. New capabilities arrive as SIBLING
+              interfaces you reach by type assertion — [EntryFetcher], [Tagger] and
+              [Loader] — because this alias publishes the interface, Go interfaces are
+              structural, and a fourth method would break every downstream implementer at
+              compile time with no deprecation window.
+            name: Store
+            target: corecache.Store[V]
+            typeParams:
+              - constraint: any
+                name: V
+      - alias:
+          - doc: |-
+              EntryFetcher is the sibling that returns the whole entry — value, REMAINING
+              TTL, tags — rather than only the value. Both stores built here implement it.
+            name: EntryFetcher
+            target: corecache.EntryFetcher[V]
+            typeParams:
+              - constraint: any
+                name: V
+      - alias:
+          - doc: |-
+              Tagger is the sibling for invalidating every entry carrying a tag.
+
+              The cost is proportional to the entries carrying the tag, not to the size of
+              the store — measured in internal/service/data/cache/BENCH.md at two store sizes.
+            name: Tagger
+            target: corecache.Tagger
+      - alias:
+          - doc: |-
+              Fill computes the entry for a key the cache does not hold: a query, a
+              request, a derivation. It is your code.
+            name: Fill
+            target: corecache.Fill[V]
+            typeParams:
+              - constraint: any
+                name: V
+      - alias:
+          - doc: |-
+              Loader is the sibling that fills a miss while collapsing concurrent misses
+              on one key into a single fill — within one process, and not across replicas.
+              See the package documentation before sizing an origin against it.
+            name: Loader
+            target: corecache.Loader[V]
+            typeParams:
+              - constraint: any
+                name: V
+      - alias:
+          - doc: |-
+              MemoryConfig parameterises [NewMemory]. Its zero value is NOT a working
+              cache — MaxEntries must be stated, and is refused rather than defaulted.
+            name: MemoryConfig
+            target: svccache.MemoryConfig
+      - alias:
+          - doc: ChainConfig parameterises [NewChain].
+            name: ChainConfig
+            target: svccache.ChainConfig
+      - func:
+          doc: |-
+            NewMemory builds an in-process store: an LRU with TTL, a tag index, and
+            stampede protection on Load.
+
+            The returned [Store] also implements [EntryFetcher], [Tagger] and [Loader].
+
+            A non-positive MaxEntries is REFUSED, not defaulted. A capacity is the whole
+            statement of how much memory you are willing to spend, so any number chosen
+            for you would be arbitrary — and the value a zero would naturally mean,
+            unbounded, is the dangerous one.
+          forward: svccache.NewMemory[V]
+          in:
+            - name: cfg
+              type: MemoryConfig
+          name: NewMemory
+          out:
+            - name: store
+              type: Store[V]
+            - name: err
+              type: error
+          typeParams:
+            - constraint: any
+              name: V
+      - func:
+          doc: |-
+            NewChain puts each store in front of the next: tiers[0] is consulted first,
+            the last is the authority. A hit in a far tier is promoted into every nearer
+            one, carrying its REMAINING TTL and its tags.
+
+            Every tier must implement [EntryFetcher] and [Tagger], checked here and
+            refused rather than discovered per call: a value promoted without its tags
+            is one [Tagger] can no longer reach, so an invalidation would report success
+            while a nearer tier kept serving the entry.
+          forward: svccache.NewChain
+          in:
+            - name: cfg
+              type: ChainConfig
+            - name: tiers
+              type: Store[V]
+          name: NewChain
+          out:
+            - name: store
+              type: Store[V]
+            - name: err
+              type: error
+          typeParams:
+            - constraint: any
+              name: V
+          variadic: true
+      - var:
+          - doc: |-
+              Misconfigured is returned by a store constructor whose configuration it
+              cannot honour — a non-positive capacity, a negative default TTL.
+            name: Misconfigured
+            reexport: corecache.CacheMisconfigured
+            type: "*errs.Error"
+          - doc: |-
+              BackendFailed is returned when a store could not serve an operation. A
+              MISS is not this: a miss is (zero, false, nil).
+            name: BackendFailed
+            reexport: corecache.CacheBackendFailed
+            type: "*errs.Error"
+          - doc: |-
+              FillFailed is returned by Load when your fill fails and its error
+              carries no SDK code of its own. Nothing is stored: caching a failure
+              turns one bad minute at the origin into a full TTL of confident wrong
+              answers.
+            name: FillFailed
+            reexport: corecache.CacheFillFailed
+            type: "*errs.Error"
+          - doc: |-
+              EntryRejected is returned by Set for an entry no store can represent —
+              an empty key, an empty tag, or a negative TTL other than [NoExpiry].
+            name: EntryRejected
+            reexport: corecache.CacheEntryRejected
+            type: "*errs.Error"
+          - doc: |-
+              ChainMisconfigured is returned by [NewChain] for a tier set it cannot
+              honour.
+            name: ChainMisconfigured
+            reexport: corecache.CacheChainMisconfigured
+            type: "*errs.Error"
+          - doc: |-
+              TierFailed is returned when a chained operation failed inside one tier.
+              Its fields name the position, because a chain's caller holds one Store
+              and would otherwise have no way to tell which backend broke.
+            name: TierFailed
+            reexport: corecache.CacheTierFailed
+            type: "*errs.Error"
     imports:
       corecache: github.com/kitsunium/sdk/internal/core/data/cache
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       kcache: github.com/kitsunium/sdk/internal/kernel/collections/cache
       svccache: github.com/kitsunium/sdk/internal/service/data/cache
     path: github.com/kitsunium/sdk/pkg/v1/data/cache
-    variables:
-      - name: Misconfigured
-        type: "*errs.Error"
-      - name: BackendFailed
-        type: "*errs.Error"
-      - name: FillFailed
-        type: "*errs.Error"
-      - name: EntryRejected
-        type: "*errs.Error"
-      - name: ChainMisconfigured
-        type: "*errs.Error"
-      - name: TierFailed
-        type: "*errs.Error"

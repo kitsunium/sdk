@@ -204,56 +204,115 @@ packages:
     variables:
       - name: Codec
         type: codec.Codec
-  - aliases:
-      - name: Form
-        target: svcmultipart.FormValue
-      - name: Part
-        target: svcmultipart.PartValue
-    constants:
+  - constants:
       - name: Format
         value: "\"multipart\""
-      - name: CodeMarshalFailed
-        type: errs.Code
-        value: "0x00_03_29_01"
-      - name: CodeUnmarshalFailed
-        type: errs.Code
-        value: "0x00_03_29_02"
-      - name: CodeValueInvalid
-        type: errs.Code
-        value: "0x00_03_29_03"
-      - name: CodeBoundaryInvalid
-        type: errs.Code
-        value: "0x00_03_29_04"
-      - name: CodeLimitExceeded
-        type: errs.Code
-        value: "0x00_03_29_05"
-      - name: CodeLimitsInvalid
-        type: errs.Code
-        value: "0x00_03_29_06"
-    functions:
-      - in:
-          - name: body
-            type: "[]byte"
-        name: ContentType
-        out:
-          - name: value
-            type: string
-          - name: err
-            type: error
+    facade:
+      - const:
+          - doc: "CodeMarshalFailed is 0.3.41.1: a part could not be written."
+            name: CodeMarshalFailed
+            reexport: coremultipart.CodeMultipartMarshalFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_29_01"
+          - doc: |-
+              CodeUnmarshalFailed is 0.3.41.2: a malformed part, a part with no name,
+              a missing closing delimiter.
+            name: CodeUnmarshalFailed
+            reexport: coremultipart.CodeMultipartUnmarshalFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_29_02"
+          - doc: |-
+              CodeValueInvalid is 0.3.41.3: an unusable value — no name, or a CR, LF
+              or NUL in a header field.
+            name: CodeValueInvalid
+            reexport: coremultipart.CodeMultipartValueInvalid
+            type: errs.Code
+            typed: true
+            value: "0x00_03_29_03"
+          - doc: "CodeBoundaryInvalid is 0.3.41.4: no usable RFC 2046 boundary."
+            name: CodeBoundaryInvalid
+            reexport: coremultipart.CodeMultipartBoundaryInvalid
+            type: errs.Code
+            typed: true
+            value: "0x00_03_29_04"
+          - doc: |-
+              CodeLimitExceeded is 0.3.41.5: a part, the part count or the body
+              crossed its bound.
+            name: CodeLimitExceeded
+            reexport: coremultipart.CodeMultipartLimitExceeded
+            type: errs.Code
+            typed: true
+            value: "0x00_03_29_05"
+          - doc: "CodeLimitsInvalid is 0.3.41.6: a negative bound."
+            name: CodeLimitsInvalid
+            reexport: coremultipart.CodeMultipartLimitsInvalid
+            type: errs.Code
+            typed: true
+            value: "0x00_03_29_06"
+        doc: The error codes, range 0.3.41.*, declared in the core (ADR 0160).
+      - doc: "The sentinels, for errors.Is: each carries the code of the same name."
+        var:
+          - doc: MarshalFailed is the sentinel of [CodeMarshalFailed].
+            name: MarshalFailed
+            reexport: coremultipart.MarshalFailed
+            type: "*errs.Error"
+          - doc: UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].
+            name: UnmarshalFailed
+            reexport: coremultipart.UnmarshalFailed
+            type: "*errs.Error"
+          - doc: ValueInvalid is the sentinel of [CodeValueInvalid].
+            name: ValueInvalid
+            reexport: coremultipart.ValueInvalid
+            type: "*errs.Error"
+          - doc: BoundaryInvalid is the sentinel of [CodeBoundaryInvalid].
+            name: BoundaryInvalid
+            reexport: coremultipart.BoundaryInvalid
+            type: "*errs.Error"
+          - doc: LimitExceeded is the sentinel of [CodeLimitExceeded].
+            name: LimitExceeded
+            reexport: coremultipart.LimitExceeded
+            type: "*errs.Error"
+          - doc: LimitsInvalid is the sentinel of [CodeLimitsInvalid].
+            name: LimitsInvalid
+            reexport: coremultipart.LimitsInvalid
+            type: "*errs.Error"
+      - alias:
+          - doc: |-
+              Form is the native value of the multipart/form-data Format: a whole body —
+              its RFC 2046 boundary and its parts, in wire order. Marshal one to build an
+              upload; Unmarshal into a *Form to read one. An empty Boundary asks Marshal
+              to generate a delimiter; Unmarshal always fills it with the one it
+              recovered.
+            name: Form
+            target: svcmultipart.FormValue
+      - alias:
+          - doc: |-
+              Part is one section of a [Form]: a named field, optionally a filename and a
+              media type, and the bytes. Name is required, and a CR, an LF or a NUL in
+              Name, FileName or ContentType is refused, never escaped. Decoding keeps a
+              filename's last path element only.
+            name: Part
+            target: svcmultipart.PartValue
+      - func:
+          doc: |-
+            ContentType returns the Content-Type header value — "multipart/form-data;
+            boundary=…", quoted when the boundary needs it — for a body Marshal wrote,
+            read off its first delimiter line. A body with no recoverable delimiter is
+            refused with CodeBoundaryInvalid.
+          forward: svcmultipart.ContentType
+          in:
+            - name: body
+              type: "[]byte"
+          name: ContentType
+          out:
+            - name: value
+              type: string
+            - name: err
+              type: error
     imports:
+      coremultipart: github.com/kitsunium/sdk/internal/core/data/codec/multipart
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       svcmultipart: github.com/kitsunium/sdk/internal/service/data/codec/multipart
     path: github.com/kitsunium/sdk/pkg/v1/data/codec/multipart
-    variables:
-      - name: MarshalFailed
-        type: "*errs.Error"
-      - name: UnmarshalFailed
-        type: "*errs.Error"
-      - name: ValueInvalid
-        type: "*errs.Error"
-      - name: BoundaryInvalid
-        type: "*errs.Error"
-      - name: LimitExceeded
-        type: "*errs.Error"
-      - name: LimitsInvalid
-        type: "*errs.Error"

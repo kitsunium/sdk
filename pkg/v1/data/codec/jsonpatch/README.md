@@ -53,7 +53,7 @@ var NotJSON = corejsonpatch.NotJSON
 ```
 
 <a name="Edit"></a>
-## type [Edit](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonpatch/jsonpatch.go#L74>)
+## type [Edit](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonpatch/facade_gen.go#L33>)
 
 Edit is one operation of a diff: its Op, its Path, the Value it writes \(add, replace\) and the Old value it replaces or removes \(replace, remove\).
 
@@ -62,7 +62,7 @@ type Edit = svcjsonpatch.EditValue
 ```
 
 <a name="Diff"></a>
-### func [Diff](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonpatch/jsonpatch.go#L79>)
+### func [Diff](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonpatch/facade_gen.go#L38>)
 
 ```go
 func Diff(from, to []byte) ([]Edit, error)
@@ -71,7 +71,7 @@ func Diff(from, to []byte) ([]Edit, error)
 Diff returns the operations that turn the JSON document from into the JSON document to, in the order they apply — an empty slice when the two are the same value — or NotJSON.
 
 <a name="Op"></a>
-## type [Op](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonpatch/jsonpatch.go#L70>)
+## type [Op](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonpatch/facade_gen.go#L29>)
 
 Op is what an operation does, as RFC 6902 names it.
 

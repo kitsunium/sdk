@@ -56,7 +56,7 @@ The backend is cgroup v2 on Linux, a Job Object on Windows and rctl\(8\) on Free
 
 
 <a name="Available"></a>
-## func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/cgroup.go#L94>)
+## func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/facade_gen.go#L32>)
 
 ```go
 func Available() bool
@@ -65,7 +65,7 @@ func Available() bool
 Available reports whether a kernel\-enforced control\-group backend is usable: on Linux, that the unified cgroup v2 hierarchy is mounted AND a sub\-group can be created under it by the caller; on Windows, that Job Objects are available \(always true\); on FreeBSD, that the kernel carries RACCT. It returns false on platforms with no backend \(darwin, OpenBSD, NetBSD, DragonFly, illumos, Solaris\), on cgroup v1, and on a Linux host where the hierarchy is read\-only.
 
 <a name="Group"></a>
-## type [Group](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/cgroup.go#L73>)
+## type [Group](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/facade_gen.go#L12>)
 
 Group is a handle to a cgroup v2 control group: set controller ceilings, attach processes, and remove the group. It aliases the core proc.Group port.
 
@@ -74,7 +74,7 @@ type Group = coreproc.Group
 ```
 
 <a name="Create"></a>
-### func [Create](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/cgroup.go#L105>)
+### func [Create](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/facade_gen.go#L42>)
 
 ```go
 func Create(name string, opts ...Option) (g Group, err error)
@@ -83,7 +83,7 @@ func Create(name string, opts ...Option) (g Group, err error)
 Create makes a new control group named name and returns a Group bound to it — a cgroup v2 sub\-group under the delegated root on Linux, a Job Object on Windows, a tracked rctl group on FreeBSD. It returns CgroupUnavailable when the Linux hierarchy is absent or not delegated, CgroupCreateFailed when creation fails, and UnsupportedPlatform on a platform with no control\-group backend \(darwin, OpenBSD, NetBSD, DragonFly, illumos, Solaris\).
 
 <a name="MustCreate"></a>
-### func [MustCreate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/cgroup.go#L118>)
+### func [MustCreate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/cgroup.go#L74>)
 
 ```go
 func MustCreate(name string, opts ...Option) Group
@@ -92,7 +92,7 @@ func MustCreate(name string, opts ...Option) Group
 MustCreate is like [Create](<#Create>) but panics with the typed error when creation fails — UnsupportedPlatform on a platform with no control\-group backend \(darwin, OpenBSD, NetBSD, DragonFly, illumos, Solaris\), or CgroupUnavailable when the Linux hierarchy is not delegated. It is the idiomatic Go MustX opt\-in \(like [regexp.MustCompile](<https://pkg.go.dev/regexp/#MustCompile>)\) for a consumer that chooses crash\-on\-unsupported at its own startup; the SDK itself never panics, and [Create](<#Create>) is the non\-panicking form for normal use. The panic value is the typed error, so a top\-level recover\(\) can classify it via errs.CodeOf / HasCode.
 
 <a name="Option"></a>
-## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/cgroup.go#L77>)
+## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/facade_gen.go#L16>)
 
 Option customises a Create call \(functional\-option pattern\). It aliases the service Option type; construct options with WithRoot.
 
@@ -101,7 +101,7 @@ type Option = svccgroup.Option
 ```
 
 <a name="WithRoot"></a>
-### func [WithRoot](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/cgroup.go#L83>)
+### func [WithRoot](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/facade_gen.go#L22>)
 
 ```go
 func WithRoot(root string) Option

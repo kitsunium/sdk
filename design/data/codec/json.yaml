@@ -43,17 +43,32 @@ packages:
   - constants:
       - name: Format
         value: "\"json\""
-      - name: CodeMarshalFailed
-        type: errs.Code
-        value: "0x00_03_02_01"
-      - name: CodeUnmarshalFailed
-        type: errs.Code
-        value: "0x00_03_02_02"
+    facade:
+      - const:
+          - doc: CodeMarshalFailed identifies a value encoding/json could not encode (0.3.2.1).
+            name: CodeMarshalFailed
+            reexport: corejson.CodeJSONMarshalFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_02_01"
+          - doc: CodeUnmarshalFailed identifies input that is not JSON the target can hold (0.3.2.2).
+            name: CodeUnmarshalFailed
+            reexport: corejson.CodeJSONUnmarshalFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_02_02"
+        doc: The error codes, range 0.3.2.*, declared in the core (ADR 0160).
+      - doc: "The sentinels, for errors.Is: each carries the code of the same name."
+        var:
+          - doc: MarshalFailed is the sentinel of [CodeMarshalFailed].
+            name: MarshalFailed
+            reexport: corejson.MarshalFailed
+            type: "*errs.Error"
+          - doc: UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].
+            name: UnmarshalFailed
+            reexport: corejson.UnmarshalFailed
+            type: "*errs.Error"
     imports:
+      corejson: github.com/kitsunium/sdk/internal/core/data/codec/json
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/pkg/v1/data/codec/json
-    variables:
-      - name: MarshalFailed
-        type: "*errs.Error"
-      - name: UnmarshalFailed
-        type: "*errs.Error"

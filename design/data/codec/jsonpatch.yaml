@@ -68,37 +68,67 @@ packages:
             - name: Old
               tag: json:"old,omitempty"
               type: json.RawMessage
-  - aliases:
-      - name: Op
-        target: svcjsonpatch.Op
-      - name: Edit
-        target: svcjsonpatch.EditValue
-    constants:
-      - name: Add
-        type: Op
-        value: "\"add\""
-      - name: Remove
-        type: Op
-        value: "\"remove\""
-      - name: Replace
-        type: Op
-        value: "\"replace\""
-      - name: CodeNotJSON
-        type: errs.Code
-        value: "0x00_03_5A_01"
-    functions:
-      - in:
-          - name: from
-          - name: to
-            type: "[]byte"
-        name: Diff
-        out:
-          - type: "[]Edit"
-          - type: error
+  - facade:
+      - const:
+          - doc: Add adds a member, or inserts an element before the one at the index.
+            name: Add
+            reexport: svcjsonpatch.Add
+            type: Op
+            typed: true
+            value: "\"add\""
+          - doc: Remove removes a member, or the element at the index.
+            name: Remove
+            reexport: svcjsonpatch.Remove
+            type: Op
+            typed: true
+            value: "\"remove\""
+          - doc: Replace replaces the value at the path, the whole document at "".
+            name: Replace
+            reexport: svcjsonpatch.Replace
+            type: Op
+            typed: true
+            value: "\"replace\""
+        doc: The three operations a diff emits.
+      - const:
+          - doc: CodeNotJSON is the code of [NotJSON] (0.3.90.1), for errs.HasCode.
+            name: CodeNotJSON
+            reexport: corejsonpatch.CodeNotJSON
+            type: errs.Code
+            typed: true
+            value: "0x00_03_5A_01"
+      - var:
+          - doc: |-
+              NotJSON refuses a document that is not exactly one JSON value; its fields
+              name the document — "from" or "to" — and the offset, never its content.
+            name: NotJSON
+            reexport: corejsonpatch.NotJSON
+            type: "*errs.Error"
+      - alias:
+          - doc: Op is what an operation does, as RFC 6902 names it.
+            name: Op
+            target: svcjsonpatch.Op
+      - alias:
+          - doc: |-
+              Edit is one operation of a diff: its Op, its Path, the Value it writes
+              (add, replace) and the Old value it replaces or removes (replace, remove).
+            name: Edit
+            target: svcjsonpatch.EditValue
+      - func:
+          doc: |-
+            Diff returns the operations that turn the JSON document from into the JSON
+            document to, in the order they apply — an empty slice when the two are the
+            same value — or NotJSON.
+          forward: svcjsonpatch.Diff
+          in:
+            - name: from
+            - name: to
+              type: "[]byte"
+          name: Diff
+          out:
+            - type: "[]Edit"
+            - type: error
     imports:
+      corejsonpatch: github.com/kitsunium/sdk/internal/core/data/codec/jsonpatch
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       svcjsonpatch: github.com/kitsunium/sdk/internal/service/data/codec/jsonpatch
     path: github.com/kitsunium/sdk/pkg/v1/data/codec/jsonpatch
-    variables:
-      - name: NotJSON
-        type: "*errs.Error"

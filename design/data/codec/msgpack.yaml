@@ -49,17 +49,36 @@ packages:
   - constants:
       - name: Format
         value: "\"msgpack\""
-      - name: CodeMarshalFailed
-        type: errs.Code
-        value: "0x00_03_07_01"
-      - name: CodeUnmarshalFailed
-        type: errs.Code
-        value: "0x00_03_07_02"
+    facade:
+      - const:
+          - doc: |-
+              CodeMarshalFailed is 0.3.7.1: a value MessagePack cannot represent,
+              nesting past the bound, a writer's failure.
+            name: CodeMarshalFailed
+            reexport: coremsgpack.CodeMsgPackMarshalFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_07_01"
+          - doc: |-
+              CodeUnmarshalFailed is 0.3.7.2: malformed or truncated input, past a
+              bound, or a value the target cannot hold.
+            name: CodeUnmarshalFailed
+            reexport: coremsgpack.CodeMsgPackUnmarshalFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_07_02"
+        doc: The error codes, range 0.3.7.*, declared in the core (ADR 0160).
+      - doc: "The sentinels, for errors.Is: each carries the code of the same name."
+        var:
+          - doc: MarshalFailed is the sentinel of [CodeMarshalFailed].
+            name: MarshalFailed
+            reexport: coremsgpack.MarshalFailed
+            type: "*errs.Error"
+          - doc: UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].
+            name: UnmarshalFailed
+            reexport: coremsgpack.UnmarshalFailed
+            type: "*errs.Error"
     imports:
+      coremsgpack: github.com/kitsunium/sdk/internal/core/data/codec/msgpack
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/pkg/v1/data/codec/msgpack
-    variables:
-      - name: MarshalFailed
-        type: "*errs.Error"
-      - name: UnmarshalFailed
-        type: "*errs.Error"

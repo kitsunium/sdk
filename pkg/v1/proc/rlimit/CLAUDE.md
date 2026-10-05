@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T16:42:12Z -->
+<!-- updated: 2026-10-05T12:00:00Z -->
 # pkg/v1/proc/rlimit/
 
 ## Purpose
@@ -36,6 +36,10 @@ limit set without acting; application is post-fork (`Apply(0, …)` in the
 child, `setrlimit(2)` on every Unix) or via `prlimit64` against a spawned pid
 (Linux only — another Unix answers `UnsupportedPlatform` for a foreign pid).
 The doc comment documents this honestly.
+
+## Generated
+
+`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/proc.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the package comment and the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
 
 ## Verification
 

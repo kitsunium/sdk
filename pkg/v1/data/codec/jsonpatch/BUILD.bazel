@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "jsonpatch",
-    srcs = ["jsonpatch.go"],
+    srcs = [
+        "facade_gen.go",
+        "jsonpatch.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/data/codec/jsonpatch",
     visibility = ["//visibility:public"],
     deps = [

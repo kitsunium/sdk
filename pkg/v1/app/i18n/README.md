@@ -149,7 +149,7 @@ var (
 ```
 
 <a name="ValidateKey"></a>
-## func [ValidateKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/i18n.go#L284>)
+## func [ValidateKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/facade_gen.go#L194>)
 
 ```go
 func ValidateKey(key Key) error
@@ -158,7 +158,7 @@ func ValidateKey(key Key) error
 ValidateKey reports whether key is usable, and returns [InvalidKey](<#InvalidTag>) when it is not: empty, or carrying a control character.
 
 <a name="Args"></a>
-## type [Args](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/i18n.go#L153>)
+## type [Args](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/facade_gen.go#L67>)
 
 Args binds placeholder names to the text that replaces them. It is map\[string\]string on purpose — see the package comment.
 
@@ -167,7 +167,7 @@ type Args = corei18n.Args
 ```
 
 <a name="Catalog"></a>
-## type [Catalog](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/i18n.go#L157>)
+## type [Catalog](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/facade_gen.go#L71>)
 
 Catalog is the message\-source port, frozen at two methods \(ADR 0039\). [Store](<#Store>) implements it.
 
@@ -176,7 +176,7 @@ type Catalog = corei18n.Catalog
 ```
 
 <a name="Catalogue"></a>
-## type [Catalogue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/i18n.go#L177>)
+## type [Catalogue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/facade_gen.go#L91>)
 
 Catalogue is one language's entries, keyed by message key.
 
@@ -185,7 +185,7 @@ type Catalogue = svci18n.Catalogue
 ```
 
 <a name="Count"></a>
-## type [Count](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/i18n.go#L149>)
+## type [Count](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/facade_gen.go#L63>)
 
 Count is a quantity described by the CLDR plural operands. It carries the DISPLAY precision, because a quantity of one shown with a decimal is a different category in English and a float64 cannot tell them apart.
 
@@ -194,7 +194,7 @@ type Count = corei18n.CountValue
 ```
 
 <a name="Decimal"></a>
-### func [Decimal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/i18n.go#L277>)
+### func [Decimal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/facade_gen.go#L188>)
 
 ```go
 func Decimal(value float64, fractionDigits int) (count Count, err error)
@@ -205,7 +205,7 @@ Decimal returns the [Count](<#Count>) of value displayed with exactly fractionDi
 The second argument is the DISPLAY precision, not a property of the value: Decimal\(1, 2\) describes "1.00", which is \`other\` in English, while [Int](<#Int>)\(1\) describes "1", which is \`one\`.
 
 <a name="Int"></a>
-### func [Int](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/i18n.go#L266>)
+### func [Int](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/facade_gen.go#L178>)
 
 ```go
 func Int(n int64) Count
@@ -214,7 +214,7 @@ func Int(n int64) Count
 Int returns the [Count](<#Count>) of an exact integer displayed with no fraction digits. The sign is discarded, because CLDR's operands are defined on the absolute value.
 
 <a name="Entry"></a>
-## type [Entry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/i18n.go#L174>)
+## type [Entry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/facade_gen.go#L88>)
 
 Entry is one catalogue entry before it is compiled: a plain pattern \([Plain](<#Plain>)\) or one pattern per CLDR category \([PluralForms](<#PluralForms>)\).
 
@@ -223,7 +223,7 @@ type Entry = svci18n.EntryValue
 ```
 
 <a name="Plain"></a>
-### func [Plain](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/i18n.go#L307>)
+### func [Plain](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/facade_gen.go#L214>)
 
 ```go
 func Plain(text string) Entry
@@ -232,7 +232,7 @@ func Plain(text string) Entry
 Plain returns an uncounted [Entry](<#Entry>).
 
 <a name="PluralForms"></a>
-### func [PluralForms](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/i18n.go#L315>)
+### func [PluralForms](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/facade_gen.go#L221>)
 
 ```go
 func PluralForms(forms map[string]string) Entry
@@ -241,7 +241,7 @@ func PluralForms(forms map[string]string) Entry
 PluralForms returns a counted [Entry](<#Entry>) whose patterns are keyed by CLDR category name. A counted entry is checked at load against every category its language can produce.
 
 <a name="Fallbacker"></a>
-## type [Fallbacker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/i18n.go#L166>)
+## type [Fallbacker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/facade_gen.go#L80>)
 
 Fallbacker is the ADR 0039 sibling that names a catalog's fallback language. A catalog with no fallback does not implement it, and the absence is the answer.
 
@@ -250,7 +250,7 @@ type Fallbacker = corei18n.Fallbacker
 ```
 
 <a name="Form"></a>
-## type [Form](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/i18n.go#L144>)
+## type [Form](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/facade_gen.go#L58>)
 
 Form is a CLDR plural category. [FormOther](<#FormOther>) is the zero value, because it is the only category every language defines.
 
@@ -295,7 +295,7 @@ const FormZero Form = corei18n.FormZero
 ```
 
 <a name="ParseForm"></a>
-### func [ParseForm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/i18n.go#L258>)
+### func [ParseForm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/facade_gen.go#L171>)
 
 ```go
 func ParseForm(name string) (form Form, err error)
@@ -304,7 +304,7 @@ func ParseForm(name string) (form Form, err error)
 ParseForm returns the [Form](<#Form>) named by a CLDR category spelling — "zero", "one", "two", "few", "many", "other" — or [InvalidForm](<#InvalidTag>).
 
 <a name="Key"></a>
-## type [Key](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/i18n.go#L135>)
+## type [Key](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/facade_gen.go#L49>)
 
 Key names a message inside a catalogue. It is a developer identifier — "checkout.button.pay" — and it is what a render puts on screen when the translation is missing.
 
@@ -313,7 +313,7 @@ type Key = corei18n.Key
 ```
 
 <a name="KeyLister"></a>
-## type [KeyLister](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/i18n.go#L161>)
+## type [KeyLister](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/facade_gen.go#L75>)
 
 KeyLister is the ADR 0039 sibling that enumerates a catalog's keys, reached by type assertion. [Store](<#Store>).Missing is what it exists for.
 
@@ -322,7 +322,7 @@ type KeyLister = corei18n.KeyLister
 ```
 
 <a name="Message"></a>
-## type [Message](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/i18n.go#L140>)
+## type [Message](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/facade_gen.go#L54>)
 
 Message is one compiled translation. Its placeholders are parsed when the catalogue is built, so a malformed pattern fails at startup and a render never parses.
 
@@ -331,7 +331,7 @@ type Message = corei18n.MessageValue
 ```
 
 <a name="NewMessage"></a>
-### func [NewMessage](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/i18n.go#L290>)
+### func [NewMessage](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/facade_gen.go#L199>)
 
 ```go
 func NewMessage(text string) (message Message, err error)
@@ -340,7 +340,7 @@ func NewMessage(text string) (message Message, err error)
 NewMessage compiles an uncounted message, or returns [InvalidPattern](<#InvalidTag>).
 
 <a name="NewPluralMessage"></a>
-### func [NewPluralMessage](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/i18n.go#L301>)
+### func [NewPluralMessage](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/facade_gen.go#L209>)
 
 ```go
 func NewPluralMessage(forms map[Form]string) (message Message, err error)
@@ -351,7 +351,7 @@ NewPluralMessage compiles a counted message from one pattern per category, or re
 It does not check the map against any language's rules — it does not know the language. [NewStore](<#NewStore>) does, and refuses there.
 
 <a name="Negotiator"></a>
-## type [Negotiator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/i18n.go#L190>)
+## type [Negotiator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/facade_gen.go#L104>)
 
 Negotiator resolves an Accept\-Language header to one of a fixed set of languages. Everything that can be wrong is refused when it is built, so [Negotiator](<#Negotiator>).Negotiate has no failure mode.
 
@@ -360,7 +360,7 @@ type Negotiator = svci18n.Negotiator
 ```
 
 <a name="NewNegotiator"></a>
-### func [NewNegotiator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/i18n.go#L360>)
+### func [NewNegotiator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/facade_gen.go#L262>)
 
 ```go
 func NewNegotiator(supported []Tag, fallback Tag) (negotiator *Negotiator, err error)
@@ -369,7 +369,7 @@ func NewNegotiator(supported []Tag, fallback Tag) (negotiator *Negotiator, err e
 NewNegotiator returns a [Negotiator](<#Negotiator>) over supported, falling back to fallback, or refuses: an empty supported set is [NegotiationEmpty](<#InvalidTag>), an unset or unsupported fallback is [CatalogInvalid](<#InvalidTag>).
 
 <a name="Plural"></a>
-## type [Plural](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/i18n.go#L194>)
+## type [Plural](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/facade_gen.go#L108>)
 
 Plural is one language's CLDR plural specification: the categories it can produce, and the rule that picks between them.
 
@@ -378,7 +378,7 @@ type Plural = svci18n.PluralValue
 ```
 
 <a name="Rules"></a>
-### func [Rules](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/i18n.go#L368>)
+### func [Rules](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/facade_gen.go#L269>)
 
 ```go
 func Rules(tag Tag) (plural Plural, ok bool)
@@ -387,7 +387,7 @@ func Rules(tag Tag) (plural Plural, ok bool)
 Rules returns the CLDR plural specification for tag, and reports whether the SDK has one. It resolves the exact tag first and the bare language second, so "pt\-PT" gets its own rule and "fr\-CA" inherits French's.
 
 <a name="PluralRule"></a>
-## type [PluralRule](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/i18n.go#L170>)
+## type [PluralRule](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/facade_gen.go#L84>)
 
 PluralRule reports which CLDR category a quantity falls in for one language. It is a func type, which satisfies ADR 0039 structurally.
 
@@ -396,7 +396,7 @@ type PluralRule = corei18n.PluralRule
 ```
 
 <a name="Printer"></a>
-## type [Printer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/i18n.go#L185>)
+## type [Printer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/facade_gen.go#L99>)
 
 Printer renders messages in one language. Build one per language at startup, not one per request — see [NewPrinter](<#NewPrinter>).
 
@@ -405,7 +405,7 @@ type Printer = svci18n.Printer
 ```
 
 <a name="NewPrinter"></a>
-### func [NewPrinter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/i18n.go#L352>)
+### func [NewPrinter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/facade_gen.go#L255>)
 
 ```go
 func NewPrinter(catalog Catalog, tag Tag) (printer *Printer, err error)
@@ -416,7 +416,7 @@ NewPrinter returns a [Printer](<#Printer>) rendering tag out of catalog, or refu
 It resolves the chain and allocates; [Printer](<#Printer>).Render walks it and does not. Build one per language at startup and index them by [Tag](<#Tag>) — a request then costs a map lookup, not a construction.
 
 <a name="Store"></a>
-## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/i18n.go#L181>)
+## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/facade_gen.go#L95>)
 
 Store is the concrete, immutable catalogue. It implements [Catalog](<#Catalog>), [KeyLister](<#KeyLister>) and [Fallbacker](<#Fallbacker>).
 
@@ -425,7 +425,7 @@ type Store = svci18n.Store
 ```
 
 <a name="LoadFS"></a>
-### func [LoadFS](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/i18n.go#L342>)
+### func [LoadFS](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/facade_gen.go#L246>)
 
 ```go
 func LoadFS(fsys fs.FS, dir string, format codec.Format, fallback Tag) (store *Store, err error)
@@ -438,7 +438,7 @@ The bytes are decoded by the codec domain, so a catalogue is JSON, YAML, TOML or
 The language comes from the file NAME: "en.json", "pt\-PT.yaml". Subdirectories are ignored rather than walked, and two files that canonicalise to one tag are [CatalogInvalid](<#InvalidTag>).
 
 <a name="NewStore"></a>
-### func [NewStore](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/i18n.go#L327>)
+### func [NewStore](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/facade_gen.go#L232>)
 
 ```go
 func NewStore(fallback Tag, catalogues map[Tag]Catalogue) (store *Store, err error)
@@ -449,7 +449,7 @@ NewStore compiles catalogues into a [Store](<#Store>), or refuses.
 Every check is here, and every failure is a startup failure: [UnsupportedLanguage](<#InvalidTag>) for a language with no reviewed rule, [TranslationIncomplete](<#InvalidTag>) for a counted message missing one of its language's categories, [CatalogInvalid](<#InvalidTag>) for an unset or unserved fallback, and the core refusals for a bad key, pattern or category name.
 
 <a name="Tag"></a>
-## type [Tag](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/i18n.go#L130>)
+## type [Tag](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/facade_gen.go#L44>)
 
 Tag is a language, optionally narrowed by a script and a region: \`language\[\-Script\]\[\-REGION\]\` and deliberately nothing else. It is comparable, so it is a map key, and it holds its canonical spelling, so [Tag](<#Tag>).String allocates nothing.
 
@@ -458,7 +458,7 @@ type Tag = corei18n.TagValue
 ```
 
 <a name="ParseTag"></a>
-### func [ParseTag](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/i18n.go#L251>)
+### func [ParseTag](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/facade_gen.go#L165>)
 
 ```go
 func ParseTag(text string) (tag Tag, err error)
@@ -469,7 +469,7 @@ ParseTag canonicalises text into a [Tag](<#Tag>), or returns [InvalidTag](<#Inva
 "FR\-latn\-ca" and "fr\-Latn\-CA" are the same Tag. The POSIX spelling \("fr\_FR"\), extensions, variants, private use and grandfathered tags are each refused by name rather than parsed and dropped — a dropped subtag changes which language answers without changing anything a reader can see.
 
 <a name="SupportedTags"></a>
-### func [SupportedTags](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/i18n.go#L376>)
+### func [SupportedTags](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/i18n/facade_gen.go#L276>)
 
 ```go
 func SupportedTags() []Tag

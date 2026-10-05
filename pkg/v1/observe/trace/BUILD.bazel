@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "trace",
-    srcs = ["trace.go"],
+    srcs = [
+        "facade_gen.go",
+        "trace.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/observe/trace",
     visibility = ["//visibility:public"],
     deps = [

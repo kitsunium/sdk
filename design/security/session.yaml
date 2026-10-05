@@ -747,120 +747,253 @@ packages:
               type: time.Duration
             - name: Key
               type: corecrypto.Key
-  - aliases:
-      - name: ID
-        target: coresession.ID
-      - name: Session
-        target: coresession.SessionValue
-      - name: State
-        target: coresession.StateValue
-      - name: Store
-        target: coresession.Store
-      - name: Sweeper
-        target: coresession.Sweeper
-      - name: Sealer
-        target: coresession.Sealer
-      - name: Config
-        target: svcsession.Config
-      - name: FileConfig
-        target: svcsession.FileConfig
-    constants:
-      - name: IDLen
-        type: int
-        value: "32"
-    functions:
-      - in:
-          - name: cfg
-            type: Config
-        name: NewMemoryStore
-        out:
-          - name: store
-            type: Store
-          - name: err
-            type: error
-      - in:
-          - name: cfg
-            type: FileConfig
-        name: NewFileStore
-        out:
-          - name: store
-            type: Store
-          - name: err
-            type: error
-      - in:
-          - name: key
-            type: corecrypto.Key
-          - name: purpose
-            type: string
-        name: NewSealer
-        out:
-          - name: sealer
-            type: Sealer
-          - name: err
-            type: error
-      - in:
-          - name: encoded
-            type: string
-        name: ParseID
-        out:
-          - name: id
-            type: ID
-          - name: err
-            type: error
-      - in:
-          - name: raw
-            type: "[]byte"
-        name: NewID
-        out:
-          - name: id
-            type: ID
-          - name: err
-            type: error
-      - in:
-          - name: state
-            type: State
-        name: NewSession
-        out:
-          - name: session
-            type: Session
-          - name: err
-            type: error
+  - facade:
+      - const:
+          - doc: IDLen is the identifier length in bytes — 256 bits from crypto/rand.
+            name: IDLen
+            reexport: coresession.IDLen
+            type: int
+            typed: true
+            value: "32"
+      - alias:
+          - doc: ID is the public alias for the opaque, redacting session identifier.
+            name: ID
+            target: coresession.ID
+      - alias:
+          - doc: Session is the public alias for the immutable session a Store hands back.
+            name: Session
+            target: coresession.SessionValue
+      - alias:
+          - doc: |-
+              State is the public alias for the exported description [NewSession] builds a
+              [Session] from. It exists so a framework can implement [Store] over its own
+              backend; it is not a way around the fixation rule, since [Store].Save refuses
+              a subject the stored record does not have.
+            name: State
+            target: coresession.StateValue
+      - alias:
+          - doc: |-
+              Store is the public alias for the session-lifetime port. Its method set is
+              frozen: new capabilities arrive as sibling interfaces (ADR 0039).
+            name: Store
+            target: coresession.Store
+      - alias:
+          - doc: |-
+              Sweeper is the public alias for the first such sibling — a store that can
+              drop its expired records on demand.
+            name: Sweeper
+            target: coresession.Sweeper
+      - alias:
+          - doc: |-
+              Sealer is the public alias for the port that renders an [ID] as an opaque,
+              tamper-evident cookie VALUE. It does not write cookies.
+            name: Sealer
+            target: coresession.Sealer
+      - alias:
+          - doc: Config is the public alias for the memory store's construction parameters.
+            name: Config
+            target: svcsession.Config
+      - alias:
+          - doc: |-
+              FileConfig is the public alias for the file store's construction parameters.
+              Its Key field takes a pkg/v1/crypto.Key, and its Clock is a clock.Timed
+              because the store both stamps time and waits on it — the poll between lock
+              attempts is armed on it, so a test drives contention without sleeping.
+            name: FileConfig
+            target: svcsession.FileConfig
+      - var:
+          - doc: NotFound is returned for an identifier that names no live session.
+            name: NotFound
+            reexport: coresession.NotFound
+            type: "*errs.Error"
+          - doc: |-
+              Expired is returned when the record existed and its deadline had passed.
+              The record is dropped as this is reported, so the next call says NotFound.
+            name: Expired
+            reexport: coresession.Expired
+            type: "*errs.Error"
+          - doc: InvalidID is returned for a malformed or zero identifier.
+            name: InvalidID
+            reexport: coresession.InvalidID
+            type: "*errs.Error"
+          - doc: |-
+              InvalidConfig is returned by every constructor for a configuration it
+              cannot honour — a non-positive timeout, an idle window the ceiling makes
+              unreachable, a missing directory or key.
+            name: InvalidConfig
+            reexport: coresession.InvalidConfig
+            type: "*errs.Error"
+          - doc: |-
+              IdentifierCollision is returned when a freshly minted identifier already
+              names a live session, which at 256 bits means the random source is broken.
+            name: IdentifierCollision
+            reexport: coresession.IdentifierCollision
+            type: "*errs.Error"
+          - doc: EntropyFailed is returned when the random source could not be read.
+            name: EntropyFailed
+            reexport: coresession.EntropyFailed
+            type: "*errs.Error"
+          - doc: StoreUnavailable is returned when the backend itself failed. Retryable.
+            name: StoreUnavailable
+            reexport: coresession.StoreUnavailable
+            type: "*errs.Error"
+          - doc: |-
+              SealInvalid is returned by Sealer.Open for every failure, without
+              distinguishing them.
+            name: SealInvalid
+            reexport: coresession.SealInvalid
+            type: "*errs.Error"
+          - doc: |-
+              FixationRefused is returned by Save when the value's subject differs from
+              the stored record's. Regenerate is the operation that was wanted.
+            name: FixationRefused
+            reexport: coresession.FixationRefused
+            type: "*errs.Error"
+          - doc: |-
+              RecordCorrupt is returned by the file store when a record could not be
+              read back — tampered, truncated, wrong key, or filed under another digest.
+            name: RecordCorrupt
+            reexport: coresession.RecordCorrupt
+            type: "*errs.Error"
+          - doc: |-
+              DirectoryUnsafe is returned when the store location is readable beyond
+              its owner, or when the filesystem accepted a 0600 request without
+              enforcing it.
+            name: DirectoryUnsafe
+            reexport: coresession.DirectoryUnsafe
+            type: "*errs.Error"
+          - doc: |-
+              LockFailed is returned when the store-wide exclusive lock could not be
+              taken; the operation is refused rather than run unserialised.
+            name: LockFailed
+            reexport: coresession.LockFailed
+            type: "*errs.Error"
+          - doc: |-
+              PayloadTooLarge is returned by Save for a payload above the store's caps,
+              and by Regenerate for a subject longer than 4096 bytes — refused before
+              anything is minted, so the old session is untouched.
+            name: PayloadTooLarge
+            reexport: coresession.PayloadTooLarge
+            type: "*errs.Error"
+          - doc: InvalidPurpose is returned by NewSealer for an empty purpose.
+            name: InvalidPurpose
+            reexport: coresession.InvalidPurpose
+            type: "*errs.Error"
+          - doc: |-
+              PathRedirected is returned by NewFileStore when the store's location is
+              reached through a link it refuses to follow: one at the lock file's
+              name, one at a component of FileConfig.Dir planted in a directory any
+              account can write, or a Dir that stopped naming the directory the store
+              had just opened. No retry helps; a human looks at the path.
+            name: PathRedirected
+            reexport: coresession.PathRedirected
+            type: "*errs.Error"
+          - doc: |-
+              UnsupportedPlatform is returned by NewFileStore on a platform without the
+              mechanics its guarantees rest on. It is the SDK-wide sentinel, shared
+              with pkg/v1/proc (ADR 0018).
+            name: UnsupportedPlatform
+            reexport: coreproc.UnsupportedPlatform
+            type: "*errs.Error"
+      - func:
+          doc: |-
+            NewMemoryStore returns a Store keeping every session in this process's
+            memory. It refuses a Config it cannot honour and never returns an inert
+            store.
+          forward: svcsession.NewMemoryStore
+          in:
+            - name: cfg
+              type: Config
+          name: NewMemoryStore
+          out:
+            - name: store
+              type: Store
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            NewFileStore returns a Store keeping one sealed file per session in cfg.Dir.
+            It refuses — at construction — an unusable configuration, an unsafe
+            directory, a location reached through a link anybody could have planted
+            ([PathRedirected]), and a platform without flock(2), enforced Unix
+            permissions and a directory flush.
+          forward: svcsession.NewFileStore
+          in:
+            - name: cfg
+              type: FileConfig
+          name: NewFileStore
+          out:
+            - name: store
+              type: Store
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            NewSealer returns a Sealer binding key and purpose. purpose is required: it
+            is the domain separator between two things sealed under one key, and an empty
+            one is refused rather than read as "no separation needed".
+          forward: svcsession.NewSealer
+          in:
+            - name: key
+              type: corecrypto.Key
+            - name: purpose
+              type: string
+          name: NewSealer
+          out:
+            - name: sealer
+              type: Sealer
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            ParseID decodes the canonical form produced by [ID].Reveal — unpadded
+            base64url over exactly [IDLen] bytes. It is the inbound path: whatever
+            arrives from a cookie reaches the domain through here, and anything that is
+            not exactly that shape is refused before it can be used as a lookup key.
+          forward: coresession.ParseID
+          in:
+            - name: encoded
+              type: string
+          name: ParseID
+          out:
+            - name: id
+              type: ID
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            NewID builds an ID from exactly [IDLen] raw bytes. Most callers want
+            [ParseID]; this is for a Store implementation that holds raw identifier
+            bytes.
+          forward: coresession.NewID
+          in:
+            - name: raw
+              type: "[]byte"
+          name: NewID
+          out:
+            - name: id
+              type: ID
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            NewSession builds an immutable [Session] from a [State]. It is what a
+            framework implementing its own [Store] returns; ordinary callers get sessions
+            from a store and never call this.
+          forward: coresession.NewSessionValue
+          in:
+            - name: state
+              type: State
+          name: NewSession
+          out:
+            - name: session
+              type: Session
+            - name: err
+              type: error
     imports:
       corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+      coreproc: github.com/kitsunium/sdk/internal/core/proc
       coresession: github.com/kitsunium/sdk/internal/core/security/session
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       svcsession: github.com/kitsunium/sdk/internal/service/security/session
     path: github.com/kitsunium/sdk/pkg/v1/security/session
-    variables:
-      - name: NotFound
-        type: "*errs.Error"
-      - name: Expired
-        type: "*errs.Error"
-      - name: InvalidID
-        type: "*errs.Error"
-      - name: InvalidConfig
-        type: "*errs.Error"
-      - name: IdentifierCollision
-        type: "*errs.Error"
-      - name: EntropyFailed
-        type: "*errs.Error"
-      - name: StoreUnavailable
-        type: "*errs.Error"
-      - name: SealInvalid
-        type: "*errs.Error"
-      - name: FixationRefused
-        type: "*errs.Error"
-      - name: RecordCorrupt
-        type: "*errs.Error"
-      - name: DirectoryUnsafe
-        type: "*errs.Error"
-      - name: LockFailed
-        type: "*errs.Error"
-      - name: PayloadTooLarge
-        type: "*errs.Error"
-      - name: InvalidPurpose
-        type: "*errs.Error"
-      - name: PathRedirected
-        type: "*errs.Error"
-      - name: UnsupportedPlatform
-        type: "*errs.Error"

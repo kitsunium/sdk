@@ -43,17 +43,34 @@ packages:
   - constants:
       - name: Format
         value: "\"asn1-der\""
-      - name: CodeMarshalFailed
-        type: errs.Code
-        value: "0x00_03_09_01"
-      - name: CodeUnmarshalFailed
-        type: errs.Code
-        value: "0x00_03_09_02"
+    facade:
+      - const:
+          - doc: "CodeMarshalFailed is 0.3.9.1: encoding/asn1 could not encode the value."
+            name: CodeMarshalFailed
+            reexport: coreasn1.CodeASN1MarshalFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_09_01"
+          - doc: |-
+              CodeUnmarshalFailed is 0.3.9.2: the input is not DER or BER the target
+              can hold.
+            name: CodeUnmarshalFailed
+            reexport: coreasn1.CodeASN1UnmarshalFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_09_02"
+        doc: The error codes, range 0.3.9.*, declared in the core (ADR 0160).
+      - doc: "The sentinels, for errors.Is: each carries the code of the same name."
+        var:
+          - doc: MarshalFailed is the sentinel of [CodeMarshalFailed].
+            name: MarshalFailed
+            reexport: coreasn1.MarshalFailed
+            type: "*errs.Error"
+          - doc: UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].
+            name: UnmarshalFailed
+            reexport: coreasn1.UnmarshalFailed
+            type: "*errs.Error"
     imports:
+      coreasn1: github.com/kitsunium/sdk/internal/core/data/codec/asn1
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/pkg/v1/data/codec/asn1
-    variables:
-      - name: MarshalFailed
-        type: "*errs.Error"
-      - name: UnmarshalFailed
-        type: "*errs.Error"

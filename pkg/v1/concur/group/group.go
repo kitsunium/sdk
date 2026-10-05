@@ -68,8 +68,6 @@
 package group
 
 import (
-	"context"
-
 	kgroup "github.com/kitsunium/sdk/internal/kernel/concur/group"
 )
 
@@ -77,69 +75,3 @@ import (
 // free, so [Group].Go never waits for one. It has to be written out — a zero
 // limit is clamped to one, never read as "no limit".
 const Unlimited int = kgroup.Unlimited
-
-// Group runs tasks concurrently under one context and one wait point.
-//
-// [Group].Go starts a task on a goroutine of its own, blocking while the group
-// already runs its limit of tasks; [Group].Wait blocks until every task has
-// returned, cancels the group's context, and returns the first error — or,
-// for a group from [NewJoined], every error joined — re-raising a task's
-// panic as a [PanicValue] if one panicked.
-//
-// The zero value is NOT usable: build it with [New] or [NewJoined], which also
-// return the context the tasks receive.
-type Group = kgroup.Group
-
-// PanicValue carries a panic raised inside a task across the goroutine
-// boundary to whoever waits on the group: Raised is the value the panic
-// carried, verbatim, and Stack the stack of the goroutine that ran the task,
-// captured at recovery. Its String method renders both, so an uncaught
-// re-raise prints the task's stack rather than only the waiter's.
-//
-// It is deliberately NOT an error, and carries no error code: a panic is a
-// programming fault, and a value the caller may ignore is how a broken
-// invariant becomes a silent wrong answer.
-type PanicValue = kgroup.PanicValue
-
-// New returns a [Group] reporting the first error, and the context every task
-// submitted to it receives.
-//
-// limit bounds how many tasks run at once; a non-positive limit is clamped to
-// 1, and [Unlimited] removes the bound. The returned context is cancelled when
-// the first task fails — that task's error is its context.Cause —, when a
-// task panics, or when [Group].Wait returns, whichever comes first.
-func New(parent context.Context, limit int) (*Group, context.Context) {
-	//: the kernel owns the group; this facade only forwards.
-	return kgroup.New(parent, limit)
-}
-
-// NewJoined returns a [Group] whose [Group].Wait reports EVERY task's error,
-// joined with errors.Join in the order the tasks were submitted, rather than
-// the first one. Everything else is [New]'s: the limit and its clamp, the
-// context, the siblings cancelled on the first failure — still the context's
-// context.Cause — and a panic, which outranks every error.
-//
-// The joined error is matchable as each of its parts — errors.Is, errors.As
-// and the SDK's errs.HasCode walk Unwrap() []error — and Wait returns nil,
-// not an empty join, when no task failed.
-func NewJoined(parent context.Context, limit int) (*Group, context.Context) {
-	//: the kernel owns the group; this facade only forwards.
-	return kgroup.NewJoined(parent, limit)
-}
-
-// Collect runs every function in fns concurrently, at most limit at a time
-// ([New]'s clamp, [Unlimited] for none), and returns their results in
-// SUBMISSION order: index i of the result is fns[i]'s value.
-//
-// On the first error the remaining functions see a cancelled context and
-// Collect returns (nil, err) — never a half-filled slice, whose zero values
-// would read as answers. A panic in any function propagates out of Collect as
-// a [PanicValue], after every other function has returned.
-//
-// It is a function rather than a method because Go's methods take no type
-// parameters of their own: a [Group] carrying a result type would force one on
-// every caller who only wants to wait.
-func Collect[T any](parent context.Context, limit int, fns []func(ctx context.Context) (value T, err error)) (results []T, err error) {
-	//: the kernel owns the fan-out; this facade only forwards.
-	return kgroup.Collect(parent, limit, fns)
-}

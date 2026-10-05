@@ -305,12 +305,7 @@ packages:
         type: coreid.Generator
       - name: UUIDv7
         type: coreid.Generator
-  - aliases:
-      - name: Scheme
-        target: coreid.Scheme
-      - name: Generator
-        target: coreid.Generator
-    constants:
+  - constants:
       - name: UUIDv4Scheme
         type: Scheme
         value: "\"uuidv4\""
@@ -332,16 +327,164 @@ packages:
       - name: TypeIDScheme
         type: Scheme
         value: "\"typeid\""
+    facade:
+      - alias:
+          - doc: Scheme is the public alias for the identifier-scheme key.
+            name: Scheme
+            target: coreid.Scheme
+      - alias:
+          - doc: Generator is the public alias for the identifier-generator contract.
+            name: Generator
+            target: coreid.Generator
+      - var:
+          - doc: |-
+              UnknownScheme is returned by New when no generator is registered under the
+              requested Scheme. Matchable via errs.HasReason(err, "UNKNOWN_SCHEME").
+            name: UnknownScheme
+            reexport: coreid.UnknownScheme
+            type: "*errs.Error"
+          - doc: |-
+              EntropyFailed is kept for code that matches it: nothing returns it since
+              Go 1.24, whose crypto/rand.Read never fails.
+            name: EntropyFailed
+            reexport: coreid.EntropyFailed
+            type: "*errs.Error"
+          - doc: ClockBackwards is returned when a snowflake observes a backwards clock.
+            name: ClockBackwards
+            reexport: coreid.ClockBackwards
+            type: "*errs.Error"
+          - doc: InvalidSize is returned by NewNanoID for a non-positive identifier length.
+            name: InvalidSize
+            reexport: coreid.InvalidSize
+            type: "*errs.Error"
+          - doc: |-
+              InvalidPrefix is returned by NewTypeID, ParseTypeID and FormatTypeID for a
+              type prefix that is empty or outside lowercase ASCII.
+            name: InvalidPrefix
+            reexport: coreid.InvalidPrefix
+            type: "*errs.Error"
+          - doc: |-
+              Malformed is returned by ParseKSUID, ParseTypeID and FormatTypeID when the
+              input is not a well-formed rendering for its scheme.
+            name: Malformed
+            reexport: coreid.Malformed
+            type: "*errs.Error"
+          - doc: |-
+              TimestampRange is returned when the clock sits outside the window a
+              scheme's timestamp field can represent.
+            name: TimestampRange
+            reexport: coreid.TimestampRange
+            type: "*errs.Error"
+      - func:
+          doc: New generates a fresh identifier using the generator registered under scheme.
+          forward: coreid.New
+          in:
+            - name: scheme
+              type: Scheme
+          name: New
+          out:
+            - name: newID
+              type: string
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            NewSnowflake returns a snowflake Generator bound to an explicit node id
+            (reduced into the 10-bit node space). Not added to the global registry.
+          forward: svcid.NewSnowflake
+          in:
+            - name: node
+              type: int64
+          name: NewSnowflake
+          out:
+            - type: Generator
+      - func:
+          doc: |-
+            NewNanoID returns a NanoID Generator producing size characters, and refuses a
+            non-positive size rather than return one that mints empty strings. Not added
+            to the global registry — the registered NanoID singleton is the 21-character
+            default.
+          forward: svcid.NewNanoID
+          in:
+            - name: size
+              type: int
+          name: NewNanoID
+          out:
+            - name: g
+              type: Generator
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            NewTypeID returns a TypeID Generator stamping prefix on every identifier —
+            "user_01h2xcejqtf2nbrexx3vqjhp41". prefix must be 1 to 63 lowercase ASCII
+            letters, with '_' allowed only between two letters; anything else is refused
+            here rather than at every call. Not added to the global registry, because no
+            prefix would be a defensible default (see TypeIDScheme).
+          forward: svcid.NewTypeID
+          in:
+            - name: prefix
+              type: string
+          name: NewTypeID
+          out:
+            - name: g
+              type: Generator
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            ParseKSUID decodes a canonical 27-character KSUID, returning the instant it
+            was issued (second resolution, UTC) and its 16-byte random payload.
+          forward: svcid.ParseKSUID
+          in:
+            - name: ksuid
+              type: string
+          name: ParseKSUID
+          out:
+            - name: issued
+              type: time.Time
+            - name: payload
+              type: "[ksuidPayloadBytes]byte"
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            ParseTypeID splits a canonical TypeID into its type prefix and the dashed-hex
+            UUID its suffix encodes. It is the exact inverse of FormatTypeID.
+          forward: svcid.ParseTypeID
+          in:
+            - name: typeID
+              type: string
+          name: ParseTypeID
+          out:
+            - name: prefix
+            - name: uuid
+              type: string
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            FormatTypeID renders prefix and a canonical dashed-hex UUID as a TypeID. It
+            is the migration path: an existing UUID column becomes typed without
+            reissuing anything, so the UUID version is not enforced.
+          forward: svcid.FormatTypeID
+          in:
+            - name: prefix
+            - name: uuid
+              type: string
+          name: FormatTypeID
+          out:
+            - name: typeID
+              type: string
+            - name: err
+              type: error
+      - func:
+          doc: Available returns the sorted list of registered Schemes.
+          forward: coreid.Available
+          name: Available
+          out:
+            - type: "[]Scheme"
     functions:
-      - in:
-          - name: scheme
-            type: Scheme
-        name: New
-        out:
-          - name: newID
-            type: string
-          - name: err
-            type: error
       - name: UUIDv4
         out:
           - name: newID
@@ -378,80 +521,8 @@ packages:
             type: string
           - name: err
             type: error
-      - in:
-          - name: node
-            type: int64
-        name: NewSnowflake
-        out:
-          - type: Generator
-      - in:
-          - name: size
-            type: int
-        name: NewNanoID
-        out:
-          - name: g
-            type: Generator
-          - name: err
-            type: error
-      - in:
-          - name: prefix
-            type: string
-        name: NewTypeID
-        out:
-          - name: g
-            type: Generator
-          - name: err
-            type: error
-      - in:
-          - name: ksuid
-            type: string
-        name: ParseKSUID
-        out:
-          - name: issued
-            type: time.Time
-          - name: payload
-            type: "[ksuidPayloadBytes]byte"
-          - name: err
-            type: error
-      - in:
-          - name: typeID
-            type: string
-        name: ParseTypeID
-        out:
-          - name: prefix
-          - name: uuid
-            type: string
-          - name: err
-            type: error
-      - in:
-          - name: prefix
-          - name: uuid
-            type: string
-        name: FormatTypeID
-        out:
-          - name: typeID
-            type: string
-          - name: err
-            type: error
-      - name: Available
-        out:
-          - type: "[]Scheme"
     imports:
       coreid: github.com/kitsunium/sdk/internal/core/app/id
       errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcid: github.com/kitsunium/sdk/internal/service/app/id
     path: github.com/kitsunium/sdk/pkg/v1/app/id
-    variables:
-      - name: UnknownScheme
-        type: "*errs.Error"
-      - name: EntropyFailed
-        type: "*errs.Error"
-      - name: ClockBackwards
-        type: "*errs.Error"
-      - name: InvalidSize
-        type: "*errs.Error"
-      - name: InvalidPrefix
-        type: "*errs.Error"
-      - name: Malformed
-        type: "*errs.Error"
-      - name: TimestampRange
-        type: "*errs.Error"

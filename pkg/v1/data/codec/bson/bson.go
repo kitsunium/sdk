@@ -59,10 +59,7 @@
 package bson
 
 import (
-	"time"
-
 	corebson "github.com/kitsunium/sdk/internal/core/data/codec/bson"
-	"github.com/kitsunium/sdk/internal/kernel/errs"
 	svcbson "github.com/kitsunium/sdk/internal/service/data/codec/bson"
 )
 
@@ -70,47 +67,6 @@ import (
 // it goes wherever a format name is taken — the codec package's Marshal,
 // config.FSSource's string, i18n.LoadFS's codec.Format — without a conversion.
 const Format = "bson"
-
-// The binary subtypes.
-const (
-	// BinaryGeneric is the default subtype, the one a []byte is written as.
-	BinaryGeneric byte = svcbson.BinaryGeneric
-	// BinaryFunction marks a function.
-	BinaryFunction byte = svcbson.BinaryFunction
-	// BinaryOld is the deprecated generic subtype, with an inner length.
-	BinaryOld byte = svcbson.BinaryOld
-	// BinaryUUIDOld is the deprecated, byte-order-ambiguous UUID subtype.
-	BinaryUUIDOld byte = svcbson.BinaryUUIDOld
-	// BinaryUUID is an RFC 9562 UUID.
-	BinaryUUID byte = svcbson.BinaryUUID
-	// BinaryMD5 is an MD5 digest.
-	BinaryMD5 byte = svcbson.BinaryMD5
-	// BinaryEncrypted is a client-side encrypted value.
-	BinaryEncrypted byte = svcbson.BinaryEncrypted
-	// BinaryColumn is a compressed time-series column.
-	BinaryColumn byte = svcbson.BinaryColumn
-	// BinarySensitive marks data a server must not log.
-	BinarySensitive byte = svcbson.BinarySensitive
-	// BinaryVector is a packed numeric vector.
-	BinaryVector byte = svcbson.BinaryVector
-	// BinaryUserDefined is the first subtype reserved for applications.
-	BinaryUserDefined byte = svcbson.BinaryUserDefined
-)
-
-// The error codes, range 0.3.36.*.
-const (
-	// CodeMarshalFailed identifies a value Marshal or Append cannot encode.
-	CodeMarshalFailed errs.Code = corebson.CodeBSONMarshalFailed
-	// CodeUnmarshalFailed identifies input Unmarshal refuses.
-	CodeUnmarshalFailed errs.Code = corebson.CodeBSONUnmarshalFailed
-	// CodeSizeExceeded identifies an Unmarshal input past 10 MiB.
-	CodeSizeExceeded errs.Code = corebson.CodeBSONSizeExceeded
-	// CodeDepthExceeded identifies nesting past 100 levels.
-	CodeDepthExceeded errs.Code = corebson.CodeBSONDepthExceeded
-	// CodeValueInvalid identifies a value type's constructor or parser
-	// refusing its input.
-	CodeValueInvalid errs.Code = corebson.CodeBSONValueInvalid
-)
 
 // The sentinels, for errors.Is, and the nil ObjectID.
 var (
@@ -126,48 +82,6 @@ var (
 	ValueInvalid = corebson.ValueInvalid
 	// NilObjectID is the zero ObjectID.
 	NilObjectID ObjectID
-)
-
-// The value types. Each is the BSON type of the same name.
-type (
-	// D is a document whose element order matters.
-	D = svcbson.D
-	// E is one element of a D.
-	E = svcbson.E
-	// M is a document whose element order does not; its keys are written sorted.
-	M = svcbson.M
-	// A is an array.
-	A = svcbson.A
-	// ObjectID is the twelve-byte identifier; its text and JSON forms are 24
-	// hexadecimal digits.
-	ObjectID = svcbson.ObjectID
-	// DateTime is milliseconds since the Unix epoch, UTC.
-	DateTime = svcbson.DateTime
-	// Decimal128 is an IEEE 754-2008 128-bit decimal, converted exactly or
-	// not at all.
-	Decimal128 = svcbson.Decimal128
-	// Binary is bytes and the subtype naming what they are.
-	Binary = svcbson.Binary
-	// Regex is a pattern and its options.
-	Regex = svcbson.Regex
-	// Timestamp is the replication timestamp: seconds and an increment.
-	Timestamp = svcbson.Timestamp
-	// DBPointer is the deprecated namespace-and-ObjectID pointer.
-	DBPointer = svcbson.DBPointer
-	// JavaScript is JavaScript code.
-	JavaScript = svcbson.JavaScript
-	// Symbol is the deprecated symbol.
-	Symbol = svcbson.Symbol
-	// CodeWithScope is the deprecated JavaScript with its scope document.
-	CodeWithScope = svcbson.CodeWithScope
-	// MinKey sorts lower than every other value.
-	MinKey = svcbson.MinKey
-	// MaxKey sorts higher than every other value.
-	MaxKey = svcbson.MaxKey
-	// Undefined is the deprecated undefined value.
-	Undefined = svcbson.Undefined
-	// Null is an explicit null, for a D.
-	Null = svcbson.Null
 )
 
 // Marshal encodes v, which must encode as a document, into a slice the caller
@@ -197,32 +111,4 @@ func Append(dst []byte, v any) ([]byte, error) {
 func Unmarshal(data []byte, v any) error {
 	//: the registered codec's own decoder.
 	return svcbson.New().Unmarshal(data, v)
-}
-
-// ObjectIDFromHex parses the 24-digit hexadecimal form of an ObjectID, in
-// either case.
-func ObjectIDFromHex(s string) (ObjectID, error) {
-	//: the parser of the type.
-	return svcbson.ObjectIDFromHex(s)
-}
-
-// NewDateTimeFromTime returns the DateTime t falls in, truncated to the
-// millisecond.
-func NewDateTimeFromTime(t time.Time) DateTime {
-	//: the conversion of the type.
-	return svcbson.NewDateTimeFromTime(t)
-}
-
-// NewDecimal128 returns the decimal whose BID encoding is high (the first
-// eight bytes) and low (the last eight).
-func NewDecimal128(high, low uint64) Decimal128 {
-	//: the constructor of the type.
-	return svcbson.NewDecimal128(high, low)
-}
-
-// ParseDecimal128 parses a decimal's string form — "1.23", "-4E+5", "NaN",
-// "Infinity" — refusing one a decimal128 cannot hold exactly.
-func ParseDecimal128(s string) (Decimal128, error) {
-	//: the parser of the type.
-	return svcbson.ParseDecimal128(s)
 }

@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "mail",
-    srcs = ["mail.go"],
+    srcs = [
+        "facade_gen.go",
+        "mail.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/app/mail",
     visibility = ["//visibility:public"],
     deps = [

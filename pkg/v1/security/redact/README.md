@@ -98,7 +98,7 @@ var (
 ```
 
 <a name="DefaultWords"></a>
-## func [DefaultWords](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/redact/redact.go#L115>)
+## func [DefaultWords](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/redact/facade_gen.go#L54>)
 
 ```go
 func DefaultWords() []string
@@ -107,7 +107,7 @@ func DefaultWords() []string
 DefaultWords returns the name fragments a Redactor treats as secret when its Config gives none, as a fresh slice a caller may extend.
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/redact/redact.go#L94>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/redact/facade_gen.go#L39>)
 
 Config says what a Redactor treats as secret: the name Words, the struct Tag, an extra Field rule, and how an Error in a log attribute is shown. Its zero value is usable.
 
@@ -116,7 +116,7 @@ type Config = svcredact.Config
 ```
 
 <a name="Document"></a>
-## type [Document](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/redact/redact.go#L105>)
+## type [Document](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/redact/facade_gen.go#L50>)
 
 Document is a JSON document with its secrets replaced — never longer than its bound, always well\-formed — and whether it had to be cut.
 
@@ -125,7 +125,7 @@ type Document = coreredact.DocumentValue
 ```
 
 <a name="Redactor"></a>
-## type [Redactor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/redact/redact.go#L101>)
+## type [Redactor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/redact/facade_gen.go#L46>)
 
 Redactor is the redaction port: Name, Text, JSON, Value and Attrs. [New](<#New>) returns the SDK's implementation, which caches what it learns about each Go type, so build one per configuration and keep it; it is safe for concurrent use. The port is frozen at those five methods \(ADR 0039\), so a consumer can accept a Redactor and hand a test double in its place.
 
@@ -134,7 +134,7 @@ type Redactor = coreredact.Redactor
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/redact/redact.go#L108>)
+### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/redact/redact.go#L65>)
 
 ```go
 func New(cfg Config) Redactor

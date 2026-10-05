@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "sql",
-    srcs = ["sql.go"],
+    srcs = [
+        "facade_gen.go",
+        "sql.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/data/sql",
     visibility = ["//visibility:public"],
     deps = [

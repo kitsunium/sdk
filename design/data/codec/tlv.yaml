@@ -104,37 +104,78 @@ packages:
   - constants:
       - name: Format
         value: "\"tlv\""
-      - name: CodeMarshalFailed
-        type: errs.Code
-        value: "0x00_03_16_01"
-      - name: CodeUnmarshalFailed
-        type: errs.Code
-        value: "0x00_03_16_02"
-      - name: CodeUnsupportedType
-        type: errs.Code
-        value: "0x00_03_16_03"
-      - name: CodeDepthExceeded
-        type: errs.Code
-        value: "0x00_03_16_04"
-      - name: CodeSizeExceeded
-        type: errs.Code
-        value: "0x00_03_16_05"
-      - name: CodeTruncated
-        type: errs.Code
-        value: "0x00_03_16_06"
+    facade:
+      - const:
+          - doc: |-
+              CodeMarshalFailed is 0.3.22.1: the value could not be encoded, or the
+              writer failed.
+            name: CodeMarshalFailed
+            reexport: coretlv.CodeTLVMarshalFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_16_01"
+          - doc: |-
+              CodeUnmarshalFailed is 0.3.22.2: a malformed record, a type mismatch, or
+              the reader failed.
+            name: CodeUnmarshalFailed
+            reexport: coretlv.CodeTLVUnmarshalFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_16_02"
+          - doc: |-
+              CodeUnsupportedType is 0.3.22.3: a channel, a function, a complex
+              number, an unsafe pointer.
+            name: CodeUnsupportedType
+            reexport: coretlv.CodeTLVUnsupportedType
+            type: errs.Code
+            typed: true
+            value: "0x00_03_16_03"
+          - doc: "CodeDepthExceeded is 0.3.22.4: nesting past 32 levels."
+            name: CodeDepthExceeded
+            reexport: coretlv.CodeTLVDepthExceeded
+            type: errs.Code
+            typed: true
+            value: "0x00_03_16_04"
+          - doc: "CodeSizeExceeded is 0.3.22.5: an input past 10 MiB."
+            name: CodeSizeExceeded
+            reexport: coretlv.CodeTLVSizeExceeded
+            type: errs.Code
+            typed: true
+            value: "0x00_03_16_05"
+          - doc: "CodeTruncated is 0.3.22.6: the input ends inside a record."
+            name: CodeTruncated
+            reexport: coretlv.CodeTLVTruncated
+            type: errs.Code
+            typed: true
+            value: "0x00_03_16_06"
+        doc: The error codes, range 0.3.22.*, declared in the core (ADR 0160).
+      - doc: "The sentinels, for errors.Is: each carries the code of the same name."
+        var:
+          - doc: MarshalFailed is the sentinel of [CodeMarshalFailed].
+            name: MarshalFailed
+            reexport: coretlv.MarshalFailed
+            type: "*errs.Error"
+          - doc: UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].
+            name: UnmarshalFailed
+            reexport: coretlv.UnmarshalFailed
+            type: "*errs.Error"
+          - doc: UnsupportedType is the sentinel of [CodeUnsupportedType].
+            name: UnsupportedType
+            reexport: coretlv.UnsupportedType
+            type: "*errs.Error"
+          - doc: DepthExceeded is the sentinel of [CodeDepthExceeded].
+            name: DepthExceeded
+            reexport: coretlv.DepthExceeded
+            type: "*errs.Error"
+          - doc: SizeExceeded is the sentinel of [CodeSizeExceeded].
+            name: SizeExceeded
+            reexport: coretlv.SizeExceeded
+            type: "*errs.Error"
+          - doc: Truncated is the sentinel of [CodeTruncated].
+            name: Truncated
+            reexport: coretlv.Truncated
+            type: "*errs.Error"
     imports:
+      coretlv: github.com/kitsunium/sdk/internal/core/data/codec/tlv
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/pkg/v1/data/codec/tlv
-    variables:
-      - name: MarshalFailed
-        type: "*errs.Error"
-      - name: UnmarshalFailed
-        type: "*errs.Error"
-      - name: UnsupportedType
-        type: "*errs.Error"
-      - name: DepthExceeded
-        type: "*errs.Error"
-      - name: SizeExceeded
-        type: "*errs.Error"
-      - name: Truncated
-        type: "*errs.Error"

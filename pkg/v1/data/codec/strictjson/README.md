@@ -134,7 +134,7 @@ var (
 ```
 
 <a name="Decode"></a>
-## func [Decode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/strictjson/strictjson.go#L123>)
+## func [Decode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/strictjson/facade_gen.go#L67>)
 
 ```go
 func Decode(r io.Reader, v any, maxBytes int64) error
@@ -143,7 +143,7 @@ func Decode(r io.Reader, v any, maxBytes int64) error
 Decode reads exactly one JSON value from r into v, a non\-nil pointer, reading at most maxBytes bytes of it — the bound plus the one byte that proves it was exceeded, never more. On a refusal v may be partly written.
 
 <a name="PointerOf"></a>
-## func [PointerOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/strictjson/strictjson.go#L132>)
+## func [PointerOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/strictjson/facade_gen.go#L75>)
 
 ```go
 func PointerOf(err error) (pointer string, ok bool)

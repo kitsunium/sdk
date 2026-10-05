@@ -325,22 +325,7 @@ packages:
             - name: Index
               tag: json:"-"
               type: "[]int"
-  - aliases:
-      - name: Format
-        target: corecodec.Format
-      - name: Codec
-        target: corecodec.Codec
-      - name: Encoder
-        target: corecodec.Encoder
-      - name: Decoder
-        target: corecodec.Decoder
-      - name: CompressAlgorithm
-        target: transform.Algorithm
-      - name: MultipartForm
-        target: multipart.Form
-      - name: MultipartPart
-        target: multipart.Part
-    codes:
+  - codes:
       - const:
           - doc: CodeUnknownFormat fires when a Format is not registered in the registry.
             name: CodeUnknownFormat
@@ -448,6 +433,91 @@ packages:
       - name: Flate
         type: CompressAlgorithm
         value: "\"flate\""
+    facade:
+      - alias:
+          - doc: Format re-exports core/data/codec.Format so consumers only depend on pkg/v1.
+            name: Format
+            target: corecodec.Format
+      - alias:
+          - doc: Codec re-exports core/data/codec.Codec for consumers who want direct access.
+            name: Codec
+            target: corecodec.Codec
+      - alias:
+          - doc: Encoder re-exports core/data/codec.Encoder for streaming callers.
+            name: Encoder
+            target: corecodec.Encoder
+      - alias:
+          - doc: Decoder re-exports core/data/codec.Decoder for streaming callers.
+            name: Decoder
+            target: corecodec.Decoder
+      - func:
+          doc: Available returns the sorted list of registered formats.
+          forward: corecodec.Available
+          name: Available
+          out:
+            - type: "[]Format"
+      - alias:
+          - doc: |-
+              CompressAlgorithm is the transform package's Algorithm, so consumers name a
+              compressor without importing internal/*. Use the Gzip / Flate constants.
+            name: CompressAlgorithm
+            target: transform.Algorithm
+      - alias:
+          - doc: |-
+              MultipartForm is the native Go shape of the [Multipart] format: a whole
+              multipart/form-data body — its RFC 2046 boundary and its parts, in wire
+              order. Marshal one to build an upload; Unmarshal into a *MultipartForm to
+              read one. An empty Boundary asks Marshal to generate a delimiter; Unmarshal
+              always fills it with the one it recovered, so a decode → encode round trip
+              keeps the original delimiter — and reproduces the whole body byte for byte
+              only for a body this codec encoded, since a part header other than the name,
+              filename and media type is not carried through, and a filename is decoded to
+              its last path element.
+            name: MultipartForm
+            target: multipart.Form
+      - alias:
+          - doc: |-
+              MultipartPart is one section of a [MultipartForm]: a named field, optionally
+              a filename and a media type, and the bytes themselves — a file upload is a
+              part with FileName and ContentType set. Marshal also accepts a single
+              MultipartPart or a []MultipartPart.
+
+              Name is required. Name, FileName and ContentType are written into the part's
+              header block, so a CR, an LF or a NUL in any of them is refused — never
+              escaped — with the codec's VALUE_INVALID naming the field. A UTF-8 filename
+              is written as-is (RFC 7578 §4.2).
+
+              Decoding keeps only a filename's last path element, reading both '/' and '\'
+              as separators on every operating system — RFC 7578 §4.2 has the receiver
+              drop the directory information a sender may include, and the sender writes
+              it with its own separator. `C:\Users\ada\cv.pdf` decodes to `cv.pdf` on
+              Linux exactly as on Windows. Nothing else is removed, so a caller turning
+              FileName into a path still validates it first.
+            name: MultipartPart
+            target: multipart.Part
+      - func:
+          doc: |-
+            MultipartContentType returns the Content-Type header value —
+            "multipart/form-data; boundary=…", quoted when the boundary needs it — for a
+            body Marshal(Multipart, …) returned. Send it alongside the bytes: the
+            boundary is announced in that header, and since the Codec contract has
+            nowhere to hand one back, it is read off the body's first delimiter line. A
+            body with no recoverable delimiter is refused with the codec's
+            BOUNDARY_INVALID.
+
+            A caller streaming through NewEncoder(Multipart, w) must set the header
+            before the first byte instead: the Encoder returned has a Boundary() string
+            method, and mime.FormatMediaType builds the same value from it.
+          forward: multipart.ContentType
+          in:
+            - name: body
+              type: "[]byte"
+          name: MultipartContentType
+          out:
+            - name: value
+              type: string
+            - name: err
+              type: error
     functions:
       - in:
           - name: f
@@ -504,9 +574,6 @@ packages:
             type: Decoder
           - name: err
             type: error
-      - name: Available
-        out:
-          - type: "[]Format"
       - in:
           - name: mime
             type: string
@@ -546,15 +613,6 @@ packages:
         name: UnmarshalCompressed
         out:
           - type: error
-      - in:
-          - name: body
-            type: "[]byte"
-        name: MultipartContentType
-        out:
-          - name: value
-            type: string
-          - name: err
-            type: error
     imports:
       corecodec: github.com/kitsunium/sdk/internal/core/data/codec
       errs: github.com/kitsunium/sdk/internal/kernel/errs
@@ -598,54 +656,112 @@ packages:
             private: "pkg/v1/data/codec: JSON-bridge promotion path could not serve the request"
             public: codec promotion failed
             reason: PROMOTE_FAILED
-  - aliases:
-      - name: Kind
-        target: svcjsonshape.Kind
-      - name: Shape
-        target: svcjsonshape.ShapeValue
-      - name: Field
-        target: svcjsonshape.FieldValue
-    constants:
-      - name: Any
-        type: Kind
-        value: "0"
-      - name: Object
-        type: Kind
-        value: "1"
-      - name: Array
-        type: Kind
-        value: "2"
-      - name: Map
-        type: Kind
-        value: "3"
-      - name: String
-        type: Kind
-        value: "4"
-      - name: Integer
-        type: Kind
-        value: "5"
-      - name: Number
-        type: Kind
-        value: "6"
-      - name: Boolean
-        type: Kind
-        value: "7"
-      - name: Unsupported
-        type: Kind
-        value: "8"
-    functions:
-      - in:
-          - name: t
-            type: reflect.Type
-        name: Of
-        out:
-          - type: "*Shape"
-      - name: For
-        out:
-          - type: "*Shape"
-        typeParams:
-          - constraint: any
-            name: T
+  - facade:
+      - alias:
+          - doc: |-
+              Kind is the JSON kind a value takes on the wire; its zero value is Any. It
+              encodes as its lower-case name.
+            name: Kind
+            target: svcjsonshape.Kind
+      - alias:
+          - doc: Shape describes the values of one Go type on the wire.
+            name: Shape
+            target: svcjsonshape.ShapeValue
+      - alias:
+          - doc: Field is one member of an Object, and the Go field behind it.
+            name: Field
+            target: svcjsonshape.FieldValue
+      - const:
+          - doc: |-
+              Any is a value whose kind the type does not decide: an interface, a
+              json.RawMessage, a type that writes its own JSON.
+            name: Any
+            reexport: svcjsonshape.Any
+            type: Kind
+            typed: true
+            value: "0"
+      - const:
+          - doc: "Object is a JSON object whose members are Shape.Fields: a struct."
+            name: Object
+            reexport: svcjsonshape.Object
+            type: Kind
+            typed: true
+            value: "1"
+      - const:
+          - doc: Array is a JSON array whose elements are Shape.Items.
+            name: Array
+            reexport: svcjsonshape.Array
+            type: Kind
+            typed: true
+            value: "2"
+      - const:
+          - doc: |-
+              Map is a JSON object keyed by a Go map's keys, whose values are
+              Shape.Values.
+            name: Map
+            reexport: svcjsonshape.Map
+            type: Kind
+            typed: true
+            value: "3"
+      - const:
+          - doc: String is a JSON string.
+            name: String
+            reexport: svcjsonshape.String
+            type: Kind
+            typed: true
+            value: "4"
+      - const:
+          - doc: |-
+              Integer is a JSON number the type holds as an integer; Format names the Go
+              kind.
+            name: Integer
+            reexport: svcjsonshape.Integer
+            type: Kind
+            typed: true
+            value: "5"
+      - const:
+          - doc: Number is a JSON number the type holds as a float, or json.Number.
+            name: Number
+            reexport: svcjsonshape.Number
+            type: Kind
+            typed: true
+            value: "6"
+      - const:
+          - doc: Boolean is true or false.
+            name: Boolean
+            reexport: svcjsonshape.Boolean
+            type: Kind
+            typed: true
+            value: "7"
+      - const:
+          - doc: |-
+              Unsupported is a type encoding/json refuses to encode; a value holding one
+              is refused whole.
+            name: Unsupported
+            reexport: svcjsonshape.Unsupported
+            type: Kind
+            typed: true
+            value: "8"
+      - func:
+          doc: |-
+            Of describes the values of t on the wire. A nil t is Any. It never fails, and
+            every call returns a new tree the caller may keep and change.
+          forward: svcjsonshape.Of
+          in:
+            - name: t
+              type: reflect.Type
+          name: Of
+          out:
+            - type: "*Shape"
+      - func:
+          doc: "For describes the values of T on the wire: Of(reflect.TypeFor[T]())."
+          forward: svcjsonshape.For[T]
+          name: For
+          out:
+            - type: "*Shape"
+          typeParams:
+            - constraint: any
+              name: T
     imports:
       svcjsonshape: github.com/kitsunium/sdk/internal/service/data/codec/jsonshape
     path: github.com/kitsunium/sdk/pkg/v1/data/codec/jsonshape

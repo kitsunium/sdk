@@ -33,8 +33,6 @@
 package msgpack
 
 import (
-	coremsgpack "github.com/kitsunium/sdk/internal/core/data/codec/msgpack"
-	"github.com/kitsunium/sdk/internal/kernel/errs"
 	// The implementation registers itself with the codec registry as it is
 	// initialised; importing it is what registers the format.
 	_ "github.com/kitsunium/sdk/internal/service/data/codec/msgpack"
@@ -45,21 +43,3 @@ import (
 // Marshal, config.FSSource's string, i18n.LoadFS's codec.Format — without a
 // conversion.
 const Format = "msgpack"
-
-// The error codes, range 0.3.7.*, declared in the core (ADR 0160).
-const (
-	// CodeMarshalFailed is 0.3.7.1: a value MessagePack cannot represent,
-	// nesting past the bound, a writer's failure.
-	CodeMarshalFailed errs.Code = coremsgpack.CodeMsgPackMarshalFailed
-	// CodeUnmarshalFailed is 0.3.7.2: malformed or truncated input, past a
-	// bound, or a value the target cannot hold.
-	CodeUnmarshalFailed errs.Code = coremsgpack.CodeMsgPackUnmarshalFailed
-)
-
-// The sentinels, for errors.Is: each carries the code of the same name.
-var (
-	// MarshalFailed is the sentinel of [CodeMarshalFailed].
-	MarshalFailed = coremsgpack.MarshalFailed
-	// UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].
-	UnmarshalFailed = coremsgpack.UnmarshalFailed
-)

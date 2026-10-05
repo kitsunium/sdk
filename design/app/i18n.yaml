@@ -856,190 +856,482 @@ packages:
         name: Store
         struct:
           unexported: true
-  - aliases:
-      - name: Tag
-        target: corei18n.TagValue
-      - name: Key
-        target: corei18n.Key
-      - name: Message
-        target: corei18n.MessageValue
-      - name: Form
-        target: corei18n.Form
-      - name: Count
-        target: corei18n.CountValue
-      - name: Args
-        target: corei18n.Args
-      - name: Catalog
-        target: corei18n.Catalog
-      - name: KeyLister
-        target: corei18n.KeyLister
-      - name: Fallbacker
-        target: corei18n.Fallbacker
-      - name: PluralRule
-        target: corei18n.PluralRule
-      - name: Entry
-        target: svci18n.EntryValue
-      - name: Catalogue
-        target: svci18n.Catalogue
-      - name: Store
-        target: svci18n.Store
-      - name: Printer
-        target: svci18n.Printer
-      - name: Negotiator
-        target: svci18n.Negotiator
-      - name: Plural
-        target: svci18n.PluralValue
-    constants:
-      - name: FormOther
-        type: Form
-        value: "0"
-      - name: FormZero
-        type: Form
-        value: "1"
-      - name: FormOne
-        type: Form
-        value: "2"
-      - name: FormTwo
-        type: Form
-        value: "3"
-      - name: FormFew
-        type: Form
-        value: "4"
-      - name: FormMany
-        type: Form
-        value: "5"
-    functions:
-      - in:
-          - name: text
-            type: string
-        name: ParseTag
-        out:
-          - name: tag
-            type: Tag
-          - name: err
-            type: error
-      - in:
-          - name: name
-            type: string
-        name: ParseForm
-        out:
-          - name: form
+  - facade:
+      - const:
+          - doc: |-
+              FormOther is the catch-all. Every language defines it and every message must
+              carry it.
+            name: FormOther
+            note: |-
+              The six CLDR plural categories, aliased from internal/core/app/i18n. FormOther
+              is the zero Form, because it is the only category every language defines.
+
+              They are declared one per const rather than as a group: their VALUES are the
+              core package's, so an iota here would restate an ordering this package does
+              not own and would silently diverge the day the core enum is reordered.
+            reexport: corei18n.FormOther
             type: Form
-          - name: err
-            type: error
-      - in:
-          - name: "n"
-            type: int64
-        name: Int
-        out:
-          - type: Count
-      - in:
-          - name: value
-            type: float64
-          - name: fractionDigits
-            type: int
-        name: Decimal
-        out:
-          - name: count
-            type: Count
-          - name: err
-            type: error
-      - in:
-          - name: key
-            type: Key
-        name: ValidateKey
-        out:
-          - type: error
-      - in:
-          - name: text
-            type: string
-        name: NewMessage
-        out:
-          - name: message
-            type: Message
-          - name: err
-            type: error
-      - in:
-          - name: forms
-            type: map[Form]string
-        name: NewPluralMessage
-        out:
-          - name: message
-            type: Message
-          - name: err
-            type: error
-      - in:
-          - name: text
-            type: string
-        name: Plain
-        out:
-          - type: Entry
-      - in:
-          - name: forms
-            type: map[string]string
-        name: PluralForms
-        out:
-          - type: Entry
-      - in:
-          - name: fallback
-            type: Tag
-          - name: catalogues
-            type: map[Tag]Catalogue
-        name: NewStore
-        out:
-          - name: store
-            type: "*Store"
-          - name: err
-            type: error
-      - in:
-          - name: fsys
-            type: fs.FS
-          - name: dir
-            type: string
-          - name: format
-            type: codec.Format
-          - name: fallback
-            type: Tag
-        name: LoadFS
-        out:
-          - name: store
-            type: "*Store"
-          - name: err
-            type: error
-      - in:
-          - name: catalog
-            type: Catalog
-          - name: tag
-            type: Tag
-        name: NewPrinter
-        out:
-          - name: printer
-            type: "*Printer"
-          - name: err
-            type: error
-      - in:
-          - name: supported
-            type: "[]Tag"
-          - name: fallback
-            type: Tag
-        name: NewNegotiator
-        out:
-          - name: negotiator
-            type: "*Negotiator"
-          - name: err
-            type: error
-      - in:
-          - name: tag
-            type: Tag
-        name: Rules
-        out:
-          - name: plural
-            type: Plural
-          - name: ok
-            type: bool
-      - name: SupportedTags
-        out:
-          - type: "[]Tag"
+            typed: true
+            value: "0"
+      - const:
+          - doc: FormZero is the distinct nought of Arabic and Latvian.
+            name: FormZero
+            reexport: corei18n.FormZero
+            type: Form
+            typed: true
+            value: "1"
+      - const:
+          - doc: FormOne is the singular of languages that have one.
+            name: FormOne
+            reexport: corei18n.FormOne
+            type: Form
+            typed: true
+            value: "2"
+      - const:
+          - doc: FormTwo is the dual.
+            name: FormTwo
+            reexport: corei18n.FormTwo
+            type: Form
+            typed: true
+            value: "3"
+      - const:
+          - doc: FormFew is the small plural of the Slavic and Semitic families.
+            name: FormFew
+            reexport: corei18n.FormFew
+            type: Form
+            typed: true
+            value: "4"
+      - const:
+          - doc: |-
+              FormMany is the large plural, and the compact-decimal form in several
+              Romance languages.
+            name: FormMany
+            reexport: corei18n.FormMany
+            type: Form
+            typed: true
+            value: "5"
+      - alias:
+          - doc: |-
+              Tag is a language, optionally narrowed by a script and a region:
+              `language[-Script][-REGION]` and deliberately nothing else. It is
+              comparable, so it is a map key, and it holds its canonical spelling, so
+              [Tag].String allocates nothing.
+            name: Tag
+            target: corei18n.TagValue
+      - alias:
+          - doc: |-
+              Key names a message inside a catalogue. It is a developer identifier —
+              "checkout.button.pay" — and it is what a render puts on screen when the
+              translation is missing.
+            name: Key
+            target: corei18n.Key
+      - alias:
+          - doc: |-
+              Message is one compiled translation. Its placeholders are parsed when the
+              catalogue is built, so a malformed pattern fails at startup and a render
+              never parses.
+            name: Message
+            target: corei18n.MessageValue
+      - alias:
+          - doc: |-
+              Form is a CLDR plural category. [FormOther] is the zero value, because it is
+              the only category every language defines.
+            name: Form
+            target: corei18n.Form
+      - alias:
+          - doc: |-
+              Count is a quantity described by the CLDR plural operands. It carries the
+              DISPLAY precision, because a quantity of one shown with a decimal is a different category
+              in English and a float64 cannot tell them apart.
+            name: Count
+            target: corei18n.CountValue
+      - alias:
+          - doc: |-
+              Args binds placeholder names to the text that replaces them. It is
+              map[string]string on purpose — see the package comment.
+            name: Args
+            target: corei18n.Args
+      - alias:
+          - doc: |-
+              Catalog is the message-source port, frozen at two methods (ADR 0039).
+              [Store] implements it.
+            name: Catalog
+            target: corei18n.Catalog
+      - alias:
+          - doc: |-
+              KeyLister is the ADR 0039 sibling that enumerates a catalog's keys, reached
+              by type assertion. [Store].Missing is what it exists for.
+            name: KeyLister
+            target: corei18n.KeyLister
+      - alias:
+          - doc: |-
+              Fallbacker is the ADR 0039 sibling that names a catalog's fallback language.
+              A catalog with no fallback does not implement it, and the absence is the
+              answer.
+            name: Fallbacker
+            target: corei18n.Fallbacker
+      - alias:
+          - doc: |-
+              PluralRule reports which CLDR category a quantity falls in for one language.
+              It is a func type, which satisfies ADR 0039 structurally.
+            name: PluralRule
+            target: corei18n.PluralRule
+      - alias:
+          - doc: |-
+              Entry is one catalogue entry before it is compiled: a plain pattern
+              ([Plain]) or one pattern per CLDR category ([PluralForms]).
+            name: Entry
+            target: svci18n.EntryValue
+      - alias:
+          - doc: Catalogue is one language's entries, keyed by message key.
+            name: Catalogue
+            target: svci18n.Catalogue
+      - alias:
+          - doc: |-
+              Store is the concrete, immutable catalogue. It implements [Catalog],
+              [KeyLister] and [Fallbacker].
+            name: Store
+            target: svci18n.Store
+      - alias:
+          - doc: |-
+              Printer renders messages in one language. Build one per language at startup,
+              not one per request — see [NewPrinter].
+            name: Printer
+            target: svci18n.Printer
+      - alias:
+          - doc: |-
+              Negotiator resolves an Accept-Language header to one of a fixed set of
+              languages. Everything that can be wrong is refused when it is built, so
+              [Negotiator].Negotiate has no failure mode.
+            name: Negotiator
+            target: svci18n.Negotiator
+      - alias:
+          - doc: |-
+              Plural is one language's CLDR plural specification: the categories it can
+              produce, and the rule that picks between them.
+            name: Plural
+            target: svci18n.PluralValue
+      - var:
+          - doc: |-
+              InvalidTag is returned by [ParseTag] for a tag outside the
+              `language[-Script][-REGION]` subset. It is NOT what a peculiar
+              Accept-Language header produces: [Negotiator].Negotiate skips an
+              element it cannot use and never fails.
+            name: InvalidTag
+            reexport: corei18n.InvalidTag
+            type: "*errs.Error"
+          - doc: |-
+              InvalidKey is returned for an empty message key, or one carrying a
+              control character.
+            name: InvalidKey
+            reexport: corei18n.InvalidKey
+            type: "*errs.Error"
+          - doc: |-
+              InvalidPattern is returned for a malformed pattern: an unclosed brace,
+              an unmatched closing brace, or a placeholder name outside
+              [A-Za-z_][A-Za-z0-9_]*.
+            name: InvalidPattern
+            reexport: corei18n.InvalidPattern
+            type: "*errs.Error"
+          - doc: |-
+              ArgumentMissing is returned when [Args] does not carry a placeholder
+              the pattern names. It names the placeholder and never a value.
+            name: ArgumentMissing
+            reexport: corei18n.ArgumentMissing
+            type: "*errs.Error"
+          - doc: |-
+              MessageNotFound is returned when no language in the chain holds the
+              key. The render still returns a non-empty string — the key itself.
+            name: MessageNotFound
+            reexport: corei18n.MessageNotFound
+            type: "*errs.Error"
+          - doc: |-
+              PluralFormMissing is returned when a message is asked for a category it
+              does not carry. A catalogue built by [NewStore] cannot produce it.
+            name: PluralFormMissing
+            reexport: corei18n.PluralFormMissing
+            type: "*errs.Error"
+          - doc: |-
+              InvalidCount is returned by [Decimal] for a NaN, an infinity, or a
+              fraction-digit count outside 0..9.
+            name: InvalidCount
+            reexport: corei18n.InvalidCount
+            type: "*errs.Error"
+          - doc: |-
+              InvalidForm is returned by [ParseForm] for a name outside the six CLDR
+              categories.
+            name: InvalidForm
+            reexport: corei18n.InvalidForm
+            type: "*errs.Error"
+          - doc: |-
+              UnsupportedLanguage is returned when a catalogue or a printer names a
+              language this SDK has no reviewed CLDR plural rule for. It is the
+              domain's central refusal — see the package comment.
+            name: UnsupportedLanguage
+            reexport: corei18n.UnsupportedLanguage
+            type: "*errs.Error"
+          - doc: |-
+              CatalogInvalid is returned for a catalogue that cannot be compiled: an
+              unset or unserved fallback, a duplicate tag, or an entry of the wrong
+              shape.
+            name: CatalogInvalid
+            reexport: corei18n.CatalogInvalid
+            type: "*errs.Error"
+          - doc: |-
+              CatalogLoadFailed is returned when a catalogue directory cannot be read
+              or its bytes cannot be decoded. The cause stays in the chain, so
+              errors.Is(err, fs.ErrNotExist) still answers.
+            name: CatalogLoadFailed
+            reexport: corei18n.CatalogLoadFailed
+            type: "*errs.Error"
+          - doc: |-
+              TranslationIncomplete is returned for a counted message missing a
+              category its language can produce — the one catalogue defect a
+              translator cannot see by reading their own file.
+            name: TranslationIncomplete
+            reexport: corei18n.TranslationIncomplete
+            type: "*errs.Error"
+          - doc: |-
+              NegotiationEmpty is returned by [NewNegotiator] for an empty supported
+              set, which is an unfinished wiring rather than "accept anything".
+            name: NegotiationEmpty
+            reexport: corei18n.NegotiationEmpty
+            type: "*errs.Error"
+      - func:
+          doc: |-
+            ParseTag canonicalises text into a [Tag], or returns [InvalidTag].
+
+            "FR-latn-ca" and "fr-Latn-CA" are the same Tag. The POSIX spelling
+            ("fr_FR"), extensions, variants, private use and grandfathered tags are each
+            refused by name rather than parsed and dropped — a dropped subtag changes
+            which language answers without changing anything a reader can see.
+          forward: svci18n.ParseTag
+          in:
+            - name: text
+              type: string
+          name: ParseTag
+          out:
+            - name: tag
+              type: Tag
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            ParseForm returns the [Form] named by a CLDR category spelling — "zero",
+            "one", "two", "few", "many", "other" — or [InvalidForm].
+          forward: corei18n.ParseForm
+          in:
+            - name: name
+              type: string
+          name: ParseForm
+          out:
+            - name: form
+              type: Form
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            Int returns the [Count] of an exact integer displayed with no fraction
+            digits. The sign is discarded, because CLDR's operands are defined on the
+            absolute value.
+          forward: corei18n.Int
+          in:
+            - name: "n"
+              type: int64
+          name: Int
+          out:
+            - type: Count
+      - func:
+          doc: |-
+            Decimal returns the [Count] of value displayed with exactly fractionDigits
+            fraction digits, or [InvalidCount].
+
+            The second argument is the DISPLAY precision, not a property of the value:
+            Decimal(1, 2) describes "1.00", which is `other` in English, while
+            [Int](1) describes "1", which is `one`.
+          forward: corei18n.Decimal
+          in:
+            - name: value
+              type: float64
+            - name: fractionDigits
+              type: int
+          name: Decimal
+          out:
+            - name: count
+              type: Count
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            ValidateKey reports whether key is usable, and returns [InvalidKey] when it
+            is not: empty, or carrying a control character.
+          forward: corei18n.ValidateKey
+          in:
+            - name: key
+              type: Key
+          name: ValidateKey
+          out:
+            - type: error
+      - func:
+          doc: NewMessage compiles an uncounted message, or returns [InvalidPattern].
+          forward: svci18n.NewMessage
+          in:
+            - name: text
+              type: string
+          name: NewMessage
+          out:
+            - name: message
+              type: Message
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            NewPluralMessage compiles a counted message from one pattern per category,
+            or returns [InvalidPattern], [InvalidForm] or [PluralFormMissing]. The map
+            MUST contain [FormOther].
+
+            It does not check the map against any language's rules — it does not know
+            the language. [NewStore] does, and refuses there.
+          forward: svci18n.NewPluralMessage
+          in:
+            - name: forms
+              type: map[Form]string
+          name: NewPluralMessage
+          out:
+            - name: message
+              type: Message
+            - name: err
+              type: error
+      - func:
+          doc: Plain returns an uncounted [Entry].
+          forward: svci18n.Plain
+          in:
+            - name: text
+              type: string
+          name: Plain
+          out:
+            - type: Entry
+      - func:
+          doc: |-
+            PluralForms returns a counted [Entry] whose patterns are keyed by CLDR
+            category name. A counted entry is checked at load against every category its
+            language can produce.
+          forward: svci18n.PluralForms
+          in:
+            - name: forms
+              type: map[string]string
+          name: PluralForms
+          out:
+            - type: Entry
+      - func:
+          doc: |-
+            NewStore compiles catalogues into a [Store], or refuses.
+
+            Every check is here, and every failure is a startup failure:
+            [UnsupportedLanguage] for a language with no reviewed rule,
+            [TranslationIncomplete] for a counted message missing one of its language's
+            categories, [CatalogInvalid] for an unset or unserved fallback, and the core
+            refusals for a bad key, pattern or category name.
+          forward: svci18n.NewStore
+          in:
+            - name: fallback
+              type: Tag
+            - name: catalogues
+              type: map[Tag]Catalogue
+          name: NewStore
+          out:
+            - name: store
+              type: "*Store"
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            LoadFS reads one catalogue file per language from dir and returns a [Store].
+
+            The bytes are decoded by the codec domain, so a catalogue is JSON, YAML,
+            TOML or any other registered format and this package contains no parser —
+            blank-import pkg/v1/data/codec to register one. fsys is io/fs.FS, so an embed.FS,
+            an os.DirFS and a pkg/v1/data/vfs filesystem all work here unchanged.
+
+            The language comes from the file NAME: "en.json", "pt-PT.yaml".
+            Subdirectories are ignored rather than walked, and two files that
+            canonicalise to one tag are [CatalogInvalid].
+          forward: svci18n.LoadFS
+          in:
+            - name: fsys
+              type: fs.FS
+            - name: dir
+              type: string
+            - name: format
+              type: codec.Format
+            - name: fallback
+              type: Tag
+          name: LoadFS
+          out:
+            - name: store
+              type: "*Store"
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            NewPrinter returns a [Printer] rendering tag out of catalog, or refuses.
+
+            It resolves the chain and allocates; [Printer].Render walks it and does not.
+            Build one per language at startup and index them by [Tag] — a request then
+            costs a map lookup, not a construction.
+          forward: svci18n.NewPrinter
+          in:
+            - name: catalog
+              type: Catalog
+            - name: tag
+              type: Tag
+          name: NewPrinter
+          out:
+            - name: printer
+              type: "*Printer"
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            NewNegotiator returns a [Negotiator] over supported, falling back to
+            fallback, or refuses: an empty supported set is [NegotiationEmpty], an unset
+            or unsupported fallback is [CatalogInvalid].
+          forward: svci18n.NewNegotiator
+          in:
+            - name: supported
+              type: "[]Tag"
+            - name: fallback
+              type: Tag
+          name: NewNegotiator
+          out:
+            - name: negotiator
+              type: "*Negotiator"
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            Rules returns the CLDR plural specification for tag, and reports whether the
+            SDK has one. It resolves the exact tag first and the bare language second,
+            so "pt-PT" gets its own rule and "fr-CA" inherits French's.
+          forward: svci18n.Rules
+          in:
+            - name: tag
+              type: Tag
+          name: Rules
+          out:
+            - name: plural
+              type: Plural
+            - name: ok
+              type: bool
+      - func:
+          doc: |-
+            SupportedTags returns every language this SDK has a reviewed CLDR plural
+            rule for, sorted. It is what [UnsupportedLanguage] names beside a refused
+            tag.
+          forward: svci18n.SupportedTags
+          name: SupportedTags
+          out:
+            - type: "[]Tag"
     imports:
       codec: github.com/kitsunium/sdk/internal/core/data/codec
       corei18n: github.com/kitsunium/sdk/internal/core/app/i18n
@@ -1047,30 +1339,3 @@ packages:
       fs: io/fs
       svci18n: github.com/kitsunium/sdk/internal/service/app/i18n
     path: github.com/kitsunium/sdk/pkg/v1/app/i18n
-    variables:
-      - name: InvalidTag
-        type: "*errs.Error"
-      - name: InvalidKey
-        type: "*errs.Error"
-      - name: InvalidPattern
-        type: "*errs.Error"
-      - name: ArgumentMissing
-        type: "*errs.Error"
-      - name: MessageNotFound
-        type: "*errs.Error"
-      - name: PluralFormMissing
-        type: "*errs.Error"
-      - name: InvalidCount
-        type: "*errs.Error"
-      - name: InvalidForm
-        type: "*errs.Error"
-      - name: UnsupportedLanguage
-        type: "*errs.Error"
-      - name: CatalogInvalid
-        type: "*errs.Error"
-      - name: CatalogLoadFailed
-        type: "*errs.Error"
-      - name: TranslationIncomplete
-        type: "*errs.Error"
-      - name: NegotiationEmpty
-        type: "*errs.Error"

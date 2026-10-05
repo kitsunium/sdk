@@ -70,7 +70,7 @@ var (
 ```
 
 <a name="Batcher"></a>
-## type [Batcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/batcher/batcher.go#L74>)
+## type [Batcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/batcher/facade_gen.go#L15>)
 
 Batcher coalesces added items into batches delivered through its [Sink](<#Sink>).
 
@@ -81,7 +81,7 @@ type Batcher[T any] = kbatcher.Batcher[T]
 ```
 
 <a name="NewBatcher"></a>
-### func [NewBatcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/batcher/batcher.go#L92>)
+### func [NewBatcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/batcher/facade_gen.go#L33>)
 
 ```go
 func NewBatcher[T any](deliver Sink[T], cfg Config[T]) *Batcher[T]
@@ -132,7 +132,7 @@ func main() {
 </details>
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/batcher/batcher.go#L82>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/batcher/facade_gen.go#L23>)
 
 Config tunes a [Batcher](<#Batcher>): MaxItems and MaxWeight, the caps that deliver eagerly \(non\-positive disables each\); WeightOf, an item's weight \(nil counts items\); FlushEvery, the background delivery interval \(non\-positive starts no ticker\); Clock, the clock.Waiter that ticker runs on \(nil is the wall clock\); and OnError, which observes the ticker path's failures \(nil ignores them\). The zero Config is usable.
 
@@ -141,7 +141,7 @@ type Config[T any] = kbatcher.Config[T]
 ```
 
 <a name="Sink"></a>
-## type [Sink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/batcher/batcher.go#L88>)
+## type [Sink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/batcher/facade_gen.go#L29>)
 
 Sink delivers one coalesced batch. A non\-nil error fails the batch: it is returned to the caller of Add, Flush or Close that triggered the delivery, and handed to [Config](<#Config>).OnError on the ticker path. A Sink is never entered concurrently.
 

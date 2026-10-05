@@ -64,7 +64,6 @@ import (
 	// Activates the default AES-256-GCM scheme. Stdlib-only, so importing
 	// pkg/v1/crypto pulls zero non-stdlib dependencies.
 	_ "github.com/kitsunium/sdk/internal/service/crypto/aead/aesgcm"
-	"github.com/kitsunium/sdk/internal/service/crypto/key/keyenvelope"
 
 	// Activates the stdlib streaming AES-256-GCM scheme behind SealStream /
 	// OpenStream. Stdlib-only, so it preserves the dep-light invariant.
@@ -74,9 +73,6 @@ import (
 // streamAlgorithm is the frozen algorithm key of the stdlib streaming scheme
 // SealStream / OpenStream dispatch to (activated by the blank import above).
 const streamAlgorithm Algorithm = "aes-256-gcm-stream"
-
-// KeyLen is the required symmetric key length in bytes (256-bit).
-const KeyLen int = corecrypto.KeyLen
 
 // AESGCM is the default algorithm: AES-256-GCM. Active out of the box.
 const AESGCM Algorithm = "aes-256-gcm"
@@ -100,17 +96,6 @@ const defaultAlgorithm Algorithm = AESGCM
 // discipline does elsewhere.
 type Algorithm corecrypto.Algorithm
 
-// Key is an opaque, redacting 256-bit symmetric key. Build one with NewKey; its
-// String output is always "<redacted>".
-type Key = corecrypto.Key
-
-// NewKey builds a Key from raw, which must be exactly KeyLen (32) bytes. A wrong
-// length returns InvalidKey; the bytes are copied defensively.
-func NewKey(raw []byte) (key Key, err error) {
-	//: delegate to the core constructor; this façade adds no behaviour.
-	return corecrypto.NewKey(raw)
-}
-
 // Seal encrypts plaintext under k using the default algorithm (AES-256-GCM),
 // binding aad, and returns a self-describing box. The nonce is generated and
 // embedded for you. Pass nil aad when unused.
@@ -124,14 +109,6 @@ func Seal(k Key, plaintext, aad []byte) (box []byte, err error) {
 func SealAs(a Algorithm, k Key, plaintext, aad []byte) (box []byte, err error) {
 	//: convert the domain-typed Algorithm to the core key at the boundary.
 	return corecrypto.Seal(corecrypto.Algorithm(a), k, plaintext, aad)
-}
-
-// Open decrypts a box produced by Seal/SealAs under k, verifying aad, and
-// returns the plaintext. The algorithm is read from the box — the caller never
-// names it. Any failure returns the single non-oracle DecryptionFailed.
-func Open(k Key, box, aad []byte) (plaintext []byte, err error) {
-	//: the core dispatcher sniffs the box's algorithm id and verifies.
-	return corecrypto.Open(k, box, aad)
 }
 
 // SealStream wraps dst so writes are sealed under k with aad in fixed 64 KiB
@@ -151,21 +128,4 @@ func SealStream(dst io.Writer, k Key, aad []byte) (sealed io.WriteCloser, err er
 func OpenStream(src io.Reader, k Key, aad []byte) (opened io.Reader, err error) {
 	//: convert the domain-typed Algorithm to the core key at the boundary.
 	return corecrypto.OpenStream(corecrypto.Algorithm(streamAlgorithm), k, src, aad)
-}
-
-// WrapKey seals the data key dek at rest under passphrase, returning the frozen
-// "$kenv$" envelope string. The KEK is stretched from passphrase with
-// PBKDF2-SHA256 and the dek is sealed under AES-256-GCM; the envelope header is
-// bound as AAD so tampering is detected on UnwrapKey.
-func WrapKey(passphrase []byte, dek Key) (envelope string, err error) {
-	//: delegate to the service emitter; this façade adds no behaviour.
-	return keyenvelope.WrapKey(passphrase, dek)
-}
-
-// UnwrapKey recovers the data key sealed in envelope under passphrase. A
-// structurally invalid envelope returns InvalidKeyEnvelope; a wrong passphrase
-// returns the non-oracle DecryptionFailed.
-func UnwrapKey(passphrase []byte, envelope string) (dek Key, err error) {
-	//: delegate to the service emitter; this façade adds no behaviour.
-	return keyenvelope.UnwrapKey(passphrase, envelope)
 }

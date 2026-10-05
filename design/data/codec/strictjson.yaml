@@ -227,87 +227,172 @@ packages:
     imports:
       http: net/http
     path: github.com/kitsunium/sdk/internal/service/data/codec/strictjson/httpbody
-  - constants:
-      - name: MaxPointerBytes
-        type: int
-        value: "256"
-      - name: CodeDocumentTooLarge
-        type: errs.Code
-        value: "0x00_03_48_01"
-      - name: CodeDocumentEmpty
-        type: errs.Code
-        value: "0x00_03_48_02"
-      - name: CodeDocumentMalformed
-        type: errs.Code
-        value: "0x00_03_48_03"
-      - name: CodeMemberUnknown
-        type: errs.Code
-        value: "0x00_03_48_04"
-      - name: CodeValueMismatched
-        type: errs.Code
-        value: "0x00_03_48_05"
-      - name: CodeMediaTypeUnsupported
-        type: errs.Code
-        value: "0x00_03_48_06"
-      - name: CodeDocumentUnreadable
-        type: errs.Code
-        value: "0x00_03_48_07"
-      - name: CodeDecodeMisconfigured
-        type: errs.Code
-        value: "0x00_03_48_08"
-    functions:
-      - in:
-          - name: r
-            type: io.Reader
-          - name: v
-            type: any
-          - name: maxBytes
-            type: int64
-        name: Decode
-        out:
-          - type: error
-      - in:
-          - name: err
-            type: error
-        name: PointerOf
-        out:
-          - name: pointer
-            type: string
-          - name: ok
-            type: bool
+  - facade:
+      - const:
+          - doc: |-
+              MaxPointerBytes bounds the JSON Pointer PointerOf returns; a longer one is
+              cut back to the deepest ancestor that fits.
+            name: MaxPointerBytes
+            reexport: svcstrict.MaxPointerBytes
+            type: int
+            typed: true
+            value: "256"
+      - const:
+          - doc: CodeDocumentTooLarge identifies a document longer than the bound (413).
+            name: CodeDocumentTooLarge
+            reexport: corestrictjson.CodeDocumentTooLarge
+            type: errs.Code
+            typed: true
+            value: "0x00_03_48_01"
+      - const:
+          - doc: CodeDocumentEmpty identifies a document of zero bytes (400).
+            name: CodeDocumentEmpty
+            reexport: corestrictjson.CodeDocumentEmpty
+            type: errs.Code
+            typed: true
+            value: "0x00_03_48_02"
+      - const:
+          - doc: |-
+              CodeDocumentMalformed identifies a document that is not exactly one
+              well-formed JSON value (400).
+            name: CodeDocumentMalformed
+            reexport: corestrictjson.CodeDocumentMalformed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_48_03"
+      - const:
+          - doc: CodeMemberUnknown identifies a member the target does not declare (400).
+            name: CodeMemberUnknown
+            reexport: corestrictjson.CodeMemberUnknown
+            type: errs.Code
+            typed: true
+            value: "0x00_03_48_04"
+      - const:
+          - doc: CodeValueMismatched identifies a value the target cannot hold (400).
+            name: CodeValueMismatched
+            reexport: corestrictjson.CodeValueMismatched
+            type: errs.Code
+            typed: true
+            value: "0x00_03_48_05"
+      - const:
+          - doc: |-
+              CodeMediaTypeUnsupported identifies a request body that does not declare
+              JSON (415).
+            name: CodeMediaTypeUnsupported
+            reexport: corestrictjson.CodeMediaTypeUnsupported
+            type: errs.Code
+            typed: true
+            value: "0x00_03_48_06"
+      - const:
+          - doc: |-
+              CodeDocumentUnreadable identifies a reader that failed before the document
+              ended (400).
+            name: CodeDocumentUnreadable
+            reexport: corestrictjson.CodeDocumentUnreadable
+            type: errs.Code
+            typed: true
+            value: "0x00_03_48_07"
+      - const:
+          - doc: |-
+              CodeDecodeMisconfigured identifies a call no input can satisfy: a
+              non-positive bound, or a target that is not a non-nil pointer.
+            name: CodeDecodeMisconfigured
+            reexport: corestrictjson.CodeDecodeMisconfigured
+            type: errs.Code
+            typed: true
+            value: "0x00_03_48_08"
+      - var:
+          - doc: DocumentTooLarge refuses a document longer than the bound.
+            name: DocumentTooLarge
+            reexport: corestrictjson.DocumentTooLarge
+            type: "*errs.Error"
+          - doc: DocumentEmpty reports a document of zero bytes.
+            name: DocumentEmpty
+            reexport: corestrictjson.DocumentEmpty
+            type: "*errs.Error"
+          - doc: DocumentMalformed refuses a document that is not one well-formed value.
+            name: DocumentMalformed
+            reexport: corestrictjson.DocumentMalformed
+            type: "*errs.Error"
+          - doc: MemberUnknown refuses a member the target does not declare.
+            name: MemberUnknown
+            reexport: corestrictjson.MemberUnknown
+            type: "*errs.Error"
+          - doc: ValueMismatched refuses a value the target cannot hold.
+            name: ValueMismatched
+            reexport: corestrictjson.ValueMismatched
+            type: "*errs.Error"
+          - doc: MediaTypeUnsupported refuses a request body that does not declare JSON.
+            name: MediaTypeUnsupported
+            reexport: corestrictjson.MediaTypeUnsupported
+            type: "*errs.Error"
+          - doc: DocumentUnreadable wraps a reader that failed before the document ended.
+            name: DocumentUnreadable
+            reexport: corestrictjson.DocumentUnreadable
+            type: "*errs.Error"
+          - doc: DecodeMisconfigured refuses a call no input can satisfy.
+            name: DecodeMisconfigured
+            reexport: corestrictjson.DecodeMisconfigured
+            type: "*errs.Error"
+      - func:
+          doc: |-
+            Decode reads exactly one JSON value from r into v, a non-nil pointer,
+            reading at most maxBytes bytes of it — the bound plus the one byte that
+            proves it was exceeded, never more. On a refusal v may be partly written.
+          forward: svcstrict.Decode
+          in:
+            - name: r
+              type: io.Reader
+            - name: v
+              type: any
+            - name: maxBytes
+              type: int64
+          name: Decode
+          out:
+            - type: error
+      - func:
+          doc: |-
+            PointerOf returns where a refused document went wrong, as a JSON Pointer
+            ("" is the document itself), and whether err carries one. It is the
+            document's own member names and indices, bounded to MaxPointerBytes — render
+            it as untrusted text.
+          forward: svcstrict.PointerOf
+          in:
+            - name: err
+              type: error
+          name: PointerOf
+          out:
+            - name: pointer
+              type: string
+            - name: ok
+              type: bool
     imports:
+      corestrictjson: github.com/kitsunium/sdk/internal/core/data/codec/strictjson
       errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcstrict: github.com/kitsunium/sdk/internal/service/data/codec/strictjson
     path: github.com/kitsunium/sdk/pkg/v1/data/codec/strictjson
-    variables:
-      - name: DocumentTooLarge
-        type: "*errs.Error"
-      - name: DocumentEmpty
-        type: "*errs.Error"
-      - name: DocumentMalformed
-        type: "*errs.Error"
-      - name: MemberUnknown
-        type: "*errs.Error"
-      - name: ValueMismatched
-        type: "*errs.Error"
-      - name: MediaTypeUnsupported
-        type: "*errs.Error"
-      - name: DocumentUnreadable
-        type: "*errs.Error"
-      - name: DecodeMisconfigured
-        type: "*errs.Error"
-  - functions:
-      - in:
-          - name: w
-            type: http.ResponseWriter
-          - name: req
-            type: "*http.Request"
-          - name: v
-            type: any
-          - name: maxBytes
-            type: int64
-        name: DecodeRequest
-        out:
-          - type: error
+  - facade:
+      - func:
+          doc: |-
+            DecodeRequest decodes the JSON body of req into v, a non-nil pointer, as
+            strictjson's Decode does, through http.MaxBytesReader, after refusing an
+            empty body (CodeDocumentEmpty) and a body that does not declare JSON
+            (CodeMediaTypeUnsupported). w is used only to have net/http close the
+            connection after an oversized body; nil is accepted.
+          forward: svchttpbody.DecodeRequest
+          in:
+            - name: w
+              type: http.ResponseWriter
+            - name: req
+              type: "*http.Request"
+            - name: v
+              type: any
+            - name: maxBytes
+              type: int64
+          name: DecodeRequest
+          out:
+            - type: error
     imports:
       http: net/http
+      svchttpbody: github.com/kitsunium/sdk/internal/service/data/codec/strictjson/httpbody
     path: github.com/kitsunium/sdk/pkg/v1/data/codec/strictjson/httpbody

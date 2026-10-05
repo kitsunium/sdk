@@ -57,7 +57,6 @@ package password
 
 import (
 	corecrypto "github.com/kitsunium/sdk/internal/core/crypto"
-	"github.com/kitsunium/sdk/internal/service/crypto/password/commonpw"
 
 	// Activates the stdlib PBKDF2-SHA256 hasher. Stdlib-only, so importing
 	// pkg/v1/crypto/password pulls zero non-stdlib dependencies.
@@ -81,28 +80,4 @@ const PBKDF2SHA256 Algorithm = "pbkdf2-sha256"
 func Hash(a Algorithm, password []byte) (phc string, err error) {
 	//: convert the domain-typed Algorithm to the core key at the boundary.
 	return corecrypto.HashPassword(corecrypto.Algorithm(a), password)
-}
-
-// Verify reports whether password matches the stored PHC hash, comparing in
-// constant time. The scheme is read from phc. A malformed phc or unregistered
-// scheme returns an error; a genuine mismatch is (false, nil).
-func Verify(password []byte, phc string) (ok bool, err error) {
-	//: delegate to the core registry dispatcher (scheme read from the PHC id).
-	return corecrypto.VerifyPassword(password, phc)
-}
-
-// IsCommon reports whether password is one of the ten thousand most common
-// passwords, compared case-insensitively — PASSWORD as password. The empty
-// password is not: refusing it is a length rule's job.
-func IsCommon(password []byte) bool {
-	//: delegate to the embedded list.
-	return commonpw.IsCommon(password)
-}
-
-// NeedsRehash reports whether the stored PHC hash was produced with cost
-// parameters weaker than its scheme's current policy — call it after a
-// successful Verify to transparently upgrade the stored hash.
-func NeedsRehash(phc string) bool {
-	//: delegate to the core registry dispatcher.
-	return corecrypto.NeedsRehash(phc)
 }

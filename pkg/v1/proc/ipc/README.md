@@ -70,7 +70,7 @@ const (
 ```
 
 <a name="RuntimeDir"></a>
-## func [RuntimeDir](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/ipc.go#L138>)
+## func [RuntimeDir](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/facade_gen.go#L46>)
 
 ```go
 func RuntimeDir(app string) string
@@ -79,7 +79,7 @@ func RuntimeDir(app string) string
 RuntimeDir is where an application's private sockets belong on this machine. It creates nothing.
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/ipc.go#L96>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/facade_gen.go#L30>)
 
 Config is where a private socket lives and who, besides its own account, may use it — the engine's configuration, shared by both ends.
 
@@ -88,7 +88,7 @@ type Config = svcipc.Config
 ```
 
 <a name="Conn"></a>
-## type [Conn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/ipc.go#L100>)
+## type [Conn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/facade_gen.go#L34>)
 
 Conn is a connection with its peer's identity.
 
@@ -97,7 +97,7 @@ type Conn = coreipc.Conn
 ```
 
 <a name="Dial"></a>
-### func [Dial](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/ipc.go#L134>)
+### func [Dial](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/ipc.go#L99>)
 
 ```go
 func Dial(ctx context.Context, cfg Config) (*Conn, error)
@@ -106,7 +106,7 @@ func Dial(ctx context.Context, cfg Config) (*Conn, error)
 Dial connects to the private socket at cfg.Path, within ctx and one second.
 
 <a name="Dialer"></a>
-## type [Dialer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/ipc.go#L107>)
+## type [Dialer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/facade_gen.go#L41>)
 
 Dialer is the connecting end of a private socket: it reaches the listener its configuration names, and refuses one it cannot trust before a byte is sent.
 
@@ -115,7 +115,7 @@ type Dialer = coreipc.Dialer
 ```
 
 <a name="NewDialer"></a>
-### func [NewDialer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/ipc.go#L124>)
+### func [NewDialer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/ipc.go#L89>)
 
 ```go
 func NewDialer(cfg Config) (Dialer, error)
@@ -124,7 +124,7 @@ func NewDialer(cfg Config) (Dialer, error)
 NewDialer returns the engine behind the Dialer port for the private socket at cfg.Path. The configuration is checked here, before anything is touched, and copied: editing cfg's slices afterwards changes nothing.
 
 <a name="Listener"></a>
-## type [Listener](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/ipc.go#L103>)
+## type [Listener](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/facade_gen.go#L37>)
 
 Listener is the accepting end of a private socket: it hands out the connections of admitted peers only, and closes and counts the others.
 
@@ -133,7 +133,7 @@ type Listener = coreipc.Listener
 ```
 
 <a name="Listen"></a>
-### func [Listen](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/ipc.go#L112>)
+### func [Listen](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/ipc.go#L77>)
 
 ```go
 func Listen(cfg Config) (Listener, error)
@@ -142,7 +142,7 @@ func Listen(cfg Config) (Listener, error)
 Listen opens the private socket at cfg.Path and returns the engine behind the Listener port.
 
 <a name="Peer"></a>
-## type [Peer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/ipc.go#L98>)
+## type [Peer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/facade_gen.go#L32>)
 
 Peer is who is at the other end of a connection, as the kernel says.
 

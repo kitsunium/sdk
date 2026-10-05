@@ -30,19 +30,3 @@
 // files, queues or sockets imports strictjson alone; a server imports this
 // package too, and the net/http it serves with anyway.
 package httpbody
-
-import (
-	"net/http"
-
-	svchttpbody "github.com/kitsunium/sdk/internal/service/data/codec/strictjson/httpbody"
-)
-
-// DecodeRequest decodes the JSON body of req into v, a non-nil pointer, as
-// strictjson's Decode does, through http.MaxBytesReader, after refusing an
-// empty body (CodeDocumentEmpty) and a body that does not declare JSON
-// (CodeMediaTypeUnsupported). w is used only to have net/http close the
-// connection after an oversized body; nil is accepted.
-func DecodeRequest(w http.ResponseWriter, req *http.Request, v any, maxBytes int64) error {
-	//: delegate verbatim to the service implementation.
-	return svchttpbody.DecodeRequest(w, req, v, maxBytes)
-}

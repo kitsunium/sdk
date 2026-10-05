@@ -28,8 +28,6 @@
 package json
 
 import (
-	corejson "github.com/kitsunium/sdk/internal/core/data/codec/json"
-	"github.com/kitsunium/sdk/internal/kernel/errs"
 	// The implementation registers itself with the codec registry as it is
 	// initialised; importing it is what registers the format.
 	_ "github.com/kitsunium/sdk/internal/service/data/codec/json"
@@ -39,19 +37,3 @@ import (
 // it goes wherever a format name is taken — config.FSSource's string,
 // i18n.LoadFS's codec.Format — without a conversion.
 const Format = "json"
-
-// The error codes, range 0.3.2.*, declared in the core (ADR 0160).
-const (
-	// CodeMarshalFailed identifies a value encoding/json could not encode (0.3.2.1).
-	CodeMarshalFailed errs.Code = corejson.CodeJSONMarshalFailed
-	// CodeUnmarshalFailed identifies input that is not JSON the target can hold (0.3.2.2).
-	CodeUnmarshalFailed errs.Code = corejson.CodeJSONUnmarshalFailed
-)
-
-// The sentinels, for errors.Is: each carries the code of the same name.
-var (
-	// MarshalFailed is the sentinel of [CodeMarshalFailed].
-	MarshalFailed = corejson.MarshalFailed
-	// UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].
-	UnmarshalFailed = corejson.UnmarshalFailed
-)

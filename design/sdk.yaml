@@ -3,8 +3,9 @@
 # exported symbol of the SDK module and of the thirteen vendor modules, one
 # file per domain or package group, each with its inputs and outputs —
 # `surface: closed` makes an exported symbol no file declares a finding. An
-# API change starts here, then `kit gen` writes the pins and the ports; the
-# SDK's CI reads this directory as bytes only (ADR 0163 §3).
+# API change starts here, then `kit gen` writes the pins, the ports, the
+# codes (ADR 0164) and pkg/v1's facades (ADR 0166); the SDK's CI reads this
+# directory as bytes only (ADR 0163 §3).
 apiVersion: kit.kitsunium/design/v2
 project:
   name: sdk
@@ -12,7 +13,7 @@ project:
   module: github.com/kitsunium/sdk
   workspace: go.work
   kit:
-    version: v0.1.0-rc.3
+    version: v0.1.0-rc.4
   surface: closed
 # The cells: bazel-ci.yml's cross-build matrix, one table, which
 # check-platforms.sh holds equal to the matrix and genindex writes docs/api on.
@@ -25,7 +26,7 @@ auxiliary:
   - tools/sdkguard
 # The order is the direction (ADR 0068, ADR 0147, ADR 0157); the kernel is
 # rule 1, both halves; the service mirrors the core (ADR 0160); pkg/v1 is the
-# facade (ADR 0074).
+# facade (ADR 0074), whose re-exports are its packages' facade: (ADR 0166).
 layers:
   - name: kernel
     paths: [internal/kernel]
@@ -381,6 +382,19 @@ budgets:
     inline: true
   - fn: go:github.com/kitsunium/sdk/internal/kernel/errs.PrivateOf
     inline: true
+  # A pkg/v1 forwarder with an inline budget forwards only while the compiler
+  # inlines it, and is otherwise a variable bound to its callee: kit measures
+  # it (go build -gcflags=<package>=-m=2, on the platforms' first cell) and
+  # records the verdict in facade_gen.go (ADR 0166). errs.ReasonOf's forwarder
+  # costs 88 against the inliner's 80 — the kernel accessor alone costs 75 —
+  # and measured slower than the variable by more than the 3 % a forwarder may
+  # cost (ADR 0163 §10): CPU time per call +1.88 %, +1.07 %, +3.88 % (p =
+  # 0.035) and +5.13 % (p = 0.043) over four benchstat runs of ten samples,
+  # +2.91 % pooled over the forty (p < 0.001). So kit writes it as
+  # kerrs.ReasonOf's variable until the accessor inlines within the budget.
+  # Every other forwarder is a function, whatever it costs.
+  - fn: go:github.com/kitsunium/sdk/pkg/v1/errs.ReasonOf
+    inline: true
   - fn: go:github.com/kitsunium/sdk/internal/kernel/errs.(*Error).Code
     inline: true
     escapes: []
@@ -484,15 +498,3 @@ budgets:
   - fn: go:github.com/kitsunium/sdk/pkg/v1/observe/logger.TraceContextFromContext
     allocs: 0
     fixture: TraceContext
-# A pkg/v1 function is a forwarder, never a variable a consumer could
-# reassign for the whole process — but one, measured (ADR 0163 §8).
-exceptions:
-  - id: go:github.com/kitsunium/sdk/pkg/v1/errs.ReasonOf
-    rule: facade
-    note: >-
-      A forwarder cannot inline (cost 88 against the budget of 80: it inlines
-      the kernel accessor, 75 on its own) and costs more than the 3 % the rule
-      allows: CPU time per call +1.88 %, +1.07 %, +3.88 % (p = 0.035) and
-      +5.13 % (p = 0.043) over four benchstat runs of ten samples, +2.91 %
-      pooled over the forty (p < 0.001). It stays var ReasonOf =
-      kerrs.ReasonOf until the kernel accessor returns from one place.

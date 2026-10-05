@@ -69,42 +69,7 @@ package ipc
 import (
 	"context"
 
-	coreipc "github.com/kitsunium/sdk/internal/core/proc/ipc"
-	"github.com/kitsunium/sdk/internal/kernel/errs"
 	svcipc "github.com/kitsunium/sdk/internal/service/proc/ipc"
-)
-
-// The codes, for errs.HasCode: a caller must tell "another daemon runs"
-// (IN_USE: talk to it) from "the directory or the path to it is not private"
-// (fix the deployment, or look for whoever planted a component) from "nobody
-// answers" (start one).
-const (
-	CodeMisconfigured   errs.Code = coreipc.CodeMisconfigured
-	CodeDirectoryUnsafe errs.Code = coreipc.CodeDirectoryUnsafe
-	CodeInUse           errs.Code = coreipc.CodeInUse
-	CodeListenFailed    errs.Code = coreipc.CodeListenFailed
-	CodePeerRefused     errs.Code = coreipc.CodePeerRefused
-	CodeDialFailed      errs.Code = coreipc.CodeDialFailed
-	CodeEndpointForeign errs.Code = coreipc.CodeEndpointForeign
-	CodeClosed          errs.Code = coreipc.CodeClosed
-	CodePathUnsafe      errs.Code = coreipc.CodePathUnsafe
-)
-
-type (
-	// Config is where a private socket lives and who, besides its own
-	// account, may use it — the engine's configuration, shared by both ends.
-	Config = svcipc.Config
-	// Peer is who is at the other end of a connection, as the kernel says.
-	Peer = coreipc.PeerValue
-	// Conn is a connection with its peer's identity.
-	Conn = coreipc.Conn
-	// Listener is the accepting end of a private socket: it hands out the
-	// connections of admitted peers only, and closes and counts the others.
-	Listener = coreipc.Listener
-	// Dialer is the connecting end of a private socket: it reaches the
-	// listener its configuration names, and refuses one it cannot trust
-	// before a byte is sent.
-	Dialer = coreipc.Dialer
 )
 
 // Listen opens the private socket at cfg.Path and returns the engine behind
@@ -132,7 +97,3 @@ func NewDialer(cfg Config) (Dialer, error) {
 
 // Dial connects to the private socket at cfg.Path, within ctx and one second.
 func Dial(ctx context.Context, cfg Config) (*Conn, error) { return svcipc.Dial(ctx, &cfg) }
-
-// RuntimeDir is where an application's private sockets belong on this
-// machine. It creates nothing.
-func RuntimeDir(app string) string { return svcipc.RuntimeDir(app) }

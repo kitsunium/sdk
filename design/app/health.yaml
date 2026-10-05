@@ -581,121 +581,343 @@ packages:
           fields:
             - name: Detail
               type: bool
-  - aliases:
-      - name: Check
-        target: corehealth.Check
-      - name: SelfCheck
-        target: corehealth.SelfCheck
-      - name: Health
-        target: corehealth.Health
-      - name: Status
-        target: corehealth.Status
-      - name: Probe
-        target: corehealth.Probe
-      - name: StartupCheck
-        target: corehealth.StartupCheckValue
-      - name: ReadinessCheck
-        target: corehealth.ReadinessCheckValue
-      - name: LivenessCheck
-        target: corehealth.LivenessCheckValue
-      - name: Result
-        target: corehealth.ResultValue
-      - name: Report
-        target: corehealth.ReportValue
-      - name: Config
-        target: svchealth.Config
-      - name: HandlerConfig
-        target: svchealth.HandlerConfig
-      - name: AskConfig
-        target: svchealth.AskConfig
-    constants:
-      - name: StatusUnhealthy
-        type: Status
-        value: "0"
-      - name: StatusDegraded
-        type: Status
-        value: "1"
-      - name: StatusHealthy
-        type: Status
-        value: "2"
-      - name: ProbeStartup
-        type: Probe
-        value: "1"
-      - name: ProbeReadiness
-        type: Probe
-        value: "2"
-      - name: ProbeLiveness
-        type: Probe
-        value: "3"
-      - name: DefaultCheckTimeout
-        type: time.Duration
-        value: "1000000000"
-      - name: MaxCacheAge
-        type: time.Duration
-        value: "30000000000"
-      - name: DefaultAskTimeout
-        type: time.Duration
-        value: "3000000000"
-      - name: MaxAskDrainBytes
-        type: int64
-        value: 64 << 10
-    functions:
-      - in:
-          - name: cfg
-            type: Config
-        name: New
-        out:
-          - type: Health
-      - in:
-          - name: a
-          - name: b
+  - facade:
+      - const:
+          - doc: |-
+              StatusUnhealthy is a failing critical check, or a probe with one. It is
+              the ZERO value of Status on purpose: a forgotten assignment must read
+              as "not serving", never as "everything is fine".
+            name: StatusUnhealthy
+            reexport: corehealth.StatusUnhealthy
             type: Status
-        name: Worst
-        out:
-          - type: Status
-      - in:
-          - name: registry
-            type: Health
-          - name: name
-            type: string
-        name: Component
-        out:
-          - type: corelc.ComponentValue
-      - in:
-          - name: registry
-            type: Health
-          - name: cfg
-            type: HandlerConfig
-        name: NewStartupHandler
-        out:
-          - type: http.Handler
-      - in:
-          - name: registry
-            type: Health
-          - name: cfg
-            type: HandlerConfig
-        name: NewReadinessHandler
-        out:
-          - type: http.Handler
-      - in:
-          - name: registry
-            type: Health
-          - name: cfg
-            type: HandlerConfig
-        name: NewLivenessHandler
-        out:
-          - type: http.Handler
-      - in:
-          - name: ctx
-            type: context.Context
-          - name: cfg
-            type: AskConfig
-        name: Ask
-        out:
-          - name: status
-            type: int
-          - name: err
-            type: error
+            typed: true
+            value: "0"
+          - doc: |-
+              StatusDegraded is a failing NON-critical check. It is a serving state:
+              the handler returns 200.
+            name: StatusDegraded
+            reexport: corehealth.StatusDegraded
+            type: Status
+            typed: true
+            value: "1"
+          - doc: |-
+              StatusHealthy is every check passing — including a probe with no checks
+              registered at all.
+            name: StatusHealthy
+            reexport: corehealth.StatusHealthy
+            type: Status
+            typed: true
+            value: "2"
+          - doc: ProbeStartup asks "is this process still coming up?".
+            name: ProbeStartup
+            reexport: corehealth.ProbeStartup
+            type: Probe
+            typed: true
+            value: "1"
+          - doc: ProbeReadiness asks "can this replica take traffic right now?".
+            name: ProbeReadiness
+            reexport: corehealth.ProbeReadiness
+            type: Probe
+            typed: true
+            value: "2"
+          - doc: ProbeLiveness asks "is this process irrecoverable?".
+            name: ProbeLiveness
+            reexport: corehealth.ProbeLiveness
+            type: Probe
+            typed: true
+            value: "3"
+          - doc: |-
+              DefaultCheckTimeout is the per-check budget a non-positive Timeout
+              clamps to.
+            name: DefaultCheckTimeout
+            reexport: svchealth.DefaultCheckTimeout
+            type: time.Duration
+            typed: true
+            value: "1000000000"
+          - doc: |-
+              MaxCacheAge is the ceiling on ReadinessCheck.MaxAge. Above it, a
+              registration is refused rather than clamped.
+            name: MaxCacheAge
+            reexport: svchealth.MaxCacheAge
+            type: time.Duration
+            typed: true
+            value: "30000000000"
+          - doc: |-
+              DefaultAskTimeout is the budget an Ask gets when AskConfig.Timeout is
+              zero: three seconds, an order of magnitude under Docker's own
+              HEALTHCHECK timeout, so a probe that gets no answer says why first.
+            name: DefaultAskTimeout
+            reexport: svchealth.DefaultAskTimeout
+            type: time.Duration
+            typed: true
+            value: "3000000000"
+          - doc: |-
+              MaxAskDrainBytes is how much of a response body Ask reads before it
+              closes the connection: enough for any readiness answer to end politely,
+              and a bound on one that never ends.
+            name: MaxAskDrainBytes
+            reexport: svchealth.MaxAskDrainBytes
+            type: int64
+            typed: true
+            value: 64 << 10
+      - alias:
+          - doc: |-
+              Check is the public alias for the ctx-aware body of a startup or readiness
+              check. It is the shape a dependency call has.
+            name: Check
+            target: corehealth.Check
+      - alias:
+          - doc: |-
+              SelfCheck is the public alias for the body of a LIVENESS check. It takes no
+              context, which is what keeps a dependency call out of the probe that
+              restarts the process.
+            name: SelfCheck
+            target: corehealth.SelfCheck
+      - alias:
+          - doc: Health is the public alias for the registry contract.
+            name: Health
+            target: corehealth.Health
+      - alias:
+          - doc: Status is the public alias for a check's or a probe's verdict.
+            name: Status
+            target: corehealth.Status
+      - alias:
+          - doc: Probe is the public alias for which of the three questions is being asked.
+            name: Probe
+            target: corehealth.Probe
+      - alias:
+          - doc: StartupCheck is the public alias for a check that gates startup.
+            name: StartupCheck
+            target: corehealth.StartupCheckValue
+      - alias:
+          - doc: |-
+              ReadinessCheck is the public alias for a check that gates routing. Every
+              dependency check belongs here.
+            name: ReadinessCheck
+            target: corehealth.ReadinessCheckValue
+      - alias:
+          - doc: |-
+              LivenessCheck is the public alias for process-local evidence that the
+              process is not irrecoverable.
+            name: LivenessCheck
+            target: corehealth.LivenessCheckValue
+      - alias:
+          - doc: Result is the public alias for one check's answer.
+            name: Result
+            target: corehealth.ResultValue
+      - alias:
+          - doc: Report is the public alias for one probe's whole answer.
+            name: Report
+            target: corehealth.ReportValue
+      - alias:
+          - doc: Config is the public alias for the registry's construction parameters.
+            name: Config
+            target: svchealth.Config
+      - alias:
+          - doc: HandlerConfig is the public alias for a handler's body verbosity.
+            name: HandlerConfig
+            target: svchealth.HandlerConfig
+      - alias:
+          - doc: |-
+              AskConfig is the public alias for where a process listens and which path
+              answers whether it is ready: Addr and Path are required, Timeout and Clock
+              have working zeros.
+            name: AskConfig
+            target: svchealth.AskConfig
+      - var:
+          - doc: |-
+              InvalidCheck is returned by every Add for a check that could never run
+              — an empty Name or a nil Check. The "missing" field names which.
+            name: InvalidCheck
+            reexport: corehealth.InvalidCheck
+            type: "*errs.Error"
+          - doc: |-
+              DuplicateCheck is returned by an Add whose name is already registered
+              on that probe. The namespace is per probe, so the same name may appear
+              once on readiness and once on liveness.
+            name: DuplicateCheck
+            reexport: corehealth.DuplicateCheck
+            type: "*errs.Error"
+          - doc: |-
+              UnknownProbe is carried by a report for a Probe value the SDK never
+              mints, including the zero value.
+            name: UnknownProbe
+            reexport: corehealth.UnknownProbe
+            type: "*errs.Error"
+          - doc: |-
+              CheckPanicked is the failure of a check whose body panicked. It was
+              recovered; the panic value travels as a field and never reaches a body.
+            name: CheckPanicked
+            reexport: corehealth.CheckPanicked
+            type: "*errs.Error"
+          - doc: |-
+              CheckFailed is the identity a PLAIN error from a check is given. An
+              error that already carries an SDK Code keeps its own.
+            name: CheckFailed
+            reexport: corehealth.CheckFailed
+            type: "*errs.Error"
+          - doc: |-
+              CheckTimeout reports a check that had not answered when its budget
+              expired. A failure, not an unknown — Result.TimedOut is what
+              distinguishes it.
+            name: CheckTimeout
+            reexport: corehealth.CheckTimeout
+            type: "*errs.Error"
+          - doc: |-
+              StaleCacheWindow is returned by AddReadiness for a MaxAge above
+              MaxCacheAge.
+            name: StaleCacheWindow
+            reexport: corehealth.StaleCacheWindow
+            type: "*errs.Error"
+          - doc: |-
+              StartupPending is the synthetic result of a readiness probe answered
+              while the process is still starting. No readiness check was run.
+            name: StartupPending
+            reexport: corehealth.StartupPending
+            type: "*errs.Error"
+          - doc: |-
+              Draining is the synthetic result of a readiness probe answered after
+              Drain. No readiness check was run, and no later probe will say anything
+              else.
+            name: Draining
+            reexport: corehealth.Draining
+            type: "*errs.Error"
+          - doc: |-
+              NotifyFailed reaches Config.OnNotifyError when an opt-in sd_notify
+              datagram could not be delivered.
+            name: NotifyFailed
+            reexport: corehealth.NotifyFailed
+            type: "*errs.Error"
+          - doc: |-
+              AskMisconfigured refuses an Ask no answer could satisfy — an address
+              with no usable port, a path that is not absolute, a negative timeout —
+              before anything is dialled. The "argument" field names which.
+            name: AskMisconfigured
+            reexport: corehealth.AskMisconfigured
+            type: "*errs.Error"
+          - doc: |-
+              AskUnreachable reports an Ask the process never answered because the
+              connection or the request failed; the transport's error is the cause.
+            name: AskUnreachable
+            reexport: corehealth.AskUnreachable
+            type: "*errs.Error"
+          - doc: |-
+              AskTimeout reports an Ask with no answer when its budget, or the
+              caller's context, ended. A caller's own context error stays in the
+              chain, so errors.Is answers context.Canceled or DeadlineExceeded too.
+            name: AskTimeout
+            reexport: corehealth.AskTimeout
+            type: "*errs.Error"
+          - doc: |-
+              AskNotReady reports an Ask the process answered with a status other
+              than 200 — a redirect included, since none is followed. The "status"
+              field carries it; the body never does.
+            name: AskNotReady
+            reexport: corehealth.AskNotReady
+            type: "*errs.Error"
+      - func:
+          doc: |-
+            New returns a Health. It cannot fail: a nil cfg.Clock falls back to the wall
+            clock, a non-positive cfg.DefaultTimeout to DefaultCheckTimeout, and nil
+            hooks to no observation. What can fail fails at registration.
+          forward: svchealth.New
+          in:
+            - name: cfg
+              type: Config
+          name: New
+          out:
+            - type: Health
+      - func:
+          doc: |-
+            Worst returns the more severe of two statuses — the SDK's whole aggregation
+            rule, exported so a caller composing several registries applies the same one.
+          forward: corehealth.Worst
+          in:
+            - name: a
+            - name: b
+              type: Status
+          name: Worst
+          out:
+            - type: Status
+      - func:
+          doc: |-
+            Component adapts a registry to pkg/v1/app/lifecycle: its Start runs the startup
+            checks, its Stop marks the process draining. The returned value IS a
+            lifecycle.Component.
+
+            Add it LAST — see the package documentation for why one rule covers both
+            directions.
+          forward: svchealth.Component
+          in:
+            - name: registry
+              type: Health
+            - name: name
+              type: string
+          name: Component
+          out:
+            - type: corelc.ComponentValue
+      - func:
+          doc: |-
+            NewStartupHandler serves the startup probe: 200 once every startup check has
+            passed, 503 while any has not.
+          forward: svchealth.NewStartupHandler
+          in:
+            - name: registry
+              type: Health
+            - name: cfg
+              type: HandlerConfig
+          name: NewStartupHandler
+          out:
+            - type: http.Handler
+      - func:
+          doc: |-
+            NewReadinessHandler serves the readiness probe: 200 while the replica can
+            take traffic (healthy OR degraded), 503 otherwise — including while starting
+            and after Drain.
+          forward: svchealth.NewReadinessHandler
+          in:
+            - name: registry
+              type: Health
+            - name: cfg
+              type: HandlerConfig
+          name: NewReadinessHandler
+          out:
+            - type: http.Handler
+      - func:
+          doc: |-
+            NewLivenessHandler serves the liveness probe: 200 unless the process is
+            irrecoverable. Nothing outside the process can make it return 503, because
+            nothing outside the process can be registered on it.
+          forward: svchealth.NewLivenessHandler
+          in:
+            - name: registry
+              type: Health
+            - name: cfg
+              type: HandlerConfig
+          name: NewLivenessHandler
+          out:
+            - type: http.Handler
+      - func:
+          doc: |-
+            Ask asks the process listening on cfg.Addr whether it is ready: one GET of
+            cfg.Path over plain HTTP, the question a container's HEALTHCHECK asks. It
+            returns the status the process answered — zero when no whole answer, body
+            included, arrived within the bound — and a nil error exactly when that
+            status is 200; otherwise the error is
+            AskMisconfigured, AskUnreachable, AskTimeout or AskNotReady. See the package
+            documentation for what the exchange refuses to do.
+          forward: svchealth.Ask
+          in:
+            - name: ctx
+              type: context.Context
+            - name: cfg
+              type: AskConfig
+          name: Ask
+          out:
+            - name: status
+              type: int
+            - name: err
+              type: error
     imports:
       corehealth: github.com/kitsunium/sdk/internal/core/app/health
       corelc: github.com/kitsunium/sdk/internal/core/app/lifecycle
@@ -703,32 +925,3 @@ packages:
       http: net/http
       svchealth: github.com/kitsunium/sdk/internal/service/app/health
     path: github.com/kitsunium/sdk/pkg/v1/app/health
-    variables:
-      - name: InvalidCheck
-        type: "*errs.Error"
-      - name: DuplicateCheck
-        type: "*errs.Error"
-      - name: UnknownProbe
-        type: "*errs.Error"
-      - name: CheckPanicked
-        type: "*errs.Error"
-      - name: CheckFailed
-        type: "*errs.Error"
-      - name: CheckTimeout
-        type: "*errs.Error"
-      - name: StaleCacheWindow
-        type: "*errs.Error"
-      - name: StartupPending
-        type: "*errs.Error"
-      - name: Draining
-        type: "*errs.Error"
-      - name: NotifyFailed
-        type: "*errs.Error"
-      - name: AskMisconfigured
-        type: "*errs.Error"
-      - name: AskUnreachable
-        type: "*errs.Error"
-      - name: AskTimeout
-        type: "*errs.Error"
-      - name: AskNotReady
-        type: "*errs.Error"

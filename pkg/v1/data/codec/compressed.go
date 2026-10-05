@@ -51,10 +51,6 @@ const (
 	maxDecompressedFrameBytes int = 64 << 20 // 64 MiB
 )
 
-// CompressAlgorithm is the transform package's Algorithm, so consumers name a
-// compressor without importing internal/*. Use the Gzip / Flate constants.
-type CompressAlgorithm = transform.Algorithm
-
 const (
 	// Gzip selects the gzip compressor (frame algID 0x01).
 	Gzip CompressAlgorithm = "gzip"

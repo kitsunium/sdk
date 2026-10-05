@@ -63,50 +63,6 @@
 // rctl backends have no hierarchy, and accept the option and ignore it.
 package cgroup
 
-import (
-	coreproc "github.com/kitsunium/sdk/internal/core/proc"
-	svccgroup "github.com/kitsunium/sdk/internal/service/proc/cgroup"
-)
-
-// Group is a handle to a cgroup v2 control group: set controller ceilings,
-// attach processes, and remove the group. It aliases the core proc.Group port.
-type Group = coreproc.Group
-
-// Option customises a Create call (functional-option pattern). It aliases the
-// service Option type; construct options with WithRoot.
-type Option = svccgroup.Option
-
-// WithRoot overrides the parent directory under which Create makes the new
-// control group, targeting a delegated sub-tree instead of the top-level mount.
-// It is a cgroup v2 path: on Windows and FreeBSD, whose backends have no
-// hierarchy, it is accepted and ignored.
-func WithRoot(root string) Option {
-	//: delegate verbatim to the service constructor.
-	return svccgroup.WithRoot(root)
-}
-
-// Available reports whether a kernel-enforced control-group backend is usable: on
-// Linux, that the unified cgroup v2 hierarchy is mounted AND a sub-group can be
-// created under it by the caller; on Windows, that Job Objects are available
-// (always true); on FreeBSD, that the kernel carries RACCT. It returns false on
-// platforms with no backend (darwin, OpenBSD, NetBSD, DragonFly, illumos, Solaris), on cgroup v1,
-// and on a Linux host where the hierarchy is read-only.
-func Available() bool {
-	//: delegate verbatim to the service probe.
-	return svccgroup.Available()
-}
-
-// Create makes a new control group named name and returns a Group bound to it —
-// a cgroup v2 sub-group under the delegated root on Linux, a Job Object on
-// Windows, a tracked rctl group on FreeBSD. It returns CgroupUnavailable when the
-// Linux hierarchy is absent or not delegated, CgroupCreateFailed when creation
-// fails, and UnsupportedPlatform on a platform with no control-group backend
-// (darwin, OpenBSD, NetBSD, DragonFly, illumos, Solaris).
-func Create(name string, opts ...Option) (g Group, err error) {
-	//: delegate verbatim to the service constructor.
-	return svccgroup.Create(name, opts...)
-}
-
 // MustCreate is like [Create] but panics with the typed error when creation
 // fails — UnsupportedPlatform on a platform with no control-group backend
 // (darwin, OpenBSD, NetBSD, DragonFly, illumos, Solaris), or CgroupUnavailable when the Linux hierarchy is not

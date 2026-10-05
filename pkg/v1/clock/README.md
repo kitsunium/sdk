@@ -80,7 +80,7 @@ The stdlib's testing/synctest replaces package time inside a bubble, so [System]
 
 
 <a name="Clock"></a>
-## type [Clock](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/clock/clock.go#L113>)
+## type [Clock](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/clock/facade_gen.go#L16>)
 
 Clock produces timestamps and durations. It is FROZEN at two methods: a struct with Now and Since satisfies every SDK field typed this way, and will keep satisfying it \(ADR 0039\).
 
@@ -91,7 +91,7 @@ type Clock = kclock.Clock
 ```
 
 <a name="ManualClock"></a>
-## type [ManualClock](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/clock/clock.go#L160>)
+## type [ManualClock](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/clock/facade_gen.go#L63>)
 
 ManualClock is the deterministic test double: a [Timed](<#Timed>) whose time moves only when the caller moves it, through Advance or Set, and which reports its armed waits through Pending and BlockUntil.
 
@@ -107,7 +107,7 @@ type ManualClock = kclock.ManualClock
 ```
 
 <a name="NewManualClock"></a>
-### func [NewManualClock](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/clock/clock.go#L177>)
+### func [NewManualClock](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/clock/facade_gen.go#L80>)
 
 ```go
 func NewManualClock(start time.Time) *ManualClock
@@ -116,7 +116,7 @@ func NewManualClock(start time.Time) *ManualClock
 NewManualClock returns a [ManualClock](<#ManualClock>) reading start. Any instant is legal — before the Unix epoch, after 2038, in any location — which is the point: unlike testing/synctest's bubble clock, the origin is the caller's choice.
 
 <a name="Ticker"></a>
-## type [Ticker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/clock/clock.go#L141>)
+## type [Ticker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/clock/facade_gen.go#L44>)
 
 Ticker is a repeating wake\-up scheduled on some clock. It mirrors the usable surface of \*time.Ticker, including its drop\-on\-slow\-receiver contract: the channel holds at most one pending tick and undeliverable ticks are discarded rather than queued.
 
@@ -127,7 +127,7 @@ type Ticker = kclock.Ticker
 ```
 
 <a name="Timed"></a>
-## type [Timed](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/clock/clock.go#L125>)
+## type [Timed](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/clock/facade_gen.go#L28>)
 
 Timed is a [Clock](<#Clock>) that also drives waiting — the union of [Clock](<#Clock>) and [Waiter](<#Waiter>), and the type SDK configurations use when they schedule, time out or back off. Both [System](<#System>) and [ManualClock](<#ManualClock>) satisfy it.
 
@@ -146,7 +146,7 @@ var System Timed = kclock.System
 ```
 
 <a name="Timer"></a>
-## type [Timer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/clock/clock.go#L133>)
+## type [Timer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/clock/facade_gen.go#L36>)
 
 Timer is a one\-shot wake\-up scheduled on some clock. It mirrors the usable surface of \*time.Timer, with one unavoidable difference: the stdlib exposes the delivery channel as a FIELD \(t.C\) and no interface can require a field, so C is a method here.
 
@@ -157,7 +157,7 @@ type Timer = kclock.Timer
 ```
 
 <a name="Waiter"></a>
-## type [Waiter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/clock/clock.go#L120>)
+## type [Waiter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/clock/facade_gen.go#L23>)
 
 Waiter suspends a caller until a duration has elapsed. It is the half of the time port [Clock](<#Clock>) deliberately does not carry, so code that only stamps records never has to implement it.
 

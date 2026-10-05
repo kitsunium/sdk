@@ -1,5 +1,19 @@
 //go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /pkg/v1/observe/logger .
 
+// Package logger — re-exports the Value payload discriminant so consumers can
+// name what Value.Kind() returns.
+//
+// Without these aliases MemorySink is only half usable: it hands back
+// RecordSnapshot values whose Attrs carry a Kind, but the Kind type itself
+// lived behind the internal/ firewall, so a consumer test could read the
+// discriminant and still not write it down. The core doc already calls these
+// values "stable across the public API"; this file makes that true.
+//
+// Package logger — exposes the runtime-tunable level surface: ParseLevel (the
+// strict inverse of a lowercased Level.String), the Leveler one-method port, and
+// LevelVar, an atomically mutable threshold holder a custom sink or gate consults
+// on each record to retune a live logger's floor without rebuilding the pipeline.
+//
 // Package logger is the stable v1 public API for SDK logging.
 //
 // Consumers import this package; internal/* paths are compile-blocked
@@ -201,30 +215,8 @@ import (
 	"time"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
-	"github.com/kitsunium/sdk/internal/core/observe/logger/level"
 	svclogger "github.com/kitsunium/sdk/internal/service/observe/logger"
 )
-
-// Logger is the stable alias for the internal core.Logger interface.
-type Logger = corelogger.Logger
-
-// Attr is the stable alias for the internal AttrValue key/value pair.
-type Attr = corelogger.AttrValue
-
-// Level is the stable alias for the internal severity type.
-type Level = level.Level
-
-// LevelDebug selects records describing detailed tracing information.
-const LevelDebug Level = level.Debug
-
-// LevelInfo selects records describing routine operational events.
-const LevelInfo Level = level.Info
-
-// LevelWarn selects records describing abnormal but recoverable conditions.
-const LevelWarn Level = level.Warn
-
-// LevelError selects records describing failures needing action.
-const LevelError Level = level.Error
 
 // Config carries the construction parameters accepted by NewText.
 // Two destination forms are supported — pick the one that fits:

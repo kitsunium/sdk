@@ -291,76 +291,140 @@ packages:
               type: clock.Timed
             - name: OnResult
               type: func(coresched.ResultValue)
-  - aliases:
-      - name: Job
-        target: coresched.Job
-      - name: Schedule
-        target: coresched.Schedule
-      - name: Scheduler
-        target: coresched.Scheduler
-      - name: Entry
-        target: coresched.EntryValue
-      - name: Result
-        target: coresched.ResultValue
-      - name: Config
-        target: svcsched.Config
-    functions:
-      - in:
-          - name: cfg
-            type: Config
-        name: New
-        out:
-          - type: Scheduler
-      - in:
-          - name: expr
-            type: string
-        name: Parse
-        out:
-          - name: schedule
-            type: Schedule
-          - name: err
-            type: error
-      - in:
-          - name: expr
-            type: string
-          - name: loc
-            type: "*time.Location"
-        name: ParseInLocation
-        out:
-          - name: schedule
-            type: Schedule
-          - name: err
-            type: error
-      - in:
-          - name: period
-            type: time.Duration
-        name: Every
-        out:
-          - name: schedule
-            type: Schedule
-          - name: err
-            type: error
+  - facade:
+      - alias:
+          - doc: Job is the public alias for the ctx-aware unit of scheduled work.
+            name: Job
+            target: coresched.Job
+      - alias:
+          - doc: Schedule is the public alias for the "when is this next due" port.
+            name: Schedule
+            target: coresched.Schedule
+      - alias:
+          - doc: Scheduler is the public alias for the engine contract.
+            name: Scheduler
+            target: coresched.Scheduler
+      - alias:
+          - doc: Entry is the public alias for one named Schedule/Job registration.
+            name: Entry
+            target: coresched.EntryValue
+      - alias:
+          - doc: Result is the public alias for one reported scheduling decision.
+            name: Result
+            target: coresched.ResultValue
+      - alias:
+          - doc: Config is the public alias for the engine's construction parameters.
+            name: Config
+            target: svcsched.Config
+      - var:
+          - doc: |-
+              InvalidEntry is returned by Add for an entry that could never run — an
+              empty Name, a nil Schedule, a nil Job. The "missing" field names which.
+            name: InvalidEntry
+            reexport: coresched.InvalidEntry
+            type: "*errs.Error"
+          - doc: DuplicateJob is returned by Add when the name is already registered.
+            name: DuplicateJob
+            reexport: coresched.DuplicateJob
+            type: "*errs.Error"
+          - doc: |-
+              SchedulerRunning is returned by Add, and by a second Run, while a Run is
+              in progress. The entry set is frozen for the duration of a Run; add
+              before it starts or after it returns.
+            name: SchedulerRunning
+            reexport: coresched.SchedulerRunning
+            type: "*errs.Error"
+          - doc: |-
+              JobPanicked is the Result.Err of a job that panicked. The scheduler
+              recovered it and kept running; the panic value travels as a field.
+            name: JobPanicked
+            reexport: coresched.JobPanicked
+            type: "*errs.Error"
+          - doc: |-
+              InvalidExpression is returned by Parse for a malformed or out-of-range
+              cron field.
+            name: InvalidExpression
+            reexport: coresched.InvalidExpression
+            type: "*errs.Error"
+          - doc: |-
+              UnsupportedSyntax is returned by Parse for a construct from another cron
+              dialect — a seconds field, @reboot, @every, L / W / # / ?.
+            name: UnsupportedSyntax
+            reexport: coresched.UnsupportedSyntax
+            type: "*errs.Error"
+          - doc: |-
+              UnreachableSchedule is returned by Parse for a valid expression that
+              matches no date on the calendar, such as "0 0 30 2 *".
+            name: UnreachableSchedule
+            reexport: coresched.UnreachableSchedule
+            type: "*errs.Error"
+          - doc: InvalidLocation is returned by ParseInLocation for a nil location.
+            name: InvalidLocation
+            reexport: coresched.InvalidLocation
+            type: "*errs.Error"
+          - doc: InvalidInterval is returned by Every for a non-positive period.
+            name: InvalidInterval
+            reexport: coresched.InvalidInterval
+            type: "*errs.Error"
+      - func:
+          doc: |-
+            New returns a Scheduler. It cannot fail: a nil cfg.Clock falls back to the
+            wall clock and a nil cfg.OnResult to no observation, both of which are
+            working configurations. What can fail fails at Add and at Parse.
+          forward: svcsched.New
+          in:
+            - name: cfg
+              type: Config
+          name: New
+          out:
+            - type: Scheduler
+      - func:
+          doc: |-
+            Parse compiles a five-field POSIX cron expression, evaluated in UTC. See the
+            package documentation for the accepted subset and for what is refused.
+          forward: svcsched.Parse
+          in:
+            - name: expr
+              type: string
+          name: Parse
+          out:
+            - name: schedule
+              type: Schedule
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            ParseInLocation compiles a cron expression evaluated in loc. A nil loc is
+            refused rather than read as UTC; use Parse to ask for UTC.
+          forward: svcsched.ParseInLocation
+          in:
+            - name: expr
+              type: string
+            - name: loc
+              type: "*time.Location"
+          name: ParseInLocation
+          out:
+            - name: schedule
+              type: Schedule
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            Every returns a Schedule due one period after each previous due instant. A
+            non-positive period is refused. It is deliberately not spelled "@every":
+            an interval is not a calendar expression.
+          forward: svcsched.Every
+          in:
+            - name: period
+              type: time.Duration
+          name: Every
+          out:
+            - name: schedule
+              type: Schedule
+            - name: err
+              type: error
     imports:
       coresched: github.com/kitsunium/sdk/internal/core/app/scheduler
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       svcsched: github.com/kitsunium/sdk/internal/service/app/scheduler
     path: github.com/kitsunium/sdk/pkg/v1/app/scheduler
-    variables:
-      - name: InvalidEntry
-        type: "*errs.Error"
-      - name: DuplicateJob
-        type: "*errs.Error"
-      - name: SchedulerRunning
-        type: "*errs.Error"
-      - name: JobPanicked
-        type: "*errs.Error"
-      - name: InvalidExpression
-        type: "*errs.Error"
-      - name: UnsupportedSyntax
-        type: "*errs.Error"
-      - name: UnreachableSchedule
-        type: "*errs.Error"
-      - name: InvalidLocation
-        type: "*errs.Error"
-      - name: InvalidInterval
-        type: "*errs.Error"

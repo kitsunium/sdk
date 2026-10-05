@@ -5,15 +5,11 @@ package(default_visibility = ["//visibility:public"])
 go_library(
     name = "logger",
     srcs = [
-        "builder.go",
-        "caller.go",
         "codes_gen.go",
         "encoder.go",
+        "facade_gen.go",
         "fromconfig.go",
-        "kind.go",
-        "levelvar.go",
         "logger.go",
-        "memory.go",
         "sink.go",
         "topology.go",
         "tracecontext.go",

@@ -40,7 +40,7 @@ A Heap is NOT safe for concurrent use. That is deliberate: a lock inside would b
 
 
 <a name="Heap"></a>
-## type [Heap](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/collections/heap/heap.go#L59>)
+## type [Heap](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/collections/heap/facade_gen.go#L15>)
 
 Heap is a binary heap ordered by the comparison given to [New](<#New>).
 
@@ -53,7 +53,7 @@ type Heap[T any] = kheap.Heap[T]
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/collections/heap/heap.go#L64>)
+### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/collections/heap/facade_gen.go#L20>)
 
 ```go
 func New[T any](cmp func(a, b T) int) *Heap[T]

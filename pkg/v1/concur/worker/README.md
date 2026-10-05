@@ -60,7 +60,7 @@ A nil loop, a nil tick and a non\-positive interval panic at the call that passe
 
 
 <a name="EveryOption"></a>
-## type [EveryOption](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/worker/worker.go#L88>)
+## type [EveryOption](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/worker/facade_gen.go#L29>)
 
 EveryOption tunes [Every](<#Every>): [WithClock](<#WithClock>) and [WithDone](<#WithDone>). Options apply in order, so a later one wins, and a nil option is skipped.
 
@@ -69,7 +69,7 @@ type EveryOption = kworker.EveryOption
 ```
 
 <a name="WithClock"></a>
-### func [WithClock](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/worker/worker.go#L120>)
+### func [WithClock](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/worker/facade_gen.go#L58>)
 
 ```go
 func WithClock(w clock.Waiter) EveryOption
@@ -78,7 +78,7 @@ func WithClock(w clock.Waiter) EveryOption
 WithClock makes [Every](<#Every>) tick on w instead of the wall clock — a \[clock.ManualClock\] in a test, advanced past the interval once the ticker is armed. A nil w is the wall clock.
 
 <a name="WithDone"></a>
-### func [WithDone](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/worker/worker.go#L128>)
+### func [WithDone](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/worker/facade_gen.go#L65>)
 
 ```go
 func WithDone(done <-chan struct{}) EveryOption
@@ -87,7 +87,7 @@ func WithDone(done <-chan struct{}) EveryOption
 WithDone ends the loop of [Every](<#Every>) as soon as done is closed, without waiting for Stop, which still joins — returning at once on a loop that has already left. A nil done never fires.
 
 <a name="Loop"></a>
-## type [Loop](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/worker/worker.go#L74>)
+## type [Loop](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/worker/facade_gen.go#L15>)
 
 Loop is the goroutine body a [LoopDaemon](<#LoopDaemon>) runs. It receives a stop channel, closed when Stop is called, and MUST return promptly once it is: Stop blocks until the loop has returned. A Loop MUST NOT panic.
 
@@ -96,7 +96,7 @@ type Loop = kworker.Loop
 ```
 
 <a name="LoopDaemon"></a>
-## type [LoopDaemon](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/worker/worker.go#L84>)
+## type [LoopDaemon](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/worker/facade_gen.go#L25>)
 
 LoopDaemon is a running background goroutine with an idempotent Stop and a join. [LoopDaemon](<#LoopDaemon>).Stop signals the loop to exit and blocks until it has returned — idempotent, and safe to call from several goroutines. [LoopDaemon](<#LoopDaemon>).Done returns the channel closed once the loop has returned, for a caller that reacts to the end without joining.
 
@@ -107,7 +107,7 @@ type LoopDaemon = kworker.LoopDaemon
 ```
 
 <a name="Every"></a>
-### func [Every](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/worker/worker.go#L112>)
+### func [Every](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/worker/facade_gen.go#L51>)
 
 ```go
 func Every(interval time.Duration, tick func(), opts ...EveryOption) *LoopDaemon
@@ -154,7 +154,7 @@ func main() {
 </details>
 
 <a name="NewLoopDaemon"></a>
-### func [NewLoopDaemon](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/worker/worker.go#L100>)
+### func [NewLoopDaemon](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/worker/facade_gen.go#L40>)
 
 ```go
 func NewLoopDaemon(loop Loop) *LoopDaemon
@@ -163,7 +163,7 @@ func NewLoopDaemon(loop Loop) *LoopDaemon
 NewLoopDaemon is [Start](<#Start>) under the New\-prefixed name: the same daemon, the same panic on a nil loop.
 
 <a name="Start"></a>
-### func [Start](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/worker/worker.go#L93>)
+### func [Start](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/worker/facade_gen.go#L34>)
 
 ```go
 func Start(loop Loop) *LoopDaemon

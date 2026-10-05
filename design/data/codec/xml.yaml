@@ -43,17 +43,34 @@ packages:
   - constants:
       - name: Format
         value: "\"xml\""
-      - name: CodeMarshalFailed
-        type: errs.Code
-        value: "0x00_03_03_01"
-      - name: CodeUnmarshalFailed
-        type: errs.Code
-        value: "0x00_03_03_02"
+    facade:
+      - const:
+          - doc: "CodeMarshalFailed is 0.3.3.1: encoding/xml could not encode the value."
+            name: CodeMarshalFailed
+            reexport: corexml.CodeXMLMarshalFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_03_01"
+          - doc: |-
+              CodeUnmarshalFailed is 0.3.3.2: the input is not XML the target can
+              hold.
+            name: CodeUnmarshalFailed
+            reexport: corexml.CodeXMLUnmarshalFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_03_02"
+        doc: The error codes, range 0.3.3.*, declared in the core (ADR 0160).
+      - doc: "The sentinels, for errors.Is: each carries the code of the same name."
+        var:
+          - doc: MarshalFailed is the sentinel of [CodeMarshalFailed].
+            name: MarshalFailed
+            reexport: corexml.MarshalFailed
+            type: "*errs.Error"
+          - doc: UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].
+            name: UnmarshalFailed
+            reexport: corexml.UnmarshalFailed
+            type: "*errs.Error"
     imports:
+      corexml: github.com/kitsunium/sdk/internal/core/data/codec/xml
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/pkg/v1/data/codec/xml
-    variables:
-      - name: MarshalFailed
-        type: "*errs.Error"
-      - name: UnmarshalFailed
-        type: "*errs.Error"

@@ -61,7 +61,7 @@ const Unlimited int = kgroup.Unlimited
 ```
 
 <a name="Collect"></a>
-## func [Collect](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/group/group.go#L142>)
+## func [Collect](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/group/facade_gen.go#L70>)
 
 ```go
 func Collect[T any](parent context.Context, limit int, fns []func(ctx context.Context) (value T, err error)) (results []T, err error)
@@ -109,7 +109,7 @@ func main() {
 </details>
 
 <a name="Group"></a>
-## type [Group](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/group/group.go#L91>)
+## type [Group](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/group/facade_gen.go#L21>)
 
 Group runs tasks concurrently under one context and one wait point.
 
@@ -122,7 +122,7 @@ type Group = kgroup.Group
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/group/group.go#L111>)
+### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/group/facade_gen.go#L41>)
 
 ```go
 func New(parent context.Context, limit int) (*Group, context.Context)
@@ -133,7 +133,7 @@ New returns a [Group](<#Group>) reporting the first error, and the context every
 limit bounds how many tasks run at once; a non\-positive limit is clamped to 1, and [Unlimited](<#Unlimited>) removes the bound. The returned context is cancelled when the first task fails — that task's error is its context.Cause —, when a task panics, or when [Group](<#Group>).Wait returns, whichever comes first.
 
 <a name="NewJoined"></a>
-### func [NewJoined](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/group/group.go#L125>)
+### func [NewJoined](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/group/facade_gen.go#L54>)
 
 ```go
 func NewJoined(parent context.Context, limit int) (*Group, context.Context)
@@ -178,7 +178,7 @@ network down
 </details>
 
 <a name="PanicValue"></a>
-## type [PanicValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/group/group.go#L102>)
+## type [PanicValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/group/facade_gen.go#L32>)
 
 PanicValue carries a panic raised inside a task across the goroutine boundary to whoever waits on the group: Raised is the value the panic carried, verbatim, and Stack the stack of the goroutine that ran the task, captured at recovery. Its String method renders both, so an uncaught re\-raise prints the task's stack rather than only the waiter's.
 

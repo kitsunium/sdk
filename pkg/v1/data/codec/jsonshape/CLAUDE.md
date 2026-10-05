@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-26T00:00:00Z -->
+<!-- updated: 2026-10-05T12:00:00Z -->
 # pkg/v1/data/codec/jsonshape/
 
 ## Purpose
@@ -28,6 +28,10 @@ blank-imports every codec, and describing a type links none of them.
 
 - Add logic here; it belongs in `internal/service/data/codec/jsonshape`.
 - Hand-edit `README.md` — regenerate with `make docs-readme`.
+
+## Generated
+
+`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/data/codec.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the package comment and the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
 
 ## Verification
 

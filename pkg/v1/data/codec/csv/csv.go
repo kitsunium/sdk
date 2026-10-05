@@ -32,8 +32,6 @@
 package csv
 
 import (
-	corecsv "github.com/kitsunium/sdk/internal/core/data/codec/csv"
-	"github.com/kitsunium/sdk/internal/kernel/errs"
 	// The implementation registers itself with the codec registry as it is
 	// initialised; importing it is what registers the format.
 	_ "github.com/kitsunium/sdk/internal/service/data/codec/csv"
@@ -43,24 +41,3 @@ import (
 // goes wherever a format name is taken — the codec package's Marshal,
 // config.FSSource's string, i18n.LoadFS's codec.Format — without a conversion.
 const Format = "csv"
-
-// The error codes, range 0.3.8.*, declared in the core (ADR 0160).
-const (
-	// CodeMarshalFailed is 0.3.8.1: encoding/csv refused to write the records.
-	CodeMarshalFailed errs.Code = corecsv.CodeCSVMarshalFailed
-	// CodeUnmarshalFailed is 0.3.8.2: the input is not CSV encoding/csv reads.
-	CodeUnmarshalFailed errs.Code = corecsv.CodeCSVUnmarshalFailed
-	// CodeValueInvalid is 0.3.8.3: the value or the target is not a
-	// [][]string.
-	CodeValueInvalid errs.Code = corecsv.CodeCSVValueInvalid
-)
-
-// The sentinels, for errors.Is: each carries the code of the same name.
-var (
-	// MarshalFailed is the sentinel of [CodeMarshalFailed].
-	MarshalFailed = corecsv.MarshalFailed
-	// UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].
-	UnmarshalFailed = corecsv.UnmarshalFailed
-	// ValueInvalid is the sentinel of [CodeValueInvalid].
-	ValueInvalid = corecsv.ValueInvalid
-)

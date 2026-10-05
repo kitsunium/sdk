@@ -72,7 +72,7 @@ var (
 ```
 
 <a name="LocalDate"></a>
-## type [LocalDate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/toml/toml.go#L78>)
+## type [LocalDate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/toml/facade_gen.go#L32>)
 
 LocalDate is a calendar day in no time zone: what a TOML local date such as 1979\-05\-27 decodes to in an untyped target. It writes and reads itself as YYYY\-MM\-DD, through String, MarshalText and UnmarshalText, and AsTime places it at midnight in a zone.
 
@@ -81,7 +81,7 @@ type LocalDate = toml.LocalDate
 ```
 
 <a name="LocalDateTime"></a>
-## type [LocalDateTime](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/toml/toml.go#L88>)
+## type [LocalDateTime](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/toml/facade_gen.go#L42>)
 
 LocalDateTime is a date and a time of day in no time zone: what a TOML local date\-time such as 1979\-05\-27T07:32:00 decodes to in an untyped target. AsTime places it in a zone.
 
@@ -90,7 +90,7 @@ type LocalDateTime = toml.LocalDateTime
 ```
 
 <a name="LocalTime"></a>
-## type [LocalTime](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/toml/toml.go#L83>)
+## type [LocalTime](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/toml/facade_gen.go#L37>)
 
 LocalTime is a time of day in no time zone: what a TOML local time such as 07:32:00.999 decodes to in an untyped target. Precision is the number of fractional digits the document wrote, which String writes back.
 

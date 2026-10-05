@@ -100,7 +100,7 @@ var (
 ```
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/scheduler.go#L111>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/facade_gen.go#L28>)
 
 Config is the public alias for the engine's construction parameters.
 
@@ -109,7 +109,7 @@ type Config = svcsched.Config
 ```
 
 <a name="Entry"></a>
-## type [Entry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/scheduler.go#L105>)
+## type [Entry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/facade_gen.go#L22>)
 
 Entry is the public alias for one named Schedule/Job registration.
 
@@ -118,7 +118,7 @@ type Entry = coresched.EntryValue
 ```
 
 <a name="Job"></a>
-## type [Job](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/scheduler.go#L96>)
+## type [Job](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/facade_gen.go#L13>)
 
 Job is the public alias for the ctx\-aware unit of scheduled work.
 
@@ -127,7 +127,7 @@ type Job = coresched.Job
 ```
 
 <a name="Result"></a>
-## type [Result](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/scheduler.go#L108>)
+## type [Result](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/facade_gen.go#L25>)
 
 Result is the public alias for one reported scheduling decision.
 
@@ -136,7 +136,7 @@ type Result = coresched.ResultValue
 ```
 
 <a name="Schedule"></a>
-## type [Schedule](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/scheduler.go#L99>)
+## type [Schedule](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/facade_gen.go#L16>)
 
 Schedule is the public alias for the "when is this next due" port.
 
@@ -145,7 +145,7 @@ type Schedule = coresched.Schedule
 ```
 
 <a name="Every"></a>
-### func [Every](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/scheduler.go#L166>)
+### func [Every](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/facade_gen.go#L80>)
 
 ```go
 func Every(period time.Duration) (schedule Schedule, err error)
@@ -154,7 +154,7 @@ func Every(period time.Duration) (schedule Schedule, err error)
 Every returns a Schedule due one period after each previous due instant. A non\-positive period is refused. It is deliberately not spelled "@every": an interval is not a calendar expression.
 
 <a name="Parse"></a>
-### func [Parse](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/scheduler.go#L151>)
+### func [Parse](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/facade_gen.go#L67>)
 
 ```go
 func Parse(expr string) (schedule Schedule, err error)
@@ -163,7 +163,7 @@ func Parse(expr string) (schedule Schedule, err error)
 Parse compiles a five\-field POSIX cron expression, evaluated in UTC. See the package documentation for the accepted subset and for what is refused.
 
 <a name="ParseInLocation"></a>
-### func [ParseInLocation](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/scheduler.go#L158>)
+### func [ParseInLocation](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/facade_gen.go#L73>)
 
 ```go
 func ParseInLocation(expr string, loc *time.Location) (schedule Schedule, err error)
@@ -172,7 +172,7 @@ func ParseInLocation(expr string, loc *time.Location) (schedule Schedule, err er
 ParseInLocation compiles a cron expression evaluated in loc. A nil loc is refused rather than read as UTC; use Parse to ask for UTC.
 
 <a name="Scheduler"></a>
-## type [Scheduler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/scheduler.go#L102>)
+## type [Scheduler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/facade_gen.go#L19>)
 
 Scheduler is the public alias for the engine contract.
 
@@ -181,7 +181,7 @@ type Scheduler = coresched.Scheduler
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/scheduler.go#L144>)
+### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/facade_gen.go#L61>)
 
 ```go
 func New(cfg Config) Scheduler

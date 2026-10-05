@@ -125,46 +125,7 @@ package process
 
 import (
 	"context"
-
-	coreproc "github.com/kitsunium/sdk/internal/core/proc"
-	svcexec "github.com/kitsunium/sdk/internal/service/proc/exec"
 )
-
-// Spec is the immutable description of a process to spawn — executable,
-// environment, credentials, isolation topology, and scheduling attributes. It is
-// an alias of the core port type.
-type Spec = coreproc.Spec
-
-// Process is the handle to a spawned process: PID, Wait, Signal, SignalGroup,
-// and a group-aware Stop. It is an alias of the core port interface.
-type Process = coreproc.Process
-
-// ExitResult is the outcome of a finished process — exit code, terminating
-// signal, and resource usage. It is an alias of the core port's ExitValue.
-type ExitResult = coreproc.ExitValue
-
-// Signal is a typed, platform-portable OS signal. It is an alias of the core
-// port type, so process.SIGTERM and a signal parsed elsewhere compare equal.
-type Signal = coreproc.Signal
-
-// Resource identifies a per-process resource governed by setrlimit(2). It is an
-// alias of the core port type.
-type Resource = coreproc.Resource
-
-// Limit is a soft/hard resource-limit pair for setrlimit(2). It is an alias of
-// the core port's LimitValue.
-type Limit = coreproc.LimitValue
-
-// Start spawns the process described by spec and returns a live Process handle.
-// It delegates to internal/service/proc/exec; ctx is honoured up to the
-// fork/exec boundary. A bare Spec.Path is searched in the child's PATH (see
-// the package documentation). On Windows the Unix-only Spec fields are refused
-// with UnsupportedPlatform; on platforms that are neither Unix nor Windows,
-// Start itself returns UnsupportedPlatform.
-func Start(ctx context.Context, spec Spec) (proc Process, err error) {
-	//: the facade adds no behaviour — delegate straight to the service spawn.
-	return svcexec.Start(ctx, spec)
-}
 
 // MustStart is like [Start] but panics with the typed error when the spawn fails
 // — UnsupportedPlatform off Unix/Windows, InvalidSpec, RlimitFailed, … It is the

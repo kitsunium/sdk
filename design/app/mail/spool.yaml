@@ -307,84 +307,181 @@ packages:
         name: Spool
         struct:
           unexported: true
-  - aliases:
-      - name: Spool
-        target: svcspool.Spool
-      - name: Config
-        target: svcspool.Config
-      - name: Event
-        target: svcspool.EventValue
-      - name: EventKind
-        target: svcspool.EventKind
-      - name: Attempt
-        target: svcspool.AttemptValue
-      - name: DeadLetter
-        target: svcspool.DeadLetterValue
-    constants:
-      - name: DefaultSendTimeout
-        type: time.Duration
-        value: "60000000000"
-      - name: DefaultRetryBase
-        type: time.Duration
-        value: "1000000000"
-      - name: DefaultRetryMax
-        type: time.Duration
-        value: "300000000000"
-      - name: DefaultMaxMessageBytes
-        type: int
-        value: 32 << 20
-      - name: DeliveredMemory
-        type: int
-        value: "1024"
-      - name: MaxIDBytes
-        type: int
-        value: "255"
-      - name: EventQueued
-        type: EventKind
-        value: "1"
-      - name: EventSent
-        type: EventKind
-        value: "2"
-      - name: EventRetrying
-        type: EventKind
-        value: "3"
-      - name: EventDeadLettered
-        type: EventKind
-        value: "4"
-      - name: EventDuplicate
-        type: EventKind
-        value: "5"
-    functions:
-      - in:
-          - name: cfg
-            type: Config
-        name: New
-        out:
-          - type: "*Spool"
-          - type: error
-      - in:
-          - name: ctx
-            type: context.Context
-        name: AttemptFrom
-        out:
-          - name: attempt
-            type: Attempt
-          - name: ok
-            type: bool
+  - facade:
+      - const:
+          - doc: |-
+              DefaultSendTimeout bounds one delivery attempt when Config.SendTimeout
+              is not positive.
+            name: DefaultSendTimeout
+            reexport: svcspool.DefaultSendTimeout
+            type: time.Duration
+            typed: true
+            value: "60000000000"
+          - doc: |-
+              DefaultRetryBase and DefaultRetryMax bound the wait between attempts
+              when Config.Backoff is zero; DefaultRetryBase is also the first wait of
+              a curve that sets no BaseDelay.
+            name: DefaultRetryBase
+            reexport: svcspool.DefaultRetryBase
+            type: time.Duration
+            typed: true
+            value: "1000000000"
+          - name: DefaultRetryMax
+            reexport: svcspool.DefaultRetryMax
+            type: time.Duration
+            typed: true
+            value: "300000000000"
+          - doc: |-
+              DefaultMaxMessageBytes bounds one spooled mail when
+              Config.MaxMessageBytes is zero.
+            name: DefaultMaxMessageBytes
+            reexport: svcspool.DefaultMaxMessageBytes
+            type: int
+            typed: true
+            value: 32 << 20
+          - doc: |-
+              DeliveredMemory is how many delivered mails a spool remembers to drop a
+              redelivery.
+            name: DeliveredMemory
+            reexport: svcspool.DeliveredMemory
+            type: int
+            typed: true
+            value: "1024"
+          - doc: |-
+              MaxIDBytes bounds a spooled mail's identifier, whoever minted it:
+              Spool.SendWithID refuses a longer one with InvalidMailID.
+            name: MaxIDBytes
+            reexport: svcspool.MaxIDBytes
+            type: int
+            typed: true
+            value: "255"
+        doc: The spool's defaults, and its bound on an identifier.
+      - const:
+          - doc: "EventQueued: Send put the mail in the spool."
+            name: EventQueued
+            reexport: svcspool.EventQueued
+            type: EventKind
+            typed: true
+            value: "1"
+          - doc: "EventSent: the transport accepted the mail."
+            name: EventSent
+            reexport: svcspool.EventSent
+            type: EventKind
+            typed: true
+            value: "2"
+          - doc: "EventRetrying: an attempt failed and the next is due at Next."
+            name: EventRetrying
+            reexport: svcspool.EventRetrying
+            type: EventKind
+            typed: true
+            value: "3"
+          - doc: "EventDeadLettered: the last attempt failed; the mail is kept with it."
+            name: EventDeadLettered
+            reexport: svcspool.EventDeadLettered
+            type: EventKind
+            typed: true
+            value: "4"
+          - doc: "EventDuplicate: a redelivery of a mail already delivered was dropped."
+            name: EventDuplicate
+            reexport: svcspool.EventDuplicate
+            type: EventKind
+            typed: true
+            value: "5"
+        doc: What can happen to a spooled mail.
+      - alias:
+          - doc: |-
+              Spool is the public alias for the durable outbox: Send, SendWithID, Run,
+              DeadLetters, Close.
+            name: Spool
+            target: svcspool.Spool
+      - alias:
+          - doc: |-
+              Config is the public alias for a spool's configuration: Transport and
+              MaxAttempts required; Dir, Clock, From, Backoff, SendTimeout,
+              MaxMessageBytes, PollInterval, Observe, Annotate and NewID optional.
+            name: Config
+            target: svcspool.Config
+      - alias:
+          - doc: Event is the public alias for one thing that happened to one mail.
+            name: Event
+            target: svcspool.EventValue
+      - alias:
+          - doc: EventKind is the public alias for what an Event reports.
+            name: EventKind
+            target: svcspool.EventKind
+      - alias:
+          - doc: |-
+              Attempt is the public alias for what one delivery attempt knows about
+              itself, carried in the context the spool hands its transport.
+            name: Attempt
+            target: svcspool.AttemptValue
+      - alias:
+          - doc: DeadLetter is the public alias for a mail the spool gave up on.
+            name: DeadLetter
+            target: svcspool.DeadLetterValue
+      - doc: |-
+          The spool's sentinels (0.3.81.*). errors.Is matches one, and errs.CodeOf
+          reads its code.
+        var:
+          - doc: |-
+              Misconfigured refuses a spool that could never deliver, and a Send
+              whose Config.NewID minted an identifier no mail can keep.
+            name: Misconfigured
+            reexport: corespool.SpoolMisconfigured
+            type: "*errs.Error"
+          - doc: Closed refuses a Send or a SendWithID after Close.
+            name: Closed
+            reexport: corespool.SpoolClosed
+            type: "*errs.Error"
+          - doc: MessageUndecodable reports a spooled record that is not a mail.
+            name: MessageUndecodable
+            reexport: corespool.MessageUndecodable
+            type: "*errs.Error"
+          - doc: MessageUnencodable refuses a mail Send could not write.
+            name: MessageUnencodable
+            reexport: corespool.MessageUnencodable
+            type: "*errs.Error"
+          - doc: |-
+              TransportPanicked is the failure of an attempt whose transport
+              panicked.
+            name: TransportPanicked
+            reexport: corespool.TransportPanicked
+            type: "*errs.Error"
+          - doc: |-
+              InvalidMailID refuses an identifier Spool.SendWithID was given that is
+              empty, longer than MaxIDBytes or not an RFC 5322 dot-atom. It names the
+              rule broken and never the identifier.
+            name: InvalidMailID
+            reexport: corespool.InvalidMailID
+            type: "*errs.Error"
+      - func:
+          doc: |-
+            New builds a durable outbox over cfg.Transport: a queue in cfg.Dir, or in
+            memory without one. It starts nothing: Run delivers.
+          forward: svcspool.New
+          in:
+            - name: cfg
+              type: Config
+          name: New
+          out:
+            - type: "*Spool"
+            - type: error
+      - func:
+          doc: |-
+            AttemptFrom returns the attempt a delivery context carries — only a context
+            a Spool handed its transport carries one.
+          forward: svcspool.AttemptFrom
+          in:
+            - name: ctx
+              type: context.Context
+          name: AttemptFrom
+          out:
+            - name: attempt
+              type: Attempt
+            - name: ok
+              type: bool
     imports:
+      corespool: github.com/kitsunium/sdk/internal/core/app/mail/spool
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       svcspool: github.com/kitsunium/sdk/internal/service/app/mail/spool
     path: github.com/kitsunium/sdk/pkg/v1/app/mail/spool
-    variables:
-      - name: Misconfigured
-        type: "*errs.Error"
-      - name: Closed
-        type: "*errs.Error"
-      - name: MessageUndecodable
-        type: "*errs.Error"
-      - name: MessageUnencodable
-        type: "*errs.Error"
-      - name: TransportPanicked
-        type: "*errs.Error"
-      - name: InvalidMailID
-        type: "*errs.Error"

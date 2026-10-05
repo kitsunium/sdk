@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "ring",
-    srcs = ["ring.go"],
+    srcs = [
+        "facade_gen.go",
+        "ring.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/collections/ring",
     visibility = ["//visibility:public"],
     deps = ["//internal/kernel/collections/ring"],

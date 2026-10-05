@@ -339,43 +339,146 @@ packages:
         name: FlagSourceValue
         struct:
           unexported: true
-  - aliases:
-      - name: Action
-        target: corecli.Action
-      - name: Binder
-        target: corecli.Binder
-      - name: Executor
-        target: corecli.Executor
-      - name: Command
-        target: corecli.CommandValue
-      - name: Invocation
-        target: corecli.InvocationValue
-      - name: Config
-        target: svccli.Config
-      - name: FlagSourceValue
-        target: svccli.FlagSourceValue
-    constants:
+  - constants:
       - name: Success
         type: int
         value: "0"
+    facade:
+      - alias:
+          - doc: Action is what one command does — see [Command].
+            name: Action
+            target: corecli.Action
+      - alias:
+          - doc: Binder declares one command's flags onto the stdlib set that parses them.
+            name: Binder
+            target: corecli.Binder
+      - alias:
+          - doc: Executor resolves an argument vector against a command tree and runs it.
+            name: Executor
+            target: corecli.Executor
+      - alias:
+          - doc: |-
+              Command is one declared command: a name, what it says about itself, its
+              flags, and EITHER an [Action] OR sub-commands.
+            name: Command
+            target: corecli.CommandValue
+      - alias:
+          - doc: Invocation is one resolved command line as an [Action] sees it.
+            name: Invocation
+            target: corecli.InvocationValue
+      - alias:
+          - doc: Config configures [New] — two writers, and deliberately nothing else.
+            name: Config
+            target: svccli.Config
+      - alias:
+          - doc: FlagSourceValue is one invocation's typed flags as a config layer.
+            name: FlagSourceValue
+            target: svccli.FlagSourceValue
+      - var:
+          - doc: |-
+              InvalidCommand refuses a declaration that could never be reached or
+              could never run: a blank name, a name that would be parsed as a flag, a
+              child with no summary, or neither an Action nor sub-commands.
+            name: InvalidCommand
+            reexport: corecli.InvalidCommand
+            type: "*kerrs.Error"
+          - doc: |-
+              AmbiguousCommand refuses a command carrying BOTH an Action and
+              sub-commands, where adding a child would silently change what an
+              existing command line means.
+            name: AmbiguousCommand
+            reexport: corecli.AmbiguousCommand
+            type: "*kerrs.Error"
+          - doc: DuplicateCommand refuses two sub-commands of one group sharing a name.
+            name: DuplicateCommand
+            reexport: corecli.DuplicateCommand
+            type: "*kerrs.Error"
+          - doc: |-
+              ReservedFlag refuses a Binder that bound -h or -help, the two names the
+              SDK answers itself.
+            name: ReservedFlag
+            reexport: corecli.ReservedFlag
+            type: "*kerrs.Error"
+          - blank: true
+            doc: |-
+              UnknownCommand is returned when a token names no sub-command of the
+              group it was typed under. EX_USAGE (64).
+            name: UnknownCommand
+            reexport: corecli.UnknownCommand
+            type: "*kerrs.Error"
+          - doc: |-
+              MissingCommand is returned when a group is invoked with no sub-command.
+              EX_USAGE (64).
+            name: MissingCommand
+            reexport: corecli.MissingCommand
+            type: "*kerrs.Error"
+          - doc: |-
+              InvalidFlags is returned when package flag refused the vector. EX_USAGE
+              (64).
+            name: InvalidFlags
+            reexport: corecli.InvalidFlags
+            type: "*kerrs.Error"
+          - doc: |-
+              CommandPanicked is returned when an [Action] panicked. The recovered
+              value and the originating stack travel as fields; the status stays
+              EX_SOFTWARE (70).
+            name: CommandPanicked
+            reexport: corecli.CommandPanicked
+            type: "*kerrs.Error"
+          - doc: |-
+              HelpWriteFailed is returned when -h asked for the help and the stream it
+              goes to did not take the page — a closed pipe, a full disk. The
+              stream's own error stays matchable beneath it, or rides in a field when
+              it is itself an SDK error, so the code and EX_IOERR (74) are always this
+              one's. A bad command line keeps its EX_USAGE even when its help could
+              not be written.
+            name: HelpWriteFailed
+            reexport: corecli.HelpWriteFailed
+            type: "*kerrs.Error"
+      - func:
+          doc: |-
+            New validates a whole command tree and returns the [Executor] that runs it.
+
+            The WHOLE tree is checked, not the branch an invocation happens to take, so
+            a mis-wired `tool db migrate` fails on the first run of the binary rather
+            than on the first run of the migration. Every refusal carries EX_CONFIG
+            (78).
+
+            Each [Binder] is CALLED once here, on a throwaway flag set, which is what
+            proves it binds no reserved name — so a Binder must be safe to call more
+            than once and must touch only the set it is given.
+          forward: svccli.New
+          in:
+            - name: cfg
+              type: Config
+            - name: root
+              type: Command
+          name: New
+          out:
+            - name: runner
+              type: Executor
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            FlagSource turns the flags an operator ACTUALLY TYPED on one invocation into
+            a config layer, for use as the LAST source of a config.Load or
+            config.LoadSchema — the position that makes a flag win over a file and over
+            the environment.
+
+            It walks flag.FlagSet.Visit and never VisitAll: an unset flag contributes
+            NOTHING, so a flag whose default is the Go zero cannot silently override the
+            configuration file on every run. The flag name is the config key verbatim,
+            with no case or separator transformation, because a rename rule is a second
+            grammar whose failure mode is a key that quietly matches nothing.
+          forward: svccli.FlagSource
+          in:
+            - name: invocation
+              type: Invocation
+          name: FlagSource
+          out:
+            - type: "*FlagSourceValue"
     functions:
-      - in:
-          - name: cfg
-            type: Config
-          - name: root
-            type: Command
-        name: New
-        out:
-          - name: runner
-            type: Executor
-          - name: err
-            type: error
-      - in:
-          - name: invocation
-            type: Invocation
-        name: FlagSource
-        out:
-          - type: "*FlagSourceValue"
       - in:
           - name: err
             type: error
@@ -399,22 +502,3 @@ packages:
       kerrs: github.com/kitsunium/sdk/internal/kernel/errs
       svccli: github.com/kitsunium/sdk/internal/service/app/cli
     path: github.com/kitsunium/sdk/pkg/v1/app/cli
-    variables:
-      - name: InvalidCommand
-        type: "*kerrs.Error"
-      - name: AmbiguousCommand
-        type: "*kerrs.Error"
-      - name: DuplicateCommand
-        type: "*kerrs.Error"
-      - name: ReservedFlag
-        type: "*kerrs.Error"
-      - name: UnknownCommand
-        type: "*kerrs.Error"
-      - name: MissingCommand
-        type: "*kerrs.Error"
-      - name: InvalidFlags
-        type: "*kerrs.Error"
-      - name: CommandPanicked
-        type: "*kerrs.Error"
-      - name: HelpWriteFailed
-        type: "*kerrs.Error"

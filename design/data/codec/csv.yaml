@@ -62,22 +62,44 @@ packages:
   - constants:
       - name: Format
         value: "\"csv\""
-      - name: CodeMarshalFailed
-        type: errs.Code
-        value: "0x00_03_08_01"
-      - name: CodeUnmarshalFailed
-        type: errs.Code
-        value: "0x00_03_08_02"
-      - name: CodeValueInvalid
-        type: errs.Code
-        value: "0x00_03_08_03"
+    facade:
+      - const:
+          - doc: "CodeMarshalFailed is 0.3.8.1: encoding/csv refused to write the records."
+            name: CodeMarshalFailed
+            reexport: corecsv.CodeCSVMarshalFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_08_01"
+          - doc: "CodeUnmarshalFailed is 0.3.8.2: the input is not CSV encoding/csv reads."
+            name: CodeUnmarshalFailed
+            reexport: corecsv.CodeCSVUnmarshalFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_08_02"
+          - doc: |-
+              CodeValueInvalid is 0.3.8.3: the value or the target is not a
+              [][]string.
+            name: CodeValueInvalid
+            reexport: corecsv.CodeCSVValueInvalid
+            type: errs.Code
+            typed: true
+            value: "0x00_03_08_03"
+        doc: The error codes, range 0.3.8.*, declared in the core (ADR 0160).
+      - doc: "The sentinels, for errors.Is: each carries the code of the same name."
+        var:
+          - doc: MarshalFailed is the sentinel of [CodeMarshalFailed].
+            name: MarshalFailed
+            reexport: corecsv.MarshalFailed
+            type: "*errs.Error"
+          - doc: UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].
+            name: UnmarshalFailed
+            reexport: corecsv.UnmarshalFailed
+            type: "*errs.Error"
+          - doc: ValueInvalid is the sentinel of [CodeValueInvalid].
+            name: ValueInvalid
+            reexport: corecsv.ValueInvalid
+            type: "*errs.Error"
     imports:
+      corecsv: github.com/kitsunium/sdk/internal/core/data/codec/csv
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/pkg/v1/data/codec/csv
-    variables:
-      - name: MarshalFailed
-        type: "*errs.Error"
-      - name: UnmarshalFailed
-        type: "*errs.Error"
-      - name: ValueInvalid
-        type: "*errs.Error"

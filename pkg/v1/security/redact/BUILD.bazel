@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "redact",
-    srcs = ["redact.go"],
+    srcs = [
+        "facade_gen.go",
+        "redact.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/security/redact",
     visibility = ["//visibility:public"],
     deps = [

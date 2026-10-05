@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "pem",
-    srcs = ["pem.go"],
+    srcs = [
+        "facade_gen.go",
+        "pem.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/data/codec/pem",
     visibility = ["//visibility:public"],
     deps = [

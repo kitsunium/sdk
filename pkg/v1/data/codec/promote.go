@@ -1,3 +1,14 @@
+// Package codec — declares the sentinel *errs.Error values the
+// facade emits when dispatch fails.
+//
+// Package codec — the multipart/form-data value types, and the one helper a
+// consumer needs to send what Marshal(Multipart, …) returns. The format is a
+// container whose delimiter lives in the Content-Type header, which the Codec
+// contract cannot carry, so the facade publishes the two shapes the codec
+// speaks natively and the function that recovers that header from the body —
+// the multipart package's own Form, Part and ContentType, under the names this
+// package has always given them.
+//
 // Package codec — JSON-bridge promotion path for codecs whose runtime
 // preconditions reject the public Marshal(F, any) / Unmarshal(F, *,
 // any) contract. Six of the twenty-four registered codecs constrain

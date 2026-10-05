@@ -141,29 +141,101 @@ packages:
     variables:
       - name: System
         type: Timed
-  - aliases:
-      - name: Clock
-        target: kclock.Clock
-      - name: Waiter
-        target: kclock.Waiter
-      - name: Timed
-        target: kclock.Timed
-      - name: Timer
-        target: kclock.Timer
-      - name: Ticker
-        target: kclock.Ticker
-      - name: ManualClock
-        target: kclock.ManualClock
-    functions:
-      - in:
-          - name: start
-            type: time.Time
-        name: NewManualClock
-        out:
-          - type: "*ManualClock"
+  - facade:
+      - alias:
+          - doc: |-
+              Clock produces timestamps and durations. It is FROZEN at two methods: a
+              struct with Now and Since satisfies every SDK field typed this way, and will
+              keep satisfying it (ADR 0039).
+
+              Implementations must be safe for concurrent use by multiple goroutines.
+            name: Clock
+            target: kclock.Clock
+      - alias:
+          - doc: |-
+              Waiter suspends a caller until a duration has elapsed. It is the half of the
+              time port [Clock] deliberately does not carry, so code that only stamps
+              records never has to implement it.
+
+              Implementations must be safe for concurrent use by multiple goroutines.
+            name: Waiter
+            target: kclock.Waiter
+      - alias:
+          - doc: |-
+              Timed is a [Clock] that also drives waiting — the union of [Clock] and
+              [Waiter], and the type SDK configurations use when they schedule, time out
+              or back off. Both [System] and [ManualClock] satisfy it.
+            name: Timed
+            target: kclock.Timed
+      - alias:
+          - doc: |-
+              Timer is a one-shot wake-up scheduled on some clock. It mirrors the usable
+              surface of *time.Timer, with one unavoidable difference: the stdlib exposes
+              the delivery channel as a FIELD (t.C) and no interface can require a field,
+              so C is a method here.
+
+              Implementations must be safe for concurrent use by multiple goroutines.
+            name: Timer
+            target: kclock.Timer
+      - alias:
+          - doc: |-
+              Ticker is a repeating wake-up scheduled on some clock. It mirrors the usable
+              surface of *time.Ticker, including its drop-on-slow-receiver contract: the
+              channel holds at most one pending tick and undeliverable ticks are discarded
+              rather than queued.
+
+              Implementations must be safe for concurrent use by multiple goroutines.
+            name: Ticker
+            target: kclock.Ticker
+      - alias:
+          - doc: |-
+              ManualClock is the deterministic test double: a [Timed] whose time moves
+              only when the caller moves it, through Advance or Set, and which reports its
+              armed waits through Pending and BlockUntil.
+
+              It carries no exported field and must not be copied — build it with
+              [NewManualClock] and pass the pointer.
+
+              Two hazards are inherent to a clock only a caller can move, and both are
+              documented rather than prevented:
+
+                - Sleep blocks until ANOTHER goroutine advances the clock. A test that
+                  sleeps on its own goroutine with nobody to advance hangs until the test
+                  binary times out. Sleep on the code under test, advance from the test.
+                - Advance wakes a waiter but does not schedule it. When an assertion
+                  depends on the woken goroutine having run, synchronise on something that
+                  goroutine itself signals; BlockUntil closes the mirror race, where a test
+                  advances before the code has registered its wait.
+            name: ManualClock
+            target: kclock.ManualClock
+      - var:
+          - doc: |-
+              System is the production [Timed], delegating every method to package time.
+
+              It is the value every SDK configuration falls back to when its Clock field
+              is nil, so it rarely needs naming — reach for it when a field is required,
+              or to make the production choice explicit beside a test that injects another.
+
+              System is a VALUE, not a hook: assigning to this variable rebinds this
+              package's name and changes nothing inside the SDK, which reads its own
+              default directly. To give a component a different clock, set that
+              component's Clock field.
+            name: System
+            reexport: kclock.System
+            type: Timed
+            typed: true
+      - func:
+          doc: |-
+            NewManualClock returns a [ManualClock] reading start. Any instant is legal —
+            before the Unix epoch, after 2038, in any location — which is the point:
+            unlike testing/synctest's bubble clock, the origin is the caller's choice.
+          forward: kclock.NewManualClock
+          in:
+            - name: start
+              type: time.Time
+          name: NewManualClock
+          out:
+            - type: "*ManualClock"
     imports:
       kclock: github.com/kitsunium/sdk/internal/kernel/clock
     path: github.com/kitsunium/sdk/pkg/v1/clock
-    variables:
-      - name: System
-        type: Timed

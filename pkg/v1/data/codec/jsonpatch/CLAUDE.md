@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T23:59:00Z -->
+<!-- updated: 2026-10-05T12:00:00Z -->
 # pkg/v1/data/codec/jsonpatch/
 
 ## Purpose
@@ -29,6 +29,10 @@ nor `net/http`, since `NotJSON`'s 400 became a literal in the core.
 
 - Add logic here; it belongs in `internal/service/data/codec/jsonpatch`.
 - Hand-edit `README.md` — regenerate with `make docs-readme`.
+
+## Generated
+
+`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/data/codec/jsonpatch.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the package comment and the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
 
 ## Verification
 

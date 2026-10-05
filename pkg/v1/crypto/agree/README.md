@@ -55,7 +55,7 @@ const KeyLen int = corecrypto.KeyLen
 ```
 
 <a name="GenerateKey"></a>
-## func [GenerateKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/agree/agree.go#L86>)
+## func [GenerateKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/agree/agree.go#L70>)
 
 ```go
 func GenerateKey(a Algorithm) (pub, priv []byte, err error)
@@ -64,7 +64,7 @@ func GenerateKey(a Algorithm) (pub, priv []byte, err error)
 GenerateKey draws a fresh keypair for the named scheme, returning the raw public and private key bytes. An unregistered algorithm returns UnknownAgreementAlgorithm; treat priv as a secret and zero it when done.
 
 <a name="Algorithm"></a>
-## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/agree/agree.go#L69>)
+## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/agree/agree.go#L65>)
 
 Algorithm is the stable identifier of a key\-agreement scheme. It is a defined type distinct from the other crypto\-family Algorithm types \(hash, mac, sign, …\), so the compiler rejects feeding a hash or signature constant into an agreement call \(V104\) — the seven registries are separate keyspaces, and the type system now enforces that separation the way typed Format/Level discipline does elsewhere.
 
@@ -79,7 +79,7 @@ const X25519 Algorithm = "x25519"
 ```
 
 <a name="Key"></a>
-## type [Key](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/agree/agree.go#L73>)
+## type [Key](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/agree/facade_gen.go#L13>)
 
 Key is an opaque, redacting 256\-bit symmetric key — the same key type the AEAD surface uses. SharedKey returns one; its String output is "\<redacted\>".
 
@@ -88,7 +88,7 @@ type Key = corecrypto.Key
 ```
 
 <a name="NewKey"></a>
-### func [NewKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/agree/agree.go#L78>)
+### func [NewKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/agree/facade_gen.go#L18>)
 
 ```go
 func NewKey(raw []byte) (key Key, err error)
@@ -97,7 +97,7 @@ func NewKey(raw []byte) (key Key, err error)
 NewKey builds a Key from raw, which must be exactly KeyLen \(32\) bytes. A wrong length returns InvalidKey; the bytes are copied defensively. Use it to round\-trip a SharedKey\-shaped value without importing an unrelated facade.
 
 <a name="SharedKey"></a>
-### func [SharedKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/agree/agree.go#L95>)
+### func [SharedKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/agree/agree.go#L79>)
 
 ```go
 func SharedKey(a Algorithm, priv, peerPub []byte, info string) (key Key, err error)

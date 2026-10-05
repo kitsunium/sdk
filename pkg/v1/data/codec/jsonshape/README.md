@@ -51,7 +51,7 @@ A type that reaches itself is described once; further down, its shape is a refer
 
 
 <a name="Field"></a>
-## type [Field](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonshape/jsonshape.go#L89>)
+## type [Field](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonshape/facade_gen.go#L19>)
 
 Field is one member of an Object, and the Go field behind it.
 
@@ -60,7 +60,7 @@ type Field = svcjsonshape.FieldValue
 ```
 
 <a name="Kind"></a>
-## type [Kind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonshape/jsonshape.go#L83>)
+## type [Kind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonshape/facade_gen.go#L13>)
 
 Kind is the JSON kind a value takes on the wire; its zero value is Any. It encodes as its lower\-case name.
 
@@ -123,7 +123,7 @@ const Unsupported Kind = svcjsonshape.Unsupported
 ```
 
 <a name="Shape"></a>
-## type [Shape](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonshape/jsonshape.go#L86>)
+## type [Shape](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonshape/facade_gen.go#L16>)
 
 Shape describes the values of one Go type on the wire.
 
@@ -132,7 +132,7 @@ type Shape = svcjsonshape.ShapeValue
 ```
 
 <a name="For"></a>
-### func [For](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonshape/jsonshape.go#L130>)
+### func [For](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonshape/facade_gen.go#L59>)
 
 ```go
 func For[T any]() *Shape
@@ -141,7 +141,7 @@ func For[T any]() *Shape
 For describes the values of T on the wire: Of\(reflect.TypeFor\[T\]\(\)\).
 
 <a name="Of"></a>
-### func [Of](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonshape/jsonshape.go#L124>)
+### func [Of](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonshape/facade_gen.go#L54>)
 
 ```go
 func Of(t reflect.Type) *Shape

@@ -131,7 +131,7 @@ const (
 ```
 
 <a name="BuildInfo"></a>
-## type [BuildInfo](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/self.go#L26>)
+## type [BuildInfo](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/facade_gen.go#L64>)
 
 BuildInfo is what the running binary was built from: the toolchain, the main package, the main module with its version\-control stamp, and every dependency followed through its replacement. It is an alias of the service value.
 
@@ -140,7 +140,7 @@ type BuildInfo = svcself.BuildValue
 ```
 
 <a name="Build"></a>
-### func [Build](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/self.go#L42>)
+### func [Build](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/facade_gen.go#L79>)
 
 ```go
 func Build() (info BuildInfo, ok bool)
@@ -149,7 +149,7 @@ func Build() (info BuildInfo, ok bool)
 Build describes what the running binary was built from, and reports false when the binary carries no build information.
 
 <a name="ParseBuild"></a>
-### func [ParseBuild](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/self.go#L50>)
+### func [ParseBuild](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/facade_gen.go#L86>)
 
 ```go
 func ParseBuild(info *debug.BuildInfo) BuildInfo
@@ -158,7 +158,7 @@ func ParseBuild(info *debug.BuildInfo) BuildInfo
 ParseBuild describes a BuildInfo from elsewhere — one a test builds by hand, or debug.ParseBuildInfo's reading of another binary — exactly as Build describes the running one.
 
 <a name="Distribution"></a>
-## type [Distribution](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/self.go#L20>)
+## type [Distribution](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/facade_gen.go#L58>)
 
 Distribution is one of the Go runtime's cumulative histograms, read as durations: Count, and Quantile\(q\) as the upper bound of the bucket that reaches q. It is an alias of the service value.
 
@@ -167,7 +167,7 @@ type Distribution = svcself.DistributionValue
 ```
 
 <a name="ExitResult"></a>
-## type [ExitResult](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/process.go#L144>)
+## type [ExitResult](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/facade_gen.go#L25>)
 
 ExitResult is the outcome of a finished process — exit code, terminating signal, and resource usage. It is an alias of the core port's ExitValue.
 
@@ -176,7 +176,7 @@ type ExitResult = coreproc.ExitValue
 ```
 
 <a name="Limit"></a>
-## type [Limit](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/process.go#L156>)
+## type [Limit](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/facade_gen.go#L37>)
 
 Limit is a soft/hard resource\-limit pair for setrlimit\(2\). It is an alias of the core port's LimitValue.
 
@@ -185,7 +185,7 @@ type Limit = coreproc.LimitValue
 ```
 
 <a name="Module"></a>
-## type [Module](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/self.go#L30>)
+## type [Module](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/facade_gen.go#L68>)
 
 Module is one module of the running binary, with its release, its commit and its local directory told apart. It is an alias of the service value.
 
@@ -194,7 +194,7 @@ type Module = svcself.ModuleValue
 ```
 
 <a name="Process"></a>
-## type [Process](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/process.go#L140>)
+## type [Process](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/facade_gen.go#L21>)
 
 Process is the handle to a spawned process: PID, Wait, Signal, SignalGroup, and a group\-aware Stop. It is an alias of the core port interface.
 
@@ -203,7 +203,7 @@ type Process = coreproc.Process
 ```
 
 <a name="MustStart"></a>
-### func [MustStart](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/process.go#L175>)
+### func [MustStart](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/process.go#L136>)
 
 ```go
 func MustStart(ctx context.Context, spec Spec) Process
@@ -212,7 +212,7 @@ func MustStart(ctx context.Context, spec Spec) Process
 MustStart is like [Start](<#Start>) but panics with the typed error when the spawn fails — UnsupportedPlatform off Unix/Windows, InvalidSpec, RlimitFailed, … It is the idiomatic Go MustX opt\-in \(like [regexp.MustCompile](<https://pkg.go.dev/regexp/#MustCompile>)\) for a consumer that chooses crash\-on\-failure at its own startup; the SDK itself never panics, and [Start](<#Start>) is the non\-panicking form for normal use. The panic value is the typed error, so a top\-level recover\(\) can classify it via errs.CodeOf / HasCode.
 
 <a name="Start"></a>
-### func [Start](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/process.go#L164>)
+### func [Start](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/facade_gen.go#L45>)
 
 ```go
 func Start(ctx context.Context, spec Spec) (proc Process, err error)
@@ -221,7 +221,7 @@ func Start(ctx context.Context, spec Spec) (proc Process, err error)
 Start spawns the process described by spec and returns a live Process handle. It delegates to internal/service/proc/exec; ctx is honoured up to the fork/exec boundary. A bare Spec.Path is searched in the child's PATH \(see the package documentation\). On Windows the Unix\-only Spec fields are refused with UnsupportedPlatform; on platforms that are neither Unix nor Windows, Start itself returns UnsupportedPlatform.
 
 <a name="Resource"></a>
-## type [Resource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/process.go#L152>)
+## type [Resource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/facade_gen.go#L33>)
 
 Resource identifies a per\-process resource governed by setrlimit\(2\). It is an alias of the core port type.
 
@@ -245,7 +245,7 @@ const (
 ```
 
 <a name="Signal"></a>
-## type [Signal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/process.go#L148>)
+## type [Signal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/facade_gen.go#L29>)
 
 Signal is a typed, platform\-portable OS signal. It is an alias of the core port type, so process.SIGTERM and a signal parsed elsewhere compare equal.
 
@@ -254,7 +254,7 @@ type Signal = coreproc.Signal
 ```
 
 <a name="Spec"></a>
-## type [Spec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/process.go#L136>)
+## type [Spec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/facade_gen.go#L17>)
 
 Spec is the immutable description of a process to spawn — executable, environment, credentials, isolation topology, and scheduling attributes. It is an alias of the core port type.
 
@@ -263,7 +263,7 @@ type Spec = coreproc.Spec
 ```
 
 <a name="Stats"></a>
-## type [Stats](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/self.go#L15>)
+## type [Stats](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/facade_gen.go#L53>)
 
 Stats is the running process at one instant: identity, scheduler settings, goroutines, heap, collections with their pause distribution, scheduling latency, and CPU time. Every count is cumulative since the process started. It is an alias of the service value.
 
@@ -272,7 +272,7 @@ type Stats = svcself.StatsValue
 ```
 
 <a name="Self"></a>
-### func [Self](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/self.go#L35>)
+### func [Self](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/facade_gen.go#L73>)
 
 ```go
 func Self() Stats
@@ -281,7 +281,7 @@ func Self() Stats
 Self takes a snapshot of the running process. It never fails: a figure the platform cannot give is zero, and Stats.CPUEstimated says when CPUTime is the runtime's estimate rather than the kernel's count.
 
 <a name="StdioMode"></a>
-## type [StdioMode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/stdio.go#L22>)
+## type [StdioMode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/facade_gen.go#L120>)
 
 StdioMode selects how a spawned child's standard streams \(stdin, stdout, stderr\) are wired. It is an alias of the core port type; set it on Spec.Stdio. The zero value is StdioInherit.
 

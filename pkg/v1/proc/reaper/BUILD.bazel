@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "reaper",
-    srcs = ["reaper.go"],
+    srcs = [
+        "facade_gen.go",
+        "reaper.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/proc/reaper",
     visibility = ["//visibility:public"],
     deps = [

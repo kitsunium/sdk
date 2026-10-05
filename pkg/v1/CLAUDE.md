@@ -1,9 +1,9 @@
-<!-- updated: 2026-10-03T20:30:02Z -->
+<!-- updated: 2026-10-05T12:00:00Z -->
 # pkg/v1/
 
 ## Purpose
 
-The first major version of the SDK's public API. Type signatures exposed here are **frozen post-v1.0.0** — breaking changes land in `pkg/v2`. Today the surface is a thin alias + helper layer over `internal/core/*` and `internal/service/*` (zero runtime cost; the Go type system treats `pkg/v1/X.T` and `internal/.../T` as the same type).
+The first major version of the SDK's public API. Type signatures exposed here are **frozen post-v1.0.0** — breaking changes land in `pkg/v2`. Today the surface is a thin alias + helper layer over `internal/core/*` and `internal/service/*` (zero runtime cost; the Go type system treats `pkg/v1/X.T` and `internal/.../T` as the same type). Every alias, re-exported constant and variable, and forwarder is the design's `facade:` and kit writes it into each package's `facade_gen.go` (ADR 0166); a package's hand-written files keep its package comment and the functions with a body of their own.
 
 ## Contents
 

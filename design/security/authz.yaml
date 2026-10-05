@@ -548,265 +548,481 @@ packages:
               type: string
             - name: Grants
               type: "[]GrantValue"
-  - aliases:
-      - name: Decision
-        target: coreauthz.Decision
-      - name: Policy
-        target: coreauthz.Policy
-      - name: Condition
-        target: coreauthz.Condition
-      - name: Request
-        target: coreauthz.RequestValue
-      - name: Attr
-        target: coreauthz.AttrValue
-      - name: AttrKind
-        target: coreauthz.AttrKind
-      - name: Permission
-        target: svcauthz.PermissionValue
-      - name: Grant
-        target: svcauthz.GrantValue
-      - name: RBACConfig
-        target: svcauthz.RBACConfig
-      - name: Rule
-        target: svcauthz.RuleValue
-    constants:
-      - name: Abstain
-        type: Decision
-        value: "0"
-      - name: Allow
-        type: Decision
-        value: "1"
-      - name: Deny
-        type: Decision
-        value: "2"
-      - name: KindInvalid
-        type: AttrKind
-        value: "0"
-      - name: KindString
-        type: AttrKind
-        value: "1"
-      - name: KindInt64
-        type: AttrKind
-        value: "2"
-      - name: KindBool
-        type: AttrKind
-        value: "3"
-      - name: KindStrings
-        type: AttrKind
-        value: "4"
-      - name: CodePermissionDenied
-        type: errs.Code
-        value: "0x00_02_1A_01"
-      - name: CodeAttributeMissing
-        type: errs.Code
-        value: "0x00_02_1A_02"
-      - name: CodeAttributeKindMismatch
-        type: errs.Code
-        value: "0x00_02_1A_03"
-      - name: CodePolicyMisconfigured
-        type: errs.Code
-        value: "0x00_02_1A_04"
-      - name: CodeGrantInvalid
-        type: errs.Code
-        value: "0x00_03_38_01"
-      - name: CodeRuleInvalid
-        type: errs.Code
-        value: "0x00_03_38_02"
-      - name: CodeConditionInvalid
-        type: errs.Code
-        value: "0x00_03_38_03"
-    functions:
-      - in:
-          - name: subject
-          - name: action
-          - name: resource
-            type: string
-          - name: attrs
-            type: Attr
-        name: NewRequest
-        out:
-          - type: Request
-        variadic: true
-      - in:
-          - name: key
-          - name: value
-            type: string
-        name: AttrString
-        out:
-          - type: Attr
-      - in:
-          - name: key
-            type: string
-          - name: value
-            type: int64
-        name: AttrInt64
-        out:
-          - type: Attr
-      - in:
-          - name: key
-            type: string
-          - name: value
-            type: bool
-        name: AttrBool
-        out:
-          - type: Attr
-      - in:
-          - name: key
-            type: string
-          - name: values
-            type: string
-        name: AttrStrings
-        out:
-          - type: Attr
-        variadic: true
-      - in:
-          - name: ctx
-            type: context.Context
-          - name: policy
-            type: Policy
-          - name: request
-            type: Request
-        name: Check
-        out:
-          - type: error
-      - in:
-          - name: policies
-            type: Policy
-        name: DenyOverrides
-        out:
-          - type: Policy
-        variadic: true
-      - in:
-          - name: cfg
-            type: RBACConfig
-        name: NewRBAC
-        out:
-          - name: policy
-            type: Policy
-          - name: err
-            type: error
-      - in:
-          - name: rules
-            type: Rule
-        name: NewABAC
-        out:
-          - name: policy
-            type: Policy
-          - name: err
-            type: error
-        variadic: true
-      - in:
-          - name: key
-          - name: want
-            type: string
-        name: AttrEquals
-        out:
-          - name: condition
-            type: Condition
-          - name: err
-            type: error
-      - in:
-          - name: key
-            type: string
-        name: AttrIsTrue
-        out:
-          - name: condition
-            type: Condition
-          - name: err
-            type: error
-      - in:
-          - name: key
-            type: string
-          - name: lo
-            type: int64
-        name: AttrAtLeast
-        out:
-          - name: condition
-            type: Condition
-          - name: err
-            type: error
-      - in:
-          - name: key
-          - name: want
-            type: string
-        name: AttrContains
-        out:
-          - name: condition
-            type: Condition
-          - name: err
-            type: error
-      - in:
-          - name: key
-            type: string
-        name: AttrMatchesSubject
-        out:
-          - name: condition
-            type: Condition
-          - name: err
-            type: error
-      - in:
-          - name: inner
-            type: Condition
-        name: Not
-        out:
-          - name: condition
-            type: Condition
-          - name: err
-            type: error
-      - in:
-          - name: conditions
-            type: Condition
-        name: AllOf
-        out:
-          - name: condition
-            type: Condition
-          - name: err
-            type: error
-        variadic: true
-      - in:
-          - name: conditions
-            type: Condition
-        name: AnyOf
-        out:
-          - name: condition
-            type: Condition
-          - name: err
-            type: error
-        variadic: true
-      - in:
-          - name: policy
-            type: Policy
-          - name: err
-            type: error
-        name: Must
-        out:
-          - type: Policy
-      - in:
-          - name: condition
-            type: Condition
-          - name: err
-            type: error
-        name: MustCondition
-        out:
-          - type: Condition
+  - facade:
+      - const:
+          - doc: |-
+              Abstain means a policy has no opinion about this request. It is the
+              ZERO Decision, it grants nothing, and [Check] refuses it.
+            name: Abstain
+            reexport: coreauthz.Abstain
+            type: Decision
+            typed: true
+            value: "0"
+          - doc: |-
+              Allow means a policy permits the request. It is the only granting state,
+              and any [Deny] in the composition still outranks it.
+            name: Allow
+            reexport: coreauthz.Allow
+            type: Decision
+            typed: true
+            value: "1"
+          - doc: Deny means a policy refuses the request. It is absorbing.
+            name: Deny
+            reexport: coreauthz.Deny
+            type: Decision
+            typed: true
+            value: "2"
+          - blank: true
+            doc: |-
+              KindInvalid is the zero AttrKind. [NewRequest] drops an attribute
+              carrying it, so such an attribute is absent rather than unusable.
+            name: KindInvalid
+            reexport: coreauthz.KindInvalid
+            type: AttrKind
+            typed: true
+            value: "0"
+          - doc: KindString is a single text value.
+            name: KindString
+            reexport: coreauthz.KindString
+            type: AttrKind
+            typed: true
+            value: "1"
+          - doc: KindInt64 is a whole number — including a Unix timestamp.
+            name: KindInt64
+            reexport: coreauthz.KindInt64
+            type: AttrKind
+            typed: true
+            value: "2"
+          - doc: KindBool is a flag, which can be present and false.
+            name: KindBool
+            reexport: coreauthz.KindBool
+            type: AttrKind
+            typed: true
+            value: "3"
+          - doc: KindStrings is an unordered set of text values — roles, groups, scopes.
+            name: KindStrings
+            reexport: coreauthz.KindStrings
+            type: AttrKind
+            typed: true
+            value: "4"
+      - const:
+          - doc: |-
+              CodePermissionDenied identifies every refusal this domain produces —
+              explicit, by abstention, or by an evaluation that could not complete.
+            name: CodePermissionDenied
+            reexport: coreauthz.CodePermissionDenied
+            type: errs.Code
+            typed: true
+            value: "0x00_02_1A_01"
+          - doc: |-
+              CodeAttributeMissing identifies a rule that named an attribute the
+              request does not carry. It is a failure, never a false comparison.
+            name: CodeAttributeMissing
+            reexport: coreauthz.CodeAttributeMissing
+            type: errs.Code
+            typed: true
+            value: "0x00_02_1A_02"
+          - doc: |-
+              CodeAttributeKindMismatch identifies an attribute present under another
+              kind than the rule compares.
+            name: CodeAttributeKindMismatch
+            reexport: coreauthz.CodeAttributeKindMismatch
+            type: errs.Code
+            typed: true
+            value: "0x00_02_1A_03"
+          - doc: |-
+              CodePolicyMisconfigured identifies a nil policy in a composition, or one
+              that returned a decision outside allow/deny/abstain.
+            name: CodePolicyMisconfigured
+            reexport: coreauthz.CodePolicyMisconfigured
+            type: errs.Code
+            typed: true
+            value: "0x00_02_1A_04"
+          - doc: CodeGrantInvalid identifies an RBAC grant table refused at construction.
+            name: CodeGrantInvalid
+            reexport: coreauthz.CodeGrantInvalid
+            type: errs.Code
+            typed: true
+            value: "0x00_03_38_01"
+          - doc: CodeRuleInvalid identifies an ABAC rule set refused at construction.
+            name: CodeRuleInvalid
+            reexport: coreauthz.CodeRuleInvalid
+            type: errs.Code
+            typed: true
+            value: "0x00_03_38_02"
+          - doc: |-
+              CodeConditionInvalid identifies a condition constructor refused at
+              construction.
+            name: CodeConditionInvalid
+            reexport: coreauthz.CodeConditionInvalid
+            type: errs.Code
+            typed: true
+            value: "0x00_03_38_03"
+      - alias:
+          - doc: |-
+              Decision is the public alias for the three-valued verdict: [Allow], [Deny]
+              or [Abstain]. Its zero value is [Abstain].
+            name: Decision
+            target: coreauthz.Decision
+      - alias:
+          - doc: |-
+              Policy is the public alias for the authorization port. It is a func type, so
+              it can never grow a method and break a downstream implementer (ADR 0039).
+            name: Policy
+            target: coreauthz.Policy
+      - alias:
+          - doc: |-
+              Condition is the public alias for an attribute predicate. Returning an error
+              means "could not be evaluated", which is absorbing everywhere.
+            name: Condition
+            target: coreauthz.Condition
+      - alias:
+          - doc: Request is the public alias for the immutable question a policy answers.
+            name: Request
+            target: coreauthz.RequestValue
+      - alias:
+          - doc: Attr is the public alias for one typed, named fact attached to a [Request].
+            name: Attr
+            target: coreauthz.AttrValue
+      - alias:
+          - doc: |-
+              AttrKind is the public alias for the type an [Attr] carries. The kind is
+              part of the attribute's identity: a text rule against a number MISMATCHES,
+              it does not compare false.
+            name: AttrKind
+            target: coreauthz.AttrKind
+      - alias:
+          - doc: |-
+              Permission is the public alias for one (action, resource) pair a role
+              confers. Resource is the KIND of thing; instance facts belong in attributes.
+            name: Permission
+            target: svcauthz.PermissionValue
+      - alias:
+          - doc: Grant is the public alias for one role and the permissions it confers.
+            name: Grant
+            target: svcauthz.GrantValue
+      - alias:
+          - doc: RBACConfig is the public alias for [NewRBAC]'s parameters.
+            name: RBACConfig
+            target: svcauthz.RBACConfig
+      - alias:
+          - doc: |-
+              Rule is the public alias for one attribute rule: what it is about, what it
+              decides, and when it fires.
+            name: Rule
+            target: svcauthz.RuleValue
+      - var:
+          - doc: |-
+              PermissionDenied is the one refusal. Every non-granting outcome converts
+              to it, with the same code, status and sentence.
+            name: PermissionDenied
+            reexport: coreauthz.PermissionDenied
+            type: "*kernelerrs.Error"
+          - doc: |-
+              AttributeMissing is reported by a condition whose rule named an
+              attribute the request does not carry.
+            name: AttributeMissing
+            reexport: coreauthz.AttributeMissing
+            type: "*kernelerrs.Error"
+          - doc: |-
+              AttributeKindMismatch is reported by a condition whose attribute is
+              present under another kind.
+            name: AttributeKindMismatch
+            reexport: coreauthz.AttributeKindMismatch
+            type: "*kernelerrs.Error"
+          - doc: |-
+              PolicyMisconfigured is reported for a nil policy in a composition, or a
+              decision outside allow/deny/abstain.
+            name: PolicyMisconfigured
+            reexport: coreauthz.PolicyMisconfigured
+            type: "*kernelerrs.Error"
+          - doc: GrantInvalid is returned by [NewRBAC] for a grant table it cannot honour.
+            name: GrantInvalid
+            reexport: coreauthz.GrantInvalid
+            type: "*kernelerrs.Error"
+          - doc: RuleInvalid is returned by [NewABAC] for a rule set it cannot honour.
+            name: RuleInvalid
+            reexport: coreauthz.RuleInvalid
+            type: "*kernelerrs.Error"
+          - doc: |-
+              ConditionInvalid is returned by a condition constructor for arguments it
+              cannot honour.
+            name: ConditionInvalid
+            reexport: coreauthz.ConditionInvalid
+            type: "*kernelerrs.Error"
+      - func:
+          doc: |-
+            NewRequest builds the immutable question. Attributes are indexed by key,
+            last one wins, and one with an empty key or the zero kind is dropped — so
+            every attribute a rule can find is one it can use.
+          forward: coreauthz.NewRequestValue
+          in:
+            - name: subject
+            - name: action
+            - name: resource
+              type: string
+            - name: attrs
+              type: Attr
+          name: NewRequest
+          out:
+            - type: Request
+          variadic: true
+      - func:
+          doc: AttrString builds a text attribute.
+          forward: coreauthz.AttrString
+          in:
+            - name: key
+            - name: value
+              type: string
+          name: AttrString
+          out:
+            - type: Attr
+      - func:
+          doc: AttrInt64 builds a whole-number attribute. Times travel as Unix seconds.
+          forward: coreauthz.AttrInt64
+          in:
+            - name: key
+              type: string
+            - name: value
+              type: int64
+          name: AttrInt64
+          out:
+            - type: Attr
+      - func:
+          doc: |-
+            AttrBool builds a flag attribute. Present-and-false is a different fact from
+            absent, and this is how the first one is stated.
+          forward: coreauthz.AttrBool
+          in:
+            - name: key
+              type: string
+            - name: value
+              type: bool
+          name: AttrBool
+          out:
+            - type: Attr
+      - func:
+          doc: |-
+            AttrStrings builds a set attribute — roles, groups, scopes. Passing no
+            values states that the subject holds none, which is NOT the same as omitting
+            the attribute: the first abstains, the second refuses.
+          forward: coreauthz.AttrStrings
+          in:
+            - name: key
+              type: string
+            - name: values
+              type: string
+          name: AttrStrings
+          out:
+            - type: Attr
+          variadic: true
+      - func:
+          doc: |-
+            Check evaluates policy and reports the verdict as an error: nil when
+            permitted, [PermissionDenied] otherwise. It is the closure — the one place
+            where "nobody said Allow" becomes a refusal — and a nil policy refuses.
+          forward: svcauthz.Check
+          in:
+            - name: ctx
+              type: context.Context
+            - name: policy
+              type: Policy
+            - name: request
+              type: Request
+          name: Check
+          out:
+            - type: error
+      - func:
+          doc: |-
+            DenyOverrides composes policies: a [Deny] from any member wins, an [Allow]
+            requires at least one grant and no refusal, and everything else abstains.
+            Every member is evaluated — only a refusal short-circuits — so the result
+            does not depend on the order the policies were listed in.
+          forward: svcauthz.DenyOverrides
+          in:
+            - name: policies
+              type: Policy
+          name: DenyOverrides
+          out:
+            - type: Policy
+          variadic: true
+      - func:
+          doc: |-
+            NewRBAC builds a role-based policy over a fixed grant table. It answers
+            [Allow] or [Abstain] and never [Deny] for an ungranted request — see the
+            package docs for why that is what makes it composable.
+          forward: svcauthz.NewRBAC
+          in:
+            - name: cfg
+              type: RBACConfig
+          name: NewRBAC
+          out:
+            - name: policy
+              type: Policy
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            NewABAC builds an attribute-based policy over a fixed rule set, folded by
+            the same deny-overrides algorithm the policy set is.
+          forward: svcauthz.NewABAC
+          in:
+            - name: rules
+              type: Rule
+          name: NewABAC
+          out:
+            - name: policy
+              type: Policy
+            - name: err
+              type: error
+          variadic: true
+      - func:
+          doc: |-
+            AttrEquals holds when the request carries key as text equal to want, and
+            FAILS when the attribute is absent or is not text.
+          forward: svcauthz.AttrEquals
+          in:
+            - name: key
+            - name: want
+              type: string
+          name: AttrEquals
+          out:
+            - name: condition
+              type: Condition
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            AttrIsTrue holds when the request carries key as a flag that is set. Present
+            and false does not hold; absent fails.
+          forward: svcauthz.AttrIsTrue
+          in:
+            - name: key
+              type: string
+          name: AttrIsTrue
+          out:
+            - name: condition
+              type: Condition
+            - name: err
+              type: error
+      - func:
+          doc: AttrAtLeast holds when the request carries key as a number at least lo.
+          forward: svcauthz.AttrAtLeast
+          in:
+            - name: key
+              type: string
+            - name: lo
+              type: int64
+          name: AttrAtLeast
+          out:
+            - name: condition
+              type: Condition
+            - name: err
+              type: error
+      - func:
+          doc: AttrContains holds when the request carries key as a set containing want.
+          forward: svcauthz.AttrContains
+          in:
+            - name: key
+            - name: want
+              type: string
+          name: AttrContains
+          out:
+            - name: condition
+              type: Condition
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            AttrMatchesSubject holds when the request carries key as text equal to the
+            subject — the ownership rule. An anonymous request owns nothing, so an empty
+            subject never matches, not even an empty owner.
+          forward: svcauthz.AttrMatchesSubject
+          in:
+            - name: key
+              type: string
+          name: AttrMatchesSubject
+          out:
+            - name: condition
+              type: Condition
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            Not inverts a condition's answer and PROPAGATES its failure unchanged. An
+            attribute the request does not carry therefore stays unevaluable instead of
+            becoming "true", which is the single sharpest form of the absent-attribute
+            trap.
+          forward: svcauthz.Not
+          in:
+            - name: inner
+              type: Condition
+          name: Not
+          out:
+            - name: condition
+              type: Condition
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            AllOf holds when every condition holds. Every branch is evaluated, so the
+            answer is order-independent and a failure anywhere is reported.
+          forward: svcauthz.AllOf
+          in:
+            - name: conditions
+              type: Condition
+          name: AllOf
+          out:
+            - name: condition
+              type: Condition
+            - name: err
+              type: error
+          variadic: true
+      - func:
+          doc: |-
+            AnyOf holds when at least one condition holds — but an unevaluable branch is
+            still absorbing, so a request cannot satisfy the rule by omitting the
+            attribute one of its branches names.
+          forward: svcauthz.AnyOf
+          in:
+            - name: conditions
+              type: Condition
+          name: AnyOf
+          out:
+            - name: condition
+              type: Condition
+            - name: err
+              type: error
+          variadic: true
+      - func:
+          doc: |-
+            Must unwraps a policy constructor for a package-level var, panicking on
+            error. Use it on wiring written in code, never on data read at run time.
+          forward: svcauthz.Must
+          in:
+            - name: policy
+              type: Policy
+            - name: err
+              type: error
+          name: Must
+          out:
+            - type: Policy
+      - func:
+          doc: |-
+            MustCondition unwraps a condition constructor for a package-level var,
+            panicking on error. Same contract as [Must].
+          forward: svcauthz.MustCondition
+          in:
+            - name: condition
+              type: Condition
+            - name: err
+              type: error
+          name: MustCondition
+          out:
+            - type: Condition
     imports:
       coreauthz: github.com/kitsunium/sdk/internal/core/security/authz
       errs: github.com/kitsunium/sdk/pkg/v1/errs
       kernelerrs: github.com/kitsunium/sdk/internal/kernel/errs
       svcauthz: github.com/kitsunium/sdk/internal/service/security/authz
     path: github.com/kitsunium/sdk/pkg/v1/security/authz
-    variables:
-      - name: PermissionDenied
-        type: "*kernelerrs.Error"
-      - name: AttributeMissing
-        type: "*kernelerrs.Error"
-      - name: AttributeKindMismatch
-        type: "*kernelerrs.Error"
-      - name: PolicyMisconfigured
-        type: "*kernelerrs.Error"
-      - name: GrantInvalid
-        type: "*kernelerrs.Error"
-      - name: RuleInvalid
-        type: "*kernelerrs.Error"
-      - name: ConditionInvalid
-        type: "*kernelerrs.Error"

@@ -307,14 +307,7 @@ packages:
         type: coretransform.Compressor
       - name: ZlibCompressor
         type: coretransform.Compressor
-  - aliases:
-      - name: Algorithm
-        target: coretransform.Algorithm
-      - name: Compressor
-        target: coretransform.Compressor
-      - name: BoundedDecompressor
-        target: coretransform.BoundedDecompressor
-    constants:
+  - constants:
       - name: Gzip
         type: Algorithm
         value: "\"gzip\""
@@ -324,37 +317,126 @@ packages:
       - name: Zlib
         type: Algorithm
         value: "\"zlib\""
-      - name: CodeUnknownCompressor
-        type: errs.Code
-        value: "0x00_02_05_01"
-      - name: CodeCompressedFrameInvalid
-        type: errs.Code
-        value: "0x00_02_05_04"
-      - name: CodeDecompressedTooLarge
-        type: errs.Code
-        value: "0x00_02_05_06"
-      - name: CodeGzipFailed
-        type: errs.Code
-        value: "0x00_03_1A_01"
-      - name: CodeFlateFailed
-        type: errs.Code
-        value: "0x00_03_1A_02"
-      - name: CodeZlibFailed
-        type: errs.Code
-        value: "0x00_03_1A_03"
+    facade:
+      - const:
+          - doc: |-
+              CodeUnknownCompressor identifies an Algorithm no imported package has
+              registered (0.2.5.1).
+            name: CodeUnknownCompressor
+            reexport: coretransform.CodeUnknownCompressor
+            type: errs.Code
+            typed: true
+            value: "0x00_02_05_01"
+          - doc: |-
+              CodeCompressedFrameInvalid identifies a malformed compressed frame of the
+              codec package, or a frame its decompression-bomb guard refused (0.2.5.4).
+            name: CodeCompressedFrameInvalid
+            reexport: coretransform.CodeCompressedFrameInvalid
+            type: errs.Code
+            typed: true
+            value: "0x00_02_05_04"
+          - doc: |-
+              CodeDecompressedTooLarge identifies a stream whose plaintext would exceed
+              the ceiling its caller gave (0.2.5.6).
+            name: CodeDecompressedTooLarge
+            reexport: coretransform.CodeDecompressedTooLarge
+            type: errs.Code
+            typed: true
+            value: "0x00_02_05_06"
+          - doc: |-
+              CodeGzipFailed identifies a stream compress/gzip refused, compressing or
+              decompressing (0.3.26.1).
+            name: CodeGzipFailed
+            reexport: coretransform.CodeGzipFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_1A_01"
+          - doc: CodeFlateFailed identifies a stream compress/flate refused (0.3.26.2).
+            name: CodeFlateFailed
+            reexport: coretransform.CodeFlateFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_1A_02"
+          - doc: |-
+              CodeZlibFailed identifies a stream compress/zlib refused (0.3.26.3): the
+              RFC 1950 envelope, told apart from raw DEFLATE because a stream one of
+              them refuses is often valid under the other.
+            name: CodeZlibFailed
+            reexport: coretransform.CodeZlibFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_1A_03"
+        doc: The error codes, ranges 0.2.5.* and 0.3.26.*, declared in the core.
+      - doc: "The sentinels, for errors.Is: each carries the code of the same name."
+        var:
+          - doc: |-
+              UnknownCompressor is the sentinel of [CodeUnknownCompressor], returned
+              as is.
+            name: UnknownCompressor
+            reexport: coretransform.UnknownCompressor
+            type: "*errs.Error"
+          - doc: CompressedFrameInvalid is the sentinel of [CodeCompressedFrameInvalid].
+            name: CompressedFrameInvalid
+            reexport: coretransform.CompressedFrameInvalid
+            type: "*errs.Error"
+          - doc: |-
+              DecompressedTooLarge is the sentinel of [CodeDecompressedTooLarge],
+              returned as is.
+            name: DecompressedTooLarge
+            reexport: coretransform.DecompressedTooLarge
+            type: "*errs.Error"
+          - doc: |-
+              GzipFailed is the sentinel of [CodeGzipFailed]; the stdlib's error is
+              kept beneath it.
+            name: GzipFailed
+            reexport: coretransform.GzipFailed
+            type: "*errs.Error"
+          - doc: FlateFailed is the sentinel of [CodeFlateFailed].
+            name: FlateFailed
+            reexport: coretransform.FlateFailed
+            type: "*errs.Error"
+          - doc: ZlibFailed is the sentinel of [CodeZlibFailed].
+            name: ZlibFailed
+            reexport: coretransform.ZlibFailed
+            type: "*errs.Error"
+      - alias:
+          - doc: |-
+              Algorithm is the name a Compressor registers under. The zero value is
+              reserved as invalid.
+            name: Algorithm
+            target: coretransform.Algorithm
+      - alias:
+          - doc: |-
+              Compressor is one compression scheme: Compress and Decompress append to dst.
+              Implementations are safe for concurrent use.
+            name: Compressor
+            target: coretransform.Compressor
+      - alias:
+          - doc: |-
+              BoundedDecompressor is the optional extension of a Compressor that can be
+              told how much plaintext it may produce; DecompressBounded uses it when the
+              scheme has it.
+            name: BoundedDecompressor
+            target: coretransform.BoundedDecompressor
+      - func:
+          doc: Lookup returns the Compressor registered under algo.
+          forward: coretransform.Lookup
+          in:
+            - name: algo
+              type: Algorithm
+          name: Lookup
+          out:
+            - name: c
+              type: Compressor
+            - name: ok
+              type: bool
+      - func:
+          doc: Available returns the registered Algorithms, sorted.
+          forward: coretransform.Available
+          name: Available
+          out:
+            - type: "[]Algorithm"
     functions:
-      - in:
-          - name: algo
-            type: Algorithm
-        name: Lookup
-        out:
-          - name: c
-            type: Compressor
-          - name: ok
-            type: bool
-      - name: Available
-        out:
-          - type: "[]Algorithm"
       - in:
           - name: algo
             type: Algorithm
@@ -397,16 +479,3 @@ packages:
       coretransform: github.com/kitsunium/sdk/internal/core/data/transform
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/pkg/v1/data/transform
-    variables:
-      - name: UnknownCompressor
-        type: "*errs.Error"
-      - name: CompressedFrameInvalid
-        type: "*errs.Error"
-      - name: DecompressedTooLarge
-        type: "*errs.Error"
-      - name: GzipFailed
-        type: "*errs.Error"
-      - name: FlateFailed
-        type: "*errs.Error"
-      - name: ZlibFailed
-        type: "*errs.Error"

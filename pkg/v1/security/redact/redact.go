@@ -58,61 +58,11 @@
 package redact
 
 import (
-	coreredact "github.com/kitsunium/sdk/internal/core/security/redact"
-	"github.com/kitsunium/sdk/internal/kernel/errs"
 	svcredact "github.com/kitsunium/sdk/internal/service/security/redact"
 )
-
-// Placeholder replaces every secret.
-const Placeholder string = coreredact.Placeholder
-
-// Ellipsis ends whatever was cut to fit a bound, and is counted in it.
-const Ellipsis string = coreredact.Ellipsis
-
-// MinBytes is the smallest bound honoured; a smaller one is raised to it.
-const MinBytes int = coreredact.MinBytes
-
-// Unencodable is the text a log attribute encoding/json refuses is shown as.
-const Unencodable string = coreredact.Unencodable
-
-// CodeDocumentInvalid identifies a document that is not one JSON value.
-const CodeDocumentInvalid errs.Code = coreredact.CodeDocumentInvalid
-
-// CodeValueUnencodable identifies a value encoding/json refuses to encode.
-const CodeValueUnencodable errs.Code = coreredact.CodeValueUnencodable
-
-var (
-	// DocumentInvalid refuses a document that is not one JSON value.
-	DocumentInvalid = coreredact.DocumentInvalid
-	// ValueUnencodable refuses a value encoding/json will not encode.
-	ValueUnencodable = coreredact.ValueUnencodable
-)
-
-// Config says what a Redactor treats as secret: the name Words, the struct
-// Tag, an extra Field rule, and how an Error in a log attribute is shown. Its
-// zero value is usable.
-type Config = svcredact.Config
-
-// Redactor is the redaction port: Name, Text, JSON, Value and Attrs. [New]
-// returns the SDK's implementation, which caches what it learns about each Go
-// type, so build one per configuration and keep it; it is safe for concurrent
-// use. The port is frozen at those five methods (ADR 0039), so a consumer can
-// accept a Redactor and hand a test double in its place.
-type Redactor = coreredact.Redactor
-
-// Document is a JSON document with its secrets replaced — never longer than
-// its bound, always well-formed — and whether it had to be cut.
-type Document = coreredact.DocumentValue
 
 // New returns a Redactor applying cfg.
 func New(cfg Config) Redactor {
 	//: delegate verbatim to the service constructor.
 	return svcredact.NewRedactor(cfg)
-}
-
-// DefaultWords returns the name fragments a Redactor treats as secret when its
-// Config gives none, as a fresh slice a caller may extend.
-func DefaultWords() []string {
-	//: delegate verbatim to the service implementation.
-	return svcredact.DefaultWords()
 }

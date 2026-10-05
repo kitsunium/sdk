@@ -5,10 +5,7 @@ package(default_visibility = ["//visibility:public"])
 go_library(
     name = "token",
     srcs = [
-        "codes.go",
-        "constants.go",
-        "constructors.go",
-        "sentinels.go",
+        "facade_gen.go",
         "token.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/security/token",

@@ -153,7 +153,7 @@ var (
 ```
 
 <a name="Execute"></a>
-## func [Execute](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/cli.go#L248>)
+## func [Execute](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/cli.go#L157>)
 
 ```go
 func Execute(ctx context.Context, cfg Config, root Command, args []string) error
@@ -162,7 +162,7 @@ func Execute(ctx context.Context, cfg Config, root Command, args []string) error
 Execute is the one\-line form of [New](<#New>) followed by [Executor](<#Executor>).Execute. It returns the same errors both would: a construction refusal carries EX\_CONFIG \(78\), so a caller that only wants a status can pass the result straight to [Status](<#Status>).
 
 <a name="Status"></a>
-## func [Status](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/cli.go#L234>)
+## func [Status](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/cli.go#L143>)
 
 ```go
 func Status(err error) int
@@ -177,7 +177,7 @@ os.Exit(cli.Status(app.Execute(ctx, os.Args[1:])))
 ```
 
 <a name="Action"></a>
-## type [Action](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/cli.go#L135>)
+## type [Action](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/facade_gen.go#L11>)
 
 Action is what one command does — see [Command](<#Command>).
 
@@ -186,7 +186,7 @@ type Action = corecli.Action
 ```
 
 <a name="Binder"></a>
-## type [Binder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/cli.go#L138>)
+## type [Binder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/facade_gen.go#L14>)
 
 Binder declares one command's flags onto the stdlib set that parses them.
 
@@ -195,7 +195,7 @@ type Binder = corecli.Binder
 ```
 
 <a name="Command"></a>
-## type [Command](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/cli.go#L145>)
+## type [Command](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/facade_gen.go#L21>)
 
 Command is one declared command: a name, what it says about itself, its flags, and EITHER an [Action](<#Action>) OR sub\-commands.
 
@@ -204,7 +204,7 @@ type Command = corecli.CommandValue
 ```
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/cli.go#L151>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/facade_gen.go#L27>)
 
 Config configures [New](<#New>) — two writers, and deliberately nothing else.
 
@@ -213,7 +213,7 @@ type Config = svccli.Config
 ```
 
 <a name="Executor"></a>
-## type [Executor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/cli.go#L141>)
+## type [Executor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/facade_gen.go#L17>)
 
 Executor resolves an argument vector against a command tree and runs it.
 
@@ -222,7 +222,7 @@ type Executor = corecli.Executor
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/cli.go#L203>)
+### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/facade_gen.go#L79>)
 
 ```go
 func New(cfg Config, root Command) (runner Executor, err error)
@@ -235,7 +235,7 @@ The WHOLE tree is checked, not the branch an invocation happens to take, so a mi
 Each [Binder](<#Binder>) is CALLED once here, on a throwaway flag set, which is what proves it binds no reserved name — so a Binder must be safe to call more than once and must touch only the set it is given.
 
 <a name="FlagSourceValue"></a>
-## type [FlagSourceValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/cli.go#L154>)
+## type [FlagSourceValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/facade_gen.go#L30>)
 
 FlagSourceValue is one invocation's typed flags as a config layer.
 
@@ -244,7 +244,7 @@ type FlagSourceValue = svccli.FlagSourceValue
 ```
 
 <a name="FlagSource"></a>
-### func [FlagSource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/cli.go#L218>)
+### func [FlagSource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/facade_gen.go#L93>)
 
 ```go
 func FlagSource(invocation Invocation) *FlagSourceValue
@@ -255,7 +255,7 @@ FlagSource turns the flags an operator ACTUALLY TYPED on one invocation into a c
 It walks flag.FlagSet.Visit and never VisitAll: an unset flag contributes NOTHING, so a flag whose default is the Go zero cannot silently override the configuration file on every run. The flag name is the config key verbatim, with no case or separator transformation, because a rename rule is a second grammar whose failure mode is a key that quietly matches nothing.
 
 <a name="Invocation"></a>
-## type [Invocation](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/cli.go#L148>)
+## type [Invocation](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/facade_gen.go#L24>)
 
 Invocation is one resolved command line as an [Action](<#Action>) sees it.
 

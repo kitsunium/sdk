@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "singleflight",
-    srcs = ["singleflight.go"],
+    srcs = [
+        "facade_gen.go",
+        "singleflight.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/concur/singleflight",
     visibility = ["//visibility:public"],
     deps = ["//internal/kernel/concur/singleflight"],

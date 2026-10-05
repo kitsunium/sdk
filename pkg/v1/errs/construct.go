@@ -58,60 +58,6 @@ const MinAppMajor Major = 0x40 // 64
 // caps at 0x7F.
 const MaxMajor Major = 0x7F // 127
 
-// Field is a single typed key/value pair attached to an error. Build one with
-// String / Int / Int64 / Bool / Float (or NewFieldValue); the zero value is
-// invalid and must never be passed across the API.
-//
-// A Field read back from an error — see [FieldsOf] — answers two methods:
-// Key(), the name the emitter chose, and StringValue(), the value as text (a
-// string verbatim, a number in decimal, a bool as true or false, "" for the
-// zero Field). The rendering is for reading, not for parsing back into a type.
-type Field = kerrs.FieldValue
-
-// WrapParams groups the metadata Wrap stamps onto the wrapping error when the
-// cause is NOT already an SDK error. When the cause IS an SDK error, origin
-// wins: Code/Reason/Public/Private are inherited from the cause and only
-// params.Code is appended to the wrap trail (ADR 0005).
-type WrapParams = kerrs.WrapParams
-
-// String builds a Field holding a string value.
-func String(key, val string) Field {
-	//: the Field is the kernel's; this facade only forwards.
-	return kerrs.String(key, val)
-}
-
-// Int builds a Field from a plain int (widened to int64 internally),
-// matching the slog / zap Int(key, int) convention.
-func Int(key string, val int) Field {
-	//: the Field is the kernel's; this facade only forwards.
-	return kerrs.Int(key, val)
-}
-
-// Int64 builds a Field from a 64-bit integer (no upcast at the call site).
-func Int64(key string, val int64) Field {
-	//: the Field is the kernel's; this facade only forwards.
-	return kerrs.Int64(key, val)
-}
-
-// Bool builds a Field holding a boolean value.
-func Bool(key string, val bool) Field {
-	//: the Field is the kernel's; this facade only forwards.
-	return kerrs.Bool(key, val)
-}
-
-// Float builds a Field holding a float64 value (shortest round-trip render).
-func Float(key string, val float64) Field {
-	//: the Field is the kernel's; this facade only forwards.
-	return kerrs.Float(key, val)
-}
-
-// NewFieldValue builds a string-typed Field. Provided for tooling that
-// expects a New-prefixed factory; prefer String for the common case.
-func NewFieldValue(key, val string) Field {
-	//: the Field is the kernel's; this facade only forwards.
-	return kerrs.NewFieldValue(key, val)
-}
-
 // New constructs a typed SDK error at runtime. On success the returned error
 // carries code / reason / public / private plus any fields. On a structural
 // failure it returns a typed validation error (CodeInvalidCode / Reason /

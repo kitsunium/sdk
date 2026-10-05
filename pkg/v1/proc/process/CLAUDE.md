@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T16:42:12Z -->
+<!-- updated: 2026-10-05T12:00:00Z -->
 # pkg/v1/proc/process
 
 Public facade for the SDK's keystone process-spawn primitive (ADR 0016). Start a
@@ -18,7 +18,7 @@ the build it came from.
   (`SIGTERM`/`SIGKILL`/`SIGINT`/`SIGHUP`/`SIGQUIT`) and the most-used resource
   sentinels, so callers drive `Stop`/`SignalGroup` and build `Spec.Rlimits`
   without importing `internal/core/proc` (which they cannot — it is internal).
-- **Stdio re-exports** (`stdio.go`): `StdioMode` and `StdioInherit` /
+- **Stdio re-exports** (`facade_gen.go` since ADR 0166; `stdio.go`, which held them, is gone and its package comment joined `signals.go`'s): `StdioMode` and `StdioInherit` /
   `StdioNull` / `StdioCapture`, so a consumer sets `Spec.Stdio` — and captures
   a child's output into any `io.Writer` — with public names only.
   `TestCaptureAndBareNamesThroughTheFacade` is that consumer.
@@ -96,3 +96,7 @@ The facade suite follows the same split: `process_other_test.go`
 facade test used to carry `!unix` and assert the refusal on Windows too, a year
 after Windows gained its backend; the first Windows run of the suite found it
 (ADR 0095).
+
+## Generated
+
+`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/proc.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the package comment and the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.

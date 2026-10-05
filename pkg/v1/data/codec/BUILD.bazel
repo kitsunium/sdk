@@ -15,7 +15,7 @@ go_library(
         "codec.go",
         "codes_gen.go",
         "compressed.go",
-        "multipart.go",
+        "facade_gen.go",
         "promote.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/data/codec",

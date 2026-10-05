@@ -56,17 +56,36 @@ packages:
   - constants:
       - name: Format
         value: "\"cbor\""
-      - name: CodeMarshalFailed
-        type: errs.Code
-        value: "0x00_03_06_01"
-      - name: CodeUnmarshalFailed
-        type: errs.Code
-        value: "0x00_03_06_02"
+    facade:
+      - const:
+          - doc: |-
+              CodeMarshalFailed is 0.3.6.1: a value CBOR cannot carry, invalid UTF-8,
+              nesting past the bound.
+            name: CodeMarshalFailed
+            reexport: corecbor.CodeCBORMarshalFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_06_01"
+          - doc: |-
+              CodeUnmarshalFailed is 0.3.6.2: input that is not one well-formed item,
+              or an item the target cannot hold.
+            name: CodeUnmarshalFailed
+            reexport: corecbor.CodeCBORUnmarshalFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_06_02"
+        doc: The error codes, range 0.3.6.*, declared in the core (ADR 0160).
+      - doc: "The sentinels, for errors.Is: each carries the code of the same name."
+        var:
+          - doc: MarshalFailed is the sentinel of [CodeMarshalFailed].
+            name: MarshalFailed
+            reexport: corecbor.MarshalFailed
+            type: "*errs.Error"
+          - doc: UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].
+            name: UnmarshalFailed
+            reexport: corecbor.UnmarshalFailed
+            type: "*errs.Error"
     imports:
+      corecbor: github.com/kitsunium/sdk/internal/core/data/codec/cbor
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/pkg/v1/data/codec/cbor
-    variables:
-      - name: MarshalFailed
-        type: "*errs.Error"
-      - name: UnmarshalFailed
-        type: "*errs.Error"

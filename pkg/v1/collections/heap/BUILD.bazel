@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "heap",
-    srcs = ["heap.go"],
+    srcs = [
+        "facade_gen.go",
+        "heap.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/collections/heap",
     visibility = ["//visibility:public"],
     deps = ["//internal/kernel/collections/heap"],

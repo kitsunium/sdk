@@ -55,7 +55,7 @@ const LimitInfinity uint64 = coreproc.LimitInfinity
 ```
 
 <a name="Apply"></a>
-## func [Apply](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/rlimit/rlimit.go#L99>)
+## func [Apply](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/rlimit/facade_gen.go#L54>)
 
 ```go
 func Apply(pid int, limits map[Resource]Limit) error
@@ -64,7 +64,7 @@ func Apply(pid int, limits map[Resource]Limit) error
 Apply sets the soft/hard ceilings in limits on the process identified by pid. A pid of 0 targets the calling process; any other pid targets that process via prlimit64\(2\) and needs CAP\_SYS\_RESOURCE. It returns UnknownResource for an unmapped resource, RlimitFailed on a syscall failure, and UnsupportedPlatform off Linux.
 
 <a name="PrepareSysProcAttr"></a>
-## func [PrepareSysProcAttr](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/rlimit/rlimit.go#L109>)
+## func [PrepareSysProcAttr](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/rlimit/facade_gen.go#L63>)
 
 ```go
 func PrepareSysProcAttr(limits map[Resource]Limit) error
@@ -73,7 +73,7 @@ func PrepareSysProcAttr(limits map[Resource]Limit) error
 PrepareSysProcAttr validates limits without issuing any syscall and reports whether they can be applied on this platform, returning the same typed errors Apply would \(UnknownResource / UnsupportedPlatform\). Use it to fail fast at Spec\-construction time; Go's SysProcAttr has no rlimit field, so the actual application happens post\-fork via Apply.
 
 <a name="Limit"></a>
-## type [Limit](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/rlimit/rlimit.go#L92>)
+## type [Limit](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/rlimit/facade_gen.go#L47>)
 
 Limit is an immutable soft/hard setrlimit\(2\) pair. It aliases the core proc LimitValue type.
 
@@ -82,7 +82,7 @@ type Limit = coreproc.LimitValue
 ```
 
 <a name="Resource"></a>
-## type [Resource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/rlimit/rlimit.go#L88>)
+## type [Resource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/rlimit/facade_gen.go#L43>)
 
 Resource is the abstract, platform\-portable resource enum mapped to a RLIMIT\_\* constant by the service layer. It aliases the core proc type.
 

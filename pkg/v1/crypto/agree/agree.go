@@ -53,10 +53,6 @@ import (
 // is activated by this package's blank import above.
 const kdfAlgorithm corecrypto.Algorithm = "hkdf-sha256"
 
-// KeyLen is the required symmetric key length in bytes (256-bit) — the length of
-// the Key SharedKey returns and that [NewKey] enforces.
-const KeyLen int = corecrypto.KeyLen
-
 // X25519 is Diffie-Hellman over Curve25519 (RFC 7748) — the modern default.
 const X25519 Algorithm = "x25519"
 
@@ -67,18 +63,6 @@ const X25519 Algorithm = "x25519"
 // type system now enforces that separation the way typed Format/Level discipline
 // does elsewhere.
 type Algorithm corecrypto.Algorithm
-
-// Key is an opaque, redacting 256-bit symmetric key — the same key type the AEAD
-// surface uses. SharedKey returns one; its String output is "<redacted>".
-type Key = corecrypto.Key
-
-// NewKey builds a Key from raw, which must be exactly KeyLen (32) bytes. A wrong
-// length returns InvalidKey; the bytes are copied defensively. Use it to
-// round-trip a SharedKey-shaped value without importing an unrelated facade.
-func NewKey(raw []byte) (key Key, err error) {
-	//: delegate to the core constructor; this facade adds no behaviour.
-	return corecrypto.NewKey(raw)
-}
 
 // GenerateKey draws a fresh keypair for the named scheme, returning the raw
 // public and private key bytes. An unregistered algorithm returns

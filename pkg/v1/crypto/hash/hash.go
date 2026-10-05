@@ -72,14 +72,6 @@ const FNV1a64 Algorithm = "fnv1a-64"
 // enforces that separation the way typed Format/Level discipline does elsewhere.
 type Algorithm corecrypto.Algorithm
 
-// DigestWriter tees writes into both a destination io.Writer and a running hash,
-// exposing the digest of everything written so far. See [NewDigestWriter].
-type DigestWriter = stdhash.DigestWriter
-
-// VerifyingReader wraps a source reader and verifies its digest against an
-// expected value on the final (EOF) read. See [NewVerifyingReader].
-type VerifyingReader = stdhash.VerifyingReader
-
 // Sum returns the digest of data under the named algorithm. An unregistered
 // algorithm returns UnknownHashAlgorithm.
 func Sum(a Algorithm, data []byte) (digest []byte, err error) {

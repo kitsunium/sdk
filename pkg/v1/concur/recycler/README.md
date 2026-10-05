@@ -47,7 +47,7 @@ A nil factory, a nil reset or capacity function, and a non\-positive cap panic a
 
 
 <a name="CappedPool"></a>
-## type [CappedPool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/recycler/recycler.go#L71>)
+## type [CappedPool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/recycler/facade_gen.go#L21>)
 
 CappedPool is a [Pool](<#Pool>) that resets a value on Put, and drops — without resetting — a value whose capacity is past its threshold. [CappedPool](<#CappedPool>).Get borrows and [CappedPool](<#CappedPool>).Put hands back, as the plain pool's do.
 
@@ -58,7 +58,7 @@ type CappedPool[T any] = krecycler.CappedPool[T]
 ```
 
 <a name="NewCappedPool"></a>
-### func [NewCappedPool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/recycler/recycler.go#L86>)
+### func [NewCappedPool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/recycler/facade_gen.go#L35>)
 
 ```go
 func NewCappedPool[T any](newFn func() T, resetFn func(T), capOfFn func(T) int, maxCap int) *CappedPool[T]
@@ -111,7 +111,7 @@ reset 5 bytes
 </details>
 
 <a name="Pool"></a>
-## type [Pool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/recycler/recycler.go#L63>)
+## type [Pool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/recycler/facade_gen.go#L13>)
 
 Pool is a typed object pool over sync.Pool. [Pool](<#Pool>).Get borrows a value, building one with the factory when the pool is empty, and [Pool](<#Pool>).Put hands one back; a caller must not touch a value after Put. It resets nothing — a caller resets before Put, or uses [CappedPool](<#CappedPool>).
 
@@ -122,7 +122,7 @@ type Pool[T any] = krecycler.Pool[T]
 ```
 
 <a name="NewPool"></a>
-### func [NewPool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/recycler/recycler.go#L76>)
+### func [NewPool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/recycler/facade_gen.go#L26>)
 
 ```go
 func NewPool[T any](newFn func() T) *Pool[T]

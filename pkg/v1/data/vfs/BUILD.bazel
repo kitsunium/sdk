@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "vfs",
-    srcs = ["vfs.go"],
+    srcs = [
+        "facade_gen.go",
+        "vfs.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/data/vfs",
     visibility = ["//visibility:public"],
     deps = [

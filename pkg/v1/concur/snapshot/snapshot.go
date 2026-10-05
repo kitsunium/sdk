@@ -45,25 +45,3 @@
 //   - A Value must not be copied after first use: hold it in a struct used
 //     behind a pointer, or behind a pointer itself.
 package snapshot
-
-import (
-	ksnapshot "github.com/kitsunium/sdk/internal/kernel/concur/snapshot"
-)
-
-// Value is a copy-on-write container for a *T. The zero value is ready to use
-// and holds nil until the first Store.
-//
-// [Value].Load returns the current pointer without a lock — one atomic load,
-// no allocation — and the pointer it returns must be treated as immutable.
-// [Value].Store replaces it, [Value].Swap replaces it and returns the previous
-// one, and [Value].Update runs a function from the current pointer to the
-// next under the writers' lock, so a concurrent writer can never interleave
-// with the read-modify-write. Writers serialise; readers never wait.
-type Value[T any] = ksnapshot.Value[T]
-
-// NewValue returns a [Value] holding initial — call-site sugar for a value
-// known up front. A nil initial leaves it empty, as the zero value is.
-func NewValue[T any](initial *T) *Value[T] {
-	//: the kernel owns the container; this facade only forwards.
-	return ksnapshot.NewValue(initial)
-}

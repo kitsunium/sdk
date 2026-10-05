@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "batcher",
-    srcs = ["batcher.go"],
+    srcs = [
+        "batcher.go",
+        "facade_gen.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/concur/batcher",
     visibility = ["//visibility:public"],
     deps = ["//internal/kernel/concur/batcher"],

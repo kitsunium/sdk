@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T16:42:12Z -->
+<!-- updated: 2026-10-05T12:00:00Z -->
 # pkg/v1/data/codec/
 
 ## Purpose
@@ -19,9 +19,12 @@ compressed.go — MarshalCompressed / UnmarshalCompressed verbs + CompressAlgori
                 (ADR 0014 D1); compresses and decompresses through pkg/v1/data/transform
                 (DecompressBounded at the frame's 64 MiB), whose import registers
                 gzip+flate+zlib — only gzip and flate are framed
-multipart.go  — MultipartForm / MultipartPart aliases + MultipartContentType: exactly what a
-                consumer needs to build a file upload, send it, and read it back (see
-                §Multipart below) — the multipart package's Form, Part and ContentType
+facade_gen.go — kit's (ADR 0166), from design/data/codec.yaml's facade:: the aliases and
+                forwarders the files here name, and what multipart.go held before its
+                package comment joined promote.go's — MultipartForm / MultipartPart
+                aliases + MultipartContentType: exactly what a consumer needs to build a
+                file upload, send it, and read it back (see §Multipart below) — the
+                multipart package's Form, Part and ContentType
 promote.go    — the JSON-bridge promotion path for codecs whose native shape cannot hold an
                 arbitrary Go value (csv, form, pem, flatbuffers, tlv, ndjson): wrapForFormat
                 builds the container, containerForFormat + the extract* closures read it
@@ -83,7 +86,7 @@ This facade documented the `Multipart` format's native shape as
 `multipart.FormValue` and its header helper as `multipart.ContentType` while
 both lived only under `internal/`, which a consumer cannot import — the
 advertised uploads were reachable only as the JSON-mediated `_json` part.
-`multipart.go` publishes exactly what building, sending and reading back an
+`facade_gen.go` publishes exactly what building, sending and reading back an
 upload needs, as type aliases (the `CompressAlgorithm` precedent), so there is
 no conversion at the edge and the `Codec` interface is not widened (ADR 0037):
 
@@ -153,6 +156,10 @@ other codec in `go list -deps`.
 - Blank-import a service codec here. The aggregate reaches every codec through its per-format package, so a format has one public door, and a format added without one is a format this package cannot reach.
 - Rename an existing `Format` string value — it's part of the frozen public contract.
 - Surface `errs.PrivateOf` output from codec errors to end users; the Private field names internal package paths.
+
+## Generated
+
+`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/data/codec.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the package comment and the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
 
 ## Verification
 

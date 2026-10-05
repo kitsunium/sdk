@@ -105,27 +105,58 @@ packages:
         value: "\"base58\""
       - name: Base62
         value: "\"base62\""
-      - name: CodeMarshalFailed
-        type: errs.Code
-        value: "0x00_03_18_01"
-      - name: CodeUnmarshalFailed
-        type: errs.Code
-        value: "0x00_03_18_02"
-      - name: CodeDecodeFailed
-        type: errs.Code
-        value: "0x00_03_18_03"
-      - name: CodeSizeExceeded
-        type: errs.Code
-        value: "0x00_03_18_04"
+    facade:
+      - const:
+          - doc: "CodeMarshalFailed is 0.3.24.1: the value has no JSON encoding."
+            name: CodeMarshalFailed
+            reexport: corebaseenc.CodeBaseEncMarshalFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_18_01"
+          - doc: |-
+              CodeUnmarshalFailed is 0.3.24.2: the decoded text is not JSON the target
+              can hold.
+            name: CodeUnmarshalFailed
+            reexport: corebaseenc.CodeBaseEncUnmarshalFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_18_02"
+          - doc: |-
+              CodeDecodeFailed is 0.3.24.3: the input is not text of the Format's
+              alphabet.
+            name: CodeDecodeFailed
+            reexport: corebaseenc.CodeBaseEncDecodeFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_18_03"
+          - doc: |-
+              CodeSizeExceeded is 0.3.24.4: an input past its bound — 10 MiB, 4 KiB
+              for base58 and base62.
+            name: CodeSizeExceeded
+            reexport: corebaseenc.CodeBaseEncSizeExceeded
+            type: errs.Code
+            typed: true
+            value: "0x00_03_18_04"
+        doc: The error codes, range 0.3.24.*, declared in the core (ADR 0160).
+      - doc: "The sentinels, for errors.Is: each carries the code of the same name."
+        var:
+          - doc: MarshalFailed is the sentinel of [CodeMarshalFailed].
+            name: MarshalFailed
+            reexport: corebaseenc.BaseEncMarshalFailed
+            type: "*errs.Error"
+          - doc: UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].
+            name: UnmarshalFailed
+            reexport: corebaseenc.BaseEncUnmarshalFailed
+            type: "*errs.Error"
+          - doc: DecodeFailed is the sentinel of [CodeDecodeFailed].
+            name: DecodeFailed
+            reexport: corebaseenc.BaseEncDecodeFailed
+            type: "*errs.Error"
+          - doc: SizeExceeded is the sentinel of [CodeSizeExceeded].
+            name: SizeExceeded
+            reexport: corebaseenc.BaseEncSizeExceeded
+            type: "*errs.Error"
     imports:
+      corebaseenc: github.com/kitsunium/sdk/internal/core/data/codec/baseenc
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/pkg/v1/data/codec/baseenc
-    variables:
-      - name: MarshalFailed
-        type: "*errs.Error"
-      - name: UnmarshalFailed
-        type: "*errs.Error"
-      - name: DecodeFailed
-        type: "*errs.Error"
-      - name: SizeExceeded
-        type: "*errs.Error"

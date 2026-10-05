@@ -32,8 +32,6 @@
 package asn1
 
 import (
-	coreasn1 "github.com/kitsunium/sdk/internal/core/data/codec/asn1"
-	"github.com/kitsunium/sdk/internal/kernel/errs"
 	// The implementation registers itself with the codec registry as it is
 	// initialised; importing it is what registers the format.
 	_ "github.com/kitsunium/sdk/internal/service/data/codec/asn1"
@@ -43,20 +41,3 @@ import (
 // so it goes wherever a format name is taken — the codec package's Marshal,
 // config.FSSource's string, i18n.LoadFS's codec.Format — without a conversion.
 const Format = "asn1-der"
-
-// The error codes, range 0.3.9.*, declared in the core (ADR 0160).
-const (
-	// CodeMarshalFailed is 0.3.9.1: encoding/asn1 could not encode the value.
-	CodeMarshalFailed errs.Code = coreasn1.CodeASN1MarshalFailed
-	// CodeUnmarshalFailed is 0.3.9.2: the input is not DER or BER the target
-	// can hold.
-	CodeUnmarshalFailed errs.Code = coreasn1.CodeASN1UnmarshalFailed
-)
-
-// The sentinels, for errors.Is: each carries the code of the same name.
-var (
-	// MarshalFailed is the sentinel of [CodeMarshalFailed].
-	MarshalFailed = coreasn1.MarshalFailed
-	// UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].
-	UnmarshalFailed = coreasn1.UnmarshalFailed
-)

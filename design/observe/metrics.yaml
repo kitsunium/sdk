@@ -829,260 +829,565 @@ packages:
         type: coremetrics.Exporter
       - name: Text
         type: coremetrics.Exporter
-  - aliases:
-      - name: OTLPHTTPConfig
-        target: svcmetrics.OTLPHTTPConfig
-      - name: Meter
-        target: coremetrics.Meter
-      - name: UpDownMeter
-        target: coremetrics.UpDownMeter
-      - name: AsyncMeter
-        target: coremetrics.AsyncMeter
-      - name: Describer
-        target: coremetrics.Describer
-      - name: FullMeter
-        target: coremetrics.FullMeter
-      - name: Counter
-        target: coremetrics.Counter
-      - name: UpDownCounter
-        target: coremetrics.UpDownCounter
-      - name: Gauge
-        target: coremetrics.Gauge
-      - name: Histogram
-        target: coremetrics.Histogram
-      - name: Attr
-        target: coreotel.AttrValue
-      - name: AttrKind
-        target: coreotel.AttrKind
-      - name: Temporality
-        target: coremetrics.Temporality
-      - name: Resource
-        target: coreotel.ResourceValue
-      - name: Scope
-        target: coreotel.ScopeValue
-      - name: Snapshot
-        target: coremetrics.SnapshotValue
-      - name: SumMetric
-        target: coremetrics.SumMetricValue
-      - name: SumPoint
-        target: coremetrics.SumValue
-      - name: GaugeMetric
-        target: coremetrics.GaugeMetricValue
-      - name: GaugePoint
-        target: coremetrics.GaugeValue
-      - name: HistogramMetric
-        target: coremetrics.HistogramMetricValue
-      - name: HistogramPoint
-        target: coremetrics.HistogramValue
-      - name: ObserveInt64
-        target: coremetrics.ObserveInt64
-      - name: ObserveFloat64
-        target: coremetrics.ObserveFloat64
-      - name: Int64Callback
-        target: coremetrics.Int64Callback
-      - name: Float64Callback
-        target: coremetrics.Float64Callback
-      - name: MeterConfig
-        target: svcmetrics.MeterConfig
-      - name: Exporter
-        target: coremetrics.Exporter
-      - name: ExporterName
-        target: coremetrics.ExporterName
-    constants:
-      - name: DefaultMaxSeriesPerInstrument
-        type: int
-        value: "2000"
-      - name: OverflowAttrKey
-        type: string
-        value: "\"sdk_metric_overflow\""
-      - name: ServiceNameKey
-        type: string
-        value: "\"service.name\""
-      - name: UnknownService
-        type: string
-        value: "\"unknown_service\""
-      - name: DefaultScopeName
-        type: string
-        value: "\"github.com/kitsunium/sdk/pkg/v1/observe/metrics\""
-      - name: OTLPMetricsPath
-        type: string
-        value: "\"/v1/metrics\""
-      - name: DefaultOTLPTimeout
-        type: time.Duration
-        value: "10000000000"
-      - name: DefaultOTLPMaxResponseBytes
-        type: int64
-        value: 1 << 20
-      - name: AttrKindInvalid
-        type: AttrKind
-        value: "0"
-      - name: AttrKindString
-        type: AttrKind
-        value: "1"
-      - name: AttrKindBool
-        type: AttrKind
-        value: "2"
-      - name: AttrKindInt64
-        type: AttrKind
-        value: "3"
-      - name: AttrKindFloat64
-        type: AttrKind
-        value: "4"
-      - name: TemporalityUnspecified
-        type: Temporality
-        value: "0"
-      - name: TemporalityDelta
-        type: Temporality
-        value: "1"
-      - name: TemporalityCumulative
-        type: Temporality
-        value: "2"
-    functions:
-      - in:
-          - name: key
-          - name: value
+  - facade:
+      - const:
+          - doc: |-
+              DefaultMaxSeriesPerInstrument is the cardinality bound NewMeter applies,
+              and the value a non-positive MeterConfig knob clamps to.
+            name: DefaultMaxSeriesPerInstrument
+            reexport: svcmetrics.DefaultMaxSeriesPerInstrument
+            type: int
+            typed: true
+            value: "2000"
+          - doc: |-
+              OverflowAttrKey is the reserved attribute naming a meter's aggregated
+              overflow series. It appears in a snapshot only once an instrument has
+              exceeded its cardinality bound, and its value is the boolean true.
+            name: OverflowAttrKey
+            reexport: coremetrics.OverflowAttrKey
             type: string
-        name: String
-        out:
-          - type: Attr
-      - in:
-          - name: key
+            typed: true
+            value: "\"sdk_metric_overflow\""
+          - doc: |-
+              ServiceNameKey is the attribute key the OTel resource semantic
+              conventions reserve for the logical name of the service.
+            name: ServiceNameKey
+            reexport: coreotel.ServiceNameKey
             type: string
-          - name: value
-            type: bool
-        name: Bool
-        out:
-          - type: Attr
-      - in:
-          - name: key
+            typed: true
+            value: "\"service.name\""
+          - doc: |-
+              UnknownService is the service.name the specification mandates when a
+              producer supplies none.
+            name: UnknownService
+            reexport: coreotel.UnknownService
             type: string
-          - name: value
+            typed: true
+            value: "\"unknown_service\""
+          - doc: |-
+              DefaultScopeName names this SDK as the instrumenting library when a
+              caller declares no scope of their own.
+            name: DefaultScopeName
+            reexport: coremetrics.DefaultScopeName
+            type: string
+            typed: true
+            value: "\"github.com/kitsunium/sdk/pkg/v1/observe/metrics\""
+          - doc: |-
+              OTLPMetricsPath is the URL path OTLP/HTTP reserves for the metrics
+              signal. An OTLP endpoint is a full URL used as-is, so append this to a
+              collector's base address rather than hoping the SDK guesses it.
+            name: OTLPMetricsPath
+            reexport: svcmetrics.OTLPMetricsPath
+            type: string
+            typed: true
+            value: "\"/v1/metrics\""
+          - doc: |-
+              DefaultOTLPTimeout bounds one OTLP/HTTP export round trip when
+              OTLPHTTPConfig leaves Timeout unset. It is the OpenTelemetry protocol
+              exporter specification's own default, not a figure this SDK invented.
+            name: DefaultOTLPTimeout
+            reexport: svcmetrics.DefaultOTLPTimeout
+            type: time.Duration
+            typed: true
+            value: "10000000000"
+          - doc: |-
+              DefaultOTLPMaxResponseBytes caps how much of a collector's response is
+              read. The body is the one length a remote party controls in this
+              exchange, and a conforming response is a few hundred bytes.
+            name: DefaultOTLPMaxResponseBytes
+            reexport: svcmetrics.DefaultOTLPMaxResponseBytes
             type: int64
-        name: Int64
-        out:
-          - type: Attr
-      - in:
-          - name: key
-            type: string
-          - name: value
-            type: float64
-        name: Float64
-        out:
-          - type: Attr
-      - name: NewMeter
-        out:
-          - type: FullMeter
-      - in:
-          - name: cfg
-            type: MeterConfig
-        name: NewMeterWithConfig
-        out:
-          - type: FullMeter
-      - in:
-          - name: name
-            type: ExporterName
-          - name: dst
-            type: io.Writer
-        name: NewTextExporter
-        out:
-          - type: Exporter
-      - in:
-          - name: name
-            type: ExporterName
-          - name: dst
-            type: io.Writer
-        name: NewPrometheusExporter
-        out:
-          - type: Exporter
-      - in:
-          - name: snap
-            type: Snapshot
-        name: EncodeOTLPJSON
-        out:
-          - name: doc
-            type: "[]byte"
-          - name: err
-            type: error
-      - in:
-          - name: name
-            type: ExporterName
-          - name: dst
-            type: io.Writer
-        name: NewOTLPJSONExporter
-        out:
-          - type: Exporter
-      - in:
-          - name: name
-            type: ExporterName
-          - name: cfg
-            type: OTLPHTTPConfig
-        name: NewOTLPHTTPExporter
-        out:
-          - name: exporter
-            type: Exporter
-          - name: err
-            type: error
-      - in:
-          - name: err
-            type: error
-        name: OTLPRetryable
-        out:
-          - type: bool
-      - in:
-          - name: e
-            type: Exporter
-        name: RegisterExporter
-        out:
-          - type: Exporter
-      - in:
-          - name: name
-            type: ExporterName
-          - name: snap
-            type: Snapshot
-        name: Export
-        out:
-          - type: error
-      - name: AvailableExporters
-        out:
-          - type: "[]ExporterName"
+            typed: true
+            value: 1 << 20
+      - alias:
+          - doc: OTLPHTTPConfig is the public alias for an OTLP/HTTP exporter's configuration.
+            name: OTLPHTTPConfig
+            target: svcmetrics.OTLPHTTPConfig
+      - alias:
+          - doc: |-
+              Meter is the public alias for the frozen instrument factory: Counter, Gauge,
+              Histogram and Collect.
+            name: Meter
+            target: coremetrics.Meter
+      - alias:
+          - doc: |-
+              UpDownMeter is the public alias for the sibling port that mints the
+              non-monotonic sum Meter cannot.
+            name: UpDownMeter
+            target: coremetrics.UpDownMeter
+      - alias:
+          - doc: |-
+              AsyncMeter is the public alias for the sibling port that registers
+              observable (asynchronous) instruments.
+            name: AsyncMeter
+            target: coremetrics.AsyncMeter
+      - alias:
+          - doc: |-
+              Describer is the public alias for the sibling port that documents an
+              instrument NAME. It is deliberately NOT part of FullMeter — reach it by type
+              assertion, and read the false case as "this meter records no description".
+            name: Describer
+            target: coremetrics.Describer
+      - alias:
+          - doc: |-
+              FullMeter is the public alias for the union of all three — what NewMeter
+              returns.
+            name: FullMeter
+            target: coremetrics.FullMeter
+      - alias:
+          - doc: Counter is the public alias for a monotonic sum instrument.
+            name: Counter
+            target: coremetrics.Counter
+      - alias:
+          - doc: UpDownCounter is the public alias for a non-monotonic sum instrument.
+            name: UpDownCounter
+            target: coremetrics.UpDownCounter
+      - alias:
+          - doc: Gauge is the public alias for a sampled-reading instrument.
+            name: Gauge
+            target: coremetrics.Gauge
+      - alias:
+          - doc: Histogram is the public alias for a bucketed distribution instrument.
+            name: Histogram
+            target: coremetrics.Histogram
+      - alias:
+          - doc: Attr is the public alias for one typed dimension of a series.
+            name: Attr
+            target: coreotel.AttrValue
+      - alias:
+          - doc: AttrKind is the public alias for an attribute value's type tag.
+            name: AttrKind
+            target: coreotel.AttrKind
+      - const:
+          - doc: AttrKindInvalid marks an attribute whose value no constructor ever set.
+            name: AttrKindInvalid
+            reexport: coreotel.AttrKindInvalid
+            type: AttrKind
+            typed: true
+            value: "0"
+      - const:
+          - doc: AttrKindString marks a string-valued attribute.
+            name: AttrKindString
+            reexport: coreotel.AttrKindString
+            type: AttrKind
+            typed: true
+            value: "1"
+      - const:
+          - doc: AttrKindBool marks a bool-valued attribute.
+            name: AttrKindBool
+            reexport: coreotel.AttrKindBool
+            type: AttrKind
+            typed: true
+            value: "2"
+      - const:
+          - doc: AttrKindInt64 marks a signed 64-bit integer attribute.
+            name: AttrKindInt64
+            reexport: coreotel.AttrKindInt64
+            type: AttrKind
+            typed: true
+            value: "3"
+      - const:
+          - doc: AttrKindFloat64 marks an IEEE-754 double attribute.
+            name: AttrKindFloat64
+            reexport: coreotel.AttrKindFloat64
+            type: AttrKind
+            typed: true
+            value: "4"
+      - alias:
+          - doc: Temporality is the public alias for a metric's aggregation temporality.
+            name: Temporality
+            target: coremetrics.Temporality
+      - const:
+          - doc: |-
+              TemporalityUnspecified is the unset zero value; it resolves to
+              TemporalityCumulative and never reaches a Snapshot.
+            name: TemporalityUnspecified
+            reexport: coremetrics.TemporalityUnspecified
+            type: Temporality
+            typed: true
+            value: "0"
+      - const:
+          - doc: TemporalityDelta reports the window since the previous collection.
+            name: TemporalityDelta
+            reexport: coremetrics.TemporalityDelta
+            type: Temporality
+            typed: true
+            value: "1"
+      - const:
+          - doc: TemporalityCumulative reports the window since the series started.
+            name: TemporalityCumulative
+            reexport: coremetrics.TemporalityCumulative
+            type: Temporality
+            typed: true
+            value: "2"
+      - alias:
+          - doc: |-
+              Resource is the public alias for the producer's identity, carried once per
+              snapshot.
+            name: Resource
+            target: coreotel.ResourceValue
+      - alias:
+          - doc: |-
+              Scope is the public alias for the instrumentation's identity, carried once
+              per snapshot.
+            name: Scope
+            target: coreotel.ScopeValue
+      - alias:
+          - doc: Snapshot is the public alias for a whole-meter point-in-time copy.
+            name: Snapshot
+            target: coremetrics.SnapshotValue
+      - alias:
+          - doc: |-
+              SumMetric is the public alias for every series of one sum instrument name,
+              plus its temporality and monotonicity.
+            name: SumMetric
+            target: coremetrics.SumMetricValue
+      - alias:
+          - doc: SumPoint is the public alias for one sum series.
+            name: SumPoint
+            target: coremetrics.SumValue
+      - alias:
+          - doc: GaugeMetric is the public alias for every series of one gauge instrument name.
+            name: GaugeMetric
+            target: coremetrics.GaugeMetricValue
+      - alias:
+          - doc: GaugePoint is the public alias for one gauge series.
+            name: GaugePoint
+            target: coremetrics.GaugeValue
+      - alias:
+          - doc: |-
+              HistogramMetric is the public alias for every series of one histogram
+              instrument name, plus its temporality.
+            name: HistogramMetric
+            target: coremetrics.HistogramMetricValue
+      - alias:
+          - doc: HistogramPoint is the public alias for one histogram series.
+            name: HistogramPoint
+            target: coremetrics.HistogramValue
+      - alias:
+          - doc: |-
+              ObserveInt64 is the public alias for the reporting function an integer
+              observable callback is handed.
+            name: ObserveInt64
+            target: coremetrics.ObserveInt64
+      - alias:
+          - doc: |-
+              ObserveFloat64 is the public alias for the reporting function a double
+              observable callback is handed.
+            name: ObserveFloat64
+            target: coremetrics.ObserveFloat64
+      - alias:
+          - doc: Int64Callback is the public alias for an integer observable's callback.
+            name: Int64Callback
+            target: coremetrics.Int64Callback
+      - alias:
+          - doc: Float64Callback is the public alias for a double observable's callback.
+            name: Float64Callback
+            target: coremetrics.Float64Callback
+      - alias:
+          - doc: MeterConfig is the public alias for a Meter's configuration.
+            name: MeterConfig
+            target: svcmetrics.MeterConfig
+      - alias:
+          - doc: Exporter is the public alias for a snapshot shipper.
+            name: Exporter
+            target: coremetrics.Exporter
+      - alias:
+          - doc: ExporterName is the public alias for an exporter's registry key.
+            name: ExporterName
+            target: coremetrics.ExporterName
+      - var:
+          - doc: UnknownExporter is returned by Export when no exporter matches the name.
+            name: UnknownExporter
+            reexport: coremetrics.UnknownExporter
+            type: "*errs.Error"
+          - doc: ExportFailed wraps an exporter's shipping failure.
+            name: ExportFailed
+            reexport: coremetrics.ExportFailed
+            type: "*errs.Error"
+          - doc: InstrumentKindConflict is raised when a name is reused across kinds.
+            name: InstrumentKindConflict
+            reexport: coremetrics.InstrumentKindConflict
+            type: "*errs.Error"
+          - doc: |-
+              InvalidAttribute is raised when an attribute set has an empty or
+              repeated key, or a value no constructor ever set.
+            name: InvalidAttribute
+            reexport: coremetrics.InvalidAttribute
+            type: "*errs.Error"
+          - doc: |-
+              InvalidTemporality is raised when a MeterConfig carries a Temporality
+              that is none of the three constants.
+            name: InvalidTemporality
+            reexport: coremetrics.InvalidTemporality
+            type: "*errs.Error"
+          - doc: |-
+              InvalidDescription is raised when Describe is handed an empty
+              description, which would document nothing.
+            name: InvalidDescription
+            reexport: coremetrics.InvalidDescription
+            type: "*errs.Error"
+          - doc: |-
+              DescriptionConflict is raised when a second, DIFFERENT description is
+              bound to an instrument name that already has one.
+            name: DescriptionConflict
+            reexport: coremetrics.DescriptionConflict
+            type: "*errs.Error"
+          - doc: |-
+              InvalidMetricName is returned by the Prometheus connector when an
+              instrument name is not a valid Prometheus metric name.
+            name: InvalidMetricName
+            reexport: coremetrics.InvalidMetricName
+            type: "*errs.Error"
+          - doc: |-
+              InvalidLabelName is returned by the Prometheus connector when an
+              attribute key is not a valid Prometheus label name.
+            name: InvalidLabelName
+            reexport: coremetrics.InvalidLabelName
+            type: "*errs.Error"
+          - doc: |-
+              ReservedLabelName is returned by the Prometheus connector when an
+              attribute key is legal but reserved — a "__" prefix, or "le" on a
+              histogram.
+            name: ReservedLabelName
+            reexport: coremetrics.ReservedLabelName
+            type: "*errs.Error"
+          - doc: |-
+              UnsupportedTemporality is returned by the Prometheus connector when the
+              snapshot is not cumulative — a delta one, which the exposition format
+              cannot express, or a hand-built one whose temporality is unresolved.
+            name: UnsupportedTemporality
+            reexport: coremetrics.UnsupportedTemporality
+            type: "*errs.Error"
+          - doc: |-
+              OTLPUnresolvedTemporality is returned by the OTLP/JSON encoder when a
+              metric's temporality is neither delta nor cumulative. The schema's
+              UNSPECIFIED value is documented as one that MUST NOT be used.
+            name: OTLPUnresolvedTemporality
+            reexport: coremetrics.OTLPUnresolvedTemporality
+            type: "*errs.Error"
+          - doc: |-
+              OTLPInvalidBucketLayout is returned by the OTLP/JSON encoder when a
+              histogram's buckets are not one count more than strictly-increasing
+              finite bounds.
+            name: OTLPInvalidBucketLayout
+            reexport: coremetrics.OTLPInvalidBucketLayout
+            type: "*errs.Error"
+          - doc: |-
+              OTLPEndpointInvalid is returned by NewOTLPHTTPExporter when the endpoint
+              is not an absolute http(s) URL carrying the signal path.
+            name: OTLPEndpointInvalid
+            reexport: coremetrics.OTLPEndpointInvalid
+            type: "*errs.Error"
+          - doc: |-
+              OTLPExportRejected is returned when a collector refuses the payload with
+              a status the specification marks non-retryable.
+            name: OTLPExportRejected
+            reexport: coremetrics.OTLPExportRejected
+            type: "*errs.Error"
+          - doc: |-
+              OTLPExportUnavailable is returned when an OTLP/HTTP export fails
+              transiently — a transport fault, or HTTP 429/502/503/504. It is the one
+              OTLPRetryable reports true for.
+            name: OTLPExportUnavailable
+            reexport: coremetrics.OTLPExportUnavailable
+            type: "*errs.Error"
+          - doc: |-
+              OTLPPartialSuccess is returned when a collector accepts the request but
+              rejects some of its data points. The specification forbids retrying it.
+            name: OTLPPartialSuccess
+            reexport: coremetrics.OTLPPartialSuccess
+            type: "*errs.Error"
+      - func:
+          doc: |-
+            String returns a string-valued attribute. It is the shortest of the four
+            constructors to write because a string dimension is the common one.
+          forward: coreotel.String
+          in:
+            - name: key
+            - name: value
+              type: string
+          name: String
+          out:
+            - type: Attr
+      - func:
+          doc: Bool returns a bool-valued attribute.
+          forward: coreotel.Bool
+          in:
+            - name: key
+              type: string
+            - name: value
+              type: bool
+          name: Bool
+          out:
+            - type: Attr
+      - func:
+          doc: Int64 returns a signed-integer attribute.
+          forward: coreotel.Int64
+          in:
+            - name: key
+              type: string
+            - name: value
+              type: int64
+          name: Int64
+          out:
+            - type: Attr
+      - func:
+          doc: |-
+            Float64 returns a double attribute. A float is a measurement rather than a
+            dimension, and it is keyed on its bit pattern — see the core documentation.
+          forward: coreotel.Float64
+          in:
+            - name: key
+              type: string
+            - name: value
+              type: float64
+          name: Float64
+          out:
+            - type: Attr
+      - func:
+          doc: |-
+            NewMeter returns a fresh in-memory Meter with every MeterConfig knob at its
+            resolved default: bounded at DefaultMaxSeriesPerInstrument, cumulative,
+            service.name=unknown_service, this SDK as the scope, and the system clock.
+          forward: svcmetrics.NewMeter
+          name: NewMeter
+          out:
+            - type: FullMeter
+      - func:
+          doc: |-
+            NewMeterWithConfig returns a fresh in-memory Meter honouring cfg. Every unset
+            field resolves to a working value and none of them to an inert one.
+          forward: svcmetrics.NewMeterWithConfig
+          in:
+            - name: cfg
+              type: MeterConfig
+          name: NewMeterWithConfig
+          out:
+            - type: FullMeter
+      - func:
+          doc: |-
+            NewTextExporter returns a text Exporter writing to dst under name (not
+            auto-registered).
+          forward: svcmetrics.NewTextExporter
+          in:
+            - name: name
+              type: ExporterName
+            - name: dst
+              type: io.Writer
+          name: NewTextExporter
+          out:
+            - type: Exporter
+      - func:
+          doc: |-
+            NewPrometheusExporter returns an Exporter rendering the Prometheus text
+            exposition format to dst under name (not auto-registered). Hand it the
+            http.ResponseWriter of a /metrics handler; the registered "prometheus"
+            exporter targets stderr and is a diagnostic, not a scrape endpoint.
+          forward: svcmetrics.NewPrometheusExporter
+          in:
+            - name: name
+              type: ExporterName
+            - name: dst
+              type: io.Writer
+          name: NewPrometheusExporter
+          out:
+            - type: Exporter
+      - func:
+          doc: |-
+            EncodeOTLPJSON renders snap as ONE OTLP/JSON ExportMetricsServiceRequest:
+            exactly the bytes that go in the body of a POST to /v1/metrics under
+            Content-Type: application/json.
+
+            It does no I/O, so it is the half of OTLP support that is testable on its
+            own — and the half NewOTLPHTTPExporter calls before it touches a socket.
+          forward: svcmetrics.EncodeOTLPJSON
+          in:
+            - name: snap
+              type: Snapshot
+          name: EncodeOTLPJSON
+          out:
+            - name: doc
+              type: "[]byte"
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            NewOTLPJSONExporter returns an Exporter writing each snapshot to dst as one
+            newline-terminated OTLP/JSON document, so a stream of exports is NDJSON. It
+            is not auto-registered; the registered "otlpjson" exporter is this, on
+            stderr.
+          forward: svcmetrics.NewOTLPJSONExporter
+          in:
+            - name: name
+              type: ExporterName
+            - name: dst
+              type: io.Writer
+          name: NewOTLPJSONExporter
+          out:
+            - type: Exporter
+      - func:
+          doc: |-
+            NewOTLPHTTPExporter returns an Exporter that encodes each snapshot as
+            OTLP/JSON and POSTs it to cfg.Endpoint, which is a full URL used as-is.
+
+            It is never registered, and it never retries — compose resilience.NewRetry
+            with OTLPRetryable instead. A refused endpoint fails here, at wiring, rather
+            than at the first scrape.
+          forward: svcmetrics.NewOTLPHTTPExporter
+          in:
+            - name: name
+              type: ExporterName
+            - name: cfg
+              type: OTLPHTTPConfig
+          name: NewOTLPHTTPExporter
+          out:
+            - name: exporter
+              type: Exporter
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            OTLPRetryable reports whether err is an OTLP/HTTP failure the specification
+            says may be replayed: a transport fault, or HTTP 429 / 502 / 503 / 504.
+            Its signature is resilience.RetryConfig.Retryable's, so it drops in without
+            an adapter.
+          forward: svcmetrics.OTLPRetryable
+          in:
+            - name: err
+              type: error
+          name: OTLPRetryable
+          out:
+            - type: bool
+      - func:
+          doc: RegisterExporter adds e to the process-wide exporter registry.
+          forward: coremetrics.RegisterExporter
+          in:
+            - name: e
+              type: Exporter
+          name: RegisterExporter
+          out:
+            - type: Exporter
+      - func:
+          doc: Export ships snap through the exporter registered as name.
+          forward: coremetrics.Export
+          in:
+            - name: name
+              type: ExporterName
+            - name: snap
+              type: Snapshot
+          name: Export
+          out:
+            - type: error
+      - func:
+          doc: AvailableExporters returns the sorted list of registered exporter names.
+          forward: coremetrics.AvailableExporters
+          name: AvailableExporters
+          out:
+            - type: "[]ExporterName"
     imports:
       coremetrics: github.com/kitsunium/sdk/internal/core/observe/metrics
       coreotel: github.com/kitsunium/sdk/internal/core/observe/otel
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       svcmetrics: github.com/kitsunium/sdk/internal/service/observe/metrics
     path: github.com/kitsunium/sdk/pkg/v1/observe/metrics
-    variables:
-      - name: UnknownExporter
-        type: "*errs.Error"
-      - name: ExportFailed
-        type: "*errs.Error"
-      - name: InstrumentKindConflict
-        type: "*errs.Error"
-      - name: InvalidAttribute
-        type: "*errs.Error"
-      - name: InvalidTemporality
-        type: "*errs.Error"
-      - name: InvalidDescription
-        type: "*errs.Error"
-      - name: DescriptionConflict
-        type: "*errs.Error"
-      - name: InvalidMetricName
-        type: "*errs.Error"
-      - name: InvalidLabelName
-        type: "*errs.Error"
-      - name: ReservedLabelName
-        type: "*errs.Error"
-      - name: UnsupportedTemporality
-        type: "*errs.Error"
-      - name: OTLPUnresolvedTemporality
-        type: "*errs.Error"
-      - name: OTLPInvalidBucketLayout
-        type: "*errs.Error"
-      - name: OTLPEndpointInvalid
-        type: "*errs.Error"
-      - name: OTLPExportRejected
-        type: "*errs.Error"
-      - name: OTLPExportUnavailable
-        type: "*errs.Error"
-      - name: OTLPPartialSuccess
-        type: "*errs.Error"

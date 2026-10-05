@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "mac",
-    srcs = ["mac.go"],
+    srcs = [
+        "facade_gen.go",
+        "mac.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/crypto/mac",
     visibility = ["//visibility:public"],
     deps = [

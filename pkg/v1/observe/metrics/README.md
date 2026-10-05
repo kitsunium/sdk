@@ -304,7 +304,7 @@ var (
 ```
 
 <a name="EncodeOTLPJSON"></a>
-## func [EncodeOTLPJSON](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L545>)
+## func [EncodeOTLPJSON](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L280>)
 
 ```go
 func EncodeOTLPJSON(snap Snapshot) (doc []byte, err error)
@@ -315,7 +315,7 @@ EncodeOTLPJSON renders snap as ONE OTLP/JSON ExportMetricsServiceRequest: exactl
 It does no I/O, so it is the half of OTLP support that is testable on its own — and the half NewOTLPHTTPExporter calls before it touches a socket.
 
 <a name="Export"></a>
-## func [Export](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L586>)
+## func [Export](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L316>)
 
 ```go
 func Export(name ExporterName, snap Snapshot) error
@@ -324,7 +324,7 @@ func Export(name ExporterName, snap Snapshot) error
 Export ships snap through the exporter registered as name.
 
 <a name="OTLPRetryable"></a>
-## func [OTLPRetryable](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L574>)
+## func [OTLPRetryable](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L306>)
 
 ```go
 func OTLPRetryable(err error) bool
@@ -333,7 +333,7 @@ func OTLPRetryable(err error) bool
 OTLPRetryable reports whether err is an OTLP/HTTP failure the specification says may be replayed: a transport fault, or HTTP 429 / 502 / 503 / 504. Its signature is resilience.RetryConfig.Retryable's, so it drops in without an adapter.
 
 <a name="AsyncMeter"></a>
-## type [AsyncMeter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L315>)
+## type [AsyncMeter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L58>)
 
 AsyncMeter is the public alias for the sibling port that registers observable \(asynchronous\) instruments.
 
@@ -342,7 +342,7 @@ type AsyncMeter = coremetrics.AsyncMeter
 ```
 
 <a name="Attr"></a>
-## type [Attr](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L339>)
+## type [Attr](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L82>)
 
 Attr is the public alias for one typed dimension of a series.
 
@@ -351,7 +351,7 @@ type Attr = coreotel.AttrValue
 ```
 
 <a name="Bool"></a>
-### func [Bool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L490>)
+### func [Bool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L232>)
 
 ```go
 func Bool(key string, value bool) Attr
@@ -360,7 +360,7 @@ func Bool(key string, value bool) Attr
 Bool returns a bool\-valued attribute.
 
 <a name="Float64"></a>
-### func [Float64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L503>)
+### func [Float64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L243>)
 
 ```go
 func Float64(key string, value float64) Attr
@@ -369,7 +369,7 @@ func Float64(key string, value float64) Attr
 Float64 returns a double attribute. A float is a measurement rather than a dimension, and it is keyed on its bit pattern — see the core documentation.
 
 <a name="Int64"></a>
-### func [Int64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L496>)
+### func [Int64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L237>)
 
 ```go
 func Int64(key string, value int64) Attr
@@ -378,7 +378,7 @@ func Int64(key string, value int64) Attr
 Int64 returns a signed\-integer attribute.
 
 <a name="String"></a>
-### func [String](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L484>)
+### func [String](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L227>)
 
 ```go
 func String(key, value string) Attr
@@ -387,7 +387,7 @@ func String(key, value string) Attr
 String returns a string\-valued attribute. It is the shortest of the four constructors to write because a string dimension is the common one.
 
 <a name="AttrKind"></a>
-## type [AttrKind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L342>)
+## type [AttrKind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L85>)
 
 AttrKind is the public alias for an attribute value's type tag.
 
@@ -426,7 +426,7 @@ const AttrKindString AttrKind = coreotel.AttrKindString
 ```
 
 <a name="Counter"></a>
-## type [Counter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L327>)
+## type [Counter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L70>)
 
 Counter is the public alias for a monotonic sum instrument.
 
@@ -435,7 +435,7 @@ type Counter = coremetrics.Counter
 ```
 
 <a name="Describer"></a>
-## type [Describer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L320>)
+## type [Describer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L63>)
 
 Describer is the public alias for the sibling port that documents an instrument NAME. It is deliberately NOT part of FullMeter — reach it by type assertion, and read the false case as "this meter records no description".
 
@@ -444,7 +444,7 @@ type Describer = coremetrics.Describer
 ```
 
 <a name="Exporter"></a>
-## type [Exporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L421>)
+## type [Exporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L164>)
 
 Exporter is the public alias for a snapshot shipper.
 
@@ -453,7 +453,7 @@ type Exporter = coremetrics.Exporter
 ```
 
 <a name="NewOTLPHTTPExporter"></a>
-### func [NewOTLPHTTPExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L565>)
+### func [NewOTLPHTTPExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L298>)
 
 ```go
 func NewOTLPHTTPExporter(name ExporterName, cfg OTLPHTTPConfig) (exporter Exporter, err error)
@@ -464,7 +464,7 @@ NewOTLPHTTPExporter returns an Exporter that encodes each snapshot as OTLP/JSON 
 It is never registered, and it never retries — compose resilience.NewRetry with OTLPRetryable instead. A refused endpoint fails here, at wiring, rather than at the first scrape.
 
 <a name="NewOTLPJSONExporter"></a>
-### func [NewOTLPJSONExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L554>)
+### func [NewOTLPJSONExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L288>)
 
 ```go
 func NewOTLPJSONExporter(name ExporterName, dst io.Writer) Exporter
@@ -473,7 +473,7 @@ func NewOTLPJSONExporter(name ExporterName, dst io.Writer) Exporter
 NewOTLPJSONExporter returns an Exporter writing each snapshot to dst as one newline\-terminated OTLP/JSON document, so a stream of exports is NDJSON. It is not auto\-registered; the registered "otlpjson" exporter is this, on stderr.
 
 <a name="NewPrometheusExporter"></a>
-### func [NewPrometheusExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L534>)
+### func [NewPrometheusExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L270>)
 
 ```go
 func NewPrometheusExporter(name ExporterName, dst io.Writer) Exporter
@@ -482,7 +482,7 @@ func NewPrometheusExporter(name ExporterName, dst io.Writer) Exporter
 NewPrometheusExporter returns an Exporter rendering the Prometheus text exposition format to dst under name \(not auto\-registered\). Hand it the http.ResponseWriter of a /metrics handler; the registered "prometheus" exporter targets stderr and is a diagnostic, not a scrape endpoint.
 
 <a name="NewTextExporter"></a>
-### func [NewTextExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L525>)
+### func [NewTextExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L262>)
 
 ```go
 func NewTextExporter(name ExporterName, dst io.Writer) Exporter
@@ -491,7 +491,7 @@ func NewTextExporter(name ExporterName, dst io.Writer) Exporter
 NewTextExporter returns a text Exporter writing to dst under name \(not auto\-registered\).
 
 <a name="RegisterExporter"></a>
-### func [RegisterExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L580>)
+### func [RegisterExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L311>)
 
 ```go
 func RegisterExporter(e Exporter) Exporter
@@ -500,7 +500,7 @@ func RegisterExporter(e Exporter) Exporter
 RegisterExporter adds e to the process\-wide exporter registry.
 
 <a name="ExporterName"></a>
-## type [ExporterName](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L424>)
+## type [ExporterName](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L167>)
 
 ExporterName is the public alias for an exporter's registry key.
 
@@ -509,7 +509,7 @@ type ExporterName = coremetrics.ExporterName
 ```
 
 <a name="AvailableExporters"></a>
-### func [AvailableExporters](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L592>)
+### func [AvailableExporters](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L321>)
 
 ```go
 func AvailableExporters() []ExporterName
@@ -518,7 +518,7 @@ func AvailableExporters() []ExporterName
 AvailableExporters returns the sorted list of registered exporter names.
 
 <a name="Float64Callback"></a>
-## type [Float64Callback](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L415>)
+## type [Float64Callback](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L158>)
 
 Float64Callback is the public alias for a double observable's callback.
 
@@ -527,7 +527,7 @@ type Float64Callback = coremetrics.Float64Callback
 ```
 
 <a name="FullMeter"></a>
-## type [FullMeter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L324>)
+## type [FullMeter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L67>)
 
 FullMeter is the public alias for the union of all three — what NewMeter returns.
 
@@ -536,7 +536,7 @@ type FullMeter = coremetrics.FullMeter
 ```
 
 <a name="NewMeter"></a>
-### func [NewMeter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L511>)
+### func [NewMeter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L250>)
 
 ```go
 func NewMeter() FullMeter
@@ -545,7 +545,7 @@ func NewMeter() FullMeter
 NewMeter returns a fresh in\-memory Meter with every MeterConfig knob at its resolved default: bounded at DefaultMaxSeriesPerInstrument, cumulative, service.name=unknown\_service, this SDK as the scope, and the system clock.
 
 <a name="NewMeterWithConfig"></a>
-### func [NewMeterWithConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L518>)
+### func [NewMeterWithConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L256>)
 
 ```go
 func NewMeterWithConfig(cfg MeterConfig) FullMeter
@@ -554,7 +554,7 @@ func NewMeterWithConfig(cfg MeterConfig) FullMeter
 NewMeterWithConfig returns a fresh in\-memory Meter honouring cfg. Every unset field resolves to a working value and none of them to an inert one.
 
 <a name="Gauge"></a>
-## type [Gauge](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L333>)
+## type [Gauge](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L76>)
 
 Gauge is the public alias for a sampled\-reading instrument.
 
@@ -563,7 +563,7 @@ type Gauge = coremetrics.Gauge
 ```
 
 <a name="GaugeMetric"></a>
-## type [GaugeMetric](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L391>)
+## type [GaugeMetric](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L134>)
 
 GaugeMetric is the public alias for every series of one gauge instrument name.
 
@@ -572,7 +572,7 @@ type GaugeMetric = coremetrics.GaugeMetricValue
 ```
 
 <a name="GaugePoint"></a>
-## type [GaugePoint](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L394>)
+## type [GaugePoint](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L137>)
 
 GaugePoint is the public alias for one gauge series.
 
@@ -581,7 +581,7 @@ type GaugePoint = coremetrics.GaugeValue
 ```
 
 <a name="Histogram"></a>
-## type [Histogram](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L336>)
+## type [Histogram](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L79>)
 
 Histogram is the public alias for a bucketed distribution instrument.
 
@@ -590,7 +590,7 @@ type Histogram = coremetrics.Histogram
 ```
 
 <a name="HistogramMetric"></a>
-## type [HistogramMetric](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L398>)
+## type [HistogramMetric](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L141>)
 
 HistogramMetric is the public alias for every series of one histogram instrument name, plus its temporality.
 
@@ -599,7 +599,7 @@ type HistogramMetric = coremetrics.HistogramMetricValue
 ```
 
 <a name="HistogramPoint"></a>
-## type [HistogramPoint](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L401>)
+## type [HistogramPoint](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L144>)
 
 HistogramPoint is the public alias for one histogram series.
 
@@ -608,7 +608,7 @@ type HistogramPoint = coremetrics.HistogramValue
 ```
 
 <a name="Int64Callback"></a>
-## type [Int64Callback](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L412>)
+## type [Int64Callback](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L155>)
 
 Int64Callback is the public alias for an integer observable's callback.
 
@@ -617,7 +617,7 @@ type Int64Callback = coremetrics.Int64Callback
 ```
 
 <a name="Meter"></a>
-## type [Meter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L307>)
+## type [Meter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L50>)
 
 Meter is the public alias for the frozen instrument factory: Counter, Gauge, Histogram and Collect.
 
@@ -626,7 +626,7 @@ type Meter = coremetrics.Meter
 ```
 
 <a name="MeterConfig"></a>
-## type [MeterConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L418>)
+## type [MeterConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L161>)
 
 MeterConfig is the public alias for a Meter's configuration.
 
@@ -635,7 +635,7 @@ type MeterConfig = svcmetrics.MeterConfig
 ```
 
 <a name="OTLPHTTPConfig"></a>
-## type [OTLPHTTPConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L303>)
+## type [OTLPHTTPConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L46>)
 
 OTLPHTTPConfig is the public alias for an OTLP/HTTP exporter's configuration.
 
@@ -644,7 +644,7 @@ type OTLPHTTPConfig = svcmetrics.OTLPHTTPConfig
 ```
 
 <a name="ObserveFloat64"></a>
-## type [ObserveFloat64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L409>)
+## type [ObserveFloat64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L152>)
 
 ObserveFloat64 is the public alias for the reporting function a double observable callback is handed.
 
@@ -653,7 +653,7 @@ type ObserveFloat64 = coremetrics.ObserveFloat64
 ```
 
 <a name="ObserveInt64"></a>
-## type [ObserveInt64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L405>)
+## type [ObserveInt64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L148>)
 
 ObserveInt64 is the public alias for the reporting function an integer observable callback is handed.
 
@@ -662,7 +662,7 @@ type ObserveInt64 = coremetrics.ObserveInt64
 ```
 
 <a name="Resource"></a>
-## type [Resource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L374>)
+## type [Resource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L117>)
 
 Resource is the public alias for the producer's identity, carried once per snapshot.
 
@@ -671,7 +671,7 @@ type Resource = coreotel.ResourceValue
 ```
 
 <a name="Scope"></a>
-## type [Scope](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L378>)
+## type [Scope](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L121>)
 
 Scope is the public alias for the instrumentation's identity, carried once per snapshot.
 
@@ -680,7 +680,7 @@ type Scope = coreotel.ScopeValue
 ```
 
 <a name="Snapshot"></a>
-## type [Snapshot](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L381>)
+## type [Snapshot](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L124>)
 
 Snapshot is the public alias for a whole\-meter point\-in\-time copy.
 
@@ -689,7 +689,7 @@ type Snapshot = coremetrics.SnapshotValue
 ```
 
 <a name="SumMetric"></a>
-## type [SumMetric](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L385>)
+## type [SumMetric](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L128>)
 
 SumMetric is the public alias for every series of one sum instrument name, plus its temporality and monotonicity.
 
@@ -698,7 +698,7 @@ type SumMetric = coremetrics.SumMetricValue
 ```
 
 <a name="SumPoint"></a>
-## type [SumPoint](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L388>)
+## type [SumPoint](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L131>)
 
 SumPoint is the public alias for one sum series.
 
@@ -707,7 +707,7 @@ type SumPoint = coremetrics.SumValue
 ```
 
 <a name="Temporality"></a>
-## type [Temporality](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L360>)
+## type [Temporality](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L103>)
 
 Temporality is the public alias for a metric's aggregation temporality.
 
@@ -734,7 +734,7 @@ const TemporalityUnspecified Temporality = coremetrics.TemporalityUnspecified
 ```
 
 <a name="UpDownCounter"></a>
-## type [UpDownCounter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L330>)
+## type [UpDownCounter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L73>)
 
 UpDownCounter is the public alias for a non\-monotonic sum instrument.
 
@@ -743,7 +743,7 @@ type UpDownCounter = coremetrics.UpDownCounter
 ```
 
 <a name="UpDownMeter"></a>
-## type [UpDownMeter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/metrics.go#L311>)
+## type [UpDownMeter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/facade_gen.go#L54>)
 
 UpDownMeter is the public alias for the sibling port that mints the non\-monotonic sum Meter cannot.
 
