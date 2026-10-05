@@ -113,3 +113,7 @@ The suite plants symbolic links and skips, naming the reason, where an
 unprivileged account cannot create one — Windows without
 `SeCreateSymbolicLinkPrivilege`. The lane that runs it on a Windows kernel is
 the `windows` job of `.github/workflows/e2e-cross.yml`.
+
+## Declarations
+
+`decl_gen.go` is written by kit gen from the design (ADR 0170): the declaration of `StepValue` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names.

@@ -48,9 +48,12 @@ packages:
         typeParams:
           - constraint: any
             name: T
+    imports:
+      snapshot: github.com/kitsunium/sdk/internal/kernel/concur/snapshot
     path: github.com/kitsunium/sdk/internal/kernel/plugin
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Registry is a process-wide table of plug-ins keyed by name: written at import
           time, read on every dispatch. A reader loads an immutable snapshot and takes
           no lock; a writer copies the table, inserts, and publishes the copy under the
@@ -139,7 +142,12 @@ packages:
             recv: pointer
         name: Registry
         struct:
-          unexported: true
+          fields:
+            - doc: |-
+                table is the copy-on-write snapshot; it loads nil before the first
+                Publish or Claim inserts.
+              name: table
+              type: snapshot.Value[map[K]V]
         typeParams:
           - constraint: cmp.Ordered
             name: K

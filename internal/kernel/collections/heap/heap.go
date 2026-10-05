@@ -6,18 +6,6 @@ package heap
 // two occurrences are the SAME decision, not two coincidences.
 const branching int = 2
 
-// Heap is a binary heap ordered by the comparison given to [New].
-//
-// The zero value is NOT usable — a heap with no comparison has no order — so
-// construct with [New]. Not safe for concurrent use.
-type Heap[T any] struct {
-	// items is the heap array: the children of i live at 2i+1 and 2i+2, so the
-	// tree needs no pointers and no per-element allocation.
-	items []T
-	// cmp is the caller's order. Non-nil by construction; see New.
-	cmp func(a, b T) int
-}
-
 // New builds an empty Heap ordered by cmp.
 //
 // A nil cmp PANICS, at the call that made the mistake. There is no order the

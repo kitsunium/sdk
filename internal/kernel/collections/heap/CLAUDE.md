@@ -18,6 +18,7 @@ programmer error it can detect panics.
 
 | File | Surface |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declaration of `Heap` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `heap.go` | `Heap[T]` + `New` / `Len` / `Push` / `Peek` / `Pop`, and the `up` / `down` sifts |
 
 One file, on purpose: a binary heap is ~80 lines of algorithm and splitting it

@@ -1,27 +1,10 @@
 package cache
 
 import (
-	"sync"
 	"time"
 
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 )
-
-// Cache is a generic LRU+TTL cache safe for concurrent use. The zero value is
-// NOT usable — construct with NewCache.
-type Cache[K comparable, V any] struct {
-	mu         sync.RWMutex
-	clk        clock.Clock
-	maxEntries int
-	defaultTTL time.Duration
-	onEvict    func(key K, val V)
-	items      map[K]*entry[K, V]
-	head       *entry[K, V] // most-recently-used
-	tail       *entry[K, V] // least-recently-used
-	hits       uint64
-	misses     uint64
-	evictions  uint64
-}
 
 // NewCache builds a Cache from cfg. A nil cfg.Clock defaults to clock.System.
 func NewCache[K comparable, V any](cfg Config[K, V]) *Cache[K, V] {

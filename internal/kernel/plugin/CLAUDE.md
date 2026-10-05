@@ -30,6 +30,7 @@ Code range: none. The answer is a string, not an error — see below.
 
 | File | Surface |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declaration of `Registry` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `plugin.go` | `Unusable` — the entry guard |
 | `registry.go` | `Registry[K cmp.Ordered, V comparable]` — `Publish` (conflict reported, identical value idempotent, check-and-publish atomic), `Claim` (the holder of a taken name reported, the identical value included — for a registrar strict on every second registration, or naming the holder), `Lookup` (zero value AND false on a miss), `Names` (ascending, the caller's own slice, one allocation) — over `kernel/concur/snapshot` |
 | `plugin_external_test.go` | both refusals, both acceptances, and the comparison a caller is about to make |

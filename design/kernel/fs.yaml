@@ -271,7 +271,8 @@ packages:
       fs: io/fs
     path: github.com/kitsunium/sdk/internal/kernel/fs/pathchain
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           StepValue describes one component of a resolved path: what that component
           IS, and who could have put it there.
 

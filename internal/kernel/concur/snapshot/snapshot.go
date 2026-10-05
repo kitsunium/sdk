@@ -1,23 +1,5 @@
 package snapshot
 
-import (
-	"sync"
-	"sync/atomic"
-)
-
-// Value is a copy-on-write container for a *T. Readers call Load with no lock;
-// writers replace the whole pointer under a mutex so concurrent
-// read-modify-write publishes cannot lose updates. The zero value is ready to
-// use — Load returns nil until the first Store. Always used behind a pointer:
-// the embedded mutex and atomic.Pointer must not be copied.
-type Value[T any] struct {
-	// mu serialises writers so Update's read-modify-write is atomic against
-	// other writers. Readers (Load) never take it.
-	mu sync.Mutex
-	// p holds the current value pointer; Load reads it without the lock.
-	p atomic.Pointer[T]
-}
-
 // NewValue returns a Value holding initial. A nil initial is valid and leaves
 // the container empty (Load returns nil), the same state as the zero value —
 // offered as call-site sugar when an initial value is already known.

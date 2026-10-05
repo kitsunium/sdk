@@ -14,11 +14,10 @@ testable. Emits **no error codes** (`Fetch` returns `(V, bool)`).
 
 | File | Surface |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `Cache`, `Config` and `StatsValue` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `cache.go` | `Cache[K,V]` + `NewCache` + `Fetch`/`Set`/`SetTTL`/`Delete`/`Len`/`Purge`/`Stats` + LRU helpers |
 | `entry.go` | `entry[K,V]` — intrusive doubly-linked LRU node |
 | `eviction.go` | `evictionValue[K,V]` — an evicted key/value pair, copied out of the locked section for `OnEvict` |
-| `config.go` | `Config[K,V]` — MaxEntries / DefaultTTL / Clock / OnEvict |
-| `stats.go` | `StatsValue` — Hits / Misses / Evictions counters |
 
 ## Conventions
 

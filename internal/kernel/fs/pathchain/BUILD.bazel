@@ -5,10 +5,10 @@ package(default_visibility = ["//internal/kernel:kernel_consumers"])
 go_library(
     name = "pathchain",
     srcs = [
+        "decl_gen.go",
         "doc.go",
         "pathchain.go",
         "stack.go",
-        "step.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/kernel/fs/pathchain",
     visibility = [

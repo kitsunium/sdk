@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/kernel:kernel_consumers"])
 go_library(
     name = "snapshot",
     srcs = [
+        "decl_gen.go",
         "doc.go",
         "snapshot.go",
     ],

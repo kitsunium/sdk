@@ -4,38 +4,7 @@ import (
 	"cmp"
 	"maps"
 	"slices"
-
-	"github.com/kitsunium/sdk/internal/kernel/concur/snapshot"
 )
-
-// Registry is a process-wide table of plug-ins keyed by name: written at import
-// time, read on every dispatch. A reader loads an immutable snapshot and takes
-// no lock; a writer copies the table, inserts, and publishes the copy under the
-// snapshot's writer lock, so a reader never observes a half-built map and two
-// writers never lose each other's entry.
-//
-// It decides nothing a domain names. Publish REPORTS whether the name was
-// already held by a different value — the conflict — and the registrar refuses
-// it with its own dotted-quad code and reason, exactly as it does with
-// Unusable's answer. Re-publishing the SAME value is an idempotent no-op that
-// reports no conflict, which is what lets a plug-in package be imported through
-// two paths without turning a diamond dependency into a boot panic. Claim
-// reports the holder instead of a verdict, for a registrar that refuses every
-// second registration or names the holder in its refusal.
-//
-// V must be comparable, and that is a runtime contract as much as a compile
-// one: when V is an interface, == on a dynamic value that is not comparable
-// panics inside Publish's duplicate check with Go's message rather than the
-// registrar's. A registrar asks Unusable first, which refuses exactly that
-// value, and a typed nil with it.
-//
-// The zero value is ready to use. K is ordered so Names can answer in a stable
-// order rather than in map order.
-type Registry[K cmp.Ordered, V comparable] struct {
-	// table is the copy-on-write snapshot; it loads nil before the first
-	// Publish or Claim inserts.
-	table snapshot.Value[map[K]V]
-}
 
 // Publish inserts (name -> value) and reports whether name was already held by
 // a DIFFERENT value. On a conflict nothing changes: the first registration

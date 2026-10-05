@@ -25,47 +25,6 @@ const (
 	maxJitter float64 = 1
 )
 
-// Value is an exponential backoff: the wait after the n-th consecutive failure
-// is BaseDelay × Multiplier^(n−1), held at MaxDelay when one is set and widened
-// by Jitter when one is asked for.
-//
-// The zero value is usable and waits nothing: a zero BaseDelay retries at
-// once. Every other field is normalised on each call, so no value can make
-// Delay misbehave:
-//
-//   - a Multiplier of 1 or below, or NaN, grows by 2 — a flat or shrinking
-//     "exponential" backoff is a fixed-interval hammer on a dependency that is
-//     already struggling;
-//   - a zero MaxDelay is no ceiling, and the growth then stops at the longest
-//     time.Duration rather than wrapping negative;
-//   - a Jitter outside [0, 1], or NaN, is clamped into it.
-//
-// The growth is compared against its bound in the float domain BEFORE any
-// conversion. The copy this replaces converted first: past 2^63 nanoseconds Go
-// leaves that conversion implementation-defined — math.MinInt64 on amd64,
-// math.MaxInt64 on arm64 — and a negative wait is below every ceiling, so a
-// one-second retry on amd64 stopped backing off at attempt 35.
-type Value struct {
-	// BaseDelay is the wait after the first failure. Zero or negative waits
-	// nothing.
-	BaseDelay time.Duration
-	// MaxDelay is the ceiling on the grown delay. Zero means no ceiling.
-	MaxDelay time.Duration
-	// Multiplier is the growth factor between consecutive waits. 1 or below,
-	// and NaN, mean 2.
-	Multiplier float64
-	// Jitter widens each wait by a uniform random fraction of itself, drawn
-	// from [0, Jitter) and ADDED, after the MaxDelay ceiling — so when a
-	// ceiling is set a wait may reach MaxDelay × (1 + Jitter). Zero is the
-	// deterministic backoff.
-	//
-	// It exists because a deterministic backoff SYNCHRONISES the very callers
-	// it is meant to spread: N clients that fail against one dependency at the
-	// same instant retry at the same instant, N times over. Jitter turns those
-	// bursts back into a distribution.
-	Jitter float64
-}
-
 // Delay returns the wait after the attempt-th consecutive failure: [Grow] for
 // the curve, then [Widen] for the jitter. attempt counts from 1; a smaller
 // value is read as 1, so a loop that has not failed yet and asks anyway waits

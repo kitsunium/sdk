@@ -29,10 +29,6 @@ const padThreshold10 uint8 = 10
 // leading zero ("0XX"). Named to avoid a bare magic literal.
 const padThreshold100 uint8 = 100
 
-// Code packs a 4-byte dotted identifier (MM.LL.PP.SS) as uint32.
-// See ADR 0005 for the registry.
-type Code uint32
-
 // Named octet types prevent positional-argument footguns in Pack.
 // PkgCode is spelled out (not `Pkg`) so callers keep `pkg` as an ordinary
 // variable name without shadowing.

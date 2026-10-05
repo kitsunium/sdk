@@ -2,47 +2,11 @@ package batcher
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
-
-// Sink delivers one coalesced batch. A non-nil error fails the batch: it is
-// returned to the caller of Flush / Close and routed to Config.OnError on the
-// background ticker path.
-type Sink[T any] func(ctx context.Context, batch []T) error
-
-// Batcher coalesces Add'd items into batches delivered through its Sink.
-// It owns its own flush ticker and guards the pending batch with a mutex, so
-// Add / Flush / Close are safe under concurrent callers (ADR 0014).
-type Batcher[T any] struct {
-	// deliver is the batch delivery seam supplied at construction.
-	deliver Sink[T]
-	// cfg holds the caps, weight function, interval and error hook.
-	cfg Config[T]
-
-	// mu guards buf + weight + closed against Add, Flush, Close and the ticker.
-	mu     sync.Mutex
-	buf    []T
-	weight int64
-	closed bool
-
-	// deliverMu serializes Sink invocations (V6) so two flush paths never enter
-	// the deliver closure concurrently. It is held only across the deliver call
-	// and is deliberately separate from mu so a slow Sink never blocks a producer
-	// appending into the next batch.
-	deliverMu sync.Mutex
-
-	// stop/done drive the optional FlushEvery ticker goroutine; the Once
-	// guards make the channel closes safe under concurrent Close calls.
-	stop     chan struct{}
-	stopOnce sync.Once
-	done     chan struct{}
-	doneOnce sync.Once
-	ticking  bool
-}
 
 // NewBatcher builds a Batcher over deliver with cfg. When cfg.FlushEvery > 0 it
 // spawns a ticker goroutine that flushes on the interval, ticking on cfg.Clock

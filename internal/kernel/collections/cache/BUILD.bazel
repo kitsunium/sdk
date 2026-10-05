@@ -6,11 +6,10 @@ go_library(
     name = "cache",
     srcs = [
         "cache.go",
-        "config.go",
+        "decl_gen.go",
         "doc.go",
         "entry.go",
         "eviction.go",
-        "stats.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/kernel/collections/cache",
     visibility = [

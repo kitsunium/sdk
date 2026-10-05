@@ -4,20 +4,6 @@ import (
 	"sync/atomic"
 )
 
-// Queue is the lock-free SPSC ring contract. Producer threads call TryWrite;
-// consumer threads call TryRead. Capacity is fixed at construction time.
-type Queue[T any] interface {
-	// TryWrite enqueues item without blocking; returns Full when saturated.
-	TryWrite(item T) (err error)
-	// TryRead dequeues the next item without blocking; returns Empty when no
-	// item is available.
-	TryRead() (item T, err error)
-	// Capacity returns the number of usable slots in the ring.
-	Capacity() (n int)
-	// Len returns a snapshot count of items currently held.
-	Len() (n int)
-}
-
 // queueRing is the concrete Queue implementation. Unexported so the public
 // surface stays narrow and the struct name can read as "ring" without the
 // role-suffix convention that exported types must follow.

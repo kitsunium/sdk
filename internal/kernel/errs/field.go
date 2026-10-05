@@ -36,19 +36,6 @@ const fieldBool fieldKind = 3
 // fieldFloat tags a FieldValue whose payload lives in the private fl member.
 const fieldFloat fieldKind = 4
 
-// FieldValue is an immutable typed key/value pair attached to an *Error.
-// Use the exported constructors (String, Int, Bool, Float, NewFieldValue)
-// to create a valid FieldValue — the zero value is invalid and must never
-// be passed across the API.
-type FieldValue struct {
-	key  string
-	kind fieldKind
-	str  string
-	num  int64
-	bl   bool
-	fl   float64
-}
-
 // NewFieldValue builds a string-typed FieldValue. Provided as a generic
 // constructor for tooling that expects a New-prefixed factory; for common
 // cases prefer the dedicated String/Int/Bool/Float helpers.

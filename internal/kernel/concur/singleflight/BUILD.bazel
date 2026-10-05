@@ -6,6 +6,7 @@ go_library(
     name = "singleflight",
     srcs = [
         "call.go",
+        "decl_gen.go",
         "doc.go",
         "panic.go",
         "singleflight.go",

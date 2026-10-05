@@ -2,7 +2,6 @@ package singleflight
 
 import (
 	"context"
-	"sync"
 )
 
 // initialCallsCapacity pre-sizes the in-flight map on first use. It is a hint,
@@ -10,17 +9,6 @@ import (
 // keys in flight at one instant is small even when the call rate is not —
 // that is the whole premise of the primitive.
 const initialCallsCapacity int = 8
-
-// Group deduplicates concurrent [Group.Do] calls that name the same key. The
-// zero value is ready to use; a Group must not be copied after first use.
-//
-// Safe for concurrent use by any number of goroutines.
-type Group[K comparable, V any] struct {
-	//: RWMutex rather than Mutex only for InFlight, the one read-only path;
-	//: every other method mutates the map or a refcount and takes Lock.
-	mu    sync.RWMutex
-	calls map[K]*call[V]
-}
 
 // Do runs fn for key unless an identical key is already in flight, in which
 // case it waits for that call instead of starting a second one. shared reports

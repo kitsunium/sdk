@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"math"
-	"sync"
 )
 
 // Unlimited is the concurrency limit that bounds nothing: a slot is always
@@ -16,44 +15,6 @@ import (
 // from this SDK — errgroup's SetLimit(0) parks every Go call forever. Naming
 // the case leaves neither reading available to a typo.
 const Unlimited int = math.MaxInt
-
-// Group runs tasks concurrently under one context and one wait point.
-//
-// The zero value is NOT usable — construct with [New] or [NewJoined], which
-// hand back the context the tasks receive alongside it. A Group is used once: after
-// [Group.Wait] has returned, submit to a new one.
-//
-// [Group.Go] may be called from any goroutine. [Group.Wait] may not run
-// concurrently with [Group.Go] — "have all submissions been made" is a
-// question only the submitter can answer, and a Group that guessed would
-// report a total that was true for an instant.
-type Group struct {
-	// ctx is handed to every task. It is stored rather than closed over so a
-	// task signature can name it, which is what stops a caller from wiring the
-	// wrong context into a goroutine they did not write.
-	ctx context.Context
-	// cancel releases ctx. It carries a cause so a sibling can tell "another
-	// task failed, with this error" from "the parent went away".
-	cancel context.CancelCauseFunc
-	// sem is the concurrency bound. A token is taken in Go, before the
-	// goroutine exists, and returned when the task ends.
-	sem chan struct{}
-	// wg reaches zero exactly when every started task has returned.
-	wg sync.WaitGroup
-
-	// mu guards the outcome fields below, which any task may write and Wait
-	// reads.
-	mu sync.Mutex
-	// err is the first non-nil error a task returned.
-	err error
-	// panicked is the first panic a task raised, with its originating stack.
-	panicked *PanicValue
-	// failures is non-nil exactly in a group from NewJoined, whose Wait
-	// reports every error: one slot per submitted task, in submission order,
-	// nil until that task fails. A pointer, so a first-error group pays one
-	// word for the mode it does not use and nothing per task.
-	failures *[]error
-}
 
 // New returns a Group and the context every task submitted to it receives.
 //

@@ -6,6 +6,7 @@ go_library(
     name = "backoff",
     srcs = [
         "backoff.go",
+        "decl_gen.go",
         "doc.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/kernel/backoff",

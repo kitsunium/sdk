@@ -1,28 +1,5 @@
 package recycler
 
-// CappedPool wraps a concrete *Pool[T] and layers a cap-discard policy
-// on top: on Put, a value whose reported capacity exceeds maxCap is orphaned
-// (never reset, never repooled), otherwise it is reset then repooled.
-//
-// Discard happens BEFORE reset on purpose: it preserves the codec scratch
-// detach contract, where an over-cap buffer's backing bytes have been handed
-// to the caller and must not be touched. Reset is NOT a memory wipe — a
-// consumer recycling sensitive bytes must zero them itself before Put.
-//
-// Always used behind a pointer: the embedded *Pool owns a non-copyable
-// sync.Pool.
-type CappedPool[T any] struct {
-	// inner is the composed plain recycler. Concrete (not an interface) so
-	// Get/Put stay inlinable on the hot path.
-	inner *Pool[T]
-	// reset returns a value to its reusable zero state before it is repooled.
-	reset func(T)
-	// capOf reports the value's current capacity, compared against maxCap.
-	capOf func(T) int
-	// maxCap is the cap-discard threshold; values above it are orphaned.
-	maxCap int
-}
-
 // NewCappedPool returns a CappedPool[T]. newFn builds fresh values,
 // resetFn returns a value to its reusable state, and capOfFn reports a value's
 // capacity for the discard decision. All three functions are required and a

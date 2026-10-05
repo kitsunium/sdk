@@ -26,26 +26,6 @@ const errorBuilderInitialCap int = 64
 // (~12 bytes for a typical dotted-quad code).
 const errorBuilderPerTrailEntry int = 12
 
-// Error is the SDK-wide typed error. Fields are unexported — consumers
-// obtain values via the getter methods on *Error or via the Of-accessors
-// in github.com/kitsunium/sdk/pkg/v1/errs. Instances are immutable after
-// construction: Wrap returns a new *Error, never mutates the input.
-type Error struct {
-	code           Code
-	reason         string
-	public         string
-	private        string
-	fields         []FieldValue
-	trail          []Code
-	trailTruncated bool
-	httpOverride   int
-	exitOverride   int
-	source         error
-}
-
-// DefineOption tunes an Error at Define time. Options compose left-to-right.
-type DefineOption func(e *Error)
-
 // WithHTTPStatus overrides the default HTTP status (500) for an Error.
 func WithHTTPStatus(status int) DefineOption {
 	//: return a closure so the option can be passed positionally to Define.

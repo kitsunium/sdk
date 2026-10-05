@@ -88,7 +88,8 @@ packages:
             public: Batcher delivery failed
             reason: BATCHER_DELIVER_FAILED
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Sink delivers one coalesced batch. A non-nil error fails the batch: it is
           returned to the caller of Flush / Close and routed to Config.OnError on the
           background ticker path.
@@ -97,7 +98,8 @@ packages:
           - constraint: any
             name: T
         underlying: func(ctx context.Context, batch []T) error
-      - doc: |-
+      - decl: true
+        doc: |-
           Batcher coalesces Add'd items into batches delivered through its Sink.
           It owns its own flush ticker and guards the pending batch with a mutex, so
           Add / Flush / Close are safe under concurrent callers (ADR 0014).
@@ -139,11 +141,47 @@ packages:
             recv: pointer
         name: Batcher
         struct:
-          unexported: true
+          fields:
+            - doc: deliver is the batch delivery seam supplied at construction.
+              name: deliver
+              type: Sink[T]
+            - doc: cfg holds the caps, weight function, interval and error hook.
+              name: cfg
+              type: Config[T]
+            - doc: mu guards buf + weight + closed against Add, Flush, Close and the ticker.
+              name: mu
+              type: sync.Mutex
+            - name: buf
+              type: "[]T"
+            - name: weight
+              type: int64
+            - name: closed
+              type: bool
+            - doc: |-
+                deliverMu serializes Sink invocations (V6) so two flush paths never enter
+                the deliver closure concurrently. It is held only across the deliver call
+                and is deliberately separate from mu so a slow Sink never blocks a producer
+                appending into the next batch.
+              name: deliverMu
+              type: sync.Mutex
+            - doc: |-
+                stop/done drive the optional FlushEvery ticker goroutine; the Once
+                guards make the channel closes safe under concurrent Close calls.
+              name: stop
+              type: chan struct{}
+            - name: stopOnce
+              type: sync.Once
+            - name: done
+              type: chan struct{}
+            - name: doneOnce
+              type: sync.Once
+            - name: ticking
+              type: bool
         typeParams:
           - constraint: any
             name: T
-      - doc: |-
+      - decl: true
+        doc: |-
           Config tunes a Batcher: the item / weight caps that trigger an eager flush,
           the per-item weight function, the background flush interval and the clock it
           ticks on, and the background-error observer. The zero Config is usable — it
@@ -387,7 +425,8 @@ packages:
           - type: context.Context
     path: github.com/kitsunium/sdk/internal/kernel/concur/group
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Group runs tasks concurrently under one context and one wait point.
 
           The zero value is NOT usable — construct with [New] or [NewJoined], which
@@ -432,8 +471,46 @@ packages:
             recv: pointer
         name: Group
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - doc: |-
+                ctx is handed to every task. It is stored rather than closed over so a
+                task signature can name it, which is what stops a caller from wiring the
+                wrong context into a goroutine they did not write.
+              name: ctx
+              type: context.Context
+            - doc: |-
+                cancel releases ctx. It carries a cause so a sibling can tell "another
+                task failed, with this error" from "the parent went away".
+              name: cancel
+              type: context.CancelCauseFunc
+            - doc: |-
+                sem is the concurrency bound. A token is taken in Go, before the
+                goroutine exists, and returned when the task ends.
+              name: sem
+              type: chan struct{}
+            - doc: wg reaches zero exactly when every started task has returned.
+              name: wg
+              type: sync.WaitGroup
+            - doc: |-
+                mu guards the outcome fields below, which any task may write and Wait
+                reads.
+              name: mu
+              type: sync.Mutex
+            - doc: err is the first non-nil error a task returned.
+              name: err
+              type: error
+            - doc: panicked is the first panic a task raised, with its originating stack.
+              name: panicked
+              type: "*PanicValue"
+            - doc: |-
+                failures is non-nil exactly in a group from NewJoined, whose Wait
+                reports every error: one slot per submitted task, in submission order,
+                nil until that task fails. A pointer, so a first-error group pays one
+                word for the mode it does not use and nothing per task.
+              name: failures
+              type: "*[]error"
+      - decl: true
+        doc: |-
           PanicValue carries a panic raised inside a task across the goroutine
           boundary to whoever is waiting on the group.
 
@@ -533,7 +610,8 @@ packages:
             name: T
     path: github.com/kitsunium/sdk/internal/kernel/concur/recycler
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           CappedPool wraps a concrete *Pool[T] and layers a cap-discard policy
           on top: on Put, a value whose reported capacity exceeds maxCap is orphaned
           (never reset, never repooled), otherwise it is reset then repooled.
@@ -564,11 +642,26 @@ packages:
             recv: pointer
         name: CappedPool
         struct:
-          unexported: true
+          fields:
+            - doc: |-
+                inner is the composed plain recycler. Concrete (not an interface) so
+                Get/Put stay inlinable on the hot path.
+              name: inner
+              type: "*Pool[T]"
+            - doc: reset returns a value to its reusable zero state before it is repooled.
+              name: reset
+              type: func(T)
+            - doc: capOf reports the value's current capacity, compared against maxCap.
+              name: capOf
+              type: func(T) int
+            - doc: maxCap is the cap-discard threshold; values above it are orphaned.
+              name: maxCap
+              type: int
         typeParams:
           - constraint: any
             name: T
-      - doc: |-
+      - decl: true
+        doc: |-
           Pool is a concrete generic object pool over sync.Pool. It performs NO
           reset — consumers that need cleanup either reset before Put (logger
           Builder.Send, async data[:0]) or use CappedPool. Safe for concurrent
@@ -594,7 +687,10 @@ packages:
             recv: pointer
         name: Pool
         struct:
-          unexported: true
+          fields:
+            - doc: pool is the underlying sync.Pool holding the recycled values.
+              name: pool
+              type: sync.Pool
         typeParams:
           - constraint: any
             name: T
@@ -656,7 +752,8 @@ packages:
       them.
     path: github.com/kitsunium/sdk/internal/kernel/concur/singleflight
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           PanicValue carries a panic raised inside a deduplicated call across the
           goroutine boundary to every caller waiting on it.
 
@@ -689,7 +786,8 @@ packages:
             - doc: Stack is the stack of the goroutine that ran fn, captured at recovery.
               name: Stack
               type: "[]byte"
-      - doc: |-
+      - decl: true
+        doc: |-
           Group deduplicates concurrent [Group.Do] calls that name the same key. The
           zero value is ready to use; a Group must not be copied after first use.
 
@@ -758,7 +856,14 @@ packages:
             recv: pointer
         name: Group
         struct:
-          unexported: true
+          fields:
+            - doc: |-
+                : RWMutex rather than Mutex only for InFlight, the one read-only path;
+                : every other method mutates the map or a refcount and takes Lock.
+              name: mu
+              type: sync.RWMutex
+            - name: calls
+              type: map[K]*call[V]
         typeParams:
           - constraint: comparable
             name: K
@@ -792,9 +897,12 @@ packages:
         typeParams:
           - constraint: any
             name: T
+    imports:
+      atomic: sync/atomic
     path: github.com/kitsunium/sdk/internal/kernel/concur/snapshot
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Value is a copy-on-write container for a *T. Readers call Load with no lock;
           writers replace the whole pointer under a mutex so concurrent
           read-modify-write publishes cannot lose updates. The zero value is ready to
@@ -844,7 +952,15 @@ packages:
             recv: pointer
         name: Value
         struct:
-          unexported: true
+          fields:
+            - doc: |-
+                mu serialises writers so Update's read-modify-write is atomic against
+                other writers. Readers (Load) never take it.
+              name: mu
+              type: sync.Mutex
+            - doc: p holds the current value pointer; Load reads it without the lock.
+              name: p
+              type: atomic.Pointer[T]
         typeParams:
           - constraint: any
             name: T
@@ -942,7 +1058,8 @@ packages:
       clock: github.com/kitsunium/sdk/internal/kernel/clock
     path: github.com/kitsunium/sdk/internal/kernel/concur/worker
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           EveryOption tunes [Every]. Options apply in order, so a later one wins; a nil
           option is skipped.
 
@@ -952,7 +1069,8 @@ packages:
           once per stream or connection by the network domains.
         name: EveryOption
         underlying: func(everyConfig) everyConfig
-      - doc: |-
+      - decl: true
+        doc: |-
           Loop is the goroutine body run by a LoopDaemon. It receives a stop channel
           that is closed when Stop is called and MUST return promptly once stop is
           closed — a Loop that ignores stop deadlocks Stop, which blocks on the join.
@@ -960,7 +1078,8 @@ packages:
           process. Callers that run risky work recover inside their own Loop.
         name: Loop
         underlying: func(stop <-chan struct{})
-      - doc: |-
+      - decl: true
+        doc: |-
           LoopDaemon is a running background goroutine with an idempotent Stop and a
           join. It is a concrete struct (not an interface) by deliberate choice,
           mirroring recycler.Pool / snapshot.Value — a single-impl interface would be
@@ -982,7 +1101,24 @@ packages:
             recv: pointer
         name: LoopDaemon
         struct:
-          unexported: true
+          fields:
+            - doc: stop is closed once by Stop to signal the loop to exit.
+              name: stop
+              type: chan struct{}
+            - doc: stopOnce guards close(stop) so concurrent Stop calls never panic.
+              name: stopOnce
+              type: sync.Once
+            - doc: |-
+                done is closed by the spawning goroutine once the loop has returned;
+                Stop blocks on it to join.
+              name: done
+              type: chan struct{}
+            - doc: |-
+                doneOnce guards close(done). The spawning goroutine is the sole closer
+                in practice, but the lint heuristic (KTN-GOROUTINE-DOUBLECLOSE) requires
+                an explicit guard on every close(field).
+              name: doneOnce
+              type: sync.Once
   - doc: |-
       Package batcher coalesces items into batches: Add appends, and a deliver
       function you supply receives them a batch at a time — when a count or a

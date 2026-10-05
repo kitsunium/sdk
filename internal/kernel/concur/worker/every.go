@@ -6,15 +6,6 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 )
 
-// EveryOption tunes [Every]. Options apply in order, so a later one wins; a nil
-// option is skipped.
-//
-// An option takes the option set by value and returns the amended copy rather
-// than writing through a pointer: handing an unknown function a pointer to the
-// set would move the set to the heap on every Every call, and Every is built
-// once per stream or connection by the network domains.
-type EveryOption func(everyConfig) everyConfig
-
 // everyConfig is the resolved option set. It is unexported because each zero
 // field has one meaning — the wall clock, no early end — decided in
 // resolveEvery rather than by whoever fills the struct.

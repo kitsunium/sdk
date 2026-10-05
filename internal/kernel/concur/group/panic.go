@@ -5,32 +5,6 @@ import (
 	"strings"
 )
 
-// PanicValue carries a panic raised inside a task across the goroutine
-// boundary to whoever is waiting on the group.
-//
-// It is deliberately NOT an error. A panic is a programming fault, and turning
-// one into a value the caller may ignore is how a broken invariant becomes a
-// silent wrong answer — the same position kernel/concur/singleflight takes, and the
-// reason neither type carries an error code.
-//
-// The stack is captured at the moment of recovery, inside the goroutine that
-// ran the task. Without it a re-raised panic would point at the waiter's
-// stack — code that did nothing wrong — and the frame that actually failed
-// would be gone, which is the failure mode that makes a crashed worker pool so
-// expensive to debug.
-//
-// It is a separate type from singleflight's namesake rather than a shared one:
-// each names its own package in the message a crash prints, and hoisting the
-// two into a fourth kernel package would add a primitive whose entire content
-// is two fields.
-type PanicValue struct {
-	// Raised is the value the original panic carried, verbatim.
-	Raised any
-	// Stack is the stack of the goroutine that ran the task, captured at
-	// recovery.
-	Stack []byte
-}
-
 // newPanicValue captures raised together with the stack of the goroutine that
 // is unwinding.
 func newPanicValue(raised any) *PanicValue {

@@ -156,7 +156,7 @@ type Queue[T any] interface {
 ```
 
 <a name="Queue.Capacity"></a>
-### func \(Queue\) [Capacity](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/collections/ring/ring.go>)
+### func \(Queue\) [Capacity](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/collections/ring/decl_gen.go>)
 
 ```go
 func (Queue) Capacity() (n int)
@@ -165,7 +165,7 @@ func (Queue) Capacity() (n int)
 Capacity returns the number of usable slots in the ring.
 
 <a name="Queue.Len"></a>
-### func \(Queue\) [Len](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/collections/ring/ring.go>)
+### func \(Queue\) [Len](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/collections/ring/decl_gen.go>)
 
 ```go
 func (Queue) Len() (n int)
@@ -174,7 +174,7 @@ func (Queue) Len() (n int)
 Len returns a snapshot count of items currently held.
 
 <a name="Queue.TryRead"></a>
-### func \(Queue\) [TryRead](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/collections/ring/ring.go>)
+### func \(Queue\) [TryRead](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/collections/ring/decl_gen.go>)
 
 ```go
 func (Queue) TryRead() (item T, err error)
@@ -183,7 +183,7 @@ func (Queue) TryRead() (item T, err error)
 TryRead dequeues the next item without blocking; returns Empty when no item is available.
 
 <a name="Queue.TryWrite"></a>
-### func \(Queue\) [TryWrite](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/collections/ring/ring.go>)
+### func \(Queue\) [TryWrite](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/collections/ring/decl_gen.go>)
 
 ```go
 func (Queue) TryWrite(item T) (err error)

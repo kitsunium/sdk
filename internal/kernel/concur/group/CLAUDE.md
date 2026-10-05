@@ -22,6 +22,7 @@ failure of its own except a programming fault, which panics.
 
 | File | Surface |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `Group` and `PanicValue` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `group.go` | `Group` + `New` / `NewJoined` / `Go` / `Wait`, `Unlimited`, and the run/fail/capture path (plus `reserve`/`runJoined`/`record`, the joined group's failure slots) |
 | `panic.go` | `PanicValue` — the panic carried off a task's goroutine into the waiter |
 | `collect.go` | `Collect[T]` — the typed fan-out, results in submission order |

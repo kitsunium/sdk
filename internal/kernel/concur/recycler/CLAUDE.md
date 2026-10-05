@@ -50,3 +50,7 @@ bazel test --config=race //internal/kernel/concur/recycler:recycler_test
 # lane (`make test-alloc`, tools/alloc-lane-targets.txt):
 bazel test --config=alloc //internal/kernel/concur/recycler:recycler_test
 ```
+
+## Declarations
+
+`decl_gen.go` is written by kit gen from the design (ADR 0170): the declarations of `CappedPool` and `Pool` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names.

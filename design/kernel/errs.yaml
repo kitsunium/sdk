@@ -439,7 +439,8 @@ packages:
           - type: "[]Code"
     path: github.com/kitsunium/sdk/internal/kernel/errs
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Code packs a 4-byte dotted identifier (MM.LL.PP.SS) as uint32.
           See ADR 0005 for the registry.
         methods:
@@ -503,7 +504,8 @@ packages:
           variable name without shadowing.
         name: Serial
         underlying: uint8
-      - doc: |-
+      - decl: true
+        doc: |-
           Error is the SDK-wide typed error. Fields are unexported — consumers
           obtain values via the getter methods on *Error or via the Of-accessors
           in github.com/kitsunium/sdk/pkg/v1/errs. Instances are immutable after
@@ -613,11 +615,33 @@ packages:
             recv: pointer
         name: Error
         struct:
-          unexported: true
-      - doc: DefineOption tunes an Error at Define time. Options compose left-to-right.
+          fields:
+            - name: code
+              type: Code
+            - name: reason
+              type: string
+            - name: public
+              type: string
+            - name: private
+              type: string
+            - name: fields
+              type: "[]FieldValue"
+            - name: trail
+              type: "[]Code"
+            - name: trailTruncated
+              type: bool
+            - name: httpOverride
+              type: int
+            - name: exitOverride
+              type: int
+            - name: source
+              type: error
+      - decl: true
+        doc: DefineOption tunes an Error at Define time. Options compose left-to-right.
         name: DefineOption
         underlying: func(e *Error)
-      - doc: |-
+      - decl: true
+        doc: |-
           FieldValue is an immutable typed key/value pair attached to an *Error.
           Use the exported constructors (String, Int, Bool, Float, NewFieldValue)
           to create a valid FieldValue — the zero value is invalid and must never
@@ -639,8 +663,21 @@ packages:
             recv: value
         name: FieldValue
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - name: key
+              type: string
+            - name: kind
+              type: fieldKind
+            - name: str
+              type: string
+            - name: num
+              type: int64
+            - name: bl
+              type: bool
+            - name: fl
+              type: float64
+      - decl: true
+        doc: |-
           PrefixMatcher is a NON-ERROR sentinel used ONLY as a target for errors.Is.
           Callers build it via NewPrefixMatcher and pass it to errors.Is; the
           matching logic lives on (*Error).Is (see error.go, added in W4).
@@ -674,8 +711,13 @@ packages:
             recv: pointer
         name: PrefixMatcher
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - name: prefix
+              type: Code
+            - name: mask
+              type: Code
+      - decl: true
+        doc: |-
           WrapParams groups the extra metadata Wrap needs when the cause is NOT
           already an *Error. Keeping them in a struct stays below the SDK's
           5-parameter ceiling for Wrap and gives call sites named fields.

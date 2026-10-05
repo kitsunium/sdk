@@ -6,6 +6,7 @@ go_library(
     name = "recycler",
     srcs = [
         "capped.go",
+        "decl_gen.go",
         "doc.go",
         "recycler.go",
     ],

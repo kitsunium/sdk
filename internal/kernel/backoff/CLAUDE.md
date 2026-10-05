@@ -97,3 +97,7 @@ bazel test --config=race //internal/kernel/backoff:backoff_test
 fix (`TestValueDelayNeverWrapsNegative`), the jitter band, and each exported
 half and normaliser on inputs `Delay` never hands them; `backoff_internal_test.go`
 pins that `grow` stops at its bound and that `widen` stays representable.
+
+## Declarations
+
+`decl_gen.go` is written by kit gen from the design (ADR 0170): the declaration of `Value` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names.

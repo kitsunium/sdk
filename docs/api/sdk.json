@@ -66882,7 +66882,7 @@
         }
       ],
       "doc": "Value is an exponential backoff: the wait after the n-th consecutive failure\nis BaseDelay × Multiplier^(n−1), held at MaxDelay when one is set and widened\nby Jitter when one is asked for.\n\nThe zero value is usable and waits nothing: a zero BaseDelay retries at\nonce. Every other field is normalised on each call, so no value can make\nDelay misbehave:\n\n  - a Multiplier of 1 or below, or NaN, grows by 2 — a flat or shrinking\n    \"exponential\" backoff is a fixed-interval hammer on a dependency that is\n    already struggling;\n  - a zero MaxDelay is no ceiling, and the growth then stops at the longest\n    time.Duration rather than wrapping negative;\n  - a Jitter outside [0, 1], or NaN, is clamped into it.\n\nThe growth is compared against its bound in the float domain BEFORE any\nconversion. The copy this replaces converted first: past 2^63 nanoseconds Go\nleaves that conversion implementation-defined — math.MinInt64 on amd64,\nmath.MaxInt64 on arm64 — and a negative wait is below every ceiling, so a\none-second retry on amd64 stopped backing off at attempt 35.\n",
-      "file": "internal/kernel/backoff/backoff.go",
+      "file": "internal/kernel/backoff/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -67301,7 +67301,7 @@
       "spelled": "[K comparable, V any] struct{}",
       "canonical": "[K comparable, V any] struct{}",
       "doc": "Cache is a generic LRU+TTL cache safe for concurrent use. The zero value is\nNOT usable — construct with NewCache.\n",
-      "file": "internal/kernel/collections/cache/cache.go",
+      "file": "internal/kernel/collections/cache/decl_gen.go",
       "layer": "kernel",
       "family": "collections"
     },
@@ -67426,7 +67426,7 @@
         }
       ],
       "doc": "Config parameterises a Cache. The zero value is valid: an unbounded cache with\nno default TTL, the system clock, and no eviction callback.\n",
-      "file": "internal/kernel/collections/cache/config.go",
+      "file": "internal/kernel/collections/cache/decl_gen.go",
       "layer": "kernel",
       "family": "collections"
     },
@@ -67464,7 +67464,7 @@
         }
       ],
       "doc": "StatsValue is a point-in-time copy of a Cache's counters. Hits/Misses\ncount Fetch outcomes; Evictions counts capacity + expiry removals (not\nexplicit Deletes).\n",
-      "file": "internal/kernel/collections/cache/stats.go",
+      "file": "internal/kernel/collections/cache/decl_gen.go",
       "layer": "kernel",
       "family": "collections"
     },
@@ -67476,7 +67476,7 @@
       "spelled": "[T any] struct{}",
       "canonical": "[T any] struct{}",
       "doc": "Heap is a binary heap ordered by the comparison given to [New].\n\nThe zero value is NOT usable — a heap with no comparison has no order — so\nconstruct with [New]. Not safe for concurrent use.\n",
-      "file": "internal/kernel/collections/heap/heap.go",
+      "file": "internal/kernel/collections/heap/decl_gen.go",
       "layer": "kernel",
       "family": "collections"
     },
@@ -67663,7 +67663,7 @@
       "spelled": "[T any] interface{Capacity() (n int); Len() (n int); TryRead() (item T, err error); TryWrite(item T) (err error)}",
       "canonical": "[T any] interface{Capacity() (n int); Len() (n int); TryRead() (item T, err error); TryWrite(item T) (err error)}",
       "doc": "Queue is the lock-free SPSC ring contract. Producer threads call TryWrite;\nconsumer threads call TryRead. Capacity is fixed at construction time.\n",
-      "file": "internal/kernel/collections/ring/ring.go",
+      "file": "internal/kernel/collections/ring/decl_gen.go",
       "layer": "kernel",
       "family": "collections"
     },
@@ -67676,7 +67676,7 @@
       "spelled": "func() (n int)",
       "canonical": "func() (n int)",
       "doc": "Capacity returns the number of usable slots in the ring.\n",
-      "file": "internal/kernel/collections/ring/ring.go",
+      "file": "internal/kernel/collections/ring/decl_gen.go",
       "layer": "kernel",
       "family": "collections"
     },
@@ -67689,7 +67689,7 @@
       "spelled": "func() (n int)",
       "canonical": "func() (n int)",
       "doc": "Len returns a snapshot count of items currently held.\n",
-      "file": "internal/kernel/collections/ring/ring.go",
+      "file": "internal/kernel/collections/ring/decl_gen.go",
       "layer": "kernel",
       "family": "collections"
     },
@@ -67702,7 +67702,7 @@
       "spelled": "func() (item T, err error)",
       "canonical": "func() (item T, err error)",
       "doc": "TryRead dequeues the next item without blocking; returns Empty when no\nitem is available.\n",
-      "file": "internal/kernel/collections/ring/ring.go",
+      "file": "internal/kernel/collections/ring/decl_gen.go",
       "layer": "kernel",
       "family": "collections"
     },
@@ -67715,7 +67715,7 @@
       "spelled": "func(item T) (err error)",
       "canonical": "func(item T) (err error)",
       "doc": "TryWrite enqueues item without blocking; returns Full when saturated.\n",
-      "file": "internal/kernel/collections/ring/ring.go",
+      "file": "internal/kernel/collections/ring/decl_gen.go",
       "layer": "kernel",
       "family": "collections"
     },
@@ -67727,7 +67727,7 @@
       "spelled": "[T any] struct{}",
       "canonical": "[T any] struct{}",
       "doc": "Batcher coalesces Add'd items into batches delivered through its Sink.\nIt owns its own flush ticker and guards the pending batch with a mutex, so\nAdd / Flush / Close are safe under concurrent callers (ADR 0014).\n",
-      "file": "internal/kernel/concur/batcher/batcher.go",
+      "file": "internal/kernel/concur/batcher/decl_gen.go",
       "layer": "kernel",
       "family": "concur"
     },
@@ -67876,7 +67876,7 @@
         }
       ],
       "doc": "Config tunes a Batcher: the item / weight caps that trigger an eager flush,\nthe per-item weight function, the background flush interval and the clock it\nticks on, and the background-error observer. The zero Config is usable — it\nbatches by item count only (each item weighs 1, MaxWeight is ignored) with no\ncaps and no ticker, so items accumulate until an explicit Flush or Close.\n",
-      "file": "internal/kernel/concur/batcher/config.go",
+      "file": "internal/kernel/concur/batcher/decl_gen.go",
       "layer": "kernel",
       "family": "concur"
     },
@@ -67900,7 +67900,7 @@
       "spelled": "[T any] func(ctx context.Context, batch []T) error",
       "canonical": "[T any] func(ctx context.Context, batch []T) error",
       "doc": "Sink delivers one coalesced batch. A non-nil error fails the batch: it is\nreturned to the caller of Flush / Close and routed to Config.OnError on the\nbackground ticker path.\n",
-      "file": "internal/kernel/concur/batcher/batcher.go",
+      "file": "internal/kernel/concur/batcher/decl_gen.go",
       "layer": "kernel",
       "family": "concur"
     },
@@ -67948,7 +67948,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Group runs tasks concurrently under one context and one wait point.\n\nThe zero value is NOT usable — construct with [New] or [NewJoined], which\nhand back the context the tasks receive alongside it. A Group is used once: after\n[Group.Wait] has returned, submit to a new one.\n\n[Group.Go] may be called from any goroutine. [Group.Wait] may not run\nconcurrently with [Group.Go] — \"have all submissions been made\" is a\nquestion only the submitter can answer, and a Group that guessed would\nreport a total that was true for an instant.\n",
-      "file": "internal/kernel/concur/group/group.go",
+      "file": "internal/kernel/concur/group/decl_gen.go",
       "layer": "kernel",
       "family": "concur"
     },
@@ -68022,7 +68022,7 @@
         }
       ],
       "doc": "PanicValue carries a panic raised inside a task across the goroutine\nboundary to whoever is waiting on the group.\n\nIt is deliberately NOT an error. A panic is a programming fault, and turning\none into a value the caller may ignore is how a broken invariant becomes a\nsilent wrong answer — the same position kernel/concur/singleflight takes, and the\nreason neither type carries an error code.\n\nThe stack is captured at the moment of recovery, inside the goroutine that\nran the task. Without it a re-raised panic would point at the waiter's\nstack — code that did nothing wrong — and the frame that actually failed\nwould be gone, which is the failure mode that makes a crashed worker pool so\nexpensive to debug.\n\nIt is a separate type from singleflight's namesake rather than a shared one:\neach names its own package in the message a crash prints, and hoisting the\ntwo into a fourth kernel package would add a primitive whose entire content\nis two fields.\n",
-      "file": "internal/kernel/concur/group/panic.go",
+      "file": "internal/kernel/concur/group/decl_gen.go",
       "layer": "kernel",
       "family": "concur"
     },
@@ -68091,7 +68091,7 @@
       "spelled": "[T any] struct{}",
       "canonical": "[T any] struct{}",
       "doc": "CappedPool wraps a concrete *Pool[T] and layers a cap-discard policy\non top: on Put, a value whose reported capacity exceeds maxCap is orphaned\n(never reset, never repooled), otherwise it is reset then repooled.\n\nDiscard happens BEFORE reset on purpose: it preserves the codec scratch\ndetach contract, where an over-cap buffer's backing bytes have been handed\nto the caller and must not be touched. Reset is NOT a memory wipe — a\nconsumer recycling sensitive bytes must zero them itself before Put.\n\nAlways used behind a pointer: the embedded *Pool owns a non-copyable\nsync.Pool.\n",
-      "file": "internal/kernel/concur/recycler/capped.go",
+      "file": "internal/kernel/concur/recycler/decl_gen.go",
       "layer": "kernel",
       "family": "concur"
     },
@@ -68153,7 +68153,7 @@
       "spelled": "[T any] struct{}",
       "canonical": "[T any] struct{}",
       "doc": "Pool is a concrete generic object pool over sync.Pool. It performs NO\nreset — consumers that need cleanup either reset before Put (logger\nBuilder.Send, async data[:0]) or use CappedPool. Safe for concurrent\nuse. Always used behind a pointer: sync.Pool must not be copied.\n",
-      "file": "internal/kernel/concur/recycler/recycler.go",
+      "file": "internal/kernel/concur/recycler/decl_gen.go",
       "layer": "kernel",
       "family": "concur"
     },
@@ -68191,7 +68191,7 @@
       "spelled": "[K comparable, V any] struct{}",
       "canonical": "[K comparable, V any] struct{}",
       "doc": "Group deduplicates concurrent [Group.Do] calls that name the same key. The\nzero value is ready to use; a Group must not be copied after first use.\n\nSafe for concurrent use by any number of goroutines.\n",
-      "file": "internal/kernel/concur/singleflight/singleflight.go",
+      "file": "internal/kernel/concur/singleflight/decl_gen.go",
       "layer": "kernel",
       "family": "concur"
     },
@@ -68254,7 +68254,7 @@
         }
       ],
       "doc": "PanicValue carries a panic raised inside a deduplicated call across the\ngoroutine boundary to every caller waiting on it.\n\nIt is deliberately NOT an error. A panic is a programming fault, and\nconverting one into a value the caller may ignore is how a broken invariant\nbecomes a silent wrong answer; it is also why this type carries no error\ncode (the kernel's cache and clock primitives take the same position — a\nprogrammer error is not a runtime condition with a dotted quad).\n\nThe stack is captured at the moment of recovery, inside the goroutine that\nran fn. Without it a re-raised panic would point at the waiter's stack —\ncode that did nothing wrong — and the frame that actually failed would be\ngone.\n",
-      "file": "internal/kernel/concur/singleflight/panic.go",
+      "file": "internal/kernel/concur/singleflight/decl_gen.go",
       "layer": "kernel",
       "family": "concur"
     },
@@ -68291,7 +68291,7 @@
       "spelled": "[T any] struct{}",
       "canonical": "[T any] struct{}",
       "doc": "Value is a copy-on-write container for a *T. Readers call Load with no lock;\nwriters replace the whole pointer under a mutex so concurrent\nread-modify-write publishes cannot lose updates. The zero value is ready to\nuse — Load returns nil until the first Store. Always used behind a pointer:\nthe embedded mutex and atomic.Pointer must not be copied.\n",
-      "file": "internal/kernel/concur/snapshot/snapshot.go",
+      "file": "internal/kernel/concur/snapshot/decl_gen.go",
       "layer": "kernel",
       "family": "concur"
     },
@@ -68367,7 +68367,7 @@
       "spelled": "func(everyConfig) everyConfig",
       "canonical": "func(github.com/kitsunium/sdk/internal/kernel/concur/worker.everyConfig) github.com/kitsunium/sdk/internal/kernel/concur/worker.everyConfig",
       "doc": "EveryOption tunes [Every]. Options apply in order, so a later one wins; a nil\noption is skipped.\n\nAn option takes the option set by value and returns the amended copy rather\nthan writing through a pointer: handing an unknown function a pointer to the\nset would move the set to the heap on every Every call, and Every is built\nonce per stream or connection by the network domains.\n",
-      "file": "internal/kernel/concur/worker/every.go",
+      "file": "internal/kernel/concur/worker/decl_gen.go",
       "layer": "kernel",
       "family": "concur"
     },
@@ -68379,7 +68379,7 @@
       "spelled": "func(stop <-chan struct{})",
       "canonical": "func(stop <-chan struct{})",
       "doc": "Loop is the goroutine body run by a LoopDaemon. It receives a stop channel\nthat is closed when Stop is called and MUST return promptly once stop is\nclosed — a Loop that ignores stop deadlocks Stop, which blocks on the join.\nA Loop MUST NOT panic: it runs in a bare goroutine, so a panic crashes the\nprocess. Callers that run risky work recover inside their own Loop.\n",
-      "file": "internal/kernel/concur/worker/worker.go",
+      "file": "internal/kernel/concur/worker/decl_gen.go",
       "layer": "kernel",
       "family": "concur"
     },
@@ -68391,7 +68391,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "LoopDaemon is a running background goroutine with an idempotent Stop and a\njoin. It is a concrete struct (not an interface) by deliberate choice,\nmirroring recycler.Pool / snapshot.Value — a single-impl interface would be\nover-abstraction. Always used behind a pointer returned by Start: the\nembedded sync.Once and channels must not be copied.\n",
-      "file": "internal/kernel/concur/worker/worker.go",
+      "file": "internal/kernel/concur/worker/decl_gen.go",
       "layer": "kernel",
       "family": "concur"
     },
@@ -68489,7 +68489,7 @@
       "spelled": "uint32",
       "canonical": "uint32",
       "doc": "Code packs a 4-byte dotted identifier (MM.LL.PP.SS) as uint32.\nSee ADR 0005 for the registry.\n",
-      "file": "internal/kernel/errs/code.go",
+      "file": "internal/kernel/errs/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -68699,7 +68699,7 @@
       "spelled": "func(e *Error)",
       "canonical": "func(e *github.com/kitsunium/sdk/internal/kernel/errs.Error)",
       "doc": "DefineOption tunes an Error at Define time. Options compose left-to-right.\n",
-      "file": "internal/kernel/errs/error.go",
+      "file": "internal/kernel/errs/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -68711,7 +68711,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Error is the SDK-wide typed error. Fields are unexported — consumers\nobtain values via the getter methods on *Error or via the Of-accessors\nin github.com/kitsunium/sdk/pkg/v1/errs. Instances are immutable after\nconstruction: Wrap returns a new *Error, never mutates the input.\n",
-      "file": "internal/kernel/errs/error.go",
+      "file": "internal/kernel/errs/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -68904,7 +68904,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "FieldValue is an immutable typed key/value pair attached to an *Error.\nUse the exported constructors (String, Int, Bool, Float, NewFieldValue)\nto create a valid FieldValue — the zero value is invalid and must never\nbe passed across the API.\n",
-      "file": "internal/kernel/errs/field.go",
+      "file": "internal/kernel/errs/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -69198,7 +69198,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "PrefixMatcher is a NON-ERROR sentinel used ONLY as a target for errors.Is.\nCallers build it via NewPrefixMatcher and pass it to errors.Is; the\nmatching logic lives on (*Error).Is (see error.go, added in W4).\n",
-      "file": "internal/kernel/errs/prefix_matcher.go",
+      "file": "internal/kernel/errs/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -69409,7 +69409,7 @@
         }
       ],
       "doc": "WrapParams groups the extra metadata Wrap needs when the cause is NOT\nalready an *Error. Keeping them in a struct stays below the SDK's\n5-parameter ceiling for Wrap and gives call sites named fields.\n",
-      "file": "internal/kernel/errs/wrap_params.go",
+      "file": "internal/kernel/errs/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -69551,7 +69551,7 @@
         }
       ],
       "doc": "StepValue describes one component of a resolved path: what that component\nIS, and who could have put it there.\n\nThe second half is the reason this type exists. Knowing that a component is\na symbolic link answers almost nothing on its own, because the answer is\n\"yes\" for /tmp on macOS, for /var/run on most Linux distributions, and for\nC:\\Users\\All Users on Windows — all of them legitimate, all of them planted\nby the operating system's installer. What separates those from an attack is\nnot the link, it is the DIRECTORY THE LINK LIVES IN: a link in a directory\nonly root can write was put there by root, and a link in a world-writable\ndirectory was put there by anybody at all.\n\nSo every step carries Container, the mode of the directory the component was\nlooked up in, read by fstat on a handle this package held open rather than\nby a second path lookup that could resolve somewhere else.\n",
-      "file": "internal/kernel/fs/pathchain/step.go",
+      "file": "internal/kernel/fs/pathchain/decl_gen.go",
       "layer": "kernel",
       "family": "fs"
     },
@@ -69695,7 +69695,7 @@
       "spelled": "[K cmp.Ordered, V comparable] struct{}",
       "canonical": "[K cmp.Ordered, V comparable] struct{}",
       "doc": "Registry is a process-wide table of plug-ins keyed by name: written at import\ntime, read on every dispatch. A reader loads an immutable snapshot and takes\nno lock; a writer copies the table, inserts, and publishes the copy under the\nsnapshot's writer lock, so a reader never observes a half-built map and two\nwriters never lose each other's entry.\n\nIt decides nothing a domain names. Publish REPORTS whether the name was\nalready held by a different value — the conflict — and the registrar refuses\nit with its own dotted-quad code and reason, exactly as it does with\nUnusable's answer. Re-publishing the SAME value is an idempotent no-op that\nreports no conflict, which is what lets a plug-in package be imported through\ntwo paths without turning a diamond dependency into a boot panic. Claim\nreports the holder instead of a verdict, for a registrar that refuses every\nsecond registration or names the holder in its refusal.\n\nV must be comparable, and that is a runtime contract as much as a compile\none: when V is an interface, == on a dynamic value that is not comparable\npanics inside Publish's duplicate check with Go's message rather than the\nregistrar's. A registrar asks Unusable first, which refuses exactly that\nvalue, and a typed nil with it.\n\nThe zero value is ready to use. K is ordered so Names can answer in a stable\norder rather than in map order.\n",
-      "file": "internal/kernel/plugin/registry.go",
+      "file": "internal/kernel/plugin/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },

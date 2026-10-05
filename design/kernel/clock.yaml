@@ -153,6 +153,26 @@ packages:
           - Waiter
           - Timed
         methods:
+          - doc: |-
+              NewTimer returns a one-shot [Timer] due d from the clock's current instant.
+              A non-positive d is already elapsed and fires before NewTimer returns.
+            impl: newTimer
+            in:
+              - name: d
+                type: time.Duration
+            name: NewTimer
+            out:
+              - type: Timer
+            recv: pointer
+          - doc: |-
+              Sleep blocks the calling goroutine until d has elapsed on this clock — which
+              means until another goroutine advances it. A non-positive d returns at once.
+            impl: sleep
+            in:
+              - name: d
+                type: time.Duration
+            name: Sleep
+            recv: pointer
           - doc: Now returns the clock's current instant.
             name: Now
             out:
@@ -179,17 +199,6 @@ packages:
               - type: <-chan time.Time
             recv: pointer
           - doc: |-
-              NewTimer returns a one-shot [Timer] due d from the clock's current instant.
-              A non-positive d is already elapsed and fires before NewTimer returns.
-            impl: newTimer
-            in:
-              - name: d
-                type: time.Duration
-            name: NewTimer
-            out:
-              - type: Timer
-            recv: pointer
-          - doc: |-
               NewTicker returns a repeating [Ticker] of period d, panicking on a
               non-positive d with the same message [System] uses.
             in:
@@ -198,15 +207,6 @@ packages:
             name: NewTicker
             out:
               - type: Ticker
-            recv: pointer
-          - doc: |-
-              Sleep blocks the calling goroutine until d has elapsed on this clock — which
-              means until another goroutine advances it. A non-positive d returns at once.
-            impl: sleep
-            in:
-              - name: d
-                type: time.Duration
-            name: Sleep
             recv: pointer
           - doc: |-
               Advance moves the clock forward by d, firing every wait that comes due, in

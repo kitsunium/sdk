@@ -1,13 +1,5 @@
 package errs
 
-// PrefixMatcher is a NON-ERROR sentinel used ONLY as a target for errors.Is.
-// Callers build it via NewPrefixMatcher and pass it to errors.Is; the
-// matching logic lives on (*Error).Is (see error.go, added in W4).
-type PrefixMatcher struct {
-	prefix Code
-	mask   Code
-}
-
 // NewPrefixMatcher constructs a PrefixMatcher usable with errors.Is to
 // match all Codes sharing a given bit-prefix (defined by the mask).
 // Example: all codes originating from pkg/v1/* →

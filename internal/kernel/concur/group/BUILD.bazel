@@ -6,6 +6,7 @@ go_library(
     name = "group",
     srcs = [
         "collect.go",
+        "decl_gen.go",
         "doc.go",
         "group.go",
         "panic.go",

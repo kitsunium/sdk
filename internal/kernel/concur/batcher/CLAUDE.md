@@ -97,3 +97,7 @@ producers + flusher race, serial `Sink` invocation (V6), every `Add` accepted
 while `Close` runs is delivered, deliver-closure-controls-order proof),
 `batcher_bench_test.go` (cap-flush `Add`, uncontended and contended, and the
 empty `Flush` fast path — the numbers are in `BENCH.md`).
+
+## Declarations
+
+`decl_gen.go` is written by kit gen from the design (ADR 0170): the declarations of `Sink`, `Batcher` and `Config` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names.

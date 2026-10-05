@@ -1,16 +1,5 @@
 package recycler
 
-import "sync"
-
-// Pool is a concrete generic object pool over sync.Pool. It performs NO
-// reset — consumers that need cleanup either reset before Put (logger
-// Builder.Send, async data[:0]) or use CappedPool. Safe for concurrent
-// use. Always used behind a pointer: sync.Pool must not be copied.
-type Pool[T any] struct {
-	// pool is the underlying sync.Pool holding the recycled values.
-	pool sync.Pool
-}
-
 // NewPool returns a Pool[T] whose factory fires on every cache miss.
 // A nil factory is a programmer error and panics at construction rather than
 // deferring the panic to sync.Pool.Get on the first cache miss, far from the

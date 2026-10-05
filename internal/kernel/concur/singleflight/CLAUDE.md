@@ -16,6 +16,7 @@ only failure of its own is a programming fault, which panics.
 
 | File | Surface |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `PanicValue` and `Group` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `singleflight.go` | `Group[K,V]` + `Do` / `Forget` / `InFlight`, and the join/run/publish/await/abandon path |
 | `call.go` | `call[V]` — the in-flight record shared by every caller of one key |
 | `panic.go` | `PanicValue` — the panic carried out of the shared call into every waiter |

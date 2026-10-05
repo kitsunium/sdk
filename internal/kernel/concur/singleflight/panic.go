@@ -5,26 +5,6 @@ import (
 	"strings"
 )
 
-// PanicValue carries a panic raised inside a deduplicated call across the
-// goroutine boundary to every caller waiting on it.
-//
-// It is deliberately NOT an error. A panic is a programming fault, and
-// converting one into a value the caller may ignore is how a broken invariant
-// becomes a silent wrong answer; it is also why this type carries no error
-// code (the kernel's cache and clock primitives take the same position — a
-// programmer error is not a runtime condition with a dotted quad).
-//
-// The stack is captured at the moment of recovery, inside the goroutine that
-// ran fn. Without it a re-raised panic would point at the waiter's stack —
-// code that did nothing wrong — and the frame that actually failed would be
-// gone.
-type PanicValue struct {
-	// Raised is the value the original panic carried, verbatim.
-	Raised any
-	// Stack is the stack of the goroutine that ran fn, captured at recovery.
-	Stack []byte
-}
-
 // newPanicValue captures raised together with the stack of the goroutine that
 // is unwinding.
 func newPanicValue(raised any) *PanicValue {

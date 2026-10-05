@@ -34,7 +34,8 @@ packages:
       clock: github.com/kitsunium/sdk/internal/kernel/clock
     path: github.com/kitsunium/sdk/internal/kernel/collections/cache
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Cache is a generic LRU+TTL cache safe for concurrent use. The zero value is
           NOT usable — construct with NewCache.
         methods:
@@ -96,13 +97,38 @@ packages:
             recv: pointer
         name: Cache
         struct:
-          unexported: true
+          fields:
+            - name: mu
+              type: sync.RWMutex
+            - name: clk
+              type: clock.Clock
+            - name: maxEntries
+              type: int
+            - name: defaultTTL
+              type: time.Duration
+            - name: onEvict
+              type: func(key K, val V)
+            - name: items
+              type: map[K]*entry[K, V]
+            - comment: most-recently-used
+              name: head
+              type: "*entry[K, V]"
+            - comment: least-recently-used
+              name: tail
+              type: "*entry[K, V]"
+            - name: hits
+              type: uint64
+            - name: misses
+              type: uint64
+            - name: evictions
+              type: uint64
         typeParams:
           - constraint: comparable
             name: K
           - constraint: any
             name: V
-      - doc: |-
+      - decl: true
+        doc: |-
           Config parameterises a Cache. The zero value is valid: an unbounded cache with
           no default TTL, the system clock, and no eviction callback.
         name: Config
@@ -127,7 +153,8 @@ packages:
             name: K
           - constraint: any
             name: V
-      - doc: |-
+      - decl: true
+        doc: |-
           StatsValue is a point-in-time copy of a Cache's counters. Hits/Misses
           count Fetch outcomes; Evictions counts capacity + expiry removals (not
           explicit Deletes).
@@ -196,7 +223,8 @@ packages:
             name: T
     path: github.com/kitsunium/sdk/internal/kernel/collections/heap
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Heap is a binary heap ordered by the comparison given to [New].
 
           The zero value is NOT usable — a heap with no comparison has no order — so
@@ -236,7 +264,15 @@ packages:
             recv: pointer
         name: Heap
         struct:
-          unexported: true
+          fields:
+            - doc: |-
+                items is the heap array: the children of i live at 2i+1 and 2i+2, so the
+                tree needs no pointers and no per-element allocation.
+              name: items
+              type: "[]T"
+            - doc: cmp is the caller's order. Non-nil by construction; see New.
+              name: cmp
+              type: func(a, b T) int
         typeParams:
           - constraint: any
             name: T
@@ -325,7 +361,8 @@ packages:
             public: Ring buffer capacity must be positive
             reason: RING_CAP_ZERO
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Queue is the lock-free SPSC ring contract. Producer threads call TryWrite;
           consumer threads call TryRead. Capacity is fixed at construction time.
         interface:

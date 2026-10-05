@@ -107,3 +107,7 @@ it: they are built on `kernel/concur/batcher`, which drives its own `time.Ticker
 ```sh
 bazel test --config=race //internal/kernel/concur/worker:worker_test
 ```
+
+## Declarations
+
+`decl_gen.go` is written by kit gen from the design (ADR 0170): the declarations of `EveryOption`, `Loop` and `LoopDaemon` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names.

@@ -81,7 +81,8 @@ packages:
           - type: float64
     path: github.com/kitsunium/sdk/internal/kernel/backoff
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Value is an exponential backoff: the wait after the n-th consecutive failure
           is BaseDelay × Multiplier^(n−1), held at MaxDelay when one is set and widened
           by Jitter when one is asked for.
