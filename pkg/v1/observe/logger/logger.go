@@ -17,7 +17,8 @@
 //     heap allocation per emit, not 0. The variadic Info/Warn/... path
 //     costs the same 1 (its variadic slice). Prefer Build for
 //     ergonomics; it is not an allocation-free guarantee. Measured in
-//     BENCH.md and pinned by TestV116BuildSendAllocatesOnePerEmit.
+//     BENCH.md and pinned by its design contract (allocsMin: 1 on
+//     Build, ADR 0165).
 //   - Composable transport. A Logger is wired from a Sink (where bytes
 //     go) + an Encoder (how bytes are formatted). Fan-out, async, route,
 //     failover, sample, recover middleware compose around a Sink —
@@ -50,7 +51,7 @@
 //	| Sinks (native)      | ConsoleStderr, ConsoleStdout, NewWriterSink(w), Multi(branches…), LevelGate  | Native + io.Writer adapter + fan-out + a per-branch floor; bring custom Sink for DB/etc. |
 //	| Middleware          | multi, async, route, failover, sample, recover                               | Compose around a base Sink; same Sink interface chainable |
 //	| Encoders            | TextEncoder                                                                  | key=value lines on system clock (JSON/structured: internal today) |
-//	| Emission            | Info / Warn / Error / Debug (variadic), Build(lg,lv) → chain → Send, LogAttrs| 1 alloc on variadic, 0 alloc steady-state on Build |
+//	| Emission            | Info / Warn / Error / Debug (variadic), Build(lg,lv) → chain → Send, LogAttrs| 1 alloc on variadic, 1 alloc steady-state on Build |
 //	| Attr constructors   | String, Int, Bool, Float64, Int64, Uint64, Duration, Time, Any               | Typed at the call site |
 //	| Levels              | LevelDebug, LevelInfo, LevelWarn, LevelError                                 | MinLevel on SinkConfig filters at the source |
 //	| Versioning          | Version (ldflags), FrameworkVersion()                                        | Stamp every record with the SDK build version |

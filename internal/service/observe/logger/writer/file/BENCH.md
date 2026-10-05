@@ -141,7 +141,7 @@ there is no device: `fsync` on RAM is a syscall and a return.
 ## 5. End to end: the writer adds NOTHING to "one alloc per emit"
 
 The root `CLAUDE.md` sells the logger on one allocation per emit and
-`pkg/v1/observe/logger` pins it with `TestV116BuildSendAllocatesOnePerEmit`. That test
+`pkg/v1/observe/logger` pins it with `TestPerfAllocsBuildSend`. That test
 ends at the handler. This is the file half of what a WRITER adds underneath it.
 
 | a full emit — text encoder + `genericHandler` + transport | ns/op | B/op | allocs |

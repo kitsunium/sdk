@@ -74,8 +74,18 @@ what the Do NOT below asks of a codec with its own pool.
 - Add a second cap-discard constant in a codec — read
   `scratch.MaxRetainedBufBytes`.
 
+## Performance contracts
+
+The design budgets three calls (ADR 0165): a warm `AcquireBuffer` /
+`ReleaseBuffer` round trip and a warm `AcquireReader` / `ReleaseReader` one
+allocate nothing, and `DetachBuffer` of a buffer under the cap allocates
+exactly once — the caller's clone. `perf_fixtures_test.go` (race off) sets
+each call up; `perf_gen_test.go`, written by kit gen, counts it; the alloc
+lane runs both.
+
 ## Verification
 
 ```
 bazel test --config=race //internal/core/data/codec/scratch:scratch_test
+bazel test --config=alloc //internal/core/data/codec/scratch:scratch_test
 ```

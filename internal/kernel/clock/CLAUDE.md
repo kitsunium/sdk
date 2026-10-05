@@ -307,5 +307,7 @@ Tests:
 | `manual_external_test.go` | `ManualClock` determinism: arbitrary origins, deadline-ordered firing, tick drop, Stop/Reset drain semantics, backwards `Set`, `Sleep`/`BlockUntil`, and a race-detector concurrency stress |
 | `synctest_external_test.go` | the two load-bearing claims of §"clock vs `testing/synctest`" |
 | `clock_bench_test.go` | the numbers in `BENCH.md`, including the `Stdlib_NewTimer` control pair |
+| `perf_fixtures_test.go` | race off: the fixtures of the design's budgets on `Clock.Now` and `Clock.Since` — a call through `System` allocates nothing (ADR 0165) |
+| `perf_gen_test.go` | written by kit gen from those budgets, run by the alloc lane |
 
 A longer-form companion lives in `README.md`.

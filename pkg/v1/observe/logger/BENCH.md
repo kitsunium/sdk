@@ -122,7 +122,7 @@ BenchmarkLogger10Fields-8     (uncorrelated)   1380577   1736 ns/op  768 B/op   
   array and appended into the buffer the handler already borrowed from the
   pool. Pinned by `TestT34TraceCorrelationAddsNoAllocation`, which asserts
   **exactly 1** on all three emission paths for both cases — stricter than
-  `TestV116BuildSendAllocatesOnePerEmit`, which asserts only `>= 1`.
+  `TestPerfAllocsBuildSend`, which asserts only `>= 1`.
 - **Cost of being correlated at all** (uncorrelated → correlated, no span in
   scope): +72 ns on the static line, +111 ns on the 10-field line. That is one
   `context.Value` walk, and a record that then renders nothing.

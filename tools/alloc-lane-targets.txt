@@ -4,6 +4,11 @@
 #   - Makefile              → `make test-alloc`
 #   - .github/workflows/bazel-ci.yml → the "alloc + zero-alloc gates" step
 #   - scripts/pre-commit/check-alloc-lane-coverage.sh → the drift guard
+# and written in part by a fourth: kit gen keeps the section between
+# `# BEGIN kit gen` and `# END kit gen` at the end, naming every package whose
+# design budgets name a fixture — its perf_gen_test.go is race off too (ADR
+# 0165). The lines above it are hand-written, and kit leaves them byte for
+# byte; kit gen -check fails on a hand edit inside the section.
 #
 # WHY this lane exists: a test file carrying `//go:build !race` is NOT compiled
 # by the race suite (`bazel test --config=ci //...`, race on by default). Such a
@@ -28,18 +33,10 @@
 # The full yaml.v3 codec kept opt-in beside the native subset: same budget test,
 # re-pinned on the library it wraps.
 //third-party/codec/yaml:yaml_test
-# Kernel zero-alloc invariant gate (buffer/clock/errs/ring). (original)
-//internal/kernel:kernel_test
-# Recycler zero-alloc invariant (ADR 0010) — Pool/CappedPool Get+Put.
-//internal/kernel/concur/recycler:recycler_test
-# Snapshot zero-alloc invariant (ADR 0011) — Load/Store/Swap.
-//internal/kernel/concur/snapshot:snapshot_test
-# Version comparison allocates nothing (ADR 0156 §4): every reading of
-# kernel/semver is a substring of its input. strings.Split in place of the
-# in-place identifier walk returns the same identifiers, so every functional
-# test passes against it — and costs 1 000 allocations over 500 comparisons.
-# Mutation-checked in the file's doc comment.
-//internal/kernel/semver:semver_test
+# The kernel's zero-allocation gate (buffer, clock, errs, ring), the
+# recycler's and the snapshot's (ADR 0010, ADR 0011) and kernel/semver's
+# (ADR 0156 §4) are design contracts since ADR 0165: their packages are in
+# kit gen's section at the end of this file.
 # encwrite frame-overflow probe (AllocsPerRun-based).
 //internal/service/observe/logger/middleware/encwrite:encwrite_test
 # Labelled-series lookup allocation gate — the claim that resolving an existing
@@ -80,7 +77,7 @@
 //internal/service/net/client:client_test
 # The two default writers (ADR 0015) and the severity floor in front of them,
 # against the SDK's flagship claim: "one alloc per emit". pkg/v1/observe/logger's
-# TestV116BuildSendAllocatesOnePerEmit ends at the handler, and nothing had ever
+# TestPerfAllocsBuildSend ends at the handler, and nothing had ever
 # measured what a WRITER adds underneath it. The answer is nothing — the
 # allocation profile of a full emit puts 99.53 % (console) / 95.92 % (file) of
 # its objects on the handler's attrs clone and 0 on the transport — and the
@@ -155,3 +152,17 @@
 # of 4x.
 //pkg/v1/data/codec:codec_test
 //framework/telemetry:telemetry_test
+
+# BEGIN kit gen from design/sdk.yaml: the packages whose budgets name a fixture,
+# whose perf_gen_test.go runs race off here alone. DO NOT EDIT to the line
+# below: kit gen writes it from the design.
+//internal/core/data/codec/scratch:scratch_test
+//internal/kernel/clock:clock_test
+//internal/kernel/collections/ring:ring_test
+//internal/kernel/concur/buffer:buffer_test
+//internal/kernel/concur/recycler:recycler_test
+//internal/kernel/concur/snapshot:snapshot_test
+//internal/kernel/errs:errs_test
+//internal/kernel/semver:semver_test
+//pkg/v1/observe/logger:logger_test
+# END kit gen
