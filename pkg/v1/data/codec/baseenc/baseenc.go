@@ -34,8 +34,6 @@
 package baseenc
 
 import (
-	corebaseenc "github.com/kitsunium/sdk/internal/core/data/codec/baseenc"
-	"github.com/kitsunium/sdk/internal/kernel/errs"
 	// The implementation registers itself with the codec registry as it is
 	// initialised; importing it is what registers the format.
 	_ "github.com/kitsunium/sdk/internal/service/data/codec/baseenc"
@@ -64,31 +62,4 @@ const (
 	Base58 = "base58"
 	// Base62 is the alphanumeric alphabet; capped at 4 KiB like Base58.
 	Base62 = "base62"
-)
-
-// The error codes, range 0.3.24.*, declared in the core (ADR 0160).
-const (
-	// CodeMarshalFailed is 0.3.24.1: the value has no JSON encoding.
-	CodeMarshalFailed errs.Code = corebaseenc.CodeBaseEncMarshalFailed
-	// CodeUnmarshalFailed is 0.3.24.2: the decoded text is not JSON the target
-	// can hold.
-	CodeUnmarshalFailed errs.Code = corebaseenc.CodeBaseEncUnmarshalFailed
-	// CodeDecodeFailed is 0.3.24.3: the input is not text of the Format's
-	// alphabet.
-	CodeDecodeFailed errs.Code = corebaseenc.CodeBaseEncDecodeFailed
-	// CodeSizeExceeded is 0.3.24.4: an input past its bound — 10 MiB, 4 KiB
-	// for base58 and base62.
-	CodeSizeExceeded errs.Code = corebaseenc.CodeBaseEncSizeExceeded
-)
-
-// The sentinels, for errors.Is: each carries the code of the same name.
-var (
-	// MarshalFailed is the sentinel of [CodeMarshalFailed].
-	MarshalFailed = corebaseenc.BaseEncMarshalFailed
-	// UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].
-	UnmarshalFailed = corebaseenc.BaseEncUnmarshalFailed
-	// DecodeFailed is the sentinel of [CodeDecodeFailed].
-	DecodeFailed = corebaseenc.BaseEncDecodeFailed
-	// SizeExceeded is the sentinel of [CodeSizeExceeded].
-	SizeExceeded = corebaseenc.BaseEncSizeExceeded
 )

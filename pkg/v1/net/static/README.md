@@ -91,7 +91,7 @@ var Misconfigured = corenet.StaticMisconfigured
 ```
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/static/static.go#L100>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/static/facade_gen.go#L31>)
 
 Config says how a tree is served; its zero value is a working, strict configuration.
 
@@ -100,7 +100,7 @@ type Config = svcstatic.Config
 ```
 
 <a name="Handler"></a>
-## type [Handler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/static/static.go#L104>)
+## type [Handler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/static/facade_gen.go#L35>)
 
 Handler serves one file tree; it is an http.Handler, safe for concurrent use. The zero Handler has no tree and answers every request 500.
 
@@ -109,7 +109,7 @@ type Handler = svcstatic.Handler
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/static/static.go#L116>)
+### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/static/facade_gen.go#L47>)
 
 ```go
 func New(fsys fs.FS, cfg Config) (*Handler, error)

@@ -850,150 +850,376 @@ packages:
               type: corequeue.PolicyValue
             - name: Dialect
               type: coresql.Dialect
-  - aliases:
-      - name: Broker
-        target: corequeue.Broker
-      - name: Handler
-        target: corequeue.Handler
-      - name: Message
-        target: corequeue.MessageValue
-      - name: Delivery
-        target: corequeue.DeliveryValue
-      - name: Lease
-        target: corequeue.LeaseValue
-      - name: Receipt
-        target: corequeue.ReceiptValue
-      - name: Nack
-        target: corequeue.NackValue
-      - name: Policy
-        target: corequeue.PolicyValue
-      - name: DeadLetter
-        target: corequeue.DeadLetterValue
-      - name: DeadLetterReader
-        target: corequeue.DeadLetterReader
-      - name: LeaseExtender
-        target: corequeue.LeaseExtender
-      - name: Waker
-        target: corequeue.Waker
-      - name: Wake
-        target: corequeue.WakeValue
-      - name: Rejecter
-        target: corequeue.Rejecter
-      - name: DeadLetterManager
-        target: corequeue.DeadLetterManager
-      - name: SQLConfig
-        target: svcqueue.SQLConfig
-      - name: FileConfig
-        target: svcqueue.FileConfig
-      - name: MemoryConfig
-        target: svcqueue.MemoryConfig
-      - name: ConsumerConfig
-        target: svcqueue.ConsumerConfig
-    constants:
-      - name: DefaultMaxMessageBytes
-        type: int
-        value: 1 << 20
-      - name: MaxDeadlineOffset
-        type: time.Duration
-        value: "3153600000000000000"
-      - name: DefaultPollInterval
-        type: time.Duration
-        value: "100000000"
-      - name: MaxSQLTableLen
-        type: int
-        value: "63"
-      - name: CodeNotRetryable
-        type: errs.Code
-        value: "0x00_02_17_06"
-      - name: CodeDeadLetterNotFound
-        type: errs.Code
-        value: "0x00_02_17_07"
-      - name: CodeSQLQueueMisconfigured
-        type: errs.Code
-        value: "0x00_03_35_05"
-    functions:
-      - in:
-          - name: cfg
-            type: FileConfig
-        name: NewFile
-        out:
-          - name: broker
-            type: Broker
-          - name: err
-            type: error
-      - in:
-          - name: cfg
-            type: SQLConfig
-        name: NewSQL
-        out:
-          - name: broker
-            type: Broker
-          - name: err
-            type: error
-      - in:
-          - name: dialect
-            type: sql.Dialect
-          - name: table
-            type: string
-          - name: version
-            type: uint64
-        name: SQLMigration
-        out:
-          - type: sql.Migration
-          - type: error
-      - in:
-          - name: cause
-            type: error
-        name: DoNotRetry
-        out:
-          - type: error
-      - in:
-          - name: cfg
-            type: MemoryConfig
-        name: NewMemory
-        out:
-          - name: broker
-            type: Broker
-          - name: err
-            type: error
-      - in:
-          - name: ctx
-            type: context.Context
-          - name: broker
-            type: Broker
-          - name: cfg
-            type: ConsumerConfig
-        name: Consume
-        out:
-          - type: error
+  - facade:
+      - const:
+          - doc: |-
+              DefaultMaxMessageBytes is the payload bound applied when
+              [Policy].MaxMessageBytes is left at zero: one mebibyte.
+            name: DefaultMaxMessageBytes
+            reexport: corequeue.DefaultMaxMessageBytes
+            type: int
+            typed: true
+            value: 1 << 20
+      - const:
+          - doc: |-
+              MaxDeadlineOffset is the ceiling on [Policy].VisibilityTimeout and
+              [Policy].RetryDelay: a century, refused above it rather than clamped,
+              because a deadline past 2262 cannot be written into the durable broker's
+              file names and read back.
+            name: MaxDeadlineOffset
+            reexport: corequeue.MaxDeadlineOffset
+            type: time.Duration
+            typed: true
+            value: "3153600000000000000"
+      - const:
+          - doc: |-
+              DefaultPollInterval is how long an idle worker waits before asking again
+              when [ConsumerConfig].PollInterval is left at zero. With a [Waker] broker it
+              bounds only how late another process's publication is noticed.
+            name: DefaultPollInterval
+            reexport: svcqueue.DefaultPollInterval
+            type: time.Duration
+            typed: true
+            value: "100000000"
+      - const:
+          - doc: |-
+              MaxSQLTableLen is the longest table name [NewSQL] and [SQLMigration] accept,
+              in bytes: PostgreSQL's identifier limit.
+            name: MaxSQLTableLen
+            reexport: svcqueue.MaxSQLTableLen
+            type: int
+            typed: true
+            value: "63"
+      - const:
+          - doc: |-
+              CodeNotRetryable is the code [DoNotRetry] adds to a failure's wrap
+              trail: errs.HasCode(err, CodeNotRetryable) recognises the mark, where
+              errors.Is(err, NotRetryable) sees only an origin.
+            name: CodeNotRetryable
+            reexport: corequeue.CodeNotRetryable
+            type: errs.Code
+            typed: true
+            value: "0x00_02_17_06"
+          - doc: CodeDeadLetterNotFound is [DeadLetterNotFound]'s code.
+            name: CodeDeadLetterNotFound
+            reexport: corequeue.CodeDeadLetterNotFound
+            type: errs.Code
+            typed: true
+            value: "0x00_02_17_07"
+          - doc: CodeSQLQueueMisconfigured is [SQLQueueMisconfigured]'s code.
+            name: CodeSQLQueueMisconfigured
+            reexport: corequeue.CodeSQLQueueMisconfigured
+            type: errs.Code
+            typed: true
+            value: "0x00_03_35_05"
+        doc: The codes of the sentinels ADR 0151 added, for errs.HasCode.
+      - alias:
+          - doc: |-
+              Broker is the public alias for the queue contract. It is FROZEN at four
+              methods; capabilities arrive as siblings ([DeadLetterReader],
+              [LeaseExtender], [Waker], [Rejecter], [DeadLetterManager]) reached by type
+              assertion.
+            name: Broker
+            target: corequeue.Broker
+      - alias:
+          - doc: Handler is the public alias for the function that processes one delivery.
+            name: Handler
+            target: corequeue.Handler
+      - alias:
+          - doc: Message is the public alias for one unit of work as the broker minted it.
+            name: Message
+            target: corequeue.MessageValue
+      - alias:
+          - doc: |-
+              Delivery is the public alias for one message handed to one consumer,
+              carrying the lease that proves the claim and the count that says whether
+              this is a retry.
+            name: Delivery
+            target: corequeue.DeliveryValue
+      - alias:
+          - doc: Lease is the public alias for a consumer's exclusive claim on one message.
+            name: Lease
+            target: corequeue.LeaseValue
+      - alias:
+          - doc: |-
+              Receipt is the public alias for the opaque handle to one lease. Do not
+              parse it and do not construct one.
+            name: Receipt
+            target: corequeue.ReceiptValue
+      - alias:
+          - doc: |-
+              Nack is the public alias for what [Broker].Nack decided: retried, or
+              dead-lettered.
+            name: Nack
+            target: corequeue.NackValue
+      - alias:
+          - doc: Policy is the public alias for the delivery discipline a broker enforces.
+            name: Policy
+            target: corequeue.PolicyValue
+      - alias:
+          - doc: DeadLetter is the public alias for one abandoned message and its cause.
+            name: DeadLetter
+            target: corequeue.DeadLetterValue
+      - alias:
+          - doc: |-
+              DeadLetterReader is the public alias for the capability of reading the
+              dead-letter store back. Every broker here implements it.
+            name: DeadLetterReader
+            target: corequeue.DeadLetterReader
+      - alias:
+          - doc: |-
+              LeaseExtender is the public alias for the capability of renewing a lease a
+              handler is still working under. Every broker here implements it.
+            name: LeaseExtender
+            target: corequeue.LeaseExtender
+      - alias:
+          - doc: |-
+              Waker is the public alias for the capability of telling an idle consumer
+              when to look again. Every broker here implements it, and Consume uses it; a
+              broker of your own that omits it is simply polled.
+            name: Waker
+            target: corequeue.Waker
+      - alias:
+          - doc: |-
+              Wake is the public alias for what an idle consumer waits on: a signal the
+              next Publish or Nack in this process closes, and how long until something
+              the broker holds becomes receivable on its own.
+            name: Wake
+            target: corequeue.WakeValue
+      - alias:
+          - doc: |-
+              Rejecter is the public alias for the capability of dead-lettering a leased
+              message at once, with the cause that condemned it. Every broker here
+              implements it, and Consume uses it for a [DoNotRetry] failure.
+            name: Rejecter
+            target: corequeue.Rejecter
+      - alias:
+          - doc: |-
+              DeadLetterManager is the public alias for the capability of replaying a
+              dead letter into its queue, its count reset, or deleting it. Every broker
+              here implements it.
+            name: DeadLetterManager
+            target: corequeue.DeadLetterManager
+      - alias:
+          - doc: |-
+              SQLConfig is the public alias for [NewSQL]'s configuration: Transactor,
+              Dialect and Table (required), Policy, and Clock.
+            name: SQLConfig
+            target: svcqueue.SQLConfig
+      - alias:
+          - doc: FileConfig is the public alias for [NewFile]'s configuration.
+            name: FileConfig
+            target: svcqueue.FileConfig
+      - alias:
+          - doc: MemoryConfig is the public alias for [NewMemory]'s configuration.
+            name: MemoryConfig
+            target: svcqueue.MemoryConfig
+      - alias:
+          - doc: ConsumerConfig is the public alias for [Consume]'s configuration.
+            name: ConsumerConfig
+            target: svcqueue.ConsumerConfig
+      - var:
+          - doc: QueueMisconfigured refuses a Policy field the broker cannot honour.
+            name: QueueMisconfigured
+            reexport: corequeue.QueueMisconfigured
+            type: "*errs.Error"
+          - doc: |-
+              MessageTooLarge refuses a payload above the policy's bound, at the
+              producer, where it can still be made smaller.
+            name: MessageTooLarge
+            reexport: corequeue.MessageTooLarge
+            type: "*errs.Error"
+          - doc: |-
+              UnknownReceipt refuses an acknowledgement naming a lease this queue
+              never issued.
+            name: UnknownReceipt
+            reexport: corequeue.UnknownReceipt
+            type: "*errs.Error"
+          - doc: |-
+              LeaseExpired reports an acknowledgement whose lease had already lapsed.
+              Nothing happened, and the message is elsewhere.
+            name: LeaseExpired
+            reexport: corequeue.LeaseExpired
+            type: "*errs.Error"
+          - doc: InvalidBatchSize refuses a non-positive batch size.
+            name: InvalidBatchSize
+            reexport: corequeue.InvalidBatchSize
+            type: "*errs.Error"
+          - doc: |-
+              NotRetryable is the failure no retry can fix: what a dead letter
+              records when [DoNotRetry] marked an error with no public words of its
+              own, or none at all.
+            name: NotRetryable
+            reexport: corequeue.NotRetryable
+            type: "*errs.Error"
+          - doc: |-
+              DeadLetterNotFound refuses a replay or a deletion naming a dead letter
+              the store does not hold.
+            name: DeadLetterNotFound
+            reexport: corequeue.DeadLetterNotFound
+            type: "*errs.Error"
+          - doc: |-
+              SQLQueueMisconfigured refuses an SQLConfig no SQL broker could run: no
+              transactor, one it cannot join a transaction of, a dialect it cannot
+              spell, or a table name it cannot use.
+            name: SQLQueueMisconfigured
+            reexport: corequeue.SQLQueueMisconfigured
+            type: "*errs.Error"
+          - doc: |-
+              QueueBackendFailed reports a refusal from a durable broker's storage:
+              the filesystem's, or a statement the SQL broker's database did not
+              complete.
+            name: QueueBackendFailed
+            reexport: corequeue.QueueBackendFailed
+            type: "*errs.Error"
+          - doc: |-
+              QueueDirectoryUnusable refuses a queue directory that is missing, is
+              not a directory, or is writable by accounts that must not be able to
+              inject or drain messages.
+            name: QueueDirectoryUnusable
+            reexport: corequeue.QueueDirectoryUnusable
+            type: "*errs.Error"
+          - doc: |-
+              ConsumerMisconfigured refuses a consumer with no Handler, or one whose
+              author has not asserted HandlerIsIdempotent.
+            name: ConsumerMisconfigured
+            reexport: corequeue.ConsumerMisconfigured
+            type: "*errs.Error"
+          - doc: |-
+              HandlerPanicked reports a recovered handler panic. The message was
+              nacked and the consumer kept running.
+
+              There is deliberately no HandlerFailed beside it: a handler that
+              returns an error has its error recorded in the dead letter unmodified,
+              because a verdict wrapped around it would displace the reason whoever
+              reads that record actually needs.
+            name: HandlerPanicked
+            reexport: corequeue.HandlerPanicked
+            type: "*errs.Error"
+      - func:
+          doc: |-
+            NewFile returns the durable broker: its whole state is the directory in
+            cfg.Dir, so it survives the process that published into it and two brokers
+            over one directory are one queue.
+
+            It refuses at construction — never at first use — a policy it cannot
+            honour, a directory it cannot use safely, and a platform with no atomic
+            replace or no flushable directory handle. Windows is such a platform: after
+            the directory checks — which read its access control lists there — NewFile
+            returns the SDK's UNSUPPORTED_PLATFORM, matched with
+            errors.Is(err, proc.UnsupportedPlatform).
+
+            The broker holds two directory descriptors and additionally implements
+            io.Closer, which releases them — reached by type assertion, as the session
+            file store's is, so Broker grows no method:
+
+            	if closer, ok := broker.(io.Closer); ok { defer closer.Close() }
+
+            The messages stay on disk; every call after Close fails.
+          forward: svcqueue.NewFile
+          in:
+            - name: cfg
+              type: FileConfig
+          name: NewFile
+          out:
+            - name: broker
+              type: Broker
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            NewSQL returns a durable broker whose queue is one table of the caller's
+            database, created by [SQLMigration]. Every call runs on the transaction its
+            context carries for cfg.Transactor, so a message published inside that
+            transaction exists if and only if it commits. It sends no statement.
+
+            It refuses at construction — never at first use — a policy it cannot honour
+            and a transactor, dialect or table it cannot use ([SQLQueueMisconfigured]).
+            The transactor must be the SDK's, or another core/data/sql Joiner and Deferrer.
+          forward: svcqueue.NewSQL
+          in:
+            - name: cfg
+              type: SQLConfig
+          name: NewSQL
+          out:
+            - name: broker
+              type: Broker
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            SQLMigration returns the migration that creates the one table an SQL queue
+            named table keeps on dialect, numbered version for the caller's own version
+            table. Its Down drops the table, and every message in it. Its statement does
+            nothing when the table exists.
+          forward: svcqueue.SQLMigration
+          in:
+            - name: dialect
+              type: sql.Dialect
+            - name: table
+              type: string
+            - name: version
+              type: uint64
+          name: SQLMigration
+          out:
+            - type: sql.Migration
+            - type: error
+      - func:
+          doc: |-
+            DoNotRetry marks cause as a failure no retry can fix: returned from a
+            [Handler], it makes [Consume] dead-letter the message at once, with cause,
+            instead of handing it back for another attempt. An SDK error keeps its own
+            reason, code and public words in the dead letter; any other error, or none,
+            is recorded as [NotRetryable].
+          forward: corequeue.DoNotRetry
+          in:
+            - name: cause
+              type: error
+          name: DoNotRetry
+          out:
+            - type: error
+      - func:
+          doc: |-
+            NewMemory returns the in-process test double: the port's full semantics,
+            no directory, no flush, and nothing that survives the process.
+
+            It refuses the same policies [NewFile] refuses, through the same guard,
+            which is what makes it an honest double.
+          forward: svcqueue.NewMemory
+          in:
+            - name: cfg
+              type: MemoryConfig
+          name: NewMemory
+          out:
+            - name: broker
+              type: Broker
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            Consume runs cfg.Handler against broker until ctx is done, on
+            cfg.Parallelism goroutines it owns.
+
+            It returns nil when ctx ends — a cancelled consumer is a stopped consumer,
+            not a failed one — and returns the broker's error when the STORAGE fails. A
+            handler's error is never returned: it is nacked, retried, and eventually
+            dead-lettered, which is the entire point of the domain.
+
+            cfg.HandlerIsIdempotent must be true; see the package documentation.
+          forward: svcqueue.Consume
+          in:
+            - name: ctx
+              type: context.Context
+            - name: broker
+              type: Broker
+            - name: cfg
+              type: ConsumerConfig
+          name: Consume
+          out:
+            - type: error
     imports:
       corequeue: github.com/kitsunium/sdk/internal/core/data/queue
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       sql: github.com/kitsunium/sdk/pkg/v1/data/sql
       svcqueue: github.com/kitsunium/sdk/internal/service/data/queue
     path: github.com/kitsunium/sdk/pkg/v1/data/queue
-    variables:
-      - name: QueueMisconfigured
-        type: "*errs.Error"
-      - name: MessageTooLarge
-        type: "*errs.Error"
-      - name: UnknownReceipt
-        type: "*errs.Error"
-      - name: LeaseExpired
-        type: "*errs.Error"
-      - name: InvalidBatchSize
-        type: "*errs.Error"
-      - name: NotRetryable
-        type: "*errs.Error"
-      - name: DeadLetterNotFound
-        type: "*errs.Error"
-      - name: SQLQueueMisconfigured
-        type: "*errs.Error"
-      - name: QueueBackendFailed
-        type: "*errs.Error"
-      - name: QueueDirectoryUnusable
-        type: "*errs.Error"
-      - name: ConsumerMisconfigured
-        type: "*errs.Error"
-      - name: HandlerPanicked
-        type: "*errs.Error"

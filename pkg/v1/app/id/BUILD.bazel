@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "id",
-    srcs = ["id.go"],
+    srcs = [
+        "facade_gen.go",
+        "id.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/app/id",
     visibility = ["//visibility:public"],
     deps = [

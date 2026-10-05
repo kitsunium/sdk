@@ -1,3 +1,6 @@
+// Package logger — exposes the in-memory test sink (NewMemorySink) and its
+// RecordSnapshot element type so consumers can assert on what was logged.
+//
 // Package logger — exposes the Sink port, the multi-sink helper and the
 // per-branch level gate alongside the encoder-aware constructor NewWithSink.
 // Together they let consumers replace the default text-on-stderr wiring
@@ -12,26 +15,8 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	svclogger "github.com/kitsunium/sdk/internal/service/observe/logger"
 	"github.com/kitsunium/sdk/internal/service/observe/logger/encoder"
-	"github.com/kitsunium/sdk/internal/service/observe/logger/middleware/multi"
 	"github.com/kitsunium/sdk/internal/service/observe/logger/sink/console"
-	"github.com/kitsunium/sdk/internal/service/observe/logger/writer/levelgate"
 )
-
-// Sink is the stable alias for the internal core.Sink port. Consumers
-// compose Sink instances (console / file / syslog / async / multi …) and
-// pass them to NewWithSink to wire a custom transport pipeline.
-type Sink = corelogger.Sink
-
-// Record is the stable alias for the internal RecordEvent value passed to
-// Sink.Write. Consumers implementing custom Sinks reach for this type
-// rather than reimporting the internal core.logger package.
-type Record = corelogger.RecordEvent
-
-// Encoder is the stable alias for the internal service encoder interface.
-// The default text encoder is exposed via TextEncoder; structured output is
-// injected through NewWithSink via SinkConfig.Encoder (see NewJSONEncoder)
-// when callers need machine-readable output.
-type Encoder = encoder.Encoder
 
 // SinkConfig carries the construction parameters accepted by NewWithSink.
 // A zero-valued SinkConfig{Sink: s} is enough to ship records through s at
@@ -81,33 +66,6 @@ func NewWithSink(cfg SinkConfig) (lg Logger, err error) {
 	return base.With(corelogger.AttrValue{Key: "framework_version", Value: corelogger.StringValue(FrameworkVersion())}), nil
 }
 
-// Multi is a thin wrapper around the internal multi (fan-out) sink. It
-// broadcasts every record to each branch in order and aggregates per-sink
-// failures via errors.Join under the FANOUT_WRITE_FAILED sentinel.
-func Multi(branches ...Sink) Sink {
-	//: delegate to the internal fan-out implementation.
-	return multi.New(branches...)
-}
-
-// LevelGate returns a Sink that passes to sink the records whose level is at
-// or above min and drops the others, delegating Flush and Close. It is how one
-// branch of a [Multi] fan-out sees less than another: the pipeline's
-// [SinkConfig].MinLevel is set to the lowest level any branch wants, and the
-// narrower branches are gated.
-//
-// The floor is the one given, for every level — Info included. A dropped
-// record reports success (every byte accepted, no error), so a fan-out never
-// counts it as a failed write. The gate holds nothing of its own: Flush and
-// Close reach sink unchanged, and closing the gate closes sink.
-//
-// A nil sink yields nil, which [Multi] skips and [NewWithSink] refuses with
-// [SinkConfigRequired].
-func LevelGate(sink Sink, min Level) Sink {
-	//: the internal gate without the writer configuration's reading of Info
-	//: as "inherit": a caller's floor is the floor applied.
-	return levelgate.Floor(sink, min)
-}
-
 // NewWriterSink wraps an arbitrary [io.Writer] in a [Sink] so callers can
 // compose plain file / network / bytes.Buffer writers with [Multi] for
 // fan-out. The returned Sink serialises Write calls through an internal
@@ -138,21 +96,6 @@ func NewWriterSink(w io.Writer) (sink Sink, err error) {
 	}
 	//: hand back the validated sink to the caller.
 	return built, nil
-}
-
-// ConsoleStderr returns the stderr console Sink used by Default. Exposed
-// so callers building a Multi() topology can wire stderr alongside richer
-// transports without re-implementing the convenience constructor.
-func ConsoleStderr() Sink {
-	//: reuse the canonical convenience constructor from the console sink.
-	return console.NewStderr()
-}
-
-// ConsoleStdout returns the stdout console Sink. Same rationale as
-// ConsoleStderr — exposed for Multi() compositions.
-func ConsoleStdout() Sink {
-	//: reuse the canonical convenience constructor from the console sink.
-	return console.NewStdout()
 }
 
 // TextEncoder returns a fresh text Encoder bound to the real system clock.

@@ -108,7 +108,7 @@ var (
 ```
 
 <a name="Attempt"></a>
-## type [Attempt](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/spool/spool.go#L134>)
+## type [Attempt](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/spool/facade_gen.go#L65>)
 
 Attempt is the public alias for what one delivery attempt knows about itself, carried in the context the spool hands its transport.
 
@@ -117,7 +117,7 @@ type Attempt = svcspool.AttemptValue
 ```
 
 <a name="AttemptFrom"></a>
-### func [AttemptFrom](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/spool/spool.go#L169>)
+### func [AttemptFrom](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/spool/facade_gen.go#L99>)
 
 ```go
 func AttemptFrom(ctx context.Context) (attempt Attempt, ok bool)
@@ -126,7 +126,7 @@ func AttemptFrom(ctx context.Context) (attempt Attempt, ok bool)
 AttemptFrom returns the attempt a delivery context carries — only a context a Spool handed its transport carries one.
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/spool/spool.go#L124>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/spool/facade_gen.go#L55>)
 
 Config is the public alias for a spool's configuration: Transport and MaxAttempts required; Dir, Clock, From, Backoff, SendTimeout, MaxMessageBytes, PollInterval, Observe, Annotate and NewID optional.
 
@@ -135,7 +135,7 @@ type Config = svcspool.Config
 ```
 
 <a name="DeadLetter"></a>
-## type [DeadLetter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/spool/spool.go#L137>)
+## type [DeadLetter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/spool/facade_gen.go#L68>)
 
 DeadLetter is the public alias for a mail the spool gave up on.
 
@@ -144,7 +144,7 @@ type DeadLetter = svcspool.DeadLetterValue
 ```
 
 <a name="Event"></a>
-## type [Event](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/spool/spool.go#L127>)
+## type [Event](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/spool/facade_gen.go#L58>)
 
 Event is the public alias for one thing that happened to one mail.
 
@@ -153,7 +153,7 @@ type Event = svcspool.EventValue
 ```
 
 <a name="EventKind"></a>
-## type [EventKind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/spool/spool.go#L130>)
+## type [EventKind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/spool/facade_gen.go#L61>)
 
 EventKind is the public alias for what an Event reports.
 
@@ -179,7 +179,7 @@ const (
 ```
 
 <a name="Spool"></a>
-## type [Spool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/spool/spool.go#L119>)
+## type [Spool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/spool/facade_gen.go#L50>)
 
 Spool is the public alias for the durable outbox: Send, SendWithID, Run, DeadLetters, Close.
 
@@ -188,7 +188,7 @@ type Spool = svcspool.Spool
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/spool/spool.go#L162>)
+### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/spool/facade_gen.go#L93>)
 
 ```go
 func New(cfg Config) (*Spool, error)

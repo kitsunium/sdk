@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "session",
-    srcs = ["session.go"],
+    srcs = [
+        "facade_gen.go",
+        "session.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/security/session",
     visibility = ["//visibility:public"],
     deps = [

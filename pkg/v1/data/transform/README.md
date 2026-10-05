@@ -104,7 +104,7 @@ var (
 ```
 
 <a name="Compress"></a>
-## func [Compress](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/transform.go#L141>)
+## func [Compress](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/transform.go#L74>)
 
 ```go
 func Compress(algo Algorithm, dst, src []byte) (encoded []byte, err error)
@@ -113,7 +113,7 @@ func Compress(algo Algorithm, dst, src []byte) (encoded []byte, err error)
 Compress compresses src with the scheme registered under algo and appends the result to dst. An unregistered algo is refused with UnknownCompressor and dst comes back as it was.
 
 <a name="Decompress"></a>
-## func [Decompress](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/transform.go#L156>)
+## func [Decompress](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/transform.go#L89>)
 
 ```go
 func Decompress(algo Algorithm, dst, src []byte) (decoded []byte, err error)
@@ -122,7 +122,7 @@ func Decompress(algo Algorithm, dst, src []byte) (decoded []byte, err error)
 Decompress decompresses src with the scheme registered under algo and appends the result to dst, bounded by the scheme's own backstop. To bound it by a number of your own, call DecompressBounded. An unregistered algo is refused with UnknownCompressor and dst comes back as it was.
 
 <a name="DecompressBounded"></a>
-## func [DecompressBounded](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/transform.go#L179>)
+## func [DecompressBounded](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/transform.go#L112>)
 
 ```go
 func DecompressBounded(algo Algorithm, dst, src []byte, limit int64) (decoded []byte, err error)
@@ -133,7 +133,7 @@ DecompressBounded decompresses src with the scheme registered under algo and app
 A scheme implementing BoundedDecompressor stops at limit, so the work is bounded too. A scheme that does not — a consumer's own, or one of the third\-party module's — is decompressed under its own backstop and judged afterwards: declining to tighten the work can never change the verdict, only the bytes touched reaching it.
 
 <a name="Algorithm"></a>
-## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/transform.go#L115>)
+## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/facade_gen.go#L53>)
 
 Algorithm is the name a Compressor registers under. The zero value is reserved as invalid.
 
@@ -156,7 +156,7 @@ const (
 ```
 
 <a name="Available"></a>
-### func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/transform.go#L133>)
+### func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/facade_gen.go#L70>)
 
 ```go
 func Available() []Algorithm
@@ -165,7 +165,7 @@ func Available() []Algorithm
 Available returns the registered Algorithms, sorted.
 
 <a name="BoundedDecompressor"></a>
-## type [BoundedDecompressor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/transform.go#L124>)
+## type [BoundedDecompressor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/facade_gen.go#L62>)
 
 BoundedDecompressor is the optional extension of a Compressor that can be told how much plaintext it may produce; DecompressBounded uses it when the scheme has it.
 
@@ -174,7 +174,7 @@ type BoundedDecompressor = coretransform.BoundedDecompressor
 ```
 
 <a name="Compressor"></a>
-## type [Compressor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/transform.go#L119>)
+## type [Compressor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/facade_gen.go#L57>)
 
 Compressor is one compression scheme: Compress and Decompress append to dst. Implementations are safe for concurrent use.
 
@@ -183,7 +183,7 @@ type Compressor = coretransform.Compressor
 ```
 
 <a name="Lookup"></a>
-### func [Lookup](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/transform.go#L127>)
+### func [Lookup](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/facade_gen.go#L65>)
 
 ```go
 func Lookup(algo Algorithm) (c Compressor, ok bool)

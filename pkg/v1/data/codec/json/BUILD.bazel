@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "json",
-    srcs = ["json.go"],
+    srcs = [
+        "facade_gen.go",
+        "json.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/data/codec/json",
     visibility = ["//visibility:public"],
     deps = [

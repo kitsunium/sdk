@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "xml",
-    srcs = ["xml.go"],
+    srcs = [
+        "facade_gen.go",
+        "xml.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/data/codec/xml",
     visibility = ["//visibility:public"],
     deps = [

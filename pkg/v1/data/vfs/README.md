@@ -120,7 +120,7 @@ var (
 ```
 
 <a name="AtomicWriter"></a>
-## type [AtomicWriter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/vfs/vfs.go#L115>)
+## type [AtomicWriter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/vfs/facade_gen.go#L22>)
 
 AtomicWriter is the public alias for the publication capability, reached by type assertion on a filesystem this package did not build.
 
@@ -129,7 +129,7 @@ type AtomicWriter = corevfs.AtomicWriter
 ```
 
 <a name="FS"></a>
-## type [FS](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/vfs/vfs.go#L106>)
+## type [FS](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/vfs/facade_gen.go#L13>)
 
 FS is the public alias for the read half, which is io/fs.FS unchanged. It exists so a signature can say "an SDK filesystem" without implying that anything about reading is different here.
 
@@ -138,7 +138,7 @@ type FS = corevfs.FS
 ```
 
 <a name="FullFS"></a>
-## type [FullFS](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/vfs/vfs.go#L120>)
+## type [FullFS](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/vfs/facade_gen.go#L27>)
 
 FullFS is the public alias for the union both constructors return: a [WritableFS](<#WritableFS>) that is also an [AtomicWriter](<#AtomicWriter>). A parameter should still ask for the narrowest thing it uses.
 
@@ -147,7 +147,7 @@ type FullFS = corevfs.FullFS
 ```
 
 <a name="NewMem"></a>
-### func [NewMem](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/vfs/vfs.go#L180>)
+### func [NewMem](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/vfs/facade_gen.go#L86>)
 
 ```go
 func NewMem() FullFS
@@ -158,7 +158,7 @@ NewMem returns an empty in\-memory filesystem containing only its root.
 It takes no arguments on purpose: every knob it could offer would be one a consumer's test has to set before it can assert anything, and the value of this type is that a filesystem double costs one line.
 
 <a name="NewOS"></a>
-### func [NewOS](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/vfs/vfs.go#L170>)
+### func [NewOS](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/vfs/facade_gen.go#L77>)
 
 ```go
 func NewOS(root string) (filesystem FullFS, err error)
@@ -171,7 +171,7 @@ It returns proc.UnsupportedPlatform on a GOOS that lacks the mechanics this file
 The filesystem holds the directory's descriptor and additionally implements io.Closer, which releases it; every call after Close fails.
 
 <a name="WritableFS"></a>
-## type [WritableFS](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/vfs/vfs.go#L111>)
+## type [WritableFS](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/vfs/facade_gen.go#L18>)
 
 WritableFS is the public alias for the write half: the four write verbs on top of the embedded [FS](<#FS>). It is frozen — a new capability arrives as a sibling interface, never as a fifth method.
 

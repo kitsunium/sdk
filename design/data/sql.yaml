@@ -905,101 +905,329 @@ packages:
         name: Withheld
         struct:
           unexported: true
-  - aliases:
-      - name: Executor
-        target: coresql.Executor
-      - name: Preparer
-        target: coresql.Preparer
-      - name: TxFunc
-        target: coresql.TxFunc
-      - name: Transactor
-        target: coresql.Transactor
-      - name: Joiner
-        target: coresql.Joiner
-      - name: Deferrer
-        target: coresql.Deferrer
-      - name: TxOptions
-        target: coresql.TxOptionsValue
-      - name: Checker
-        target: coresql.Checker
-      - name: Migrator
-        target: coresql.Migrator
-      - name: Migration
-        target: coresql.MigrationValue
-      - name: Step
-        target: coresql.Step
-      - name: Dialect
-        target: coresql.Dialect
-      - name: Config
-        target: svcsql.Config
-      - name: PoolConfig
-        target: svcsql.PoolConfig
-      - name: MigrateConfig
-        target: svcsql.MigrateConfig
-    constants:
-      - name: DialectPostgres
-        type: Dialect
-        value: "1"
-      - name: DialectMySQL
-        type: Dialect
-        value: "2"
-      - name: DialectSQLite
-        type: Dialect
-        value: "3"
-    functions:
-      - in:
-          - name: name
-            type: string
-        name: ParseDialect
-        out:
-          - name: dialect
+  - facade:
+      - const:
+          - doc: DialectPostgres is PostgreSQL 9.1+.
+            name: DialectPostgres
+            note: |-
+              The three engines this SDK can spell. Each is re-exported individually
+              rather than as one group: their values are FIXED by internal/core/data/sql and
+              must equal it exactly, so an iota sequence here would be a second source of
+              truth that silently diverges the day a dialect is inserted.
+            reexport: coresql.DialectPostgres
             type: Dialect
-          - name: err
-            type: error
-      - in:
-          - name: ctx
-            type: context.Context
-          - name: ex
-            type: Executor
-        name: Irreversible
-        out:
-          - type: error
-      - in:
-          - name: cfg
-            type: Config
-        name: NewTransactor
-        out:
-          - name: manager
-            type: Transactor
-          - name: err
-            type: error
-      - in:
-          - name: cfg
-            type: Config
-        name: NewChecker
-        out:
-          - name: probe
-            type: Checker
-          - name: err
-            type: error
-      - in:
-          - name: cfg
-            type: Config
-          - name: mig
-            type: MigrateConfig
-        name: NewMigrator
-        out:
-          - name: runner
-            type: Migrator
-          - name: err
-            type: error
-      - in:
-          - name: stmts
-            type: string
-        name: Statements
-        out:
-          - type: Step
-        variadic: true
+            typed: true
+            value: "1"
+      - const:
+          - doc: DialectMySQL is MySQL 5.7+ / MariaDB 10.x with InnoDB.
+            name: DialectMySQL
+            reexport: coresql.DialectMySQL
+            type: Dialect
+            typed: true
+            value: "2"
+      - const:
+          - doc: |-
+              DialectSQLite is SQLite 3.6.8+. It has no advisory lock, so [NewMigrator]
+              serialises a run on the database file's write lock instead (ADR 0140).
+            name: DialectSQLite
+            reexport: coresql.DialectSQLite
+            type: Dialect
+            typed: true
+            value: "3"
+      - alias:
+          - doc: |-
+              Executor is the public alias for the read/write surface a statement runs
+              against. *sql.DB, *sql.Tx and *sql.Conn all satisfy it with no adapter, and
+              it deliberately carries no Commit, Rollback or Begin.
+            name: Executor
+            target: coresql.Executor
+      - alias:
+          - doc: |-
+              Preparer is the public alias for the ADR 0039 sibling of [Executor]: an
+              executor that can also prepare a statement. Discover it by type assertion.
+            name: Preparer
+            target: coresql.Preparer
+      - alias:
+          - doc: TxFunc is the public alias for a unit of work run inside a transaction.
+            name: TxFunc
+            target: coresql.TxFunc
+      - alias:
+          - doc: Transactor is the public alias for the transaction manager.
+            name: Transactor
+            target: coresql.Transactor
+      - alias:
+          - doc: |-
+              Joiner is the public alias for the ADR 0039 sibling of [Transactor] that
+              says where a statement issued under a context runs: in the transaction the
+              context carries, or on the pool. Discover it by type assertion.
+            name: Joiner
+            target: coresql.Joiner
+      - alias:
+          - doc: |-
+              Deferrer is the public alias for the ADR 0039 sibling of [Transactor] that
+              holds a function until the transaction a context carries has committed, and
+              drops it with a rollback. Discover it by type assertion.
+            name: Deferrer
+            target: coresql.Deferrer
+      - alias:
+          - doc: |-
+              TxOptions is the public alias for one transaction's isolation and
+              read-only-ness. The zero value defers to the driver.
+            name: TxOptions
+            target: coresql.TxOptionsValue
+      - alias:
+          - doc: Checker is the public alias for the bounded liveness probe.
+            name: Checker
+            target: coresql.Checker
+      - alias:
+          - doc: Migrator is the public alias for the schema-migration runner.
+            name: Migrator
+            target: coresql.Migrator
+      - alias:
+          - doc: |-
+              Migration is the public alias for one versioned schema change and its
+              reversal.
+            name: Migration
+            target: coresql.MigrationValue
+      - alias:
+          - doc: Step is the public alias for one direction of a migration.
+            name: Step
+            target: coresql.Step
+      - alias:
+          - doc: |-
+              Dialect is the public alias for the closed set of SQL engines this SDK can
+              spell. For SQL you write yourself, it spells the engine's vocabulary — the
+              tokens the SDK's own statements are spelled with, never a statement:
+              [Dialect].Placeholder renders a bind marker ($1 on PostgreSQL, ? on MySQL and
+              SQLite), [Dialect].QuoteIdent a delimited name, its delimiter doubled
+              inside, and [Dialect].ForUpdate and [Dialect].ForUpdateSkipLocked a row-lock
+              clause, which SQLite — whose exclusion is its one write lock — renders as
+              nothing. QuoteIdent validates nothing: check a name before you interpolate
+              it. An unset Dialect renders no marker and no name, so a statement built
+              from it fails rather than passing for another engine's.
+            name: Dialect
+            target: coresql.Dialect
+      - alias:
+          - doc: Config is the public alias for the parameters every port is built from.
+            name: Config
+            target: svcsql.Config
+      - alias:
+          - doc: PoolConfig is the public alias for the connection-pool policy.
+            name: PoolConfig
+            target: svcsql.PoolConfig
+      - alias:
+          - doc: MigrateConfig is the public alias for the migration runner's parameters.
+            name: MigrateConfig
+            target: svcsql.MigrateConfig
+      - var:
+          - doc: |-
+              UnknownDialect is returned by ParseDialect for a name this SDK has
+              never heard of.
+            name: UnknownDialect
+            reexport: coresql.UnknownDialect
+            type: "*errs.Error"
+          - doc: |-
+              DialectRefused is returned by ParseDialect for an engine this SDK
+              recognises and declines. The reason travels in a field.
+            name: DialectRefused
+            reexport: coresql.DialectRefused
+            type: "*errs.Error"
+          - doc: |-
+              NestedIsolation is returned when a nested Transact asks for isolation
+              or read-only mode a savepoint cannot provide.
+            name: NestedIsolation
+            reexport: coresql.NestedIsolation
+            type: "*errs.Error"
+          - doc: |-
+              InvalidMigration is returned for a migration with version 0, an empty
+              name, a nil Up or a nil Down.
+            name: InvalidMigration
+            reexport: coresql.InvalidMigration
+            type: "*errs.Error"
+          - doc: MigrationIrreversible is what the Irreversible step returns.
+            name: MigrationIrreversible
+            reexport: coresql.MigrationIrreversible
+            type: "*errs.Error"
+          - doc: |-
+              ConfigInvalid is returned by every constructor for a Config that could
+              never produce a working port.
+            name: ConfigInvalid
+            reexport: coresql.ConfigInvalid
+            type: "*errs.Error"
+          - doc: |-
+              PoolMisconfigured refuses a pool policy whose zero value database/sql
+              would read as a decision nobody made — a non-positive MaxOpen.
+            name: PoolMisconfigured
+            reexport: coresql.PoolMisconfigured
+            type: "*errs.Error"
+          - doc: BeginFailed reports a transaction the driver would not open.
+            name: BeginFailed
+            reexport: coresql.BeginFailed
+            type: "*errs.Error"
+          - doc: CommitFailed reports a transaction that had NO effect.
+            name: CommitFailed
+            reexport: coresql.CommitFailed
+            type: "*errs.Error"
+          - doc: RollbackFailed travels alongside the error that triggered the rollback.
+            name: RollbackFailed
+            reexport: coresql.RollbackFailed
+            type: "*errs.Error"
+          - doc: |-
+              SavepointFailed reports a rejected savepoint statement; the "statement"
+              field names which of the three.
+            name: SavepointFailed
+            reexport: coresql.SavepointFailed
+            type: "*errs.Error"
+          - doc: |-
+              TxPoisoned refuses every operation on a transaction whose savepoint
+              rollback failed. It is never committed.
+            name: TxPoisoned
+            reexport: coresql.TxPoisoned
+            type: "*errs.Error"
+          - doc: |-
+              TxClosed reports an Executor used after the scope that lent it
+              returned.
+            name: TxClosed
+            reexport: coresql.TxClosed
+            type: "*errs.Error"
+          - doc: |-
+              HealthCheckFailed reports a database that answered the probe with an
+              error.
+            name: HealthCheckFailed
+            reexport: coresql.HealthCheckFailed
+            type: "*errs.Error"
+          - doc: HealthCheckTimeout reports a database that did not answer in time.
+            name: HealthCheckTimeout
+            reexport: coresql.HealthCheckTimeout
+            type: "*errs.Error"
+          - doc: |-
+              MigrationFailed reports a migration that did not apply; it was rolled
+              back.
+            name: MigrationFailed
+            reexport: coresql.MigrationFailed
+            type: "*errs.Error"
+          - doc: |-
+              MigrationOutOfOrder refuses a pending migration older than one already
+              applied.
+            name: MigrationOutOfOrder
+            reexport: coresql.MigrationOutOfOrder
+            type: "*errs.Error"
+          - doc: |-
+              MigrationLockUnsupported refuses a Migrator on a dialect with no lock
+              that dies with its holder. No dialect this SDK speaks answers it since
+              SQLite's runner serialises on its file's write lock (ADR 0140).
+            name: MigrationLockUnsupported
+            reexport: coresql.MigrationLockUnsupported
+            type: "*errs.Error"
+          - doc: |-
+              MigrationLockTimeout reports another process holding the migration lock
+              for the whole budget. Nothing was applied.
+            name: MigrationLockTimeout
+            reexport: coresql.MigrationLockTimeout
+            type: "*errs.Error"
+          - doc: |-
+              MigrationUnknownVersion refuses a Down over a version this build does
+              not carry.
+            name: MigrationUnknownVersion
+            reexport: coresql.MigrationUnknownVersion
+            type: "*errs.Error"
+          - doc: |-
+              VersionTableInvalid refuses a version-table name that is not a plain
+              SQL identifier.
+            name: VersionTableInvalid
+            reexport: coresql.VersionTableInvalid
+            type: "*errs.Error"
+          - doc: DuplicateMigration refuses two migrations declaring the same version.
+            name: DuplicateMigration
+            reexport: coresql.DuplicateMigration
+            type: "*errs.Error"
+      - func:
+          doc: |-
+            ParseDialect resolves a dialect name and never guesses. A recognised but
+            unsupported engine returns [DialectRefused] carrying why; an unrecognised
+            one returns [UnknownDialect].
+          forward: coresql.ParseDialect
+          in:
+            - name: name
+              type: string
+          name: ParseDialect
+          out:
+            - name: dialect
+              type: Dialect
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            Irreversible is the [Step] a migration assigns to Down to declare, out loud,
+            that it cannot be reversed.
+          forward: coresql.Irreversible
+          in:
+            - name: ctx
+              type: context.Context
+            - name: ex
+              type: Executor
+          name: Irreversible
+          out:
+            - type: error
+      - func:
+          doc: |-
+            NewTransactor returns the transaction manager for cfg.DB, applying
+            cfg.Pool to it.
+          forward: svcsql.NewTransactor
+          in:
+            - name: cfg
+              type: Config
+          name: NewTransactor
+          out:
+            - name: manager
+              type: Transactor
+            - name: err
+              type: error
+      - func:
+          doc: NewChecker returns a liveness probe bounded by cfg.CheckTimeout.
+          forward: svcsql.NewChecker
+          in:
+            - name: cfg
+              type: Config
+          name: NewChecker
+          out:
+            - name: probe
+              type: Checker
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            NewMigrator returns the migration runner. It refuses a dialect with no
+            session-scoped advisory lock, by name and at construction.
+          forward: svcsql.NewMigrator
+          in:
+            - name: cfg
+              type: Config
+            - name: mig
+              type: MigrateConfig
+          name: NewMigrator
+          out:
+            - name: runner
+              type: Migrator
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            Statements returns a [Step] that runs the given statements in order on the
+            transaction's executor.
+
+            It is the smallest useful helper and deliberately not a file loader: it
+            invents no directory layout, no naming convention and no parser. Where the
+            text comes from — a literal, an embed.FS, a generator — stays yours.
+          forward: svcsql.Statements
+          in:
+            - name: stmts
+              type: string
+          name: Statements
+          out:
+            - type: Step
+          variadic: true
+    functions:
       - in:
           - name: ctx
             type: context.Context
@@ -1015,48 +1243,3 @@ packages:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       svcsql: github.com/kitsunium/sdk/internal/service/data/sql
     path: github.com/kitsunium/sdk/pkg/v1/data/sql
-    variables:
-      - name: UnknownDialect
-        type: "*errs.Error"
-      - name: DialectRefused
-        type: "*errs.Error"
-      - name: NestedIsolation
-        type: "*errs.Error"
-      - name: InvalidMigration
-        type: "*errs.Error"
-      - name: MigrationIrreversible
-        type: "*errs.Error"
-      - name: ConfigInvalid
-        type: "*errs.Error"
-      - name: PoolMisconfigured
-        type: "*errs.Error"
-      - name: BeginFailed
-        type: "*errs.Error"
-      - name: CommitFailed
-        type: "*errs.Error"
-      - name: RollbackFailed
-        type: "*errs.Error"
-      - name: SavepointFailed
-        type: "*errs.Error"
-      - name: TxPoisoned
-        type: "*errs.Error"
-      - name: TxClosed
-        type: "*errs.Error"
-      - name: HealthCheckFailed
-        type: "*errs.Error"
-      - name: HealthCheckTimeout
-        type: "*errs.Error"
-      - name: MigrationFailed
-        type: "*errs.Error"
-      - name: MigrationOutOfOrder
-        type: "*errs.Error"
-      - name: MigrationLockUnsupported
-        type: "*errs.Error"
-      - name: MigrationLockTimeout
-        type: "*errs.Error"
-      - name: MigrationUnknownVersion
-        type: "*errs.Error"
-      - name: VersionTableInvalid
-        type: "*errs.Error"
-      - name: DuplicateMigration
-        type: "*errs.Error"

@@ -43,10 +43,6 @@ import (
 	_ "github.com/kitsunium/sdk/internal/service/crypto/mac/hmacsha2"
 )
 
-// KeyLen is the required symmetric key length in bytes (256-bit) — the length
-// [NewKey] enforces.
-const KeyLen int = corecrypto.KeyLen
-
 // HMACSHA256 is HMAC (RFC 2104) over SHA-256 — the detached-MAC default.
 const HMACSHA256 Algorithm = "hmac-sha256"
 
@@ -56,17 +52,6 @@ const HMACSHA256 Algorithm = "hmac-sha256"
 // (V104) — the seven registries are separate keyspaces, and the type system now
 // enforces that separation the way typed Format/Level discipline does elsewhere.
 type Algorithm corecrypto.Algorithm
-
-// Key is an opaque, redacting 256-bit symmetric key — the same key type used by
-// the AEAD surface. Build one with [NewKey]; its String output is "<redacted>".
-type Key = corecrypto.Key
-
-// NewKey builds a Key from raw, which must be exactly KeyLen (32) bytes. A wrong
-// length returns InvalidKey; the bytes are copied defensively.
-func NewKey(raw []byte) (key Key, err error) {
-	//: delegate to the core constructor; this facade adds no behaviour.
-	return corecrypto.NewKey(raw)
-}
 
 // Tag returns the authentication tag over message under key for the named
 // scheme. An unregistered algorithm returns UnknownMACAlgorithm; a registered

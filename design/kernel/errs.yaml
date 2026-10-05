@@ -385,126 +385,322 @@ packages:
               type: string
             - name: ExitCode
               type: int
-  - aliases:
-      - name: Code
-        target: kerrs.Code
-      - name: Major
-        target: kerrs.Major
-      - name: Layer
-        target: kerrs.Layer
-      - name: PkgCode
-        target: kerrs.PkgCode
-      - name: Serial
-        target: kerrs.Serial
-      - name: PrefixMatcher
-        target: kerrs.PrefixMatcher
-      - name: Field
-        target: kerrs.FieldValue
-      - name: WrapParams
-        target: kerrs.WrapParams
-    constants:
-      - name: MaskByMajor
-        type: Code
-        value: "0xFF_00_00_00"
-      - name: MaskByLayer
-        type: Code
-        value: "0xFF_FF_00_00"
-      - name: MaskByPackage
-        type: Code
-        value: "0xFF_FF_FF_00"
-      - name: MaskExact
-        type: Code
-        value: "0xFF_FF_FF_FF"
+  - constants:
       - name: MinAppMajor
         type: Major
         value: "0x40"
       - name: MaxMajor
         type: Major
         value: "0x7F"
+    facade:
+      - alias:
+          - doc: |-
+              Code is the dotted-quad error identifier packed into uint32.
+              See ADR 0005 for the registry and layout.
+            name: Code
+            target: kerrs.Code
+          - blank: true
+            doc: |-
+              Major is the top octet of Code — SemVer major version (0 = internal,
+              1 = v1,...). See ADR 0005.
+            name: Major
+            target: kerrs.Major
+          - doc: |-
+              Layer is the second octet of Code — SDK layer (0 = meta, 1 = kernel,
+              2 = core, 3 = service,...). See ADR 0005.
+            name: Layer
+            target: kerrs.Layer
+          - doc: PkgCode is the third octet of Code — per-layer package slot. See ADR 0005 / 0006.
+            name: PkgCode
+            target: kerrs.PkgCode
+          - doc: Serial is the low octet of Code — per-package serial. See ADR 0005.
+            name: Serial
+            target: kerrs.Serial
+          - blank: true
+            doc: |-
+              PrefixMatcher is the errors.Is target for CIDR-style Code matching.
+              Construct via NewPrefixMatcher.
+            name: PrefixMatcher
+            target: kerrs.PrefixMatcher
+        doc: |-
+          Type aliases re-export the kernel types verbatim so consumer code can
+          declare variables with pkg/v1/errs.<Type> and pass them into the kernel
+          API without conversion. Aliases (not new named types) preserve assignment
+          compatibility — pkg/v1/errs.Code == kerrs.Code for the Go type system.
+      - const:
+          - doc: MaskByMajor matches all codes sharing the Major octet (/8 equivalent).
+            name: MaskByMajor
+            reexport: kerrs.MaskByMajor
+            type: Code
+            typed: true
+            value: "0xFF_00_00_00"
+          - doc: MaskByLayer matches all codes sharing Major+Layer (/16 equivalent).
+            name: MaskByLayer
+            reexport: kerrs.MaskByLayer
+            type: Code
+            typed: true
+            value: "0xFF_FF_00_00"
+          - doc: MaskByPackage matches all codes sharing Major+Layer+Package (/24 equivalent).
+            name: MaskByPackage
+            reexport: kerrs.MaskByPackage
+            type: Code
+            typed: true
+            value: "0xFF_FF_FF_00"
+          - doc: MaskExact matches a single exact code (/32 equivalent).
+            name: MaskExact
+            reexport: kerrs.MaskExact
+            type: Code
+            typed: true
+            value: "0xFF_FF_FF_FF"
+        doc: CIDR-style mask constants re-exported for use with NewPrefixMatcher.
+      - func:
+          doc: |-
+            CodeOf returns the deepest *errs.Error's typed Code in err's chain,
+            or (0, false) when no *errs.Error is present.
+          forward: kerrs.CodeOf
+          in:
+            - name: err
+              type: error
+          name: CodeOf
+          out:
+            - name: code
+              type: Code
+            - name: ok
+              type: bool
+      - block: true
+        doc: The one function this package still holds in a variable.
+        func:
+          doc: |-
+            ReasonOf returns the deepest *errs.Error reason in err's chain, or ("", false).
+
+            It is a variable bound to the kernel accessor rather than a forwarder like
+            its siblings: the forwarder cannot inline — the accessor it would inline
+            already costs 75 of the inliner's 80 — and in two of four measured runs it
+            was slower than the indirect call through this variable by more than the
+            3 % a forwarder may cost (BENCH.md). Assigning to it would change it for
+            every caller in the process: never do.
+          forward: kerrs.ReasonOf
+          in:
+            - name: err
+              type: error
+          name: ReasonOf
+          out:
+            - name: reason
+              type: string
+            - name: ok
+              type: bool
+      - func:
+          doc: |-
+            PublicOf returns the deepest *errs.Error Public message, or "" when no
+            *errs.Error is in the chain.
+          forward: kerrs.PublicOf
+          in:
+            - name: err
+              type: error
+          name: PublicOf
+          out:
+            - type: string
+      - func:
+          doc: PrivateOf returns the deepest *errs.Error Private message. DIAGNOSTIC-ONLY.
+          forward: kerrs.PrivateOf
+          in:
+            - name: err
+              type: error
+          name: PrivateOf
+          out:
+            - type: string
+      - func:
+          doc: |-
+            HTTPStatusOf returns the HTTP status mapped from the deepest *errs.Error,
+            defaulting to 500 when no *errs.Error is present.
+          forward: kerrs.HTTPStatusOf
+          in:
+            - name: err
+              type: error
+          name: HTTPStatusOf
+          out:
+            - type: int
+      - func:
+          doc: |-
+            ExitCodeOf returns the sysexits code mapped from the deepest *errs.Error,
+            defaulting to 70 (EX_SOFTWARE) when no *errs.Error is present.
+          forward: kerrs.ExitCodeOf
+          in:
+            - name: err
+              type: error
+          name: ExitCodeOf
+          out:
+            - type: int
+      - func:
+          doc: |-
+            FieldsOf returns every Field attached along err's chain, oldest cause
+            first and newest wrapper last, as a copy the caller owns — nil when no
+            *errs.Error is present. Read each with Key and StringValue.
+
+            The values are clauses the emitters chose to attach — names, positions,
+            reasons — never secrets: no SDK emitter attaches a value it was given to
+            protect (mail.ParseURL never quotes the URL), which is what makes reading
+            them safe. They are diagnostics nonetheless, like PrivateOf — keep them
+            off the wire.
+          forward: kerrs.FieldsOf
+          in:
+            - name: err
+              type: error
+          name: FieldsOf
+          out:
+            - type: "[]Field"
+      - func:
+          doc: |-
+            HasCode walks the chain (including errors.Join subtrees) and reports
+            whether any *errs.Error carries code (origin or trail entry).
+          forward: kerrs.HasCode
+          in:
+            - name: err
+              type: error
+            - name: code
+              type: Code
+          name: HasCode
+          out:
+            - type: bool
+      - func:
+          doc: HasReason walks the chain and reports whether any *errs.Error carries reason.
+          forward: kerrs.HasReason
+          in:
+            - name: err
+              type: error
+            - name: reason
+              type: string
+          name: HasReason
+          out:
+            - type: bool
+      - func:
+          doc: NewPrefixMatcher builds an errors.Is target for CIDR-style Code matching.
+          forward: kerrs.NewPrefixMatcher
+          in:
+            - name: prefix
+            - name: mask
+              type: Code
+          name: NewPrefixMatcher
+          out:
+            - type: "*PrefixMatcher"
+      - func:
+          doc: |-
+            Pack constructs a Code from its four octets. Runtime only — sentinel
+            constants in caller code MUST use hex literals to stay const-expressible.
+          forward: kerrs.Pack
+          in:
+            - name: major
+              type: Major
+            - name: layer
+              type: Layer
+            - name: pkg
+              type: PkgCode
+            - name: serial
+              type: Serial
+          name: Pack
+          out:
+            - type: Code
+      - func:
+          doc: ParseCode parses the canonical "M.L.P.S" textual form.
+          forward: kerrs.ParseCode
+          in:
+            - name: text
+              type: string
+          name: ParseCode
+          out:
+            - name: code
+              type: Code
+            - name: err
+              type: error
+      - alias:
+          - doc: |-
+              Field is a single typed key/value pair attached to an error. Build one with
+              String / Int / Int64 / Bool / Float (or NewFieldValue); the zero value is
+              invalid and must never be passed across the API.
+
+              A Field read back from an error — see [FieldsOf] — answers two methods:
+              Key(), the name the emitter chose, and StringValue(), the value as text (a
+              string verbatim, a number in decimal, a bool as true or false, "" for the
+              zero Field). The rendering is for reading, not for parsing back into a type.
+            name: Field
+            target: kerrs.FieldValue
+      - alias:
+          - doc: |-
+              WrapParams groups the metadata Wrap stamps onto the wrapping error when the
+              cause is NOT already an SDK error. When the cause IS an SDK error, origin
+              wins: Code/Reason/Public/Private are inherited from the cause and only
+              params.Code is appended to the wrap trail (ADR 0005).
+            name: WrapParams
+            target: kerrs.WrapParams
+      - func:
+          doc: String builds a Field holding a string value.
+          forward: kerrs.String
+          in:
+            - name: key
+            - name: val
+              type: string
+          name: String
+          out:
+            - type: Field
+      - func:
+          doc: |-
+            Int builds a Field from a plain int (widened to int64 internally),
+            matching the slog / zap Int(key, int) convention.
+          forward: kerrs.Int
+          in:
+            - name: key
+              type: string
+            - name: val
+              type: int
+          name: Int
+          out:
+            - type: Field
+      - func:
+          doc: Int64 builds a Field from a 64-bit integer (no upcast at the call site).
+          forward: kerrs.Int64
+          in:
+            - name: key
+              type: string
+            - name: val
+              type: int64
+          name: Int64
+          out:
+            - type: Field
+      - func:
+          doc: Bool builds a Field holding a boolean value.
+          forward: kerrs.Bool
+          in:
+            - name: key
+              type: string
+            - name: val
+              type: bool
+          name: Bool
+          out:
+            - type: Field
+      - func:
+          doc: Float builds a Field holding a float64 value (shortest round-trip render).
+          forward: kerrs.Float
+          in:
+            - name: key
+              type: string
+            - name: val
+              type: float64
+          name: Float
+          out:
+            - type: Field
+      - func:
+          doc: |-
+            NewFieldValue builds a string-typed Field. Provided for tooling that
+            expects a New-prefixed factory; prefer String for the common case.
+          forward: kerrs.NewFieldValue
+          in:
+            - name: key
+            - name: val
+              type: string
+          name: NewFieldValue
+          out:
+            - type: Field
     functions:
-      - in:
-          - name: err
-            type: error
-        name: CodeOf
-        out:
-          - name: code
-            type: Code
-          - name: ok
-            type: bool
-      - in:
-          - name: err
-            type: error
-        name: PublicOf
-        out:
-          - type: string
-      - in:
-          - name: err
-            type: error
-        name: PrivateOf
-        out:
-          - type: string
-      - in:
-          - name: err
-            type: error
-        name: HTTPStatusOf
-        out:
-          - type: int
-      - in:
-          - name: err
-            type: error
-        name: ExitCodeOf
-        out:
-          - type: int
-      - in:
-          - name: err
-            type: error
-        name: FieldsOf
-        out:
-          - type: "[]Field"
-      - in:
-          - name: err
-            type: error
-          - name: code
-            type: Code
-        name: HasCode
-        out:
-          - type: bool
-      - in:
-          - name: err
-            type: error
-          - name: reason
-            type: string
-        name: HasReason
-        out:
-          - type: bool
-      - in:
-          - name: prefix
-          - name: mask
-            type: Code
-        name: NewPrefixMatcher
-        out:
-          - type: "*PrefixMatcher"
-      - in:
-          - name: major
-            type: Major
-          - name: layer
-            type: Layer
-          - name: pkg
-            type: PkgCode
-          - name: serial
-            type: Serial
-        name: Pack
-        out:
-          - type: Code
-      - in:
-          - name: text
-            type: string
-        name: ParseCode
-        out:
-          - name: code
-            type: Code
-          - name: err
-            type: error
       - in:
           - name: err
             type: error
@@ -523,52 +719,6 @@ packages:
         out:
           - type: bool
         variadic: true
-      - in:
-          - name: key
-          - name: val
-            type: string
-        name: String
-        out:
-          - type: Field
-      - in:
-          - name: key
-            type: string
-          - name: val
-            type: int
-        name: Int
-        out:
-          - type: Field
-      - in:
-          - name: key
-            type: string
-          - name: val
-            type: int64
-        name: Int64
-        out:
-          - type: Field
-      - in:
-          - name: key
-            type: string
-          - name: val
-            type: bool
-        name: Bool
-        out:
-          - type: Field
-      - in:
-          - name: key
-            type: string
-          - name: val
-            type: float64
-        name: Float
-        out:
-          - type: Field
-      - in:
-          - name: key
-          - name: val
-            type: string
-        name: NewFieldValue
-        out:
-          - type: Field
       - in:
           - name: code
             type: Code
@@ -596,6 +746,3 @@ packages:
     imports:
       kerrs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/pkg/v1/errs
-    variables:
-      - name: ReasonOf
-        type: func(err error) (reason string, ok bool)

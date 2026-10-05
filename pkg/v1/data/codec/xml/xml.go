@@ -31,8 +31,6 @@
 package xml
 
 import (
-	corexml "github.com/kitsunium/sdk/internal/core/data/codec/xml"
-	"github.com/kitsunium/sdk/internal/kernel/errs"
 	// The implementation registers itself with the codec registry as it is
 	// initialised; importing it is what registers the format.
 	_ "github.com/kitsunium/sdk/internal/service/data/codec/xml"
@@ -42,20 +40,3 @@ import (
 // goes wherever a format name is taken — the codec package's Marshal,
 // config.FSSource's string, i18n.LoadFS's codec.Format — without a conversion.
 const Format = "xml"
-
-// The error codes, range 0.3.3.*, declared in the core (ADR 0160).
-const (
-	// CodeMarshalFailed is 0.3.3.1: encoding/xml could not encode the value.
-	CodeMarshalFailed errs.Code = corexml.CodeXMLMarshalFailed
-	// CodeUnmarshalFailed is 0.3.3.2: the input is not XML the target can
-	// hold.
-	CodeUnmarshalFailed errs.Code = corexml.CodeXMLUnmarshalFailed
-)
-
-// The sentinels, for errors.Is: each carries the code of the same name.
-var (
-	// MarshalFailed is the sentinel of [CodeMarshalFailed].
-	MarshalFailed = corexml.MarshalFailed
-	// UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].
-	UnmarshalFailed = corexml.UnmarshalFailed
-)

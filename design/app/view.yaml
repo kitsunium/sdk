@@ -464,85 +464,240 @@ packages:
     variables:
       - name: HTML
         type: coreview.Factory
-  - aliases:
-      - name: Renderer
-        target: coreview.Renderer
-      - name: Config
-        target: coreview.Config
-      - name: Factory
-        target: coreview.Factory
-      - name: Engine
-        target: coreview.Engine
-      - name: TrustedHTML
-        target: coreview.TrustedHTML
-    constants:
-      - name: HTML
-        type: Engine
-        value: "\"html\""
-      - name: ContentTypeHTML
-        type: string
-        value: "\"text/html; charset=utf-8\""
-      - name: DefaultMaxBytes
-        type: int
-        value: 8 << 20
-    functions:
-      - in:
-          - name: s
-            type: string
-        name: TrustHTML
-        out:
-          - type: TrustedHTML
-      - in:
-          - name: cfg
-            type: Config
-        name: New
-        out:
-          - name: renderer
-            type: Renderer
-          - name: err
-            type: error
-      - in:
-          - name: name
+  - facade:
+      - const:
+          - doc: |-
+              HTML is the [Engine] name of the stdlib html/template implementation. It
+              is the only engine the SDK ships.
+            name: HTML
+            reexport: coreview.HTML
             type: Engine
-          - name: cfg
-            type: Config
-        name: Open
-        out:
-          - name: renderer
-            type: Renderer
-          - name: err
-            type: error
-      - in:
-          - name: f
-            type: Factory
-        name: Register
-        out:
-          - type: Factory
-      - name: Available
-        out:
-          - type: "[]Engine"
+            typed: true
+            value: "\"html\""
+          - blank: true
+            doc: |-
+              ContentTypeHTML is the media type an HTML [Renderer] reports, charset
+              included — a response with no charset is sniffed, and a document sniffed
+              as UTF-7 can smuggle markup past an escaper that judged the bytes as
+              UTF-8.
+            name: ContentTypeHTML
+            reexport: coreview.ContentTypeHTML
+            type: string
+            typed: true
+            value: "\"text/html; charset=utf-8\""
+          - blank: true
+            doc: |-
+              DefaultMaxBytes is the ceiling [Config].MaxBytes clamps to when it is not
+              positive: 8 MiB. There is deliberately no spelling for "unlimited".
+            name: DefaultMaxBytes
+            reexport: coreview.DefaultMaxBytes
+            type: int
+            typed: true
+            value: 8 << 20
+      - alias:
+          - doc: |-
+              Renderer turns a named template and a data value into a complete document:
+              Render and ContentType.
+
+              The method set is FROZEN at two. New capabilities arrive as SIBLING
+              interfaces reached by type assertion, because this alias publishes the
+              interface, Go interfaces are structural, and a third method would break
+              every downstream implementer at compile time with no deprecation window
+              (ADR 0039).
+            name: Renderer
+            target: coreview.Renderer
+      - alias:
+          - doc: |-
+              Config parameterises every engine. FS is required; everything else has a
+              defensible default.
+            name: Config
+            target: coreview.Config
+      - alias:
+          - doc: |-
+              Factory is the plug-in contract an engine implements to enter the registry.
+              Registering is a promise the security model rests on — see [Register].
+            name: Factory
+            target: coreview.Factory
+      - alias:
+          - doc: |-
+              Engine names a registered template engine. The zero value is the reserved
+              invalid name.
+            name: Engine
+            target: coreview.Engine
+      - alias:
+          - doc: |-
+              TrustedHTML is an HTML fragment written WITHOUT escaping.
+
+              It is an ALIAS of html/template.HTML, and that has a consequence stated
+              rather than hidden: the engine cannot tell a fragment marked through
+              [TrustHTML] from one a caller converted directly. See the package
+              documentation.
+            name: TrustedHTML
+            target: coreview.TrustedHTML
+      - doc: The sentinels a caller matches with errors.Is or errs.HasCode.
+        var:
+          - doc: |-
+              ViewMisconfigured is returned by a constructor for a Config it cannot
+              honour: a nil FS, a tree that does not parse, or a template
+              html/template cannot contextually escape.
+            name: ViewMisconfigured
+            reexport: coreview.ViewMisconfigured
+            type: "*errs.Error"
+          - blank: true
+            doc: |-
+              TemplateNotFound is returned by Render for a name the engine does not
+              hold, including the empty name. A Renderer over an empty tree is
+              legitimate and refuses everything by name.
+            name: TemplateNotFound
+            reexport: coreview.TemplateNotFound
+            type: "*errs.Error"
+          - blank: true
+            doc: |-
+              RenderFailed is returned when execution started and could not finish.
+              Nothing is returned alongside it: the partial bytes are discarded
+              inside the engine.
+            name: RenderFailed
+            reexport: coreview.RenderFailed
+            type: "*errs.Error"
+          - blank: true
+            doc: |-
+              RenderTooLarge is returned when a render reached Config.MaxBytes. It is
+              a denial-of-service guard, not a formatting complaint.
+            name: RenderTooLarge
+            reexport: coreview.RenderTooLarge
+            type: "*errs.Error"
+          - blank: true
+            doc: |-
+              UnsafeValue is returned when render data carries one of the six refused
+              html/template trust types. The fields name the path and the type, never
+              the value.
+            name: UnsafeValue
+            reexport: coreview.UnsafeValue
+            type: "*errs.Error"
+          - blank: true
+            doc: |-
+              EngineUnknown is returned by [Open] for a name no factory claims —
+              usually an engine package that was never imported.
+            name: EngineUnknown
+            reexport: coreview.EngineUnknown
+            type: "*errs.Error"
+          - blank: true
+            doc: |-
+              EngineInvalid is the boot-time panic for a nil Factory or one claiming
+              the empty Engine name.
+            name: EngineInvalid
+            reexport: coreview.EngineInvalid
+            type: "*errs.Error"
+          - blank: true
+            doc: |-
+              DuplicateEngine is the boot-time panic for two distinct factories under
+              one Engine name. It is refused rather than resolved, because one of the
+              two would silently decide how every value in the program is escaped.
+            name: DuplicateEngine
+            reexport: coreview.DuplicateEngine
+            type: "*errs.Error"
+          - blank: true
+            doc: |-
+              TemplateSourceFailed is returned when the template FS could not be READ
+              — usually an embed pattern that matched nothing.
+            name: TemplateSourceFailed
+            reexport: coreview.TemplateSourceFailed
+            type: "*errs.Error"
+          - blank: true
+            doc: |-
+              TemplateParseFailed is returned for a file html/template refused to
+              parse or could not build an escaping plan for.
+            name: TemplateParseFailed
+            reexport: coreview.TemplateParseFailed
+            type: "*errs.Error"
+      - func:
+          doc: |-
+            TrustHTML marks s as HTML that is already safe to write unescaped.
+
+            It is the one bypass the SDK offers and the only spelling it has, so "where
+            does this codebase decide to trust markup?" is one grep with one answer.
+            Read the package documentation before using it: the SDK cannot verify the
+            assertion this call makes.
+          forward: coreview.TrustHTML
+          in:
+            - name: s
+              type: string
+          name: TrustHTML
+          out:
+            - type: TrustedHTML
+      - func:
+          doc: |-
+            New builds the stdlib html/template [Renderer] over cfg.FS, parsing the
+            whole tree eagerly.
+
+            Call it once, at start-up, and keep the result: see the package
+            documentation's parse-once rule. A nil FS, a file that does not parse and a
+            template whose escaping context cannot be resolved are all refused here, so
+            a broken tree is a deploy that does not come up.
+
+            An EMPTY tree is not an error. It produces a Renderer that refuses every
+            name with [TemplateNotFound] — loud rather than inert (ADR 0031).
+          forward: svcview.NewHTML
+          in:
+            - name: cfg
+              type: Config
+          name: New
+          out:
+            - name: renderer
+              type: Renderer
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            Open resolves an [Engine] by name and builds a [Renderer] from cfg. It is
+            the configuration-driven counterpart to [New].
+
+            It fails loudly on a name nobody claims — [EngineUnknown] — rather than
+            falling back to a default, because a fallback here would let a typo in a
+            configuration file silently choose how every value in the program is
+            escaped.
+          forward: coreview.Open
+          in:
+            - name: name
+              type: Engine
+            - name: cfg
+              type: Config
+          name: Open
+          out:
+            - name: renderer
+              type: Renderer
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            Register inserts f under f.Engine() and returns it, so a third-party engine
+            can bind the singleton to a package-level variable.
+
+            Registration is not merely a name binding. An engine in this registry MUST
+            contextually escape every value it renders for the media type its
+            ContentType reports, render into its own buffer and return complete bytes or
+            none, honour Config.MaxBytes, refuse at construction a Config it cannot
+            honour, and name every template by its slash path within Config.FS.
+
+            It panics on a nil factory, on the empty [Engine] name, and when a DISTINCT
+            factory already claims the name — at import, where the offender is visible.
+          forward: coreview.Register
+          in:
+            - name: f
+              type: Factory
+          name: Register
+          out:
+            - type: Factory
+      - func:
+          doc: |-
+            Available returns every registered [Engine], sorted, so a program can print
+            what its imports actually wired up.
+          forward: coreview.Available
+          name: Available
+          out:
+            - type: "[]Engine"
     imports:
       coreview: github.com/kitsunium/sdk/internal/core/app/view
       errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcview: github.com/kitsunium/sdk/internal/service/app/view
     path: github.com/kitsunium/sdk/pkg/v1/app/view
-    variables:
-      - name: ViewMisconfigured
-        type: "*errs.Error"
-      - name: TemplateNotFound
-        type: "*errs.Error"
-      - name: RenderFailed
-        type: "*errs.Error"
-      - name: RenderTooLarge
-        type: "*errs.Error"
-      - name: UnsafeValue
-        type: "*errs.Error"
-      - name: EngineUnknown
-        type: "*errs.Error"
-      - name: EngineInvalid
-        type: "*errs.Error"
-      - name: DuplicateEngine
-        type: "*errs.Error"
-      - name: TemplateSourceFailed
-        type: "*errs.Error"
-      - name: TemplateParseFailed
-        type: "*errs.Error"

@@ -70,22 +70,48 @@ packages:
   - constants:
       - name: Format
         value: "\"form\""
-      - name: CodeValueInvalid
-        type: errs.Code
-        value: "0x00_03_28_01"
-      - name: CodeUnmarshalFailed
-        type: errs.Code
-        value: "0x00_03_28_02"
-      - name: CodeMultiValue
-        type: errs.Code
-        value: "0x00_03_28_03"
+    facade:
+      - const:
+          - doc: |-
+              CodeValueInvalid is 0.3.40.1: the value or the target is not
+              url.Values-shaped.
+            name: CodeValueInvalid
+            reexport: coreform.CodeFormValueInvalid
+            type: errs.Code
+            typed: true
+            value: "0x00_03_28_01"
+          - doc: |-
+              CodeUnmarshalFailed is 0.3.40.2: a malformed escape, a ';' separator, or
+              a decode bound exceeded.
+            name: CodeUnmarshalFailed
+            reexport: coreform.CodeFormUnmarshalFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_28_02"
+          - doc: |-
+              CodeMultiValue is 0.3.40.3: a repeated key decoded into a
+              map[string]string.
+            name: CodeMultiValue
+            reexport: coreform.CodeFormMultiValue
+            type: errs.Code
+            typed: true
+            value: "0x00_03_28_03"
+        doc: The error codes, range 0.3.40.*, declared in the core (ADR 0160).
+      - doc: "The sentinels, for errors.Is: each carries the code of the same name."
+        var:
+          - doc: ValueInvalid is the sentinel of [CodeValueInvalid].
+            name: ValueInvalid
+            reexport: coreform.ValueInvalid
+            type: "*errs.Error"
+          - doc: UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].
+            name: UnmarshalFailed
+            reexport: coreform.UnmarshalFailed
+            type: "*errs.Error"
+          - doc: MultiValue is the sentinel of [CodeMultiValue].
+            name: MultiValue
+            reexport: coreform.MultiValue
+            type: "*errs.Error"
     imports:
+      coreform: github.com/kitsunium/sdk/internal/core/data/codec/form
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/pkg/v1/data/codec/form
-    variables:
-      - name: ValueInvalid
-        type: "*errs.Error"
-      - name: UnmarshalFailed
-        type: "*errs.Error"
-      - name: MultiValue
-        type: "*errs.Error"

@@ -79,7 +79,7 @@ var (
 ```
 
 <a name="FileParams"></a>
-## type [FileParams](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/tlsid/tlsid.go#L81>)
+## type [FileParams](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/tlsid/facade_gen.go#L19>)
 
 FileParams names TLS material to read from the filesystem.
 
@@ -88,7 +88,7 @@ type FileParams = corenet.IdentityFileParams
 ```
 
 <a name="Identity"></a>
-## type [Identity](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/tlsid/tlsid.go#L75>)
+## type [Identity](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/tlsid/facade_gen.go#L13>)
 
 Identity is an opaque TLS identity. Its String and GoString output is always "\<redacted\>"; ClientConfig and ServerConfig are the only ways to reach the material, and each returns a fresh \*tls.Config.
 
@@ -97,7 +97,7 @@ type Identity = corenet.IdentityValue
 ```
 
 <a name="Load"></a>
-### func [Load](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/tlsid/tlsid.go#L102>)
+### func [Load](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/tlsid/facade_gen.go#L39>)
 
 ```go
 func Load(p FileParams) (id Identity, err error)
@@ -106,7 +106,7 @@ func Load(p FileParams) (id Identity, err error)
 Load reads the named TLS material from disk and returns the opaque identity. A configured\-but\-unreadable file is an error, never a silently skipped one.
 
 <a name="New"></a>
-### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/tlsid/tlsid.go#L95>)
+### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/tlsid/facade_gen.go#L33>)
 
 ```go
 func New(p Params) (id Identity, err error)
@@ -115,7 +115,7 @@ func New(p Params) (id Identity, err error)
 New validates TLS material held in memory and returns the opaque identity. It applies exactly the same rules as Load; only the source of the bytes differs.
 
 <a name="Params"></a>
-## type [Params](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/tlsid/tlsid.go#L78>)
+## type [Params](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/tlsid/facade_gen.go#L16>)
 
 Params carries TLS material already held in memory.
 

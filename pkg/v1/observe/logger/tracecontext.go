@@ -18,16 +18,6 @@ import (
 	coretrace "github.com/kitsunium/sdk/internal/core/observe/trace"
 )
 
-// TraceContext is the stable alias for the trace correlation a Record carries:
-// the trace and span identifiers of the span the record was emitted inside.
-// The zero value means "no trace here" and renders nothing.
-type TraceContext = corelogger.TraceContextValue
-
-// TraceContextSource is the stable alias for the port that reads a
-// TraceContext off a context.Context. Every Logger built by this package is
-// wired to TraceContextFromContext.
-type TraceContextSource = corelogger.TraceContextSource
-
 // TraceContextFromContext reads the span identity carried by ctx and returns
 // it in the shape a log record carries.
 //

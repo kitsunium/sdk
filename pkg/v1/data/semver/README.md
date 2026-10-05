@@ -57,7 +57,7 @@ Nothing here allocates.
 
 
 <a name="Compare"></a>
-## func [Compare](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/semver/semver.go#L82>)
+## func [Compare](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/semver/facade_gen.go#L21>)
 
 ```go
 func Compare(v, w string) int
@@ -66,7 +66,7 @@ func Compare(v, w string) int
 Compare returns \-1, 0 or \+1 as v orders before, equal to or after w under SemVer precedence. Build metadata is ignored, so v1.0.0\+a and v1.0.0\+b compare equal. An invalid string orders below every version and equal to every other invalid string.
 
 <a name="IsPseudoVersion"></a>
-## func [IsPseudoVersion](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/semver/semver.go#L99>)
+## func [IsPseudoVersion](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/semver/facade_gen.go#L36>)
 
 ```go
 func IsPseudoVersion(v string) bool
@@ -75,7 +75,7 @@ func IsPseudoVersion(v string) bool
 IsPseudoVersion reports whether v is a Go pseudo\-version, in any of its three shapes, with or without build metadata. It recognises the shape: a stamp whose digits are no real instant still makes one, and [PseudoVersionTime](<#PseudoVersionTime>) is what reports that the time does not read.
 
 <a name="IsValid"></a>
-## func [IsValid](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/semver/semver.go#L73>)
+## func [IsValid](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/semver/facade_gen.go#L13>)
 
 ```go
 func IsValid(v string) bool
@@ -84,7 +84,7 @@ func IsValid(v string) bool
 IsValid reports whether v is a version: SemVer 2.0.0 with a leading "v", or one of the shorthands "vMAJOR" and "vMAJOR.MINOR".
 
 <a name="Prerelease"></a>
-## func [Prerelease](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/semver/semver.go#L90>)
+## func [Prerelease](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/semver/facade_gen.go#L28>)
 
 ```go
 func Prerelease(v string) string
@@ -93,7 +93,7 @@ func Prerelease(v string) string
 Prerelease returns the pre\-release part of v with its leading hyphen — "\-rc.1" for "v1.0.0\-rc.1\+build" — or "" when v has none: a release, a shorthand, or a string that is not a version, which [IsValid](<#IsValid>) tells apart.
 
 <a name="PseudoVersionRev"></a>
-## func [PseudoVersionRev](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/semver/semver.go#L107>)
+## func [PseudoVersionRev](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/semver/facade_gen.go#L43>)
 
 ```go
 func PseudoVersionRev(v string) (string, bool)
@@ -102,7 +102,7 @@ func PseudoVersionRev(v string) (string, bool)
 PseudoVersionRev returns the revision a pseudo\-version names — by the toolchain's convention a commit's first twelve hexadecimal digits — and reports whether v is a pseudo\-version at all.
 
 <a name="PseudoVersionTime"></a>
-## func [PseudoVersionTime](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/semver/semver.go#L115>)
+## func [PseudoVersionTime](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/semver/facade_gen.go#L50>)
 
 ```go
 func PseudoVersionTime(v string) (time.Time, bool)

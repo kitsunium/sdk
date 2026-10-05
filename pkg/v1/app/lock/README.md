@@ -156,7 +156,7 @@ var (
 ```
 
 <a name="Keepalive"></a>
-## func [Keepalive](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/lock.go#L301>)
+## func [Keepalive](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/facade_gen.go#L158>)
 
 ```go
 func Keepalive(ctx context.Context, lease Lease, cfg KeepaliveConfig) (guarded context.Context, stop context.CancelFunc, err error)
@@ -176,7 +176,7 @@ defer stop()
 stop does NOT release the lease: the lifetime of a lock must not depend on the lifetime of a convenience.
 
 <a name="Deadliner"></a>
-## type [Deadliner](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/lock.go#L174>)
+## type [Deadliner](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/facade_gen.go#L33>)
 
 Deadliner is the sibling implemented by a [Lease](<#Lease>) that CAN expire — i.e. one that can be taken from you while you are still running.
 
@@ -187,7 +187,7 @@ type Deadliner = corelock.Deadliner
 ```
 
 <a name="FileConfig"></a>
-## type [FileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/lock.go#L180>)
+## type [FileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/facade_gen.go#L39>)
 
 FileConfig parameterises [NewFileLocker](<#NewFileLocker>). Dir must be set; Poll defaults.
 
@@ -196,7 +196,7 @@ type FileConfig = svclock.FileConfig
 ```
 
 <a name="KeepaliveConfig"></a>
-## type [KeepaliveConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/lock.go#L185>)
+## type [KeepaliveConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/facade_gen.go#L44>)
 
 KeepaliveConfig parameterises [Keepalive](<#Keepalive>). Every must be positive and should be comfortably shorter than the lease TTL — a third of it leaves room for two consecutive failed renewals.
 
@@ -205,7 +205,7 @@ type KeepaliveConfig = svclock.KeepaliveConfig
 ```
 
 <a name="Lease"></a>
-## type [Lease](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/lock.go#L164>)
+## type [Lease](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/facade_gen.go#L23>)
 
 Lease is a held lock: Fence, Extend, Release. FROZEN at three, for the same reason [Locker](<#Locker>) is frozen at two.
 
@@ -214,7 +214,7 @@ type Lease = corelock.Lease
 ```
 
 <a name="Locker"></a>
-## type [Locker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/lock.go#L160>)
+## type [Locker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/facade_gen.go#L19>)
 
 Locker hands out named, exclusive leases: Acquire and TryAcquire.
 
@@ -225,7 +225,7 @@ type Locker = corelock.Locker
 ```
 
 <a name="NewFileLocker"></a>
-### func [NewFileLocker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/lock.go#L281>)
+### func [NewFileLocker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/facade_gen.go#L139>)
 
 ```go
 func NewFileLocker(cfg FileConfig) (locker Locker, err error)
@@ -240,7 +240,7 @@ The third refusal is one rule with two vocabularies, because the two platforms a
 Creating an entry at a free name is NOT that right, on either platform: it is what the sticky bit permits, and what Windows spells as "may add a file" without "may delete a child". What it costs is a lock file planted before any holder exists, which is a denial of service rather than a lost exclusion.
 
 <a name="NewMemory"></a>
-### func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/lock.go#L254>)
+### func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/facade_gen.go#L113>)
 
 ```go
 func NewMemory(cfg MemoryConfig) (locker Locker, err error)
@@ -251,7 +251,7 @@ NewMemory returns a [Locker](<#Locker>) whose leases live in this process and DO
 cfg.TTL must be positive; a zero or negative TTL is refused here rather than defaulted, because the two natural readings of zero are opposites and either choice would be silently wrong for half of its callers \(ADR 0031\).
 
 <a name="MemoryConfig"></a>
-## type [MemoryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/lock.go#L177>)
+## type [MemoryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/facade_gen.go#L36>)
 
 MemoryConfig parameterises [NewMemory](<#NewMemory>). TTL must be positive.
 

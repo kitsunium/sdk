@@ -149,7 +149,7 @@ var (
 ```
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/view.go#L141>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/facade_gen.go#L38>)
 
 Config parameterises every engine. FS is required; everything else has a defensible default.
 
@@ -158,7 +158,7 @@ type Config = coreview.Config
 ```
 
 <a name="Engine"></a>
-## type [Engine](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/view.go#L149>)
+## type [Engine](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/facade_gen.go#L46>)
 
 Engine names a registered template engine. The zero value is the reserved invalid name.
 
@@ -167,7 +167,7 @@ type Engine = coreview.Engine
 ```
 
 <a name="Available"></a>
-### func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/view.go#L263>)
+### func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/facade_gen.go#L156>)
 
 ```go
 func Available() []Engine
@@ -176,7 +176,7 @@ func Available() []Engine
 Available returns every registered [Engine](<#Engine>), sorted, so a program can print what its imports actually wired up.
 
 <a name="Factory"></a>
-## type [Factory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/view.go#L145>)
+## type [Factory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/facade_gen.go#L42>)
 
 Factory is the plug\-in contract an engine implements to enter the registry. Registering is a promise the security model rests on — see [Register](<#Register>).
 
@@ -185,7 +185,7 @@ type Factory = coreview.Factory
 ```
 
 <a name="Register"></a>
-### func [Register](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/view.go#L256>)
+### func [Register](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/facade_gen.go#L150>)
 
 ```go
 func Register(f Factory) Factory
@@ -198,7 +198,7 @@ Registration is not merely a name binding. An engine in this registry MUST conte
 It panics on a nil factory, on the empty [Engine](<#Engine>) name, and when a DISTINCT factory already claims the name — at import, where the offender is visible.
 
 <a name="Renderer"></a>
-## type [Renderer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/view.go#L137>)
+## type [Renderer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/facade_gen.go#L34>)
 
 Renderer turns a named template and a data value into a complete document: Render and ContentType.
 
@@ -209,7 +209,7 @@ type Renderer = coreview.Renderer
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/view.go#L228>)
+### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/facade_gen.go#L124>)
 
 ```go
 func New(cfg Config) (renderer Renderer, err error)
@@ -222,7 +222,7 @@ Call it once, at start\-up, and keep the result: see the package documentation's
 An EMPTY tree is not an error. It produces a Renderer that refuses every name with [TemplateNotFound](<#ViewMisconfigured>) — loud rather than inert \(ADR 0031\).
 
 <a name="Open"></a>
-### func [Open](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/view.go#L240>)
+### func [Open](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/facade_gen.go#L135>)
 
 ```go
 func Open(name Engine, cfg Config) (renderer Renderer, err error)
@@ -233,7 +233,7 @@ Open resolves an [Engine](<#Engine>) by name and builds a [Renderer](<#Renderer>
 It fails loudly on a name nobody claims — [EngineUnknown](<#ViewMisconfigured>) — rather than falling back to a default, because a fallback here would let a typo in a configuration file silently choose how every value in the program is escaped.
 
 <a name="TrustedHTML"></a>
-## type [TrustedHTML](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/view.go#L157>)
+## type [TrustedHTML](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/facade_gen.go#L54>)
 
 TrustedHTML is an HTML fragment written WITHOUT escaping.
 
@@ -244,7 +244,7 @@ type TrustedHTML = coreview.TrustedHTML
 ```
 
 <a name="TrustHTML"></a>
-### func [TrustHTML](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/view.go#L213>)
+### func [TrustHTML](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/facade_gen.go#L110>)
 
 ```go
 func TrustHTML(s string) TrustedHTML

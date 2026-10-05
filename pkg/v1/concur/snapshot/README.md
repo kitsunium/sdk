@@ -44,7 +44,7 @@ Not for write\-heavy state: every write copies the value. A map written as often
 
 
 <a name="Value"></a>
-## type [Value](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/snapshot/snapshot.go#L62>)
+## type [Value](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/snapshot/facade_gen.go#L16>)
 
 Value is a copy\-on\-write container for a \*T. The zero value is ready to use and holds nil until the first Store.
 
@@ -91,7 +91,7 @@ func main() {
 </details>
 
 <a name="NewValue"></a>
-### func [NewValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/snapshot/snapshot.go#L66>)
+### func [NewValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/snapshot/facade_gen.go#L20>)
 
 ```go
 func NewValue[T any](initial *T) *Value[T]

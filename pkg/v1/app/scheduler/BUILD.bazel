@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "scheduler",
-    srcs = ["scheduler.go"],
+    srcs = [
+        "facade_gen.go",
+        "scheduler.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/app/scheduler",
     visibility = ["//visibility:public"],
     deps = [

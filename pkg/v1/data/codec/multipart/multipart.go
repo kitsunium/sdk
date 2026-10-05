@@ -38,12 +38,9 @@
 package multipart
 
 import (
-	coremultipart "github.com/kitsunium/sdk/internal/core/data/codec/multipart"
-	"github.com/kitsunium/sdk/internal/kernel/errs"
-	// The implementation registers itself with the codec registry as it is
-	// initialised; importing it registers the format, and the names below
-	// alias the types it owns.
-	svcmultipart "github.com/kitsunium/sdk/internal/service/data/codec/multipart"
+// The implementation registers itself with the codec registry as it is
+// initialised; importing it registers the format, and the names below
+// alias the types it owns.
 )
 
 // Format is the name multipart/form-data is registered under. It is an untyped
@@ -51,60 +48,3 @@ import (
 // Marshal, config.FSSource's string, i18n.LoadFS's codec.Format — without a
 // conversion.
 const Format = "multipart"
-
-// The error codes, range 0.3.41.*, declared in the core (ADR 0160).
-const (
-	// CodeMarshalFailed is 0.3.41.1: a part could not be written.
-	CodeMarshalFailed errs.Code = coremultipart.CodeMultipartMarshalFailed
-	// CodeUnmarshalFailed is 0.3.41.2: a malformed part, a part with no name,
-	// a missing closing delimiter.
-	CodeUnmarshalFailed errs.Code = coremultipart.CodeMultipartUnmarshalFailed
-	// CodeValueInvalid is 0.3.41.3: an unusable value — no name, or a CR, LF
-	// or NUL in a header field.
-	CodeValueInvalid errs.Code = coremultipart.CodeMultipartValueInvalid
-	// CodeBoundaryInvalid is 0.3.41.4: no usable RFC 2046 boundary.
-	CodeBoundaryInvalid errs.Code = coremultipart.CodeMultipartBoundaryInvalid
-	// CodeLimitExceeded is 0.3.41.5: a part, the part count or the body
-	// crossed its bound.
-	CodeLimitExceeded errs.Code = coremultipart.CodeMultipartLimitExceeded
-	// CodeLimitsInvalid is 0.3.41.6: a negative bound.
-	CodeLimitsInvalid errs.Code = coremultipart.CodeMultipartLimitsInvalid
-)
-
-// The sentinels, for errors.Is: each carries the code of the same name.
-var (
-	// MarshalFailed is the sentinel of [CodeMarshalFailed].
-	MarshalFailed = coremultipart.MarshalFailed
-	// UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].
-	UnmarshalFailed = coremultipart.UnmarshalFailed
-	// ValueInvalid is the sentinel of [CodeValueInvalid].
-	ValueInvalid = coremultipart.ValueInvalid
-	// BoundaryInvalid is the sentinel of [CodeBoundaryInvalid].
-	BoundaryInvalid = coremultipart.BoundaryInvalid
-	// LimitExceeded is the sentinel of [CodeLimitExceeded].
-	LimitExceeded = coremultipart.LimitExceeded
-	// LimitsInvalid is the sentinel of [CodeLimitsInvalid].
-	LimitsInvalid = coremultipart.LimitsInvalid
-)
-
-// Form is the native value of the multipart/form-data Format: a whole body —
-// its RFC 2046 boundary and its parts, in wire order. Marshal one to build an
-// upload; Unmarshal into a *Form to read one. An empty Boundary asks Marshal
-// to generate a delimiter; Unmarshal always fills it with the one it
-// recovered.
-type Form = svcmultipart.FormValue
-
-// Part is one section of a [Form]: a named field, optionally a filename and a
-// media type, and the bytes. Name is required, and a CR, an LF or a NUL in
-// Name, FileName or ContentType is refused, never escaped. Decoding keeps a
-// filename's last path element only.
-type Part = svcmultipart.PartValue
-
-// ContentType returns the Content-Type header value — "multipart/form-data;
-// boundary=…", quoted when the boundary needs it — for a body Marshal wrote,
-// read off its first delimiter line. A body with no recoverable delimiter is
-// refused with CodeBoundaryInvalid.
-func ContentType(body []byte) (value string, err error) {
-	//: the service package owns the boundary recovery.
-	return svcmultipart.ContentType(body)
-}

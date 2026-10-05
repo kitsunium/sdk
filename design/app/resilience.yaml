@@ -279,92 +279,205 @@ packages:
               type: float64
             - name: Clock
               type: clock.Timed
-  - aliases:
-      - name: Operation
-        target: coreres.Operation
-      - name: Runner
-        target: coreres.Runner
-      - name: RetryConfig
-        target: svcres.RetryConfig
-      - name: BreakerConfig
-        target: svcres.BreakerConfig
-      - name: RateLimiterConfig
-        target: svcres.RateLimiterConfig
-      - name: FallbackConfig
-        target: svcres.FallbackConfig
-      - name: HedgeConfig
-        target: svcres.HedgeConfig
-      - name: KeyedRateLimiterConfig
-        target: svcres.KeyedRateLimiterConfig
-      - name: Backoff
-        target: kbackoff.Value
-    functions:
-      - in:
-          - name: cfg
-            type: RetryConfig
-        name: NewRetry
-        out:
-          - type: Runner
-      - in:
-          - name: cfg
-            type: BreakerConfig
-        name: NewCircuitBreaker
-        out:
-          - type: Runner
-      - in:
-          - name: cfg
-            type: RateLimiterConfig
-        name: NewRateLimiter
-        out:
-          - type: Runner
-      - in:
-          - name: cfg
-            type: KeyedRateLimiterConfig
-        name: NewKeyedRateLimiter
-        out:
-          - type: Runner
-      - in:
-          - name: maxConcurrent
-            type: int
-        name: NewBulkhead
-        out:
-          - type: Runner
-      - in:
-          - name: d
-            type: time.Duration
-        name: NewTimeout
-        out:
-          - type: Runner
-      - in:
-          - name: cfg
-            type: FallbackConfig
-        name: NewFallback
-        out:
-          - type: Runner
-      - in:
-          - name: cfg
-            type: HedgeConfig
-        name: NewHedge
-        out:
-          - type: Runner
+  - facade:
+      - alias:
+          - doc: Operation is the public alias for the ctx-aware unit of guarded work.
+            name: Operation
+            target: coreres.Operation
+      - alias:
+          - doc: Runner is the public alias for the composable policy-executor contract.
+            name: Runner
+            target: coreres.Runner
+      - alias:
+          - doc: RetryConfig is the public alias for the retry policy configuration.
+            name: RetryConfig
+            target: svcres.RetryConfig
+      - alias:
+          - doc: BreakerConfig is the public alias for the circuit-breaker configuration.
+            name: BreakerConfig
+            target: svcres.BreakerConfig
+      - alias:
+          - doc: RateLimiterConfig is the public alias for the rate-limiter configuration.
+            name: RateLimiterConfig
+            target: svcres.RateLimiterConfig
+      - alias:
+          - doc: FallbackConfig is the public alias for the fallback policy configuration.
+            name: FallbackConfig
+            target: svcres.FallbackConfig
+      - alias:
+          - doc: HedgeConfig is the public alias for the hedging policy configuration.
+            name: HedgeConfig
+            target: svcres.HedgeConfig
+      - alias:
+          - doc: |-
+              KeyedRateLimiterConfig is the public alias for the keyed rate-limiter
+              configuration: a token bucket per key, bounded in number and forgotten when
+              idle.
+            name: KeyedRateLimiterConfig
+            target: svcres.KeyedRateLimiterConfig
+      - alias:
+          - doc: |-
+              Backoff is the public alias for the exponential backoff curve NewRetry waits
+              between attempts, for a loop that backs off on its own terms.
+            name: Backoff
+            target: kbackoff.Value
+      - var:
+          - doc: RetryExhausted is returned when the retry budget is spent.
+            name: RetryExhausted
+            reexport: coreres.RetryExhausted
+            type: "*errs.Error"
+          - doc: |-
+              CircuitOpen is returned when the breaker rejects a call fast. It carries
+              HTTP 503 (errs.HTTPStatusOf): the dependency cannot take the call now.
+            name: CircuitOpen
+            reexport: coreres.CircuitOpen
+            type: "*errs.Error"
+          - doc: |-
+              RateLimited is returned when no rate-limit token is available. It
+              carries HTTP 429: the client should slow down.
+            name: RateLimited
+            reexport: coreres.RateLimited
+            type: "*errs.Error"
+          - doc: |-
+              BulkheadFull is returned when every concurrency slot is occupied. It
+              carries HTTP 503.
+            name: BulkheadFull
+            reexport: coreres.BulkheadFull
+            type: "*errs.Error"
+          - doc: |-
+              TimeoutExceeded is returned when an operation outruns its deadline. It
+              carries HTTP 504: the call was made and its answer did not arrive in
+              time.
+            name: TimeoutExceeded
+            reexport: coreres.TimeoutExceeded
+            type: "*errs.Error"
+          - doc: |-
+              FallbackFailed is returned when the primary operation AND its fallback
+              both failed. Both messages travel as the "primary" and "fallback"
+              fields, so neither half of a double failure is lost and neither can
+              hijack the policy's own code.
+            name: FallbackFailed
+            reexport: coreres.FallbackFailed
+            type: "*errs.Error"
+          - doc: |-
+              PolicyMisconfigured is returned by every call to a policy that was built
+              with a configuration it cannot honour — a non-positive RateLimiterConfig
+              .Rate, a non-positive NewTimeout duration, a nil FallbackConfig.Fallback,
+              an unasserted HedgeConfig.Idempotent, a non-positive HedgeConfig.Delay or
+              MaxInFlight, a KeyedRateLimiterConfig without a Key, a MaxKeys or an
+              IdleTimeout. The operation is not run. Unlike the sentinels above it is
+              permanent, not transient: the fix is at the construction site, never a
+              retry (ADR 0031).
+            name: PolicyMisconfigured
+            reexport: coreres.PolicyMisconfigured
+            type: "*errs.Error"
+      - func:
+          doc: |-
+            NewRetry returns a retry-with-backoff Runner. An error rejected by
+            cfg.Retryable ends the loop at once and is returned verbatim.
+          forward: svcres.NewRetry
+          in:
+            - name: cfg
+              type: RetryConfig
+          name: NewRetry
+          out:
+            - type: Runner
+      - func:
+          doc: |-
+            NewCircuitBreaker returns a circuit-breaker Runner. An error rejected by
+            cfg.Retryable is returned verbatim and left out of the state machine.
+          forward: svcres.NewCircuitBreaker
+          in:
+            - name: cfg
+              type: BreakerConfig
+          name: NewCircuitBreaker
+          out:
+            - type: Runner
+      - func:
+          doc: |-
+            NewRateLimiter returns a token-bucket rate-limiter Runner. A non-positive
+            cfg.Rate is refused: every call returns PolicyMisconfigured without running
+            the operation, because any rate chosen for the caller would be a guess.
+          forward: svcres.NewRateLimiter
+          in:
+            - name: cfg
+              type: RateLimiterConfig
+          name: NewRateLimiter
+          out:
+            - type: Runner
+      - func:
+          doc: |-
+            NewKeyedRateLimiter returns a Runner holding one token bucket per key — the
+            key cfg.Key names for each call's context — so a caller who empties its
+            bucket is refused while every other caller is not. At most cfg.MaxKeys keys
+            are held, the least recently used forgotten first, and a key unused for
+            cfg.IdleTimeout is forgotten too; a forgotten key starts over with a full
+            bucket. A non-finite or non-positive cfg.Rate, a nil cfg.Key and a
+            non-positive cfg.MaxKeys or cfg.IdleTimeout are each refused: every call
+            returns PolicyMisconfigured, naming the field.
+          forward: svcres.NewKeyedRateLimiter
+          in:
+            - name: cfg
+              type: KeyedRateLimiterConfig
+          name: NewKeyedRateLimiter
+          out:
+            - type: Runner
+      - func:
+          doc: NewBulkhead returns a bounded-concurrency Runner (reject mode).
+          forward: svcres.NewBulkhead
+          in:
+            - name: maxConcurrent
+              type: int
+          name: NewBulkhead
+          out:
+            - type: Runner
+      - func:
+          doc: |-
+            NewTimeout returns a deadline-enforcing Runner. A non-positive d is refused:
+            every call returns PolicyMisconfigured without running the operation, since
+            any deadline chosen for the caller would be a guess (ADR 0031).
+          forward: svcres.NewTimeout
+          in:
+            - name: d
+              type: time.Duration
+          name: NewTimeout
+          out:
+            - type: Runner
+      - func:
+          doc: |-
+            NewFallback returns a Runner that runs cfg.Fallback when the guarded
+            Operation fails, reporting success when it works. When both fail the result
+            is FallbackFailed, carrying both messages — unless the context was cancelled,
+            which is reported as ctx.Err(). A nil cfg.Fallback is refused.
+          forward: svcres.NewFallback
+          in:
+            - name: cfg
+              type: FallbackConfig
+          name: NewFallback
+          out:
+            - type: Runner
+      - func:
+          doc: |-
+            NewHedge returns a tail-latency Runner that DUPLICATES an Operation still
+            outstanding after cfg.Delay and takes the first success. Correct only on an
+            idempotent Operation, which cfg.Idempotent makes the caller assert: that
+            field, cfg.Delay and cfg.MaxInFlight are all refused when unset (ADR 0031).
+
+            Each copy runs on a goroutine of its own, so a panic in one is recovered
+            there and re-raised by Run on the caller's goroutine with the ORIGINAL value
+            — a recover comparing against http.ErrAbortHandler still matches — but with
+            the stack of the re-raise site; the copy's own stack is the price of not
+            ending the process. A losing copy's late panic is recovered and dropped.
+          forward: svcres.NewHedge
+          in:
+            - name: cfg
+              type: HedgeConfig
+          name: NewHedge
+          out:
+            - type: Runner
     imports:
       coreres: github.com/kitsunium/sdk/internal/core/app/resilience
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       kbackoff: github.com/kitsunium/sdk/internal/kernel/backoff
       svcres: github.com/kitsunium/sdk/internal/service/app/resilience
     path: github.com/kitsunium/sdk/pkg/v1/app/resilience
-    variables:
-      - name: RetryExhausted
-        type: "*errs.Error"
-      - name: CircuitOpen
-        type: "*errs.Error"
-      - name: RateLimited
-        type: "*errs.Error"
-      - name: BulkheadFull
-        type: "*errs.Error"
-      - name: TimeoutExceeded
-        type: "*errs.Error"
-      - name: FallbackFailed
-        type: "*errs.Error"
-      - name: PolicyMisconfigured
-        type: "*errs.Error"

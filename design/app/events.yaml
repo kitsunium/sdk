@@ -338,73 +338,144 @@ packages:
         typeParams:
           - constraint: any
             name: E
-  - aliases:
-      - name: Bus
-        target: corev.Bus
-      - name: Listener
-        target: corev.Listener
-      - name: EventType
-        target: corev.EventType
-      - name: Priority
-        target: corev.Priority
-      - name: Subscription
-        target: corev.SubscriptionValue
-      - name: Dispatch
-        target: corev.DispatchValue
-      - name: Handler
-        target: svcev.Handler[E]
-        typeParams:
-          - constraint: any
-            name: E
-    constants:
-      - name: PriorityNormal
-        type: Priority
-        value: "0"
-    functions:
-      - name: New
-        out:
-          - type: Bus
-      - in:
-          - name: bus
-            type: Bus
-          - name: handler
-            type: Handler[E]
-        name: "On"
-        out:
-          - type: error
-        typeParams:
-          - constraint: any
-            name: E
-      - in:
-          - name: bus
-            type: Bus
-          - name: name
-            type: string
-        name: "Off"
-        out:
-          - type: error
-        typeParams:
-          - constraint: any
-            name: E
+  - facade:
+      - const:
+          - doc: |-
+              PriorityNormal is the zero Priority: negative values run before it,
+              positive values after.
+            name: PriorityNormal
+            reexport: corev.PriorityNormal
+            type: Priority
+            typed: true
+            value: "0"
+      - alias:
+          - doc: Bus is the public alias for the in-process dispatch contract.
+            name: Bus
+            target: corev.Bus
+      - alias:
+          - doc: |-
+              Listener is the public alias for the ERASED reaction the bus dispatches.
+              Most code never names it — [On] builds one from a typed function.
+            name: Listener
+            target: corev.Listener
+      - alias:
+          - doc: |-
+              EventType is the public alias for the concrete Go type a subscription is
+              keyed on. It is reflect.Type; [On] and [Off] derive it for you.
+            name: EventType
+            target: corev.EventType
+      - alias:
+          - doc: |-
+              Priority is the public alias for a listener's position in the dispatch
+              order. Lower runs first.
+            name: Priority
+            target: corev.Priority
+      - alias:
+          - doc: |-
+              Subscription is the public alias for one ERASED registration. Prefer
+              [Handler] with [On]; this is the shape a caller who has already erased the
+              type themselves registers.
+            name: Subscription
+            target: corev.SubscriptionValue
+      - alias:
+          - doc: Dispatch is the public alias for the report one Publish returns.
+            name: Dispatch
+            target: corev.DispatchValue
+      - alias:
+          - doc: Handler is the public alias for one TYPED listener's registration.
+            name: Handler
+            target: svcev.Handler[E]
+            typeParams:
+              - constraint: any
+                name: E
+      - var:
+          - doc: |-
+              Halt is the control sentinel a listener returns to stop the dispatch.
+              Only a listener registered with MayHalt may use it.
+            name: Halt
+            reexport: corev.Halt
+            type: "*errs.Error"
+          - doc: InvalidSubscription refuses a registration with no name or no listener.
+            name: InvalidSubscription
+            reexport: corev.InvalidSubscription
+            type: "*errs.Error"
+          - doc: DuplicateListener refuses a name already registered for that type.
+            name: DuplicateListener
+            reexport: corev.DuplicateListener
+            type: "*errs.Error"
+          - doc: UnknownListener reports an Unsubscribe naming nobody.
+            name: UnknownListener
+            reexport: corev.UnknownListener
+            type: "*errs.Error"
+          - doc: InvalidEventType refuses a type no dispatch could ever match.
+            name: InvalidEventType
+            reexport: corev.InvalidEventType
+            type: "*errs.Error"
+          - doc: ListenerPanicked reports a recovered listener panic.
+            name: ListenerPanicked
+            reexport: corev.ListenerPanicked
+            type: "*errs.Error"
+          - doc: |-
+              ListenerFailed is the bus's verdict on a listener that returned an
+              error; it travels beside that error, never around it.
+            name: ListenerFailed
+            reexport: corev.ListenerFailed
+            type: "*errs.Error"
+          - doc: |-
+              HaltNotPermitted reports a Halt from a listener without MayHalt. The
+              dispatch continued.
+            name: HaltNotPermitted
+            reexport: corev.HaltNotPermitted
+            type: "*errs.Error"
+      - func:
+          doc: |-
+            New returns an empty in-process event bus. It cannot fail and takes no
+            configuration: every knob considered was a contract rather than a setting,
+            and a bus whose semantics vary by construction cannot be read at the call
+            site.
+          forward: svcev.New
+          name: New
+          out:
+            - type: Bus
+      - func:
+          doc: |-
+            On registers a typed listener for the event type E.
+
+            It is a function rather than a method because Go methods cannot take type
+            parameters — and a Bus[E] would carry exactly one event type, which is a
+            channel and not a bus.
+
+            E must be a concrete type; an interface is refused with [InvalidEventType].
+          forward: svcev.On
+          in:
+            - name: bus
+              type: Bus
+            - name: handler
+              type: Handler[E]
+          name: "On"
+          out:
+            - type: error
+          typeParams:
+            - constraint: any
+              name: E
+      - func:
+          doc: |-
+            Off removes the listener registered under name for the event type E. A name
+            that is not registered is [UnknownListener], never a silent success.
+          forward: svcev.Off[E]
+          in:
+            - name: bus
+              type: Bus
+            - name: name
+              type: string
+          name: "Off"
+          out:
+            - type: error
+          typeParams:
+            - constraint: any
+              name: E
     imports:
       corev: github.com/kitsunium/sdk/internal/core/app/events
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       svcev: github.com/kitsunium/sdk/internal/service/app/events
     path: github.com/kitsunium/sdk/pkg/v1/app/events
-    variables:
-      - name: Halt
-        type: "*errs.Error"
-      - name: InvalidSubscription
-        type: "*errs.Error"
-      - name: DuplicateListener
-        type: "*errs.Error"
-      - name: UnknownListener
-        type: "*errs.Error"
-      - name: InvalidEventType
-        type: "*errs.Error"
-      - name: ListenerPanicked
-        type: "*errs.Error"
-      - name: ListenerFailed
-        type: "*errs.Error"
-      - name: HaltNotPermitted
-        type: "*errs.Error"

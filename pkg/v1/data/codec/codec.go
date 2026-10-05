@@ -175,18 +175,6 @@ import (
 	_ "github.com/kitsunium/sdk/pkg/v1/data/codec/yaml"
 )
 
-// Format re-exports core/data/codec.Format so consumers only depend on pkg/v1.
-type Format = corecodec.Format
-
-// Codec re-exports core/data/codec.Codec for consumers who want direct access.
-type Codec = corecodec.Codec
-
-// Encoder re-exports core/data/codec.Encoder for streaming callers.
-type Encoder = corecodec.Encoder
-
-// Decoder re-exports core/data/codec.Decoder for streaming callers.
-type Decoder = corecodec.Decoder
-
 // Known format constants — string values are part of the public contract.
 // Prefer the typed constants over string literals at call sites: the
 // IDE catches typos at compile time, autocomplete surfaces the full
@@ -420,12 +408,6 @@ func NewDecoder(f Format, r io.Reader) (dec Decoder, err error) {
 	}
 	//: delegate to the streaming codec.
 	return sc.NewDecoder(r), nil
-}
-
-// Available returns the sorted list of registered formats.
-func Available() []Format {
-	//: delegate to the core registry.
-	return corecodec.Available()
 }
 
 // FromMIME resolves a MIME string to its registered Format.

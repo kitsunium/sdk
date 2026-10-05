@@ -32,8 +32,6 @@
 package pem
 
 import (
-	corepem "github.com/kitsunium/sdk/internal/core/data/codec/pem"
-	"github.com/kitsunium/sdk/internal/kernel/errs"
 	// The implementation registers itself with the codec registry as it is
 	// initialised; importing it is what registers the format.
 	_ "github.com/kitsunium/sdk/internal/service/data/codec/pem"
@@ -43,24 +41,3 @@ import (
 // goes wherever a format name is taken — the codec package's Marshal,
 // config.FSSource's string, i18n.LoadFS's codec.Format — without a conversion.
 const Format = "pem"
-
-// The error codes, range 0.3.10.*, declared in the core (ADR 0160).
-const (
-	// CodeMarshalFailed is 0.3.10.1: encoding/pem refused to write the block.
-	CodeMarshalFailed errs.Code = corepem.CodePEMMarshalFailed
-	// CodeUnmarshalFailed is 0.3.10.2: no PEM block in the input.
-	CodeUnmarshalFailed errs.Code = corepem.CodePEMUnmarshalFailed
-	// CodeValueInvalid is 0.3.10.3: the value is not a *pem.Block, or the
-	// target a **pem.Block.
-	CodeValueInvalid errs.Code = corepem.CodePEMValueInvalid
-)
-
-// The sentinels, for errors.Is: each carries the code of the same name.
-var (
-	// MarshalFailed is the sentinel of [CodeMarshalFailed].
-	MarshalFailed = corepem.MarshalFailed
-	// UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].
-	UnmarshalFailed = corepem.UnmarshalFailed
-	// ValueInvalid is the sentinel of [CodeValueInvalid].
-	ValueInvalid = corepem.ValueInvalid
-)

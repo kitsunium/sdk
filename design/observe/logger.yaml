@@ -816,58 +816,7 @@ packages:
         name: Memory
         struct:
           unexported: true
-  - aliases:
-      - name: Builder
-        target: svclogger.Builder
-      - name: Format
-        target: corecodec.Format
-      - name: Kind
-        target: corelogger.Kind
-      - name: Leveler
-        target: level.Leveler
-      - name: LevelVar
-        target: level.Var
-      - name: Logger
-        target: corelogger.Logger
-      - name: Attr
-        target: corelogger.AttrValue
-      - name: Level
-        target: level.Level
-      - name: RecordSnapshot
-        target: corelogger.RecordEvent
-      - name: MemorySink
-        target: memory.Memory
-      - name: Sink
-        target: corelogger.Sink
-      - name: Record
-        target: corelogger.RecordEvent
-      - name: Encoder
-        target: encoder.Encoder
-      - name: TraceContext
-        target: corelogger.TraceContextValue
-      - name: TraceContextSource
-        target: corelogger.TraceContextSource
-      - name: WriterName
-        target: corewriter.Name
-      - name: ConsoleConfig
-        target: corewriter.ConsoleConfig
-      - name: FileConfig
-        target: corewriter.FileConfig
-      - name: S3Config
-        target: corewriter.S3Config
-      - name: CloudWatchConfig
-        target: corewriter.CloudWatchConfig
-      - name: RotFileConfig
-        target: corewriter.RotFileConfig
-      - name: ConsoleStream
-        target: corewriter.ConsoleStream
-      - name: CredentialProvider
-        target: corewriter.CredentialProvider
-      - name: CredentialValue
-        target: corewriter.CredentialValue
-      - name: WriterSpec
-        target: corewriter.Spec
-    codes:
+  - codes:
       - const:
           - doc: |-
               CodeWriterRequired identifies a NewText call with Config.Writer == nil;
@@ -902,81 +851,452 @@ packages:
             name: CodeTopologyInvalid
             value: "0x01_01_00_04"
         type: errs.Code
-    constants:
-      - name: KindAny
-        type: Kind
-        value: "0"
-      - name: KindBool
-        type: Kind
-        value: "1"
-      - name: KindDuration
-        type: Kind
-        value: "2"
-      - name: KindFloat64
-        type: Kind
-        value: "3"
-      - name: KindInt64
-        type: Kind
-        value: "4"
-      - name: KindString
-        type: Kind
-        value: "5"
-      - name: KindTime
-        type: Kind
-        value: "6"
-      - name: KindUint64
-        type: Kind
-        value: "7"
-      - name: KindGroup
-        type: Kind
-        value: "8"
-      - name: LevelDebug
-        type: Level
-        value: "-4"
-      - name: LevelInfo
-        type: Level
-        value: "0"
-      - name: LevelWarn
-        type: Level
-        value: "4"
-      - name: LevelError
-        type: Level
-        value: "8"
-      - name: StreamStderr
-        type: corewriter.ConsoleStream
-        value: "0"
-      - name: StreamStdout
-        type: corewriter.ConsoleStream
-        value: "1"
+    facade:
+      - alias:
+          - doc: |-
+              Builder is the stable alias for the internal chainable Builder. Returned
+              by Build, every typed accessor (Str / Int / Bool / …) returns the receiver
+              so callers compose the chain in a single expression. Send terminates the
+              chain — callers MUST NOT use the builder after Send.
+            name: Builder
+            target: svclogger.Builder
+      - func:
+          doc: |-
+            Build returns a chainable Builder bound to lg at the supplied level.
+            Builders are recycled through a sync.Pool, so the steady-state per-call
+            cost is one heap allocation per emit — the handler clones the accumulated
+            attrs on Send, and that clone escapes. See BENCH.md.
+          forward: svclogger.Build
+          in:
+            - name: lg
+              type: Logger
+            - name: lv
+              type: Level
+          name: Build
+          out:
+            - type: Builder
+      - func:
+          doc: |-
+            LogAttrs is the slice-overload of Logger.Log that avoids the variadic
+            slice allocation imposed by Logger.Log(... Attr). Pre-built attribute
+            slices flow through this entry point without per-call boxing.
+          forward: svclogger.LogAttrs
+          in:
+            - name: ctx
+              type: context.Context
+            - name: lg
+              type: Logger
+            - name: lv
+              type: Level
+            - name: msg
+              type: string
+            - name: attrs
+              type: "[]Attr"
+          name: LogAttrs
+      - func:
+          doc: |-
+            WithCaller returns a derived Logger whose emitted records carry a "source"
+            attribute resolving the call site into file:line:function. The skip argument
+            is the extra stack-frame offset reserved for wrapper layers; pass 0 for
+            direct callers. The returned Logger shares the original's sink and encoder;
+            the only change is the added annotation, so the option is safe to layer onto
+            any Logger built by this package.
+
+            	lg, _ := logger.Default()
+            	lg = logger.WithCaller(lg, 0)
+            	lg.Info(ctx, "ready") // record now carries source=…/main.go:42:main.run
+          forward: svclogger.WithCaller
+          in:
+            - name: lg
+              type: Logger
+            - name: skip
+              type: int
+          name: WithCaller
+          out:
+            - type: Logger
+      - alias:
+          - doc: |-
+              Format is the typed wire-format identifier accepted by FromConfig. It is a
+              stable alias onto the core codec dispatch surface, so a consumer names a
+              format with the same string values the codec facade exposes.
+            name: Format
+            target: corecodec.Format
+      - alias:
+          - doc: |-
+              Kind is the stable alias for the internal payload discriminant carried by a
+              Value. Switch on it to select the matching typed accessor (String, Int64,
+              Float64, …) instead of paying for an `any` assertion at render time.
+            name: Kind
+            target: corelogger.Kind
+      - const:
+          - doc: |-
+              KindAny tags a Value whose payload is an unconstrained interface. It is also
+              the zero value of Kind, so an unrecognised future variant degrades here
+              rather than panicking.
+            name: KindAny
+            reexport: corelogger.KindAny
+            type: Kind
+            typed: true
+            value: "0"
+      - const:
+          - doc: KindBool tags a Value carrying a boolean payload.
+            name: KindBool
+            reexport: corelogger.KindBool
+            type: Kind
+            typed: true
+            value: "1"
+      - const:
+          - doc: KindDuration tags a Value carrying a time.Duration payload.
+            name: KindDuration
+            reexport: corelogger.KindDuration
+            type: Kind
+            typed: true
+            value: "2"
+      - const:
+          - doc: KindFloat64 tags a Value carrying a float64 payload.
+            name: KindFloat64
+            reexport: corelogger.KindFloat64
+            type: Kind
+            typed: true
+            value: "3"
+      - const:
+          - doc: |-
+              KindInt64 tags a Value carrying an int64 payload (also covers int / int32,
+              which IntValue widens on the way in).
+            name: KindInt64
+            reexport: corelogger.KindInt64
+            type: Kind
+            typed: true
+            value: "4"
+      - const:
+          - doc: KindString tags a Value carrying a string payload.
+            name: KindString
+            reexport: corelogger.KindString
+            type: Kind
+            typed: true
+            value: "5"
+      - const:
+          - doc: KindTime tags a Value carrying a time.Time payload.
+            name: KindTime
+            reexport: corelogger.KindTime
+            type: Kind
+            typed: true
+            value: "6"
+      - const:
+          - doc: KindUint64 tags a Value carrying an unsigned 64-bit integer payload.
+            name: KindUint64
+            reexport: corelogger.KindUint64
+            type: Kind
+            typed: true
+            value: "7"
+      - const:
+          - doc: |-
+              KindGroup tags a Value whose payload is a nested []Attr. Producers that
+              target the bundled text and JSON encoders flatten groups into dotted keys
+              instead, since neither encoder renders a group payload directly.
+            name: KindGroup
+            reexport: corelogger.KindGroup
+            type: Kind
+            typed: true
+            value: "8"
+      - alias:
+          - doc: |-
+              Leveler is the stable alias for the internal one-method level port. A custom
+              Sink reads Level on each record so the threshold can change at runtime; both
+              LevelVar and any constant-returning type satisfy it.
+            name: Leveler
+            target: level.Leveler
+      - alias:
+          - doc: |-
+              LevelVar is the stable alias for the atomic Level holder. Its zero value
+              reports LevelInfo; Set and Level are safe for concurrent use, so one
+              goroutine can retune the floor while a sink reads it on the hot path.
+            name: LevelVar
+            target: level.Var
+      - func:
+          doc: |-
+            NewLevelVar returns a LevelVar seeded with initial. Hold the returned pointer
+            where a sink or gate can read its Level, then call Set to raise or lower the
+            live threshold. Pair it with ParseLevel to retune from an env or flag value.
+          forward: level.NewVar
+          in:
+            - name: initial
+              type: Level
+          name: NewLevelVar
+          out:
+            - type: "*LevelVar"
+      - func:
+          doc: |-
+            ParseLevel maps a canonical lowercase level name (debug / info / warn /
+            error) to its Level, the strict inverse of a lowercased Level.String. Input
+            is trimmed and lowercased before matching. Unknown names return the zero
+            Level and a redacted LevelUnknown error — the offending input is never echoed.
+
+            Unlike the internal best-effort config path, this surface reports the miss so
+            a caller validating an env/flag value can reject it rather than silently
+            falling back to Info.
+          forward: level.ParseLevel
+          in:
+            - name: name
+              type: string
+          name: ParseLevel
+          out:
+            - name: lvl
+              type: Level
+            - name: err
+              type: error
+      - alias:
+          - doc: Logger is the stable alias for the internal core.Logger interface.
+            name: Logger
+            target: corelogger.Logger
+      - alias:
+          - doc: Attr is the stable alias for the internal AttrValue key/value pair.
+            name: Attr
+            target: corelogger.AttrValue
+      - alias:
+          - doc: Level is the stable alias for the internal severity type.
+            name: Level
+            target: level.Level
+      - const:
+          - doc: LevelDebug selects records describing detailed tracing information.
+            name: LevelDebug
+            reexport: level.Debug
+            type: Level
+            typed: true
+            value: "-4"
+      - const:
+          - doc: LevelInfo selects records describing routine operational events.
+            name: LevelInfo
+            reexport: level.Info
+            type: Level
+            typed: true
+            value: "0"
+      - const:
+          - doc: LevelWarn selects records describing abnormal but recoverable conditions.
+            name: LevelWarn
+            reexport: level.Warn
+            type: Level
+            typed: true
+            value: "4"
+      - const:
+          - doc: LevelError selects records describing failures needing action.
+            name: LevelError
+            reexport: level.Error
+            type: Level
+            typed: true
+            value: "8"
+      - alias:
+          - doc: |-
+              RecordSnapshot is a buffered copy of a single recorded log event. It is the
+              element type returned by MemorySink.Records, letting tests assert on a
+              record's Level, Message, and Attrs without parsing an encoder's byte output.
+              It is the same type as Record (an alias of the core RecordEvent).
+            name: RecordSnapshot
+            target: corelogger.RecordEvent
+      - alias:
+          - doc: |-
+              MemorySink is a Sink that buffers a defensive snapshot of every received
+              record in a mutex-guarded slice. It is intended for tests that assert on
+              what was logged. Pass it to NewWithSink (it satisfies Sink), retrieve the
+              buffered records with Records, and clear them with Reset.
+            name: MemorySink
+            target: memory.Memory
+      - func:
+          doc: NewMemorySink returns an empty MemorySink ready to record received records.
+          forward: memory.NewMemory
+          name: NewMemorySink
+          out:
+            - type: "*MemorySink"
+      - alias:
+          - doc: |-
+              Sink is the stable alias for the internal core.Sink port. Consumers
+              compose Sink instances (console / file / syslog / async / multi …) and
+              pass them to NewWithSink to wire a custom transport pipeline.
+            name: Sink
+            target: corelogger.Sink
+      - alias:
+          - doc: |-
+              Record is the stable alias for the internal RecordEvent value passed to
+              Sink.Write. Consumers implementing custom Sinks reach for this type
+              rather than reimporting the internal core.logger package.
+            name: Record
+            target: corelogger.RecordEvent
+      - alias:
+          - doc: |-
+              Encoder is the stable alias for the internal service encoder interface.
+              The default text encoder is exposed via TextEncoder; structured output is
+              injected through NewWithSink via SinkConfig.Encoder (see NewJSONEncoder)
+              when callers need machine-readable output.
+            name: Encoder
+            target: encoder.Encoder
+      - func:
+          doc: |-
+            Multi is a thin wrapper around the internal multi (fan-out) sink. It
+            broadcasts every record to each branch in order and aggregates per-sink
+            failures via errors.Join under the FANOUT_WRITE_FAILED sentinel.
+          forward: multi.New
+          in:
+            - name: branches
+              type: Sink
+          name: Multi
+          out:
+            - type: Sink
+          variadic: true
+      - func:
+          doc: |-
+            LevelGate returns a Sink that passes to sink the records whose level is at
+            or above min and drops the others, delegating Flush and Close. It is how one
+            branch of a [Multi] fan-out sees less than another: the pipeline's
+            [SinkConfig].MinLevel is set to the lowest level any branch wants, and the
+            narrower branches are gated.
+
+            The floor is the one given, for every level — Info included. A dropped
+            record reports success (every byte accepted, no error), so a fan-out never
+            counts it as a failed write. The gate holds nothing of its own: Flush and
+            Close reach sink unchanged, and closing the gate closes sink.
+
+            A nil sink yields nil, which [Multi] skips and [NewWithSink] refuses with
+            [SinkConfigRequired].
+          forward: levelgate.Floor
+          in:
+            - name: sink
+              type: Sink
+            - name: min
+              type: Level
+          name: LevelGate
+          out:
+            - type: Sink
+      - func:
+          doc: |-
+            ConsoleStderr returns the stderr console Sink used by Default. Exposed
+            so callers building a Multi() topology can wire stderr alongside richer
+            transports without re-implementing the convenience constructor.
+          forward: console.NewStderr
+          name: ConsoleStderr
+          out:
+            - type: Sink
+      - func:
+          doc: |-
+            ConsoleStdout returns the stdout console Sink. Same rationale as
+            ConsoleStderr — exposed for Multi() compositions.
+          forward: console.NewStdout
+          name: ConsoleStdout
+          out:
+            - type: Sink
+      - alias:
+          - doc: |-
+              TraceContext is the stable alias for the trace correlation a Record carries:
+              the trace and span identifiers of the span the record was emitted inside.
+              The zero value means "no trace here" and renders nothing.
+            name: TraceContext
+            target: corelogger.TraceContextValue
+      - alias:
+          - doc: |-
+              TraceContextSource is the stable alias for the port that reads a
+              TraceContext off a context.Context. Every Logger built by this package is
+              wired to TraceContextFromContext.
+            name: TraceContextSource
+            target: corelogger.TraceContextSource
+      - const:
+          - doc: |-
+              StreamStderr selects os.Stderr for the console writer (zero value, so a
+              ConsoleConfig{} written without an opinion lands here — ADR 0030).
+            name: StreamStderr
+            reexport: corewriter.ConsoleStderr
+            type: corewriter.ConsoleStream
+            typed: true
+            value: "0"
+          - doc: |-
+              StreamStdout selects os.Stdout for the console writer. Because stdout is
+              a protocol channel for many processes, it is reachable only by name.
+            name: StreamStdout
+            reexport: corewriter.ConsoleStdout
+            type: corewriter.ConsoleStream
+            typed: true
+            value: "1"
+        doc: |-
+          StreamStderr targets os.Stderr (the zero value); StreamStdout targets stdout.
+          Typed as corewriter.ConsoleStream so the constants stand alone ahead of the
+          type aliases below (const → type ordering).
+      - alias:
+          - doc: |-
+              WriterName is the stable alias for a registered writer key
+              ("console" / "file" / "rotfile" / "s3" / "cloudwatch").
+            name: WriterName
+            target: corewriter.Name
+      - alias:
+          - doc: |-
+              ConsoleConfig configures the "console" writer (stream + optional MinLevel).
+              The zero value targets os.Stderr (ADR 0030).
+            name: ConsoleConfig
+            target: corewriter.ConsoleConfig
+      - alias:
+          - doc: FileConfig configures the "file" writer (path + optional MinLevel).
+            name: FileConfig
+            target: corewriter.FileConfig
+      - alias:
+          - doc: |-
+              S3Config configures the "s3" writer. Usable as a value without the AWS SDK;
+              it resolves to a working sink only once third-party/aws/writer/s3 is imported.
+            name: S3Config
+            target: corewriter.S3Config
+      - alias:
+          - doc: |-
+              CloudWatchConfig configures the "cloudwatch" writer. Same import-gated
+              resolution as S3Config.
+            name: CloudWatchConfig
+            target: corewriter.CloudWatchConfig
+      - alias:
+          - doc: |-
+              RotFileConfig configures the "rotfile" writer — a size- and/or age-capped,
+              optionally gzip-compressed on-disk file that rotates Path -> Path.1 … up to
+              MaxBackups (Path / MaxBytes / MaxBackups / MaxAgeDays / Compress / RotateEvery
+              / MinLevel). Usable as a value once
+              github.com/kitsunium/sdk/pkg/v1/observe/logger/writer is blank-imported (it
+              self-registers the "rotfile" factory alongside console and file); pass it via
+              WriterSpec{Name: "rotfile", Config: cfg} to NewMulti.
+            name: RotFileConfig
+            target: corewriter.RotFileConfig
+      - alias:
+          - doc: |-
+              ConsoleStream selects which standard stream the console writer targets. Its
+              zero value is StreamStderr (ADR 0030).
+            name: ConsoleStream
+            target: corewriter.ConsoleStream
+      - alias:
+          - doc: |-
+              CredentialProvider yields short-lived credentials on demand for the network
+              writers; the SDK never logs or wraps the returned material.
+            name: CredentialProvider
+            target: corewriter.CredentialProvider
+      - alias:
+          - doc: |-
+              CredentialValue is the opaque, redacting credential set returned by a
+              CredentialProvider; its String output is always "<redacted>".
+            name: CredentialValue
+            target: corewriter.CredentialValue
+      - func:
+          doc: |-
+            NewCredentialValue builds a CredentialValue from AWS SigV4 material. An empty
+            sessionToken is valid for long-lived keys.
+          forward: corewriter.NewCredentialValue
+          in:
+            - name: accessKeyID
+            - name: secretAccessKey
+            - name: sessionToken
+              type: string
+          name: NewCredentialValue
+          out:
+            - type: CredentialValue
+      - alias:
+          - doc: |-
+              WriterSpec names a writer and carries its concrete config. Read at call sites
+              as logger.WriterSpec{Name: "file", Config: logger.FileConfig{Path: …}}. It is
+              a type alias onto internal/core/observe/logger/writer, so the public type is identity-equal
+              to the internal writer model (alias-based public surface, zero runtime cost).
+            name: WriterSpec
+            target: corewriter.Spec
     functions:
-      - in:
-          - name: lg
-            type: Logger
-          - name: lv
-            type: Level
-        name: Build
-        out:
-          - type: Builder
-      - in:
-          - name: ctx
-            type: context.Context
-          - name: lg
-            type: Logger
-          - name: lv
-            type: Level
-          - name: msg
-            type: string
-          - name: attrs
-            type: "[]Attr"
-        name: LogAttrs
-      - in:
-          - name: lg
-            type: Logger
-          - name: skip
-            type: int
-        name: WithCaller
-        out:
-          - type: Logger
       - name: NewTextEncoder
         out:
           - type: Encoder
@@ -992,21 +1312,6 @@ packages:
         out:
           - name: lg
             type: Logger
-          - name: err
-            type: error
-      - in:
-          - name: initial
-            type: Level
-        name: NewLevelVar
-        out:
-          - type: "*LevelVar"
-      - in:
-          - name: name
-            type: string
-        name: ParseLevel
-        out:
-          - name: lvl
-            type: Level
           - name: err
             type: error
       - in:
@@ -1148,9 +1453,6 @@ packages:
         name: Any
         out:
           - type: Attr
-      - name: NewMemorySink
-        out:
-          - type: "*MemorySink"
       - in:
           - name: cfg
             type: SinkConfig
@@ -1161,21 +1463,6 @@ packages:
           - name: err
             type: error
       - in:
-          - name: branches
-            type: Sink
-        name: Multi
-        out:
-          - type: Sink
-        variadic: true
-      - in:
-          - name: sink
-            type: Sink
-          - name: min
-            type: Level
-        name: LevelGate
-        out:
-          - type: Sink
-      - in:
           - name: w
             type: io.Writer
         name: NewWriterSink
@@ -1184,12 +1471,6 @@ packages:
             type: Sink
           - name: err
             type: error
-      - name: ConsoleStderr
-        out:
-          - type: Sink
-      - name: ConsoleStdout
-        out:
-          - type: Sink
       - name: TextEncoder
         out:
           - type: Encoder
@@ -1209,14 +1490,6 @@ packages:
         out:
           - type: "[]Attr"
       - in:
-          - name: accessKeyID
-          - name: secretAccessKey
-          - name: sessionToken
-            type: string
-        name: NewCredentialValue
-        out:
-          - type: CredentialValue
-      - in:
           - name: min
             type: Level
           - name: specs
@@ -1229,13 +1502,16 @@ packages:
             type: error
         variadic: true
     imports:
+      console: github.com/kitsunium/sdk/internal/service/observe/logger/sink/console
       corecodec: github.com/kitsunium/sdk/internal/core/data/codec
       corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
       corewriter: github.com/kitsunium/sdk/internal/core/observe/logger/writer
       encoder: github.com/kitsunium/sdk/internal/service/observe/logger/encoder
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       level: github.com/kitsunium/sdk/internal/core/observe/logger/level
+      levelgate: github.com/kitsunium/sdk/internal/service/observe/logger/writer/levelgate
       memory: github.com/kitsunium/sdk/internal/service/observe/logger/sink/memory
+      multi: github.com/kitsunium/sdk/internal/service/observe/logger/middleware/multi
       svclogger: github.com/kitsunium/sdk/internal/service/observe/logger
     path: github.com/kitsunium/sdk/pkg/v1/observe/logger
     sentinels:

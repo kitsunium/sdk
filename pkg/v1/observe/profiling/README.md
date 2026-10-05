@@ -201,7 +201,7 @@ var (
 ```
 
 <a name="CanonicalName"></a>
-## func [CanonicalName](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L254>)
+## func [CanonicalName](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go#L174>)
 
 ```go
 func CanonicalName(name string) string
@@ -210,7 +210,7 @@ func CanonicalName(name string) string
 CanonicalName spells a function the same way whoever named it.
 
 <a name="FlameNode"></a>
-## type [FlameNode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L199>)
+## type [FlameNode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go#L126>)
 
 FlameNode is one frame of a flame graph.
 
@@ -219,7 +219,7 @@ type FlameNode = coreprofiling.FlameNodeValue
 ```
 
 <a name="FoldConfig"></a>
-## type [FoldConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L187>)
+## type [FoldConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go#L114>)
 
 FoldConfig says how Fold reads a profile; every zero field has a default.
 
@@ -228,7 +228,7 @@ type FoldConfig = svcprof.FoldConfig
 ```
 
 <a name="Folded"></a>
-## type [Folded](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L190>)
+## type [Folded](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go#L117>)
 
 Folded is a profile folded, in the sample type's own unit.
 
@@ -237,7 +237,7 @@ type Folded = coreprofiling.FoldedValue
 ```
 
 <a name="Fold"></a>
-### func [Fold](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L229>)
+### func [Fold](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go#L153>)
 
 ```go
 func Fold(p *Profile, cfg FoldConfig) (Folded, error)
@@ -246,7 +246,7 @@ func Fold(p *Profile, cfg FoldConfig) (Folded, error)
 Fold charges every sample of p to an owner and adds it all up.
 
 <a name="Frame"></a>
-## type [Frame](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L184>)
+## type [Frame](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go#L111>)
 
 Frame is one frame of a stack.
 
@@ -255,7 +255,7 @@ type Frame = coreprofiling.FrameValue
 ```
 
 <a name="FunctionCost"></a>
-## type [FunctionCost](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L196>)
+## type [FunctionCost](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go#L123>)
 
 FunctionCost is what one function cost.
 
@@ -264,7 +264,7 @@ type FunctionCost = coreprofiling.FunctionCostValue
 ```
 
 <a name="Goroutine"></a>
-## type [Goroutine](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L202>)
+## type [Goroutine](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go#L129>)
 
 Goroutine is one goroutine, as the runtime's dump describes it.
 
@@ -273,7 +273,7 @@ type Goroutine = coreprofiling.GoroutineValue
 ```
 
 <a name="Goroutines"></a>
-### func [Goroutines](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L235>)
+### func [Goroutines](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go#L158>)
 
 ```go
 func Goroutines() ([]Goroutine, error)
@@ -282,7 +282,7 @@ func Goroutines() ([]Goroutine, error)
 Goroutines returns every goroutine of the process.
 
 <a name="ParseGoroutines"></a>
-### func [ParseGoroutines](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L241>)
+### func [ParseGoroutines](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go#L163>)
 
 ```go
 func ParseGoroutines(dump []byte) []Goroutine
@@ -291,7 +291,7 @@ func ParseGoroutines(dump []byte) []Goroutine
 ParseGoroutines reads a goroutine dump; it never fails.
 
 <a name="GoroutineGroup"></a>
-## type [GoroutineGroup](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L208>)
+## type [GoroutineGroup](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go#L135>)
 
 GoroutineGroup is goroutines sharing their labels, state and top frame.
 
@@ -300,7 +300,7 @@ type GoroutineGroup = coreprofiling.GoroutineGroupValue
 ```
 
 <a name="GroupGoroutines"></a>
-### func [GroupGoroutines](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L248>)
+### func [GroupGoroutines](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go#L169>)
 
 ```go
 func GroupGoroutines(gs []Goroutine, cfg GroupConfig) []GoroutineGroup
@@ -309,7 +309,7 @@ func GroupGoroutines(gs []Goroutine, cfg GroupConfig) []GoroutineGroup
 GroupGoroutines groups goroutines by labels, state and top frame, largest first.
 
 <a name="GroupConfig"></a>
-## type [GroupConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L205>)
+## type [GroupConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go#L132>)
 
 GroupConfig says how GroupGoroutines groups.
 
@@ -318,7 +318,7 @@ type GroupConfig = svcprof.GroupConfig
 ```
 
 <a name="OwnerCost"></a>
-## type [OwnerCost](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L193>)
+## type [OwnerCost](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go#L120>)
 
 OwnerCost is what one owner cost.
 
@@ -327,7 +327,7 @@ type OwnerCost = coreprofiling.OwnerCostValue
 ```
 
 <a name="Profile"></a>
-## type [Profile](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L175>)
+## type [Profile](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go#L102>)
 
 Profile is a decoded pprof profile.
 
@@ -336,7 +336,7 @@ type Profile = coreprofiling.ProfileValue
 ```
 
 <a name="CaptureCPU"></a>
-### func [CaptureCPU](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L211>)
+### func [CaptureCPU](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go#L138>)
 
 ```go
 func CaptureCPU(ctx context.Context, window time.Duration) (*Profile, error)
@@ -345,7 +345,7 @@ func CaptureCPU(ctx context.Context, window time.Duration) (*Profile, error)
 CaptureCPU samples the process's CPU for window and returns the profile.
 
 <a name="CaptureHeap"></a>
-### func [CaptureHeap](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L217>)
+### func [CaptureHeap](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go#L143>)
 
 ```go
 func CaptureHeap() (*Profile, error)
@@ -354,7 +354,7 @@ func CaptureHeap() (*Profile, error)
 CaptureHeap returns the live heap, after a garbage collection.
 
 <a name="Parse"></a>
-### func [Parse](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L223>)
+### func [Parse](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go#L148>)
 
 ```go
 func Parse(data []byte) (*Profile, error)
@@ -363,7 +363,7 @@ func Parse(data []byte) (*Profile, error)
 Parse decodes a pprof profile, gzipped or not.
 
 <a name="Sample"></a>
-## type [Sample](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L181>)
+## type [Sample](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go#L108>)
 
 Sample is one sample: a stack, a value per sample type, and labels.
 
@@ -372,7 +372,7 @@ type Sample = coreprofiling.SampleValue
 ```
 
 <a name="SampleType"></a>
-## type [SampleType](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L178>)
+## type [SampleType](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go#L105>)
 
 SampleType names what a value measures and its unit.
 

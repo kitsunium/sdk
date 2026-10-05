@@ -36,8 +36,6 @@
 package tlv
 
 import (
-	coretlv "github.com/kitsunium/sdk/internal/core/data/codec/tlv"
-	"github.com/kitsunium/sdk/internal/kernel/errs"
 	// The implementation registers itself with the codec registry as it is
 	// initialised; importing it is what registers the format.
 	_ "github.com/kitsunium/sdk/internal/service/data/codec/tlv"
@@ -47,38 +45,3 @@ import (
 // goes wherever a format name is taken — the codec package's Marshal,
 // config.FSSource's string, i18n.LoadFS's codec.Format — without a conversion.
 const Format = "tlv"
-
-// The error codes, range 0.3.22.*, declared in the core (ADR 0160).
-const (
-	// CodeMarshalFailed is 0.3.22.1: the value could not be encoded, or the
-	// writer failed.
-	CodeMarshalFailed errs.Code = coretlv.CodeTLVMarshalFailed
-	// CodeUnmarshalFailed is 0.3.22.2: a malformed record, a type mismatch, or
-	// the reader failed.
-	CodeUnmarshalFailed errs.Code = coretlv.CodeTLVUnmarshalFailed
-	// CodeUnsupportedType is 0.3.22.3: a channel, a function, a complex
-	// number, an unsafe pointer.
-	CodeUnsupportedType errs.Code = coretlv.CodeTLVUnsupportedType
-	// CodeDepthExceeded is 0.3.22.4: nesting past 32 levels.
-	CodeDepthExceeded errs.Code = coretlv.CodeTLVDepthExceeded
-	// CodeSizeExceeded is 0.3.22.5: an input past 10 MiB.
-	CodeSizeExceeded errs.Code = coretlv.CodeTLVSizeExceeded
-	// CodeTruncated is 0.3.22.6: the input ends inside a record.
-	CodeTruncated errs.Code = coretlv.CodeTLVTruncated
-)
-
-// The sentinels, for errors.Is: each carries the code of the same name.
-var (
-	// MarshalFailed is the sentinel of [CodeMarshalFailed].
-	MarshalFailed = coretlv.MarshalFailed
-	// UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].
-	UnmarshalFailed = coretlv.UnmarshalFailed
-	// UnsupportedType is the sentinel of [CodeUnsupportedType].
-	UnsupportedType = coretlv.UnsupportedType
-	// DepthExceeded is the sentinel of [CodeDepthExceeded].
-	DepthExceeded = coretlv.DepthExceeded
-	// SizeExceeded is the sentinel of [CodeSizeExceeded].
-	SizeExceeded = coretlv.SizeExceeded
-	// Truncated is the sentinel of [CodeTruncated].
-	Truncated = coretlv.Truncated
-)

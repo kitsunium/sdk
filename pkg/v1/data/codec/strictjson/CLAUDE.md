@@ -44,6 +44,10 @@ break of the import path (ADR 0155 §4); the framework moved with it.
 `strictjson.go` (ADR 0008). Regenerate with `make docs-readme`; do not
 hand-edit it.
 
+## Generated
+
+`facade_gen.go` is kit's (ADR 0165): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/data/codec/strictjson.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the package comment and the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
+
 ## Verification
 
 ```sh

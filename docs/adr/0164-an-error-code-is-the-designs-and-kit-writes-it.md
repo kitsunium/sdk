@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-10-05
 - **Deciders**: SDK maintainers (the owner's decision: stage 2 of "kit regenerates the Go SDK from its design")
+- **Amended by**: [ADR 0165](0165-a-facade-is-the-designs-and-a-forwarders-form-is-measured.md) — a package's re-exports join its codes as the design's, written by kit
 - **Amends**: [ADR 0163](0163-the-sdk-is-designed-by-its-diagram-and-kit-writes-only-data-and-test-pins.md) §2 ("nothing else in production code is generated") and §8 (`codeRangeOwners` hand-kept); [ADR 0035](0035-pp-range-ownership-enforcement.md) (how the table stays independent of the constants)
 - **Related**: [ADR 0005](0005-sdk-error-codes-dotted-quad.md), [ADR 0006](0006-sdk-error-code-registry-extension.md), [ADR 0020](0020-errs-audit-dual-reason-derivation.md) (the two Reason derivations), [ADR 0160](0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md) (where a code is declared)
 

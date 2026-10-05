@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "docstore",
-    srcs = ["docstore.go"],
+    srcs = [
+        "docstore.go",
+        "facade_gen.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/data/docstore",
     visibility = ["//visibility:public"],
     deps = [

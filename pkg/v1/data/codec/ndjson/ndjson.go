@@ -32,8 +32,6 @@
 package ndjson
 
 import (
-	corendjson "github.com/kitsunium/sdk/internal/core/data/codec/ndjson"
-	"github.com/kitsunium/sdk/internal/kernel/errs"
 	// The implementation registers itself with the codec registry as it is
 	// initialised; importing it is what registers the format.
 	_ "github.com/kitsunium/sdk/internal/service/data/codec/ndjson"
@@ -44,24 +42,3 @@ import (
 // package's Marshal, config.FSSource's string, i18n.LoadFS's codec.Format —
 // without a conversion.
 const Format = "ndjson"
-
-// The error codes, range 0.3.11.*, declared in the core (ADR 0160).
-const (
-	// CodeMarshalFailed is 0.3.11.1: a record has no JSON encoding.
-	CodeMarshalFailed errs.Code = corendjson.CodeNDJSONMarshalFailed
-	// CodeUnmarshalFailed is 0.3.11.2: a line is not JSON its element can
-	// hold.
-	CodeUnmarshalFailed errs.Code = corendjson.CodeNDJSONUnmarshalFailed
-	// CodeValueInvalid is 0.3.11.3: the value or the target is not a slice.
-	CodeValueInvalid errs.Code = corendjson.CodeNDJSONValueInvalid
-)
-
-// The sentinels, for errors.Is: each carries the code of the same name.
-var (
-	// MarshalFailed is the sentinel of [CodeMarshalFailed].
-	MarshalFailed = corendjson.MarshalFailed
-	// UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].
-	UnmarshalFailed = corendjson.UnmarshalFailed
-	// ValueInvalid is the sentinel of [CodeValueInvalid].
-	ValueInvalid = corendjson.ValueInvalid
-)

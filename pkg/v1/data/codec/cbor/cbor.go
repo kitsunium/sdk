@@ -34,8 +34,6 @@
 package cbor
 
 import (
-	corecbor "github.com/kitsunium/sdk/internal/core/data/codec/cbor"
-	"github.com/kitsunium/sdk/internal/kernel/errs"
 	// The implementation registers itself with the codec registry as it is
 	// initialised; importing it is what registers the format.
 	_ "github.com/kitsunium/sdk/internal/service/data/codec/cbor"
@@ -45,21 +43,3 @@ import (
 // it goes wherever a format name is taken — the codec package's Marshal,
 // config.FSSource's string, i18n.LoadFS's codec.Format — without a conversion.
 const Format = "cbor"
-
-// The error codes, range 0.3.6.*, declared in the core (ADR 0160).
-const (
-	// CodeMarshalFailed is 0.3.6.1: a value CBOR cannot carry, invalid UTF-8,
-	// nesting past the bound.
-	CodeMarshalFailed errs.Code = corecbor.CodeCBORMarshalFailed
-	// CodeUnmarshalFailed is 0.3.6.2: input that is not one well-formed item,
-	// or an item the target cannot hold.
-	CodeUnmarshalFailed errs.Code = corecbor.CodeCBORUnmarshalFailed
-)
-
-// The sentinels, for errors.Is: each carries the code of the same name.
-var (
-	// MarshalFailed is the sentinel of [CodeMarshalFailed].
-	MarshalFailed = corecbor.MarshalFailed
-	// UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].
-	UnmarshalFailed = corecbor.UnmarshalFailed
-)

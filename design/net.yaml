@@ -2013,606 +2013,1343 @@ packages:
         name: Conn
         struct:
           unexported: true
-  - aliases:
-      - name: Client
-        target: svcclient.Client
-      - name: Config
-        target: corenet.ClientConfig
-      - name: Response
-        target: corenet.ResponseValue
-      - name: Policy
-        target: corenet.Policy
-      - name: PolicyFunc
-        target: corenet.PolicyFunc
-      - name: RequestInfo
-        target: corenet.RequestValue
-      - name: CallInfo
-        target: corenet.CallValue
-      - name: CallHook
-        target: corenet.CallHook
-      - name: Duration
-        target: corenet.DurationValue
-    functions:
-      - in:
-          - name: cfg
-            type: Config
-          - name: id
-            type: tlsid.Identity
-          - name: policy
-            type: Policy
-          - name: hook
-            type: CallHook
-        name: New
-        out:
-          - name: c
-            type: "*Client"
-          - name: err
-            type: error
-      - in:
-          - name: methods
-            type: string
-        name: AllowMethods
-        out:
-          - type: Policy
-        variadic: true
-      - in:
-          - name: patterns
-            type: string
-        name: AllowPaths
-        out:
-          - name: policy
-            type: Policy
-          - name: err
-            type: error
-        variadic: true
-      - in:
-          - name: patterns
-            type: string
-        name: DenyPaths
-        out:
-          - name: policy
-            type: Policy
-          - name: err
-            type: error
-        variadic: true
-      - in:
-          - name: members
-            type: Policy
-        name: Policies
-        out:
-          - type: Policy
-        variadic: true
+  - facade:
+      - alias:
+          - doc: Client performs guarded outbound HTTP calls.
+            name: Client
+            target: svcclient.Client
+      - alias:
+          - doc: |-
+              Config describes an outbound client. Durations accept "5s" as well as a raw
+              nanosecond count, so a configuration file stays readable.
+            name: Config
+            target: corenet.ClientConfig
+      - alias:
+          - doc: Response is a fully-read outbound response.
+            name: Response
+            target: corenet.ResponseValue
+      - alias:
+          - doc: |-
+              Policy authorises an outbound request. Implementations run inside the
+              transport, so no call site can bypass them.
+            name: Policy
+            target: corenet.Policy
+      - alias:
+          - doc: PolicyFunc adapts a plain function to Policy.
+            name: PolicyFunc
+            target: corenet.PolicyFunc
+      - alias:
+          - doc: |-
+              RequestInfo is the immutable request description a Policy judges. It carries
+              the ESCAPED path: url.URL.Path is already percent-decoded, so a policy that
+              judged it would accept "%2e%2e", which the upstream reinterprets as "..".
+            name: RequestInfo
+            target: corenet.RequestValue
+      - alias:
+          - doc: CallInfo records one completed outbound call.
+            name: CallInfo
+            target: corenet.CallValue
+      - alias:
+          - doc: CallHook receives one CallInfo per outbound call. It must not block.
+            name: CallHook
+            target: corenet.CallHook
+      - alias:
+          - doc: Duration is a configuration-friendly time.Duration.
+            name: Duration
+            target: corenet.DurationValue
+      - doc: Sentinels returned by this package. Match with errors.Is or errs.HasCode.
+        var:
+          - doc: |-
+              RequestDenied reports a request refused by the policy. Its public message
+              never names the refused path, so a denial cannot leak the private API
+              surface into a log line.
+            name: RequestDenied
+            reexport: corenet.RequestDenied
+            type: "*errs.Error"
+          - doc: |-
+              UnsafePath reports a path carrying a dot segment, literal or
+              percent-encoded, or a path that is not absolute.
+            name: UnsafePath
+            reexport: corenet.UnsafePath
+            type: "*errs.Error"
+          - doc: ResponseTooLarge reports a body beyond the configured ceiling.
+            name: ResponseTooLarge
+            reexport: corenet.ResponseTooLarge
+            type: "*errs.Error"
+          - doc: CallFailed reports an unreachable upstream or a non-2xx status.
+            name: CallFailed
+            reexport: corenet.CallFailed
+            type: "*errs.Error"
+          - doc: TooManyRedirects reports a redirect chain beyond the configured cap.
+            name: TooManyRedirects
+            reexport: corenet.TooManyRedirects
+            type: "*errs.Error"
+      - func:
+          doc: |-
+            New builds a guarded client. A nil policy is refused rather than defaulted to
+            "allow everything": an unguarded egress path wearing the name of a guarded one
+            is worse than no client at all.
+          forward: svcclient.New
+          in:
+            - name: cfg
+              type: Config
+            - name: id
+              type: tlsid.Identity
+            - name: policy
+              type: Policy
+            - name: hook
+              type: CallHook
+          name: New
+          out:
+            - name: c
+              type: "*Client"
+            - name: err
+              type: error
+      - func:
+          doc: AllowMethods admits only the named HTTP methods. Passing none admits none.
+          forward: svcclient.AllowMethods
+          in:
+            - name: methods
+              type: string
+          name: AllowMethods
+          out:
+            - type: Policy
+          variadic: true
+      - func:
+          doc: |-
+            AllowPaths admits only paths matching one of the patterns. The patterns are
+            supplied unanchored and anchored here, so no caller can forget to.
+          forward: svcclient.AllowPaths
+          in:
+            - name: patterns
+              type: string
+          name: AllowPaths
+          out:
+            - name: policy
+              type: Policy
+            - name: err
+              type: error
+          variadic: true
+      - func:
+          doc: |-
+            DenyPaths refuses paths matching one of the patterns. A deny is final and is
+            not overridable by an allow pattern.
+          forward: svcclient.DenyPaths
+          in:
+            - name: patterns
+              type: string
+          name: DenyPaths
+          out:
+            - name: policy
+              type: Policy
+            - name: err
+              type: error
+          variadic: true
+      - func:
+          doc: |-
+            Policies requires every policy to allow the request. Composition is by
+            conjunction, so adding a policy can only ever narrow what is permitted.
+          forward: svcclient.Policies
+          in:
+            - name: members
+              type: Policy
+          name: Policies
+          out:
+            - type: Policy
+          variadic: true
     imports:
       corenet: github.com/kitsunium/sdk/internal/core/net
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       svcclient: github.com/kitsunium/sdk/internal/service/net/client
       tlsid: github.com/kitsunium/sdk/pkg/v1/net/tlsid
     path: github.com/kitsunium/sdk/pkg/v1/net/client
-    variables:
-      - name: RequestDenied
-        type: "*errs.Error"
-      - name: UnsafePath
-        type: "*errs.Error"
-      - name: ResponseTooLarge
-        type: "*errs.Error"
-      - name: CallFailed
-        type: "*errs.Error"
-      - name: TooManyRedirects
-        type: "*errs.Error"
-  - aliases:
-      - name: Server
-        target: svcserver.Server
-      - name: Group
-        target: svcserver.StreamGroup
-      - name: Conn
-        target: corenet.Conn
-      - name: Handler
-        target: corenet.ConnHandler
-      - name: HandlerFunc
-        target: corenet.ConnHandlerFunc
-      - name: Middleware
-        target: corenet.Middleware[corenet.ConnHandler]
-      - name: State
-        target: corenet.StateValue
-      - name: ListenerState
-        target: corenet.ListenerStateValue
-      - name: Phase
-        target: corenet.Phase
-      - name: Option
-        target: svcserver.Option
-      - name: GroupOption
-        target: svcserver.GroupOption
-      - name: PacketGroup
-        target: svcserver.PacketGroup
-      - name: Packet
-        target: corenet.Packet
-      - name: PacketHandler
-        target: corenet.PacketHandler
-      - name: PacketHandlerFunc
-        target: corenet.PacketHandlerFunc
-      - name: PacketMiddleware
-        target: corenet.Middleware[corenet.PacketHandler]
-    constants:
-      - name: PhaseNew
-        type: Phase
-        value: "0"
-      - name: PhaseStarting
-        type: Phase
-        value: "1"
-      - name: PhaseServing
-        type: Phase
-        value: "2"
-      - name: PhaseDraining
-        type: Phase
-        value: "3"
-      - name: PhaseStopped
-        type: Phase
-        value: "4"
-    functions:
-      - in:
-          - name: d
-            type: time.Duration
-        name: ReadHeaderTimeout
-        out:
-          - type: GroupOption
-      - in:
-          - name: "n"
-            type: int
-        name: MaxHeaderBytes
-        out:
-          - type: GroupOption
-      - in:
-          - name: opts
-            type: Option
-        name: New
-        out:
-          - type: "*Server"
-        variadic: true
-      - in:
-          - name: ctx
-            type: context.Context
-        name: DrainSignal
-        out:
-          - type: <-chan struct{}
-      - in:
-          - name: h
-            type: Handler
-          - name: middlewares
-            type: Middleware
-        name: Chain
-        out:
-          - type: Handler
-        variadic: true
-      - in:
-          - name: network
-          - name: addr
-            type: string
-        name: Listen
-        out:
-          - type: GroupOption
-      - in:
-          - name: id
-            type: tlsid.Identity
-        name: TLS
-        out:
-          - type: GroupOption
-      - in:
-          - name: d
-            type: time.Duration
-        name: ReadTimeout
-        out:
-          - type: GroupOption
-      - in:
-          - name: d
-            type: time.Duration
-        name: WriteTimeout
-        out:
-          - type: GroupOption
-      - in:
-          - name: d
-            type: time.Duration
-        name: IdleTimeout
-        out:
-          - type: GroupOption
-      - in:
-          - name: d
-            type: time.Duration
-        name: HandshakeTimeout
-        out:
-          - type: GroupOption
-      - in:
-          - name: "n"
-            type: int
-        name: ReadBufferSize
-        out:
-          - type: GroupOption
-      - in:
-          - name: d
-            type: time.Duration
-        name: WithDrainTimeout
-        out:
-          - type: Option
-      - in:
-          - name: "n"
-            type: int
-        name: MaxPacketSize
-        out:
-          - type: GroupOption
-      - in:
-          - name: "n"
-            type: int
-        name: BatchSize
-        out:
-          - type: GroupOption
-      - in:
-          - name: h
-            type: PacketHandler
-          - name: middlewares
-            type: PacketMiddleware
-        name: ChainPacket
-        out:
-          - type: PacketHandler
-        variadic: true
-      - in:
-          - name: "n"
-            type: int
-        name: MaxConns
-        out:
-          - type: GroupOption
-      - in:
-          - name: "n"
-            type: int
-        name: Shards
-        out:
-          - type: GroupOption
-      - in:
-          - name: names
-            type: string
-        name: Adopt
-        out:
-          - type: GroupOption
-        variadic: true
+  - facade:
+      - func:
+          doc: |-
+            ReadHeaderTimeout bounds the HEADER phase of an HTTP request on its own: the
+            request line and every header field must arrive within d, whatever the read
+            timeout allows a body.
+
+            The header phase is the one a slowloris stalls — a byte every few seconds,
+            never finishing a line — and the one an honest client finishes in
+            milliseconds, so it deserves a bound far shorter than a read timeout sized
+            for an upload. A client that stalls there is disconnected at d. Unset (or
+            non-positive) keeps the earlier behaviour: the header phase is bounded by
+            [ReadTimeout]. No effect on a group that does not serve HTTP.
+          forward: svcserver.ReadHeaderTimeout
+          in:
+            - name: d
+              type: time.Duration
+          name: ReadHeaderTimeout
+          out:
+            - type: GroupOption
+      - func:
+          doc: |-
+            MaxHeaderBytes caps the bytes net/http reads for a request's line and header
+            fields; a request past the cap is answered 431 Request Header Fields Too
+            Large and never reaches the handler.
+
+            Unset (or non-positive) keeps net/http's default of 1 MiB, which applied
+            silently before this option existed. net/http reads a small fixed allowance
+            past the cap before refusing. No effect on a group that does not serve HTTP.
+          forward: svcserver.MaxHeaderBytes
+          in:
+            - name: "n"
+              type: int
+          name: MaxHeaderBytes
+          out:
+            - type: GroupOption
+      - alias:
+          - doc: Server owns a set of listener groups and their lifecycle.
+            name: Server
+            target: svcserver.Server
+      - alias:
+          - doc: |-
+              Group is a set of listeners sharing one handler, middleware chain and policy.
+
+              Group.HandleHTTP mounts an http.Handler on the group's listeners: the group
+              keeps its own limits, TLS identity and drain, and net/http only does the
+              protocol.
+            name: Group
+            target: svcserver.StreamGroup
+      - alias:
+          - doc: Conn is one accepted stream connection. It embeds net.Conn.
+            name: Conn
+            target: corenet.Conn
+      - alias:
+          - doc: Handler serves one accepted stream connection.
+            name: Handler
+            target: corenet.ConnHandler
+      - alias:
+          - doc: HandlerFunc adapts a plain function to Handler.
+            name: HandlerFunc
+            target: corenet.ConnHandlerFunc
+      - alias:
+          - doc: Middleware decorates a handler with another of the same type.
+            name: Middleware
+            target: corenet.Middleware[corenet.ConnHandler]
+      - alias:
+          - doc: State is a snapshot of the server's lifecycle and listeners.
+            name: State
+            target: corenet.StateValue
+      - alias:
+          - doc: ListenerState reports one bound listener, including any fallback.
+            name: ListenerState
+            target: corenet.ListenerStateValue
+      - alias:
+          - doc: Phase is where a server sits in its lifecycle.
+            name: Phase
+            target: corenet.Phase
+      - const:
+          - doc: |-
+              The lifecycle phases, in the order a server passes through them. They are
+              re-exported so a caller can compare State().Phase without importing the
+              internal package, which Go's firewall forbids anyway.
+              PhaseNew is a constructed server that has not bound anything yet.
+            name: PhaseNew
+            reexport: corenet.PhaseNew
+            type: Phase
+            typed: true
+            value: "0"
+      - const:
+          - doc: PhaseStarting is binding listeners; some may already be up.
+            name: PhaseStarting
+            reexport: corenet.PhaseStarting
+            type: Phase
+            typed: true
+            value: "1"
+      - const:
+          - doc: PhaseServing is bound and accepting.
+            name: PhaseServing
+            reexport: corenet.PhaseServing
+            type: Phase
+            typed: true
+            value: "2"
+      - const:
+          - doc: PhaseDraining has stopped accepting and is waiting for in-flight work.
+            name: PhaseDraining
+            reexport: corenet.PhaseDraining
+            type: Phase
+            typed: true
+            value: "3"
+      - const:
+          - doc: PhaseStopped has released every listener.
+            name: PhaseStopped
+            reexport: corenet.PhaseStopped
+            type: Phase
+            typed: true
+            value: "4"
+      - alias:
+          - doc: Option configures a Server.
+            name: Option
+            target: svcserver.Option
+      - alias:
+          - doc: GroupOption configures a Group.
+            name: GroupOption
+            target: svcserver.GroupOption
+      - doc: Sentinels returned by this package. Match with errors.Is or errs.HasCode.
+        var:
+          - doc: ListenFailed reports a listener that could not be bound.
+            name: ListenFailed
+            reexport: corenet.ListenFailed
+            type: "*errs.Error"
+          - doc: InvalidAddress reports an unusable listen address.
+            name: InvalidAddress
+            reexport: corenet.InvalidAddress
+            type: "*errs.Error"
+          - doc: UnsupportedNetwork reports a socket family the domain does not serve.
+            name: UnsupportedNetwork
+            reexport: corenet.UnsupportedNetwork
+            type: "*errs.Error"
+          - doc: AlreadyStarted reports a second Start on a running server.
+            name: AlreadyStarted
+            reexport: corenet.AlreadyStarted
+            type: "*errs.Error"
+          - doc: HandlerMissing reports a group declared without a handler.
+            name: HandlerMissing
+            reexport: corenet.HandlerMissing
+            type: "*errs.Error"
+          - doc: GroupDuplicate reports a second group declared under one name.
+            name: GroupDuplicate
+            reexport: corenet.GroupDuplicate
+            type: "*errs.Error"
+          - doc: DrainTimeout reports a shutdown whose budget expired with work in flight.
+            name: DrainTimeout
+            reexport: corenet.DrainTimeout
+            type: "*errs.Error"
+          - doc: ConnLimitReached reports a connection turned away by the group ceiling.
+            name: ConnLimitReached
+            reexport: corenet.ConnLimitReached
+            type: "*errs.Error"
+      - func:
+          doc: New builds a server.
+          forward: svcserver.New
+          in:
+            - name: opts
+              type: Option
+          name: New
+          out:
+            - type: "*Server"
+          variadic: true
+      - func:
+          doc: |-
+            DrainSignal returns the channel closed when the server serving this request
+            begins draining, or nil when none is published.
+
+            It is how a handler that holds a connection open indefinitely — an event
+            stream, a long poll — learns that finishing now is the cooperative thing to
+            do. Without it such a handler holds the drain open until the budget expires
+            and its socket is severed under it, on every shutdown.
+
+            A nil channel blocks forever, so a select that watches it needs no nil check
+            and behaves correctly on a server that publishes nothing.
+          forward: corenet.DrainSignal
+          in:
+            - name: ctx
+              type: context.Context
+          name: DrainSignal
+          out:
+            - type: <-chan struct{}
+      - func:
+          doc: |-
+            Chain applies middlewares to a handler, outermost first.
+
+            Chain(h, a, b, c) yields a(b(c(h))): the first middleware listed is the first
+            to see a connection, matching how the list reads at the call site.
+          forward: corenet.Chain
+          in:
+            - name: h
+              type: Handler
+            - name: middlewares
+              type: Middleware
+          name: Chain
+          out:
+            - type: Handler
+          variadic: true
+      - func:
+          doc: |-
+            Listen adds an address to a group. Repeat it to bind several addresses to one
+            handler — a TCP port and a Unix socket, for instance.
+
+            On Windows, whose AF_UNIX sockets are stream-only, a "unixgram" or
+            "unixpacket" address fails Start with the SDK's UNSUPPORTED_PLATFORM, before
+            any socket is opened; "unix" is served there as everywhere else.
+          forward: svcserver.Listen
+          in:
+            - name: network
+            - name: addr
+              type: string
+          name: Listen
+          out:
+            - type: GroupOption
+      - func:
+          doc: |-
+            TLS turns the group's listeners into TLS listeners, or mutual-TLS ones when
+            the identity requires a client certificate.
+          forward: svcserver.TLS
+          in:
+            - name: id
+              type: tlsid.Identity
+          name: TLS
+          out:
+            - type: GroupOption
+      - func:
+          doc: |-
+            ReadTimeout bounds one read from the peer.
+
+            It is refreshed per read, not installed once when the connection is accepted:
+            a deadline set at accept time would be a budget for the connection's whole
+            life, which a peer trickling one byte at a time stays comfortably inside. On
+            a group serving an http.Handler the same value becomes net/http's own
+            ReadTimeout — and its ReadHeaderTimeout too, unless [ReadHeaderTimeout] sets
+            the header phase apart — so it is refreshed per request there.
+          forward: svcserver.ReadTimeout
+          in:
+            - name: d
+              type: time.Duration
+          name: ReadTimeout
+          out:
+            - type: GroupOption
+      - func:
+          doc: WriteTimeout bounds one write to the peer, refreshed per write.
+          forward: svcserver.WriteTimeout
+          in:
+            - name: d
+              type: time.Duration
+          name: WriteTimeout
+          out:
+            - type: GroupOption
+      - func:
+          doc: |-
+            IdleTimeout bounds how long a connection may sit with no traffic at all.
+
+            It is enforced on the read side, where silence is observable: a read is
+            bounded by whichever of ReadTimeout and IdleTimeout is tighter. Setting both
+            therefore narrows the bound rather than replacing it, which is what the two
+            options together are asking for.
+          forward: svcserver.IdleTimeout
+          in:
+            - name: d
+              type: time.Duration
+          name: IdleTimeout
+          out:
+            - type: GroupOption
+      - func:
+          doc: |-
+            HandshakeTimeout bounds the TLS negotiation on the group's listeners.
+
+            Unset does not mean unbounded, unlike the other three. The handshake runs on
+            the connection's own goroutine — the listener does not negotiate in Accept,
+            which is what keeps one slow peer from stalling the accept path for everyone
+            — so it is the one phase that can be stalled before any handler exists to
+            notice, and a peer that connects and says nothing would otherwise hold a
+            goroutine and a slot under MaxConns indefinitely. It falls back to a domain
+            default instead.
+          forward: svcserver.HandshakeTimeout
+          in:
+            - name: d
+              type: time.Duration
+          name: HandshakeTimeout
+          out:
+            - type: GroupOption
+      - func:
+          doc: |-
+            ReadBufferSize sizes the per-connection scratch buffer handed to the handler
+            by Conn.Buffer. It is recycled with the connection, which is what lets a
+            handler read without allocating per connection.
+          forward: svcserver.ReadBufferSize
+          in:
+            - name: "n"
+              type: int
+          name: ReadBufferSize
+          out:
+            - type: GroupOption
+      - func:
+          doc: |-
+            WithDrainTimeout bounds how long Shutdown waits for in-flight connections
+            before severing them.
+          forward: svcserver.WithDrainTimeout
+          in:
+            - name: d
+              type: time.Duration
+          name: WithDrainTimeout
+          out:
+            - type: Option
+      - alias:
+          - doc: PacketGroup is a set of datagram sockets sharing one handler and chain.
+            name: PacketGroup
+            target: svcserver.PacketGroup
+      - alias:
+          - doc: Packet is one received datagram.
+            name: Packet
+            target: corenet.Packet
+      - alias:
+          - doc: PacketHandler serves one received datagram.
+            name: PacketHandler
+            target: corenet.PacketHandler
+      - alias:
+          - doc: PacketHandlerFunc adapts a plain function to PacketHandler.
+            name: PacketHandlerFunc
+            target: corenet.PacketHandlerFunc
+      - alias:
+          - doc: PacketMiddleware decorates a datagram handler.
+            name: PacketMiddleware
+            target: corenet.Middleware[corenet.PacketHandler]
+      - func:
+          doc: |-
+            MaxPacketSize caps the datagram size a group accepts.
+
+            A larger datagram is dropped and counted in [State].OversizedPackets, never
+            delivered. Truncating would hand the handler a prefix indistinguishable from
+            a complete message, which is a correctness problem rather than a capacity
+            one; a drop it can observe in State is the honest answer.
+          forward: svcserver.MaxPacketSize
+          in:
+            - name: "n"
+              type: int
+          name: MaxPacketSize
+          out:
+            - type: GroupOption
+      - func:
+          doc: |-
+            BatchSize sets how many datagrams one read attempts to collect. One disables
+            batching; zero selects the platform default. Where the platform cannot batch,
+            State reports the degradation rather than hiding it.
+          forward: svcserver.BatchSize
+          in:
+            - name: "n"
+              type: int
+          name: BatchSize
+          out:
+            - type: GroupOption
+      - func:
+          doc: ChainPacket applies middlewares to a datagram handler, outermost first.
+          forward: corenet.Chain
+          in:
+            - name: h
+              type: PacketHandler
+            - name: middlewares
+              type: PacketMiddleware
+          name: ChainPacket
+          out:
+            - type: PacketHandler
+          variadic: true
+      - func:
+          doc: |-
+            MaxConns caps how many connections a group serves at once.
+
+            The budget is per group, not per socket: a group listening on a TCP port and
+            a Unix socket, or sharded across several listeners, shares one ceiling —
+            which is what an operator sizing a server actually means. Beyond it a
+            connection is accepted and closed immediately with ConnLimitReached, because
+            a refusal the peer can observe beats a timeout it cannot tell from a hang.
+            Zero means no ceiling.
+          forward: svcserver.MaxConns
+          in:
+            - name: "n"
+              type: int
+          name: MaxConns
+          out:
+            - type: GroupOption
+      - func:
+          doc: |-
+            Shards sets how many listeners to open on each of the group's addresses.
+
+            Zero selects one per core; one disables sharding. Where the platform (Windows
+            has no SO_REUSEPORT) or the socket family (a Unix socket) cannot shard, the
+            count collapses to one. An explicit count that collapses is reported in State
+            with the reason; zero collapsing is not, since it asked for nothing a single
+            listener fails to give.
+          forward: svcserver.Shards
+          in:
+            - name: "n"
+              type: int
+          name: Shards
+          out:
+            - type: GroupOption
+      - func:
+          doc: |-
+            Adopt takes over a socket inherited from a supervisor instead of binding one.
+
+            Socket activation is what makes a zero-downtime restart possible: the
+            supervisor holds the bound socket across the exec, so no connection is lost
+            and no bind races. The name is the one the unit file publishes in
+            LISTEN_FDNAMES. Repeat the option to adopt several sockets into one group.
+
+            A named socket the supervisor did not pass is SocketAdoptFailed, never a
+            silent fallback to binding: a service that quietly binds its own port has
+            lost exactly the property activation exists to provide. The same holds on
+            Windows, which has no socket activation at all: Start fails there with
+            SocketAdoptFailed, whose cause field names UNSUPPORTED_PLATFORM.
+          forward: svcserver.Adopt
+          in:
+            - name: names
+              type: string
+          name: Adopt
+          out:
+            - type: GroupOption
+          variadic: true
     imports:
       corenet: github.com/kitsunium/sdk/internal/core/net
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       svcserver: github.com/kitsunium/sdk/internal/service/net/server
       tlsid: github.com/kitsunium/sdk/pkg/v1/net/tlsid
     path: github.com/kitsunium/sdk/pkg/v1/net/server
-    variables:
-      - name: ListenFailed
-        type: "*errs.Error"
-      - name: InvalidAddress
-        type: "*errs.Error"
-      - name: UnsupportedNetwork
-        type: "*errs.Error"
-      - name: AlreadyStarted
-        type: "*errs.Error"
-      - name: HandlerMissing
-        type: "*errs.Error"
-      - name: GroupDuplicate
-        type: "*errs.Error"
-      - name: DrainTimeout
-        type: "*errs.Error"
-      - name: ConnLimitReached
-        type: "*errs.Error"
-  - aliases:
-      - name: Stream
-        target: svcsse.Stream
-      - name: Event
-        target: corenet.SSEEventValue
-      - name: Option
-        target: svcsse.Option
-    constants:
-      - name: ContentType
-        type: string
-        value: "\"text/event-stream\""
-      - name: LastEventIDHeader
-        type: string
-        value: "\"Last-Event-ID\""
-      - name: MinRetry
-        type: time.Duration
-        value: "1000000"
-      - name: DefaultKeepAlive
-        type: time.Duration
-        value: "15000000000"
-      - name: DefaultWriteTimeout
-        type: time.Duration
-        value: "10000000000"
-    functions:
-      - in:
-          - name: w
-            type: http.ResponseWriter
-          - name: r
-            type: "*http.Request"
-          - name: opts
-            type: Option
-        name: New
-        out:
-          - name: stream
-            type: "*Stream"
-          - name: err
-            type: error
-        variadic: true
-      - in:
-          - name: dst
-            type: "[]byte"
-          - name: ev
-            type: Event
-        name: AppendEvent
-        out:
-          - name: wire
-            type: "[]byte"
-          - name: err
-            type: error
-      - in:
-          - name: d
+  - facade:
+      - const:
+          - doc: |-
+              ContentType is the media type an event stream is served under. A client that
+              receives anything else does not open an EventSource at all.
+            name: ContentType
+            reexport: corenet.SSEContentType
+            type: string
+            typed: true
+            value: "\"text/event-stream\""
+      - const:
+          - doc: |-
+              LastEventIDHeader is the request header a reconnecting client sends, carrying
+              the id of the last event it processed.
+            name: LastEventIDHeader
+            reexport: corenet.SSELastEventIDHeader
+            type: string
+            typed: true
+            value: "\"Last-Event-ID\""
+      - const:
+          - doc: |-
+              MinRetry is the shortest reconnection hint [Event].Retry can carry. The wire
+              field is an integer millisecond count, so anything shorter would round to
+              zero — which does not mean "very soon", it means "reconnect immediately".
+            name: MinRetry
+            reexport: corenet.SSEMinRetry
             type: time.Duration
-        name: KeepAlive
-        out:
-          - type: Option
-      - name: WithoutKeepAlive
-        out:
-          - type: Option
-      - in:
-          - name: d
+            typed: true
+            value: "1000000"
+      - const:
+          - doc: |-
+              DefaultKeepAlive is the comment cadence a stream uses when the caller sets
+              none. It sits under the idle timeout of every proxy worth naming.
+            name: DefaultKeepAlive
+            reexport: svcsse.DefaultKeepAlive
             type: time.Duration
-        name: WriteTimeout
-        out:
-          - type: Option
-      - in:
-          - name: d
+            typed: true
+            value: "15000000000"
+      - const:
+          - doc: |-
+              DefaultWriteTimeout bounds ONE frame's write. A stream has no total write
+              budget by nature; this is what stops a peer that has stopped reading from
+              pinning a goroutine forever.
+            name: DefaultWriteTimeout
+            reexport: svcsse.DefaultWriteTimeout
             type: time.Duration
-        name: Retry
-        out:
-          - type: Option
-      - in:
-          - name: ctx
-            type: context.Context
-        name: DrainSignal
-        out:
-          - type: <-chan struct{}
+            typed: true
+            value: "10000000000"
+      - doc: Sentinels returned by this package. Match with errors.Is or errs.HasCode.
+        var:
+          - doc: |-
+              FieldInvalid reports an event the wire format cannot carry: a line
+              terminator in an id, an event name or a comment; a negative or
+              sub-millisecond retry; an event name with no data, which every client
+              discards; or a frame with no field at all.
+            name: FieldInvalid
+            reexport: corenet.SSEFieldInvalid
+            type: "*errs.Error"
+          - doc: |-
+              FlushUnsupported reports a ResponseWriter that cannot be flushed, and so
+              cannot stream at all.
+            name: FlushUnsupported
+            reexport: corenet.SSEFlushUnsupported
+            type: "*errs.Error"
+          - doc: |-
+              StreamClosed reports a send on a stream that has already ended — the
+              client disconnected, the server began draining, or the handler closed it.
+              It is the terminal outcome a streaming handler loops until.
+            name: StreamClosed
+            reexport: corenet.SSEStreamClosed
+            type: "*errs.Error"
+          - doc: |-
+              StreamMisconfigured reports an option the domain refuses to interpret
+              rather than guess at, such as a negative keep-alive interval.
+            name: StreamMisconfigured
+            reexport: corenet.SSEStreamMisconfigured
+            type: "*errs.Error"
+      - alias:
+          - doc: |-
+              Stream is one open event stream: an HTTP response held open, written one
+              frame at a time and flushed after each. It is safe for concurrent use.
+            name: Stream
+            target: svcsse.Stream
+      - alias:
+          - doc: |-
+              Event is one Server-Sent Events frame. [Event].Validate reports whether the
+              wire format can carry it; [AppendEvent] writes it.
+            name: Event
+            target: corenet.SSEEventValue
+      - alias:
+          - doc: Option configures a Stream.
+            name: Option
+            target: svcsse.Option
+      - func:
+          doc: |-
+            New starts an event stream on w and returns it.
+
+            It writes the response headers and flushes them immediately, so the client
+            connects at once rather than at the first event. It fails when the response
+            cannot be flushed — checked before anything is written, so the handler is
+            free to answer some other way.
+          forward: svcsse.New
+          in:
+            - name: w
+              type: http.ResponseWriter
+            - name: r
+              type: "*http.Request"
+            - name: opts
+              type: Option
+          name: New
+          out:
+            - name: stream
+              type: "*Stream"
+            - name: err
+              type: error
+          variadic: true
+      - func:
+          doc: |-
+            AppendEvent appends ev's wire form to dst and returns the extended slice —
+            the bytes [Stream].Send writes, for a caller that frames events onto a
+            transport of its own.
+
+            It appends nothing when the frame is invalid: the whole frame is validated
+            first, so a partial frame never reaches dst. Appending rather than returning
+            a fresh slice is what lets a caller reuse one buffer for every frame.
+          forward: svcsse.AppendEvent
+          in:
+            - name: dst
+              type: "[]byte"
+            - name: ev
+              type: Event
+          name: AppendEvent
+          out:
+            - name: wire
+              type: "[]byte"
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            KeepAlive sets the interval between keep-alive comments.
+
+            Zero does not mean "never": a stream with keep-alive silently disabled works
+            perfectly on a developer's loopback and dies at one minute behind a real
+            proxy, which is the worst possible place to learn it. Zero is clamped to
+            [DefaultKeepAlive]; a negative interval is refused. To disable it, say so
+            with [WithoutKeepAlive].
+          forward: svcsse.KeepAlive
+          in:
+            - name: d
+              type: time.Duration
+          name: KeepAlive
+          out:
+            - type: Option
+      - func:
+          doc: |-
+            WithoutKeepAlive disables the keep-alive comment entirely, so that "never" is
+            something a caller writes on purpose rather than something a zero does to
+            them.
+          forward: svcsse.WithoutKeepAlive
+          name: WithoutKeepAlive
+          out:
+            - type: Option
+      - func:
+          doc: |-
+            WriteTimeout bounds how long one frame's write may take.
+
+            It is per-frame on purpose. A group's WriteTimeout is an absolute deadline
+            for the whole response, which on an endless stream means the stream is cut at
+            that instant; a stream replaces it with this bound, refreshed per frame. Zero
+            is clamped to [DefaultWriteTimeout], negative is refused.
+          forward: svcsse.WriteTimeout
+          in:
+            - name: d
+              type: time.Duration
+          name: WriteTimeout
+          out:
+            - type: Option
+      - func:
+          doc: |-
+            Retry sets the reconnection delay the stream advertises in its opening frame.
+
+            It is the server's one chance to control how hard clients come back: a fleet
+            that all reconnect on the browser default of about three seconds is a
+            thundering herd aimed at a server that has just restarted. Zero sends no
+            retry field.
+          forward: svcsse.Retry
+          in:
+            - name: d
+              type: time.Duration
+          name: Retry
+          out:
+            - type: Option
+      - func:
+          doc: |-
+            DrainSignal returns the channel closed when the server serving this request
+            begins draining, or nil when it publishes none.
+
+            It is what [Stream] watches, exposed because an event stream is not the only
+            handler that holds a connection open indefinitely — a long poll does too, and
+            so will anything built on a protocol upgrade. A nil channel blocks forever,
+            so a select that watches it needs no nil check.
+          forward: corenet.DrainSignal
+          in:
+            - name: ctx
+              type: context.Context
+          name: DrainSignal
+          out:
+            - type: <-chan struct{}
     imports:
       corenet: github.com/kitsunium/sdk/internal/core/net
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       http: net/http
       svcsse: github.com/kitsunium/sdk/internal/service/net/sse
     path: github.com/kitsunium/sdk/pkg/v1/net/sse
-    variables:
-      - name: FieldInvalid
-        type: "*errs.Error"
-      - name: FlushUnsupported
-        type: "*errs.Error"
-      - name: StreamClosed
-        type: "*errs.Error"
-      - name: StreamMisconfigured
-        type: "*errs.Error"
-  - aliases:
-      - name: Config
-        target: svcstatic.Config
-      - name: Handler
-        target: svcstatic.Handler
-    constants:
-      - name: DefaultContentSecurityPolicy
-        type: string
-        value: "\"default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'\""
-      - name: DefaultReferrerPolicy
-        type: string
-        value: "\"same-origin\""
-      - name: ImmutableCacheControl
-        type: string
-        value: "\"public, max-age=31536000, immutable\""
-      - name: RevalidateCacheControl
-        type: string
-        value: "\"no-cache\""
-    functions:
-      - in:
-          - name: fsys
-            type: fs.FS
-          - name: cfg
-            type: Config
-        name: New
-        out:
-          - type: "*Handler"
-          - type: error
+  - facade:
+      - const:
+          - doc: |-
+              DefaultContentSecurityPolicy is the policy sent when Config names none: the
+              page's own origin for everything it loads, no base URL or form target
+              elsewhere, and no framing by another page.
+            name: DefaultContentSecurityPolicy
+            reexport: svcstatic.DefaultContentSecurityPolicy
+            type: string
+            typed: true
+            value: "\"default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'\""
+      - const:
+          - doc: |-
+              DefaultReferrerPolicy is the Referrer-Policy sent when Config names none: a
+              full referrer to this origin, none at all to another.
+            name: DefaultReferrerPolicy
+            reexport: svcstatic.DefaultReferrerPolicy
+            type: string
+            typed: true
+            value: "\"same-origin\""
+      - const:
+          - doc: |-
+              ImmutableCacheControl is the Cache-Control of a file Config.Immutable marks
+              content-hashed: a year, shared caches included, never revalidated.
+            name: ImmutableCacheControl
+            reexport: svcstatic.ImmutableCacheControl
+            type: string
+            typed: true
+            value: "\"public, max-age=31536000, immutable\""
+      - const:
+          - doc: |-
+              RevalidateCacheControl is the Cache-Control of every other response:
+              stored, but revalidated before each use.
+            name: RevalidateCacheControl
+            reexport: svcstatic.RevalidateCacheControl
+            type: string
+            typed: true
+            value: "\"no-cache\""
+      - alias:
+          - doc: |-
+              Config says how a tree is served; its zero value is a working, strict
+              configuration.
+            name: Config
+            target: svcstatic.Config
+      - alias:
+          - doc: |-
+              Handler serves one file tree; it is an http.Handler, safe for concurrent
+              use. The zero Handler has no tree and answers every request 500.
+            name: Handler
+            target: svcstatic.Handler
+      - var:
+          - doc: |-
+              Misconfigured is returned by New for a nil tree, a header value holding a
+              control character, or a Referrer-Policy that is not a list of known tokens.
+              The "option" field names which; the value is never repeated.
+            name: Misconfigured
+            reexport: corenet.StaticMisconfigured
+            type: "*errs.Error"
+      - func:
+          doc: |-
+            New returns a Handler serving fsys as cfg says, or Misconfigured. It reads
+            nothing from fsys. To serve a sub-directory, hand it the result of fs.Sub;
+            to keep a link inside the tree from leading out of it, hand it an os.Root's
+            FS rather than os.DirFS — the handler confines the names it is asked for,
+            not what the tree's own entries point at.
+          forward: svcstatic.NewHandler
+          in:
+            - name: fsys
+              type: fs.FS
+            - name: cfg
+              type: Config
+          name: New
+          out:
+            - type: "*Handler"
+            - type: error
     imports:
+      corenet: github.com/kitsunium/sdk/internal/core/net
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       fs: io/fs
       svcstatic: github.com/kitsunium/sdk/internal/service/net/static
     path: github.com/kitsunium/sdk/pkg/v1/net/static
-    variables:
-      - name: Misconfigured
-        type: "*errs.Error"
-  - aliases:
-      - name: Identity
-        target: corenet.IdentityValue
-      - name: Params
-        target: corenet.IdentityParams
-      - name: FileParams
-        target: corenet.IdentityFileParams
-    functions:
-      - in:
-          - name: p
-            type: Params
-        name: New
-        out:
-          - name: id
-            type: Identity
-          - name: err
-            type: error
-      - in:
-          - name: p
-            type: FileParams
-        name: Load
-        out:
-          - name: id
-            type: Identity
-          - name: err
-            type: error
+  - facade:
+      - alias:
+          - doc: |-
+              Identity is an opaque TLS identity. Its String and GoString output is always
+              "<redacted>"; ClientConfig and ServerConfig are the only ways to reach the
+              material, and each returns a fresh *tls.Config.
+            name: Identity
+            target: corenet.IdentityValue
+      - alias:
+          - doc: Params carries TLS material already held in memory.
+            name: Params
+            target: corenet.IdentityParams
+      - alias:
+          - doc: FileParams names TLS material to read from the filesystem.
+            name: FileParams
+            target: corenet.IdentityFileParams
+      - doc: Sentinels returned by this package. Match with errors.Is or errs.HasCode.
+        var:
+          - doc: |-
+              MaterialInvalid reports TLS material that is missing, unreadable,
+              malformed, or that yields no usable certificate. It is never downgraded to
+              an empty trust store.
+            name: MaterialInvalid
+            reexport: corenet.TLSMaterialInvalid
+            type: "*errs.Error"
+          - doc: HandshakeFailed reports a TLS or mutual-TLS handshake that did not complete.
+            name: HandshakeFailed
+            reexport: corenet.TLSHandshakeFailed
+            type: "*errs.Error"
+      - func:
+          doc: |-
+            New validates TLS material held in memory and returns the opaque identity. It
+            applies exactly the same rules as Load; only the source of the bytes differs.
+          forward: corenet.NewIdentityValue
+          in:
+            - name: p
+              type: Params
+          name: New
+          out:
+            - name: id
+              type: Identity
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            Load reads the named TLS material from disk and returns the opaque identity.
+            A configured-but-unreadable file is an error, never a silently skipped one.
+          forward: svctlsid.Load
+          in:
+            - name: p
+              type: FileParams
+          name: Load
+          out:
+            - name: id
+              type: Identity
+            - name: err
+              type: error
     imports:
       corenet: github.com/kitsunium/sdk/internal/core/net
       errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svctlsid: github.com/kitsunium/sdk/internal/service/net/tlsid
     path: github.com/kitsunium/sdk/pkg/v1/net/tlsid
-    variables:
-      - name: MaterialInvalid
-        type: "*errs.Error"
-      - name: HandshakeFailed
-        type: "*errs.Error"
-  - aliases:
-      - name: Conn
-        target: svcws.Conn
-      - name: Message
-        target: corenet.WSMessageValue
-      - name: CloseCode
-        target: corenet.WSCloseCode
-      - name: Option
-        target: svcws.Option
-    constants:
-      - name: GUID
-        type: string
-        value: "\"258EAFA5-E914-47DA-95CA-C5AB0DC85B11\""
-      - name: Version
-        type: string
-        value: "\"13\""
-      - name: MaxControlPayload
-        type: int
-        value: "125"
-      - name: DefaultPingInterval
-        type: time.Duration
-        value: "30000000000"
-      - name: DefaultWriteTimeout
-        type: time.Duration
-        value: "10000000000"
-      - name: DefaultMaxMessageSize
-        type: int64
-        value: 1 << 20
-      - name: DefaultMaxFrameSize
-        type: int64
-        value: 1 << 20
-      - name: CloseNormal
-        type: CloseCode
-        value: "1000"
-      - name: CloseGoingAway
-        type: CloseCode
-        value: "1001"
-      - name: CloseProtocolError
-        type: CloseCode
-        value: "1002"
-      - name: CloseUnsupportedData
-        type: CloseCode
-        value: "1003"
-      - name: CloseNoStatus
-        type: CloseCode
-        value: "1005"
-      - name: CloseAbnormal
-        type: CloseCode
-        value: "1006"
-      - name: CloseInvalidPayload
-        type: CloseCode
-        value: "1007"
-      - name: ClosePolicyViolation
-        type: CloseCode
-        value: "1008"
-      - name: CloseTooLarge
-        type: CloseCode
-        value: "1009"
-      - name: CloseExtensionRequired
-        type: CloseCode
-        value: "1010"
-      - name: CloseInternalError
-        type: CloseCode
-        value: "1011"
-      - name: CloseTLSHandshake
-        type: CloseCode
-        value: "1015"
-    functions:
-      - in:
-          - name: w
-            type: http.ResponseWriter
-          - name: r
-            type: "*http.Request"
-          - name: opts
-            type: Option
-        name: Upgrade
-        out:
-          - name: conn
-            type: "*Conn"
-          - name: err
-            type: error
-        variadic: true
-      - in:
-          - name: names
+  - facade:
+      - const:
+          - doc: |-
+              GUID is the fixed string RFC 6455 §1.3 concatenates to the client's key
+              before hashing. It is a constant of the protocol, not a secret.
+            name: GUID
+            reexport: corenet.WSGUID
             type: string
-        name: Subprotocols
-        out:
-          - type: Option
-        variadic: true
-      - in:
-          - name: "n"
-            type: int64
-        name: MaxMessageSize
-        out:
-          - type: Option
-      - in:
-          - name: "n"
-            type: int64
-        name: MaxFrameSize
-        out:
-          - type: Option
-      - in:
-          - name: d
+            typed: true
+            value: "\"258EAFA5-E914-47DA-95CA-C5AB0DC85B11\""
+      - const:
+          - doc: |-
+              Version is the only protocol version this server speaks. A request naming
+              another is refused WITH this value advertised back, so a client can
+              renegotiate instead of guessing.
+            name: Version
+            reexport: corenet.WSVersion
+            type: string
+            typed: true
+            value: "\"13\""
+      - const:
+          - doc: |-
+              MaxControlPayload is the ceiling RFC 6455 §5.5 puts on a control frame's
+              payload, and therefore on a [Conn].Ping payload or a close reason.
+            name: MaxControlPayload
+            reexport: corenet.WSMaxControlPayload
+            type: int
+            typed: true
+            value: "125"
+      - const:
+          - doc: |-
+              DefaultPingInterval is the heartbeat cadence a connection uses when the
+              caller sets none. It sits under the idle timeout of every proxy worth naming.
+            name: DefaultPingInterval
+            reexport: svcws.DefaultPingInterval
             type: time.Duration
-        name: PingInterval
-        out:
-          - type: Option
-      - name: WithoutPing
-        out:
-          - type: Option
-      - in:
-          - name: d
+            typed: true
+            value: "30000000000"
+      - const:
+          - doc: |-
+              DefaultWriteTimeout bounds ONE frame's write. A connection has no total write
+              budget by nature; this is what stops a peer that has stopped reading from
+              pinning a goroutine forever.
+            name: DefaultWriteTimeout
+            reexport: svcws.DefaultWriteTimeout
             type: time.Duration
-        name: WriteTimeout
-        out:
-          - type: Option
-      - in:
-          - name: origins
-            type: string
-        name: AllowOrigins
-        out:
-          - type: Option
-        variadic: true
-      - name: AllowAnyOrigin
-        out:
-          - type: Option
-      - in:
-          - name: key
-            type: string
-        name: AcceptKey
-        out:
-          - type: string
-      - in:
-          - name: ctx
-            type: context.Context
-        name: DrainSignal
-        out:
-          - type: <-chan struct{}
+            typed: true
+            value: "10000000000"
+      - const:
+          - doc: DefaultMaxMessageSize is the ceiling on one reassembled message.
+            name: DefaultMaxMessageSize
+            reexport: svcws.DefaultMaxMessageSize
+            type: int64
+            typed: true
+            value: 1 << 20
+      - const:
+          - doc: DefaultMaxFrameSize is the ceiling on a single frame's announced payload.
+            name: DefaultMaxFrameSize
+            reexport: svcws.DefaultMaxFrameSize
+            type: int64
+            typed: true
+            value: 1 << 20
+      - const:
+          - doc: CloseNormal is a completed purpose, on either side.
+            name: CloseNormal
+            reexport: corenet.WSCloseNormal
+            type: CloseCode
+            typed: true
+            value: "1000"
+          - doc: CloseGoingAway is a server shutting down; it is what a drain sends.
+            name: CloseGoingAway
+            reexport: corenet.WSCloseGoingAway
+            type: CloseCode
+            typed: true
+            value: "1001"
+          - doc: CloseProtocolError is a frame the RFC forbids.
+            name: CloseProtocolError
+            reexport: corenet.WSCloseProtocolError
+            type: CloseCode
+            typed: true
+            value: "1002"
+          - doc: |-
+              CloseUnsupportedData is a well-formed frame carrying data this endpoint
+              cannot accept.
+            name: CloseUnsupportedData
+            reexport: corenet.WSCloseUnsupportedData
+            type: CloseCode
+            typed: true
+            value: "1003"
+          - doc: CloseNoStatus means the peer's Close frame carried no code.
+            name: CloseNoStatus
+            reexport: corenet.WSCloseNoStatus
+            type: CloseCode
+            typed: true
+            value: "1005"
+          - doc: CloseAbnormal means the connection died without a Close frame.
+            name: CloseAbnormal
+            reexport: corenet.WSCloseAbnormal
+            type: CloseCode
+            typed: true
+            value: "1006"
+          - doc: CloseInvalidPayload is text that is not valid UTF-8.
+            name: CloseInvalidPayload
+            reexport: corenet.WSCloseInvalidPayload
+            type: CloseCode
+            typed: true
+            value: "1007"
+          - doc: ClosePolicyViolation is the generic refusal when no other code fits.
+            name: ClosePolicyViolation
+            reexport: corenet.WSClosePolicyViolation
+            type: CloseCode
+            typed: true
+            value: "1008"
+          - doc: CloseTooLarge is a message beyond what this endpoint accepts.
+            name: CloseTooLarge
+            reexport: corenet.WSCloseTooLarge
+            type: CloseCode
+            typed: true
+            value: "1009"
+          - doc: CloseExtensionRequired is a client giving up for want of an extension.
+            name: CloseExtensionRequired
+            reexport: corenet.WSCloseExtensionRequired
+            type: CloseCode
+            typed: true
+            value: "1010"
+          - doc: CloseInternalError is an unexpected condition on this side.
+            name: CloseInternalError
+            reexport: corenet.WSCloseInternalError
+            type: CloseCode
+            typed: true
+            value: "1011"
+          - doc: CloseTLSHandshake means the TLS handshake failed.
+            name: CloseTLSHandshake
+            reexport: corenet.WSCloseTLSHandshake
+            type: CloseCode
+            typed: true
+            value: "1015"
+        doc: |-
+          The close codes RFC 6455 §7.4.1 defines. [CloseNoStatus], [CloseAbnormal] and
+          [CloseTLSHandshake] describe the ABSENCE of a close frame: they may be
+          observed through [Conn].PeerCloseCode and must never be sent, which
+          [Conn].CloseWith enforces — as it refuses [CloseExtensionRequired], the one
+          code only a client may open a closing handshake with.
+      - doc: Sentinels returned by this package. Match with errors.Is or errs.HasCode.
+        var:
+          - doc: |-
+              HandshakeFailed reports a request that is not a valid RFC 6455 opening
+              handshake, or one whose origin the policy refused. [Upgrade] has already
+              written the HTTP response when it returns this.
+            name: HandshakeFailed
+            reexport: corenet.WSHandshakeFailed
+            type: "*errs.Error"
+          - doc: |-
+              UpgradeUnsupported reports a response whose connection cannot be taken
+              over — HTTP/2, or a middleware that wraps the ResponseWriter without
+              forwarding Unwrap. The request was fine; this stack cannot serve it.
+            name: UpgradeUnsupported
+            reexport: corenet.WSUpgradeUnsupported
+            type: "*errs.Error"
+          - doc: |-
+              ProtocolViolation reports a frame RFC 6455 forbids. The connection has
+              already been failed when it surfaces.
+            name: ProtocolViolation
+            reexport: corenet.WSProtocolViolation
+            type: "*errs.Error"
+          - doc: |-
+              MessageTooLarge reports a frame or a reassembled message beyond the
+              configured ceiling, refused before any buffer was sized from it.
+            name: MessageTooLarge
+            reexport: corenet.WSMessageTooLarge
+            type: "*errs.Error"
+          - doc: |-
+              InvalidPayload reports text that is not UTF-8, a close code that must
+              never travel, or a close reason past the control-frame ceiling.
+            name: InvalidPayload
+            reexport: corenet.WSInvalidPayload
+            type: "*errs.Error"
+          - doc: |-
+              ConnClosed reports an operation on a connection that has ended. It is the
+              terminal outcome a receive loop runs until, and it carries the peer's
+              close code when there was one.
+            name: ConnClosed
+            reexport: corenet.WSConnClosed
+            type: "*errs.Error"
+          - doc: |-
+              ConnMisconfigured reports an option the domain refuses to interpret
+              rather than guess at, such as a negative ping interval.
+            name: ConnMisconfigured
+            reexport: corenet.WSConnMisconfigured
+            type: "*errs.Error"
+      - alias:
+          - doc: |-
+              Conn is one upgraded WebSocket connection.
+
+              Exactly one goroutine loops on [Conn].Receive for the connection's whole
+              life. Never two: the protocol is a single ordered frame stream, so two
+              readers would each take half of a message. Never zero: that loop is also
+              where Pings are answered, where the peer's Close is replied to and where the
+              heartbeat sees the peer alive, so a connection nobody reads is ended within
+              two ping intervals — see the package documentation for the push-handler
+              shape. Writes are safe for concurrent use.
+            name: Conn
+            target: svcws.Conn
+      - alias:
+          - doc: Message is one complete WebSocket application message.
+            name: Message
+            target: corenet.WSMessageValue
+      - alias:
+          - doc: CloseCode is the status code a Close frame carries (RFC 6455 §7.4).
+            name: CloseCode
+            target: corenet.WSCloseCode
+      - alias:
+          - doc: Option configures a Conn.
+            name: Option
+            target: svcws.Option
+      - func:
+          doc: |-
+            Upgrade completes the RFC 6455 opening handshake and returns the connection.
+
+            On failure it has ALREADY written the HTTP response — a 426 carrying the
+            version this server speaks, a 400, a 403 or a 405 as the fault requires — so
+            the handler should simply return.
+
+            The socket is taken over from net/http. It is no longer the HTTP server's to
+            close, nor this SDK's listener engine's: it is the handler's until
+            [Conn].Close.
+          forward: svcws.Upgrade
+          in:
+            - name: w
+              type: http.ResponseWriter
+            - name: r
+              type: "*http.Request"
+            - name: opts
+              type: Option
+          name: Upgrade
+          out:
+            - name: conn
+              type: "*Conn"
+            - name: err
+              type: error
+          variadic: true
+      - func:
+          doc: |-
+            Subprotocols declares the subprotocols this server speaks, most preferred
+            first.
+
+            The SERVER's order decides. A client advertises what it can speak; choosing
+            among those is the server's call, or a client that listed a deprecated
+            dialect first could pin the server to it forever. No overlap is not a failure
+            — the upgrade succeeds with no subprotocol, which RFC 6455 §4.2.2 names as
+            the way to say "none agreed".
+
+            Each name must be an RFC 7230 token, since the chosen one is written into
+            the response verbatim; a name with a space, a comma or a quote is refused at
+            Upgrade. The list is copied, so reusing the slice changes nothing later.
+          forward: svcws.Subprotocols
+          in:
+            - name: names
+              type: string
+          name: Subprotocols
+          out:
+            - type: Option
+          variadic: true
+      - func:
+          doc: |-
+            MaxMessageSize bounds one reassembled message.
+
+            Zero is clamped to [DefaultMaxMessageSize], negative is refused. There is
+            deliberately no "unbounded" setting: the length is announced by the peer in a
+            64-bit field, and fragmentation lets it keep announcing more, so an unbounded
+            ceiling is not a configuration choice — it is a remote memory allocator.
+          forward: svcws.MaxMessageSize
+          in:
+            - name: "n"
+              type: int64
+          name: MaxMessageSize
+          out:
+            - type: Option
+      - func:
+          doc: |-
+            MaxFrameSize bounds one frame's ANNOUNCED payload length.
+
+            It is separate from [MaxMessageSize] because it is enforced at a different
+            moment: against the header, before a byte is read or allocated. A ceiling
+            above the message ceiling can never be reached and is refused as a mistake.
+          forward: svcws.MaxFrameSize
+          in:
+            - name: "n"
+              type: int64
+          name: MaxFrameSize
+          out:
+            - type: Option
+      - func:
+          doc: |-
+            PingInterval sets how often the connection pings an otherwise silent peer.
+
+            Zero does not mean "never": it is clamped to [DefaultPingInterval], because a
+            connection with the heartbeat silently disabled works perfectly on loopback
+            and then stops noticing peers that vanish — which is how a mobile client
+            normally leaves. A negative interval is refused; "never" is [WithoutPing].
+
+            The heartbeat counts frames the handler has READ, so it keeps a connection
+            open only while one goroutine loops on [Conn].Receive; a connection nobody
+            reads is ended within two intervals, however healthy the peer.
+          forward: svcws.PingInterval
+          in:
+            - name: d
+              type: time.Duration
+          name: PingInterval
+          out:
+            - type: Option
+      - func:
+          doc: |-
+            WithoutPing disables the heartbeat, and with it the connection's only
+            liveness check. Use it where the transport provides its own.
+          forward: svcws.WithoutPing
+          name: WithoutPing
+          out:
+            - type: Option
+      - func:
+          doc: |-
+            WriteTimeout bounds how long one frame's write may take.
+
+            It is per-frame on purpose: a group's WriteTimeout is an absolute deadline
+            for one HTTP response, and this connection outlives the response entirely.
+            Zero is clamped to [DefaultWriteTimeout], negative is refused.
+          forward: svcws.WriteTimeout
+          in:
+            - name: d
+              type: time.Duration
+          name: WriteTimeout
+          out:
+            - type: Option
+      - func:
+          doc: |-
+            AllowOrigins replaces the default same-origin rule with an exact allowlist.
+
+            The comparison is on the whole Origin header — scheme, host and port —
+            case-insensitively. Matching the host alone would accept http:// for an https
+            server, which is the downgrade the check exists to notice. Behind a proxy
+            that terminates TLS this is the only way to have the scheme checked at all:
+            the request arrives in plaintext there, so the default rule cannot see which
+            scheme the browser used.
+          forward: svcws.AllowOrigins
+          in:
+            - name: origins
+              type: string
+          name: AllowOrigins
+          out:
+            - type: Option
+          variadic: true
+      - func:
+          doc: |-
+            AllowAnyOrigin disables the origin check.
+
+            It has to be written out because the browser's same-origin policy does not
+            apply to WebSocket: any page may open a connection to this server and the
+            browser will attach the user's cookies to the handshake. Reach for it when
+            authentication does not ride on ambient credentials — a bearer token, a
+            signed ticket — which is exactly when the origin proves nothing anyway.
+          forward: svcws.AllowAnyOrigin
+          name: AllowAnyOrigin
+          out:
+            - type: Option
+      - func:
+          doc: |-
+            AcceptKey computes the Sec-WebSocket-Accept value for a client's
+            Sec-WebSocket-Key (RFC 6455 §4.2.2).
+
+            It is exported for tests and for anyone writing a client handshake by hand.
+            The digest is SHA-1 by the RFC's own instruction and is not a security
+            primitive: its job is to prove the server parsed the handshake rather than
+            replaying it, so a cached 101 cannot pass for a live upgrade.
+          forward: svcws.AcceptKey
+          in:
+            - name: key
+              type: string
+          name: AcceptKey
+          out:
+            - type: string
+      - func:
+          doc: |-
+            DrainSignal returns the channel closed when the server serving this request
+            begins draining, or nil when it publishes none.
+
+            [Conn] watches it for you. It is re-exported here because a handler often
+            wants to stop its own work at the same moment, and a nil channel blocks
+            forever, so a select that watches it needs no nil check.
+          forward: corenet.DrainSignal
+          in:
+            - name: ctx
+              type: context.Context
+          name: DrainSignal
+          out:
+            - type: <-chan struct{}
     imports:
       corenet: github.com/kitsunium/sdk/internal/core/net
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       http: net/http
       svcws: github.com/kitsunium/sdk/internal/service/net/websocket
     path: github.com/kitsunium/sdk/pkg/v1/net/websocket
-    variables:
-      - name: HandshakeFailed
-        type: "*errs.Error"
-      - name: UpgradeUnsupported
-        type: "*errs.Error"
-      - name: ProtocolViolation
-        type: "*errs.Error"
-      - name: MessageTooLarge
-        type: "*errs.Error"
-      - name: InvalidPayload
-        type: "*errs.Error"
-      - name: ConnClosed
-        type: "*errs.Error"
-      - name: ConnMisconfigured
-        type: "*errs.Error"

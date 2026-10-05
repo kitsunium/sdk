@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T11:00:00Z -->
+<!-- updated: 2026-10-05T12:00:00Z -->
 # pkg/v1/concur/snapshot/
 
 ## Purpose
@@ -47,6 +47,10 @@ That is the complete exported surface of `internal/kernel/concur/snapshot`.
 - Add a `CompareAndSwap`, a typed map wrapper or a clone helper here. A shape
   the alias cannot express lands in the kernel package first.
 - Reach for `internal/kernel/concur/snapshot` in this package's tests.
+
+## Generated
+
+`facade_gen.go` is kit's (ADR 0165): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/kernel/concur.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the package comment and the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
 
 ## Verification
 

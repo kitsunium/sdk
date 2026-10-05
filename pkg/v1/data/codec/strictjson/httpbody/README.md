@@ -32,7 +32,7 @@ So that strictjson links no net/http. A program decoding documents from files, q
 
 
 <a name="DecodeRequest"></a>
-## func [DecodeRequest](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/strictjson/httpbody/httpbody.go#L45>)
+## func [DecodeRequest](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/strictjson/httpbody/facade_gen.go#L16>)
 
 ```go
 func DecodeRequest(w http.ResponseWriter, req *http.Request, v any, maxBytes int64) error

@@ -51,7 +51,6 @@ package transform
 
 import (
 	coretransform "github.com/kitsunium/sdk/internal/core/data/transform"
-	"github.com/kitsunium/sdk/internal/kernel/errs"
 
 	// The stdlib schemes register themselves — gzip, flate and zlib — as Go
 	// initialises their package.
@@ -68,72 +67,6 @@ const (
 	// "deflate".
 	Zlib Algorithm = "zlib"
 )
-
-// The error codes, ranges 0.2.5.* and 0.3.26.*, declared in the core.
-const (
-	// CodeUnknownCompressor identifies an Algorithm no imported package has
-	// registered (0.2.5.1).
-	CodeUnknownCompressor errs.Code = coretransform.CodeUnknownCompressor
-	// CodeCompressedFrameInvalid identifies a malformed compressed frame of the
-	// codec package, or a frame its decompression-bomb guard refused (0.2.5.4).
-	CodeCompressedFrameInvalid errs.Code = coretransform.CodeCompressedFrameInvalid
-	// CodeDecompressedTooLarge identifies a stream whose plaintext would exceed
-	// the ceiling its caller gave (0.2.5.6).
-	CodeDecompressedTooLarge errs.Code = coretransform.CodeDecompressedTooLarge
-	// CodeGzipFailed identifies a stream compress/gzip refused, compressing or
-	// decompressing (0.3.26.1).
-	CodeGzipFailed errs.Code = coretransform.CodeGzipFailed
-	// CodeFlateFailed identifies a stream compress/flate refused (0.3.26.2).
-	CodeFlateFailed errs.Code = coretransform.CodeFlateFailed
-	// CodeZlibFailed identifies a stream compress/zlib refused (0.3.26.3): the
-	// RFC 1950 envelope, told apart from raw DEFLATE because a stream one of
-	// them refuses is often valid under the other.
-	CodeZlibFailed errs.Code = coretransform.CodeZlibFailed
-)
-
-// The sentinels, for errors.Is: each carries the code of the same name.
-var (
-	// UnknownCompressor is the sentinel of [CodeUnknownCompressor], returned
-	// as is.
-	UnknownCompressor = coretransform.UnknownCompressor
-	// CompressedFrameInvalid is the sentinel of [CodeCompressedFrameInvalid].
-	CompressedFrameInvalid = coretransform.CompressedFrameInvalid
-	// DecompressedTooLarge is the sentinel of [CodeDecompressedTooLarge],
-	// returned as is.
-	DecompressedTooLarge = coretransform.DecompressedTooLarge
-	// GzipFailed is the sentinel of [CodeGzipFailed]; the stdlib's error is
-	// kept beneath it.
-	GzipFailed = coretransform.GzipFailed
-	// FlateFailed is the sentinel of [CodeFlateFailed].
-	FlateFailed = coretransform.FlateFailed
-	// ZlibFailed is the sentinel of [CodeZlibFailed].
-	ZlibFailed = coretransform.ZlibFailed
-)
-
-// Algorithm is the name a Compressor registers under. The zero value is
-// reserved as invalid.
-type Algorithm = coretransform.Algorithm
-
-// Compressor is one compression scheme: Compress and Decompress append to dst.
-// Implementations are safe for concurrent use.
-type Compressor = coretransform.Compressor
-
-// BoundedDecompressor is the optional extension of a Compressor that can be
-// told how much plaintext it may produce; DecompressBounded uses it when the
-// scheme has it.
-type BoundedDecompressor = coretransform.BoundedDecompressor
-
-// Lookup returns the Compressor registered under algo.
-func Lookup(algo Algorithm) (c Compressor, ok bool) {
-	//: the core registry, which every scheme registers with.
-	return coretransform.Lookup(algo)
-}
-
-// Available returns the registered Algorithms, sorted.
-func Available() []Algorithm {
-	//: the core registry's view.
-	return coretransform.Available()
-}
 
 // Compress compresses src with the scheme registered under algo and appends
 // the result to dst. An unregistered algo is refused with UnknownCompressor

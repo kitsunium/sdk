@@ -18,11 +18,6 @@ import (
 	svclogger "github.com/kitsunium/sdk/internal/service/observe/logger"
 )
 
-// Format is the typed wire-format identifier accepted by FromConfig. It is a
-// stable alias onto the core codec dispatch surface, so a consumer names a
-// format with the same string values the codec facade exposes.
-type Format = corecodec.Format
-
 // FromConfig builds a Logger from raw, a config blob in the wire format named by
 // format, decoded by a codec the consumer has already registered (blank-import
 // github.com/kitsunium/sdk/pkg/v1/data/codec or a single service codec to activate

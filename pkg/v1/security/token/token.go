@@ -1,5 +1,44 @@
 //go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /pkg/v1/security/token .
 
+// Package token — the dotted-quad codes a consumer routes on.
+//
+// These are RE-EXPORTS, not declarations: the ranges 0.2.13.* and 0.3.44.* are
+// owned by internal/core/security/token, where every code of the token domain
+// is declared (ADR 0160), and 0.3.42.* by internal/core/crypto/key/jwk; the
+// errs ownership audit skips a cross-package selector for exactly this reason
+// (ADR 0035). Matching on a code
+// rather than on a reason string is the stronger contract — a code is a number
+// in docs/error-codes.yaml, a reason is a spelling.
+//
+//	switch {
+//	case errs.HasCode(err, token.CodeExpired):          // 401, refresh
+//	case errs.HasCode(err, token.CodeAudienceMismatch): // 401, wrong service
+//	case errs.HasCode(err, token.CodeSignatureInvalid): // 401, and alert
+//	}
+//
+// All three answer 401, and a token addressed to another service is no
+// exception: RFC 6750 §3.1 spends invalid_token — and 401 — on a token that is
+// "invalid for other reasons", while 403 (insufficient_scope) says the token
+// is valid HERE and merely too weak, which an audience mismatch is not. What
+// differs between the rows is what the caller does next, not the status.
+//
+// Package token — the algorithm, registered-claim and JWK key vocabulary.
+//
+// Package token — the constructor set, one per algorithm, plus the JWK
+// loaders and bridges. Each constructor accepts only the Go key type its
+// algorithm can use, which is what makes algorithm confusion a call that does
+// not compile.
+//
+// Package token — the typed verdicts an issuer, a verifier or a key loader
+// returns.
+//
+// Match them with errs.HasCode (the codes are re-exported in codes.go) or
+// errs.HasReason. Their Public halves name WHICH check refused a token and
+// never echo a value out of it — not an audience, not an issuer, not a key id,
+// not a claim. The JWK* verdicts are the key loaders' — ParseJWK and
+// ParseJWKSet — and hold a key document to the same rule: they name the rule a
+// member broke, never the member's value.
+//
 // Package token is the public facade for the SDK's security-token domain:
 // JSON Web Tokens over JWS Compact Serialization (RFC 7519) and PASETO
 // v4.public. It is stdlib-only and composes the SDK's own crypto schemes, so
@@ -105,49 +144,7 @@ package token
 
 import (
 	"encoding/json"
-
-	coretoken "github.com/kitsunium/sdk/internal/core/security/token"
-	svctoken "github.com/kitsunium/sdk/internal/service/security/token"
 )
-
-// Algorithm is the public alias for the signature algorithm a token issuer or
-// verifier is bound to.
-type Algorithm = coretoken.Algorithm
-
-// Claims is the public alias for a token's immutable claim set.
-type Claims = coretoken.ClaimsValue
-
-// Issuer is the public alias for the token-minting port.
-type Issuer = coretoken.Issuer
-
-// Verifier is the public alias for the token-authenticating port.
-type Verifier = coretoken.Verifier
-
-// IssuerConfig is the public alias for the JWT issuing policy.
-type IssuerConfig = svctoken.IssuerConfig
-
-// VerifierConfig is the public alias for the JWT verification policy.
-type VerifierConfig = svctoken.VerifierConfig
-
-// PasetoIssuerConfig is the public alias for the PASETO v4.public issuing
-// policy. It is a separate type rather than [IssuerConfig] plus two extras
-// because PASETO has no header parameters: there is nothing for a Type or a
-// KeyID to set, and publishing knobs the format ignores is how a configuration
-// field ends up doing nothing. Its equivalent of a "kid" is the Footer, which
-// the signature covers.
-type PasetoIssuerConfig = svctoken.PasetoIssuerConfig
-
-// PasetoVerifierConfig is the public alias for the PASETO v4.public
-// verification policy. Same shape decision as its issuing counterpart: no
-// RequireType, no MaxKeyCandidates, because PASETO has neither a "typ" to
-// require nor a "kid" to select on.
-type PasetoVerifierConfig = svctoken.PasetoVerifierConfig
-
-// NewClaims returns an empty claim set to build on with the With* methods.
-func NewClaims() Claims {
-	//: delegate to the core constructor.
-	return coretoken.NewClaimsValue()
-}
 
 // PrivateClaim decodes the named application claim of claims into T.
 //

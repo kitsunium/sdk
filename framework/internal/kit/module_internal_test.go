@@ -26,7 +26,9 @@ const toolsModule = "github.com/kitsunium/sdk/pkg"
 // the SDK are one Go module (ADR 0162), so the test binary links no second
 // one: for the test, the directory pkg/ is a Go module of its own,
 // github.com/kitsunium/sdk/pkg — as it was before ADR 0162 —, and the position
-// is clock.NewManualClock's, in a file under that directory.
+// is clock.NewManualClock's, in a file under that directory — kit's
+// facade_gen.go since ADR 0165, so the tests name the file the position is
+// in rather than spelling one.
 func toolsPos(t *testing.T) pos {
 	t.Helper()
 	anotherGoModule(t, toolsModule)
@@ -115,8 +117,8 @@ func TestAModuleRefusesAForeignPasswordPolicy(t *testing.T) {
 		t.Fatalf("Start = %v, want the foreign policy refused", err)
 	}
 	mod, _ := goModuleOf(accounts.decl.pkg())
-	want := fmt.Sprintf("tools.desk/store/accounts, declared at %s/v1/clock/clock.go:%d, of module tools, "+
-		"is given a password policy from outside its Go module github.com/kitsunium/sdk/pkg:", mod.id, accounts.decl.line())
+	want := fmt.Sprintf("tools.desk/store/accounts, declared at %s/v1/clock/%s:%d, of module tools, "+
+		"is given a password policy from outside its Go module github.com/kitsunium/sdk/pkg:", mod.id, filepath.Base(accounts.decl.file()), accounts.decl.line())
 	if len(de.Diagnostics) != 1 || !strings.HasPrefix(de.Diagnostics[0].Message, want) {
 		t.Fatalf("the start said %+v, want only %q", de.Diagnostics, want)
 	}
@@ -160,7 +162,7 @@ func TestAModulesSourceIsServedFromItsGoModule(t *testing.T) {
 	}()
 	src := app.Graph().ModuleOf("tools").Source
 	mod, _ := goModuleOf(home.pkg())
-	if want := (model.Source{File: "v1/clock/clock.go", Line: home.line(), GoModule: mod.id}); src == nil || *src != want {
+	if want := (model.Source{File: "v1/clock/" + filepath.Base(home.file()), Line: home.line(), GoModule: mod.id}); src == nil || *src != want {
 		t.Fatalf("the module's source: %+v, want %+v", src, want)
 	}
 	servesOnlyWhatTheGraphNames(t, app, mod.id, src.File)
@@ -184,7 +186,7 @@ func TestALibrarysSourceIsServedFromItsGoModule(t *testing.T) {
 	}()
 	src := app.Graph().Node("lib").Source
 	mod, _ := goModuleOf(home.pkg())
-	if want := (model.Source{File: "v1/clock/clock.go", Line: home.line(), GoModule: mod.id}); src == nil || *src != want {
+	if want := (model.Source{File: "v1/clock/" + filepath.Base(home.file()), Line: home.line(), GoModule: mod.id}); src == nil || *src != want {
 		t.Fatalf("the library's source: %+v, want %+v", src, want)
 	}
 	servesOnlyWhatTheGraphNames(t, app, mod.id, src.File)
@@ -208,7 +210,7 @@ func servesOnlyWhatTheGraphNames(t *testing.T, app *App, mod, file string) {
 		}
 		return resp.StatusCode, s
 	}
-	if status, s := get(mod, file); status != http.StatusOK || !slices.ContainsFunc(s.Lines, func(l string) bool { return strings.HasPrefix(l, "// Package clock") }) {
+	if status, s := get(mod, file); status != http.StatusOK || !slices.ContainsFunc(s.Lines, func(l string) bool { return l == "package clock" }) {
 		t.Errorf("the file the graph names: %d %+v", status, s)
 	}
 	for _, c := range []struct{ module, file string }{{"", file}, {mod, "v1/errs/construct.go"}} {

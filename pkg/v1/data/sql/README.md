@@ -205,7 +205,7 @@ var (
 ```
 
 <a name="Irreversible"></a>
-## func [Irreversible](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/sql.go#L305>)
+## func [Irreversible](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go#L163>)
 
 ```go
 func Irreversible(ctx context.Context, ex Executor) error
@@ -214,7 +214,7 @@ func Irreversible(ctx context.Context, ex Executor) error
 Irreversible is the [Step](<#Step>) a migration assigns to Down to declare, out loud, that it cannot be reversed.
 
 <a name="Transact"></a>
-## func [Transact](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/sql.go#L346>)
+## func [Transact](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/sql.go#L155>)
 
 ```go
 func Transact(ctx context.Context, tm Transactor, fn TxFunc) error
@@ -225,7 +225,7 @@ Transact runs fn inside a transaction with the driver's default isolation.
 It is the ergonomic form of [Transactor](<#Transactor>).Transact for the common case. The port itself keeps the options parameter so it never needs a second method \(ADR 0039\); this helper keeps the call site short.
 
 <a name="Checker"></a>
-## type [Checker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/sql.go#L198>)
+## type [Checker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go#L57>)
 
 Checker is the public alias for the bounded liveness probe.
 
@@ -234,7 +234,7 @@ type Checker = coresql.Checker
 ```
 
 <a name="NewChecker"></a>
-### func [NewChecker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/sql.go#L318>)
+### func [NewChecker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go#L174>)
 
 ```go
 func NewChecker(cfg Config) (probe Checker, err error)
@@ -243,7 +243,7 @@ func NewChecker(cfg Config) (probe Checker, err error)
 NewChecker returns a liveness probe bounded by cfg.CheckTimeout.
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/sql.go#L223>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go#L82>)
 
 Config is the public alias for the parameters every port is built from.
 
@@ -252,7 +252,7 @@ type Config = svcsql.Config
 ```
 
 <a name="Deferrer"></a>
-## type [Deferrer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/sql.go#L191>)
+## type [Deferrer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go#L50>)
 
 Deferrer is the public alias for the ADR 0039 sibling of [Transactor](<#Transactor>) that holds a function until the transaction a context carries has committed, and drops it with a rollback. Discover it by type assertion.
 
@@ -261,7 +261,7 @@ type Deferrer = coresql.Deferrer
 ```
 
 <a name="Dialect"></a>
-## type [Dialect](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/sql.go#L220>)
+## type [Dialect](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go#L79>)
 
 Dialect is the public alias for the closed set of SQL engines this SDK can spell. For SQL you write yourself, it spells the engine's vocabulary — the tokens the SDK's own statements are spelled with, never a statement: [Dialect](<#Dialect>).Placeholder renders a bind marker \($1 on PostgreSQL, ? on MySQL and SQLite\), [Dialect](<#Dialect>).QuoteIdent a delimited name, its delimiter doubled inside, and [Dialect](<#Dialect>).ForUpdate and [Dialect](<#Dialect>).ForUpdateSkipLocked a row\-lock clause, which SQLite — whose exclusion is its one write lock — renders as nothing. QuoteIdent validates nothing: check a name before you interpolate it. An unset Dialect renders no marker and no name, so a statement built from it fails rather than passing for another engine's.
 
@@ -288,7 +288,7 @@ const DialectSQLite Dialect = coresql.DialectSQLite
 ```
 
 <a name="ParseDialect"></a>
-### func [ParseDialect](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/sql.go#L298>)
+### func [ParseDialect](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go#L157>)
 
 ```go
 func ParseDialect(name string) (dialect Dialect, err error)
@@ -297,7 +297,7 @@ func ParseDialect(name string) (dialect Dialect, err error)
 ParseDialect resolves a dialect name and never guesses. A recognised but unsupported engine returns [DialectRefused](<#UnknownDialect>) carrying why; an unrecognised one returns [UnknownDialect](<#UnknownDialect>).
 
 <a name="Executor"></a>
-## type [Executor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/sql.go#L171>)
+## type [Executor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go#L30>)
 
 Executor is the public alias for the read/write surface a statement runs against. \*sql.DB, \*sql.Tx and \*sql.Conn all satisfy it with no adapter, and it deliberately carries no Commit, Rollback or Begin.
 
@@ -306,7 +306,7 @@ type Executor = coresql.Executor
 ```
 
 <a name="Joiner"></a>
-## type [Joiner](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/sql.go#L186>)
+## type [Joiner](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go#L45>)
 
 Joiner is the public alias for the ADR 0039 sibling of [Transactor](<#Transactor>) that says where a statement issued under a context runs: in the transaction the context carries, or on the pool. Discover it by type assertion.
 
@@ -315,7 +315,7 @@ type Joiner = coresql.Joiner
 ```
 
 <a name="MigrateConfig"></a>
-## type [MigrateConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/sql.go#L229>)
+## type [MigrateConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go#L88>)
 
 MigrateConfig is the public alias for the migration runner's parameters.
 
@@ -324,7 +324,7 @@ type MigrateConfig = svcsql.MigrateConfig
 ```
 
 <a name="Migration"></a>
-## type [Migration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/sql.go#L205>)
+## type [Migration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go#L64>)
 
 Migration is the public alias for one versioned schema change and its reversal.
 
@@ -333,7 +333,7 @@ type Migration = coresql.MigrationValue
 ```
 
 <a name="Migrator"></a>
-## type [Migrator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/sql.go#L201>)
+## type [Migrator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go#L60>)
 
 Migrator is the public alias for the schema\-migration runner.
 
@@ -342,7 +342,7 @@ type Migrator = coresql.Migrator
 ```
 
 <a name="NewMigrator"></a>
-### func [NewMigrator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/sql.go#L325>)
+### func [NewMigrator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go#L180>)
 
 ```go
 func NewMigrator(cfg Config, mig MigrateConfig) (runner Migrator, err error)
@@ -351,7 +351,7 @@ func NewMigrator(cfg Config, mig MigrateConfig) (runner Migrator, err error)
 NewMigrator returns the migration runner. It refuses a dialect with no session\-scoped advisory lock, by name and at construction.
 
 <a name="PoolConfig"></a>
-## type [PoolConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/sql.go#L226>)
+## type [PoolConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go#L85>)
 
 PoolConfig is the public alias for the connection\-pool policy.
 
@@ -360,7 +360,7 @@ type PoolConfig = svcsql.PoolConfig
 ```
 
 <a name="Preparer"></a>
-## type [Preparer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/sql.go#L175>)
+## type [Preparer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go#L34>)
 
 Preparer is the public alias for the ADR 0039 sibling of [Executor](<#Executor>): an executor that can also prepare a statement. Discover it by type assertion.
 
@@ -369,7 +369,7 @@ type Preparer = coresql.Preparer
 ```
 
 <a name="Step"></a>
-## type [Step](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/sql.go#L208>)
+## type [Step](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go#L67>)
 
 Step is the public alias for one direction of a migration.
 
@@ -378,7 +378,7 @@ type Step = coresql.Step
 ```
 
 <a name="Statements"></a>
-### func [Statements](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/sql.go#L336>)
+### func [Statements](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go#L190>)
 
 ```go
 func Statements(stmts ...string) Step
@@ -389,7 +389,7 @@ Statements returns a [Step](<#Step>) that runs the given statements in order on 
 It is the smallest useful helper and deliberately not a file loader: it invents no directory layout, no naming convention and no parser. Where the text comes from — a literal, an embed.FS, a generator — stays yours.
 
 <a name="Transactor"></a>
-## type [Transactor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/sql.go#L181>)
+## type [Transactor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go#L40>)
 
 Transactor is the public alias for the transaction manager.
 
@@ -398,7 +398,7 @@ type Transactor = coresql.Transactor
 ```
 
 <a name="NewTransactor"></a>
-### func [NewTransactor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/sql.go#L312>)
+### func [NewTransactor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go#L169>)
 
 ```go
 func NewTransactor(cfg Config) (manager Transactor, err error)
@@ -407,7 +407,7 @@ func NewTransactor(cfg Config) (manager Transactor, err error)
 NewTransactor returns the transaction manager for cfg.DB, applying cfg.Pool to it.
 
 <a name="TxFunc"></a>
-## type [TxFunc](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/sql.go#L178>)
+## type [TxFunc](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go#L37>)
 
 TxFunc is the public alias for a unit of work run inside a transaction.
 
@@ -416,7 +416,7 @@ type TxFunc = coresql.TxFunc
 ```
 
 <a name="TxOptions"></a>
-## type [TxOptions](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/sql.go#L195>)
+## type [TxOptions](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go#L54>)
 
 TxOptions is the public alias for one transaction's isolation and read\-only\-ness. The zero value defers to the driver.
 

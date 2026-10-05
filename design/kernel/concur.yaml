@@ -382,49 +382,83 @@ packages:
         name: LoopDaemon
         struct:
           unexported: true
-  - aliases:
-      - name: Batcher
-        target: kbatcher.Batcher[T]
-        typeParams:
-          - constraint: any
-            name: T
-      - name: Config
-        target: kbatcher.Config[T]
-        typeParams:
-          - constraint: any
-            name: T
-      - name: Sink
-        target: kbatcher.Sink[T]
-        typeParams:
-          - constraint: any
-            name: T
-    functions:
-      - in:
-          - name: deliver
-            type: Sink[T]
-          - name: cfg
-            type: Config[T]
-        name: NewBatcher
-        out:
-          - type: "*Batcher[T]"
-        typeParams:
-          - constraint: any
-            name: T
+  - facade:
+      - alias:
+          - doc: |-
+              Batcher coalesces added items into batches delivered through its [Sink].
+
+              [Batcher].Add appends an item and delivers the batch at once when a cap is
+              reached; [Batcher].Flush delivers what is pending; [Batcher].Close stops the
+              ticker, delivers what is pending with the context it is given, and closes
+              the batcher — idempotently, a second Close returning nil. Each takes a
+              context and returns the delivery's error, wrapped as
+              [BatcherDeliverFailed], or [BatcherClosed] after Close.
+            name: Batcher
+            target: kbatcher.Batcher[T]
+            typeParams:
+              - constraint: any
+                name: T
+      - alias:
+          - doc: |-
+              Config tunes a [Batcher]: MaxItems and MaxWeight, the caps that deliver
+              eagerly (non-positive disables each); WeightOf, an item's weight (nil counts
+              items); FlushEvery, the background delivery interval (non-positive starts no
+              ticker); Clock, the clock.Waiter that ticker runs on (nil is the wall
+              clock); and OnError, which observes the ticker path's failures (nil ignores
+              them). The zero Config is usable.
+            name: Config
+            target: kbatcher.Config[T]
+            typeParams:
+              - constraint: any
+                name: T
+      - alias:
+          - doc: |-
+              Sink delivers one coalesced batch. A non-nil error fails the batch: it is
+              returned to the caller of Add, Flush or Close that triggered the delivery,
+              and handed to [Config].OnError on the ticker path. A Sink is never entered
+              concurrently.
+            name: Sink
+            target: kbatcher.Sink[T]
+            typeParams:
+              - constraint: any
+                name: T
+      - func:
+          doc: |-
+            NewBatcher builds a [Batcher] over deliver with cfg. A positive
+            cfg.FlushEvery spawns the ticker goroutine, which Close joins.
+          forward: kbatcher.NewBatcher
+          in:
+            - name: deliver
+              type: Sink[T]
+            - name: cfg
+              type: Config[T]
+          name: NewBatcher
+          out:
+            - type: "*Batcher[T]"
+          typeParams:
+            - constraint: any
+              name: T
+      - doc: The sentinels a caller matches with errors.Is or errs.HasCode.
+        var:
+          - doc: |-
+              BatcherClosed is returned by Add and Flush once Close has run: the
+              batcher accepts no more items, and its ticker, if any, has been joined.
+            name: BatcherClosed
+            reexport: kbatcher.BatcherClosed
+            type: "*errs.Error"
+          - blank: true
+            doc: |-
+              BatcherDeliverFailed wraps the error a deliver function returned, so a
+              caller routes on one code while the original cause stays reachable
+              through errors.Is and errors.As.
+            name: BatcherDeliverFailed
+            reexport: kbatcher.BatcherDeliverFailed
+            type: "*errs.Error"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       kbatcher: github.com/kitsunium/sdk/internal/kernel/concur/batcher
     path: github.com/kitsunium/sdk/pkg/v1/concur/batcher
-    variables:
-      - name: BatcherClosed
-        type: "*errs.Error"
-      - name: BatcherDeliverFailed
-        type: "*errs.Error"
-  - aliases:
-      - name: Group
-        target: kgroup.Group
-      - name: PanicValue
-        target: kgroup.PanicValue
-    constants:
+  - constants:
       - build: "!(386 || arm)"
         name: Unlimited
         type: int
@@ -433,158 +467,349 @@ packages:
         name: Unlimited
         type: int
         value: "2147483647"
-    functions:
-      - in:
-          - name: parent
-            type: context.Context
-          - name: limit
-            type: int
-        name: New
-        out:
-          - type: "*Group"
-          - type: context.Context
-      - in:
-          - name: parent
-            type: context.Context
-          - name: limit
-            type: int
-        name: NewJoined
-        out:
-          - type: "*Group"
-          - type: context.Context
-      - in:
-          - name: parent
-            type: context.Context
-          - name: limit
-            type: int
-          - name: fns
-            type: "[]func(ctx context.Context) (value T, err error)"
-        name: Collect
-        out:
-          - name: results
-            type: "[]T"
-          - name: err
-            type: error
-        typeParams:
-          - constraint: any
-            name: T
+    facade:
+      - alias:
+          - doc: |-
+              Group runs tasks concurrently under one context and one wait point.
+
+              [Group].Go starts a task on a goroutine of its own, blocking while the group
+              already runs its limit of tasks; [Group].Wait blocks until every task has
+              returned, cancels the group's context, and returns the first error — or,
+              for a group from [NewJoined], every error joined — re-raising a task's
+              panic as a [PanicValue] if one panicked.
+
+              The zero value is NOT usable: build it with [New] or [NewJoined], which also
+              return the context the tasks receive.
+            name: Group
+            target: kgroup.Group
+      - alias:
+          - doc: |-
+              PanicValue carries a panic raised inside a task across the goroutine
+              boundary to whoever waits on the group: Raised is the value the panic
+              carried, verbatim, and Stack the stack of the goroutine that ran the task,
+              captured at recovery. Its String method renders both, so an uncaught
+              re-raise prints the task's stack rather than only the waiter's.
+
+              It is deliberately NOT an error, and carries no error code: a panic is a
+              programming fault, and a value the caller may ignore is how a broken
+              invariant becomes a silent wrong answer.
+            name: PanicValue
+            target: kgroup.PanicValue
+      - func:
+          doc: |-
+            New returns a [Group] reporting the first error, and the context every task
+            submitted to it receives.
+
+            limit bounds how many tasks run at once; a non-positive limit is clamped to
+            1, and [Unlimited] removes the bound. The returned context is cancelled when
+            the first task fails — that task's error is its context.Cause —, when a
+            task panics, or when [Group].Wait returns, whichever comes first.
+          forward: kgroup.New
+          in:
+            - name: parent
+              type: context.Context
+            - name: limit
+              type: int
+          name: New
+          out:
+            - type: "*Group"
+            - type: context.Context
+      - func:
+          doc: |-
+            NewJoined returns a [Group] whose [Group].Wait reports EVERY task's error,
+            joined with errors.Join in the order the tasks were submitted, rather than
+            the first one. Everything else is [New]'s: the limit and its clamp, the
+            context, the siblings cancelled on the first failure — still the context's
+            context.Cause — and a panic, which outranks every error.
+
+            The joined error is matchable as each of its parts — errors.Is, errors.As
+            and the SDK's errs.HasCode walk Unwrap() []error — and Wait returns nil,
+            not an empty join, when no task failed.
+          forward: kgroup.NewJoined
+          in:
+            - name: parent
+              type: context.Context
+            - name: limit
+              type: int
+          name: NewJoined
+          out:
+            - type: "*Group"
+            - type: context.Context
+      - func:
+          doc: |-
+            Collect runs every function in fns concurrently, at most limit at a time
+            ([New]'s clamp, [Unlimited] for none), and returns their results in
+            SUBMISSION order: index i of the result is fns[i]'s value.
+
+            On the first error the remaining functions see a cancelled context and
+            Collect returns (nil, err) — never a half-filled slice, whose zero values
+            would read as answers. A panic in any function propagates out of Collect as
+            a [PanicValue], after every other function has returned.
+
+            It is a function rather than a method because Go's methods take no type
+            parameters of their own: a [Group] carrying a result type would force one on
+            every caller who only wants to wait.
+          forward: kgroup.Collect
+          in:
+            - name: parent
+              type: context.Context
+            - name: limit
+              type: int
+            - name: fns
+              type: "[]func(ctx context.Context) (value T, err error)"
+          name: Collect
+          out:
+            - name: results
+              type: "[]T"
+            - name: err
+              type: error
+          typeParams:
+            - constraint: any
+              name: T
     imports:
       kgroup: github.com/kitsunium/sdk/internal/kernel/concur/group
     path: github.com/kitsunium/sdk/pkg/v1/concur/group
-  - aliases:
-      - name: Pool
-        target: krecycler.Pool[T]
-        typeParams:
-          - constraint: any
-            name: T
-      - name: CappedPool
-        target: krecycler.CappedPool[T]
-        typeParams:
-          - constraint: any
-            name: T
-    functions:
-      - in:
-          - name: newFn
-            type: func() T
-        name: NewPool
-        out:
-          - type: "*Pool[T]"
-        typeParams:
-          - constraint: any
-            name: T
-      - in:
-          - name: newFn
-            type: func() T
-          - name: resetFn
-            type: func(T)
-          - name: capOfFn
-            type: func(T) int
-          - name: maxCap
-            type: int
-        name: NewCappedPool
-        out:
-          - type: "*CappedPool[T]"
-        typeParams:
-          - constraint: any
-            name: T
+  - facade:
+      - alias:
+          - doc: |-
+              Pool is a typed object pool over sync.Pool. [Pool].Get borrows a value,
+              building one with the factory when the pool is empty, and [Pool].Put hands
+              one back; a caller must not touch a value after Put. It resets nothing — a
+              caller resets before Put, or uses [CappedPool].
+
+              Safe for concurrent use; always used behind the pointer [NewPool] returns.
+            name: Pool
+            target: krecycler.Pool[T]
+            typeParams:
+              - constraint: any
+                name: T
+      - alias:
+          - doc: |-
+              CappedPool is a [Pool] that resets a value on Put, and drops — without
+              resetting — a value whose capacity is past its threshold. [CappedPool].Get
+              borrows and [CappedPool].Put hands back, as the plain pool's do.
+
+              Safe for concurrent use; always used behind the pointer [NewCappedPool]
+              returns.
+            name: CappedPool
+            target: krecycler.CappedPool[T]
+            typeParams:
+              - constraint: any
+                name: T
+      - func:
+          doc: |-
+            NewPool returns a [Pool] whose factory newFn builds a value whenever Get
+            finds the pool empty. A nil newFn panics here, rather than at the first
+            empty Get far from this call.
+          forward: krecycler.NewPool
+          in:
+            - name: newFn
+              type: func() T
+          name: NewPool
+          out:
+            - type: "*Pool[T]"
+          typeParams:
+            - constraint: any
+              name: T
+      - func:
+          doc: |-
+            NewCappedPool returns a [CappedPool]: newFn builds a value, resetFn returns
+            one to its reusable state before it is pooled again, and capOfFn reports the
+            capacity compared with maxCap on each Put. A nil function or a non-positive
+            maxCap panics here — a threshold of zero would drop every value and turn the
+            pool into an allocator that never recycles.
+          forward: krecycler.NewCappedPool
+          in:
+            - name: newFn
+              type: func() T
+            - name: resetFn
+              type: func(T)
+            - name: capOfFn
+              type: func(T) int
+            - name: maxCap
+              type: int
+          name: NewCappedPool
+          out:
+            - type: "*CappedPool[T]"
+          typeParams:
+            - constraint: any
+              name: T
     imports:
       krecycler: github.com/kitsunium/sdk/internal/kernel/concur/recycler
     path: github.com/kitsunium/sdk/pkg/v1/concur/recycler
-  - aliases:
-      - name: Group
-        target: ksingleflight.Group[K, V]
-        typeParams:
-          - constraint: comparable
-            name: K
-          - constraint: any
-            name: V
-      - name: PanicValue
-        target: ksingleflight.PanicValue
+  - facade:
+      - alias:
+          - doc: |-
+              Group deduplicates concurrent calls that name the same key. The zero value is
+              ready to use; a Group must not be copied after first use, and is safe for
+              any number of goroutines.
+
+              [Group].Do runs fn for a key unless the same key is already in flight, in
+              which case it waits for that call instead; it returns the value, whether the
+              result came from a call this goroutine did not start (shared), and the
+              error. fn receives the shared call's context, not the caller's — see the
+              package documentation. A caller whose ctx ends while it waits returns
+              ctx.Err() and leaves the call running; a result already available is
+              delivered even if ctx is also done.
+
+              [Group].Forget retires a key so the NEXT Do starts a fresh call — for an
+              in-flight call known to answer a question that has since changed; callers
+              already waiting keep waiting and still receive its result.
+
+              [Group].InFlight reports how many keys a Do arriving now would join rather
+              than start — a point-in-time reading for a gauge or a test, never for a
+              decision, and not a count of running calls (a forgotten or abandoned call
+              may still run).
+            name: Group
+            target: ksingleflight.Group[K, V]
+            typeParams:
+              - constraint: comparable
+                name: K
+              - constraint: any
+                name: V
+      - alias:
+          - doc: |-
+              PanicValue carries a panic raised inside a deduplicated call to every caller
+              waiting on it: Raised is the value the panic carried, verbatim, and Stack the
+              stack of the goroutine that ran fn, captured at recovery. Its String method
+              renders both, so an uncaught re-raise prints fn's stack rather than only the
+              waiter's.
+
+              It is deliberately NOT an error, and carries no error code: a panic is a
+              programming fault, not a runtime condition.
+            name: PanicValue
+            target: ksingleflight.PanicValue
     imports:
       ksingleflight: github.com/kitsunium/sdk/internal/kernel/concur/singleflight
     path: github.com/kitsunium/sdk/pkg/v1/concur/singleflight
-  - aliases:
-      - name: Value
-        target: ksnapshot.Value[T]
-        typeParams:
-          - constraint: any
-            name: T
-    functions:
-      - in:
-          - name: initial
-            type: "*T"
-        name: NewValue
-        out:
-          - type: "*Value[T]"
-        typeParams:
-          - constraint: any
-            name: T
+  - facade:
+      - alias:
+          - doc: |-
+              Value is a copy-on-write container for a *T. The zero value is ready to use
+              and holds nil until the first Store.
+
+              [Value].Load returns the current pointer without a lock — one atomic load,
+              no allocation — and the pointer it returns must be treated as immutable.
+              [Value].Store replaces it, [Value].Swap replaces it and returns the previous
+              one, and [Value].Update runs a function from the current pointer to the
+              next under the writers' lock, so a concurrent writer can never interleave
+              with the read-modify-write. Writers serialise; readers never wait.
+            name: Value
+            target: ksnapshot.Value[T]
+            typeParams:
+              - constraint: any
+                name: T
+      - func:
+          doc: |-
+            NewValue returns a [Value] holding initial — call-site sugar for a value
+            known up front. A nil initial leaves it empty, as the zero value is.
+          forward: ksnapshot.NewValue
+          in:
+            - name: initial
+              type: "*T"
+          name: NewValue
+          out:
+            - type: "*Value[T]"
+          typeParams:
+            - constraint: any
+              name: T
     imports:
       ksnapshot: github.com/kitsunium/sdk/internal/kernel/concur/snapshot
     path: github.com/kitsunium/sdk/pkg/v1/concur/snapshot
-  - aliases:
-      - name: Loop
-        target: kworker.Loop
-      - name: LoopDaemon
-        target: kworker.LoopDaemon
-      - name: EveryOption
-        target: kworker.EveryOption
-    functions:
-      - in:
-          - name: loop
-            type: Loop
-        name: Start
-        out:
-          - type: "*LoopDaemon"
-      - in:
-          - name: loop
-            type: Loop
-        name: NewLoopDaemon
-        out:
-          - type: "*LoopDaemon"
-      - in:
-          - name: interval
-            type: time.Duration
-          - name: tick
-            type: func()
-          - name: opts
-            type: EveryOption
-        name: Every
-        out:
-          - type: "*LoopDaemon"
-        variadic: true
-      - in:
-          - name: w
-            type: clock.Waiter
-        name: WithClock
-        out:
-          - type: EveryOption
-      - in:
-          - name: done
-            type: <-chan struct{}
-        name: WithDone
-        out:
-          - type: EveryOption
+  - facade:
+      - alias:
+          - doc: |-
+              Loop is the goroutine body a [LoopDaemon] runs. It receives a stop channel,
+              closed when Stop is called, and MUST return promptly once it is: Stop blocks
+              until the loop has returned. A Loop MUST NOT panic.
+            name: Loop
+            target: kworker.Loop
+      - alias:
+          - doc: |-
+              LoopDaemon is a running background goroutine with an idempotent Stop and a
+              join. [LoopDaemon].Stop signals the loop to exit and blocks until it has
+              returned — idempotent, and safe to call from several goroutines.
+              [LoopDaemon].Done returns the channel closed once the loop has returned, for
+              a caller that reacts to the end without joining.
+
+              Always used behind the pointer [Start], [NewLoopDaemon] or [Every] returns:
+              it must not be copied.
+            name: LoopDaemon
+            target: kworker.LoopDaemon
+      - alias:
+          - doc: |-
+              EveryOption tunes [Every]: [WithClock] and [WithDone]. Options apply in
+              order, so a later one wins, and a nil option is skipped.
+            name: EveryOption
+            target: kworker.EveryOption
+      - func:
+          doc: |-
+            Start spawns loop in a new goroutine and returns the [LoopDaemon] that
+            controls it. A nil loop panics here rather than spawning a goroutine that
+            does nothing.
+          forward: kworker.Start
+          in:
+            - name: loop
+              type: Loop
+          name: Start
+          out:
+            - type: "*LoopDaemon"
+      - func:
+          doc: |-
+            NewLoopDaemon is [Start] under the New-prefixed name: the same daemon, the
+            same panic on a nil loop.
+          forward: kworker.NewLoopDaemon
+          in:
+            - name: loop
+              type: Loop
+          name: NewLoopDaemon
+          out:
+            - type: "*LoopDaemon"
+      - func:
+          doc: |-
+            Every starts a [LoopDaemon] whose loop calls tick on each interval until
+            Stop is called, or until the channel given by [WithDone] is closed. The
+            daemon owns the ticker — the wall clock unless [WithClock] names another —
+            and stops it when the loop ends, so Stop both ends the ticking and joins
+            the goroutine. A tick due while the previous one still runs is dropped.
+
+            A nil tick and a non-positive interval panic here, at the caller.
+          forward: kworker.Every
+          in:
+            - name: interval
+              type: time.Duration
+            - name: tick
+              type: func()
+            - name: opts
+              type: EveryOption
+          name: Every
+          out:
+            - type: "*LoopDaemon"
+          variadic: true
+      - func:
+          doc: |-
+            WithClock makes [Every] tick on w instead of the wall clock — a
+            [clock.ManualClock] in a test, advanced past the interval once the ticker is
+            armed. A nil w is the wall clock.
+          forward: kworker.WithClock
+          in:
+            - name: w
+              type: clock.Waiter
+          name: WithClock
+          out:
+            - type: EveryOption
+      - func:
+          doc: |-
+            WithDone ends the loop of [Every] as soon as done is closed, without waiting
+            for Stop, which still joins — returning at once on a loop that has already
+            left. A nil done never fires.
+          forward: kworker.WithDone
+          in:
+            - name: done
+              type: <-chan struct{}
+          name: WithDone
+          out:
+            - type: EveryOption
     imports:
       clock: github.com/kitsunium/sdk/pkg/v1/clock
       kworker: github.com/kitsunium/sdk/internal/kernel/concur/worker

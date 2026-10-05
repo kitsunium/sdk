@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "metrics",
-    srcs = ["metrics.go"],
+    srcs = [
+        "facade_gen.go",
+        "metrics.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/observe/metrics",
     visibility = ["//visibility:public"],
     deps = [

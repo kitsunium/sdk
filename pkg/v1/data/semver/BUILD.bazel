@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "semver",
-    srcs = ["semver.go"],
+    srcs = [
+        "facade_gen.go",
+        "semver.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/data/semver",
     visibility = ["//visibility:public"],
     deps = ["//internal/kernel/semver"],

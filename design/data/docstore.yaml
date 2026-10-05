@@ -1433,250 +1433,489 @@ packages:
         typeParams:
           - constraint: any
             name: T
-  - aliases:
-      - name: Store
-        target: svcdocstore.Store[T]
-        typeParams:
-          - constraint: any
-            name: T
-      - name: Config
-        target: svcdocstore.Config[T]
-        typeParams:
-          - constraint: any
-            name: T
-      - name: Version
-        target: coredocstore.VersionValue
-      - name: Stamp
-        target: coredocstore.StampValue
-      - name: IndexSpec
-        target: coredocstore.IndexSpec[T]
-        typeParams:
-          - constraint: any
-            name: T
-      - name: Entry
-        target: coredocstore.EntryValue
-      - name: Stats
-        target: svcdocstore.StatsValue
-      - name: SQLStore
-        target: svcdocstore.SQLStore[T]
-        typeParams:
-          - constraint: any
-            name: T
-      - name: SQLConfig
-        target: svcdocstore.SQLConfig[T]
-        typeParams:
-          - constraint: any
-            name: T
-      - name: Collection
-        target: coredocstore.Collection[T]
-        typeParams:
-          - constraint: any
-            name: T
-      - name: Versioned
-        target: coredocstore.Versioned[T]
-        typeParams:
-          - constraint: any
-            name: T
-      - name: CollectionContext
-        target: coredocstore.CollectionContext[T]
-        typeParams:
-          - constraint: any
-            name: T
-      - name: VersionedContext
-        target: coredocstore.VersionedContext[T]
-        typeParams:
-          - constraint: any
-            name: T
-      - name: Announcer
-        target: coredocstore.Announcer
-    constants:
-      - name: DefaultFoldAt
-        type: int
-        value: "1024"
-      - name: MaxSQLTableLen
-        type: int
-        value: "58"
-      - name: MaxSQLKeyLen
-        type: int
-        value: "1024"
-      - name: MaxSQLIndexNameLen
-        type: int
-        value: "64"
-      - name: CodeDocumentNotFound
-        type: errs.Code
-        value: "0x00_03_50_01"
-      - name: CodeDocumentExists
-        type: errs.Code
-        value: "0x00_03_50_02"
-      - name: CodeUniqueKeyTaken
-        type: errs.Code
-        value: "0x00_03_50_03"
-      - name: CodeDocumentKeyEmpty
-        type: errs.Code
-        value: "0x00_03_50_04"
-      - name: CodeDocumentKeyChanged
-        type: errs.Code
-        value: "0x00_03_50_05"
-      - name: CodeIndexUnknown
-        type: errs.Code
-        value: "0x00_03_50_06"
-      - name: CodeIndexNotUnique
-        type: errs.Code
-        value: "0x00_03_50_07"
-      - name: CodeDocumentUndecodable
-        type: errs.Code
-        value: "0x00_03_50_08"
-      - name: CodeDocumentUnencodable
-        type: errs.Code
-        value: "0x00_03_50_09"
-      - name: CodePersistFailed
-        type: errs.Code
-        value: "0x00_03_50_0A"
-      - name: CodeLoadFailed
-        type: errs.Code
-        value: "0x00_03_50_0B"
-      - name: CodeIndexBroken
-        type: errs.Code
-        value: "0x00_03_50_0C"
-      - name: CodeStoreClosed
-        type: errs.Code
-        value: "0x00_03_50_0D"
-      - name: CodeStoreMisconfigured
-        type: errs.Code
-        value: "0x00_03_50_0E"
-      - name: CodeWriteUnconfirmed
-        type: errs.Code
-        value: "0x00_03_50_0F"
-      - name: CodeStatementFailed
-        type: errs.Code
-        value: "0x00_03_50_10"
-      - name: CodeKeyTooLong
-        type: errs.Code
-        value: "0x00_03_50_11"
-      - name: CodeVersionsNotKept
-        type: errs.Code
-        value: "0x00_03_50_12"
-      - name: CodeVersionNotFound
-        type: errs.Code
-        value: "0x00_03_50_13"
-      - name: CodeVersionsRewriteRefused
-        type: errs.Code
-        value: "0x00_03_50_14"
-    functions:
-      - in:
-          - name: cfg
-            type: Config[T]
-          - name: indexes
-            type: IndexSpec[T]
-        name: Open
-        out:
-          - type: "*Store[T]"
-          - type: error
-        typeParams:
-          - constraint: any
-            name: T
-        variadic: true
-      - in:
-          - name: cfg
-            type: SQLConfig[T]
-          - name: indexes
-            type: IndexSpec[T]
-        name: OpenSQL
-        out:
-          - type: "*SQLStore[T]"
-          - type: error
-        typeParams:
-          - constraint: any
-            name: T
-        variadic: true
-      - in:
-          - name: dialect
-            type: sql.Dialect
-          - name: table
-            type: string
-          - name: version
-            type: uint64
-        name: SQLMigration
-        out:
-          - type: sql.Migration
-          - type: error
-      - in:
-          - name: dialect
-            type: sql.Dialect
-          - name: table
-            type: string
-          - name: version
-            type: uint64
-        name: SQLVersionsMigration
-        out:
-          - type: sql.Migration
-          - type: error
-      - in:
-          - name: name
-            type: string
-          - name: key
-            type: func(T) string
-        name: Unique
-        out:
-          - type: IndexSpec[T]
-        typeParams:
-          - constraint: any
-            name: T
-      - in:
-          - name: name
-            type: string
-          - name: keys
-            type: func(T) []string
-        name: Index
-        out:
-          - type: IndexSpec[T]
-        typeParams:
-          - constraint: any
-            name: T
+  - facade:
+      - const:
+          - doc: |-
+              DefaultFoldAt is the least number of overlay entries that folds the overlay
+              into the snapshot when [Config].FoldAt is zero.
+            name: DefaultFoldAt
+            reexport: svcdocstore.DefaultFoldAt
+            type: int
+            typed: true
+            value: "1024"
+      - const:
+          - doc: |-
+              MaxSQLTableLen is the longest table name [OpenSQL] and [SQLMigration]
+              accept, in bytes: PostgreSQL's limit of 63, less what the store appends to
+              derive its index table's name.
+            name: MaxSQLTableLen
+            reexport: svcdocstore.MaxSQLTableLen
+            type: int
+            typed: true
+            value: "58"
+      - const:
+          - doc: |-
+              MaxSQLKeyLen is the longest store key, and the longest index key as it
+              reaches the table, a SQL store accepts, in bytes.
+            name: MaxSQLKeyLen
+            reexport: svcdocstore.MaxSQLKeyLen
+            type: int
+            typed: true
+            value: "1024"
+      - const:
+          - doc: MaxSQLIndexNameLen is the longest index name a SQL store accepts, in bytes.
+            name: MaxSQLIndexNameLen
+            reexport: svcdocstore.MaxSQLIndexNameLen
+            type: int
+            typed: true
+            value: "64"
+      - const:
+          - doc: |-
+              CodeDocumentNotFound: no document under the key, or nobody holds the
+              key in a unique index.
+            name: CodeDocumentNotFound
+            reexport: coredocstore.CodeDocumentNotFound
+            type: errs.Code
+            typed: true
+            value: "0x00_03_50_01"
+          - doc: "CodeDocumentExists: Insert over a taken key."
+            name: CodeDocumentExists
+            reexport: coredocstore.CodeDocumentExists
+            type: errs.Code
+            typed: true
+            value: "0x00_03_50_02"
+          - doc: "CodeUniqueKeyTaken: a unique index refused the write."
+            name: CodeUniqueKeyTaken
+            reexport: coredocstore.CodeUniqueKeyTaken
+            type: errs.Code
+            typed: true
+            value: "0x00_03_50_03"
+          - doc: "CodeDocumentKeyEmpty: the key function returned the empty string."
+            name: CodeDocumentKeyEmpty
+            reexport: coredocstore.CodeDocumentKeyEmpty
+            type: errs.Code
+            typed: true
+            value: "0x00_03_50_04"
+          - doc: "CodeDocumentKeyChanged: an Update's function changed the key."
+            name: CodeDocumentKeyChanged
+            reexport: coredocstore.CodeDocumentKeyChanged
+            type: errs.Code
+            typed: true
+            value: "0x00_03_50_05"
+          - doc: "CodeIndexUnknown: a read named an index the store never declared."
+            name: CodeIndexUnknown
+            reexport: coredocstore.CodeIndexUnknown
+            type: errs.Code
+            typed: true
+            value: "0x00_03_50_06"
+          - doc: "CodeIndexNotUnique: Lookup on a multi-valued index."
+            name: CodeIndexNotUnique
+            reexport: coredocstore.CodeIndexNotUnique
+            type: errs.Code
+            typed: true
+            value: "0x00_03_50_07"
+          - doc: "CodeDocumentUndecodable: a stored document no longer fits the type."
+            name: CodeDocumentUndecodable
+            reexport: coredocstore.CodeDocumentUndecodable
+            type: errs.Code
+            typed: true
+            value: "0x00_03_50_08"
+          - doc: "CodeDocumentUnencodable: encoding/json refused the value."
+            name: CodeDocumentUnencodable
+            reexport: coredocstore.CodeDocumentUnencodable
+            type: errs.Code
+            typed: true
+            value: "0x00_03_50_09"
+          - doc: "CodePersistFailed: the filesystem refused the write; nothing changed."
+            name: CodePersistFailed
+            reexport: coredocstore.CodePersistFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_50_0A"
+          - doc: "CodeLoadFailed: the store's files cannot be read or are not a store's."
+            name: CodeLoadFailed
+            reexport: coredocstore.CodeLoadFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_50_0B"
+          - doc: "CodeIndexBroken: the stored documents break a unique index."
+            name: CodeIndexBroken
+            reexport: coredocstore.CodeIndexBroken
+            type: errs.Code
+            typed: true
+            value: "0x00_03_50_0C"
+          - doc: "CodeStoreClosed: a call after Close."
+            name: CodeStoreClosed
+            reexport: coredocstore.CodeStoreClosed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_50_0D"
+          - doc: "CodeStoreMisconfigured: Open refused its configuration."
+            name: CodeStoreMisconfigured
+            reexport: coredocstore.CodeStoreMisconfigured
+            type: errs.Code
+            typed: true
+            value: "0x00_03_50_0E"
+          - doc: "CodeWriteUnconfirmed: the write stands, its durability is in doubt."
+            name: CodeWriteUnconfirmed
+            reexport: coredocstore.CodeWriteUnconfirmed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_50_0F"
+          - doc: "CodeStatementFailed: the SQL store's database did not complete a call."
+            name: CodeStatementFailed
+            reexport: coredocstore.CodeStatementFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_50_10"
+          - doc: "CodeKeyTooLong: a key is longer than the SQL store's key columns hold."
+            name: CodeKeyTooLong
+            reexport: coredocstore.CodeKeyTooLong
+            type: errs.Code
+            typed: true
+            value: "0x00_03_50_11"
+          - doc: "CodeVersionsNotKept: a call on versions to a store that keeps none."
+            name: CodeVersionsNotKept
+            reexport: coredocstore.CodeVersionsNotKept
+            type: errs.Code
+            typed: true
+            value: "0x00_03_50_12"
+          - doc: "CodeVersionNotFound: the document keeps no version of that number."
+            name: CodeVersionNotFound
+            reexport: coredocstore.CodeVersionNotFound
+            type: errs.Code
+            typed: true
+            value: "0x00_03_50_13"
+          - doc: "CodeVersionsRewriteRefused: a rewrite returned what a rewrite may not."
+            name: CodeVersionsRewriteRefused
+            reexport: coredocstore.CodeVersionsRewriteRefused
+            type: errs.Code
+            typed: true
+            value: "0x00_03_50_14"
+        doc: The codes of the store's refusals (0.3.80.*), for errs.HasCode.
+      - doc: The store's sentinels, for errors.Is.
+        var:
+          - doc: DocumentNotFound is a miss.
+            name: DocumentNotFound
+            reexport: coredocstore.DocumentNotFound
+            type: "*errs.Error"
+          - doc: DocumentExists refuses an insertion over a taken key.
+            name: DocumentExists
+            reexport: coredocstore.DocumentExists
+            type: "*errs.Error"
+          - doc: UniqueKeyTaken refuses a write a unique index cannot file.
+            name: UniqueKeyTaken
+            reexport: coredocstore.UniqueKeyTaken
+            type: "*errs.Error"
+          - doc: DocumentKeyEmpty refuses a document whose key is empty.
+            name: DocumentKeyEmpty
+            reexport: coredocstore.DocumentKeyEmpty
+            type: "*errs.Error"
+          - doc: DocumentKeyChanged refuses an update that renames.
+            name: DocumentKeyChanged
+            reexport: coredocstore.DocumentKeyChanged
+            type: "*errs.Error"
+          - doc: IndexUnknown refuses a read of an undeclared index.
+            name: IndexUnknown
+            reexport: coredocstore.IndexUnknown
+            type: "*errs.Error"
+          - doc: IndexNotUnique refuses a Lookup on a multi-valued index.
+            name: IndexNotUnique
+            reexport: coredocstore.IndexNotUnique
+            type: "*errs.Error"
+          - doc: DocumentUndecodable reports a stored document the type no longer fits.
+            name: DocumentUndecodable
+            reexport: coredocstore.DocumentUndecodable
+            type: "*errs.Error"
+          - doc: DocumentUnencodable refuses a value encoding/json cannot encode.
+            name: DocumentUnencodable
+            reexport: coredocstore.DocumentUnencodable
+            type: "*errs.Error"
+          - doc: PersistFailed reports a write the filesystem refused.
+            name: PersistFailed
+            reexport: coredocstore.PersistFailed
+            type: "*errs.Error"
+          - doc: LoadFailed refuses files that are not a store's.
+            name: LoadFailed
+            reexport: coredocstore.LoadFailed
+            type: "*errs.Error"
+          - doc: IndexBroken refuses documents that break a unique index.
+            name: IndexBroken
+            reexport: coredocstore.IndexBroken
+            type: "*errs.Error"
+          - doc: StoreClosed refuses a call after Close.
+            name: StoreClosed
+            reexport: coredocstore.StoreClosed
+            type: "*errs.Error"
+          - doc: StoreMisconfigured refuses a configuration no store could honour.
+            name: StoreMisconfigured
+            reexport: coredocstore.StoreMisconfigured
+            type: "*errs.Error"
+          - doc: |-
+              WriteUnconfirmed reports a write that stands but may not survive a
+              power loss.
+            name: WriteUnconfirmed
+            reexport: coredocstore.WriteUnconfirmed
+            type: "*errs.Error"
+          - doc: |-
+              StatementFailed reports a call the SQL store's database did not
+              complete; the driver's error is joined beside it, its text withheld.
+            name: StatementFailed
+            reexport: coredocstore.StatementFailed
+            type: "*errs.Error"
+          - doc: KeyTooLong refuses a key longer than the SQL store's key columns hold.
+            name: KeyTooLong
+            reexport: coredocstore.KeyTooLong
+            type: "*errs.Error"
+          - doc: VersionsNotKept refuses a call on versions to a store that keeps none.
+            name: VersionsNotKept
+            reexport: coredocstore.VersionsNotKept
+            type: "*errs.Error"
+          - doc: "VersionNotFound is a miss on a version: never made, or pruned."
+            name: VersionNotFound
+            reexport: coredocstore.VersionNotFound
+            type: "*errs.Error"
+          - doc: VersionsRewriteRefused refuses what a rewrite's function returned.
+            name: VersionsRewriteRefused
+            reexport: coredocstore.VersionsRewriteRefused
+            type: "*errs.Error"
+      - alias:
+          - doc: |-
+              Store is the public alias for the document store: Get, List, Filter,
+              Entries, Lookup, Find and Stats read; Put, Insert, Replace, Update and
+              Delete write, and their Stamped forms say what the version they make
+              records; Versions and Version read a document's versions, RewriteVersions
+              rewrites its former ones; OnWrite and OnDelete announce; Fold and Close
+              bring it to rest.
+            name: Store
+            target: svcdocstore.Store[T]
+            typeParams:
+              - constraint: any
+                name: T
+      - alias:
+          - doc: |-
+              Config is the public alias for a store's configuration: Key (required), FS
+              and Path (both, or neither for a memory store), FoldAt, and Versions with
+              its Clock and Held.
+            name: Config
+            target: svcdocstore.Config[T]
+            typeParams:
+              - constraint: any
+                name: T
+      - alias:
+          - doc: |-
+              Version is the public alias for one version of a document: its Number from
+              1, the instant At the write that made it ran, the Meta that write carried,
+              and the document as JSON.
+            name: Version
+            target: coredocstore.VersionValue
+      - alias:
+          - doc: |-
+              Stamp is the public alias for what a Stamped write says about the version
+              it makes: the Meta the version records, or InPlace — no version.
+            name: Stamp
+            target: coredocstore.StampValue
+      - alias:
+          - doc: |-
+              IndexSpec is the public alias for one secondary index's declaration, built
+              by [Unique] or [Index] and given to [Open].
+            name: IndexSpec
+            target: coredocstore.IndexSpec[T]
+            typeParams:
+              - constraint: any
+                name: T
+      - alias:
+          - doc: Entry is the public alias for one stored document as JSON, with its key.
+            name: Entry
+            target: coredocstore.EntryValue
+      - alias:
+          - doc: |-
+              Stats is the public alias for what a store says about itself: documents,
+              pending overlay entries, folds, and the last automatic fold's failure.
+            name: Stats
+            target: svcdocstore.StatsValue
+      - alias:
+          - doc: |-
+              SQLStore is the public alias for the document store over SQL: Get, List,
+              Filter, Entries, Count, Lookup and Find read; Put, Insert, Replace, Update
+              and Delete write, and their Stamped forms say what the version they make
+              records; Versions, Version and RewriteVersions as for [Store]; OnWrite and
+              OnDelete announce once the write's transaction commits; Reindex files the
+              stored documents again. Every call takes a context.
+            name: SQLStore
+            target: svcdocstore.SQLStore[T]
+            typeParams:
+              - constraint: any
+                name: T
+      - alias:
+          - doc: |-
+              SQLConfig is the public alias for a SQL store's configuration: Key,
+              Transactor, Dialect and Table (required), IndexKey, and Versions with its
+              Clock and Held.
+            name: SQLConfig
+            target: svcdocstore.SQLConfig[T]
+            typeParams:
+              - constraint: any
+                name: T
+      - alias:
+          - doc: |-
+              Collection is the public alias for the port of a store whose calls take no
+              context, which [Store] implements: Get, List, Filter, Entries, Lookup and
+              Find; Put, Insert, Replace, Update and Delete; OnWrite and OnDelete. It is
+              what a caller depends on to stand a double in for a [Store]; Stats, Fold
+              and Close are the engine's own.
+            name: Collection
+            target: coredocstore.Collection[T]
+            typeParams:
+              - constraint: any
+                name: T
+      - alias:
+          - doc: |-
+              Versioned is the public alias for the sibling of [Collection] that reads and
+              writes a document's versions without a context, which [Store] implements:
+              the four Stamped writes, Versions, Version and RewriteVersions.
+            name: Versioned
+            target: coredocstore.Versioned[T]
+            typeParams:
+              - constraint: any
+                name: T
+      - alias:
+          - doc: |-
+              CollectionContext is the public alias for [Collection] with a context on
+              every call, which [SQLStore] implements; Count and Reindex are the engine's
+              own.
+            name: CollectionContext
+            target: coredocstore.CollectionContext[T]
+            typeParams:
+              - constraint: any
+                name: T
+      - alias:
+          - doc: |-
+              VersionedContext is the public alias for [Versioned] with a context on every
+              call, which [SQLStore] implements beside [CollectionContext].
+            name: VersionedContext
+            target: coredocstore.VersionedContext[T]
+            typeParams:
+              - constraint: any
+                name: T
+      - alias:
+          - doc: |-
+              Announcer is the public alias for the pair of hooks both engines answer
+              exactly as they are: OnWrite and OnDelete.
+            name: Announcer
+            target: coredocstore.Announcer
+      - func:
+          doc: |-
+            Open builds a store from cfg with the secondary indexes given: in memory
+            without a filesystem, otherwise loaded from it — the snapshot, the overlay
+            replayed on top, the indexes rebuilt. It creates the directories the store
+            lives in, 0700, and writes its files 0600.
+          forward: svcdocstore.Open
+          in:
+            - name: cfg
+              type: Config[T]
+            - name: indexes
+              type: IndexSpec[T]
+          name: Open
+          out:
+            - type: "*Store[T]"
+            - type: error
+          typeParams:
+            - constraint: any
+              name: T
+          variadic: true
+      - func:
+          doc: |-
+            OpenSQL builds a store over SQL from cfg with the secondary indexes given,
+            declared as for [Open]. It sends no statement: its tables are
+            [SQLMigration]'s, run by the caller's Migrator before the store is used.
+          forward: svcdocstore.OpenSQL
+          in:
+            - name: cfg
+              type: SQLConfig[T]
+            - name: indexes
+              type: IndexSpec[T]
+          name: OpenSQL
+          out:
+            - type: "*SQLStore[T]"
+            - type: error
+          typeParams:
+            - constraint: any
+              name: T
+          variadic: true
+      - func:
+          doc: |-
+            SQLMigration returns the migration that creates the two tables a SQL store
+            named table keeps on dialect, numbered version for the caller's own version
+            table. Its Down drops both, and every document in them. Every statement does
+            nothing when its table exists, so a run MySQL's implicit commit stopped
+            halfway completes when it runs again.
+          forward: svcdocstore.SQLMigration
+          in:
+            - name: dialect
+              type: sql.Dialect
+            - name: table
+              type: string
+            - name: version
+              type: uint64
+          name: SQLMigration
+          out:
+            - type: sql.Migration
+            - type: error
+      - func:
+          doc: |-
+            SQLVersionsMigration returns the migration that creates the table a SQL
+            store named table keeps its versions in on dialect, numbered version for the
+            caller's own version table, beside [SQLMigration]'s. A store opened with
+            [SQLConfig].Versions needs it. Its Down drops the table, and every version
+            in it: run it to turn versions off for good.
+          forward: svcdocstore.SQLVersionsMigration
+          in:
+            - name: dialect
+              type: sql.Dialect
+            - name: table
+              type: string
+            - name: version
+              type: uint64
+          name: SQLVersionsMigration
+          out:
+            - type: sql.Migration
+            - type: error
+      - func:
+          doc: |-
+            Unique declares a unique index over the one key key returns. An empty key is
+            not indexed, so any number of documents may have none.
+          forward: coredocstore.Unique
+          in:
+            - name: name
+              type: string
+            - name: key
+              type: func(T) string
+          name: Unique
+          out:
+            - type: IndexSpec[T]
+          typeParams:
+            - constraint: any
+              name: T
+      - func:
+          doc: |-
+            Index declares an index where a document may have several keys and a key
+            several documents. Empty keys are not indexed.
+          forward: coredocstore.Index
+          in:
+            - name: name
+              type: string
+            - name: keys
+              type: func(T) []string
+          name: Index
+          out:
+            - type: IndexSpec[T]
+          typeParams:
+            - constraint: any
+              name: T
     imports:
       coredocstore: github.com/kitsunium/sdk/internal/core/data/docstore
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       sql: github.com/kitsunium/sdk/pkg/v1/data/sql
       svcdocstore: github.com/kitsunium/sdk/internal/service/data/docstore
     path: github.com/kitsunium/sdk/pkg/v1/data/docstore
-    variables:
-      - name: DocumentNotFound
-        type: "*errs.Error"
-      - name: DocumentExists
-        type: "*errs.Error"
-      - name: UniqueKeyTaken
-        type: "*errs.Error"
-      - name: DocumentKeyEmpty
-        type: "*errs.Error"
-      - name: DocumentKeyChanged
-        type: "*errs.Error"
-      - name: IndexUnknown
-        type: "*errs.Error"
-      - name: IndexNotUnique
-        type: "*errs.Error"
-      - name: DocumentUndecodable
-        type: "*errs.Error"
-      - name: DocumentUnencodable
-        type: "*errs.Error"
-      - name: PersistFailed
-        type: "*errs.Error"
-      - name: LoadFailed
-        type: "*errs.Error"
-      - name: IndexBroken
-        type: "*errs.Error"
-      - name: StoreClosed
-        type: "*errs.Error"
-      - name: StoreMisconfigured
-        type: "*errs.Error"
-      - name: WriteUnconfirmed
-        type: "*errs.Error"
-      - name: StatementFailed
-        type: "*errs.Error"
-      - name: KeyTooLong
-        type: "*errs.Error"
-      - name: VersionsNotKept
-        type: "*errs.Error"
-      - name: VersionNotFound
-        type: "*errs.Error"
-      - name: VersionsRewriteRefused
-        type: "*errs.Error"

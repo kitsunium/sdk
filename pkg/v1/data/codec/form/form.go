@@ -37,8 +37,6 @@
 package form
 
 import (
-	coreform "github.com/kitsunium/sdk/internal/core/data/codec/form"
-	"github.com/kitsunium/sdk/internal/kernel/errs"
 	// The implementation registers itself with the codec registry as it is
 	// initialised; importing it is what registers the format.
 	_ "github.com/kitsunium/sdk/internal/service/data/codec/form"
@@ -49,26 +47,3 @@ import (
 // Marshal, config.FSSource's string, i18n.LoadFS's codec.Format — without a
 // conversion.
 const Format = "form"
-
-// The error codes, range 0.3.40.*, declared in the core (ADR 0160).
-const (
-	// CodeValueInvalid is 0.3.40.1: the value or the target is not
-	// url.Values-shaped.
-	CodeValueInvalid errs.Code = coreform.CodeFormValueInvalid
-	// CodeUnmarshalFailed is 0.3.40.2: a malformed escape, a ';' separator, or
-	// a decode bound exceeded.
-	CodeUnmarshalFailed errs.Code = coreform.CodeFormUnmarshalFailed
-	// CodeMultiValue is 0.3.40.3: a repeated key decoded into a
-	// map[string]string.
-	CodeMultiValue errs.Code = coreform.CodeFormMultiValue
-)
-
-// The sentinels, for errors.Is: each carries the code of the same name.
-var (
-	// ValueInvalid is the sentinel of [CodeValueInvalid].
-	ValueInvalid = coreform.ValueInvalid
-	// UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].
-	UnmarshalFailed = coreform.UnmarshalFailed
-	// MultiValue is the sentinel of [CodeMultiValue].
-	MultiValue = coreform.MultiValue
-)

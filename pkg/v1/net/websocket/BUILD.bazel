@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "websocket",
-    srcs = ["websocket.go"],
+    srcs = [
+        "facade_gen.go",
+        "websocket.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/net/websocket",
     visibility = ["//visibility:public"],
     deps = [

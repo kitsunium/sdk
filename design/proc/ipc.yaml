@@ -292,45 +292,92 @@ packages:
         name: Dialer
         struct:
           unexported: true
-  - aliases:
-      - name: Config
-        target: svcipc.Config
-      - name: Peer
-        target: coreipc.PeerValue
-      - name: Conn
-        target: coreipc.Conn
-      - name: Listener
-        target: coreipc.Listener
-      - name: Dialer
-        target: coreipc.Dialer
-    constants:
-      - name: CodeMisconfigured
-        type: errs.Code
-        value: "0x00_03_5B_01"
-      - name: CodeDirectoryUnsafe
-        type: errs.Code
-        value: "0x00_03_5B_02"
-      - name: CodeInUse
-        type: errs.Code
-        value: "0x00_03_5B_03"
-      - name: CodeListenFailed
-        type: errs.Code
-        value: "0x00_03_5B_04"
-      - name: CodePeerRefused
-        type: errs.Code
-        value: "0x00_03_5B_05"
-      - name: CodeDialFailed
-        type: errs.Code
-        value: "0x00_03_5B_06"
-      - name: CodeEndpointForeign
-        type: errs.Code
-        value: "0x00_03_5B_07"
-      - name: CodeClosed
-        type: errs.Code
-        value: "0x00_03_5B_08"
-      - name: CodePathUnsafe
-        type: errs.Code
-        value: "0x00_03_5B_09"
+  - facade:
+      - const:
+          - name: CodeMisconfigured
+            reexport: coreipc.CodeMisconfigured
+            type: errs.Code
+            typed: true
+            value: "0x00_03_5B_01"
+          - name: CodeDirectoryUnsafe
+            reexport: coreipc.CodeDirectoryUnsafe
+            type: errs.Code
+            typed: true
+            value: "0x00_03_5B_02"
+          - name: CodeInUse
+            reexport: coreipc.CodeInUse
+            type: errs.Code
+            typed: true
+            value: "0x00_03_5B_03"
+          - name: CodeListenFailed
+            reexport: coreipc.CodeListenFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_5B_04"
+          - name: CodePeerRefused
+            reexport: coreipc.CodePeerRefused
+            type: errs.Code
+            typed: true
+            value: "0x00_03_5B_05"
+          - name: CodeDialFailed
+            reexport: coreipc.CodeDialFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_5B_06"
+          - name: CodeEndpointForeign
+            reexport: coreipc.CodeEndpointForeign
+            type: errs.Code
+            typed: true
+            value: "0x00_03_5B_07"
+          - name: CodeClosed
+            reexport: coreipc.CodeClosed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_5B_08"
+          - name: CodePathUnsafe
+            reexport: coreipc.CodePathUnsafe
+            type: errs.Code
+            typed: true
+            value: "0x00_03_5B_09"
+        doc: |-
+          The codes, for errs.HasCode: a caller must tell "another daemon runs"
+          (IN_USE: talk to it) from "the directory or the path to it is not private"
+          (fix the deployment, or look for whoever planted a component) from "nobody
+          answers" (start one).
+      - alias:
+          - doc: |-
+              Config is where a private socket lives and who, besides its own
+              account, may use it — the engine's configuration, shared by both ends.
+            name: Config
+            target: svcipc.Config
+          - doc: Peer is who is at the other end of a connection, as the kernel says.
+            name: Peer
+            target: coreipc.PeerValue
+          - doc: Conn is a connection with its peer's identity.
+            name: Conn
+            target: coreipc.Conn
+          - doc: |-
+              Listener is the accepting end of a private socket: it hands out the
+              connections of admitted peers only, and closes and counts the others.
+            name: Listener
+            target: coreipc.Listener
+          - doc: |-
+              Dialer is the connecting end of a private socket: it reaches the
+              listener its configuration names, and refuses one it cannot trust
+              before a byte is sent.
+            name: Dialer
+            target: coreipc.Dialer
+      - func:
+          doc: |-
+            RuntimeDir is where an application's private sockets belong on this
+            machine. It creates nothing.
+          forward: svcipc.RuntimeDir
+          in:
+            - name: app
+              type: string
+          name: RuntimeDir
+          out:
+            - type: string
     functions:
       - in:
           - name: cfg
@@ -355,12 +402,6 @@ packages:
         out:
           - type: "*Conn"
           - type: error
-      - in:
-          - name: app
-            type: string
-        name: RuntimeDir
-        out:
-          - type: string
     imports:
       coreipc: github.com/kitsunium/sdk/internal/core/proc/ipc
       errs: github.com/kitsunium/sdk/internal/kernel/errs

@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "ipc",
-    srcs = ["ipc.go"],
+    srcs = [
+        "facade_gen.go",
+        "ipc.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/proc/ipc",
     visibility = ["//visibility:public"],
     deps = [

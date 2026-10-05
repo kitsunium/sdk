@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "form",
-    srcs = ["form.go"],
+    srcs = [
+        "facade_gen.go",
+        "form.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/data/codec/form",
     visibility = ["//visibility:public"],
     deps = [

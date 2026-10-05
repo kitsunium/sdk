@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "memlimit",
-    srcs = ["memlimit.go"],
+    srcs = [
+        "facade_gen.go",
+        "memlimit.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/proc/memlimit",
     visibility = ["//visibility:public"],
     deps = [

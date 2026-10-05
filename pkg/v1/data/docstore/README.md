@@ -248,7 +248,7 @@ var (
 ```
 
 <a name="SQLMigration"></a>
-## func [SQLMigration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L377>)
+## func [SQLMigration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go#L210>)
 
 ```go
 func SQLMigration(dialect sql.Dialect, table string, version uint64) (sql.Migration, error)
@@ -257,7 +257,7 @@ func SQLMigration(dialect sql.Dialect, table string, version uint64) (sql.Migrat
 SQLMigration returns the migration that creates the two tables a SQL store named table keeps on dialect, numbered version for the caller's own version table. Its Down drops both, and every document in them. Every statement does nothing when its table exists, so a run MySQL's implicit commit stopped halfway completes when it runs again.
 
 <a name="SQLVersionsMigration"></a>
-## func [SQLVersionsMigration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L387>)
+## func [SQLVersionsMigration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go#L219>)
 
 ```go
 func SQLVersionsMigration(dialect sql.Dialect, table string, version uint64) (sql.Migration, error)
@@ -266,7 +266,7 @@ func SQLVersionsMigration(dialect sql.Dialect, table string, version uint64) (sq
 SQLVersionsMigration returns the migration that creates the table a SQL store named table keeps its versions in on dialect, numbered version for the caller's own version table, beside [SQLMigration](<#SQLMigration>)'s. A store opened with [SQLConfig](<#SQLConfig>).Versions needs it. Its Down drops the table, and every version in it: run it to turn versions off for good.
 
 <a name="Announcer"></a>
-## type [Announcer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L353>)
+## type [Announcer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go#L188>)
 
 Announcer is the public alias for the pair of hooks both engines answer exactly as they are: OnWrite and OnDelete.
 
@@ -275,7 +275,7 @@ type Announcer = coredocstore.Announcer
 ```
 
 <a name="Collection"></a>
-## type [Collection](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L335>)
+## type [Collection](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go#L170>)
 
 Collection is the public alias for the port of a store whose calls take no context, which [Store](<#Store>) implements: Get, List, Filter, Entries, Lookup and Find; Put, Insert, Replace, Update and Delete; OnWrite and OnDelete. It is what a caller depends on to stand a double in for a [Store](<#Store>); Stats, Fold and Close are the engine's own.
 
@@ -284,7 +284,7 @@ type Collection[T any] = coredocstore.Collection[T]
 ```
 
 <a name="CollectionContext"></a>
-## type [CollectionContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L345>)
+## type [CollectionContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go#L180>)
 
 CollectionContext is the public alias for [Collection](<#Collection>) with a context on every call, which [SQLStore](<#SQLStore>) implements; Count and Reindex are the engine's own.
 
@@ -293,7 +293,7 @@ type CollectionContext[T any] = coredocstore.CollectionContext[T]
 ```
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L295>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go#L130>)
 
 Config is the public alias for a store's configuration: Key \(required\), FS and Path \(both, or neither for a memory store\), FoldAt, and Versions with its Clock and Held.
 
@@ -302,7 +302,7 @@ type Config[T any] = svcdocstore.Config[T]
 ```
 
 <a name="Entry"></a>
-## type [Entry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L311>)
+## type [Entry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go#L146>)
 
 Entry is the public alias for one stored document as JSON, with its key.
 
@@ -311,7 +311,7 @@ type Entry = coredocstore.EntryValue
 ```
 
 <a name="IndexSpec"></a>
-## type [IndexSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L308>)
+## type [IndexSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go#L143>)
 
 IndexSpec is the public alias for one secondary index's declaration, built by [Unique](<#Unique>) or [Index](<#Index>) and given to [Open](<#Open>).
 
@@ -320,7 +320,7 @@ type IndexSpec[T any] = coredocstore.IndexSpec[T]
 ```
 
 <a name="Index"></a>
-### func [Index](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L401>)
+### func [Index](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go#L231>)
 
 ```go
 func Index[T any](name string, keys func(T) []string) IndexSpec[T]
@@ -329,7 +329,7 @@ func Index[T any](name string, keys func(T) []string) IndexSpec[T]
 Index declares an index where a document may have several keys and a key several documents. Empty keys are not indexed.
 
 <a name="Unique"></a>
-### func [Unique](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L394>)
+### func [Unique](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go#L225>)
 
 ```go
 func Unique[T any](name string, key func(T) string) IndexSpec[T]
@@ -338,7 +338,7 @@ func Unique[T any](name string, key func(T) string) IndexSpec[T]
 Unique declares a unique index over the one key key returns. An empty key is not indexed, so any number of documents may have none.
 
 <a name="SQLConfig"></a>
-## type [SQLConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L328>)
+## type [SQLConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go#L163>)
 
 SQLConfig is the public alias for a SQL store's configuration: Key, Transactor, Dialect and Table \(required\), IndexKey, and Versions with its Clock and Held.
 
@@ -347,7 +347,7 @@ type SQLConfig[T any] = svcdocstore.SQLConfig[T]
 ```
 
 <a name="SQLStore"></a>
-## type [SQLStore](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L323>)
+## type [SQLStore](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go#L158>)
 
 SQLStore is the public alias for the document store over SQL: Get, List, Filter, Entries, Count, Lookup and Find read; Put, Insert, Replace, Update and Delete write, and their Stamped forms say what the version they make records; Versions, Version and RewriteVersions as for [Store](<#Store>); OnWrite and OnDelete announce once the write's transaction commits; Reindex files the stored documents again. Every call takes a context.
 
@@ -356,7 +356,7 @@ type SQLStore[T any] = svcdocstore.SQLStore[T]
 ```
 
 <a name="OpenSQL"></a>
-### func [OpenSQL](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L367>)
+### func [OpenSQL](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go#L201>)
 
 ```go
 func OpenSQL[T any](cfg SQLConfig[T], indexes ...IndexSpec[T]) (*SQLStore[T], error)
@@ -365,7 +365,7 @@ func OpenSQL[T any](cfg SQLConfig[T], indexes ...IndexSpec[T]) (*SQLStore[T], er
 OpenSQL builds a store over SQL from cfg with the secondary indexes given, declared as for [Open](<#Open>). It sends no statement: its tables are [SQLMigration](<#SQLMigration>)'s, run by the caller's Migrator before the store is used.
 
 <a name="Stamp"></a>
-## type [Stamp](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L304>)
+## type [Stamp](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go#L139>)
 
 Stamp is the public alias for what a Stamped write says about the version it makes: the Meta the version records, or InPlace — no version.
 
@@ -374,7 +374,7 @@ type Stamp = coredocstore.StampValue
 ```
 
 <a name="Stats"></a>
-## type [Stats](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L315>)
+## type [Stats](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go#L150>)
 
 Stats is the public alias for what a store says about itself: documents, pending overlay entries, folds, and the last automatic fold's failure.
 
@@ -383,7 +383,7 @@ type Stats = svcdocstore.StatsValue
 ```
 
 <a name="Store"></a>
-## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L290>)
+## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go#L125>)
 
 Store is the public alias for the document store: Get, List, Filter, Entries, Lookup, Find and Stats read; Put, Insert, Replace, Update and Delete write, and their Stamped forms say what the version they make records; Versions and Version read a document's versions, RewriteVersions rewrites its former ones; OnWrite and OnDelete announce; Fold and Close bring it to rest.
 
@@ -392,7 +392,7 @@ type Store[T any] = svcdocstore.Store[T]
 ```
 
 <a name="Open"></a>
-### func [Open](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L359>)
+### func [Open](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go#L194>)
 
 ```go
 func Open[T any](cfg Config[T], indexes ...IndexSpec[T]) (*Store[T], error)
@@ -401,7 +401,7 @@ func Open[T any](cfg Config[T], indexes ...IndexSpec[T]) (*Store[T], error)
 Open builds a store from cfg with the secondary indexes given: in memory without a filesystem, otherwise loaded from it — the snapshot, the overlay replayed on top, the indexes rebuilt. It creates the directories the store lives in, 0700, and writes its files 0600.
 
 <a name="Version"></a>
-## type [Version](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L300>)
+## type [Version](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go#L135>)
 
 Version is the public alias for one version of a document: its Number from 1, the instant At the write that made it ran, the Meta that write carried, and the document as JSON.
 
@@ -410,7 +410,7 @@ type Version = coredocstore.VersionValue
 ```
 
 <a name="Versioned"></a>
-## type [Versioned](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L340>)
+## type [Versioned](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go#L175>)
 
 Versioned is the public alias for the sibling of [Collection](<#Collection>) that reads and writes a document's versions without a context, which [Store](<#Store>) implements: the four Stamped writes, Versions, Version and RewriteVersions.
 
@@ -419,7 +419,7 @@ type Versioned[T any] = coredocstore.Versioned[T]
 ```
 
 <a name="VersionedContext"></a>
-## type [VersionedContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L349>)
+## type [VersionedContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go#L184>)
 
 VersionedContext is the public alias for [Versioned](<#Versioned>) with a context on every call, which [SQLStore](<#SQLStore>) implements beside [CollectionContext](<#CollectionContext>).
 

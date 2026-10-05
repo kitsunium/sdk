@@ -49,39 +49,3 @@
 // other. And it is per PROCESS: N replicas each running it still send N calls
 // to whatever is behind them.
 package singleflight
-
-import (
-	ksingleflight "github.com/kitsunium/sdk/internal/kernel/concur/singleflight"
-)
-
-// Group deduplicates concurrent calls that name the same key. The zero value is
-// ready to use; a Group must not be copied after first use, and is safe for
-// any number of goroutines.
-//
-// [Group].Do runs fn for a key unless the same key is already in flight, in
-// which case it waits for that call instead; it returns the value, whether the
-// result came from a call this goroutine did not start (shared), and the
-// error. fn receives the shared call's context, not the caller's — see the
-// package documentation. A caller whose ctx ends while it waits returns
-// ctx.Err() and leaves the call running; a result already available is
-// delivered even if ctx is also done.
-//
-// [Group].Forget retires a key so the NEXT Do starts a fresh call — for an
-// in-flight call known to answer a question that has since changed; callers
-// already waiting keep waiting and still receive its result.
-//
-// [Group].InFlight reports how many keys a Do arriving now would join rather
-// than start — a point-in-time reading for a gauge or a test, never for a
-// decision, and not a count of running calls (a forgotten or abandoned call
-// may still run).
-type Group[K comparable, V any] = ksingleflight.Group[K, V]
-
-// PanicValue carries a panic raised inside a deduplicated call to every caller
-// waiting on it: Raised is the value the panic carried, verbatim, and Stack the
-// stack of the goroutine that ran fn, captured at recovery. Its String method
-// renders both, so an uncaught re-raise prints fn's stack rather than only the
-// waiter's.
-//
-// It is deliberately NOT an error, and carries no error code: a panic is a
-// programming fault, not a runtime condition.
-type PanicValue = ksingleflight.PanicValue

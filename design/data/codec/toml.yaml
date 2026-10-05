@@ -143,28 +143,60 @@ packages:
     variables:
       - name: Codec
         type: codec.Codec
-  - aliases:
-      - name: LocalDate
-        target: toml.LocalDate
-      - name: LocalTime
-        target: toml.LocalTime
-      - name: LocalDateTime
-        target: toml.LocalDateTime
-    constants:
+  - constants:
       - name: Format
         value: "\"toml\""
-      - name: CodeMarshalFailed
-        type: errs.Code
-        value: "0x00_03_05_01"
-      - name: CodeUnmarshalFailed
-        type: errs.Code
-        value: "0x00_03_05_02"
+    facade:
+      - const:
+          - doc: CodeMarshalFailed identifies a Go value TOML cannot represent (0.3.5.1).
+            name: CodeMarshalFailed
+            reexport: coretoml.CodeTOMLMarshalFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_05_01"
+          - doc: |-
+              CodeUnmarshalFailed identifies a document the decoder cannot read, or a
+              value its target cannot hold (0.3.5.2).
+            name: CodeUnmarshalFailed
+            reexport: coretoml.CodeTOMLUnmarshalFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_05_02"
+        doc: The error codes, range 0.3.5.*, declared in the core (ADR 0160).
+      - doc: "The sentinels, for errors.Is: each carries the code of the same name."
+        var:
+          - doc: MarshalFailed is the sentinel of [CodeMarshalFailed].
+            name: MarshalFailed
+            reexport: coretoml.MarshalFailed
+            type: "*errs.Error"
+          - doc: UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].
+            name: UnmarshalFailed
+            reexport: coretoml.UnmarshalFailed
+            type: "*errs.Error"
+      - alias:
+          - doc: |-
+              LocalDate is a calendar day in no time zone: what a TOML local date such as
+              1979-05-27 decodes to in an untyped target. It writes and reads itself as
+              YYYY-MM-DD, through String, MarshalText and UnmarshalText, and AsTime places
+              it at midnight in a zone.
+            name: LocalDate
+            target: toml.LocalDate
+      - alias:
+          - doc: |-
+              LocalTime is a time of day in no time zone: what a TOML local time such as
+              07:32:00.999 decodes to in an untyped target. Precision is the number of
+              fractional digits the document wrote, which String writes back.
+            name: LocalTime
+            target: toml.LocalTime
+      - alias:
+          - doc: |-
+              LocalDateTime is a date and a time of day in no time zone: what a TOML local
+              date-time such as 1979-05-27T07:32:00 decodes to in an untyped target. AsTime
+              places it in a zone.
+            name: LocalDateTime
+            target: toml.LocalDateTime
     imports:
+      coretoml: github.com/kitsunium/sdk/internal/core/data/codec/toml
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       toml: github.com/kitsunium/sdk/internal/service/data/codec/toml
     path: github.com/kitsunium/sdk/pkg/v1/data/codec/toml
-    variables:
-      - name: MarshalFailed
-        type: "*errs.Error"
-      - name: UnmarshalFailed
-        type: "*errs.Error"

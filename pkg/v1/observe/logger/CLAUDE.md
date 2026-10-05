@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-05T12:00:00Z -->
 # pkg/v1/observe/logger/
 
 ## Purpose
@@ -8,6 +8,14 @@ Stable v1 public API for SDK logging. Everything consumer code needs — `Logger
 ## Contents
 
 ```
+facade_gen.go  — kit's (ADR 0165), from design/observe/logger.yaml's facade:: every
+                 alias, re-export and forwarder the files below name, and what
+                 builder.go, caller.go, kind.go, levelvar.go and memory.go held before
+                 their package comments joined their neighbours' — Builder alias,
+                 Build, LogAttrs (slice overload), Kind alias + its nine constants,
+                 WithCaller, Leveler / LevelVar aliases, NewLevelVar, ParseLevel
+                 (strict; never echoes its input), RecordSnapshot / MemorySink
+                 aliases, NewMemorySink (the test sink)
 logger.go      — Logger / Attr / Level aliases, 4 Level constants, Config struct,
                  NewText, Default, DefaultMulti (console + one file, through NewMulti),
                  Debug|Info|Warn|Error emission helpers,
@@ -25,23 +33,15 @@ fromconfig.go  — Format alias, FromConfig (build a Logger from a config blob),
                  + parseLevel / decodeTopology / resolveSinks helpers (ADR 0014 §D5)
 topology.go    — TopologyConfig DTO (Level + Writers)
 writer_entry.go — WriterEntryConfig DTO (Name + raw Options map)
-builder.go     — Builder alias, Build (chainable hot path), LogAttrs (slice overload)
 tracecontext.go — TraceContext / TraceContextSource aliases + TraceContextFromContext,
                  the ONLY bridge between the logging and tracing domains (ADR 0062)
-kind.go        — Kind alias + KindAny|Bool|Duration|Float64|Int64|String|Time|Uint64|Group
-                 constants (what Value.Kind() returns; needed to assert on MemorySink records)
 version.go     — Version var (ldflags injection point), FrameworkVersion()
 codes_gen.go   — CodeWriterRequired / CodeSinkConfigRequired / CodeWriterSpecInvalid
                  / CodeTopologyInvalid (range 1.1.0.*)
 codes_gen.go   — WriterRequired / SinkConfigRequired / WriterSpecInvalid /
                  TopologyInvalid sentinels (errs.Define)
-caller.go      — WithCaller (adds the emitting call site; skip reserves frames for
-                 wrapper layers)
 encoder.go     — NewTextEncoder / NewJSONEncoder (one JSON object per line, groups
                  flattened to dotted keys)
-levelvar.go    — Leveler / LevelVar aliases, NewLevelVar (a floor retuned without
-                 rebuilding), ParseLevel (strict; never echoes its input)
-memory.go      — RecordSnapshot / MemorySink aliases + NewMemorySink, the test sink
 witherror.go   — WithError: an error as error.code / error.reason / error.public /
                  error.trail.<n> Attrs, or one error.message for a non-SDK error
 BENCH.md       — the emit-path benchmarks (logger_bench_test.go), then a separate
@@ -199,6 +199,10 @@ ADR 0039 never came into play.
   it is: `logger.String("upstream_trace_id", id)`.
 - Import `internal/core/observe/trace` from anywhere else in the logging tree.
   `tracecontext.go` is the only place the two domains meet, on purpose.
+
+## Generated
+
+`facade_gen.go` is kit's (ADR 0165): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/observe/logger.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the package comment and the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
 
 ## Verification
 

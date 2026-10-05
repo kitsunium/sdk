@@ -956,264 +956,596 @@ packages:
             name: E
           - constraint: comparable
             name: S
-  - aliases:
-      - name: Store
-        target: corestm.Store[E]
-        typeParams:
-          - constraint: any
-            name: E
-      - name: Journal
-        target: corestm.Journal[S]
-        typeParams:
-          - constraint: comparable
-            name: S
-      - name: Record
-        target: corestm.RecordValue[S]
-        typeParams:
-          - constraint: comparable
-            name: S
-      - name: Step
-        target: corestm.StepValue[S]
-        typeParams:
-          - constraint: comparable
-            name: S
-      - name: Trigger
-        target: corestm.Trigger
-      - name: Definition
-        target: svcstm.MachineSpec[E, S]
-        typeParams:
-          - constraint: any
-            name: E
-          - constraint: comparable
-            name: S
-      - name: Transition
-        target: svcstm.TransitionValue[S]
-        typeParams:
-          - constraint: comparable
-            name: S
-      - name: Change
-        target: svcstm.ChangeValue[E, S]
-        typeParams:
-          - constraint: any
-            name: E
-          - constraint: comparable
-            name: S
-      - name: Config
-        target: svcstm.Config[E, S]
-        typeParams:
-          - constraint: any
-            name: E
-          - constraint: comparable
-            name: S
-      - name: Firing
-        target: svcstm.FiringValue[S]
-        typeParams:
-          - constraint: comparable
-            name: S
-      - name: Machine
-        target: svcstm.StateMachine[E, S]
-        typeParams:
-          - constraint: any
-            name: E
-          - constraint: comparable
-            name: S
-      - name: Wake
-        target: svcstm.Wake
-      - name: LoopEvent
-        target: svcstm.LoopEvent
-      - name: LoopEventKind
-        target: svcstm.LoopEventKind
-    constants:
-      - name: CreateEvent
-        type: string
-        value: "\"create\""
-      - name: DefaultMinGap
-        type: time.Duration
-        value: "1000000000"
-      - name: DefaultMaxHistory
-        type: int
-        value: "20"
-      - name: TriggerStart
-        type: Trigger
-        value: "1"
-      - name: TriggerEvent
-        type: Trigger
-        value: "2"
-      - name: TriggerDelay
-        type: Trigger
-        value: "3"
-      - name: TriggerDeadline
-        type: Trigger
-        value: "4"
-      - name: TriggerGuard
-        type: Trigger
-        value: "5"
-      - name: WakeStart
-        type: Wake
-        value: "1"
-      - name: WakeDue
-        type: Wake
-        value: "2"
-      - name: WakeChange
-        type: Wake
-        value: "3"
-      - name: LoopRunStarted
-        type: LoopEventKind
-        value: "1"
-      - name: LoopRunEnded
-        type: LoopEventKind
-        value: "2"
-      - name: LoopWaiting
-        type: LoopEventKind
-        value: "3"
-      - name: CodeTriggerUnknown
-        type: errs.Code
-        value: "0x00_02_38_01"
-      - name: CodeTransitionRefused
-        type: errs.Code
-        value: "0x00_03_58_01"
-      - name: CodeEntityMissing
-        type: errs.Code
-        value: "0x00_03_58_02"
-      - name: CodeEntityExists
-        type: errs.Code
-        value: "0x00_03_58_03"
-      - name: CodeKeyEmpty
-        type: errs.Code
-        value: "0x00_03_58_04"
-      - name: CodeHookFailed
-        type: errs.Code
-        value: "0x00_03_58_05"
-      - name: CodeHookPanicked
-        type: errs.Code
-        value: "0x00_03_58_06"
-      - name: CodeHookChangedState
-        type: errs.Code
-        value: "0x00_03_58_07"
-      - name: CodeHookChangedKey
-        type: errs.Code
-        value: "0x00_03_58_08"
-      - name: CodeReentrant
-        type: errs.Code
-        value: "0x00_03_58_09"
-      - name: CodeStoreFailed
-        type: errs.Code
-        value: "0x00_03_58_0A"
-      - name: CodeJournalFailed
-        type: errs.Code
-        value: "0x00_03_58_0B"
-      - name: CodeLoopRunning
-        type: errs.Code
-        value: "0x00_03_58_0C"
-      - name: CodeFunctionPanicked
-        type: errs.Code
-        value: "0x00_03_58_0D"
-      - name: CodeInitialMissing
-        type: errs.Code
-        value: "0x00_03_58_0E"
-      - name: CodeEventInvalid
-        type: errs.Code
-        value: "0x00_03_58_0F"
-      - name: CodeTransitionDuplicate
-        type: errs.Code
-        value: "0x00_03_58_10"
-      - name: CodeDelayInvalid
-        type: errs.Code
-        value: "0x00_03_58_11"
-      - name: CodeFunctionMissing
-        type: errs.Code
-        value: "0x00_03_58_12"
-      - name: CodeStoreMissing
-        type: errs.Code
-        value: "0x00_03_58_13"
-      - name: CodeWaitAbandoned
-        type: errs.Code
-        value: "0x00_03_58_14"
-      - name: CodeLoopPanicked
-        type: errs.Code
-        value: "0x00_03_58_15"
-    functions:
-      - in:
-          - name: state
-            type: func(*E) *S
-        name: Define
-        out:
-          - type: "*Definition[E, S]"
-        typeParams:
-          - constraint: any
-            name: E
-          - constraint: comparable
-            name: S
-      - in:
-          - name: ctx
-            type: context.Context
-          - name: def
-            type: "*Definition[E, S]"
-          - name: cfg
-            type: "*Config[E, S]"
-        name: New
-        out:
-          - type: "*Machine[E, S]"
-          - type: error
-        typeParams:
-          - constraint: any
-            name: E
-          - constraint: comparable
-            name: S
-      - in:
-          - name: name
+  - facade:
+      - const:
+          - doc: |-
+              CreateEvent is the event name of the step that brings a new entity into its
+              initial state; no declared transition may take it.
+            name: CreateEvent
+            reexport: corestm.CreateEvent
             type: string
-        name: ParseTrigger
-        out:
-          - type: Trigger
-          - type: error
+            typed: true
+            value: "\"create\""
+      - const:
+          - doc: |-
+              DefaultMinGap is the least time between two runs of the loop when
+              Config.MinGap is not positive.
+            name: DefaultMinGap
+            reexport: svcstm.DefaultMinGap
+            type: time.Duration
+            typed: true
+            value: "1000000000"
+      - const:
+          - doc: |-
+              DefaultMaxHistory is how many transitions a Record keeps when
+              Config.MaxHistory is not positive.
+            name: DefaultMaxHistory
+            reexport: svcstm.DefaultMaxHistory
+            type: int
+            typed: true
+            value: "20"
+      - const:
+          - doc: "TriggerStart is a Start: the entity entered its initial state."
+            name: TriggerStart
+            reexport: corestm.TriggerStart
+            type: Trigger
+            typed: true
+            value: "1"
+      - const:
+          - doc: TriggerEvent is an event a caller fired.
+            name: TriggerEvent
+            reexport: corestm.TriggerEvent
+            type: Trigger
+            typed: true
+            value: "2"
+      - const:
+          - doc: TriggerDelay is a duration the entity spent in its state (Definition.After).
+            name: TriggerDelay
+            reexport: corestm.TriggerDelay
+            type: Trigger
+            typed: true
+            value: "3"
+      - const:
+          - doc: |-
+              TriggerDeadline is the arrival of an instant the entity carries
+              (Definition.At).
+            name: TriggerDeadline
+            reexport: corestm.TriggerDeadline
+            type: Trigger
+            typed: true
+            value: "4"
+      - const:
+          - doc: |-
+              TriggerGuard is a guard on the entity that held after a write
+              (Definition.When).
+            name: TriggerGuard
+            reexport: corestm.TriggerGuard
+            type: Trigger
+            typed: true
+            value: "5"
+      - const:
+          - doc: WakeStart is the first run, when Run starts.
+            name: WakeStart
+            reexport: svcstm.WakeStart
+            type: Wake
+            typed: true
+            value: "1"
+      - const:
+          - doc: "WakeDue is a run the loop woke for by itself: a transition fell due."
+            name: WakeDue
+            reexport: svcstm.WakeDue
+            type: Wake
+            typed: true
+            value: "2"
+      - const:
+          - doc: WakeChange is a run a write woke the loop for.
+            name: WakeChange
+            reexport: svcstm.WakeChange
+            type: Wake
+            typed: true
+            value: "3"
+      - const:
+          - doc: "LoopRunStarted reports a run starting: Wake and Started are set."
+            name: LoopRunStarted
+            reexport: svcstm.LoopRunStarted
+            type: LoopEventKind
+            typed: true
+            value: "1"
+      - const:
+          - doc: "LoopRunEnded reports a run ending: every field is set."
+            name: LoopRunEnded
+            reexport: svcstm.LoopRunEnded
+            type: LoopEventKind
+            typed: true
+            value: "2"
+      - const:
+          - doc: |-
+              LoopWaiting reports the loop re-armed to wake earlier, at Next, because a
+              write arrived while it slept.
+            name: LoopWaiting
+            reexport: svcstm.LoopWaiting
+            type: LoopEventKind
+            typed: true
+            value: "3"
+      - const:
+          - doc: CodeTriggerUnknown identifies a name ParseTrigger does not know (0.2.56.1).
+            name: CodeTriggerUnknown
+            reexport: corestm.CodeTriggerUnknown
+            type: errs.Code
+            typed: true
+            value: "0x00_02_38_01"
+      - const:
+          - doc: |-
+              CodeTransitionRefused identifies an event no declared transition takes from
+              the entity's state (0.3.88.1).
+            name: CodeTransitionRefused
+            reexport: corestm.CodeTransitionRefused
+            type: errs.Code
+            typed: true
+            value: "0x00_03_58_01"
+      - const:
+          - doc: |-
+              CodeEntityMissing identifies a key the store holds no entity under — never
+              there, or deleted while a transition ran (0.3.88.2).
+            name: CodeEntityMissing
+            reexport: corestm.CodeEntityMissing
+            type: errs.Code
+            typed: true
+            value: "0x00_03_58_02"
+      - const:
+          - doc: |-
+              CodeEntityExists identifies a Start whose entity's key the store already
+              holds (0.3.88.3).
+            name: CodeEntityExists
+            reexport: corestm.CodeEntityExists
+            type: errs.Code
+            typed: true
+            value: "0x00_03_58_03"
+      - const:
+          - doc: |-
+              CodeKeyEmpty identifies an entity handed to Start whose key is empty
+              (0.3.88.4).
+            name: CodeKeyEmpty
+            reexport: corestm.CodeKeyEmpty
+            type: errs.Code
+            typed: true
+            value: "0x00_03_58_04"
+      - const:
+          - doc: CodeHookFailed identifies a hook that returned an error (0.3.88.5).
+            name: CodeHookFailed
+            reexport: corestm.CodeHookFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_58_05"
+      - const:
+          - doc: |-
+              CodeHookPanicked identifies a hook that panicked, recovered as an error
+              (0.3.88.6).
+            name: CodeHookPanicked
+            reexport: corestm.CodeHookPanicked
+            type: errs.Code
+            typed: true
+            value: "0x00_03_58_06"
+      - const:
+          - doc: |-
+              CodeHookChangedState identifies an OnEnter hook that changed the state it
+              was entering (0.3.88.7).
+            name: CodeHookChangedState
+            reexport: corestm.CodeHookChangedState
+            type: errs.Code
+            typed: true
+            value: "0x00_03_58_07"
+      - const:
+          - doc: |-
+              CodeHookChangedKey identifies an OnEnter hook that changed its entity's key
+              (0.3.88.8).
+            name: CodeHookChangedKey
+            reexport: corestm.CodeHookChangedKey
+            type: errs.Code
+            typed: true
+            value: "0x00_03_58_08"
+      - const:
+          - doc: |-
+              CodeReentrant identifies a Start or Fire through the context an OnEnter hook
+              of the same machine was given (0.3.88.9).
+            name: CodeReentrant
+            reexport: corestm.CodeReentrant
+            type: errs.Code
+            typed: true
+            value: "0x00_03_58_09"
+      - const:
+          - doc: |-
+              CodeStoreFailed identifies a Store method that returned an error
+              (0.3.88.10).
+            name: CodeStoreFailed
+            reexport: corestm.CodeStoreFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_58_0A"
+      - const:
+          - doc: |-
+              CodeJournalFailed identifies a Journal method that returned an error
+              (0.3.88.11).
+            name: CodeJournalFailed
+            reexport: corestm.CodeJournalFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_58_0B"
+      - const:
+          - doc: |-
+              CodeLoopRunning identifies a Run or a Step asked for while another is going
+              (0.3.88.12).
+            name: CodeLoopRunning
+            reexport: corestm.CodeLoopRunning
+            type: errs.Code
+            typed: true
+            value: "0x00_03_58_0C"
+      - const:
+          - doc: |-
+              CodeFunctionPanicked identifies a guard or an instant function that panicked
+              (0.3.88.13).
+            name: CodeFunctionPanicked
+            reexport: corestm.CodeFunctionPanicked
+            type: errs.Code
+            typed: true
+            value: "0x00_03_58_0D"
+      - const:
+          - doc: |-
+              CodeInitialMissing identifies a definition with no initial state
+              (0.3.88.14).
+            name: CodeInitialMissing
+            reexport: corestm.CodeInitialMissing
+            type: errs.Code
+            typed: true
+            value: "0x00_03_58_0E"
+      - const:
+          - doc: |-
+              CodeEventInvalid identifies a transition declared with an empty event name,
+              or CreateEvent (0.3.88.15).
+            name: CodeEventInvalid
+            reexport: corestm.CodeEventInvalid
+            type: errs.Code
+            typed: true
+            value: "0x00_03_58_0F"
+      - const:
+          - doc: |-
+              CodeTransitionDuplicate identifies a second transition declared for one
+              event from one state (0.3.88.16).
+            name: CodeTransitionDuplicate
+            reexport: corestm.CodeTransitionDuplicate
+            type: errs.Code
+            typed: true
+            value: "0x00_03_58_10"
+      - const:
+          - doc: |-
+              CodeDelayInvalid identifies an After with a duration that is not positive
+              (0.3.88.17).
+            name: CodeDelayInvalid
+            reexport: corestm.CodeDelayInvalid
+            type: errs.Code
+            typed: true
+            value: "0x00_03_58_11"
+      - const:
+          - doc: |-
+              CodeFunctionMissing identifies a nil accessor, guard, instant function, hook
+              or definition (0.3.88.18).
+            name: CodeFunctionMissing
+            reexport: corestm.CodeFunctionMissing
+            type: errs.Code
+            typed: true
+            value: "0x00_03_58_12"
+      - const:
+          - doc: CodeStoreMissing identifies a configuration with no store (0.3.88.19).
+            name: CodeStoreMissing
+            reexport: corestm.CodeStoreMissing
+            type: errs.Code
+            typed: true
+            value: "0x00_03_58_13"
+      - const:
+          - doc: |-
+              CodeWaitAbandoned identifies a caller whose context ended while the entity
+              was busy (0.3.88.20).
+            name: CodeWaitAbandoned
+            reexport: corestm.CodeWaitAbandoned
+            type: errs.Code
+            typed: true
+            value: "0x00_03_58_14"
+      - const:
+          - doc: |-
+              CodeLoopPanicked identifies a panic the loop recovered from a store, journal
+              or observer call (0.3.88.21).
+            name: CodeLoopPanicked
+            reexport: corestm.CodeLoopPanicked
+            type: errs.Code
+            typed: true
+            value: "0x00_03_58_15"
+      - var:
+          - doc: TriggerUnknown refuses a trigger name outside the five.
+            name: TriggerUnknown
+            reexport: corestm.TriggerUnknown
+            type: "*errs.Error"
+          - blank: true
+            doc: |-
+              TransitionRefused is returned when no transition by that event leaves the
+              entity's state (409); the entity comes back with it.
+            name: TransitionRefused
+            reexport: corestm.TransitionRefused
+            type: "*errs.Error"
+          - blank: true
+            doc: |-
+              EntityMissing is returned for a key the store holds no entity under, or one
+              deleted while the transition ran (404).
+            name: EntityMissing
+            reexport: corestm.EntityMissing
+            type: "*errs.Error"
+          - blank: true
+            doc: EntityExists is returned by a Start over a key already taken (409).
+            name: EntityExists
+            reexport: corestm.EntityExists
+            type: "*errs.Error"
+          - blank: true
+            doc: KeyEmpty is returned by a Start with an entity whose key is empty.
+            name: KeyEmpty
+            reexport: corestm.KeyEmpty
+            type: "*errs.Error"
+          - blank: true
+            doc: HookFailed accompanies a hook's own error, joined beside it.
+            name: HookFailed
+            reexport: corestm.HookFailed
+            type: "*errs.Error"
+          - blank: true
+            doc: |-
+              HookPanicked is a hook that panicked and was recovered; the value and the
+              stack are log-only fields.
+            name: HookPanicked
+            reexport: corestm.HookPanicked
+            type: "*errs.Error"
+          - blank: true
+            doc: HookChangedState is an OnEnter hook that changed the state it was entering.
+            name: HookChangedState
+            reexport: corestm.HookChangedState
+            type: "*errs.Error"
+          - blank: true
+            doc: HookChangedKey is an OnEnter hook that changed its entity's key.
+            name: HookChangedKey
+            reexport: corestm.HookChangedKey
+            type: "*errs.Error"
+          - blank: true
+            doc: |-
+              Reentrant is a Start or Fire through the context an OnEnter hook of the same
+              machine was given: refused, not deadlocked.
+            name: Reentrant
+            reexport: corestm.Reentrant
+            type: "*errs.Error"
+          - blank: true
+            doc: StoreFailed wraps an error a Store method returned.
+            name: StoreFailed
+            reexport: corestm.StoreFailed
+            type: "*errs.Error"
+          - blank: true
+            doc: JournalFailed wraps an error a Journal method returned.
+            name: JournalFailed
+            reexport: corestm.JournalFailed
+            type: "*errs.Error"
+          - blank: true
+            doc: LoopRunning is returned by Run or Step while another is going.
+            name: LoopRunning
+            reexport: corestm.LoopRunning
+            type: "*errs.Error"
+          - blank: true
+            doc: |-
+              FunctionPanicked is a guard or an instant function that panicked; the entity
+              is retried after its backoff.
+            name: FunctionPanicked
+            reexport: corestm.FunctionPanicked
+            type: "*errs.Error"
+          - blank: true
+            doc: |-
+              InitialMissing is returned by New for a definition that never called
+              Initial.
+            name: InitialMissing
+            reexport: corestm.InitialMissing
+            type: "*errs.Error"
+          - blank: true
+            doc: |-
+              EventInvalid is a transition declared with an empty event name, or
+              CreateEvent.
+            name: EventInvalid
+            reexport: corestm.EventInvalid
+            type: "*errs.Error"
+          - blank: true
+            doc: TransitionDuplicate is one event declared twice from one state.
+            name: TransitionDuplicate
+            reexport: corestm.TransitionDuplicate
+            type: "*errs.Error"
+          - blank: true
+            doc: DelayInvalid is an After with a duration that is not positive.
+            name: DelayInvalid
+            reexport: corestm.DelayInvalid
+            type: "*errs.Error"
+          - blank: true
+            doc: |-
+              FunctionMissing is a nil accessor, guard, instant function, hook or
+              definition.
+            name: FunctionMissing
+            reexport: corestm.FunctionMissing
+            type: "*errs.Error"
+          - blank: true
+            doc: StoreMissing is returned by New when Config.Store is nil.
+            name: StoreMissing
+            reexport: corestm.StoreMissing
+            type: "*errs.Error"
+          - blank: true
+            doc: |-
+              WaitAbandoned is returned when the context ended while the entity was busy
+              (503); errors.Is still finds the context's error.
+            name: WaitAbandoned
+            reexport: corestm.WaitAbandoned
+            type: "*errs.Error"
+          - blank: true
+            doc: |-
+              LoopPanicked is a panic the loop recovered from a store, journal or observer
+              call: the entity is retried after its backoff, unless it came from the
+              observer's end, once the transition was stored.
+            name: LoopPanicked
+            reexport: corestm.LoopPanicked
+            type: "*errs.Error"
+      - alias:
+          - doc: |-
+              Store is the port your entities are read and written through. It is frozen
+              at five methods.
+            name: Store
+            target: corestm.Store[E]
+            typeParams:
+              - constraint: any
+                name: E
+      - alias:
+          - doc: |-
+              Journal is the port the machine keeps its records in, beside your store.
+              It is frozen at three methods.
+            name: Journal
+            target: corestm.Journal[S]
+            typeParams:
+              - constraint: comparable
+                name: S
+      - alias:
+          - doc: |-
+              Record is what the machine keeps about one entity: its state, since when,
+              and its latest transitions.
+            name: Record
+            target: corestm.RecordValue[S]
+            typeParams:
+              - constraint: comparable
+                name: S
+      - alias:
+          - doc: Step is one transition in a Record's history.
+            name: Step
+            target: corestm.StepValue[S]
+            typeParams:
+              - constraint: comparable
+                name: S
+      - alias:
+          - doc: |-
+              Trigger says what fired a transition: a start, an event, a delay, a
+              deadline or a guard.
+            name: Trigger
+            target: corestm.Trigger
+      - alias:
+          - doc: "Definition declares a machine: its states, transitions and hooks."
+            name: Definition
+            target: svcstm.MachineSpec[E, S]
+            typeParams:
+              - constraint: any
+                name: E
+              - constraint: comparable
+                name: S
+      - alias:
+          - doc: Transition is a declared transition, as Definition.Transitions reads it back.
+            name: Transition
+            target: svcstm.TransitionValue[S]
+            typeParams:
+              - constraint: comparable
+                name: S
+      - alias:
+          - doc: Change is a stored transition, as an OnTransition hook receives it.
+            name: Change
+            target: svcstm.ChangeValue[E, S]
+            typeParams:
+              - constraint: any
+                name: E
+              - constraint: comparable
+                name: S
+      - alias:
+          - doc: Config parameterises New. Only Store is required.
+            name: Config
+            target: svcstm.Config[E, S]
+            typeParams:
+              - constraint: any
+                name: E
+              - constraint: comparable
+                name: S
+      - alias:
+          - doc: |-
+              Firing is a transition the machine's own loop is about to fire, as
+              Config.Observe is told it.
+            name: Firing
+            target: svcstm.FiringValue[S]
+            typeParams:
+              - constraint: comparable
+                name: S
+      - alias:
+          - doc: Machine runs a Definition over a Store. It is safe for concurrent use.
+            name: Machine
+            target: svcstm.StateMachine[E, S]
+            typeParams:
+              - constraint: any
+                name: E
+              - constraint: comparable
+                name: S
+      - alias:
+          - doc: Wake says why a run of the loop started.
+            name: Wake
+            target: svcstm.Wake
+      - alias:
+          - doc: LoopEvent is what Config.OnLoop is told about Run.
+            name: LoopEvent
+            target: svcstm.LoopEvent
+      - alias:
+          - doc: LoopEventKind says what a LoopEvent reports.
+            name: LoopEventKind
+            target: svcstm.LoopEventKind
+      - func:
+          doc: |-
+            Define starts the declaration of a machine over entities of type E. state
+            returns a pointer to the entity's state field.
+          forward: svcstm.NewMachineSpec
+          in:
+            - name: state
+              type: func(*E) *S
+          name: Define
+          out:
+            - type: "*Definition[E, S]"
+          typeParams:
+            - constraint: any
+              name: E
+            - constraint: comparable
+              name: S
+      - func:
+          doc: |-
+            New checks def and cfg and opens a machine over cfg.Store: it reads the
+            journal and every entity once, reconciles them and schedules what is due.
+            Every problem of the declaration is returned at once, joined.
+          forward: svcstm.NewStateMachine
+          in:
+            - name: ctx
+              type: context.Context
+            - name: def
+              type: "*Definition[E, S]"
+            - name: cfg
+              type: "*Config[E, S]"
+          name: New
+          out:
+            - type: "*Machine[E, S]"
+            - type: error
+          typeParams:
+            - constraint: any
+              name: E
+            - constraint: comparable
+              name: S
+      - func:
+          doc: |-
+            ParseTrigger reads a trigger's name — "start", "event", "delay", "deadline"
+            or "guard" — as Trigger.String writes it.
+          forward: corestm.ParseTrigger
+          in:
+            - name: name
+              type: string
+          name: ParseTrigger
+          out:
+            - type: Trigger
+            - type: error
     imports:
       corestm: github.com/kitsunium/sdk/internal/core/app/statemachine
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       svcstm: github.com/kitsunium/sdk/internal/service/app/statemachine
     path: github.com/kitsunium/sdk/pkg/v1/app/statemachine
-    variables:
-      - name: TriggerUnknown
-        type: "*errs.Error"
-      - name: TransitionRefused
-        type: "*errs.Error"
-      - name: EntityMissing
-        type: "*errs.Error"
-      - name: EntityExists
-        type: "*errs.Error"
-      - name: KeyEmpty
-        type: "*errs.Error"
-      - name: HookFailed
-        type: "*errs.Error"
-      - name: HookPanicked
-        type: "*errs.Error"
-      - name: HookChangedState
-        type: "*errs.Error"
-      - name: HookChangedKey
-        type: "*errs.Error"
-      - name: Reentrant
-        type: "*errs.Error"
-      - name: StoreFailed
-        type: "*errs.Error"
-      - name: JournalFailed
-        type: "*errs.Error"
-      - name: LoopRunning
-        type: "*errs.Error"
-      - name: FunctionPanicked
-        type: "*errs.Error"
-      - name: InitialMissing
-        type: "*errs.Error"
-      - name: EventInvalid
-        type: "*errs.Error"
-      - name: TransitionDuplicate
-        type: "*errs.Error"
-      - name: DelayInvalid
-        type: "*errs.Error"
-      - name: FunctionMissing
-        type: "*errs.Error"
-      - name: StoreMissing
-        type: "*errs.Error"
-      - name: WaitAbandoned
-        type: "*errs.Error"
-      - name: LoopPanicked
-        type: "*errs.Error"

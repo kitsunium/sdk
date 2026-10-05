@@ -1282,29 +1282,95 @@ packages:
     variables:
       - name: Signer
         type: corecrypto.Signer
-  - aliases:
-      - name: Key
-        target: corecrypto.Key
-    constants:
-      - name: KeyLen
-        type: int
-        value: "32"
+  - constants:
       - name: AESGCM
         type: Algorithm
         value: "\"aes-256-gcm\""
       - name: XChaCha20Poly1305
         type: Algorithm
         value: "\"xchacha20poly1305\""
+    facade:
+      - const:
+          - doc: KeyLen is the required symmetric key length in bytes (256-bit).
+            name: KeyLen
+            reexport: corecrypto.KeyLen
+            type: int
+            typed: true
+            value: "32"
+      - alias:
+          - doc: |-
+              Key is an opaque, redacting 256-bit symmetric key. Build one with NewKey; its
+              String output is always "<redacted>".
+            name: Key
+            target: corecrypto.Key
+      - func:
+          doc: |-
+            NewKey builds a Key from raw, which must be exactly KeyLen (32) bytes. A wrong
+            length returns InvalidKey; the bytes are copied defensively.
+          forward: corecrypto.NewKey
+          in:
+            - name: raw
+              type: "[]byte"
+          name: NewKey
+          out:
+            - name: key
+              type: Key
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            Open decrypts a box produced by Seal/SealAs under k, verifying aad, and
+            returns the plaintext. The algorithm is read from the box — the caller never
+            names it. Any failure returns the single non-oracle DecryptionFailed.
+          forward: corecrypto.Open
+          in:
+            - name: k
+              type: Key
+            - name: box
+            - name: aad
+              type: "[]byte"
+          name: Open
+          out:
+            - name: plaintext
+              type: "[]byte"
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            WrapKey seals the data key dek at rest under passphrase, returning the frozen
+            "$kenv$" envelope string. The KEK is stretched from passphrase with
+            PBKDF2-SHA256 and the dek is sealed under AES-256-GCM; the envelope header is
+            bound as AAD so tampering is detected on UnwrapKey.
+          forward: keyenvelope.WrapKey
+          in:
+            - name: passphrase
+              type: "[]byte"
+            - name: dek
+              type: Key
+          name: WrapKey
+          out:
+            - name: envelope
+              type: string
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            UnwrapKey recovers the data key sealed in envelope under passphrase. A
+            structurally invalid envelope returns InvalidKeyEnvelope; a wrong passphrase
+            returns the non-oracle DecryptionFailed.
+          forward: keyenvelope.UnwrapKey
+          in:
+            - name: passphrase
+              type: "[]byte"
+            - name: envelope
+              type: string
+          name: UnwrapKey
+          out:
+            - name: dek
+              type: Key
+            - name: err
+              type: error
     functions:
-      - in:
-          - name: raw
-            type: "[]byte"
-        name: NewKey
-        out:
-          - name: key
-            type: Key
-          - name: err
-            type: error
       - in:
           - name: k
             type: Key
@@ -1328,18 +1394,6 @@ packages:
         name: SealAs
         out:
           - name: box
-            type: "[]byte"
-          - name: err
-            type: error
-      - in:
-          - name: k
-            type: Key
-          - name: box
-          - name: aad
-            type: "[]byte"
-        name: Open
-        out:
-          - name: plaintext
             type: "[]byte"
           - name: err
             type: error
@@ -1369,54 +1423,49 @@ packages:
             type: io.Reader
           - name: err
             type: error
-      - in:
-          - name: passphrase
-            type: "[]byte"
-          - name: dek
-            type: Key
-        name: WrapKey
-        out:
-          - name: envelope
-            type: string
-          - name: err
-            type: error
-      - in:
-          - name: passphrase
-            type: "[]byte"
-          - name: envelope
-            type: string
-        name: UnwrapKey
-        out:
-          - name: dek
-            type: Key
-          - name: err
-            type: error
     imports:
       corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+      keyenvelope: github.com/kitsunium/sdk/internal/service/crypto/key/keyenvelope
     path: github.com/kitsunium/sdk/pkg/v1/crypto
     types:
       - name: Algorithm
         underlying: corecrypto.Algorithm
-  - aliases:
-      - name: Key
-        target: corecrypto.Key
-    constants:
-      - name: KeyLen
-        type: int
-        value: "32"
+  - constants:
       - name: X25519
         type: Algorithm
         value: "\"x25519\""
+    facade:
+      - const:
+          - doc: |-
+              KeyLen is the required symmetric key length in bytes (256-bit) — the length of
+              the Key SharedKey returns and that [NewKey] enforces.
+            name: KeyLen
+            reexport: corecrypto.KeyLen
+            type: int
+            typed: true
+            value: "32"
+      - alias:
+          - doc: |-
+              Key is an opaque, redacting 256-bit symmetric key — the same key type the AEAD
+              surface uses. SharedKey returns one; its String output is "<redacted>".
+            name: Key
+            target: corecrypto.Key
+      - func:
+          doc: |-
+            NewKey builds a Key from raw, which must be exactly KeyLen (32) bytes. A wrong
+            length returns InvalidKey; the bytes are copied defensively. Use it to
+            round-trip a SharedKey-shaped value without importing an unrelated facade.
+          forward: corecrypto.NewKey
+          in:
+            - name: raw
+              type: "[]byte"
+          name: NewKey
+          out:
+            - name: key
+              type: Key
+            - name: err
+              type: error
     functions:
-      - in:
-          - name: raw
-            type: "[]byte"
-        name: NewKey
-        out:
-          - name: key
-            type: Key
-          - name: err
-            type: error
       - in:
           - name: a
             type: Algorithm
@@ -1447,12 +1496,7 @@ packages:
     types:
       - name: Algorithm
         underlying: corecrypto.Algorithm
-  - aliases:
-      - name: DigestWriter
-        target: stdhash.DigestWriter
-      - name: VerifyingReader
-        target: stdhash.VerifyingReader
-    constants:
+  - constants:
       - name: SHA256
         type: Algorithm
         value: "\"sha256\""
@@ -1468,6 +1512,19 @@ packages:
       - name: FNV1a64
         type: Algorithm
         value: "\"fnv1a-64\""
+    facade:
+      - alias:
+          - doc: |-
+              DigestWriter tees writes into both a destination io.Writer and a running hash,
+              exposing the digest of everything written so far. See [NewDigestWriter].
+            name: DigestWriter
+            target: stdhash.DigestWriter
+      - alias:
+          - doc: |-
+              VerifyingReader wraps a source reader and verifies its digest against an
+              expected value on the final (EOF) read. See [NewVerifyingReader].
+            name: VerifyingReader
+            target: stdhash.VerifyingReader
     functions:
       - in:
           - name: a
@@ -1531,28 +1588,49 @@ packages:
     types:
       - name: Algorithm
         underlying: corecrypto.Algorithm
-  - aliases:
-      - name: Key
-        target: corecrypto.Key
-      - name: KeyTree
-        target: keytree.KeyTree
-    constants:
-      - name: KeyLen
-        type: int
-        value: "32"
+  - constants:
       - name: HKDFSHA256
         type: Algorithm
         value: "\"hkdf-sha256\""
+    facade:
+      - const:
+          - doc: |-
+              KeyLen is the required symmetric key length in bytes (256-bit) — the length
+              [NewKey] enforces.
+            name: KeyLen
+            reexport: corecrypto.KeyLen
+            type: int
+            typed: true
+            value: "32"
+      - alias:
+          - doc: |-
+              Key is an opaque, redacting 256-bit symmetric key — the master a KeyTree
+              derives from and the type DeriveKey returns. Build one with [NewKey].
+            name: Key
+            target: corecrypto.Key
+      - func:
+          doc: |-
+            NewKey builds a Key from raw, which must be exactly KeyLen (32) bytes. A wrong
+            length returns InvalidKey; the bytes are copied defensively. Use it to build
+            the master a KeyTree derives from without importing an unrelated facade.
+          forward: corecrypto.NewKey
+          in:
+            - name: raw
+              type: "[]byte"
+          name: NewKey
+          out:
+            - name: key
+              type: Key
+            - name: err
+              type: error
+      - alias:
+          - doc: |-
+              KeyTree is the path-addressed hierarchical key-derivation node, re-exported
+              from the service layer. Build one with NewKeyTree; Child descends a path and
+              DeriveKey yields a 32-byte key at the current node.
+            name: KeyTree
+            target: keytree.KeyTree
     functions:
-      - in:
-          - name: raw
-            type: "[]byte"
-        name: NewKey
-        out:
-          - name: key
-            type: Key
-          - name: err
-            type: error
       - in:
           - name: a
             type: Algorithm
@@ -1584,26 +1662,41 @@ packages:
     types:
       - name: Algorithm
         underlying: corecrypto.Algorithm
-  - aliases:
-      - name: Key
-        target: corecrypto.Key
-    constants:
-      - name: KeyLen
-        type: int
-        value: "32"
+  - constants:
       - name: HMACSHA256
         type: Algorithm
         value: "\"hmac-sha256\""
+    facade:
+      - const:
+          - doc: |-
+              KeyLen is the required symmetric key length in bytes (256-bit) — the length
+              [NewKey] enforces.
+            name: KeyLen
+            reexport: corecrypto.KeyLen
+            type: int
+            typed: true
+            value: "32"
+      - alias:
+          - doc: |-
+              Key is an opaque, redacting 256-bit symmetric key — the same key type used by
+              the AEAD surface. Build one with [NewKey]; its String output is "<redacted>".
+            name: Key
+            target: corecrypto.Key
+      - func:
+          doc: |-
+            NewKey builds a Key from raw, which must be exactly KeyLen (32) bytes. A wrong
+            length returns InvalidKey; the bytes are copied defensively.
+          forward: corecrypto.NewKey
+          in:
+            - name: raw
+              type: "[]byte"
+          name: NewKey
+          out:
+            - name: key
+              type: Key
+            - name: err
+              type: error
     functions:
-      - in:
-          - name: raw
-            type: "[]byte"
-        name: NewKey
-        out:
-          - name: key
-            type: Key
-          - name: err
-            type: error
       - in:
           - name: a
             type: Algorithm
@@ -1641,6 +1734,48 @@ packages:
       - name: PBKDF2SHA256
         type: Algorithm
         value: "\"pbkdf2-sha256\""
+    facade:
+      - func:
+          doc: |-
+            Verify reports whether password matches the stored PHC hash, comparing in
+            constant time. The scheme is read from phc. A malformed phc or unregistered
+            scheme returns an error; a genuine mismatch is (false, nil).
+          forward: corecrypto.VerifyPassword
+          in:
+            - name: password
+              type: "[]byte"
+            - name: phc
+              type: string
+          name: Verify
+          out:
+            - name: ok
+              type: bool
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            IsCommon reports whether password is one of the ten thousand most common
+            passwords, compared case-insensitively — PASSWORD as password. The empty
+            password is not: refusing it is a length rule's job.
+          forward: commonpw.IsCommon
+          in:
+            - name: password
+              type: "[]byte"
+          name: IsCommon
+          out:
+            - type: bool
+      - func:
+          doc: |-
+            NeedsRehash reports whether the stored PHC hash was produced with cost
+            parameters weaker than its scheme's current policy — call it after a
+            successful Verify to transparently upgrade the stored hash.
+          forward: corecrypto.NeedsRehash
+          in:
+            - name: phc
+              type: string
+          name: NeedsRehash
+          out:
+            - type: bool
     functions:
       - in:
           - name: a
@@ -1653,30 +1788,8 @@ packages:
             type: string
           - name: err
             type: error
-      - in:
-          - name: password
-            type: "[]byte"
-          - name: phc
-            type: string
-        name: Verify
-        out:
-          - name: ok
-            type: bool
-          - name: err
-            type: error
-      - in:
-          - name: password
-            type: "[]byte"
-        name: IsCommon
-        out:
-          - type: bool
-      - in:
-          - name: phc
-            type: string
-        name: NeedsRehash
-        out:
-          - type: bool
     imports:
+      commonpw: github.com/kitsunium/sdk/internal/service/crypto/password/commonpw
       corecrypto: github.com/kitsunium/sdk/internal/core/crypto
     path: github.com/kitsunium/sdk/pkg/v1/crypto/password
     types:

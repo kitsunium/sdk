@@ -43,25 +43,3 @@
 // would be paid by every caller, including the many that keep a heap inside a
 // structure they already lock. The caller picks the lock, or needs none.
 package heap
-
-import (
-	kheap "github.com/kitsunium/sdk/internal/kernel/collections/heap"
-)
-
-// Heap is a binary heap ordered by the comparison given to [New].
-//
-// [Heap].Push adds an element in O(log n); [Heap].Pop removes and returns the
-// top one in O(log n), and [Heap].Peek returns it without removing it, both
-// reporting false on an empty heap; [Heap].Len counts the elements.
-//
-// The zero value is NOT usable — a heap with no comparison has no order — and
-// a Heap is not safe for concurrent use.
-type Heap[T any] = kheap.Heap[T]
-
-// New builds an empty [Heap] ordered by cmp, which returns a negative number
-// when a sorts before b, zero on a tie and a positive one otherwise. A nil cmp
-// panics here, at the call that made the mistake.
-func New[T any](cmp func(a, b T) int) *Heap[T] {
-	//: the kernel owns the heap; this facade only forwards.
-	return kheap.New(cmp)
-}

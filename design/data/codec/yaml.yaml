@@ -163,62 +163,126 @@ packages:
   - constants:
       - name: Format
         value: "\"yaml\""
-      - name: CodeMarshalFailed
-        type: errs.Code
-        value: "0x00_03_04_01"
-      - name: CodeUnmarshalFailed
-        type: errs.Code
-        value: "0x00_03_04_02"
-      - name: CodeAnchorRefused
-        type: errs.Code
-        value: "0x00_03_04_03"
-      - name: CodeAliasRefused
-        type: errs.Code
-        value: "0x00_03_04_04"
-      - name: CodeTagRefused
-        type: errs.Code
-        value: "0x00_03_04_05"
-      - name: CodeMergeKeyRefused
-        type: errs.Code
-        value: "0x00_03_04_06"
-      - name: CodeMultiDocRefused
-        type: errs.Code
-        value: "0x00_03_04_07"
-      - name: CodeComplexKeyRefused
-        type: errs.Code
-        value: "0x00_03_04_08"
-      - name: CodeDirectiveRefused
-        type: errs.Code
-        value: "0x00_03_04_09"
-      - name: CodeDuplicateKey
-        type: errs.Code
-        value: "0x00_03_04_0A"
-      - name: CodeLeadingZeroRefused
-        type: errs.Code
-        value: "0x00_03_04_0B"
+    facade:
+      - const:
+          - doc: CodeMarshalFailed identifies a value the encoder cannot write (0.3.4.1).
+            name: CodeMarshalFailed
+            reexport: coreyaml.CodeYAMLMarshalFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_04_01"
+          - doc: |-
+              CodeUnmarshalFailed identifies a document the decoder cannot read into
+              its target (0.3.4.2); every refusal below carries it in its trail.
+            name: CodeUnmarshalFailed
+            reexport: coreyaml.CodeYAMLUnmarshalFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_04_02"
+          - doc: CodeAnchorRefused identifies an anchor (0.3.4.3).
+            name: CodeAnchorRefused
+            reexport: coreyaml.CodeYAMLAnchorRefused
+            type: errs.Code
+            typed: true
+            value: "0x00_03_04_03"
+          - doc: CodeAliasRefused identifies an alias (0.3.4.4).
+            name: CodeAliasRefused
+            reexport: coreyaml.CodeYAMLAliasRefused
+            type: errs.Code
+            typed: true
+            value: "0x00_03_04_04"
+          - doc: CodeTagRefused identifies an explicit tag (0.3.4.5).
+            name: CodeTagRefused
+            reexport: coreyaml.CodeYAMLTagRefused
+            type: errs.Code
+            typed: true
+            value: "0x00_03_04_05"
+          - doc: CodeMergeKeyRefused identifies a merge key (0.3.4.6).
+            name: CodeMergeKeyRefused
+            reexport: coreyaml.CodeYAMLMergeKeyRefused
+            type: errs.Code
+            typed: true
+            value: "0x00_03_04_06"
+          - doc: CodeMultiDocRefused identifies a second document (0.3.4.7).
+            name: CodeMultiDocRefused
+            reexport: coreyaml.CodeYAMLMultiDocRefused
+            type: errs.Code
+            typed: true
+            value: "0x00_03_04_07"
+          - doc: CodeComplexKeyRefused identifies a complex mapping key (0.3.4.8).
+            name: CodeComplexKeyRefused
+            reexport: coreyaml.CodeYAMLComplexKeyRefused
+            type: errs.Code
+            typed: true
+            value: "0x00_03_04_08"
+          - doc: CodeDirectiveRefused identifies a directive (0.3.4.9).
+            name: CodeDirectiveRefused
+            reexport: coreyaml.CodeYAMLDirectiveRefused
+            type: errs.Code
+            typed: true
+            value: "0x00_03_04_09"
+          - doc: CodeDuplicateKey identifies a mapping holding one key twice (0.3.4.10).
+            name: CodeDuplicateKey
+            reexport: coreyaml.CodeYAMLDuplicateKey
+            type: errs.Code
+            typed: true
+            value: "0x00_03_04_0A"
+          - doc: |-
+              CodeLeadingZeroRefused identifies an integer with a leading zero where
+              its value matters (0.3.4.11).
+            name: CodeLeadingZeroRefused
+            reexport: coreyaml.CodeYAMLLeadingZeroRefused
+            type: errs.Code
+            typed: true
+            value: "0x00_03_04_0B"
+        doc: The error codes, range 0.3.4.*, declared in the core (ADR 0160).
+      - doc: "The sentinels, for errors.Is: each carries the code of the same name."
+        var:
+          - doc: MarshalFailed is the sentinel of [CodeMarshalFailed].
+            name: MarshalFailed
+            reexport: coreyaml.MarshalFailed
+            type: "*errs.Error"
+          - doc: UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].
+            name: UnmarshalFailed
+            reexport: coreyaml.UnmarshalFailed
+            type: "*errs.Error"
+          - doc: AnchorRefused is the sentinel of [CodeAnchorRefused].
+            name: AnchorRefused
+            reexport: coreyaml.AnchorRefused
+            type: "*errs.Error"
+          - doc: AliasRefused is the sentinel of [CodeAliasRefused].
+            name: AliasRefused
+            reexport: coreyaml.AliasRefused
+            type: "*errs.Error"
+          - doc: TagRefused is the sentinel of [CodeTagRefused].
+            name: TagRefused
+            reexport: coreyaml.TagRefused
+            type: "*errs.Error"
+          - doc: MergeKeyRefused is the sentinel of [CodeMergeKeyRefused].
+            name: MergeKeyRefused
+            reexport: coreyaml.MergeKeyRefused
+            type: "*errs.Error"
+          - doc: MultipleDocumentsRefused is the sentinel of [CodeMultiDocRefused].
+            name: MultipleDocumentsRefused
+            reexport: coreyaml.MultipleDocumentsRefused
+            type: "*errs.Error"
+          - doc: ComplexKeyRefused is the sentinel of [CodeComplexKeyRefused].
+            name: ComplexKeyRefused
+            reexport: coreyaml.ComplexKeyRefused
+            type: "*errs.Error"
+          - doc: DirectiveRefused is the sentinel of [CodeDirectiveRefused].
+            name: DirectiveRefused
+            reexport: coreyaml.DirectiveRefused
+            type: "*errs.Error"
+          - doc: DuplicateKey is the sentinel of [CodeDuplicateKey].
+            name: DuplicateKey
+            reexport: coreyaml.DuplicateKey
+            type: "*errs.Error"
+          - doc: LeadingZeroRefused is the sentinel of [CodeLeadingZeroRefused].
+            name: LeadingZeroRefused
+            reexport: coreyaml.LeadingZeroRefused
+            type: "*errs.Error"
     imports:
+      coreyaml: github.com/kitsunium/sdk/internal/core/data/codec/yaml
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/pkg/v1/data/codec/yaml
-    variables:
-      - name: MarshalFailed
-        type: "*errs.Error"
-      - name: UnmarshalFailed
-        type: "*errs.Error"
-      - name: AnchorRefused
-        type: "*errs.Error"
-      - name: AliasRefused
-        type: "*errs.Error"
-      - name: TagRefused
-        type: "*errs.Error"
-      - name: MergeKeyRefused
-        type: "*errs.Error"
-      - name: MultipleDocumentsRefused
-        type: "*errs.Error"
-      - name: ComplexKeyRefused
-        type: "*errs.Error"
-      - name: DirectiveRefused
-        type: "*errs.Error"
-      - name: DuplicateKey
-        type: "*errs.Error"
-      - name: LeadingZeroRefused
-        type: "*errs.Error"

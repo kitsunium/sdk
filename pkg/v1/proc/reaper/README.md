@@ -67,7 +67,7 @@ var (
 ```
 
 <a name="IsPID1"></a>
-## func [IsPID1](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/reaper/reaper.go#L116>)
+## func [IsPID1](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/reaper/facade_gen.go#L57>)
 
 ```go
 func IsPID1() bool
@@ -76,7 +76,7 @@ func IsPID1() bool
 IsPID1 reports whether the current process is the init process \(pid 1\). It is false on platforms where the convention does not apply.
 
 <a name="SetChildSubreaper"></a>
-## func [SetChildSubreaper](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/reaper/reaper.go#L109>)
+## func [SetChildSubreaper](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/reaper/facade_gen.go#L51>)
 
 ```go
 func SetChildSubreaper() error
@@ -85,7 +85,7 @@ func SetChildSubreaper() error
 SetChildSubreaper marks the calling process as a child subreaper so orphaned descendants reparent to it rather than to PID1. It returns [SubreaperFailed](<#ReapFailed>) on a prctl error and [UnsupportedPlatform](<#ReapFailed>) off Unix.
 
 <a name="Option"></a>
-## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/reaper/reaper.go#L73>)
+## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/reaper/facade_gen.go#L17>)
 
 Option configures a [Reaper](<#Reaper>) returned by [New](<#New>). It is an alias of the service option type so callers compose options without importing internal packages.
 
@@ -94,7 +94,7 @@ type Option = svc.Option
 ```
 
 <a name="WithOnReap"></a>
-### func [WithOnReap](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/reaper/reaper.go#L94>)
+### func [WithOnReap](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/reaper/facade_gen.go#L38>)
 
 ```go
 func WithOnReap(fn func(int)) Option
@@ -103,7 +103,7 @@ func WithOnReap(fn func(int)) Option
 WithOnReap registers fn as a post\-sweep observer receiving the number of children reaped in each sweep \(including zero\). fn must not block. On illumos and Solaris the loop also sweeps once a second, so there an idle reaper calls fn with zero once a second.
 
 <a name="Reaper"></a>
-## type [Reaper](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/reaper/reaper.go#L69>)
+## type [Reaper](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/reaper/facade_gen.go#L13>)
 
 Reaper collects terminated child processes so they do not linger as zombies — the core duty of any PID1 or subreaper. It is an alias of the core port; the concrete value is platform\-selected by [New](<#New>).
 
@@ -112,7 +112,7 @@ type Reaper = coreproc.Reaper
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/reaper/reaper.go#L101>)
+### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/reaper/facade_gen.go#L44>)
 
 ```go
 func New(opts ...Option) Reaper

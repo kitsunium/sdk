@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T16:42:12Z -->
+<!-- updated: 2026-10-05T12:00:00Z -->
 # pkg/v1/app/mail/
 
 ## Purpose
@@ -71,6 +71,10 @@ and `errs.CodeOf` covers the rest. This mirrors `pkg/v1/data/vfs`.
   network from an `init`.
 - **Do NOT hand-edit `README.md`.** Edit the package doc comment in `mail.go`
   and run `go generate ./v1/app/mail/` (rule 10).
+
+## Generated
+
+`facade_gen.go` is kit's (ADR 0165): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/app/mail.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the package comment and the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
 
 ## Verification
 

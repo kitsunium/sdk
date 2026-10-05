@@ -308,7 +308,7 @@ var (
 ```
 
 <a name="Change"></a>
-## type [Change](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/statemachine.go#L321>)
+## type [Change](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go#L252>)
 
 Change is a stored transition, as an OnTransition hook receives it.
 
@@ -317,7 +317,7 @@ type Change[E any, S comparable] = svcstm.ChangeValue[E, S]
 ```
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/statemachine.go#L324>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go#L255>)
 
 Config parameterises New. Only Store is required.
 
@@ -326,7 +326,7 @@ type Config[E any, S comparable] = svcstm.Config[E, S]
 ```
 
 <a name="Definition"></a>
-## type [Definition](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/statemachine.go#L315>)
+## type [Definition](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go#L246>)
 
 Definition declares a machine: its states, transitions and hooks.
 
@@ -335,7 +335,7 @@ type Definition[E any, S comparable] = svcstm.MachineSpec[E, S]
 ```
 
 <a name="Define"></a>
-### func [Define](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/statemachine.go#L344>)
+### func [Define](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go#L275>)
 
 ```go
 func Define[E any, S comparable](state func(*E) *S) *Definition[E, S]
@@ -344,7 +344,7 @@ func Define[E any, S comparable](state func(*E) *S) *Definition[E, S]
 Define starts the declaration of a machine over entities of type E. state returns a pointer to the entity's state field.
 
 <a name="Firing"></a>
-## type [Firing](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/statemachine.go#L328>)
+## type [Firing](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go#L259>)
 
 Firing is a transition the machine's own loop is about to fire, as Config.Observe is told it.
 
@@ -353,7 +353,7 @@ type Firing[S comparable] = svcstm.FiringValue[S]
 ```
 
 <a name="Journal"></a>
-## type [Journal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/statemachine.go#L301>)
+## type [Journal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go#L232>)
 
 Journal is the port the machine keeps its records in, beside your store. It is frozen at three methods.
 
@@ -362,7 +362,7 @@ type Journal[S comparable] = corestm.Journal[S]
 ```
 
 <a name="LoopEvent"></a>
-## type [LoopEvent](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/statemachine.go#L337>)
+## type [LoopEvent](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go#L268>)
 
 LoopEvent is what Config.OnLoop is told about Run.
 
@@ -371,7 +371,7 @@ type LoopEvent = svcstm.LoopEvent
 ```
 
 <a name="LoopEventKind"></a>
-## type [LoopEventKind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/statemachine.go#L340>)
+## type [LoopEventKind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go#L271>)
 
 LoopEventKind says what a LoopEvent reports.
 
@@ -398,7 +398,7 @@ const LoopWaiting LoopEventKind = svcstm.LoopWaiting
 ```
 
 <a name="Machine"></a>
-## type [Machine](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/statemachine.go#L331>)
+## type [Machine](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go#L262>)
 
 Machine runs a Definition over a Store. It is safe for concurrent use.
 
@@ -407,7 +407,7 @@ type Machine[E any, S comparable] = svcstm.StateMachine[E, S]
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/statemachine.go#L352>)
+### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go#L282>)
 
 ```go
 func New[E any, S comparable](ctx context.Context, def *Definition[E, S], cfg *Config[E, S]) (*Machine[E, S], error)
@@ -416,7 +416,7 @@ func New[E any, S comparable](ctx context.Context, def *Definition[E, S], cfg *C
 New checks def and cfg and opens a machine over cfg.Store: it reads the journal and every entity once, reconciles them and schedules what is due. Every problem of the declaration is returned at once, joined.
 
 <a name="Record"></a>
-## type [Record](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/statemachine.go#L305>)
+## type [Record](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go#L236>)
 
 Record is what the machine keeps about one entity: its state, since when, and its latest transitions.
 
@@ -425,7 +425,7 @@ type Record[S comparable] = corestm.RecordValue[S]
 ```
 
 <a name="Step"></a>
-## type [Step](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/statemachine.go#L308>)
+## type [Step](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go#L239>)
 
 Step is one transition in a Record's history.
 
@@ -434,7 +434,7 @@ type Step[S comparable] = corestm.StepValue[S]
 ```
 
 <a name="Store"></a>
-## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/statemachine.go#L297>)
+## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go#L228>)
 
 Store is the port your entities are read and written through. It is frozen at five methods.
 
@@ -443,7 +443,7 @@ type Store[E any] = corestm.Store[E]
 ```
 
 <a name="Transition"></a>
-## type [Transition](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/statemachine.go#L318>)
+## type [Transition](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go#L249>)
 
 Transition is a declared transition, as Definition.Transitions reads it back.
 
@@ -452,7 +452,7 @@ type Transition[S comparable] = svcstm.TransitionValue[S]
 ```
 
 <a name="Trigger"></a>
-## type [Trigger](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/statemachine.go#L312>)
+## type [Trigger](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go#L243>)
 
 Trigger says what fired a transition: a start, an event, a delay, a deadline or a guard.
 
@@ -491,7 +491,7 @@ const TriggerStart Trigger = corestm.TriggerStart
 ```
 
 <a name="ParseTrigger"></a>
-### func [ParseTrigger](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/statemachine.go#L359>)
+### func [ParseTrigger](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go#L288>)
 
 ```go
 func ParseTrigger(name string) (Trigger, error)
@@ -500,7 +500,7 @@ func ParseTrigger(name string) (Trigger, error)
 ParseTrigger reads a trigger's name — "start", "event", "delay", "deadline" or "guard" — as Trigger.String writes it.
 
 <a name="Wake"></a>
-## type [Wake](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/statemachine.go#L334>)
+## type [Wake](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go#L265>)
 
 Wake says why a run of the loop started.
 

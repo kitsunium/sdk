@@ -1,12 +1,15 @@
+// Package process — the running process itself: what it was built from and
+// what it is doing.
+//
 // Package process — ergonomic re-exports: the handful of signal constants and
 // resource sentinels callers need to drive Stop/SignalGroup and read typed
 // errors without importing internal/core/proc directly.
+//
+// Package process — StdioMode re-exports for wiring a child's standard streams.
 package process
 
 import (
 	"syscall"
-
-	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 )
 
 // The common control signals as typed process.Signal values, so callers pass
@@ -23,18 +26,4 @@ const (
 	SIGHUP = Signal(syscall.SIGHUP)
 	// SIGQUIT is the quit-with-core signal.
 	SIGQUIT = Signal(syscall.SIGQUIT)
-)
-
-// The resource sentinels callers most often set in Spec.Rlimits, re-exported so
-// a Spec can be built without importing internal/core/proc. The full set lives
-// on the core Resource type.
-const (
-	// ResourceNoFile limits the highest open file descriptor (RLIMIT_NOFILE).
-	ResourceNoFile Resource = coreproc.ResourceNoFile
-	// ResourceCore limits the size of a core dump in bytes (RLIMIT_CORE).
-	ResourceCore Resource = coreproc.ResourceCore
-	// ResourceCPU limits CPU time in seconds (RLIMIT_CPU).
-	ResourceCPU Resource = coreproc.ResourceCPU
-	// ResourceAS limits the process virtual address-space size (RLIMIT_AS).
-	ResourceAS Resource = coreproc.ResourceAS
 )

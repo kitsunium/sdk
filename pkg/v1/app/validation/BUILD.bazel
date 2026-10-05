@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "validation",
-    srcs = ["validation.go"],
+    srcs = [
+        "facade_gen.go",
+        "validation.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/app/validation",
     visibility = ["//visibility:public"],
     deps = [

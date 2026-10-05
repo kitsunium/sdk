@@ -386,50 +386,135 @@ packages:
     imports:
       corevfs: github.com/kitsunium/sdk/internal/core/data/vfs
     path: github.com/kitsunium/sdk/internal/service/data/vfs
-  - aliases:
-      - name: FS
-        target: corevfs.FS
-      - name: WritableFS
-        target: corevfs.WritableFS
-      - name: AtomicWriter
-        target: corevfs.AtomicWriter
-      - name: FullFS
-        target: corevfs.FullFS
-    functions:
-      - in:
-          - name: root
-            type: string
-        name: NewOS
-        out:
-          - name: filesystem
-            type: FullFS
-          - name: err
-            type: error
-      - name: NewMem
-        out:
-          - type: FullFS
+  - facade:
+      - alias:
+          - doc: |-
+              FS is the public alias for the read half, which is io/fs.FS unchanged. It
+              exists so a signature can say "an SDK filesystem" without implying that
+              anything about reading is different here.
+            name: FS
+            target: corevfs.FS
+      - alias:
+          - doc: |-
+              WritableFS is the public alias for the write half: the four write verbs on
+              top of the embedded [FS]. It is frozen — a new capability arrives as a
+              sibling interface, never as a fifth method.
+            name: WritableFS
+            target: corevfs.WritableFS
+      - alias:
+          - doc: |-
+              AtomicWriter is the public alias for the publication capability, reached by
+              type assertion on a filesystem this package did not build.
+            name: AtomicWriter
+            target: corevfs.AtomicWriter
+      - alias:
+          - doc: |-
+              FullFS is the public alias for the union both constructors return: a
+              [WritableFS] that is also an [AtomicWriter]. A parameter should still ask
+              for the narrowest thing it uses.
+            name: FullFS
+            target: corevfs.FullFS
+      - var:
+          - doc: |-
+              InvalidPath is returned for a name outside the fs.ValidPath grammar —
+              rooted, empty, or carrying a "." or ".." element — and for the root
+              itself on any call that writes or removes.
+            name: InvalidPath
+            reexport: corevfs.InvalidPath
+            type: "*errs.Error"
+          - doc: |-
+              InvalidPermission is returned for a zero file mode, which is never read
+              as "pick a default", and for any mode carrying setuid, setgid, sticky
+              or a type bit.
+            name: InvalidPermission
+            reexport: corevfs.InvalidPermission
+            type: "*errs.Error"
+          - doc: |-
+              PathEscaped is returned when a name resolved outside the filesystem's
+              root, and when a write's final component is a symbolic link.
+            name: PathEscaped
+            reexport: corevfs.PathEscaped
+            type: "*errs.Error"
+          - doc: |-
+              ReadFailed is returned when an open, stat or listing was refused. The
+              cause stays in the chain, so errors.Is(err, fs.ErrNotExist) still
+              answers.
+            name: ReadFailed
+            reexport: corevfs.ReadFailed
+            type: "*errs.Error"
+          - doc: |-
+              WriteFailed is returned when a create, write, mkdir or remove was
+              refused, and keeps its cause the same way.
+            name: WriteFailed
+            reexport: corevfs.WriteFailed
+            type: "*errs.Error"
+          - doc: |-
+              PublishFailed is returned when an atomic publication did not complete.
+              The previous content is intact and no temporary survives, so the
+              operation is safe to retry and safe to abandon.
+            name: PublishFailed
+            reexport: corevfs.PublishFailed
+            type: "*errs.Error"
+          - doc: |-
+              NotRegularFile is returned when the name — or a component of it —
+              exists and is not the kind of thing the call needs it to be.
+            name: NotRegularFile
+            reexport: corevfs.NotRegularFile
+            type: "*errs.Error"
+          - doc: |-
+              DirectoryNotEmpty is returned by Remove for a directory that still has
+              entries. RemoveAll is the recursive call.
+            name: DirectoryNotEmpty
+            reexport: corevfs.DirectoryNotEmpty
+            type: "*errs.Error"
+          - doc: |-
+              RootUnavailable is returned by NewOS when the root cannot be opened:
+              absent, not a directory, or not searchable by this process.
+            name: RootUnavailable
+            reexport: corevfs.RootUnavailable
+            type: "*errs.Error"
+          - doc: |-
+              DirectorySyncFailed is returned when the rename succeeded and the
+              directory entry could not be flushed. The content IS published; only
+              its survival across a power loss is in doubt, and it is deliberately
+              not rolled back.
+            name: DirectorySyncFailed
+            reexport: corevfs.DirectorySyncFailed
+            type: "*errs.Error"
+      - func:
+          doc: |-
+            NewOS opens root as a filesystem confined to that directory tree.
+
+            It returns proc.UnsupportedPlatform on a GOOS that lacks the mechanics this
+            filesystem's guarantees rest on, and [RootUnavailable] when the directory
+            cannot be opened. Both are construction-time refusals, so a misconfiguration
+            is reported where the program is wired rather than on the first write.
+
+            The filesystem holds the directory's descriptor and additionally implements
+            io.Closer, which releases it; every call after Close fails.
+          forward: svcvfs.NewOS
+          in:
+            - name: root
+              type: string
+          name: NewOS
+          out:
+            - name: filesystem
+              type: FullFS
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            NewMem returns an empty in-memory filesystem containing only its root.
+
+            It takes no arguments on purpose: every knob it could offer would be one a
+            consumer's test has to set before it can assert anything, and the value of
+            this type is that a filesystem double costs one line.
+          forward: svcvfs.NewMem
+          name: NewMem
+          out:
+            - type: FullFS
     imports:
       corevfs: github.com/kitsunium/sdk/internal/core/data/vfs
       errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcvfs: github.com/kitsunium/sdk/internal/service/data/vfs
     path: github.com/kitsunium/sdk/pkg/v1/data/vfs
-    variables:
-      - name: InvalidPath
-        type: "*errs.Error"
-      - name: InvalidPermission
-        type: "*errs.Error"
-      - name: PathEscaped
-        type: "*errs.Error"
-      - name: ReadFailed
-        type: "*errs.Error"
-      - name: WriteFailed
-        type: "*errs.Error"
-      - name: PublishFailed
-        type: "*errs.Error"
-      - name: NotRegularFile
-        type: "*errs.Error"
-      - name: DirectoryNotEmpty
-        type: "*errs.Error"
-      - name: RootUnavailable
-        type: "*errs.Error"
-      - name: DirectorySyncFailed
-        type: "*errs.Error"

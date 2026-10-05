@@ -1370,33 +1370,66 @@ packages:
     variables:
       - name: UnsupportedPlatform
         type: "*kernelerrs.Error"
-  - aliases:
-      - name: Group
-        target: coreproc.Group
-      - name: Option
-        target: svccgroup.Option
+  - facade:
+      - alias:
+          - doc: |-
+              Group is a handle to a cgroup v2 control group: set controller ceilings,
+              attach processes, and remove the group. It aliases the core proc.Group port.
+            name: Group
+            target: coreproc.Group
+      - alias:
+          - doc: |-
+              Option customises a Create call (functional-option pattern). It aliases the
+              service Option type; construct options with WithRoot.
+            name: Option
+            target: svccgroup.Option
+      - func:
+          doc: |-
+            WithRoot overrides the parent directory under which Create makes the new
+            control group, targeting a delegated sub-tree instead of the top-level mount.
+            It is a cgroup v2 path: on Windows and FreeBSD, whose backends have no
+            hierarchy, it is accepted and ignored.
+          forward: svccgroup.WithRoot
+          in:
+            - name: root
+              type: string
+          name: WithRoot
+          out:
+            - type: Option
+      - func:
+          doc: |-
+            Available reports whether a kernel-enforced control-group backend is usable: on
+            Linux, that the unified cgroup v2 hierarchy is mounted AND a sub-group can be
+            created under it by the caller; on Windows, that Job Objects are available
+            (always true); on FreeBSD, that the kernel carries RACCT. It returns false on
+            platforms with no backend (darwin, OpenBSD, NetBSD, DragonFly, illumos, Solaris), on cgroup v1,
+            and on a Linux host where the hierarchy is read-only.
+          forward: svccgroup.Available
+          name: Available
+          out:
+            - type: bool
+      - func:
+          doc: |-
+            Create makes a new control group named name and returns a Group bound to it —
+            a cgroup v2 sub-group under the delegated root on Linux, a Job Object on
+            Windows, a tracked rctl group on FreeBSD. It returns CgroupUnavailable when the
+            Linux hierarchy is absent or not delegated, CgroupCreateFailed when creation
+            fails, and UnsupportedPlatform on a platform with no control-group backend
+            (darwin, OpenBSD, NetBSD, DragonFly, illumos, Solaris).
+          forward: svccgroup.Create
+          in:
+            - name: name
+              type: string
+            - name: opts
+              type: Option
+          name: Create
+          out:
+            - name: g
+              type: Group
+            - name: err
+              type: error
+          variadic: true
     functions:
-      - in:
-          - name: root
-            type: string
-        name: WithRoot
-        out:
-          - type: Option
-      - name: Available
-        out:
-          - type: bool
-      - in:
-          - name: name
-            type: string
-          - name: opts
-            type: Option
-        name: Create
-        out:
-          - name: g
-            type: Group
-          - name: err
-            type: error
-        variadic: true
       - in:
           - name: name
             type: string
@@ -1410,55 +1443,72 @@ packages:
       coreproc: github.com/kitsunium/sdk/internal/core/proc
       svccgroup: github.com/kitsunium/sdk/internal/service/proc/cgroup
     path: github.com/kitsunium/sdk/pkg/v1/proc/cgroup
-  - aliases:
-      - name: Source
-        target: coreproc.MemorySource
-      - name: Limit
-        target: coreproc.MemoryLimitValue
-    constants:
-      - name: MemorySourceOperator
-        type: Source
-        value: "1"
-      - name: MemorySourceUnconstrained
-        type: Source
-        value: "2"
-      - name: MemorySourceBelowFloor
-        type: Source
-        value: "3"
-      - name: MemorySourceCgroup
-        type: Source
-        value: "4"
-    functions:
-      - name: Apply
-        out:
-          - type: Limit
+  - facade:
+      - const:
+          - doc: |-
+              MemorySourceOperator reports that GOMEMLIMIT carried a non-empty value, which
+              the runtime has already applied. It re-exports the core enum value so consumers
+              qualify it as memlimit.MemorySourceOperator.
+            name: MemorySourceOperator
+            reexport: coreproc.MemorySourceOperator
+            type: Source
+            typed: true
+            value: "1"
+      - const:
+          - doc: |-
+              MemorySourceUnconstrained reports that no control group governing this process
+              declares a memory cap.
+            name: MemorySourceUnconstrained
+            reexport: coreproc.MemorySourceUnconstrained
+            type: Source
+            typed: true
+            value: "2"
+      - const:
+          - doc: |-
+              MemorySourceBelowFloor reports that a cap was found but the limit derived from
+              it fell under the usable floor and was discarded.
+            name: MemorySourceBelowFloor
+            reexport: coreproc.MemorySourceBelowFloor
+            type: Source
+            typed: true
+            value: "3"
+      - const:
+          - doc: |-
+              MemorySourceCgroup reports the one outcome that yields a limit: a real cap was
+              read from the control-group hierarchy and the derived value was applied.
+            name: MemorySourceCgroup
+            reexport: coreproc.MemorySourceCgroup
+            type: Source
+            typed: true
+            value: "4"
+      - alias:
+          - doc: Source names what decided the soft memory limit. It aliases the core proc type.
+            name: Source
+            target: coreproc.MemorySource
+      - alias:
+          - doc: |-
+              Limit is an immutable record of one derivation: the allowance read, the limit
+              derived, and the source that decided it. It aliases the core proc type.
+            name: Limit
+            target: coreproc.MemoryLimitValue
+      - func:
+          doc: |-
+            Apply derives the Go soft memory limit from the tightest control-group cap
+            governing this process and installs it, returning what it read, what it
+            derived, and what decided the outcome.
+
+            It stands aside — leaving the runtime default in place — when GOMEMLIMIT is
+            already set, when no cgroup declares a cap, and when the derived limit is too
+            small to be useful. Those three are told apart by Limit.Source.
+          forward: svcmemlimit.Apply
+          name: Apply
+          out:
+            - type: Limit
     imports:
       coreproc: github.com/kitsunium/sdk/internal/core/proc
+      svcmemlimit: github.com/kitsunium/sdk/internal/service/proc/memlimit
     path: github.com/kitsunium/sdk/pkg/v1/proc/memlimit
-  - aliases:
-      - name: Spec
-        target: coreproc.Spec
-      - name: Process
-        target: coreproc.Process
-      - name: ExitResult
-        target: coreproc.ExitValue
-      - name: Signal
-        target: coreproc.Signal
-      - name: Resource
-        target: coreproc.Resource
-      - name: Limit
-        target: coreproc.LimitValue
-      - name: Stats
-        target: svcself.StatsValue
-      - name: Distribution
-        target: svcself.DistributionValue
-      - name: BuildInfo
-        target: svcself.BuildValue
-      - name: Module
-        target: svcself.ModuleValue
-      - name: StdioMode
-        target: coreproc.StdioMode
-    constants:
+  - constants:
       - name: SIGTERM
         type: Signal
         value: "15"
@@ -1474,39 +1524,190 @@ packages:
       - name: SIGQUIT
         type: Signal
         value: "3"
-      - name: ResourceNoFile
-        type: Resource
-        value: "1"
-      - name: ResourceCore
-        type: Resource
-        value: "3"
-      - name: ResourceCPU
-        type: Resource
-        value: "5"
-      - name: ResourceAS
-        type: Resource
-        value: "4"
-      - name: StdioInherit
-        type: StdioMode
-        value: "0"
-      - name: StdioNull
-        type: StdioMode
-        value: "1"
-      - name: StdioCapture
-        type: StdioMode
-        value: "2"
+    facade:
+      - alias:
+          - doc: |-
+              Spec is the immutable description of a process to spawn — executable,
+              environment, credentials, isolation topology, and scheduling attributes. It is
+              an alias of the core port type.
+            name: Spec
+            target: coreproc.Spec
+      - alias:
+          - doc: |-
+              Process is the handle to a spawned process: PID, Wait, Signal, SignalGroup,
+              and a group-aware Stop. It is an alias of the core port interface.
+            name: Process
+            target: coreproc.Process
+      - alias:
+          - doc: |-
+              ExitResult is the outcome of a finished process — exit code, terminating
+              signal, and resource usage. It is an alias of the core port's ExitValue.
+            name: ExitResult
+            target: coreproc.ExitValue
+      - alias:
+          - doc: |-
+              Signal is a typed, platform-portable OS signal. It is an alias of the core
+              port type, so process.SIGTERM and a signal parsed elsewhere compare equal.
+            name: Signal
+            target: coreproc.Signal
+      - alias:
+          - doc: |-
+              Resource identifies a per-process resource governed by setrlimit(2). It is an
+              alias of the core port type.
+            name: Resource
+            target: coreproc.Resource
+      - alias:
+          - doc: |-
+              Limit is a soft/hard resource-limit pair for setrlimit(2). It is an alias of
+              the core port's LimitValue.
+            name: Limit
+            target: coreproc.LimitValue
+      - func:
+          doc: |-
+            Start spawns the process described by spec and returns a live Process handle.
+            It delegates to internal/service/proc/exec; ctx is honoured up to the
+            fork/exec boundary. A bare Spec.Path is searched in the child's PATH (see
+            the package documentation). On Windows the Unix-only Spec fields are refused
+            with UnsupportedPlatform; on platforms that are neither Unix nor Windows,
+            Start itself returns UnsupportedPlatform.
+          forward: svcexec.Start
+          in:
+            - name: ctx
+              type: context.Context
+            - name: spec
+              type: Spec
+          name: Start
+          out:
+            - name: proc
+              type: Process
+            - name: err
+              type: error
+      - alias:
+          - doc: |-
+              Stats is the running process at one instant: identity, scheduler settings,
+              goroutines, heap, collections with their pause distribution, scheduling
+              latency, and CPU time. Every count is cumulative since the process started.
+              It is an alias of the service value.
+            name: Stats
+            target: svcself.StatsValue
+      - alias:
+          - doc: |-
+              Distribution is one of the Go runtime's cumulative histograms, read as
+              durations: Count, and Quantile(q) as the upper bound of the bucket that
+              reaches q. It is an alias of the service value.
+            name: Distribution
+            target: svcself.DistributionValue
+      - alias:
+          - doc: |-
+              BuildInfo is what the running binary was built from: the toolchain, the
+              main package, the main module with its version-control stamp, and every
+              dependency followed through its replacement. It is an alias of the service
+              value.
+            name: BuildInfo
+            target: svcself.BuildValue
+      - alias:
+          - doc: |-
+              Module is one module of the running binary, with its release, its commit
+              and its local directory told apart. It is an alias of the service value.
+            name: Module
+            target: svcself.ModuleValue
+      - func:
+          doc: |-
+            Self takes a snapshot of the running process. It never fails: a figure the
+            platform cannot give is zero, and Stats.CPUEstimated says when CPUTime is
+            the runtime's estimate rather than the kernel's count.
+          forward: svcself.ReadStats
+          name: Self
+          out:
+            - type: Stats
+      - func:
+          doc: |-
+            Build describes what the running binary was built from, and reports false
+            when the binary carries no build information.
+          forward: svcself.ReadBuild
+          name: Build
+          out:
+            - name: info
+              type: BuildInfo
+            - name: ok
+              type: bool
+      - func:
+          doc: |-
+            ParseBuild describes a BuildInfo from elsewhere — one a test builds by
+            hand, or debug.ParseBuildInfo's reading of another binary — exactly as
+            Build describes the running one.
+          forward: svcself.ParseBuild
+          in:
+            - name: info
+              type: "*debug.BuildInfo"
+          name: ParseBuild
+          out:
+            - type: BuildInfo
+      - const:
+          - doc: ResourceNoFile limits the highest open file descriptor (RLIMIT_NOFILE).
+            name: ResourceNoFile
+            reexport: coreproc.ResourceNoFile
+            type: Resource
+            typed: true
+            value: "1"
+          - doc: ResourceCore limits the size of a core dump in bytes (RLIMIT_CORE).
+            name: ResourceCore
+            reexport: coreproc.ResourceCore
+            type: Resource
+            typed: true
+            value: "3"
+          - doc: ResourceCPU limits CPU time in seconds (RLIMIT_CPU).
+            name: ResourceCPU
+            reexport: coreproc.ResourceCPU
+            type: Resource
+            typed: true
+            value: "5"
+          - doc: ResourceAS limits the process virtual address-space size (RLIMIT_AS).
+            name: ResourceAS
+            reexport: coreproc.ResourceAS
+            type: Resource
+            typed: true
+            value: "4"
+        doc: |-
+          The resource sentinels callers most often set in Spec.Rlimits, re-exported so
+          a Spec can be built without importing internal/core/proc. The full set lives
+          on the core Resource type.
+      - const:
+          - doc: |-
+              StdioInherit shares the parent's stdin/stdout/stderr with the child — the
+              default and the only behaviour before per-process wiring existed.
+            name: StdioInherit
+            reexport: coreproc.StdioInherit
+            type: StdioMode
+            typed: true
+            value: "0"
+      - const:
+          - doc: |-
+              StdioNull connects every stream to the null device: output is discarded and
+              the child's stdin returns EOF immediately.
+            name: StdioNull
+            reexport: coreproc.StdioNull
+            type: StdioMode
+            typed: true
+            value: "1"
+      - const:
+          - doc: |-
+              StdioCapture connects the child to Spec.Stdout/Stderr (io.Writer) and
+              Spec.Stdin (io.Reader); a nil stream falls back to the null device for that
+              one stream. The systemd analogue is StandardOutput=/StandardError=/StandardInput=.
+            name: StdioCapture
+            reexport: coreproc.StdioCapture
+            type: StdioMode
+            typed: true
+            value: "2"
+      - alias:
+          - doc: |-
+              StdioMode selects how a spawned child's standard streams (stdin, stdout,
+              stderr) are wired. It is an alias of the core port type; set it on Spec.Stdio.
+              The zero value is StdioInherit.
+            name: StdioMode
+            target: coreproc.StdioMode
     functions:
-      - in:
-          - name: ctx
-            type: context.Context
-          - name: spec
-            type: Spec
-        name: Start
-        out:
-          - name: proc
-            type: Process
-          - name: err
-            type: error
       - in:
           - name: ctx
             type: context.Context
@@ -1515,246 +1716,448 @@ packages:
         name: MustStart
         out:
           - type: Process
-      - name: Self
-        out:
-          - type: Stats
-      - name: Build
-        out:
-          - name: info
-            type: BuildInfo
-          - name: ok
-            type: bool
-      - in:
-          - name: info
-            type: "*debug.BuildInfo"
-        name: ParseBuild
-        out:
-          - type: BuildInfo
     imports:
       coreproc: github.com/kitsunium/sdk/internal/core/proc
       debug: runtime/debug
+      svcexec: github.com/kitsunium/sdk/internal/service/proc/exec
       svcself: github.com/kitsunium/sdk/internal/service/proc/self
     path: github.com/kitsunium/sdk/pkg/v1/proc/process
-  - aliases:
-      - name: Reaper
-        target: coreproc.Reaper
-      - name: Option
-        target: svc.Option
-    functions:
-      - in:
-          - name: fn
-            type: func(int)
-        name: WithOnReap
-        out:
-          - type: Option
-      - in:
-          - name: opts
-            type: Option
-        name: New
-        out:
-          - type: Reaper
-        variadic: true
-      - name: SetChildSubreaper
-        out:
-          - type: error
-      - name: IsPID1
-        out:
-          - type: bool
+  - facade:
+      - alias:
+          - doc: |-
+              Reaper collects terminated child processes so they do not linger as zombies —
+              the core duty of any PID1 or subreaper. It is an alias of the core port; the
+              concrete value is platform-selected by [New].
+            name: Reaper
+            target: coreproc.Reaper
+      - alias:
+          - doc: |-
+              Option configures a [Reaper] returned by [New]. It is an alias of the service
+              option type so callers compose options without importing internal packages.
+            name: Option
+            target: svc.Option
+      - doc: |-
+          The exported sentinels re-export the central proc error vars so callers match
+          reaper failures without importing internal packages. Match with errs.HasCode
+          and [github.com/kitsunium/sdk/pkg/v1/errs].
+        var:
+          - doc: |-
+              ReapFailed is returned by a sweep when wait4 fails with an error other
+              than the benign ECHILD ("no children") condition.
+            name: ReapFailed
+            reexport: coreproc.ReapFailed
+            type: "*errs.Error"
+          - doc: |-
+              SubreaperFailed is returned by [SetChildSubreaper] when
+              prctl(PR_SET_CHILD_SUBREAPER) fails to arm subreaper mode.
+            name: SubreaperFailed
+            reexport: coreproc.SubreaperFailed
+            type: "*errs.Error"
+          - doc: |-
+              UnsupportedPlatform is returned by [SetChildSubreaper] on platforms
+              without a prctl(PR_SET_CHILD_SUBREAPER) equivalent (e.g. Windows).
+            name: UnsupportedPlatform
+            reexport: coreproc.UnsupportedPlatform
+            type: "*errs.Error"
+      - func:
+          doc: |-
+            WithOnReap registers fn as a post-sweep observer receiving the number of
+            children reaped in each sweep (including zero). fn must not block. On illumos
+            and Solaris the loop also sweeps once a second, so there an idle reaper calls
+            fn with zero once a second.
+          forward: svc.WithOnReap
+          in:
+            - name: fn
+              type: func(int)
+          name: WithOnReap
+          out:
+            - type: Option
+      - func:
+          doc: |-
+            New returns a [Reaper] configured by opts. On Unix it is a SIGCHLD-driven
+            waitpid loop; elsewhere it is a no-op. The reaper starts idle — call Start.
+          forward: svc.New
+          in:
+            - name: opts
+              type: Option
+          name: New
+          out:
+            - type: Reaper
+          variadic: true
+      - func:
+          doc: |-
+            SetChildSubreaper marks the calling process as a child subreaper so orphaned
+            descendants reparent to it rather than to PID1. It returns [SubreaperFailed]
+            on a prctl error and [UnsupportedPlatform] off Unix.
+          forward: svc.SetChildSubreaper
+          name: SetChildSubreaper
+          out:
+            - type: error
+      - func:
+          doc: |-
+            IsPID1 reports whether the current process is the init process (pid 1). It is
+            false on platforms where the convention does not apply.
+          forward: svc.IsPID1
+          name: IsPID1
+          out:
+            - type: bool
     imports:
       coreproc: github.com/kitsunium/sdk/internal/core/proc
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       svc: github.com/kitsunium/sdk/internal/service/proc/reaper
     path: github.com/kitsunium/sdk/pkg/v1/proc/reaper
-    variables:
-      - name: ReapFailed
-        type: "*errs.Error"
-      - name: SubreaperFailed
-        type: "*errs.Error"
-      - name: UnsupportedPlatform
-        type: "*errs.Error"
-  - aliases:
-      - name: Resource
-        target: coreproc.Resource
-      - name: Limit
-        target: coreproc.LimitValue
-    constants:
-      - name: LimitInfinity
-        type: uint64
-        value: "18446744073709551615"
-      - name: ResourceNoFile
-        type: Resource
-        value: "1"
-      - name: ResourceNProc
-        type: Resource
-        value: "2"
-      - name: ResourceCore
-        type: Resource
-        value: "3"
-      - name: ResourceAS
-        type: Resource
-        value: "4"
-      - name: ResourceCPU
-        type: Resource
-        value: "5"
-      - name: ResourceFSize
-        type: Resource
-        value: "6"
-      - name: ResourceData
-        type: Resource
-        value: "7"
-      - name: ResourceStack
-        type: Resource
-        value: "8"
-      - name: ResourceMemLock
-        type: Resource
-        value: "9"
-    functions:
-      - in:
-          - name: pid
-            type: int
-          - name: limits
-            type: map[Resource]Limit
-        name: Apply
-        out:
-          - type: error
-      - in:
-          - name: limits
-            type: map[Resource]Limit
-        name: PrepareSysProcAttr
-        out:
-          - type: error
+  - facade:
+      - const:
+          - doc: LimitInfinity is the soft/hard value meaning "no limit" (RLIM_INFINITY).
+            name: LimitInfinity
+            reexport: coreproc.LimitInfinity
+            type: uint64
+            typed: true
+            value: "18446744073709551615"
+      - const:
+          - doc: |-
+              ResourceNoFile limits the highest open file descriptor (RLIMIT_NOFILE). It
+              re-exports the core enum value so consumers qualify it as rlimit.ResourceNoFile.
+            name: ResourceNoFile
+            reexport: coreproc.ResourceNoFile
+            type: Resource
+            typed: true
+            value: "1"
+      - const:
+          - doc: ResourceNProc limits the number of processes for the real uid (RLIMIT_NPROC).
+            name: ResourceNProc
+            reexport: coreproc.ResourceNProc
+            type: Resource
+            typed: true
+            value: "2"
+      - const:
+          - doc: ResourceCore limits the core-dump size in bytes (RLIMIT_CORE).
+            name: ResourceCore
+            reexport: coreproc.ResourceCore
+            type: Resource
+            typed: true
+            value: "3"
+      - const:
+          - doc: ResourceAS limits the process virtual address-space size (RLIMIT_AS).
+            name: ResourceAS
+            reexport: coreproc.ResourceAS
+            type: Resource
+            typed: true
+            value: "4"
+      - const:
+          - doc: ResourceCPU limits CPU time in seconds (RLIMIT_CPU).
+            name: ResourceCPU
+            reexport: coreproc.ResourceCPU
+            type: Resource
+            typed: true
+            value: "5"
+      - const:
+          - doc: ResourceFSize limits the largest file the process may create (RLIMIT_FSIZE).
+            name: ResourceFSize
+            reexport: coreproc.ResourceFSize
+            type: Resource
+            typed: true
+            value: "6"
+      - const:
+          - doc: ResourceData limits the process data-segment size (RLIMIT_DATA).
+            name: ResourceData
+            reexport: coreproc.ResourceData
+            type: Resource
+            typed: true
+            value: "7"
+      - const:
+          - doc: ResourceStack limits the process stack size (RLIMIT_STACK).
+            name: ResourceStack
+            reexport: coreproc.ResourceStack
+            type: Resource
+            typed: true
+            value: "8"
+      - const:
+          - doc: ResourceMemLock limits bytes that may be locked into RAM (RLIMIT_MEMLOCK).
+            name: ResourceMemLock
+            reexport: coreproc.ResourceMemLock
+            type: Resource
+            typed: true
+            value: "9"
+      - alias:
+          - doc: |-
+              Resource is the abstract, platform-portable resource enum mapped to a
+              RLIMIT_* constant by the service layer. It aliases the core proc type.
+            name: Resource
+            target: coreproc.Resource
+      - alias:
+          - doc: |-
+              Limit is an immutable soft/hard setrlimit(2) pair. It aliases the core proc
+              LimitValue type.
+            name: Limit
+            target: coreproc.LimitValue
+      - func:
+          doc: |-
+            Apply sets the soft/hard ceilings in limits on the process identified by pid.
+            A pid of 0 targets the calling process; any other pid targets that process via
+            prlimit64(2) and needs CAP_SYS_RESOURCE. It returns UnknownResource for an
+            unmapped resource, RlimitFailed on a syscall failure, and UnsupportedPlatform
+            off Linux.
+          forward: svcrlimit.Apply
+          in:
+            - name: pid
+              type: int
+            - name: limits
+              type: map[Resource]Limit
+          name: Apply
+          out:
+            - type: error
+      - func:
+          doc: |-
+            PrepareSysProcAttr validates limits without issuing any syscall and reports
+            whether they can be applied on this platform, returning the same typed errors
+            Apply would (UnknownResource / UnsupportedPlatform). Use it to fail fast at
+            Spec-construction time; Go's SysProcAttr has no rlimit field, so the actual
+            application happens post-fork via Apply.
+          forward: svcrlimit.PrepareSysProcAttr
+          in:
+            - name: limits
+              type: map[Resource]Limit
+          name: PrepareSysProcAttr
+          out:
+            - type: error
     imports:
       coreproc: github.com/kitsunium/sdk/internal/core/proc
+      svcrlimit: github.com/kitsunium/sdk/internal/service/proc/rlimit
     path: github.com/kitsunium/sdk/pkg/v1/proc/rlimit
-  - aliases:
-      - name: Signal
-        target: coreproc.Signal
-      - name: Target
-        target: svcsignal.Target
-    functions:
-      - in:
-          - name: name
-            type: string
-        name: Parse
-        out:
-          - name: sig
-            type: Signal
-          - name: err
-            type: error
-      - in:
-          - name: sigs
-            type: Signal
-        name: Notify
-        out:
-          - name: ch
-            type: <-chan Signal
-          - name: stop
-            type: func()
-        variadic: true
-      - in:
-          - name: src
-            type: <-chan Signal
-          - name: target
-            type: Target
-        name: Relay
-        out:
-          - type: error
+  - facade:
+      - alias:
+          - doc: |-
+              Signal is a typed, platform-portable OS signal. It aliases the domain type, so
+              a value parsed here interoperates with the rest of the SDK process domain.
+            name: Signal
+            target: coreproc.Signal
+      - alias:
+          - doc: |-
+              Target names the recipient of a relayed signal: a positive value is a pid; a
+              value below -1 addresses the process group whose id is its absolute value.
+            name: Target
+            target: svcsignal.Target
+      - func:
+          doc: |-
+            Parse resolves a signal from its name or number — the canonical "SIGTERM", the
+            bare "TERM", or the numeric "15", all case-insensitive — returning a typed
+            UNKNOWN_SIGNAL error for anything the platform table does not define.
+          forward: coreproc.Parse
+          in:
+            - name: name
+              type: string
+          name: Parse
+          out:
+            - name: sig
+              type: Signal
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            Notify subscribes to sigs and returns a receive-only channel of typed Signals
+            plus an idempotent, leak-free stop function. Each delivery is translated to a
+            typed Signal; the channel is buffered so a burst is not dropped, and stop
+            detaches the subscription and closes the channel.
+          forward: svcsignal.Notify
+          in:
+            - name: sigs
+              type: Signal
+          name: Notify
+          out:
+            - name: ch
+              type: <-chan Signal
+            - name: stop
+              type: func()
+          variadic: true
+      - func:
+          doc: |-
+            Relay reads signals from src and forwards each to target until src closes —
+            via kill(2) on Unix, via TerminateProcess or a console control event on
+            Windows. A positive target is a pid; a target below -1 addresses the process
+            group whose id is -target. It returns nil on a clean drain and a typed
+            RELAY_FAILED error on the first delivery failure (UNSUPPORTED_PLATFORM on a
+            platform that is neither Unix nor Windows).
+          forward: svcsignal.Relay
+          in:
+            - name: src
+              type: <-chan Signal
+            - name: target
+              type: Target
+          name: Relay
+          out:
+            - type: error
     imports:
       coreproc: github.com/kitsunium/sdk/internal/core/proc
       svcsignal: github.com/kitsunium/sdk/internal/service/proc/signal
     path: github.com/kitsunium/sdk/pkg/v1/proc/signal
-  - aliases:
-      - name: Spec
-        target: coreproc.Spec
-    functions:
-      - in:
-          - name: unsetEnv
-            type: bool
-        name: Files
-        out:
-          - name: files
-            type: "[]*os.File"
-          - name: err
-            type: error
-      - in:
-          - name: unsetEnv
-            type: bool
-        name: Listeners
-        out:
-          - name: listeners
-            type: "[]net.Listener"
-          - name: err
-            type: error
-      - in:
-          - name: unsetEnv
-            type: bool
-        name: WithNames
-        out:
-          - name: named
-            type: map[string][]*os.File
-          - name: err
-            type: error
-      - in:
-          - name: child
-            type: "*Spec"
-          - name: named
-            type: map[string]net.Listener
-        name: Prepare
-        out:
-          - type: error
+  - facade:
+      - alias:
+          - doc: |-
+              Spec is the process spawn specification an activator augments via Prepare. It
+              aliases the core port type, so the same value drives process.Start.
+            name: Spec
+            target: coreproc.Spec
+      - func:
+          doc: |-
+            Files returns the inherited listening sockets (fd 3..3+LISTEN_FDS) as *os.File,
+            honouring LISTEN_PID. When unsetEnv is true the activation environment is
+            cleared so a grandchild does not re-inherit it. An empty or foreign activation
+            set yields nil with no error; off Unix it returns UnsupportedPlatform.
+          forward: svclisten.Files
+          in:
+            - name: unsetEnv
+              type: bool
+          name: Files
+          out:
+            - name: files
+              type: "[]*os.File"
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            Listeners returns the inherited stream sockets wrapped as net.Listener (the
+            underlying *os.File is closed after the dup). Same gating and platform
+            behaviour as Files.
+          forward: svclisten.Listeners
+          in:
+            - name: unsetEnv
+              type: bool
+          name: Listeners
+          out:
+            - name: listeners
+              type: "[]net.Listener"
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            WithNames returns the inherited sockets grouped by their LISTEN_FDNAMES name;
+            duplicate names group several fds under one key.
+          forward: svclisten.WithNames
+          in:
+            - name: unsetEnv
+              type: bool
+          name: WithNames
+          out:
+            - name: named
+              type: map[string][]*os.File
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            Prepare (activator side) appends each named listener's socket to child as an
+            inherited fd and sets LISTEN_FDS / LISTEN_FDNAMES in child.Env so the spawned
+            process recovers them via Files/Listeners. Off Unix it returns
+            UnsupportedPlatform.
+          forward: svclisten.Prepare
+          in:
+            - name: child
+              type: "*Spec"
+            - name: named
+              type: map[string]net.Listener
+          name: Prepare
+          out:
+            - type: error
     imports:
       coreproc: github.com/kitsunium/sdk/internal/core/proc
+      svclisten: github.com/kitsunium/sdk/internal/service/proc/systemd/listen
     path: github.com/kitsunium/sdk/pkg/v1/proc/systemd/listen
-  - aliases:
-      - name: Listener
-        target: coreproc.Listener
-      - name: Notification
-        target: coreproc.NotificationValue
-    functions:
-      - in:
-          - name: state
-            type: map[string]string
-        name: Notify
-        out:
-          - type: error
-      - name: Ready
-        out:
-          - type: error
-      - name: Reloading
-        out:
-          - type: error
-      - name: Stopping
-        out:
-          - type: error
-      - in:
-          - name: msg
-            type: string
-        name: Status
-        out:
-          - type: error
-      - name: Watchdog
-        out:
-          - type: error
-      - in:
-          - name: pid
-            type: int
-        name: MainPID
-        out:
-          - type: error
-      - name: Listen
-        out:
-          - name: l
-            type: Listener
-          - name: socketPath
-            type: string
-          - name: err
-            type: error
-      - name: WatchdogInterval
-        out:
-          - name: d
-            type: time.Duration
-          - name: ok
-            type: bool
+  - facade:
+      - alias:
+          - doc: |-
+              Listener is the supervisor side of the protocol: it owns the datagram socket a
+              supervised child writes readiness to and yields one parsed, credential-verified
+              Notification per Recv.
+            name: Listener
+            target: coreproc.Listener
+      - alias:
+          - doc: |-
+              Notification is a parsed sd_notify datagram: the raw State field set plus the
+              typed Status, MainPID, and kernel-verified SenderPID, with Ready/Reloading/
+              Stopping/Watchdog lifecycle accessors.
+            name: Notification
+            target: coreproc.NotificationValue
+      - func:
+          doc: |-
+            Notify sends an sd_notify datagram carrying the given NAME=value state to
+            $NOTIFY_SOCKET, or is a no-op returning nil when $NOTIFY_SOCKET is unset.
+          forward: svcnotify.Notify
+          in:
+            - name: state
+              type: map[string]string
+          name: Notify
+          out:
+            - type: error
+      - func:
+          doc: Ready notifies the supervisor that startup is complete (READY=1).
+          forward: svcnotify.Ready
+          name: Ready
+          out:
+            - type: error
+      - func:
+          doc: |-
+            Reloading notifies the supervisor that a configuration reload has begun
+            (RELOADING=1).
+          forward: svcnotify.Reloading
+          name: Reloading
+          out:
+            - type: error
+      - func:
+          doc: Stopping notifies the supervisor that shutdown has begun (STOPPING=1).
+          forward: svcnotify.Stopping
+          name: Stopping
+          out:
+            - type: error
+      - func:
+          doc: Status publishes a single-line free-text status (STATUS=msg).
+          forward: svcnotify.Status
+          in:
+            - name: msg
+              type: string
+          name: Status
+          out:
+            - type: error
+      - func:
+          doc: Watchdog sends a watchdog keep-alive ping (WATCHDOG=1).
+          forward: svcnotify.Watchdog
+          name: Watchdog
+          out:
+            - type: error
+      - func:
+          doc: MainPID advertises the main process PID to the supervisor (MAINPID=pid).
+          forward: svcnotify.MainPID
+          in:
+            - name: pid
+              type: int
+          name: MainPID
+          out:
+            - type: error
+      - func:
+          doc: |-
+            Listen creates a supervisor-side sd_notify socket and returns the Listener plus
+            the socketPath a child should be given via NOTIFY_SOCKET. On non-Linux
+            platforms it returns the UNSUPPORTED_PLATFORM error.
+          forward: svcnotify.Listen
+          name: Listen
+          out:
+            - name: l
+              type: Listener
+            - name: socketPath
+              type: string
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            WatchdogInterval reports the watchdog ping interval the supervisor configured
+            via $WATCHDOG_USEC; ok is false when the variable is unset or malformed.
+          forward: svcnotify.WatchdogInterval
+          name: WatchdogInterval
+          out:
+            - name: d
+              type: time.Duration
+            - name: ok
+              type: bool
     imports:
       coreproc: github.com/kitsunium/sdk/internal/core/proc
+      svcnotify: github.com/kitsunium/sdk/internal/service/proc/systemd/notify
     path: github.com/kitsunium/sdk/pkg/v1/proc/systemd/notify

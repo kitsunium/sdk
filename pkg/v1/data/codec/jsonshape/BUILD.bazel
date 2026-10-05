@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "jsonshape",
-    srcs = ["jsonshape.go"],
+    srcs = [
+        "facade_gen.go",
+        "jsonshape.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/data/codec/jsonshape",
     visibility = ["//visibility:public"],
     deps = ["//internal/service/data/codec/jsonshape"],

@@ -113,7 +113,7 @@ var (
 ```
 
 <a name="Cache"></a>
-## type [Cache](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/cache.go#L86>)
+## type [Cache](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/facade_gen.go#L22>)
 
 Cache is the public alias for the generic LRU\+TTL primitive.
 
@@ -122,7 +122,7 @@ type Cache[K comparable, V any] = kcache.Cache[K, V]
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/cache.go#L95>)
+### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/facade_gen.go#L31>)
 
 ```go
 func New[K comparable, V any](cfg Config[K, V]) *Cache[K, V]
@@ -131,7 +131,7 @@ func New[K comparable, V any](cfg Config[K, V]) *Cache[K, V]
 New builds a [Cache](<#Cache>) from cfg. A nil cfg.Clock defaults to the system clock.
 
 <a name="ChainConfig"></a>
-## type [ChainConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/cache.go#L137>)
+## type [ChainConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/facade_gen.go#L72>)
 
 ChainConfig parameterises [NewChain](<#NewChain>).
 
@@ -140,7 +140,7 @@ type ChainConfig = svccache.ChainConfig
 ```
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/cache.go#L89>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/facade_gen.go#L25>)
 
 Config is the public alias for the primitive's constructor configuration.
 
@@ -149,7 +149,7 @@ type Config[K comparable, V any] = kcache.Config[K, V]
 ```
 
 <a name="Entry"></a>
-## type [Entry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/cache.go#L102>)
+## type [Entry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/facade_gen.go#L37>)
 
 Entry is what a caller stores: the value, its lifetime, and the tags by which it can later be invalidated in bulk.
 
@@ -158,7 +158,7 @@ type Entry[V any] = corecache.EntryValue[V]
 ```
 
 <a name="EntryFetcher"></a>
-## type [EntryFetcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/cache.go#L115>)
+## type [EntryFetcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/facade_gen.go#L50>)
 
 EntryFetcher is the sibling that returns the whole entry — value, REMAINING TTL, tags — rather than only the value. Both stores built here implement it.
 
@@ -167,7 +167,7 @@ type EntryFetcher[V any] = corecache.EntryFetcher[V]
 ```
 
 <a name="Fill"></a>
-## type [Fill](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/cache.go#L125>)
+## type [Fill](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/facade_gen.go#L60>)
 
 Fill computes the entry for a key the cache does not hold: a query, a request, a derivation. It is your code.
 
@@ -176,7 +176,7 @@ type Fill[V any] = corecache.Fill[V]
 ```
 
 <a name="Loader"></a>
-## type [Loader](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/cache.go#L130>)
+## type [Loader](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/facade_gen.go#L65>)
 
 Loader is the sibling that fills a miss while collapsing concurrent misses on one key into a single fill — within one process, and not across replicas. See the package documentation before sizing an origin against it.
 
@@ -185,7 +185,7 @@ type Loader[V any] = corecache.Loader[V]
 ```
 
 <a name="MemoryConfig"></a>
-## type [MemoryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/cache.go#L134>)
+## type [MemoryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/facade_gen.go#L69>)
 
 MemoryConfig parameterises [NewMemory](<#NewMemory>). Its zero value is NOT a working cache — MaxEntries must be stated, and is refused rather than defaulted.
 
@@ -194,7 +194,7 @@ type MemoryConfig = svccache.MemoryConfig
 ```
 
 <a name="Stats"></a>
-## type [Stats](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/cache.go#L92>)
+## type [Stats](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/facade_gen.go#L28>)
 
 Stats is the public alias for the primitive's counters snapshot.
 
@@ -203,7 +203,7 @@ type Stats = kcache.StatsValue
 ```
 
 <a name="Store"></a>
-## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/cache.go#L111>)
+## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/facade_gen.go#L46>)
 
 Store is the cache port: Fetch, Set, Delete.
 
@@ -214,7 +214,7 @@ type Store[V any] = corecache.Store[V]
 ```
 
 <a name="NewChain"></a>
-### func [NewChain](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/cache.go#L161>)
+### func [NewChain](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/facade_gen.go#L95>)
 
 ```go
 func NewChain[V any](cfg ChainConfig, tiers ...Store[V]) (store Store[V], err error)
@@ -225,7 +225,7 @@ NewChain puts each store in front of the next: tiers\[0\] is consulted first, th
 Every tier must implement [EntryFetcher](<#EntryFetcher>) and [Tagger](<#Tagger>), checked here and refused rather than discovered per call: a value promoted without its tags is one [Tagger](<#Tagger>) can no longer reach, so an invalidation would report success while a nearer tier kept serving the entry.
 
 <a name="NewMemory"></a>
-### func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/cache.go#L148>)
+### func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/facade_gen.go#L83>)
 
 ```go
 func NewMemory[V any](cfg MemoryConfig) (store Store[V], err error)
@@ -238,7 +238,7 @@ The returned [Store](<#Store>) also implements [EntryFetcher](<#EntryFetcher>), 
 A non\-positive MaxEntries is REFUSED, not defaulted. A capacity is the whole statement of how much memory you are willing to spend, so any number chosen for you would be arbitrary — and the value a zero would naturally mean, unbounded, is the dangerous one.
 
 <a name="Tagger"></a>
-## type [Tagger](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/cache.go#L121>)
+## type [Tagger](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/facade_gen.go#L56>)
 
 Tagger is the sibling for invalidating every entry carrying a tag.
 

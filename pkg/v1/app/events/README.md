@@ -121,7 +121,7 @@ var (
 ```
 
 <a name="Off"></a>
-## func [Off](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/events.go#L194>)
+## func [Off](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/facade_gen.go#L83>)
 
 ```go
 func Off[E any](bus Bus, name string) error
@@ -130,7 +130,7 @@ func Off[E any](bus Bus, name string) error
 Off removes the listener registered under name for the event type E. A name that is not registered is [UnknownListener](<#Halt>), never a silent success.
 
 <a name="On"></a>
-## func [On](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/events.go#L186>)
+## func [On](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/facade_gen.go#L77>)
 
 ```go
 func On[E any](bus Bus, handler Handler[E]) error
@@ -143,7 +143,7 @@ It is a function rather than a method because Go methods cannot take type parame
 E must be a concrete type; an interface is refused with [InvalidEventType](<#Halt>).
 
 <a name="Bus"></a>
-## type [Bus](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/events.go#L123>)
+## type [Bus](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/facade_gen.go#L15>)
 
 Bus is the public alias for the in\-process dispatch contract.
 
@@ -152,7 +152,7 @@ type Bus = corev.Bus
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/events.go#L174>)
+### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/facade_gen.go#L66>)
 
 ```go
 func New() Bus
@@ -161,7 +161,7 @@ func New() Bus
 New returns an empty in\-process event bus. It cannot fail and takes no configuration: every knob considered was a contract rather than a setting, and a bus whose semantics vary by construction cannot be read at the call site.
 
 <a name="Dispatch"></a>
-## type [Dispatch](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/events.go#L143>)
+## type [Dispatch](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/facade_gen.go#L35>)
 
 Dispatch is the public alias for the report one Publish returns.
 
@@ -170,7 +170,7 @@ type Dispatch = corev.DispatchValue
 ```
 
 <a name="EventType"></a>
-## type [EventType](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/events.go#L131>)
+## type [EventType](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/facade_gen.go#L23>)
 
 EventType is the public alias for the concrete Go type a subscription is keyed on. It is reflect.Type; [On](<#On>) and [Off](<#Off>) derive it for you.
 
@@ -179,7 +179,7 @@ type EventType = corev.EventType
 ```
 
 <a name="Handler"></a>
-## type [Handler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/events.go#L146>)
+## type [Handler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/facade_gen.go#L38>)
 
 Handler is the public alias for one TYPED listener's registration.
 
@@ -188,7 +188,7 @@ type Handler[E any] = svcev.Handler[E]
 ```
 
 <a name="Listener"></a>
-## type [Listener](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/events.go#L127>)
+## type [Listener](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/facade_gen.go#L19>)
 
 Listener is the public alias for the ERASED reaction the bus dispatches. Most code never names it — [On](<#On>) builds one from a typed function.
 
@@ -197,7 +197,7 @@ type Listener = corev.Listener
 ```
 
 <a name="Priority"></a>
-## type [Priority](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/events.go#L135>)
+## type [Priority](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/facade_gen.go#L27>)
 
 Priority is the public alias for a listener's position in the dispatch order. Lower runs first.
 
@@ -212,7 +212,7 @@ const PriorityNormal Priority = corev.PriorityNormal
 ```
 
 <a name="Subscription"></a>
-## type [Subscription](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/events.go#L140>)
+## type [Subscription](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/facade_gen.go#L32>)
 
 Subscription is the public alias for one ERASED registration. Prefer [Handler](<#Handler>) with [On](<#On>); this is the shape a caller who has already erased the type themselves registers.
 

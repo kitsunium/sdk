@@ -225,32 +225,88 @@ packages:
         name: Redactor
         struct:
           unexported: true
-  - aliases:
-      - name: Config
-        target: svcredact.Config
-      - name: Redactor
-        target: coreredact.Redactor
-      - name: Document
-        target: coreredact.DocumentValue
-    constants:
-      - name: Placeholder
-        type: string
-        value: "\"[redacted]\""
-      - name: Ellipsis
-        type: string
-        value: "\"…\""
-      - name: MinBytes
-        type: int
-        value: "16"
-      - name: Unencodable
-        type: string
-        value: "\"[unencodable]\""
-      - name: CodeDocumentInvalid
-        type: errs.Code
-        value: "0x00_03_49_01"
-      - name: CodeValueUnencodable
-        type: errs.Code
-        value: "0x00_03_49_02"
+  - facade:
+      - const:
+          - doc: Placeholder replaces every secret.
+            name: Placeholder
+            reexport: coreredact.Placeholder
+            type: string
+            typed: true
+            value: "\"[redacted]\""
+      - const:
+          - doc: Ellipsis ends whatever was cut to fit a bound, and is counted in it.
+            name: Ellipsis
+            reexport: coreredact.Ellipsis
+            type: string
+            typed: true
+            value: "\"…\""
+      - const:
+          - doc: MinBytes is the smallest bound honoured; a smaller one is raised to it.
+            name: MinBytes
+            reexport: coreredact.MinBytes
+            type: int
+            typed: true
+            value: "16"
+      - const:
+          - doc: Unencodable is the text a log attribute encoding/json refuses is shown as.
+            name: Unencodable
+            reexport: coreredact.Unencodable
+            type: string
+            typed: true
+            value: "\"[unencodable]\""
+      - const:
+          - doc: CodeDocumentInvalid identifies a document that is not one JSON value.
+            name: CodeDocumentInvalid
+            reexport: coreredact.CodeDocumentInvalid
+            type: errs.Code
+            typed: true
+            value: "0x00_03_49_01"
+      - const:
+          - doc: CodeValueUnencodable identifies a value encoding/json refuses to encode.
+            name: CodeValueUnencodable
+            reexport: coreredact.CodeValueUnencodable
+            type: errs.Code
+            typed: true
+            value: "0x00_03_49_02"
+      - var:
+          - doc: DocumentInvalid refuses a document that is not one JSON value.
+            name: DocumentInvalid
+            reexport: coreredact.DocumentInvalid
+            type: "*errs.Error"
+          - doc: ValueUnencodable refuses a value encoding/json will not encode.
+            name: ValueUnencodable
+            reexport: coreredact.ValueUnencodable
+            type: "*errs.Error"
+      - alias:
+          - doc: |-
+              Config says what a Redactor treats as secret: the name Words, the struct
+              Tag, an extra Field rule, and how an Error in a log attribute is shown. Its
+              zero value is usable.
+            name: Config
+            target: svcredact.Config
+      - alias:
+          - doc: |-
+              Redactor is the redaction port: Name, Text, JSON, Value and Attrs. [New]
+              returns the SDK's implementation, which caches what it learns about each Go
+              type, so build one per configuration and keep it; it is safe for concurrent
+              use. The port is frozen at those five methods (ADR 0039), so a consumer can
+              accept a Redactor and hand a test double in its place.
+            name: Redactor
+            target: coreredact.Redactor
+      - alias:
+          - doc: |-
+              Document is a JSON document with its secrets replaced — never longer than
+              its bound, always well-formed — and whether it had to be cut.
+            name: Document
+            target: coreredact.DocumentValue
+      - func:
+          doc: |-
+            DefaultWords returns the name fragments a Redactor treats as secret when its
+            Config gives none, as a fresh slice a caller may extend.
+          forward: svcredact.DefaultWords
+          name: DefaultWords
+          out:
+            - type: "[]string"
     functions:
       - in:
           - name: cfg
@@ -258,16 +314,8 @@ packages:
         name: New
         out:
           - type: Redactor
-      - name: DefaultWords
-        out:
-          - type: "[]string"
     imports:
       coreredact: github.com/kitsunium/sdk/internal/core/security/redact
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       svcredact: github.com/kitsunium/sdk/internal/service/security/redact
     path: github.com/kitsunium/sdk/pkg/v1/security/redact
-    variables:
-      - name: DocumentInvalid
-        type: "*errs.Error"
-      - name: ValueUnencodable
-        type: "*errs.Error"

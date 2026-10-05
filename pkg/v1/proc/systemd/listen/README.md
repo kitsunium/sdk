@@ -55,7 +55,7 @@ Socket activation relies on Unix file\-descriptor inheritance. Off Unix every fu
 
 
 <a name="Files"></a>
-## func [Files](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/listen/sdlisten.go#L69>)
+## func [Files](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/listen/facade_gen.go#L21>)
 
 ```go
 func Files(unsetEnv bool) (files []*os.File, err error)
@@ -64,7 +64,7 @@ func Files(unsetEnv bool) (files []*os.File, err error)
 Files returns the inherited listening sockets \(fd 3..3\+LISTEN\_FDS\) as \*os.File, honouring LISTEN\_PID. When unsetEnv is true the activation environment is cleared so a grandchild does not re\-inherit it. An empty or foreign activation set yields nil with no error; off Unix it returns UnsupportedPlatform.
 
 <a name="Listeners"></a>
-## func [Listeners](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/listen/sdlisten.go#L77>)
+## func [Listeners](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/listen/facade_gen.go#L28>)
 
 ```go
 func Listeners(unsetEnv bool) (listeners []net.Listener, err error)
@@ -73,7 +73,7 @@ func Listeners(unsetEnv bool) (listeners []net.Listener, err error)
 Listeners returns the inherited stream sockets wrapped as net.Listener \(the underlying \*os.File is closed after the dup\). Same gating and platform behaviour as Files.
 
 <a name="Prepare"></a>
-## func [Prepare](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/listen/sdlisten.go#L93>)
+## func [Prepare](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/listen/facade_gen.go#L42>)
 
 ```go
 func Prepare(child *Spec, named map[string]net.Listener) error
@@ -82,7 +82,7 @@ func Prepare(child *Spec, named map[string]net.Listener) error
 Prepare \(activator side\) appends each named listener's socket to child as an inherited fd and sets LISTEN\_FDS / LISTEN\_FDNAMES in child.Env so the spawned process recovers them via Files/Listeners. Off Unix it returns UnsupportedPlatform.
 
 <a name="WithNames"></a>
-## func [WithNames](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/listen/sdlisten.go#L84>)
+## func [WithNames](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/listen/facade_gen.go#L34>)
 
 ```go
 func WithNames(unsetEnv bool) (named map[string][]*os.File, err error)
@@ -91,7 +91,7 @@ func WithNames(unsetEnv bool) (named map[string][]*os.File, err error)
 WithNames returns the inherited sockets grouped by their LISTEN\_FDNAMES name; duplicate names group several fds under one key.
 
 <a name="Spec"></a>
-## type [Spec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/listen/sdlisten.go#L63>)
+## type [Spec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/listen/facade_gen.go#L15>)
 
 Spec is the process spawn specification an activator augments via Prepare. It aliases the core port type, so the same value drives process.Start.
 

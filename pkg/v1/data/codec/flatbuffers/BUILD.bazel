@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "flatbuffers",
-    srcs = ["flatbuffers.go"],
+    srcs = [
+        "facade_gen.go",
+        "flatbuffers.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/data/codec/flatbuffers",
     visibility = ["//visibility:public"],
     deps = [

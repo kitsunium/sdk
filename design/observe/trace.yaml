@@ -1064,405 +1064,918 @@ packages:
     variables:
       - name: OTLPJSON
         type: coretrace.SpanExporter
-  - aliases:
-      - name: Tracer
-        target: coretrace.Tracer
-      - name: Span
-        target: coretrace.Span
-      - name: Sampler
-        target: coretrace.Sampler
-      - name: SpanSink
-        target: coretrace.SpanSink
-      - name: Carrier
-        target: coretrace.Carrier
-      - name: SpanExporter
-        target: coretrace.SpanExporter
-      - name: ExporterName
-        target: coretrace.ExporterName
-      - name: TraceID
-        target: coretrace.TraceID
-      - name: SpanID
-        target: coretrace.SpanID
-      - name: TraceFlags
-        target: coretrace.TraceFlags
-      - name: SpanContext
-        target: coretrace.SpanContextValue
-      - name: TraceState
-        target: coretrace.StateValue
-      - name: Kind
-        target: coretrace.SpanKind
-      - name: StatusCode
-        target: coretrace.StatusCode
-      - name: Status
-        target: coretrace.StatusValue
-      - name: Event
-        target: coretrace.EventValue
-      - name: Link
-        target: coretrace.LinkValue
-      - name: SpanData
-        target: coretrace.SpanValue
-      - name: Spans
-        target: coretrace.SpansValue
-      - name: Attr
-        target: coreotel.AttrValue
-      - name: AttrKind
-        target: coreotel.AttrKind
-      - name: Resource
-        target: coreotel.ResourceValue
-      - name: Scope
-        target: coreotel.ScopeValue
-      - name: SpanParams
-        target: coretrace.SpanParams
-      - name: SamplingParams
-        target: coretrace.SamplingParams
-      - name: SDKTracer
-        target: svctrace.Tracer
-      - name: TracerConfig
-        target: svctrace.TracerConfig
-      - name: Recorder
-        target: svctrace.Recorder
-      - name: RecorderConfig
-        target: svctrace.RecorderConfig
-      - name: OTLPHTTPConfig
-        target: svctrace.OTLPHTTPConfig
-    constants:
-      - name: KindUnspecified
-        type: Kind
-        value: "0"
-      - name: KindInternal
-        type: Kind
-        value: "1"
-      - name: KindServer
-        type: Kind
-        value: "2"
-      - name: KindClient
-        type: Kind
-        value: "3"
-      - name: KindProducer
-        type: Kind
-        value: "4"
-      - name: KindConsumer
-        type: Kind
-        value: "5"
-      - name: StatusUnset
-        type: StatusCode
-        value: "0"
-      - name: StatusOK
-        type: StatusCode
-        value: "1"
-      - name: StatusError
-        type: StatusCode
-        value: "2"
-      - name: AttrKindInvalid
-        type: AttrKind
-        value: "0"
-      - name: AttrKindString
-        type: AttrKind
-        value: "1"
-      - name: AttrKindBool
-        type: AttrKind
-        value: "2"
-      - name: AttrKindInt64
-        type: AttrKind
-        value: "3"
-      - name: AttrKindFloat64
-        type: AttrKind
-        value: "4"
-      - name: TraceParentHeader
-        type: string
-        value: "\"traceparent\""
-      - name: TraceStateHeader
-        type: string
-        value: "\"tracestate\""
-      - name: TraceParentLen
-        type: int
-        value: "55"
-      - name: VersionSupported
-        type: string
-        value: "\"00\""
-      - name: FlagSampled
-        type: TraceFlags
-        value: "0x01"
-      - name: MaxTraceStateMembers
-        type: int
-        value: "32"
-      - name: DefaultScopeName
-        type: string
-        value: "\"github.com/kitsunium/sdk/pkg/v1/observe/trace\""
-      - name: ServiceNameKey
-        type: string
-        value: "\"service.name\""
-      - name: ExceptionEventName
-        type: string
-        value: "\"exception\""
-      - name: ExceptionTypeKey
-        type: string
-        value: "\"exception.type\""
-      - name: ExceptionMessageKey
-        type: string
-        value: "\"exception.message\""
-      - name: HTTPRequestMethodKey
-        type: string
-        value: "\"http.request.method\""
-      - name: HTTPResponseStatusCodeKey
-        type: string
-        value: "\"http.response.status_code\""
-      - name: URLPathKey
-        type: string
-        value: "\"url.path\""
-      - name: URLSchemeKey
-        type: string
-        value: "\"url.scheme\""
-      - name: URLFullKey
-        type: string
-        value: "\"url.full\""
-      - name: ServerAddressKey
-        type: string
-        value: "\"server.address\""
-      - name: OTLPTracesPath
-        type: string
-        value: "\"/v1/traces\""
-      - name: DefaultOTLPTimeout
-        type: time.Duration
-        value: "10000000000"
-      - name: DefaultOTLPMaxResponseBytes
-        type: int64
-        value: 1 << 20
-      - name: DefaultMaxSpans
-        type: int
-        value: "2048"
-    functions:
-      - in:
-          - name: key
-          - name: value
+  - facade:
+      - const:
+          - doc: KindUnspecified is SPAN_KIND_UNSPECIFIED; it resolves to KindInternal.
+            name: KindUnspecified
+            note: |-
+              The five span kinds. The zero value resolves to KindInternal. Each is declared
+              on its own so the group carries no implied sequence: these are the schema's
+              numbers, not this package's.
+            reexport: coretrace.SpanKindUnspecified
+            type: Kind
+            typed: true
+            value: "0"
+      - const:
+          - doc: KindInternal is work inside one process.
+            name: KindInternal
+            reexport: coretrace.SpanKindInternal
+            type: Kind
+            typed: true
+            value: "1"
+      - const:
+          - doc: KindServer is handling an inbound synchronous request.
+            name: KindServer
+            reexport: coretrace.SpanKindServer
+            type: Kind
+            typed: true
+            value: "2"
+      - const:
+          - doc: KindClient is making an outbound synchronous request.
+            name: KindClient
+            reexport: coretrace.SpanKindClient
+            type: Kind
+            typed: true
+            value: "3"
+      - const:
+          - doc: KindProducer is enqueuing a message handled later, elsewhere.
+            name: KindProducer
+            reexport: coretrace.SpanKindProducer
+            type: Kind
+            typed: true
+            value: "4"
+      - const:
+          - doc: KindConsumer is handling a message enqueued earlier.
+            name: KindConsumer
+            reexport: coretrace.SpanKindConsumer
+            type: Kind
+            typed: true
+            value: "5"
+      - const:
+          - doc: |-
+              StatusUnset is the default: no explicit judgement. It does NOT mean "it
+              worked" — a backend applies its own heuristics, and claiming OK on the
+              caller's behalf would suppress them.
+            name: StatusUnset
+            reexport: coretrace.StatusUnset
+            type: StatusCode
+            typed: true
+            value: "0"
+      - const:
+          - doc: StatusOK is an explicit success assertion by the developer.
+            name: StatusOK
+            reexport: coretrace.StatusOK
+            type: StatusCode
+            typed: true
+            value: "1"
+      - const:
+          - doc: StatusError is a failure.
+            name: StatusError
+            reexport: coretrace.StatusError
+            type: StatusCode
+            typed: true
+            value: "2"
+      - const:
+          - doc: AttrKindInvalid is the zero value and names no type.
+            name: AttrKindInvalid
+            reexport: coreotel.AttrKindInvalid
+            type: AttrKind
+            typed: true
+            value: "0"
+      - const:
+          - doc: AttrKindString marks a string-valued attribute.
+            name: AttrKindString
+            reexport: coreotel.AttrKindString
+            type: AttrKind
+            typed: true
+            value: "1"
+      - const:
+          - doc: AttrKindBool marks a bool-valued attribute.
+            name: AttrKindBool
+            reexport: coreotel.AttrKindBool
+            type: AttrKind
+            typed: true
+            value: "2"
+      - const:
+          - doc: AttrKindInt64 marks a signed 64-bit integer attribute.
+            name: AttrKindInt64
+            reexport: coreotel.AttrKindInt64
+            type: AttrKind
+            typed: true
+            value: "3"
+      - const:
+          - doc: AttrKindFloat64 marks an IEEE-754 double attribute.
+            name: AttrKindFloat64
+            reexport: coreotel.AttrKindFloat64
+            type: AttrKind
+            typed: true
+            value: "4"
+      - const:
+          - doc: TraceParentHeader is the W3C header carrying the span context.
+            name: TraceParentHeader
+            reexport: svctrace.TraceParentHeader
             type: string
-        name: String
-        out:
-          - type: Attr
-      - in:
-          - name: key
+            typed: true
+            value: "\"traceparent\""
+      - const:
+          - doc: TraceStateHeader is the W3C header carrying the vendor list.
+            name: TraceStateHeader
+            reexport: svctrace.TraceStateHeader
             type: string
-          - name: value
-            type: bool
-        name: Bool
-        out:
-          - type: Attr
-      - in:
-          - name: key
+            typed: true
+            value: "\"tracestate\""
+      - const:
+          - doc: "TraceParentLen is the length of a version-00 traceparent: 55 characters."
+            name: TraceParentLen
+            reexport: svctrace.TraceParentLen
+            type: int
+            typed: true
+            value: "55"
+      - const:
+          - doc: "VersionSupported is the traceparent version this SDK emits: \"00\"."
+            name: VersionSupported
+            reexport: svctrace.VersionSupported
             type: string
-          - name: value
+            typed: true
+            value: "\"00\""
+      - const:
+          - doc: |-
+              FlagSampled is the traceparent sampled bit — the one flag version 00 defines,
+              and the one the whole sampling design travels in.
+            name: FlagSampled
+            reexport: coretrace.FlagSampled
+            type: TraceFlags
+            typed: true
+            value: "0x01"
+      - const:
+          - doc: |-
+              MaxTraceStateMembers is the W3C list cap: 32 members, from the grammar itself
+              rather than from a ceiling this SDK invented.
+            name: MaxTraceStateMembers
+            reexport: coretrace.MaxTraceStateMembers
+            type: int
+            typed: true
+            value: "32"
+      - const:
+          - doc: |-
+              DefaultScopeName names this package as the instrumenting library when a caller
+              declares no scope. It is deliberately NOT the metrics one: a scope names the
+              library that produced THIS signal.
+            name: DefaultScopeName
+            reexport: coretrace.DefaultScopeName
+            type: string
+            typed: true
+            value: "\"github.com/kitsunium/sdk/pkg/v1/observe/trace\""
+      - const:
+          - doc: |-
+              ServiceNameKey is the resource attribute a backend joins a trace to a metric
+              on. It is the same constant pkg/v1/observe/metrics exports, so the two signals cannot
+              disagree about the spelling.
+            name: ServiceNameKey
+            reexport: coreotel.ServiceNameKey
+            type: string
+            typed: true
+            value: "\"service.name\""
+      - const:
+          - doc: ExceptionEventName is the reserved event name RecordError writes.
+            name: ExceptionEventName
+            reexport: coretrace.ExceptionEventName
+            type: string
+            typed: true
+            value: "\"exception\""
+      - const:
+          - doc: ExceptionTypeKey names a recorded error's stable identity.
+            name: ExceptionTypeKey
+            reexport: coretrace.ExceptionTypeKey
+            type: string
+            typed: true
+            value: "\"exception.type\""
+      - const:
+          - doc: ExceptionMessageKey names a recorded error's message.
+            name: ExceptionMessageKey
+            reexport: coretrace.ExceptionMessageKey
+            type: string
+            typed: true
+            value: "\"exception.message\""
+      - const:
+          - doc: HTTPRequestMethodKey is the request method attribute the middlewares record.
+            name: HTTPRequestMethodKey
+            reexport: svctrace.HTTPRequestMethodKey
+            type: string
+            typed: true
+            value: "\"http.request.method\""
+      - const:
+          - doc: HTTPResponseStatusCodeKey is the response status attribute.
+            name: HTTPResponseStatusCodeKey
+            reexport: svctrace.HTTPResponseStatusCodeKey
+            type: string
+            typed: true
+            value: "\"http.response.status_code\""
+      - const:
+          - doc: URLPathKey is the inbound request path attribute, in its ESCAPED form.
+            name: URLPathKey
+            reexport: svctrace.URLPathKey
+            type: string
+            typed: true
+            value: "\"url.path\""
+      - const:
+          - doc: URLSchemeKey is the request scheme attribute.
+            name: URLSchemeKey
+            reexport: svctrace.URLSchemeKey
+            type: string
+            typed: true
+            value: "\"url.scheme\""
+      - const:
+          - doc: URLFullKey is the outbound URL attribute, recorded on CLIENT spans.
+            name: URLFullKey
+            reexport: svctrace.URLFullKey
+            type: string
+            typed: true
+            value: "\"url.full\""
+      - const:
+          - doc: ServerAddressKey is the host attribute.
+            name: ServerAddressKey
+            reexport: svctrace.ServerAddressKey
+            type: string
+            typed: true
+            value: "\"server.address\""
+      - const:
+          - doc: |-
+              OTLPTracesPath is the OTLP/HTTP path for the trace signal. Append it to a
+              collector's base URL yourself, so the whole address is one readable string.
+            name: OTLPTracesPath
+            reexport: svctrace.OTLPTracesPath
+            type: string
+            typed: true
+            value: "\"/v1/traces\""
+      - const:
+          - doc: |-
+              DefaultOTLPTimeout bounds one export round trip: 10s, the OpenTelemetry
+              specification's own default for OTEL_EXPORTER_OTLP_TIMEOUT.
+            name: DefaultOTLPTimeout
+            reexport: svctrace.DefaultOTLPTimeout
+            type: time.Duration
+            typed: true
+            value: "10000000000"
+      - const:
+          - doc: "DefaultOTLPMaxResponseBytes caps the response body read: 1 MiB."
+            name: DefaultOTLPMaxResponseBytes
+            reexport: svctrace.DefaultOTLPMaxResponseBytes
             type: int64
-        name: Int64
-        out:
-          - type: Attr
-      - in:
-          - name: key
-            type: string
-          - name: value
-            type: float64
-        name: Float64
-        out:
-          - type: Attr
-      - in:
-          - name: cfg
-            type: TracerConfig
-        name: NewTracer
-        out:
-          - type: "*SDKTracer"
-      - in:
-          - name: cfg
-            type: RecorderConfig
-        name: NewRecorder
-        out:
-          - type: "*Recorder"
-      - in:
-          - name: params
-            type: SamplingParams
-        name: AlwaysSample
-        out:
-          - type: bool
-      - in:
-          - name: params
-            type: SamplingParams
-        name: NeverSample
-        out:
-          - type: bool
-      - in:
-          - name: root
-            type: Sampler
-        name: ParentBased
-        out:
-          - type: Sampler
-      - in:
-          - name: fraction
-            type: float64
-        name: Ratio
-        out:
-          - name: sampler
-            type: Sampler
-          - name: err
-            type: error
-      - in:
-          - name: context
-            type: SpanContext
-          - name: carrier
-            type: Carrier
-        name: Inject
-      - in:
-          - name: carrier
-            type: Carrier
-        name: Extract
-        out:
-          - type: SpanContext
-      - in:
-          - name: header
-            type: string
-        name: ParseTraceParent
-        out:
-          - name: context
-            type: SpanContext
-          - name: err
-            type: error
-      - in:
-          - name: context
-            type: SpanContext
-        name: FormatTraceParent
-        out:
-          - name: header
-            type: string
-          - name: ok
-            type: bool
-      - in:
-          - name: header
-            type: string
-        name: ParseTraceState
-        out:
-          - name: state
-            type: TraceState
-          - name: err
-            type: error
-      - in:
-          - name: text
-            type: string
-        name: ParseTraceID
-        out:
-          - name: id
-            type: TraceID
-          - name: err
-            type: error
-      - in:
-          - name: text
-            type: string
-        name: ParseSpanID
-        out:
-          - name: id
-            type: SpanID
-          - name: err
-            type: error
-      - name: NewTraceID
-        out:
-          - name: id
-            type: TraceID
-          - name: err
-            type: error
-      - name: NewSpanID
-        out:
-          - name: id
-            type: SpanID
-          - name: err
-            type: error
-      - in:
-          - name: parent
-            type: context.Context
-          - name: spanContext
-            type: SpanContext
-        name: ContextWithSpanContext
-        out:
-          - type: context.Context
-      - in:
-          - name: ctx
-            type: context.Context
-        name: SpanContextFromContext
-        out:
-          - type: SpanContext
-      - in:
-          - name: span
-            type: Span
-          - name: err
-            type: error
-        name: RecordError
-      - in:
-          - name: tracer
-            type: Tracer
-        name: ServerMiddleware
-        out:
-          - type: corenet.Middleware[http.Handler]
-      - in:
-          - name: tracer
-            type: Tracer
-        name: ClientMiddleware
-        out:
-          - type: corenet.Middleware[http.RoundTripper]
-      - in:
-          - name: spans
-            type: Spans
-        name: EncodeOTLPJSON
-        out:
-          - name: doc
-            type: "[]byte"
-          - name: err
-            type: error
-      - in:
-          - name: name
-            type: ExporterName
-          - name: dst
-            type: io.Writer
-        name: NewOTLPJSONExporter
-        out:
-          - type: SpanExporter
-      - in:
-          - name: name
-            type: ExporterName
-          - name: cfg
-            type: OTLPHTTPConfig
-        name: NewOTLPHTTPExporter
-        out:
-          - name: exporter
-            type: SpanExporter
-          - name: err
-            type: error
-      - in:
-          - name: err
-            type: error
-        name: OTLPRetryable
-        out:
-          - type: bool
-      - in:
-          - name: e
-            type: SpanExporter
-        name: RegisterExporter
-        out:
-          - type: SpanExporter
-      - in:
-          - name: name
-            type: ExporterName
-        name: LookupExporter
-        out:
-          - name: e
-            type: SpanExporter
-          - name: ok
-            type: bool
-      - name: AvailableExporters
-        out:
-          - type: "[]ExporterName"
-      - in:
-          - name: name
-            type: ExporterName
-          - name: spans
-            type: Spans
-        name: Export
-        out:
-          - type: error
+            typed: true
+            value: 1 << 20
+      - const:
+          - doc: |-
+              DefaultMaxSpans is a Recorder's default bound. There is no "unbounded"
+              setting, because a buffer nobody drains is how a tracing integration takes a
+              process down.
+            name: DefaultMaxSpans
+            reexport: svctrace.DefaultMaxSpans
+            type: int
+            typed: true
+            value: "2048"
+      - doc: Sentinels returned by this package. Match with errors.Is or errs.HasCode.
+        var:
+          - doc: InvalidTraceParent reports a traceparent header that cannot be read.
+            name: InvalidTraceParent
+            reexport: coretrace.InvalidTraceParent
+            type: "*errs.Error"
+          - doc: InvalidTraceState reports a tracestate header that cannot be read.
+            name: InvalidTraceState
+            reexport: coretrace.InvalidTraceState
+            type: "*errs.Error"
+          - doc: InvalidSpanName is the panic sentinel for a Start with no name.
+            name: InvalidSpanName
+            reexport: coretrace.InvalidSpanName
+            type: "*errs.Error"
+          - doc: |-
+              InvalidAttribute is the panic sentinel for an unusable attribute set —
+              an empty or repeated key, or a value no constructor set — on a span, an
+              event, a link or a Resource. It is this package's own code; the metrics
+              one is a different sentinel for the same defect in that signal.
+            name: InvalidAttribute
+            reexport: coretrace.InvalidAttribute
+            type: "*errs.Error"
+          - doc: UnknownExporter reports a name no imported package registered.
+            name: UnknownExporter
+            reexport: coretrace.UnknownExporter
+            type: "*errs.Error"
+          - doc: ExportFailed wraps an exporter's failure.
+            name: ExportFailed
+            reexport: coretrace.ExportFailed
+            type: "*errs.Error"
+          - doc: DuplicateRegistration is the boot-time registry panic sentinel.
+            name: DuplicateRegistration
+            reexport: coretrace.DuplicateRegistration
+            type: "*errs.Error"
+          - doc: |-
+              EntropyFailed is kept for code that matches it: nothing returns it since
+              Go 1.24, whose crypto/rand.Read never fails, so minting an identifier
+              cannot fail.
+            name: EntropyFailed
+            reexport: coretrace.EntropyFailed
+            type: "*errs.Error"
+          - doc: |-
+              InvalidSampleRatio reports a fraction Ratio will not accept — including
+              exactly 0, which also spells "unconfigured".
+            name: InvalidSampleRatio
+            reexport: coretrace.InvalidSampleRatio
+            type: "*errs.Error"
+          - doc: OTLPInvalidSpanContext reports a span with an all-zero identifier.
+            name: OTLPInvalidSpanContext
+            reexport: coretrace.OTLPInvalidSpanContext
+            type: "*errs.Error"
+          - doc: OTLPSpanNotEnded reports a span that reached the encoder unended.
+            name: OTLPSpanNotEnded
+            reexport: coretrace.OTLPSpanNotEnded
+            type: "*errs.Error"
+          - doc: OTLPEndpointInvalid reports an endpoint that cannot address a collector.
+            name: OTLPEndpointInvalid
+            reexport: coretrace.OTLPEndpointInvalid
+            type: "*errs.Error"
+          - doc: OTLPExportRejected reports a permanent refusal by the collector.
+            name: OTLPExportRejected
+            reexport: coretrace.OTLPExportRejected
+            type: "*errs.Error"
+          - doc: OTLPExportUnavailable reports a transient failure worth retrying.
+            name: OTLPExportUnavailable
+            reexport: coretrace.OTLPExportUnavailable
+            type: "*errs.Error"
+          - doc: OTLPPartialSuccess reports an accepted request with rejected spans.
+            name: OTLPPartialSuccess
+            reexport: coretrace.OTLPPartialSuccess
+            type: "*errs.Error"
+      - func:
+          doc: String returns a string-valued attribute.
+          forward: coreotel.String
+          in:
+            - name: key
+            - name: value
+              type: string
+          name: String
+          out:
+            - type: Attr
+        note: |-
+          ── Attributes ───────────────────────────────────────────────────────────────
+
+          The four attribute constructors below forward to the shared model's own, the
+          ones [github.com/kitsunium/sdk/pkg/v1/observe/metrics] forwards to as well, so a
+          value built by either package is accepted by both.
+      - func:
+          doc: Bool returns a bool-valued attribute.
+          forward: coreotel.Bool
+          in:
+            - name: key
+              type: string
+            - name: value
+              type: bool
+          name: Bool
+          out:
+            - type: Attr
+      - func:
+          doc: Int64 returns a signed-integer attribute.
+          forward: coreotel.Int64
+          in:
+            - name: key
+              type: string
+            - name: value
+              type: int64
+          name: Int64
+          out:
+            - type: Attr
+      - func:
+          doc: Float64 returns a double attribute.
+          forward: coreotel.Float64
+          in:
+            - name: key
+              type: string
+            - name: value
+              type: float64
+          name: Float64
+          out:
+            - type: Attr
+      - alias:
+          - doc: Tracer starts spans. FROZEN at one method (ADR 0039).
+            name: Tracer
+            note: ── The ports ────────────────────────────────────────────────────────────────
+            target: coretrace.Tracer
+      - alias:
+          - doc: Span is one live, recording span. FROZEN at five methods (ADR 0039).
+            name: Span
+            target: coretrace.Span
+      - alias:
+          - doc: |-
+              Sampler decides whether a ROOT trace is recorded. A func port, so it cannot
+              grow a method at all.
+            name: Sampler
+            target: coretrace.Sampler
+      - alias:
+          - doc: SpanSink receives every sampled span at End. A func port, for the same reason.
+            name: SpanSink
+            target: coretrace.SpanSink
+      - alias:
+          - doc: |-
+              Carrier is the two-method surface a header set presents for propagation. It is
+              exactly http.Header's Get/Set pair, so http.Header satisfies it with no
+              adapter.
+            name: Carrier
+            target: coretrace.Carrier
+      - alias:
+          - doc: SpanExporter ships a batch of finished spans to a backend.
+            name: SpanExporter
+            target: coretrace.SpanExporter
+      - alias:
+          - doc: ExporterName is the typed key a SpanExporter registers under.
+            name: ExporterName
+            target: coretrace.ExporterName
+      - alias:
+          - doc: |-
+              TraceID identifies one trace: sixteen octets, rendered as 32 lowercase hex
+              digits. The all-zero value is invalid.
+            name: TraceID
+            note: ── The data model ───────────────────────────────────────────────────────────
+            target: coretrace.TraceID
+      - alias:
+          - doc: |-
+              SpanID identifies one span: eight octets, rendered as 16 lowercase hex
+              digits. The all-zero value is invalid, and is also how "no parent" is spelled.
+            name: SpanID
+            target: coretrace.SpanID
+      - alias:
+          - doc: TraceFlags is the traceparent flag byte. Only bit 0, sampled, is defined.
+            name: TraceFlags
+            target: coretrace.TraceFlags
+      - alias:
+          - doc: |-
+              SpanContext is the immutable identity of a span — what travels in a
+              traceparent and what a child inherits.
+            name: SpanContext
+            target: coretrace.SpanContextValue
+      - alias:
+          - doc: |-
+              TraceState is the parsed tracestate header: an ordered vendor list, leftmost
+              first. Immutable.
+            name: TraceState
+            target: coretrace.StateValue
+      - alias:
+          - doc: Kind says how a span relates to its neighbours.
+            name: Kind
+            target: coretrace.SpanKind
+      - alias:
+          - doc: "StatusCode is a span's verdict: unset, ok or error."
+            name: StatusCode
+            target: coretrace.StatusCode
+      - alias:
+          - doc: Status is a span's recorded outcome.
+            name: Status
+            target: coretrace.StatusValue
+      - alias:
+          - doc: Event is a timestamped point inside a span.
+            name: Event
+            target: coretrace.EventValue
+      - alias:
+          - doc: Link points at a causally related span in another trace.
+            name: Link
+            target: coretrace.LinkValue
+      - alias:
+          - doc: |-
+              SpanData is one FINISHED span — what a SpanSink receives and an exporter
+              ships. The live one is [Span].
+            name: SpanData
+            target: coretrace.SpanValue
+      - alias:
+          - doc: |-
+              Spans is a batch of finished spans plus the Resource and Scope that describe
+              all of them.
+            name: Spans
+            target: coretrace.SpansValue
+      - alias:
+          - doc: |-
+              Attr is one typed dimension. It is the SAME type as
+              [github.com/kitsunium/sdk/pkg/v1/observe/metrics.Attr], deliberately: an attribute is
+              OTel's common.proto, shared by every signal, so a value built for a metric is
+              accepted by a span and the reverse.
+            name: Attr
+            target: coreotel.AttrValue
+      - alias:
+          - doc: AttrKind discriminates an Attr's value type.
+            name: AttrKind
+            target: coreotel.AttrKind
+      - alias:
+          - doc: |-
+              Resource identifies the producer of the telemetry. The same type a MeterConfig
+              takes, so a process cannot carry two Resources that disagree about
+              service.name — which is the key a backend correlates a trace with a metric on.
+            name: Resource
+            target: coreotel.ResourceValue
+      - alias:
+          - doc: Scope identifies the instrumentation that started the spans.
+            name: Scope
+            target: coreotel.ScopeValue
+      - alias:
+          - doc: |-
+              SpanParams are the facts a span is born with. The zero value is an INTERNAL
+              span starting now.
+            name: SpanParams
+            target: coretrace.SpanParams
+      - alias:
+          - doc: SamplingParams is everything a Sampler sees.
+            name: SamplingParams
+            target: coretrace.SamplingParams
+      - alias:
+          - doc: |-
+              SDKTracer is the concrete [Tracer] that [NewTracer] returns: the port's
+              Start, plus Resource and Scope, which read back what it stamps on every
+              span it starts. The port keeps the name Tracer; this is the SDK's
+              implementation of it, in OpenTelemetry's sense of API and SDK. Name it
+              to keep a tracer in a field, or to pass one to a function of your own.
+            name: SDKTracer
+            target: svctrace.Tracer
+          - doc: |-
+              TracerConfig configures a Tracer. Every field has a resolved meaning
+              when left unset.
+            name: TracerConfig
+            target: svctrace.TracerConfig
+          - doc: |-
+              Recorder accumulates finished spans in memory and hands them out in
+              batches. It is the in-tree SpanSink.
+            name: Recorder
+            target: svctrace.Recorder
+          - doc: RecorderConfig configures a Recorder.
+            name: RecorderConfig
+            target: svctrace.RecorderConfig
+          - doc: OTLPHTTPConfig configures the OTLP/HTTP exporter.
+            name: OTLPHTTPConfig
+            target: svctrace.OTLPHTTPConfig
+        doc: Tracer configuration and the concrete tracer.
+        note: ── The implementations ──────────────────────────────────────────────────────
+      - func:
+          doc: |-
+            NewTracer builds a Tracer from cfg, applying every clamp once. It cannot fail:
+            every field of TracerConfig has a resolved meaning, and the inputs that CAN be
+            refused — a sampling ratio, an OTLP endpoint — are refused by their own
+            constructors before they reach here.
+
+            It returns the concrete [SDKTracer] rather than the [Tracer] port, so a caller
+            keeps Resource and Scope, and anything the concrete type grows later, without
+            the port having to grow (ADR 0039).
+          forward: svctrace.NewTracer
+          in:
+            - name: cfg
+              type: TracerConfig
+          name: NewTracer
+          out:
+            - type: "*SDKTracer"
+      - func:
+          doc: |-
+            NewRecorder builds the in-memory span destination. Its Sink is what a
+            TracerConfig takes, and its Collect DRAINS — a Recorder has exactly one reader.
+          forward: svctrace.NewRecorder
+          in:
+            - name: cfg
+              type: RecorderConfig
+          name: NewRecorder
+          out:
+            - type: "*Recorder"
+      - func:
+          doc: AlwaysSample keeps every root trace.
+          forward: svctrace.AlwaysSample
+          in:
+            - name: params
+              type: SamplingParams
+          name: AlwaysSample
+          out:
+            - type: bool
+        note: ── Sampling ─────────────────────────────────────────────────────────────────
+      - func:
+          doc: |-
+            NeverSample drops every root trace. It exists so "off" has a NAME a reviewer
+            can grep for, rather than a rate of zero that is indistinguishable from a field
+            nobody set.
+          forward: svctrace.NeverSample
+          in:
+            - name: params
+              type: SamplingParams
+          name: NeverSample
+          out:
+            - type: bool
+      - func:
+          doc: |-
+            ParentBased returns a Sampler that honours a valid parent's decision and
+            consults root only at the start of a trace. It is what almost every deployment
+            wants — see the package documentation on why re-deciding produces a trace with
+            holes in it. A nil root clamps to AlwaysSample.
+          forward: svctrace.ParentBased
+          in:
+            - name: root
+              type: Sampler
+          name: ParentBased
+          out:
+            - type: Sampler
+      - func:
+          doc: |-
+            Ratio returns a Sampler keeping a deterministic fraction of root traces,
+            decided on the trace id so two services reach the same verdict for the same id.
+
+            It REFUSES exactly 0, and that refusal is the point. A float64 left unset, a
+            JSON document missing the key and a YAML `rate:` with nothing after it all
+            produce 0.0 — so a rate of zero means both "sample nothing" and "nobody
+            configured this", and nothing in the type can tell them apart. The failure is
+            silent: no error, no log, and no telemetry, where the absence of telemetry IS
+            the symptom. Say NeverSample for none and AlwaysSample (or Ratio(1)) for all.
+          forward: svctrace.Ratio
+          in:
+            - name: fraction
+              type: float64
+          name: Ratio
+          out:
+            - name: sampler
+              type: Sampler
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            Inject writes context into carrier as a traceparent, plus a tracestate when the
+            vendor list is non-empty. An invalid context writes NOTHING — not an empty
+            header, not a zero-filled one.
+          forward: svctrace.Inject
+          in:
+            - name: context
+              type: SpanContext
+            - name: carrier
+              type: Carrier
+          name: Inject
+        note: ── Propagation ──────────────────────────────────────────────────────────────
+      - func:
+          doc: |-
+            Extract reads a span context out of carrier, returning the invalid zero value
+            when there is nothing usable. It returns no error on purpose — see the package
+            documentation.
+          forward: svctrace.Extract
+          in:
+            - name: carrier
+              type: Carrier
+          name: Extract
+          out:
+            - type: SpanContext
+      - func:
+          doc: |-
+            ParseTraceParent reads a traceparent header value, with a typed error. It is
+            the diagnostic form of Extract: use it when you are debugging a header, not
+            when you are serving a request.
+          forward: svctrace.ParseTraceParent
+          in:
+            - name: header
+              type: string
+          name: ParseTraceParent
+          out:
+            - name: context
+              type: SpanContext
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            FormatTraceParent renders a span context as a version-00 traceparent,
+            reporting ok=false when the context names no joinable span — an all-zero
+            identifier is a header every conforming receiver must ignore, so there is
+            nothing to write. Undefined flag bits are masked here, which is where this SDK
+            acts as a producer.
+          forward: svctrace.FormatTraceParent
+          in:
+            - name: context
+              type: SpanContext
+          name: FormatTraceParent
+          out:
+            - name: header
+              type: string
+            - name: ok
+              type: bool
+      - func:
+          doc: |-
+            ParseTraceState reads a tracestate header value. It refuses the whole header
+            rather than salvaging the members it understood: a half-parsed list forwarded
+            to the next hop is a list this process invented.
+          forward: svctrace.ParseTraceState
+          in:
+            - name: header
+              type: string
+          name: ParseTraceState
+          out:
+            - name: state
+              type: TraceState
+            - name: err
+              type: error
+      - func:
+          doc: ParseTraceID reads 32 lowercase hex digits, refusing an all-zero result.
+          forward: coretrace.ParseTraceID
+          in:
+            - name: text
+              type: string
+          name: ParseTraceID
+          out:
+            - name: id
+              type: TraceID
+            - name: err
+              type: error
+      - func:
+          doc: ParseSpanID reads 16 lowercase hex digits, refusing an all-zero result.
+          forward: coretrace.ParseSpanID
+          in:
+            - name: text
+              type: string
+          name: ParseSpanID
+          out:
+            - name: id
+              type: SpanID
+            - name: err
+              type: error
+      - func:
+          doc: NewTraceID draws a fresh random trace identifier.
+          forward: svctrace.NewTraceID
+          name: NewTraceID
+          out:
+            - name: id
+              type: TraceID
+            - name: err
+              type: error
+      - func:
+          doc: NewSpanID draws a fresh random span identifier.
+          forward: svctrace.NewSpanID
+          name: NewSpanID
+          out:
+            - name: id
+              type: SpanID
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            ContextWithSpanContext returns a copy of parent carrying spanContext. An
+            invalid context is still stored: it is how "this scope deliberately has no
+            trace" is expressed, and it shadows any outer one.
+          forward: coretrace.ContextWithSpanContext
+          in:
+            - name: parent
+              type: context.Context
+            - name: spanContext
+              type: SpanContext
+          name: ContextWithSpanContext
+          out:
+            - type: context.Context
+      - func:
+          doc: |-
+            SpanContextFromContext returns the span context carried by ctx, or the invalid
+            zero value when there is none.
+          forward: coretrace.SpanContextFromContext
+          in:
+            - name: ctx
+              type: context.Context
+          name: SpanContextFromContext
+          out:
+            - type: SpanContext
+      - func:
+          doc: |-
+            RecordError records err on span as the conventional `exception` event and marks
+            the span ERROR.
+
+            It is a helper rather than a Span method because what an error's type is, and
+            whether recording one should also set the status, are judgements about the
+            caller's error model — and a port method would freeze this SDK's answer into
+            every downstream implementation (ADR 0039).
+          forward: svctrace.RecordError
+          in:
+            - name: span
+              type: Span
+            - name: err
+              type: error
+          name: RecordError
+        note: ── Instrumentation helpers ──────────────────────────────────────────────────
+      - func:
+          doc: |-
+            ServerMiddleware returns a middleware tracing every inbound request: it
+            extracts the parent context from the headers, starts a SERVER span named by the
+            request method, and records the status. A malformed traceparent starts a new
+            trace and never fails the request.
+          forward: svctrace.ServerMiddleware
+          in:
+            - name: tracer
+              type: Tracer
+          name: ServerMiddleware
+          out:
+            - type: corenet.Middleware[http.Handler]
+      - func:
+          doc: |-
+            ClientMiddleware returns a middleware tracing every outbound request and
+            INJECTING the traceparent into it. It decorates the RoundTripper, so no call
+            site can skip it, and it clones the request rather than mutating one the caller
+            still holds.
+          forward: svctrace.ClientMiddleware
+          in:
+            - name: tracer
+              type: Tracer
+          name: ClientMiddleware
+          out:
+            - type: corenet.Middleware[http.RoundTripper]
+      - func:
+          doc: |-
+            EncodeOTLPJSON renders spans as ONE OTLP/JSON ExportTraceServiceRequest —
+            exactly the bytes that go in the body of a POST to /v1/traces. It does no I/O,
+            so an encoding question never becomes a network question.
+          forward: svctrace.EncodeOTLPJSON
+          in:
+            - name: spans
+              type: Spans
+          name: EncodeOTLPJSON
+          out:
+            - name: doc
+              type: "[]byte"
+            - name: err
+              type: error
+        note: ── Export ───────────────────────────────────────────────────────────────────
+      - func:
+          doc: |-
+            NewOTLPJSONExporter returns a SpanExporter writing each batch to dst as one
+            newline-terminated OTLP/JSON document. It is not registered — bind it yourself.
+          forward: svctrace.NewOTLPJSONExporter
+          in:
+            - name: name
+              type: ExporterName
+            - name: dst
+              type: io.Writer
+          name: NewOTLPJSONExporter
+          out:
+            - type: SpanExporter
+      - func:
+          doc: |-
+            NewOTLPHTTPExporter builds a SpanExporter that POSTs each batch to an OTLP
+            collector. It is deliberately NOT in the registry: arming a network client from
+            an import is worse than arming a writer, and no endpoint could be a correct
+            default. It does not retry either — use OTLPRetryable with
+            [github.com/kitsunium/sdk/pkg/v1/app/resilience].
+          forward: svctrace.NewOTLPHTTPExporter
+          in:
+            - name: name
+              type: ExporterName
+            - name: cfg
+              type: OTLPHTTPConfig
+          name: NewOTLPHTTPExporter
+          out:
+            - name: exporter
+              type: SpanExporter
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            OTLPRetryable reports whether err is an OTLP/HTTP failure the specification
+            says may be replayed. Its signature is exactly resilience.RetryConfig.Retryable's.
+          forward: svctrace.OTLPRetryable
+          in:
+            - name: err
+              type: error
+          name: OTLPRetryable
+          out:
+            - type: bool
+      - func:
+          doc: |-
+            RegisterExporter inserts e under e.Name(). It panics on a nil exporter or a
+            distinct exporter claiming a taken name.
+          forward: coretrace.RegisterExporter
+          in:
+            - name: e
+              type: SpanExporter
+          name: RegisterExporter
+          out:
+            - type: SpanExporter
+      - func:
+          doc: LookupExporter returns the SpanExporter registered under name.
+          forward: coretrace.LookupExporter
+          in:
+            - name: name
+              type: ExporterName
+          name: LookupExporter
+          out:
+            - name: e
+              type: SpanExporter
+            - name: ok
+              type: bool
+      - func:
+          doc: |-
+            AvailableExporters returns the sorted list of registered names. The OTLP/HTTP
+            emitter never appears in it.
+          forward: coretrace.AvailableExporters
+          name: AvailableExporters
+          out:
+            - type: "[]ExporterName"
+      - func:
+          doc: Export ships spans through the SpanExporter registered as name.
+          forward: coretrace.Export
+          in:
+            - name: name
+              type: ExporterName
+            - name: spans
+              type: Spans
+          name: Export
+          out:
+            - type: error
     imports:
       corenet: github.com/kitsunium/sdk/internal/core/net
       coreotel: github.com/kitsunium/sdk/internal/core/observe/otel
@@ -1471,34 +1984,3 @@ packages:
       http: net/http
       svctrace: github.com/kitsunium/sdk/internal/service/observe/trace
     path: github.com/kitsunium/sdk/pkg/v1/observe/trace
-    variables:
-      - name: InvalidTraceParent
-        type: "*errs.Error"
-      - name: InvalidTraceState
-        type: "*errs.Error"
-      - name: InvalidSpanName
-        type: "*errs.Error"
-      - name: InvalidAttribute
-        type: "*errs.Error"
-      - name: UnknownExporter
-        type: "*errs.Error"
-      - name: ExportFailed
-        type: "*errs.Error"
-      - name: DuplicateRegistration
-        type: "*errs.Error"
-      - name: EntropyFailed
-        type: "*errs.Error"
-      - name: InvalidSampleRatio
-        type: "*errs.Error"
-      - name: OTLPInvalidSpanContext
-        type: "*errs.Error"
-      - name: OTLPSpanNotEnded
-        type: "*errs.Error"
-      - name: OTLPEndpointInvalid
-        type: "*errs.Error"
-      - name: OTLPExportRejected
-        type: "*errs.Error"
-      - name: OTLPExportUnavailable
-        type: "*errs.Error"
-      - name: OTLPPartialSuccess
-        type: "*errs.Error"

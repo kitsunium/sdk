@@ -86,7 +86,7 @@ var (
 ```
 
 <a name="CallHook"></a>
-## type [CallHook](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/client/client.go#L95>)
+## type [CallHook](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/client/facade_gen.go#L37>)
 
 CallHook receives one CallInfo per outbound call. It must not block.
 
@@ -95,7 +95,7 @@ type CallHook = corenet.CallHook
 ```
 
 <a name="CallInfo"></a>
-## type [CallInfo](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/client/client.go#L92>)
+## type [CallInfo](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/client/facade_gen.go#L34>)
 
 CallInfo records one completed outbound call.
 
@@ -104,7 +104,7 @@ type CallInfo = corenet.CallValue
 ```
 
 <a name="Client"></a>
-## type [Client](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/client/client.go#L70>)
+## type [Client](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/client/facade_gen.go#L12>)
 
 Client performs guarded outbound HTTP calls.
 
@@ -113,7 +113,7 @@ type Client = svcclient.Client
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/client/client.go#L120>)
+### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/client/facade_gen.go#L62>)
 
 ```go
 func New(cfg Config, id tlsid.Identity, policy Policy, hook CallHook) (c *Client, err error)
@@ -122,7 +122,7 @@ func New(cfg Config, id tlsid.Identity, policy Policy, hook CallHook) (c *Client
 New builds a guarded client. A nil policy is refused rather than defaulted to "allow everything": an unguarded egress path wearing the name of a guarded one is worse than no client at all.
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/client/client.go#L74>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/client/facade_gen.go#L16>)
 
 Config describes an outbound client. Durations accept "5s" as well as a raw nanosecond count, so a configuration file stays readable.
 
@@ -131,7 +131,7 @@ type Config = corenet.ClientConfig
 ```
 
 <a name="Duration"></a>
-## type [Duration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/client/client.go#L98>)
+## type [Duration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/client/facade_gen.go#L40>)
 
 Duration is a configuration\-friendly time.Duration.
 
@@ -140,7 +140,7 @@ type Duration = corenet.DurationValue
 ```
 
 <a name="Policy"></a>
-## type [Policy](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/client/client.go#L81>)
+## type [Policy](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/client/facade_gen.go#L23>)
 
 Policy authorises an outbound request. Implementations run inside the transport, so no call site can bypass them.
 
@@ -149,7 +149,7 @@ type Policy = corenet.Policy
 ```
 
 <a name="AllowMethods"></a>
-### func [AllowMethods](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/client/client.go#L126>)
+### func [AllowMethods](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/client/facade_gen.go#L67>)
 
 ```go
 func AllowMethods(methods ...string) Policy
@@ -158,7 +158,7 @@ func AllowMethods(methods ...string) Policy
 AllowMethods admits only the named HTTP methods. Passing none admits none.
 
 <a name="AllowPaths"></a>
-### func [AllowPaths](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/client/client.go#L133>)
+### func [AllowPaths](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/client/facade_gen.go#L73>)
 
 ```go
 func AllowPaths(patterns ...string) (policy Policy, err error)
@@ -167,7 +167,7 @@ func AllowPaths(patterns ...string) (policy Policy, err error)
 AllowPaths admits only paths matching one of the patterns. The patterns are supplied unanchored and anchored here, so no caller can forget to.
 
 <a name="DenyPaths"></a>
-### func [DenyPaths](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/client/client.go#L140>)
+### func [DenyPaths](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/client/facade_gen.go#L79>)
 
 ```go
 func DenyPaths(patterns ...string) (policy Policy, err error)
@@ -176,7 +176,7 @@ func DenyPaths(patterns ...string) (policy Policy, err error)
 DenyPaths refuses paths matching one of the patterns. A deny is final and is not overridable by an allow pattern.
 
 <a name="Policies"></a>
-### func [Policies](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/client/client.go#L147>)
+### func [Policies](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/client/facade_gen.go#L85>)
 
 ```go
 func Policies(members ...Policy) Policy
@@ -185,7 +185,7 @@ func Policies(members ...Policy) Policy
 Policies requires every policy to allow the request. Composition is by conjunction, so adding a policy can only ever narrow what is permitted.
 
 <a name="PolicyFunc"></a>
-## type [PolicyFunc](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/client/client.go#L84>)
+## type [PolicyFunc](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/client/facade_gen.go#L26>)
 
 PolicyFunc adapts a plain function to Policy.
 
@@ -194,7 +194,7 @@ type PolicyFunc = corenet.PolicyFunc
 ```
 
 <a name="RequestInfo"></a>
-## type [RequestInfo](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/client/client.go#L89>)
+## type [RequestInfo](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/client/facade_gen.go#L31>)
 
 RequestInfo is the immutable request description a Policy judges. It carries the ESCAPED path: url.URL.Path is already percent\-decoded, so a policy that judged it would accept "%2e%2e", which the upstream reinterprets as "..".
 
@@ -203,7 +203,7 @@ type RequestInfo = corenet.RequestValue
 ```
 
 <a name="Response"></a>
-## type [Response](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/client/client.go#L77>)
+## type [Response](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/client/facade_gen.go#L19>)
 
 Response is a fully\-read outbound response.
 

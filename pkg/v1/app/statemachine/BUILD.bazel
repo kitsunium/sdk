@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "statemachine",
-    srcs = ["statemachine.go"],
+    srcs = [
+        "facade_gen.go",
+        "statemachine.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/app/statemachine",
     visibility = ["//visibility:public"],
     deps = [

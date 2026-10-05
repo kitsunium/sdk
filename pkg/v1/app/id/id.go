@@ -42,17 +42,8 @@
 package id
 
 import (
-	"time"
-
-	coreid "github.com/kitsunium/sdk/internal/core/app/id"
 	svcid "github.com/kitsunium/sdk/internal/service/app/id"
 )
-
-// Scheme is the public alias for the identifier-scheme key.
-type Scheme = coreid.Scheme
-
-// Generator is the public alias for the identifier-generator contract.
-type Generator = coreid.Generator
 
 const (
 	// UUIDv4Scheme is the random-UUID scheme key.
@@ -79,34 +70,6 @@ const (
 	// either way, and it mirrors the service-layer constant.
 	ksuidPayloadBytes int = 16
 )
-
-var (
-	// UnknownScheme is returned by New when no generator is registered under the
-	// requested Scheme. Matchable via errs.HasReason(err, "UNKNOWN_SCHEME").
-	UnknownScheme = coreid.UnknownScheme
-	// EntropyFailed is kept for code that matches it: nothing returns it since
-	// Go 1.24, whose crypto/rand.Read never fails.
-	EntropyFailed = coreid.EntropyFailed
-	// ClockBackwards is returned when a snowflake observes a backwards clock.
-	ClockBackwards = coreid.ClockBackwards
-	// InvalidSize is returned by NewNanoID for a non-positive identifier length.
-	InvalidSize = coreid.InvalidSize
-	// InvalidPrefix is returned by NewTypeID, ParseTypeID and FormatTypeID for a
-	// type prefix that is empty or outside lowercase ASCII.
-	InvalidPrefix = coreid.InvalidPrefix
-	// Malformed is returned by ParseKSUID, ParseTypeID and FormatTypeID when the
-	// input is not a well-formed rendering for its scheme.
-	Malformed = coreid.Malformed
-	// TimestampRange is returned when the clock sits outside the window a
-	// scheme's timestamp field can represent.
-	TimestampRange = coreid.TimestampRange
-)
-
-// New generates a fresh identifier using the generator registered under scheme.
-func New(scheme Scheme) (newID string, err error) {
-	//: delegate to the core dispatch (UnknownScheme on a missing scheme).
-	return coreid.New(scheme)
-}
 
 // UUIDv4 returns a fresh random UUIDv4 in canonical dashed-hex form.
 func UUIDv4() (newID string, err error) {
@@ -145,58 +108,4 @@ func NanoID() (newID string, err error) {
 func KSUID() (newID string, err error) {
 	//: the registered singleton avoids a registry lookup.
 	return svcid.KSUID.New()
-}
-
-// NewSnowflake returns a snowflake Generator bound to an explicit node id
-// (reduced into the 10-bit node space). Not added to the global registry.
-func NewSnowflake(node int64) Generator {
-	//: hand back a fresh per-node stateful generator.
-	return svcid.NewSnowflake(node)
-}
-
-// NewNanoID returns a NanoID Generator producing size characters, and refuses a
-// non-positive size rather than return one that mints empty strings. Not added
-// to the global registry — the registered NanoID singleton is the 21-character
-// default.
-func NewNanoID(size int) (g Generator, err error) {
-	//: the service constructor owns the refusal.
-	return svcid.NewNanoID(size)
-}
-
-// NewTypeID returns a TypeID Generator stamping prefix on every identifier —
-// "user_01h2xcejqtf2nbrexx3vqjhp41". prefix must be 1 to 63 lowercase ASCII
-// letters, with '_' allowed only between two letters; anything else is refused
-// here rather than at every call. Not added to the global registry, because no
-// prefix would be a defensible default (see TypeIDScheme).
-func NewTypeID(prefix string) (g Generator, err error) {
-	//: the service constructor owns the prefix rules and the refusal.
-	return svcid.NewTypeID(prefix)
-}
-
-// ParseKSUID decodes a canonical 27-character KSUID, returning the instant it
-// was issued (second resolution, UTC) and its 16-byte random payload.
-func ParseKSUID(ksuid string) (issued time.Time, payload [ksuidPayloadBytes]byte, err error) {
-	//: the service parser owns the base62 decoding and its refusals.
-	return svcid.ParseKSUID(ksuid)
-}
-
-// ParseTypeID splits a canonical TypeID into its type prefix and the dashed-hex
-// UUID its suffix encodes. It is the exact inverse of FormatTypeID.
-func ParseTypeID(typeID string) (prefix, uuid string, err error) {
-	//: the service parser owns the split, the prefix rules and the decoding.
-	return svcid.ParseTypeID(typeID)
-}
-
-// FormatTypeID renders prefix and a canonical dashed-hex UUID as a TypeID. It
-// is the migration path: an existing UUID column becomes typed without
-// reissuing anything, so the UUID version is not enforced.
-func FormatTypeID(prefix, uuid string) (typeID string, err error) {
-	//: the service formatter owns the prefix rules and the UUID parsing.
-	return svcid.FormatTypeID(prefix, uuid)
-}
-
-// Available returns the sorted list of registered Schemes.
-func Available() []Scheme {
-	//: delegate to the core registry's sorted key list.
-	return coreid.Available()
 }

@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "password",
-    srcs = ["password.go"],
+    srcs = [
+        "facade_gen.go",
+        "password.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/crypto/password",
     visibility = ["//visibility:public"],
     deps = [

@@ -5,10 +5,9 @@ package(default_visibility = ["//visibility:public"])
 go_library(
     name = "process",
     srcs = [
+        "facade_gen.go",
         "process.go",
-        "self.go",
         "signals.go",
-        "stdio.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/proc/process",
     visibility = ["//visibility:public"],

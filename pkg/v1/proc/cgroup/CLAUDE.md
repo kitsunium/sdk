@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-29T03:41:17Z -->
+<!-- updated: 2026-10-05T12:00:00Z -->
 # pkg/v1/proc/cgroup/
 
 ## Purpose
@@ -49,6 +49,10 @@ when the kernel carries RACCT) and `Create` returns a working `Group` whose
 names, and `TestWithRootOption` asserts the ignored root where a backend has no
 hierarchy. It carried a bare `!linux` and asserted the refusal on Windows until
 the first Windows run of the whole suite (ADR 0095).
+
+## Generated
+
+`facade_gen.go` is kit's (ADR 0165): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/proc.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the package comment and the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
 
 ## Verification
 

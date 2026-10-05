@@ -56,7 +56,7 @@ The [Algorithm](<#Algorithm>) constants are frozen post\-v1.0.0; the PHC id segm
 
 
 <a name="Hash"></a>
-## func [Hash](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/password/password.go#L81>)
+## func [Hash](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/password/password.go#L80>)
 
 ```go
 func Hash(a Algorithm, password []byte) (phc string, err error)
@@ -65,7 +65,7 @@ func Hash(a Algorithm, password []byte) (phc string, err error)
 Hash returns a PHC\-string hash of password using the named scheme, with a fresh random salt and the scheme's current cost parameters. An unregistered algorithm returns UnknownPasswordAlgorithm. Store the returned string as\-is.
 
 <a name="IsCommon"></a>
-## func [IsCommon](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/password/password.go#L97>)
+## func [IsCommon](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/password/facade_gen.go#L20>)
 
 ```go
 func IsCommon(password []byte) bool
@@ -74,7 +74,7 @@ func IsCommon(password []byte) bool
 IsCommon reports whether password is one of the ten thousand most common passwords, compared case\-insensitively — PASSWORD as password. The empty password is not: refusing it is a length rule's job.
 
 <a name="NeedsRehash"></a>
-## func [NeedsRehash](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/password/password.go#L105>)
+## func [NeedsRehash](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/password/facade_gen.go#L27>)
 
 ```go
 func NeedsRehash(phc string) bool
@@ -83,7 +83,7 @@ func NeedsRehash(phc string) bool
 NeedsRehash reports whether the stored PHC hash was produced with cost parameters weaker than its scheme's current policy — call it after a successful Verify to transparently upgrade the stored hash.
 
 <a name="Verify"></a>
-## func [Verify](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/password/password.go#L89>)
+## func [Verify](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/password/facade_gen.go#L13>)
 
 ```go
 func Verify(password []byte, phc string) (ok bool, err error)
@@ -92,7 +92,7 @@ func Verify(password []byte, phc string) (ok bool, err error)
 Verify reports whether password matches the stored PHC hash, comparing in constant time. The scheme is read from phc. A malformed phc or unregistered scheme returns an error; a genuine mismatch is \(false, nil\).
 
 <a name="Algorithm"></a>
-## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/password/password.go#L73>)
+## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/password/password.go#L72>)
 
 Algorithm is the stable identifier of a password\-hashing scheme; it is also the PHC id segment of hashes that scheme produces. It is a defined type distinct from the other crypto\-family Algorithm types \(hash, mac, kdf, …\), so the compiler rejects feeding a hash or KDF constant into a password call \(V104\) — the seven registries are separate keyspaces, and the type system now enforces that separation the way typed Format/Level discipline does elsewhere.
 

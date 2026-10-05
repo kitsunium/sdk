@@ -62,22 +62,44 @@ packages:
   - constants:
       - name: Format
         value: "\"pem\""
-      - name: CodeMarshalFailed
-        type: errs.Code
-        value: "0x00_03_0A_01"
-      - name: CodeUnmarshalFailed
-        type: errs.Code
-        value: "0x00_03_0A_02"
-      - name: CodeValueInvalid
-        type: errs.Code
-        value: "0x00_03_0A_03"
+    facade:
+      - const:
+          - doc: "CodeMarshalFailed is 0.3.10.1: encoding/pem refused to write the block."
+            name: CodeMarshalFailed
+            reexport: corepem.CodePEMMarshalFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_0A_01"
+          - doc: "CodeUnmarshalFailed is 0.3.10.2: no PEM block in the input."
+            name: CodeUnmarshalFailed
+            reexport: corepem.CodePEMUnmarshalFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_0A_02"
+          - doc: |-
+              CodeValueInvalid is 0.3.10.3: the value is not a *pem.Block, or the
+              target a **pem.Block.
+            name: CodeValueInvalid
+            reexport: corepem.CodePEMValueInvalid
+            type: errs.Code
+            typed: true
+            value: "0x00_03_0A_03"
+        doc: The error codes, range 0.3.10.*, declared in the core (ADR 0160).
+      - doc: "The sentinels, for errors.Is: each carries the code of the same name."
+        var:
+          - doc: MarshalFailed is the sentinel of [CodeMarshalFailed].
+            name: MarshalFailed
+            reexport: corepem.MarshalFailed
+            type: "*errs.Error"
+          - doc: UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].
+            name: UnmarshalFailed
+            reexport: corepem.UnmarshalFailed
+            type: "*errs.Error"
+          - doc: ValueInvalid is the sentinel of [CodeValueInvalid].
+            name: ValueInvalid
+            reexport: corepem.ValueInvalid
+            type: "*errs.Error"
     imports:
+      corepem: github.com/kitsunium/sdk/internal/core/data/codec/pem
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/pkg/v1/data/codec/pem
-    variables:
-      - name: MarshalFailed
-        type: "*errs.Error"
-      - name: UnmarshalFailed
-        type: "*errs.Error"
-      - name: ValueInvalid
-        type: "*errs.Error"

@@ -396,94 +396,219 @@ packages:
         type: codec.Codec
       - name: NilObjectID
         type: ObjectID
-  - aliases:
-      - name: D
-        target: svcbson.D
-      - name: E
-        target: svcbson.E
-      - name: M
-        target: svcbson.M
-      - name: A
-        target: svcbson.A
-      - name: ObjectID
-        target: svcbson.ObjectID
-      - name: DateTime
-        target: svcbson.DateTime
-      - name: Decimal128
-        target: svcbson.Decimal128
-      - name: Binary
-        target: svcbson.Binary
-      - name: Regex
-        target: svcbson.Regex
-      - name: Timestamp
-        target: svcbson.Timestamp
-      - name: DBPointer
-        target: svcbson.DBPointer
-      - name: JavaScript
-        target: svcbson.JavaScript
-      - name: Symbol
-        target: svcbson.Symbol
-      - name: CodeWithScope
-        target: svcbson.CodeWithScope
-      - name: MinKey
-        target: svcbson.MinKey
-      - name: MaxKey
-        target: svcbson.MaxKey
-      - name: Undefined
-        target: svcbson.Undefined
-      - name: "Null"
-        target: svcbson.Null
-    constants:
+  - constants:
       - name: Format
         value: "\"bson\""
-      - name: BinaryGeneric
-        type: byte
-        value: "0x00"
-      - name: BinaryFunction
-        type: byte
-        value: "0x01"
-      - name: BinaryOld
-        type: byte
-        value: "0x02"
-      - name: BinaryUUIDOld
-        type: byte
-        value: "0x03"
-      - name: BinaryUUID
-        type: byte
-        value: "0x04"
-      - name: BinaryMD5
-        type: byte
-        value: "0x05"
-      - name: BinaryEncrypted
-        type: byte
-        value: "0x06"
-      - name: BinaryColumn
-        type: byte
-        value: "0x07"
-      - name: BinarySensitive
-        type: byte
-        value: "0x08"
-      - name: BinaryVector
-        type: byte
-        value: "0x09"
-      - name: BinaryUserDefined
-        type: byte
-        value: "0x80"
-      - name: CodeMarshalFailed
-        type: errs.Code
-        value: "0x00_03_24_01"
-      - name: CodeUnmarshalFailed
-        type: errs.Code
-        value: "0x00_03_24_02"
-      - name: CodeSizeExceeded
-        type: errs.Code
-        value: "0x00_03_24_03"
-      - name: CodeDepthExceeded
-        type: errs.Code
-        value: "0x00_03_24_04"
-      - name: CodeValueInvalid
-        type: errs.Code
-        value: "0x00_03_24_05"
+    facade:
+      - const:
+          - doc: BinaryGeneric is the default subtype, the one a []byte is written as.
+            name: BinaryGeneric
+            reexport: svcbson.BinaryGeneric
+            type: byte
+            typed: true
+            value: "0x00"
+          - doc: BinaryFunction marks a function.
+            name: BinaryFunction
+            reexport: svcbson.BinaryFunction
+            type: byte
+            typed: true
+            value: "0x01"
+          - doc: BinaryOld is the deprecated generic subtype, with an inner length.
+            name: BinaryOld
+            reexport: svcbson.BinaryOld
+            type: byte
+            typed: true
+            value: "0x02"
+          - doc: BinaryUUIDOld is the deprecated, byte-order-ambiguous UUID subtype.
+            name: BinaryUUIDOld
+            reexport: svcbson.BinaryUUIDOld
+            type: byte
+            typed: true
+            value: "0x03"
+          - doc: BinaryUUID is an RFC 9562 UUID.
+            name: BinaryUUID
+            reexport: svcbson.BinaryUUID
+            type: byte
+            typed: true
+            value: "0x04"
+          - doc: BinaryMD5 is an MD5 digest.
+            name: BinaryMD5
+            reexport: svcbson.BinaryMD5
+            type: byte
+            typed: true
+            value: "0x05"
+          - doc: BinaryEncrypted is a client-side encrypted value.
+            name: BinaryEncrypted
+            reexport: svcbson.BinaryEncrypted
+            type: byte
+            typed: true
+            value: "0x06"
+          - doc: BinaryColumn is a compressed time-series column.
+            name: BinaryColumn
+            reexport: svcbson.BinaryColumn
+            type: byte
+            typed: true
+            value: "0x07"
+          - doc: BinarySensitive marks data a server must not log.
+            name: BinarySensitive
+            reexport: svcbson.BinarySensitive
+            type: byte
+            typed: true
+            value: "0x08"
+          - doc: BinaryVector is a packed numeric vector.
+            name: BinaryVector
+            reexport: svcbson.BinaryVector
+            type: byte
+            typed: true
+            value: "0x09"
+          - doc: BinaryUserDefined is the first subtype reserved for applications.
+            name: BinaryUserDefined
+            reexport: svcbson.BinaryUserDefined
+            type: byte
+            typed: true
+            value: "0x80"
+        doc: The binary subtypes.
+      - const:
+          - doc: CodeMarshalFailed identifies a value Marshal or Append cannot encode.
+            name: CodeMarshalFailed
+            reexport: corebson.CodeBSONMarshalFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_24_01"
+          - doc: CodeUnmarshalFailed identifies input Unmarshal refuses.
+            name: CodeUnmarshalFailed
+            reexport: corebson.CodeBSONUnmarshalFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_24_02"
+          - doc: CodeSizeExceeded identifies an Unmarshal input past 10 MiB.
+            name: CodeSizeExceeded
+            reexport: corebson.CodeBSONSizeExceeded
+            type: errs.Code
+            typed: true
+            value: "0x00_03_24_03"
+          - doc: CodeDepthExceeded identifies nesting past 100 levels.
+            name: CodeDepthExceeded
+            reexport: corebson.CodeBSONDepthExceeded
+            type: errs.Code
+            typed: true
+            value: "0x00_03_24_04"
+          - doc: |-
+              CodeValueInvalid identifies a value type's constructor or parser
+              refusing its input.
+            name: CodeValueInvalid
+            reexport: corebson.CodeBSONValueInvalid
+            type: errs.Code
+            typed: true
+            value: "0x00_03_24_05"
+        doc: The error codes, range 0.3.36.*.
+      - alias:
+          - doc: D is a document whose element order matters.
+            name: D
+            target: svcbson.D
+          - doc: E is one element of a D.
+            name: E
+            target: svcbson.E
+          - doc: M is a document whose element order does not; its keys are written sorted.
+            name: M
+            target: svcbson.M
+          - doc: A is an array.
+            name: A
+            target: svcbson.A
+          - doc: |-
+              ObjectID is the twelve-byte identifier; its text and JSON forms are 24
+              hexadecimal digits.
+            name: ObjectID
+            target: svcbson.ObjectID
+          - doc: DateTime is milliseconds since the Unix epoch, UTC.
+            name: DateTime
+            target: svcbson.DateTime
+          - doc: |-
+              Decimal128 is an IEEE 754-2008 128-bit decimal, converted exactly or
+              not at all.
+            name: Decimal128
+            target: svcbson.Decimal128
+          - doc: Binary is bytes and the subtype naming what they are.
+            name: Binary
+            target: svcbson.Binary
+          - doc: Regex is a pattern and its options.
+            name: Regex
+            target: svcbson.Regex
+          - doc: "Timestamp is the replication timestamp: seconds and an increment."
+            name: Timestamp
+            target: svcbson.Timestamp
+          - doc: DBPointer is the deprecated namespace-and-ObjectID pointer.
+            name: DBPointer
+            target: svcbson.DBPointer
+          - doc: JavaScript is JavaScript code.
+            name: JavaScript
+            target: svcbson.JavaScript
+          - doc: Symbol is the deprecated symbol.
+            name: Symbol
+            target: svcbson.Symbol
+          - doc: CodeWithScope is the deprecated JavaScript with its scope document.
+            name: CodeWithScope
+            target: svcbson.CodeWithScope
+          - doc: MinKey sorts lower than every other value.
+            name: MinKey
+            target: svcbson.MinKey
+          - doc: MaxKey sorts higher than every other value.
+            name: MaxKey
+            target: svcbson.MaxKey
+          - doc: Undefined is the deprecated undefined value.
+            name: Undefined
+            target: svcbson.Undefined
+          - doc: Null is an explicit null, for a D.
+            name: "Null"
+            target: svcbson.Null
+        doc: The value types. Each is the BSON type of the same name.
+      - func:
+          doc: |-
+            ObjectIDFromHex parses the 24-digit hexadecimal form of an ObjectID, in
+            either case.
+          forward: svcbson.ObjectIDFromHex
+          in:
+            - name: s
+              type: string
+          name: ObjectIDFromHex
+          out:
+            - type: ObjectID
+            - type: error
+      - func:
+          doc: |-
+            NewDateTimeFromTime returns the DateTime t falls in, truncated to the
+            millisecond.
+          forward: svcbson.NewDateTimeFromTime
+          in:
+            - name: t
+              type: time.Time
+          name: NewDateTimeFromTime
+          out:
+            - type: DateTime
+      - func:
+          doc: |-
+            NewDecimal128 returns the decimal whose BID encoding is high (the first
+            eight bytes) and low (the last eight).
+          forward: svcbson.NewDecimal128
+          in:
+            - name: high
+            - name: low
+              type: uint64
+          name: NewDecimal128
+          out:
+            - type: Decimal128
+      - func:
+          doc: |-
+            ParseDecimal128 parses a decimal's string form — "1.23", "-4E+5", "NaN",
+            "Infinity" — refusing one a decimal128 cannot hold exactly.
+          forward: svcbson.ParseDecimal128
+          in:
+            - name: s
+              type: string
+          name: ParseDecimal128
+          out:
+            - type: Decimal128
+            - type: error
     functions:
       - in:
           - name: v
@@ -509,34 +634,8 @@ packages:
         name: Unmarshal
         out:
           - type: error
-      - in:
-          - name: s
-            type: string
-        name: ObjectIDFromHex
-        out:
-          - type: ObjectID
-          - type: error
-      - in:
-          - name: t
-            type: time.Time
-        name: NewDateTimeFromTime
-        out:
-          - type: DateTime
-      - in:
-          - name: high
-          - name: low
-            type: uint64
-        name: NewDecimal128
-        out:
-          - type: Decimal128
-      - in:
-          - name: s
-            type: string
-        name: ParseDecimal128
-        out:
-          - type: Decimal128
-          - type: error
     imports:
+      corebson: github.com/kitsunium/sdk/internal/core/data/codec/bson
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       svcbson: github.com/kitsunium/sdk/internal/service/data/codec/bson
     path: github.com/kitsunium/sdk/pkg/v1/data/codec/bson

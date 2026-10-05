@@ -216,50 +216,97 @@ packages:
         typeParams:
           - constraint: any
             name: T
-  - aliases:
-      - name: Heap
-        target: kheap.Heap[T]
-        typeParams:
-          - constraint: any
-            name: T
-    functions:
-      - in:
-          - name: cmp
-            type: func(a, b T) int
-        name: New
-        out:
-          - type: "*Heap[T]"
-        typeParams:
-          - constraint: any
-            name: T
+  - facade:
+      - alias:
+          - doc: |-
+              Heap is a binary heap ordered by the comparison given to [New].
+
+              [Heap].Push adds an element in O(log n); [Heap].Pop removes and returns the
+              top one in O(log n), and [Heap].Peek returns it without removing it, both
+              reporting false on an empty heap; [Heap].Len counts the elements.
+
+              The zero value is NOT usable — a heap with no comparison has no order — and
+              a Heap is not safe for concurrent use.
+            name: Heap
+            target: kheap.Heap[T]
+            typeParams:
+              - constraint: any
+                name: T
+      - func:
+          doc: |-
+            New builds an empty [Heap] ordered by cmp, which returns a negative number
+            when a sorts before b, zero on a tie and a positive one otherwise. A nil cmp
+            panics here, at the call that made the mistake.
+          forward: kheap.New
+          in:
+            - name: cmp
+              type: func(a, b T) int
+          name: New
+          out:
+            - type: "*Heap[T]"
+          typeParams:
+            - constraint: any
+              name: T
     imports:
       kheap: github.com/kitsunium/sdk/internal/kernel/collections/heap
     path: github.com/kitsunium/sdk/pkg/v1/collections/heap
-  - aliases:
-      - name: Queue
-        target: kring.Queue[T]
-        typeParams:
-          - constraint: any
-            name: T
-    functions:
-      - in:
-          - name: capacity
-            type: int
-        name: New
-        out:
-          - type: Queue[T]
-          - type: error
-        typeParams:
-          - constraint: any
-            name: T
+  - facade:
+      - alias:
+          - doc: |-
+              Queue is the single-producer, single-consumer ring.
+
+              TryWrite enqueues an item without blocking, or returns [Full]. TryRead
+              dequeues the oldest item without blocking, or returns [Empty]; the slot it
+              read is cleared, so the queue keeps no reference to an item it handed out.
+              Capacity is the number of items the ring holds when full, fixed at [New].
+              Len is a snapshot count — the producer or the consumer may move it before
+              the caller acts on it.
+
+              Its four methods are frozen: a published interface grows by a sibling,
+              never by a fifth method (ADR 0039).
+            name: Queue
+            target: kring.Queue[T]
+            typeParams:
+              - constraint: any
+                name: T
+      - func:
+          doc: |-
+            New returns an empty [Queue] holding at most capacity items, or [CapZero]
+            when capacity is not positive. The storage is allocated once, here.
+          forward: kring.New[T]
+          in:
+            - name: capacity
+              type: int
+          name: New
+          out:
+            - type: Queue[T]
+            - type: error
+          typeParams:
+            - constraint: any
+              name: T
+      - doc: The sentinels a caller matches with errors.Is or errs.HasCode.
+        var:
+          - doc: |-
+              Full is returned by TryWrite when every slot is taken; the caller
+              decides whether to drop, retry or slow its producer.
+            name: Full
+            reexport: kring.Full
+            type: "*errs.Error"
+          - blank: true
+            doc: |-
+              Empty is returned by TryRead when no item is waiting; the caller
+              decides whether to wait on a signal or yield — never to spin.
+            name: Empty
+            reexport: kring.Empty
+            type: "*errs.Error"
+          - blank: true
+            doc: |-
+              CapZero is returned by New for a capacity that is not positive: a ring
+              that can hold nothing is a configuration mistake, not a queue.
+            name: CapZero
+            reexport: kring.CapZero
+            type: "*errs.Error"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       kring: github.com/kitsunium/sdk/internal/kernel/collections/ring
     path: github.com/kitsunium/sdk/pkg/v1/collections/ring
-    variables:
-      - name: Full
-        type: "*errs.Error"
-      - name: Empty
-        type: "*errs.Error"
-      - name: CapZero
-        type: "*errs.Error"

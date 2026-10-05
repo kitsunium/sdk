@@ -76,7 +76,7 @@ var (
 ```
 
 <a name="BytesAcceptor"></a>
-## type [BytesAcceptor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/flatbuffers/flatbuffers.go#L81>)
+## type [BytesAcceptor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/flatbuffers/facade_gen.go#L42>)
 
 BytesAcceptor is what an Unmarshal target may implement to receive the buffer. The slice is the caller's input, passed by reference: an implementation that keeps it copies it.
 
@@ -85,7 +85,7 @@ type BytesAcceptor = svcflatbuffers.BytesAcceptor
 ```
 
 <a name="BytesProvider"></a>
-## type [BytesProvider](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/flatbuffers/flatbuffers.go#L76>)
+## type [BytesProvider](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/flatbuffers/facade_gen.go#L37>)
 
 BytesProvider is what a Marshal argument may implement to hand the codec its already\-encoded FlatBuffer: the bytes are read, never copied, for the length of the call.
 

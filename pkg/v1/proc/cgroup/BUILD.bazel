@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "cgroup",
-    srcs = ["cgroup.go"],
+    srcs = [
+        "cgroup.go",
+        "facade_gen.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/proc/cgroup",
     visibility = ["//visibility:public"],
     deps = [

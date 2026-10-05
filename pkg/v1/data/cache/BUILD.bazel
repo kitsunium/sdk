@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "cache",
-    srcs = ["cache.go"],
+    srcs = [
+        "cache.go",
+        "facade_gen.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/data/cache",
     visibility = ["//visibility:public"],
     deps = [

@@ -362,148 +362,313 @@ packages:
               type: int
             - name: MaxStack
               type: int
-  - aliases:
-      - name: Profile
-        target: coreprofiling.ProfileValue
-      - name: SampleType
-        target: coreprofiling.SampleTypeValue
-      - name: Sample
-        target: coreprofiling.SampleValue
-      - name: Frame
-        target: coreprofiling.FrameValue
-      - name: FoldConfig
-        target: svcprof.FoldConfig
-      - name: Folded
-        target: coreprofiling.FoldedValue
-      - name: OwnerCost
-        target: coreprofiling.OwnerCostValue
-      - name: FunctionCost
-        target: coreprofiling.FunctionCostValue
-      - name: FlameNode
-        target: coreprofiling.FlameNodeValue
-      - name: Goroutine
-        target: coreprofiling.GoroutineValue
-      - name: GroupConfig
-        target: svcprof.GroupConfig
-      - name: GoroutineGroup
-        target: coreprofiling.GoroutineGroupValue
-    constants:
-      - name: MaxCPUWindow
-        type: time.Duration
-        value: "300000000000"
-      - name: MaxProfileBytes
-        type: int
-        value: 64 << 20
-      - name: FlameRoot
-        type: string
-        value: "\"root\""
-      - name: MaxFrames
-        type: int
-        value: 1 << 22
-      - name: DefaultTopFunctions
-        type: int
-        value: "25"
-      - name: DefaultTopPerOwner
-        type: int
-        value: "8"
-      - name: DefaultFlameMinShare
-        type: float64
-        value: "0.005"
-      - name: DefaultFlameMaxDepth
-        type: int
-        value: "64"
-      - name: CodeWindowInvalid
-        type: errs.Code
-        value: "0x00_03_59_01"
-      - name: CodeProfilerBusy
-        type: errs.Code
-        value: "0x00_03_59_02"
-      - name: CodeCaptureCanceled
-        type: errs.Code
-        value: "0x00_03_59_03"
-      - name: CodeCaptureFailed
-        type: errs.Code
-        value: "0x00_03_59_04"
-      - name: CodeProfileMalformed
-        type: errs.Code
-        value: "0x00_03_59_05"
-      - name: CodeProfileTooLarge
-        type: errs.Code
-        value: "0x00_03_59_06"
-      - name: CodeSampleTypeMissing
-        type: errs.Code
-        value: "0x00_03_59_07"
-    functions:
-      - in:
-          - name: ctx
-            type: context.Context
-          - name: window
+  - facade:
+      - const:
+          - doc: MaxCPUWindow is the longest window CaptureCPU samples.
+            name: MaxCPUWindow
+            reexport: svcprof.MaxCPUWindow
             type: time.Duration
-        name: CaptureCPU
-        out:
-          - type: "*Profile"
-          - type: error
-      - name: CaptureHeap
-        out:
-          - type: "*Profile"
-          - type: error
-      - in:
-          - name: data
-            type: "[]byte"
-        name: Parse
-        out:
-          - type: "*Profile"
-          - type: error
-      - in:
-          - name: p
-            type: "*Profile"
-          - name: cfg
-            type: FoldConfig
-        name: Fold
-        out:
-          - type: Folded
-          - type: error
-      - name: Goroutines
-        out:
-          - type: "[]Goroutine"
-          - type: error
-      - in:
-          - name: dump
-            type: "[]byte"
-        name: ParseGoroutines
-        out:
-          - type: "[]Goroutine"
-      - in:
-          - name: gs
-            type: "[]Goroutine"
-          - name: cfg
-            type: GroupConfig
-        name: GroupGoroutines
-        out:
-          - type: "[]GoroutineGroup"
-      - in:
-          - name: name
+            typed: true
+            value: "300000000000"
+      - const:
+          - doc: MaxProfileBytes bounds what Parse reads, compressed and inflated alike.
+            name: MaxProfileBytes
+            reexport: svcprof.MaxProfileBytes
+            type: int
+            typed: true
+            value: 64 << 20
+      - const:
+          - doc: FlameRoot is the name of a flame graph's root frame.
+            name: FlameRoot
+            reexport: coreprofiling.FlameRoot
             type: string
-        name: CanonicalName
-        out:
-          - type: string
+            typed: true
+            value: "\"root\""
+      - const:
+          - doc: |-
+              MaxFrames bounds the frames Parse builds: each location's once, and every
+              copy a sample's stack makes of them.
+            name: MaxFrames
+            reexport: svcprof.MaxFrames
+            type: int
+            typed: true
+            value: 1 << 22
+      - const:
+          - doc: |-
+              DefaultTopFunctions is how many functions Folded.Top lists when
+              FoldConfig.TopFunctions is not positive.
+            name: DefaultTopFunctions
+            reexport: svcprof.DefaultTopFunctions
+            type: int
+            typed: true
+            value: "25"
+      - const:
+          - doc: |-
+              DefaultTopPerOwner is how many functions each owner's Top lists when
+              FoldConfig.TopPerOwner is not positive.
+            name: DefaultTopPerOwner
+            reexport: svcprof.DefaultTopPerOwner
+            type: int
+            typed: true
+            value: "8"
+      - const:
+          - doc: |-
+              DefaultFlameMinShare prunes a flame frame costing less than this share of
+              the total when FoldConfig.FlameMinShare is outside (0, 1): half a percent.
+            name: DefaultFlameMinShare
+            reexport: svcprof.DefaultFlameMinShare
+            type: float64
+            typed: true
+            value: "0.005"
+      - const:
+          - doc: |-
+              DefaultFlameMaxDepth is how deep the flame graph goes when
+              FoldConfig.FlameMaxDepth is not positive.
+            name: DefaultFlameMaxDepth
+            reexport: svcprof.DefaultFlameMaxDepth
+            type: int
+            typed: true
+            value: "64"
+      - const:
+          - doc: |-
+              CodeWindowInvalid identifies a CPU window not positive or over MaxCPUWindow
+              (0.3.89.1).
+            name: CodeWindowInvalid
+            reexport: coreprofiling.CodeWindowInvalid
+            type: errs.Code
+            typed: true
+            value: "0x00_03_59_01"
+      - const:
+          - doc: |-
+              CodeProfilerBusy identifies a CPU capture refused because the process's one
+              CPU profiler is running (0.3.89.2).
+            name: CodeProfilerBusy
+            reexport: coreprofiling.CodeProfilerBusy
+            type: errs.Code
+            typed: true
+            value: "0x00_03_59_02"
+      - const:
+          - doc: |-
+              CodeCaptureCanceled identifies a CPU capture whose context ended before its
+              window (0.3.89.3).
+            name: CodeCaptureCanceled
+            reexport: coreprofiling.CodeCaptureCanceled
+            type: errs.Code
+            typed: true
+            value: "0x00_03_59_03"
+      - const:
+          - doc: |-
+              CodeCaptureFailed identifies a profile runtime/pprof could not write
+              (0.3.89.4).
+            name: CodeCaptureFailed
+            reexport: coreprofiling.CodeCaptureFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_59_04"
+      - const:
+          - doc: |-
+              CodeProfileMalformed identifies bytes that are not a well-formed pprof
+              profile, or a hand-built profile Fold cannot read (0.3.89.5).
+            name: CodeProfileMalformed
+            reexport: coreprofiling.CodeProfileMalformed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_59_05"
+      - const:
+          - doc: |-
+              CodeProfileTooLarge identifies a profile over MaxProfileBytes, or whose
+              stacks exceed MaxFrames (0.3.89.6).
+            name: CodeProfileTooLarge
+            reexport: coreprofiling.CodeProfileTooLarge
+            type: errs.Code
+            typed: true
+            value: "0x00_03_59_06"
+      - const:
+          - doc: |-
+              CodeSampleTypeMissing identifies a fold asked for a sample type the profile
+              does not measure (0.3.89.7).
+            name: CodeSampleTypeMissing
+            reexport: coreprofiling.CodeSampleTypeMissing
+            type: errs.Code
+            typed: true
+            value: "0x00_03_59_07"
+      - var:
+          - doc: WindowInvalid refuses a CPU window not positive or over MaxCPUWindow (400).
+            name: WindowInvalid
+            reexport: coreprofiling.WindowInvalid
+            type: "*errs.Error"
+          - blank: true
+            doc: |-
+              ProfilerBusy refuses a CPU capture while the process's one CPU profiler is
+              running, whoever started it (409).
+            name: ProfilerBusy
+            reexport: coreprofiling.ProfilerBusy
+            type: "*errs.Error"
+          - blank: true
+            doc: |-
+              CaptureCanceled is a CPU capture whose context ended before the window
+              (503); errors.Is still finds the context's error.
+            name: CaptureCanceled
+            reexport: coreprofiling.CaptureCanceled
+            type: "*errs.Error"
+          - blank: true
+            doc: |-
+              CaptureFailed wraps an error runtime/pprof returned while writing a
+              profile.
+            name: CaptureFailed
+            reexport: coreprofiling.CaptureFailed
+            type: "*errs.Error"
+          - blank: true
+            doc: |-
+              ProfileMalformed refuses bytes that are not a well-formed pprof profile —
+              the field names the part, the input is never quoted — and a nil profile or
+              a sample short of values handed to Fold.
+            name: ProfileMalformed
+            reexport: coreprofiling.ProfileMalformed
+            type: "*errs.Error"
+          - blank: true
+            doc: |-
+              ProfileTooLarge refuses a profile over MaxProfileBytes, compressed or
+              inflated, or whose stacks would take more than MaxFrames frames.
+            name: ProfileTooLarge
+            reexport: coreprofiling.ProfileTooLarge
+            type: "*errs.Error"
+          - blank: true
+            doc: |-
+              SampleTypeMissing refuses a fold asked for a sample type the profile does
+              not measure.
+            name: SampleTypeMissing
+            reexport: coreprofiling.SampleTypeMissing
+            type: "*errs.Error"
+      - alias:
+          - doc: Profile is a decoded pprof profile.
+            name: Profile
+            target: coreprofiling.ProfileValue
+      - alias:
+          - doc: SampleType names what a value measures and its unit.
+            name: SampleType
+            target: coreprofiling.SampleTypeValue
+      - alias:
+          - doc: "Sample is one sample: a stack, a value per sample type, and labels."
+            name: Sample
+            target: coreprofiling.SampleValue
+      - alias:
+          - doc: Frame is one frame of a stack.
+            name: Frame
+            target: coreprofiling.FrameValue
+      - alias:
+          - doc: FoldConfig says how Fold reads a profile; every zero field has a default.
+            name: FoldConfig
+            target: svcprof.FoldConfig
+      - alias:
+          - doc: Folded is a profile folded, in the sample type's own unit.
+            name: Folded
+            target: coreprofiling.FoldedValue
+      - alias:
+          - doc: OwnerCost is what one owner cost.
+            name: OwnerCost
+            target: coreprofiling.OwnerCostValue
+      - alias:
+          - doc: FunctionCost is what one function cost.
+            name: FunctionCost
+            target: coreprofiling.FunctionCostValue
+      - alias:
+          - doc: FlameNode is one frame of a flame graph.
+            name: FlameNode
+            target: coreprofiling.FlameNodeValue
+      - alias:
+          - doc: Goroutine is one goroutine, as the runtime's dump describes it.
+            name: Goroutine
+            target: coreprofiling.GoroutineValue
+      - alias:
+          - doc: GroupConfig says how GroupGoroutines groups.
+            name: GroupConfig
+            target: svcprof.GroupConfig
+      - alias:
+          - doc: GoroutineGroup is goroutines sharing their labels, state and top frame.
+            name: GoroutineGroup
+            target: coreprofiling.GoroutineGroupValue
+      - func:
+          doc: CaptureCPU samples the process's CPU for window and returns the profile.
+          forward: svcprof.CaptureCPU
+          in:
+            - name: ctx
+              type: context.Context
+            - name: window
+              type: time.Duration
+          name: CaptureCPU
+          out:
+            - type: "*Profile"
+            - type: error
+      - func:
+          doc: CaptureHeap returns the live heap, after a garbage collection.
+          forward: svcprof.CaptureHeap
+          name: CaptureHeap
+          out:
+            - type: "*Profile"
+            - type: error
+      - func:
+          doc: Parse decodes a pprof profile, gzipped or not.
+          forward: svcprof.Parse
+          in:
+            - name: data
+              type: "[]byte"
+          name: Parse
+          out:
+            - type: "*Profile"
+            - type: error
+      - func:
+          doc: Fold charges every sample of p to an owner and adds it all up.
+          forward: svcprof.Fold
+          in:
+            - name: p
+              type: "*Profile"
+            - name: cfg
+              type: FoldConfig
+          name: Fold
+          out:
+            - type: Folded
+            - type: error
+      - func:
+          doc: Goroutines returns every goroutine of the process.
+          forward: svcprof.Goroutines
+          name: Goroutines
+          out:
+            - type: "[]Goroutine"
+            - type: error
+      - func:
+          doc: ParseGoroutines reads a goroutine dump; it never fails.
+          forward: svcprof.ParseGoroutines
+          in:
+            - name: dump
+              type: "[]byte"
+          name: ParseGoroutines
+          out:
+            - type: "[]Goroutine"
+      - func:
+          doc: |-
+            GroupGoroutines groups goroutines by labels, state and top frame, largest
+            first.
+          forward: svcprof.GroupGoroutines
+          in:
+            - name: gs
+              type: "[]Goroutine"
+            - name: cfg
+              type: GroupConfig
+          name: GroupGoroutines
+          out:
+            - type: "[]GoroutineGroup"
+      - func:
+          doc: CanonicalName spells a function the same way whoever named it.
+          forward: svcprof.CanonicalName
+          in:
+            - name: name
+              type: string
+          name: CanonicalName
+          out:
+            - type: string
     imports:
       coreprofiling: github.com/kitsunium/sdk/internal/core/observe/profiling
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       svcprof: github.com/kitsunium/sdk/internal/service/observe/profiling
     path: github.com/kitsunium/sdk/pkg/v1/observe/profiling
-    variables:
-      - name: WindowInvalid
-        type: "*errs.Error"
-      - name: ProfilerBusy
-        type: "*errs.Error"
-      - name: CaptureCanceled
-        type: "*errs.Error"
-      - name: CaptureFailed
-        type: "*errs.Error"
-      - name: ProfileMalformed
-        type: "*errs.Error"
-      - name: ProfileTooLarge
-        type: "*errs.Error"
-      - name: SampleTypeMissing
-        type: "*errs.Error"

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T03:40:00Z -->
+<!-- updated: 2026-10-05T12:00:00Z -->
 # pkg/v1/crypto/
 
 ## Purpose
@@ -110,6 +110,10 @@ cd pkg/v1 && GOWORK=off go list -deps ./crypto/hash | grep -x 'github.com/kitsun
   not pay for the AEAD, nor a consumer of `Seal` for six registries. A suite may
   compose them — `agree`'s seals with the key it agreed.
 - Log `Key.Bytes()` or surface it in an error message.
+
+## Generated
+
+`facade_gen.go` is kit's (ADR 0165): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/crypto.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the package comment and the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
 
 ## Verification
 

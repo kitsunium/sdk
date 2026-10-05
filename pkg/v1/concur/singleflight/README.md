@@ -43,7 +43,7 @@ It is not a cache: nothing is remembered once the call completes, so two SEQUENT
 
 
 <a name="Group"></a>
-## type [Group](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/singleflight/singleflight.go#L77>)
+## type [Group](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/singleflight/facade_gen.go#L27>)
 
 Group deduplicates concurrent calls that name the same key. The zero value is ready to use; a Group must not be copied after first use, and is safe for any number of goroutines.
 
@@ -91,7 +91,7 @@ func main() {
 </details>
 
 <a name="PanicValue"></a>
-## type [PanicValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/singleflight/singleflight.go#L87>)
+## type [PanicValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/singleflight/facade_gen.go#L37>)
 
 PanicValue carries a panic raised inside a deduplicated call to every caller waiting on it: Raised is the value the panic carried, verbatim, and Stack the stack of the goroutine that ran fn, captured at recovery. Its String method renders both, so an uncaught re\-raise prints fn's stack rather than only the waiter's.
 

@@ -67,7 +67,7 @@ var (
 ```
 
 <a name="Queue"></a>
-## type [Queue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/collections/ring/ring.go#L65>)
+## type [Queue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/collections/ring/facade_gen.go#L18>)
 
 Queue is the single\-producer, single\-consumer ring.
 
@@ -80,7 +80,7 @@ type Queue[T any] = kring.Queue[T]
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/collections/ring/ring.go#L69>)
+### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/collections/ring/facade_gen.go#L22>)
 
 ```go
 func New[T any](capacity int) (Queue[T], error)

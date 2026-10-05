@@ -279,37 +279,33 @@ rules:
   # KTN-STRUCT-COHESION (phase 6) — "this file holds unrelated groups; split it".
   #
   # Scoped to the pkg/v1 facade layer, where the finding describes the design
-  # instead of a defect. A facade package is ONE file by convention — cache.go,
-  # scheduler.go, lifecycle.go, vfs.go, events.go, clock.go — holding the
-  # package doc comment plus every type alias the domain publishes. The
-  # declarations are "unrelated" to each other by construction: they are a
-  # domain's whole vocabulary re-exported side by side, and pkg/v1/observe/trace.go is
-  # reported as 62 unrelated groups precisely because tracing has 62 public
-  # names.
+  # instead of a defect. A facade's declarations are "unrelated" to each other
+  # by construction: they are a domain's whole vocabulary published side by
+  # side. Since ADR 0165 every alias, re-export and forwarder of pkg/v1 lives in
+  # the package's facade_gen.go, which kit writes and this linter skips as
+  # generated, so the five facade files this list named until then
+  # (security/authz/authz.go, app/i18n/i18n.go, net/server/server.go,
+  # net/websocket/websocket.go, observe/trace/trace.go) now hold their package
+  # comment alone and no longer need it.
   #
-  # Splitting them would break a rule this repository enforces mechanically:
-  # ADR 0008 / CLAUDE.md rule 10 generate each README.md from the package doc
-  # comment, gomarkdoc reads it from the single facade file, and
-  # scripts/pre-commit/check-readme-drift.sh fails the build when the result
-  # stops matching. The layer below is where cohesion is a real question, and
-  # the rule still runs there.
-  # The exclusion names the five facade FILES rather than recursing over
-  # `pkg/v1/**`: a recursive pattern would also silence packages that are more
-  # than aliases — `logger/slogbridge` carries a real `slog.Handler` — and a
-  # facade that grows past the threshold later should be flagged and added here
-  # deliberately rather than covered in advance.
+  # data/codec/codec.go is the one left: it declares the codec's vocabulary —
+  # the 26 Format constants, values of its own and not re-exports — beside the
+  # dispatch verbs that take them. The Format alias and the forwarders that tied
+  # the two together moved to facade_gen.go (ADR 0165), so the constants now
+  # read as 26 unrelated groups. Splitting them into a file of their own would
+  # move 26 documented constants for a rule that cannot see the generated half
+  # of the package; the README is generated from the package doc comment and
+  # its order is go/doc's (ADR 0008).
+  #
+  # The exclusion names the FILE rather than recursing over `pkg/v1/**`: a
+  # recursive pattern would also silence packages that are more than a
+  # vocabulary — `logger/slogbridge` carries a real `slog.Handler` — and a
+  # facade file that grows past the threshold later should be flagged and
+  # added here deliberately rather than covered in advance.
   KTN-STRUCT-COHESION:
     exclude:
-      - "**/pkg/v1/security/authz/authz.go"
-      - "pkg/v1/security/authz/authz.go"
-      - "**/pkg/v1/app/i18n/i18n.go"
-      - "pkg/v1/app/i18n/i18n.go"
-      - "**/pkg/v1/net/server/server.go"
-      - "pkg/v1/net/server/server.go"
-      - "**/pkg/v1/net/websocket/websocket.go"
-      - "pkg/v1/net/websocket/websocket.go"
-      - "**/pkg/v1/observe/trace/trace.go"
-      - "pkg/v1/observe/trace/trace.go"
+      - "**/pkg/v1/data/codec/codec.go"
+      - "pkg/v1/data/codec/codec.go"
 
   # KTN-VAR-MINLEN (phase 4) — "a one or two letter name only reads while its
   # declaration is still on screen".
