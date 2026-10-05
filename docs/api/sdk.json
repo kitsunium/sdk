@@ -73720,7 +73720,7 @@
       "spelled": "func() []byte",
       "canonical": "func() []byte",
       "doc": "Sum returns the digest of every byte written so far. Calling it does not reset\nthe hash, so subsequent Writes keep extending the same digest.\n",
-      "file": "internal/service/crypto/hash/stdhash/digest_writer.go",
+      "file": "internal/service/crypto/hash/stdhash/decl_gen.go",
       "layer": "service",
       "family": "crypto"
     },
@@ -73832,7 +73832,7 @@
       "spelled": "func(segment string) KeyTree",
       "canonical": "func(segment string) github.com/kitsunium/sdk/internal/service/crypto/kdf/keytree.KeyTree",
       "doc": "Child returns a new KeyTree one segment deeper; the receiver is unchanged.\n",
-      "file": "internal/service/crypto/kdf/keytree/keytree.go",
+      "file": "internal/service/crypto/kdf/keytree/decl_gen.go",
       "layer": "service",
       "family": "crypto"
     },
@@ -73857,7 +73857,7 @@
       "spelled": "func(algo corecrypto.Algorithm, master corecrypto.Key) KeyTree",
       "canonical": "func(algo github.com/kitsunium/sdk/internal/core/crypto.Algorithm, master github.com/kitsunium/sdk/internal/core/crypto.Key) github.com/kitsunium/sdk/internal/service/crypto/kdf/keytree.KeyTree",
       "doc": "NewKeyTree returns the root KeyTree for master, deriving children under algo.\n",
-      "file": "internal/service/crypto/kdf/keytree/keytree.go",
+      "file": "internal/service/crypto/kdf/keytree/decl_gen.go",
       "layer": "service",
       "family": "crypto"
     },
@@ -73981,7 +73981,7 @@
       "spelled": "func(secret corecrypto.Key) (key KeyValue, err error)",
       "canonical": "func(secret github.com/kitsunium/sdk/internal/core/crypto.Key) (key github.com/kitsunium/sdk/internal/service/crypto/key/jwk.KeyValue, err error)",
       "doc": "FromSecret builds an oct JWK from the SDK's redacting symmetric key — the one\nservice/crypto/mac/hmacsha2 tags and verifies with.\n\nThe resulting key is still redacting under %v, and still refuses\nMarshalPublic: wrapping a crypto.Key in a JWK must not be a way around the\nprotection crypto.Key was given.\n",
-      "file": "internal/service/crypto/key/jwk/bridge.go",
+      "file": "internal/service/crypto/key/jwk/decl_gen.go",
       "layer": "service",
       "family": "crypto"
     },
@@ -74071,7 +74071,7 @@
       "spelled": "func() (pub []byte, err error)",
       "canonical": "func() (pub []byte, err error)",
       "doc": "Ed25519Public returns the raw 32-octet public key, ready for\nservice/crypto/sign/ed25519sig.Verify.\n",
-      "file": "internal/service/crypto/key/jwk/bridge.go",
+      "file": "internal/service/crypto/key/jwk/decl_gen.go",
       "layer": "service",
       "family": "crypto"
     },
@@ -74097,7 +74097,7 @@
       "spelled": "func() string",
       "canonical": "func() string",
       "doc": "GoString implements fmt.GoStringer so %#v stays redacted too — fmt bypasses\nString for Go-syntax formatting and would otherwise dump the raw slices.\n",
-      "file": "internal/service/crypto/key/jwk/jwk.go",
+      "file": "internal/service/crypto/key/jwk/decl_gen.go",
       "layer": "service",
       "family": "crypto"
     },
@@ -74110,7 +74110,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "IsPrivate reports whether k holds private material (\"d\" or \"k\"). It is the\nquestion to ask before publishing a set: a true here means MarshalPrivate,\nand only MarshalPrivate, can serialise this key whole.\n",
-      "file": "internal/service/crypto/key/jwk/jwk.go",
+      "file": "internal/service/crypto/key/jwk/decl_gen.go",
       "layer": "service",
       "family": "crypto"
     },
@@ -74123,7 +74123,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "IsZero reports whether k is the zero KeyValue — no kty, hence nothing to\nserialise. Every marshaller rejects it with MissingMember.\n",
-      "file": "internal/service/crypto/key/jwk/jwk.go",
+      "file": "internal/service/crypto/key/jwk/decl_gen.go",
       "layer": "service",
       "family": "crypto"
     },
@@ -74214,7 +74214,7 @@
       "spelled": "func() (pub KeyValue, err error)",
       "canonical": "func() (pub github.com/kitsunium/sdk/internal/service/crypto/key/jwk.KeyValue, err error)",
       "doc": "Public returns the public half of k: the same key with its private member\ndropped. It refuses a symmetric key with NoPublicForm, because \"the public\nhalf of an oct key\" is not a thing that exists — the k member IS the secret.\n",
-      "file": "internal/service/crypto/key/jwk/jwk.go",
+      "file": "internal/service/crypto/key/jwk/decl_gen.go",
       "layer": "service",
       "family": "crypto"
     },
@@ -74279,7 +74279,7 @@
       "spelled": "func(alg string) KeyValue",
       "canonical": "func(alg string) github.com/kitsunium/sdk/internal/service/crypto/key/jwk.KeyValue",
       "doc": "WithAlg returns a copy of k carrying alg (e.g. \"ES256\"). The value is not\nchecked against crv: an \"alg\" is a publisher's assertion, and rejecting an\nunfamiliar one here would break interop for no security gain.\n",
-      "file": "internal/service/crypto/key/jwk/jwk.go",
+      "file": "internal/service/crypto/key/jwk/decl_gen.go",
       "layer": "service",
       "family": "crypto"
     },
@@ -74292,7 +74292,7 @@
       "spelled": "func(ops ...string) KeyValue",
       "canonical": "func(ops ...string) github.com/kitsunium/sdk/internal/service/crypto/key/jwk.KeyValue",
       "doc": "WithKeyOps returns a copy of k carrying key_ops. The slice is copied.\n",
-      "file": "internal/service/crypto/key/jwk/jwk.go",
+      "file": "internal/service/crypto/key/jwk/decl_gen.go",
       "layer": "service",
       "family": "crypto"
     },
@@ -74305,7 +74305,7 @@
       "spelled": "func(kid string) KeyValue",
       "canonical": "func(kid string) github.com/kitsunium/sdk/internal/service/crypto/key/jwk.KeyValue",
       "doc": "WithKid returns a copy of k carrying kid. Passing the empty string clears it.\n",
-      "file": "internal/service/crypto/key/jwk/jwk.go",
+      "file": "internal/service/crypto/key/jwk/decl_gen.go",
       "layer": "service",
       "family": "crypto"
     },
@@ -74331,7 +74331,7 @@
       "spelled": "func(use string) KeyValue",
       "canonical": "func(use string) github.com/kitsunium/sdk/internal/service/crypto/key/jwk.KeyValue",
       "doc": "WithUse returns a copy of k carrying use (\"sig\" / \"enc\"). The value is not\nvalidated — RFC 7517 §4.2 leaves the vocabulary open.\n",
-      "file": "internal/service/crypto/key/jwk/jwk.go",
+      "file": "internal/service/crypto/key/jwk/decl_gen.go",
       "layer": "service",
       "family": "crypto"
     },
@@ -74392,7 +74392,7 @@
       "spelled": "func(kid string) []KeyValue",
       "canonical": "func(kid string) []github.com/kitsunium/sdk/internal/service/crypto/key/jwk.KeyValue",
       "doc": "AllByKid returns every key carrying kid, in document order — the rotation\npath. During a rollover a caller typically walks the candidates until one\nverifies, which is exactly the decision this package refuses to make for it.\n\nAn empty kid returns no candidates rather than every keyless key: \"match the\nkeys that have no id\" is never what a lookup by id means.\n",
-      "file": "internal/service/crypto/key/jwk/set.go",
+      "file": "internal/service/crypto/key/jwk/decl_gen.go",
       "layer": "service",
       "family": "crypto"
     },
@@ -74418,7 +74418,7 @@
       "spelled": "func() string",
       "canonical": "func() string",
       "doc": "GoString implements fmt.GoStringer so %#v stays redacted too — without it fmt\nwould walk the unexported members and print their octet slices.\n",
-      "file": "internal/service/crypto/key/jwk/set.go",
+      "file": "internal/service/crypto/key/jwk/decl_gen.go",
       "layer": "service",
       "family": "crypto"
     },

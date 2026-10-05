@@ -1549,7 +1549,7 @@ func (JWK) Ed25519Private() (priv []byte, err error)
 Ed25519Private returns the raw 64-octet private key (seed||public) that service/crypto/sign/ed25519sig.Sign expects, re-expanded from the stored seed. It hands back live private material — straight to the scheme, never to a log.
 
 <a name="JWK.Ed25519Public"></a>
-### func \(JWK\) [Ed25519Public](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/bridge.go>)
+### func \(JWK\) [Ed25519Public](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/decl_gen.go>)
 
 ```go
 func (JWK) Ed25519Public() (pub []byte, err error)
@@ -1567,7 +1567,7 @@ func (JWK) Equal(other KeyValue) bool
 Equal reports whether k and other describe the same key, comparing every member including the private one. The comparison is NOT constant-time and must not be used to authenticate anything; it exists so round-trip tests and set de-duplication can ask a precise question.
 
 <a name="JWK.GoString"></a>
-### func \(JWK\) [GoString](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/jwk.go>)
+### func \(JWK\) [GoString](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/decl_gen.go>)
 
 ```go
 func (JWK) GoString() string
@@ -1576,7 +1576,7 @@ func (JWK) GoString() string
 GoString implements fmt.GoStringer so %#v stays redacted too — fmt bypasses String for Go-syntax formatting and would otherwise dump the raw slices.
 
 <a name="JWK.IsPrivate"></a>
-### func \(JWK\) [IsPrivate](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/jwk.go>)
+### func \(JWK\) [IsPrivate](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/decl_gen.go>)
 
 ```go
 func (JWK) IsPrivate() bool
@@ -1585,7 +1585,7 @@ func (JWK) IsPrivate() bool
 IsPrivate reports whether k holds private material ("d" or "k"). It is the question to ask before publishing a set: a true here means MarshalPrivate, and only MarshalPrivate, can serialise this key whole.
 
 <a name="JWK.IsZero"></a>
-### func \(JWK\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/jwk.go>)
+### func \(JWK\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/decl_gen.go>)
 
 ```go
 func (JWK) IsZero() bool
@@ -1652,7 +1652,7 @@ MarshalPublic renders the public JWK: "kty", "crv", the public members, and what
 A symmetric key is refused with NoPublicForm rather than rendered without its "k": an oct JWK IS its secret, so there is no public projection of one, and handing back a key-shaped object with no key would be worse than an error.
 
 <a name="JWK.Public"></a>
-### func \(JWK\) [Public](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/jwk.go>)
+### func \(JWK\) [Public](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/decl_gen.go>)
 
 ```go
 func (JWK) Public() (pub KeyValue, err error)
@@ -1701,7 +1701,7 @@ func (JWK) Use() string
 Use reports the key's "use" member ("sig" / "enc"), empty when absent.
 
 <a name="JWK.WithAlg"></a>
-### func \(JWK\) [WithAlg](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/jwk.go>)
+### func \(JWK\) [WithAlg](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/decl_gen.go>)
 
 ```go
 func (JWK) WithAlg(alg string) KeyValue
@@ -1710,7 +1710,7 @@ func (JWK) WithAlg(alg string) KeyValue
 WithAlg returns a copy of k carrying alg (e.g. "ES256"). The value is not checked against crv: an "alg" is a publisher's assertion, and rejecting an unfamiliar one here would break interop for no security gain.
 
 <a name="JWK.WithKeyOps"></a>
-### func \(JWK\) [WithKeyOps](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/jwk.go>)
+### func \(JWK\) [WithKeyOps](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/decl_gen.go>)
 
 ```go
 func (JWK) WithKeyOps(ops ...string) KeyValue
@@ -1719,7 +1719,7 @@ func (JWK) WithKeyOps(ops ...string) KeyValue
 WithKeyOps returns a copy of k carrying key\_ops. The slice is copied.
 
 <a name="JWK.WithKid"></a>
-### func \(JWK\) [WithKid](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/jwk.go>)
+### func \(JWK\) [WithKid](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/decl_gen.go>)
 
 ```go
 func (JWK) WithKid(kid string) KeyValue
@@ -1737,7 +1737,7 @@ func (JWK) WithThumbprintKid() (identified KeyValue, err error)
 WithThumbprintKid returns a copy of k whose "kid" is its RFC 7638 thumbprint — a deterministic, collision-resistant id derived from the key itself rather than from a counter somebody has to remember to bump.
 
 <a name="JWK.WithUse"></a>
-### func \(JWK\) [WithUse](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/jwk.go>)
+### func \(JWK\) [WithUse](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/decl_gen.go>)
 
 ```go
 func (JWK) WithUse(use string) KeyValue
@@ -1761,7 +1761,7 @@ type JWKSet struct{}
 ```
 
 <a name="JWKSet.AllByKid"></a>
-### func \(JWKSet\) [AllByKid](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/set.go>)
+### func \(JWKSet\) [AllByKid](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/decl_gen.go>)
 
 ```go
 func (JWKSet) AllByKid(kid string) []KeyValue
@@ -1783,7 +1783,7 @@ ByKid returns THE key carrying kid.
 It refuses both ends of the ambiguity: no match is KeyNotFound, and more than one match is AmbiguousKid with the candidate count attached — never "the first one", which would silently depend on member order. Callers handling rotation use AllByKid and choose explicitly.
 
 <a name="JWKSet.GoString"></a>
-### func \(JWKSet\) [GoString](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/set.go>)
+### func \(JWKSet\) [GoString](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/decl_gen.go>)
 
 ```go
 func (JWKSet) GoString() string

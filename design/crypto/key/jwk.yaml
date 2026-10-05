@@ -422,6 +422,7 @@ packages:
           - name: secret
             type: corecrypto.Key
         name: FromSecret
+        impl: fromSecret
         out:
           - name: key
             type: KeyValue
@@ -523,6 +524,7 @@ packages:
               Ed25519Public returns the raw 32-octet public key, ready for
               service/crypto/sign/ed25519sig.Verify.
             name: Ed25519Public
+            impl: ed25519Public
             out:
               - name: pub
                 type: "[]byte"
@@ -591,6 +593,7 @@ packages:
               IsZero reports whether k is the zero KeyValue — no kty, hence nothing to
               serialise. Every marshaller rejects it with MissingMember.
             name: IsZero
+            impl: isZero
             out:
               - type: bool
             recv: value
@@ -599,6 +602,7 @@ packages:
               question to ask before publishing a set: a true here means MarshalPrivate,
               and only MarshalPrivate, can serialise this key whole.
             name: IsPrivate
+            impl: isPrivate
             out:
               - type: bool
             recv: value
@@ -607,6 +611,7 @@ packages:
               - name: kid
                 type: string
             name: WithKid
+            impl: withKid
             out:
               - type: KeyValue
             recv: value
@@ -617,6 +622,7 @@ packages:
               - name: use
                 type: string
             name: WithUse
+            impl: withUse
             out:
               - type: KeyValue
             recv: value
@@ -628,6 +634,7 @@ packages:
               - name: alg
                 type: string
             name: WithAlg
+            impl: withAlg
             out:
               - type: KeyValue
             recv: value
@@ -636,6 +643,7 @@ packages:
               - name: ops
                 type: string
             name: WithKeyOps
+            impl: withKeyOps
             out:
               - type: KeyValue
             recv: value
@@ -645,6 +653,7 @@ packages:
               dropped. It refuses a symmetric key with NoPublicForm, because "the public
               half of an oct key" is not a thing that exists — the k member IS the secret.
             name: Public
+            impl: public
             out:
               - name: pub
                 type: KeyValue
@@ -675,6 +684,7 @@ packages:
               GoString implements fmt.GoStringer so %#v stays redacted too — fmt bypasses
               String for Go-syntax formatting and would otherwise dump the raw slices.
             name: GoString
+            impl: goString
             out:
               - type: string
             recv: value
@@ -810,6 +820,7 @@ packages:
               - name: kid
                 type: string
             name: AllByKid
+            impl: allByKid
             out:
               - type: "[]KeyValue"
             recv: value
@@ -879,6 +890,7 @@ packages:
               GoString implements fmt.GoStringer so %#v stays redacted too — without it fmt
               would walk the unexported members and print their octet slices.
             name: GoString
+            impl: goString
             out:
               - type: string
             recv: value

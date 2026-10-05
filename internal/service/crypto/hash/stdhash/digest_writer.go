@@ -40,9 +40,9 @@ func (w *DigestWriter) Write(p []byte) (n int, err error) {
 	return n, err
 }
 
-// Sum returns the digest of every byte written so far. Calling it does not reset
-// the hash, so subsequent Writes keep extending the same digest.
-func (w *DigestWriter) Sum() []byte {
+// sum is DigestWriter.Sum's body: decl_gen.go writes DigestWriter.Sum, from the
+// design, as one call of it.
+func (w *DigestWriter) sum() []byte {
 	//: Sum(nil) appends the current digest to a fresh slice.
 	return w.hsh.Sum(nil)
 }

@@ -59,7 +59,7 @@ methods are removed.
 
 | File | Surface |
 |---|---|
-| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `Type`, `Curve`, `KeyValue` and `Set` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `Type`, `Curve`, `KeyValue` and `Set` — each struct with every field, unexported ones included; `KeyValue.Ed25519Public`, `KeyValue.IsZero`, `KeyValue.IsPrivate`, `KeyValue.WithKid`, `KeyValue.WithUse`, `KeyValue.WithAlg`, `KeyValue.WithKeyOps`, `KeyValue.Public`, `KeyValue.GoString`, `Set.AllByKid`, `Set.GoString` and `FromSecret`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
 | `jwk.go` | `Type` (EC/OKP/oct), `Curve` (P-256/384/521, Ed25519), the immutable `KeyValue` + accessors (`Kty`/`Crv`/`Kid`/`Use`/`Alg`/`KeyOps`/`IsZero`/`IsPrivate`), `With*` copy-on-write setters, `Public`, `Equal`, redacting `String`/`GoString` |
 | `parse.go` | `Parse` — the single decode entry point, plus the per-family validators |
 | `marshal.go` | `MarshalPublic` / `MarshalPrivate` / `MarshalJSON`, RFC 7638 `Thumbprint` and `WithThumbprintKid` |

@@ -1640,6 +1640,7 @@ packages:
               Sum returns the digest of every byte written so far. Calling it does not reset
               the hash, so subsequent Writes keep extending the same digest.
             name: Sum
+            impl: sum
             out:
               - type: "[]byte"
             recv: pointer
@@ -1732,6 +1733,7 @@ packages:
           - name: master
             type: corecrypto.Key
         name: NewKeyTree
+        impl: newKeyTree
         out:
           - type: KeyTree
     imports:
@@ -1749,6 +1751,7 @@ packages:
               - name: segment
                 type: string
             name: Child
+            impl: child
             out:
               - type: KeyTree
             recv: value

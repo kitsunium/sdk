@@ -177,7 +177,7 @@ type KeyTree struct{}
 ```
 
 <a name="KeyTree.Child"></a>
-### func \(KeyTree\) [Child](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/kdf/keytree/keytree.go>)
+### func \(KeyTree\) [Child](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/kdf/keytree/decl_gen.go>)
 
 ```go
 func (KeyTree) Child(segment string) KeyTree

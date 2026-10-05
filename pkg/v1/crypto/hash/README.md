@@ -157,7 +157,7 @@ type DigestWriter struct{}
 ```
 
 <a name="DigestWriter.Sum"></a>
-### func \(DigestWriter\) [Sum](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/hash/stdhash/digest_writer.go>)
+### func \(DigestWriter\) [Sum](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/hash/stdhash/decl_gen.go>)
 
 ```go
 func (*DigestWriter) Sum() []byte
