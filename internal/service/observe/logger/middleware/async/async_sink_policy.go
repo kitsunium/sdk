@@ -1,8 +1,5 @@
 package async
 
-// DropPolicy selects how a saturated ring buffer behaves on Write.
-type DropPolicy uint8
-
 // DropNewest discards the new entry when the ring is full and surfaces
 // BufferFull to the caller. The OnDrop callback fires for the dropped entry.
 const DropNewest DropPolicy = 0

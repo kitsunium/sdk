@@ -10,17 +10,6 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// TeeSink fans every record out to all primary sinks. When — and only when —
-// every primary rejects the record, it routes that record to the optional
-// spill (dead-letter) sink. A record accepted by at least one primary is
-// never spilled.
-type TeeSink struct {
-	// primaries receive every Write; a record they all reject is spilled.
-	primaries []corelogger.Sink
-	// spill is the optional dead-letter sink; nil disables the spill seam.
-	spill corelogger.Sink
-}
-
 // NewTeeSink builds a TeeSink from cfg. The primaries slice is copied so
 // later caller mutation cannot affect the sink. A nil cfg.Spill disables the
 // dead-letter seam.

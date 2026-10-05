@@ -55,34 +55,6 @@ const (
 	rootPath    string = "/"
 )
 
-// Sender POSTs encoded OTLP/JSON documents to one collector and maps each
-// answer onto one of three verdicts, under the calling signal's codes.
-//
-// It holds no mutable state, so it needs no mutex: http.Client is safe for
-// concurrent use, and every request builds its own body reader from its own
-// document.
-//
-// It does NOT retry, and that is a decision rather than an omission. The
-// specification asks a client to honour Retry-After and otherwise back off
-// exponentially; internal/service/app/resilience already ships that policy, and a
-// backoff hidden inside a send would be a second one a caller cannot see, tune
-// or cancel — an exporter's Export has no context to cancel it with. What it
-// supplies instead is the CLASSIFICATION a retry policy needs: a transient
-// verdict carries the signal's Unavailable code, which each signal's
-// OTLPRetryable reads.
-type Sender struct {
-	// endpoint is the validated full URL.
-	endpoint string
-	// client is the caller's, or the bounded redirect-refusing default.
-	client *http.Client
-	// headers are owned copies of the caller's, written on every request.
-	headers map[string]string
-	// maxResponse caps the response body read.
-	maxResponse int64
-	// signal names every verdict in the calling signal's words.
-	signal *SignalSpec
-}
-
 // NewSender validates cfg and builds the sender a signal's
 // NewOTLPHTTPExporter wraps. A refused endpoint fails HERE, at wiring, under
 // the signal's EndpointInvalid code, rather than at the first export: an

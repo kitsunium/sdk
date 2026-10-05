@@ -7,6 +7,7 @@ go_library(
     srcs = [
         "carved.go",
         "config.go",
+        "decl_gen.go",
         "doc.go",
         "exporter_otlphttp.go",
         "exporter_otlpjson.go",
@@ -21,7 +22,6 @@ go_library(
         "name_state.go",
         "otlp_export_response.go",
         "otlp_request.go",
-        "otlphttp_config.go",
         "series.go",
         "series_entry.go",
         "series_store.go",

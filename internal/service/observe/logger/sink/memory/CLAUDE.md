@@ -12,8 +12,8 @@ output. Mirrors apex/log's memory handler.
 
 | File | Role |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declaration of `Memory` — each struct with every field, unexported ones included; the assertion `Memory → corelogger.Sink`. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `memory.go`            | `Memory` struct + `NewMemory` + `Write` / `Flush` / `Close` / `Records` / `Len` / `Reset` |
-| `memory_compliance.go` | compile-time `var _ core/observe/logger.Sink = (*Memory)(nil)` |
 | `doc.go`               | the package comment — kit writes it from the design (ADR 0167) |
 
 ## Why this shape

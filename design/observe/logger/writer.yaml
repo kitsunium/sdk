@@ -886,7 +886,8 @@ packages:
       level: github.com/kitsunium/sdk/internal/core/observe/logger/level
     path: github.com/kitsunium/sdk/internal/service/observe/logger/writer/dbsink
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Config tunes the database sink shell. Every field is optional: the zero Config
           batches by the default row cap, flushes only on Flush / Close, drops on a
           saturated ring with no observer, and inherits the handler-global level. It

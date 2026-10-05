@@ -18,6 +18,7 @@ Stdlib only (plus `kernel/clock` — the CPU window is a timer on it, `clock.Sys
 | File | Role |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `FoldConfig` and `GroupConfig` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `profiling.go` | `MaxCPUWindow`, `MaxProfileBytes`, `MaxFrames` — the bounds of the capture and the decoder, the engine's |
 | `capture.go` | `CaptureCPU`, `CaptureHeap` |
 | `wire.go` | the protocol-buffer wire reader: varints (a tenth byte past the 64th bit refused), length-delimited fields, skips, packed or unpacked repeated varints — every read bounds-checked |

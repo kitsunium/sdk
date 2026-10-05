@@ -71,12 +71,14 @@ packages:
       level: github.com/kitsunium/sdk/internal/core/observe/logger/level
     path: github.com/kitsunium/sdk/internal/service/observe/logger/middleware/route
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Predicate decides whether a route should accept a given record. The
           router evaluates predicates in declaration order; the first true wins.
         name: Predicate
         underlying: func(r corelogger.RecordEvent) (match bool)
-      - doc: |-
+      - decl: true
+        doc: |-
           Params binds a Predicate to a downstream Sink. Held verbatim by the
           router; callers MUST NOT mutate the Sink reference after registration.
           Read at call sites as route.Params{When: …, Sink: …}.

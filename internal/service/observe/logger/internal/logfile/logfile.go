@@ -19,19 +19,6 @@ const (
 	kindFieldKey string = "kind"
 )
 
-// RefusalSpec is one sink's error vocabulary for the hardened open: the wrap a
-// policy refusal leaves under, and the wrap a failed os.OpenFile does. Each
-// carries the sink's own code, reason and wording, and a sink declares its
-// RefusalSpec once, as a package-level value.
-type RefusalSpec struct {
-	// Symlink wraps the policy refusal: the final component is already a
-	// symbolic link, so the open is never attempted.
-	Symlink errs.WrapParams
-	// Open wraps a failed os.OpenFile — the kernel refusing a link planted
-	// after the check among the causes, and a full disk among the others.
-	Open errs.WrapParams
-}
-
 // Open refuses a pre-existing symlink at path, then opens it for appending —
 // O_APPEND|O_CREATE|O_WRONLY, plus O_NOFOLLOW on every Unix — creating it with
 // perm. It is the single hardening entry point, so the checks run identically

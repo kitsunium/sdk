@@ -2,19 +2,6 @@ package otlp
 
 import coreotel "github.com/kitsunium/sdk/internal/core/observe/otel"
 
-// KeyValue is common.v1.KeyValue: key (1) + value (2). One attribute of a
-// resource, a data point, a span, an event or a link.
-//
-// Field ORDER inside every message of this package is the schema's
-// FIELD-NUMBER order, not a reading order: encoding/json emits struct fields as
-// declared, and deriving the order from the document is what makes the
-// expected bytes in each signal's tests checkable against the .proto field by
-// field.
-type KeyValue struct {
-	Key   string   `json:"key"`
-	Value AnyValue `json:"value"`
-}
-
 // Attrs renders an attribute set as the repeated KeyValue every OTLP message
 // spells its dimensions with. An empty set stays nil, which encoding/json
 // omits — the proto3 rule for an empty repeated field.

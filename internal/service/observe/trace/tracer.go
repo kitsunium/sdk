@@ -7,19 +7,6 @@ import (
 	coretrace "github.com/kitsunium/sdk/internal/core/observe/trace"
 )
 
-// Tracer is the concrete core/observe/trace.Tracer. It holds a resolved configuration
-// and no mutable state at all: a span is the only thing that changes, and each
-// one owns its own.
-//
-// That is why there is no lock here and no Collect: the tracer FANS OUT to a
-// SpanSink rather than accumulating, so N goroutines starting spans contend on
-// nothing in this type. Whatever buffering a deployment wants lives in the sink,
-// where its cost is visible.
-type Tracer struct {
-	// cfg is the resolved configuration — every clamp already applied.
-	cfg TracerConfig
-}
-
 // NewTracer builds a Tracer from cfg, applying every clamp once.
 //
 // It returns the concrete type rather than the core/observe/trace.Tracer interface so a

@@ -3,30 +3,9 @@ package memory
 import (
 	"context"
 	"slices"
-	"sync"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 )
-
-// Memory is a terminal Sink that retains a defensive snapshot of every
-// RecordEvent it receives in a slice guarded by an RWMutex. It exists for tests
-// that assert on what was logged without parsing an encoder's byte output.
-// Write records; Records returns an independent copy of the buffer; Reset
-// clears it. All methods are safe for concurrent use.
-type Memory struct {
-	// mu guards records and writes; Write/Reset take the write lock, Records
-	// the read lock so concurrent assertions never block each other.
-	mu sync.RWMutex
-	// records holds a defensive copy of each received RecordEvent in arrival
-	// order; each entry's Attrs slice is deep-cloned (including nested
-	// KindGroup payloads) so caller mutation cannot corrupt recorded history.
-	records []corelogger.RecordEvent
-	// writes is the lifetime accepted-append count — equal to len(records)
-	// until Reset (this sink never drops or dedups). It lets callers assert on
-	// total throughput without diffing the slice and gives the struct a second
-	// field beyond the guarded slice.
-	writes int
-}
 
 // NewMemory returns an empty Memory sink ready to record received records.
 func NewMemory() *Memory {

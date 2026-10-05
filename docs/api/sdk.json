@@ -80079,7 +80079,7 @@
         }
       ],
       "doc": "AnyValue is common.v1.AnyValue, restricted to the four SCALAR cases the\nSDK's attribute model has: stringValue (1), boolValue (2), intValue (3),\ndoubleValue (4).\n\narrayValue (5), kvlistValue (6) and bytesValue (7) are absent because\ninternal/core/observe/otel.AttrValue has no corresponding kind — homogeneous array\nattributes are deferred with a measured reason (ADR 0044 §Decision 2).\nExactly one pointer is non-nil, and it is emitted even at its zero value,\nbecause a oneof member has explicit presence.\n",
-      "file": "internal/service/observe/internal/otlp/any_value.go",
+      "file": "internal/service/observe/internal/otlp/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80154,7 +80154,7 @@
       "spelled": "float64",
       "canonical": "float64",
       "doc": "Double is an IEEE-754 double rendered as a JSON number, or as one of the\nthree quoted spellings proto3 JSON gives a non-finite value.\n\nencoding/json refuses NaN and ±Inf outright (\"json: unsupported value\"), so\nwithout this type a single NaN would fail the whole export. The model allows\nthe value — a gauge is whatever was sampled — and the specification says how\nto spell it, so the encoder spells it.\n",
-      "file": "internal/service/observe/internal/otlp/scalar.go",
+      "file": "internal/service/observe/internal/otlp/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80206,7 +80206,7 @@
         }
       ],
       "doc": "HTTPConfig configures an OTLP/HTTP sender. Every field has a resolved meaning\nwhen left unset except Endpoint, which has none that could be right.\n\nEach signal publishes it as a DEFINED type of its own —\n`type OTLPHTTPConfig otlp.HTTPConfig` in internal/service/observe/metrics and in\ninternal/service/observe/trace — so metrics.OTLPHTTPConfig and trace.OTLPHTTPConfig\nstay two types a caller cannot mix up, while their fields are declared, and\ndocumented, once: here.\n",
-      "file": "internal/service/observe/internal/otlp/http_config.go",
+      "file": "internal/service/observe/internal/otlp/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80218,7 +80218,7 @@
       "spelled": "int64",
       "canonical": "int64",
       "doc": "Int64 is a signed 64-bit integer rendered as a DECIMAL STRING.\n\nThat is the proto3 JSON mapping OTLP inherits — \"64-bit integer numbers in\nJSON-encoded payloads are encoded as decimal strings\" — and the reason is\nrange, not taste: a JSON number is a double in most parsers, so an int64\npast 2^53 loses its low bits on the way through.\n",
-      "file": "internal/service/observe/internal/otlp/scalar.go",
+      "file": "internal/service/observe/internal/otlp/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80255,7 +80255,7 @@
         }
       ],
       "doc": "KeyValue is common.v1.KeyValue: key (1) + value (2). One attribute of a\nresource, a data point, a span, an event or a link.\n\nField ORDER inside every message of this package is the schema's\nFIELD-NUMBER order, not a reading order: encoding/json emits struct fields as\ndeclared, and deriving the order from the document is what makes the\nexpected bytes in each signal's tests checkable against the .proto field by\nfield.\n",
-      "file": "internal/service/observe/internal/otlp/key_value.go",
+      "file": "internal/service/observe/internal/otlp/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80279,7 +80279,7 @@
       "spelled": "int64",
       "canonical": "int64",
       "doc": "LenientInt64 decodes a 64-bit integer written EITHER as a JSON number OR as a\ndecimal string.\n\nThis is not tolerance for its own sake, it is the specification: 64-bit\nintegers are encoded as decimal strings, \"and either numbers or strings are\naccepted when decoding\". Collectors differ — the reference collector emits\nthe string form, some proxies re-serialise it as a number — and a decoder\nthat accepted only one of them would silently read every partial success as\na full one whenever it met the other.\n",
-      "file": "internal/service/observe/internal/otlp/response.go",
+      "file": "internal/service/observe/internal/otlp/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80340,7 +80340,7 @@
       "spelled": "interface{RejectedCount() int64}",
       "canonical": "interface{RejectedCount() int64}",
       "doc": "RejectedCounter is a signal's partialSuccess message — ExportMetricsPartialSuccess,\nExportTracePartialSuccess — reduced to the one number the sender reads.\n\nThe messages differ in exactly one member name (rejectedDataPoints,\nrejectedSpans), so each signal declares its own small struct with its own\njson tag and this method, and DecodeRejected decodes into it: the tags stay\nstatic, which keeps encoding/json's matching rules what they were when each\nsignal decoded its own response type.\n",
-      "file": "internal/service/observe/internal/otlp/response.go",
+      "file": "internal/service/observe/internal/otlp/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80352,7 +80352,7 @@
       "recv": "RejectedCounter",
       "spelled": "func() int64",
       "canonical": "func() int64",
-      "file": "internal/service/observe/internal/otlp/response.go",
+      "file": "internal/service/observe/internal/otlp/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80371,7 +80371,7 @@
         }
       ],
       "doc": "ResourceMessage is resource.v1.Resource: attributes (1).\n\ndroppedAttributesCount (2) is absent because this SDK drops no resource\nattribute. What each signal does drop is a different thing, counted where it\nhappens: the meter folds excess SERIES into an overflow series, and a\nRecorder drops whole SPANS when it is full.\n",
-      "file": "internal/service/observe/internal/otlp/resource_message.go",
+      "file": "internal/service/observe/internal/otlp/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80407,7 +80407,7 @@
         }
       ],
       "doc": "ScopeMessage is common.v1.InstrumentationScope: name (1) + version (2). A Meter and\na Tracer both normalise Name, so it is always present; Version is optional in\nthe specification and omitted when the caller has none rather than emitted\nblank.\n\nattributes (3) and droppedAttributesCount (4) are absent: nothing in this SDK\nproduces a scope attribute (ADR 0044 §Deferred), and an always-empty field\nis a placeholder (rule 5).\n",
-      "file": "internal/service/observe/internal/otlp/scope_message.go",
+      "file": "internal/service/observe/internal/otlp/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80431,7 +80431,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Sender POSTs encoded OTLP/JSON documents to one collector and maps each\nanswer onto one of three verdicts, under the calling signal's codes.\n\nIt holds no mutable state, so it needs no mutex: http.Client is safe for\nconcurrent use, and every request builds its own body reader from its own\ndocument.\n\nIt does NOT retry, and that is a decision rather than an omission. The\nspecification asks a client to honour Retry-After and otherwise back off\nexponentially; internal/service/app/resilience already ships that policy, and a\nbackoff hidden inside a send would be a second one a caller cannot see, tune\nor cancel — an exporter's Export has no context to cancel it with. What it\nsupplies instead is the CLASSIFICATION a retry policy needs: a transient\nverdict carries the signal's Unavailable code, which each signal's\nOTLPRetryable reads.\n",
-      "file": "internal/service/observe/internal/otlp/sender.go",
+      "file": "internal/service/observe/internal/otlp/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80503,7 +80503,7 @@
         }
       ],
       "doc": "SignalSpec is one signal's vocabulary for the shared OTLP/HTTP sender: the\nsentinels each verdict wraps, the parameters each wrap of a FOREIGN cause\nuses, the field a partial success counts under, and how that signal's\ncollector reports a partial success at all.\n\nIt is the error-code injection seam this package is built around. The sender\ndecides WHICH verdict an exchange earns — the specification's sections, the\nsame for every signal — and the SignalSpec decides what that verdict is CALLED:\nthe dotted-quad code, the reason, the public and private wording. A metrics\nexport refused by a collector still reads OTLP_EXPORT_REJECTED 0.3.45.8 and\n\"The OTLP collector rejected the metrics payload\", a trace export\n0.3.50.6 and \"The trace collector rejected the export\", exactly as before\nthe transport was shared.\n\nEvery field is required. A signal declares its SignalSpec once, as a\npackage-level value, and hands a pointer to NewSender.\n",
-      "file": "internal/service/observe/internal/otlp/signal_spec.go",
+      "file": "internal/service/observe/internal/otlp/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80515,7 +80515,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Stream writes whole OTLP/JSON documents to one io.Writer, each terminated by\nDocumentTerminator, so a stream of exports is newline-delimited JSON — what a\nfile or a terminal wants, where an HTTP body wants the document alone.\n\nmu serialises the single write: an exporter port requires concurrency safety\nand the writer is caller-supplied, so two concurrent exports must not\ninterleave partial documents into a non-atomic destination. Encoding happens\nbefore Emit is called, outside the lock, so a slow writer serialises callers\nwithout also serialising the work.\n",
-      "file": "internal/service/observe/internal/otlp/stream.go",
+      "file": "internal/service/observe/internal/otlp/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80540,7 +80540,7 @@
       "spelled": "uint64",
       "canonical": "uint64",
       "doc": "Uint64 is an unsigned 64-bit integer rendered as a decimal string, for the\nsame reason Int64 is: fixed64 and uint64 both map to a string. Every\ntimestamp in an OTLP payload uses it, and every one of them is past 2^53.\n",
-      "file": "internal/service/observe/internal/otlp/scalar.go",
+      "file": "internal/service/observe/internal/otlp/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80589,7 +80589,7 @@
       "spelled": "interface{Any(key string, val any) Builder; Bool(key string, val bool) Builder; Duration(key string, val time.Duration) Builder; Float64(key string, val float64) Builder; Int(key string, val int) Builder; Int64(key string, val int64) Builder; Send(ctx context.Context, msg string); Str(key string, val string) Builder; Time(key string, val time.Time) Builder; Uint64(key string, val uint64) Builder}",
       "canonical": "interface{Any(key string, val any) github.com/kitsunium/sdk/internal/service/observe/logger.Builder; Bool(key string, val bool) github.com/kitsunium/sdk/internal/service/observe/logger.Builder; Duration(key string, val time.Duration) github.com/kitsunium/sdk/internal/service/observe/logger.Builder; Float64(key string, val float64) github.com/kitsunium/sdk/internal/service/observe/logger.Builder; Int(key string, val int) github.com/kitsunium/sdk/internal/service/observe/logger.Builder; Int64(key string, val int64) github.com/kitsunium/sdk/internal/service/observe/logger.Builder; Send(ctx context.Context, msg string); Str(key string, val string) github.com/kitsunium/sdk/internal/service/observe/logger.Builder; Time(key string, val time.Time) github.com/kitsunium/sdk/internal/service/observe/logger.Builder; Uint64(key string, val uint64) github.com/kitsunium/sdk/internal/service/observe/logger.Builder}",
       "doc": "Builder is the chainable interface returned by Logger.Build. Every typed\naccessor (Str / Int / Bool / …) returns the receiver so callers compose\nthe chain in a single expression. Send terminates the chain by emitting\nthe accumulated record through the underlying handler and returns the\nbuilder to the recycler — callers MUST NOT use the builder after Send.\n",
-      "file": "internal/service/observe/logger/builder.go",
+      "file": "internal/service/observe/logger/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80602,7 +80602,7 @@
       "spelled": "func(key string, val any) Builder",
       "canonical": "func(key string, val any) github.com/kitsunium/sdk/internal/service/observe/logger.Builder",
       "doc": "Any appends an opaque attribute; handlers degrade unrecognised types to \"?\".\n",
-      "file": "internal/service/observe/logger/builder.go",
+      "file": "internal/service/observe/logger/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80615,7 +80615,7 @@
       "spelled": "func(key string, val bool) Builder",
       "canonical": "func(key string, val bool) github.com/kitsunium/sdk/internal/service/observe/logger.Builder",
       "doc": "Bool appends a boolean attribute.\n",
-      "file": "internal/service/observe/logger/builder.go",
+      "file": "internal/service/observe/logger/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80628,7 +80628,7 @@
       "spelled": "func(key string, val time.Duration) Builder",
       "canonical": "func(key string, val time.Duration) github.com/kitsunium/sdk/internal/service/observe/logger.Builder",
       "doc": "Duration appends a time.Duration attribute.\n",
-      "file": "internal/service/observe/logger/builder.go",
+      "file": "internal/service/observe/logger/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80641,7 +80641,7 @@
       "spelled": "func(key string, val float64) Builder",
       "canonical": "func(key string, val float64) github.com/kitsunium/sdk/internal/service/observe/logger.Builder",
       "doc": "Float64 appends a float64 attribute.\n",
-      "file": "internal/service/observe/logger/builder.go",
+      "file": "internal/service/observe/logger/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80654,7 +80654,7 @@
       "spelled": "func(key string, val int) Builder",
       "canonical": "func(key string, val int) github.com/kitsunium/sdk/internal/service/observe/logger.Builder",
       "doc": "Int appends an int attribute (widened to int64 internally).\n",
-      "file": "internal/service/observe/logger/builder.go",
+      "file": "internal/service/observe/logger/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80667,7 +80667,7 @@
       "spelled": "func(key string, val int64) Builder",
       "canonical": "func(key string, val int64) github.com/kitsunium/sdk/internal/service/observe/logger.Builder",
       "doc": "Int64 appends an int64 attribute.\n",
-      "file": "internal/service/observe/logger/builder.go",
+      "file": "internal/service/observe/logger/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80680,7 +80680,7 @@
       "spelled": "func(ctx context.Context, msg string)",
       "canonical": "func(ctx context.Context, msg string)",
       "doc": "Send terminates the chain by emitting the accumulated record.\n",
-      "file": "internal/service/observe/logger/builder.go",
+      "file": "internal/service/observe/logger/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80693,7 +80693,7 @@
       "spelled": "func(key string, val string) Builder",
       "canonical": "func(key string, val string) github.com/kitsunium/sdk/internal/service/observe/logger.Builder",
       "doc": "Str appends a string attribute.\n",
-      "file": "internal/service/observe/logger/builder.go",
+      "file": "internal/service/observe/logger/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80706,7 +80706,7 @@
       "spelled": "func(key string, val time.Time) Builder",
       "canonical": "func(key string, val time.Time) github.com/kitsunium/sdk/internal/service/observe/logger.Builder",
       "doc": "Time appends a time.Time attribute.\n",
-      "file": "internal/service/observe/logger/builder.go",
+      "file": "internal/service/observe/logger/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80719,7 +80719,7 @@
       "spelled": "func(key string, val uint64) Builder",
       "canonical": "func(key string, val uint64) github.com/kitsunium/sdk/internal/service/observe/logger.Builder",
       "doc": "Uint64 appends a uint64 attribute.\n",
-      "file": "internal/service/observe/logger/builder.go",
+      "file": "internal/service/observe/logger/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80816,7 +80816,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "TextHandler is a core.Handler that renders records as a single plain-text\nline per event. It is safe for concurrent use via an internal mutex.\n",
-      "file": "internal/service/observe/logger/text_handler.go",
+      "file": "internal/service/observe/logger/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -81015,7 +81015,7 @@
         }
       ],
       "doc": "RefusalSpec is one sink's error vocabulary for the hardened open: the wrap a\npolicy refusal leaves under, and the wrap a failed os.OpenFile does. Each\ncarries the sink's own code, reason and wording, and a sink declares its\nRefusalSpec once, as a package-level value.\n",
-      "file": "internal/service/observe/logger/internal/logfile/logfile.go",
+      "file": "internal/service/observe/logger/internal/logfile/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -81061,7 +81061,7 @@
         }
       ],
       "doc": "Config tunes the async sink at construction time. Every field is optional\n— the zero-value Config produces a sink with the documented defaults\n(defaultBufferSize ring, DropNewest policy, no callbacks).\n",
-      "file": "internal/service/observe/logger/middleware/async/config.go",
+      "file": "internal/service/observe/logger/middleware/async/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -81099,7 +81099,7 @@
       "spelled": "uint8",
       "canonical": "uint8",
       "doc": "DropPolicy selects how a saturated ring buffer behaves on Write.\n",
-      "file": "internal/service/observe/logger/middleware/async/async_sink_policy.go",
+      "file": "internal/service/observe/logger/middleware/async/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -81140,7 +81140,7 @@
         }
       ],
       "doc": "Config configures an EncWriter: the downstream sink, the master key the\nper-sink subkey is derived from, and the HKDF info label that binds that\nsubkey to a purpose.\n",
-      "file": "internal/service/observe/logger/middleware/encwrite/config.go",
+      "file": "internal/service/observe/logger/middleware/encwrite/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -81152,7 +81152,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "EncWriter seals each record's bytes under a per-sink subkey and writes the\nlength-prefixed sealed box to the downstream sink. Safe for concurrent use.\n",
-      "file": "internal/service/observe/logger/middleware/encwrite/encwrite.go",
+      "file": "internal/service/observe/logger/middleware/encwrite/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -81246,7 +81246,7 @@
         }
       ],
       "doc": "Config tunes the recover sink at construction time. Every field is\noptional — the zero-value Config produces a sink with the documented\ndefaults (no callback), so the panic-absorption behaviour is byte-for-byte\nidentical to New until OnPanic is wired.\n",
-      "file": "internal/service/observe/logger/middleware/recover/config.go",
+      "file": "internal/service/observe/logger/middleware/recover/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -81318,7 +81318,7 @@
         }
       ],
       "doc": "Params binds a Predicate to a downstream Sink. Held verbatim by the\nrouter; callers MUST NOT mutate the Sink reference after registration.\nRead at call sites as route.Params{When: …, Sink: …}.\n",
-      "file": "internal/service/observe/logger/middleware/route/router_sink_params.go",
+      "file": "internal/service/observe/logger/middleware/route/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -81330,7 +81330,7 @@
       "spelled": "func(r corelogger.RecordEvent) (match bool)",
       "canonical": "func(r github.com/kitsunium/sdk/internal/core/observe/logger.RecordEvent) (match bool)",
       "doc": "Predicate decides whether a route should accept a given record. The\nrouter evaluates predicates in declaration order; the first true wins.\n",
-      "file": "internal/service/observe/logger/middleware/route/router_sink_params.go",
+      "file": "internal/service/observe/logger/middleware/route/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -81366,7 +81366,7 @@
         }
       ],
       "doc": "Config configures a TeeSink: the primary sinks every record is fanned out\nto, plus an optional spill sink that receives a record only when every\nprimary rejected it.\n",
-      "file": "internal/service/observe/logger/middleware/tee/config.go",
+      "file": "internal/service/observe/logger/middleware/tee/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -81390,7 +81390,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "TeeSink fans every record out to all primary sinks. When — and only when —\nevery primary rejects the record, it routes that record to the optional\nspill (dead-letter) sink. A record accepted by at least one primary is\nnever spilled.\n",
-      "file": "internal/service/observe/logger/middleware/tee/tee.go",
+      "file": "internal/service/observe/logger/middleware/tee/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -81489,7 +81489,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Memory is a terminal Sink that retains a defensive snapshot of every\nRecordEvent it receives in a slice guarded by an RWMutex. It exists for tests\nthat assert on what was logged without parsing an encoder's byte output.\nWrite records; Records returns an independent copy of the buffer; Reset\nclears it. All methods are safe for concurrent use.\n",
-      "file": "internal/service/observe/logger/sink/memory/memory.go",
+      "file": "internal/service/observe/logger/sink/memory/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -81598,7 +81598,7 @@
         }
       ],
       "doc": "Config tunes the syslog sink at construction time. Every field is\noptional — the zero-value Config produces a sink using net.Dial as the\ndialer, which is the pre-existing behaviour preserved by New.\n",
-      "file": "internal/service/observe/logger/sink/syslog/config.go",
+      "file": "internal/service/observe/logger/sink/syslog/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -81695,7 +81695,7 @@
         }
       ],
       "doc": "Config tunes the database sink shell. Every field is optional: the zero Config\nbatches by the default row cap, flushes only on Flush / Close, drops on a\nsaturated ring with no observer, and inherits the handler-global level. It\ncarries NO driver type — only plain data — so a concrete adapter's own config\n(e.g. a future logger.MySQLConfig) can map onto it without leaking a driver\ninto the dep-light layers.\n",
-      "file": "internal/service/observe/logger/writer/dbsink/dbsink_config.go",
+      "file": "internal/service/observe/logger/writer/dbsink/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -81751,7 +81751,7 @@
         }
       ],
       "doc": "Config tunes the journald sink. Every field is optional: the zero\nConfig connects the default systemd journal socket, inherits the\nhandler-global level, and uses async's default ring. It carries only stdlib\ntypes, so the package stays dep-light.\n",
-      "file": "internal/service/observe/logger/writer/journald/journald_config.go",
+      "file": "internal/service/observe/logger/writer/journald/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -81836,7 +81836,7 @@
         }
       ],
       "doc": "NetConfig tunes a network writer. Address is required (a host:port for\ntcp/udp, a URL for http); every other field is optional. It carries only\nstdlib types, so the package stays dep-light.\n",
-      "file": "internal/service/observe/logger/writer/nettransport/config.go",
+      "file": "internal/service/observe/logger/writer/nettransport/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -81989,7 +81989,7 @@
         }
       ],
       "doc": "MeterConfig configures a Meter. Every field has a resolved meaning when left\nunset — none of them is inert (ADR 0031).\n",
-      "file": "internal/service/observe/metrics/config.go",
+      "file": "internal/service/observe/metrics/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -82095,7 +82095,7 @@
         }
       ],
       "doc": "OTLPHTTPConfig configures an OTLP/HTTP exporter. Every field has a resolved\nmeaning when left unset except Endpoint, which has none that could be right:\na full URL used as-is, so a caller writes\n\"http://collector:4318\" + OTLPMetricsPath, and an endpoint that is not an\nabsolute http(s) URL with a non-root path is REFUSED at construction\n(OTLPEndpointInvalid). Timeout clamps to DefaultOTLPTimeout and is ignored\nwhen Client is set; MaxResponseBytes clamps to DefaultOTLPMaxResponseBytes.\n\nIt is a DEFINED type over the configuration of the transport both signals\nshare (internal/service/observe/internal/otlp.HTTPConfig, where each field is\ndocumented once), not an alias of it: metrics.OTLPHTTPConfig and\ntrace.OTLPHTTPConfig stay two types a caller cannot hand to the wrong\nsignal's constructor.\n",
-      "file": "internal/service/observe/metrics/otlphttp_config.go",
+      "file": "internal/service/observe/metrics/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -82300,7 +82300,7 @@
         }
       ],
       "doc": "FoldConfig says how Fold reads a profile: which sample type, whose each\nsample is, how many functions to rank and how much of the flame to keep.\nEvery zero field has a default.\n",
-      "file": "internal/service/observe/profiling/fold.go",
+      "file": "internal/service/observe/profiling/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -82341,7 +82341,7 @@
         }
       ],
       "doc": "GroupConfig says how GroupGoroutines groups: by which labels, and how many\ngroups and frames to keep.\n",
-      "file": "internal/service/observe/profiling/group.go",
+      "file": "internal/service/observe/profiling/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -82686,7 +82686,7 @@
         }
       ],
       "doc": "OTLPHTTPConfig configures an OTLP/HTTP span exporter. Every field has a\nresolved meaning when left unset except Endpoint, which has none that could be\nright — see ADR 0051 §Decision 5: a full URL used as-is, so a caller writes\n\"http://collector:4318\" + OTLPTracesPath, and an endpoint that is not an\nabsolute http(s) URL with a non-root path is REFUSED at construction\n(OTLPEndpointInvalid). Timeout clamps to DefaultOTLPTimeout and is ignored\nwhen Client is set; MaxResponseBytes clamps to DefaultOTLPMaxResponseBytes.\n\nIt is a DEFINED type over the configuration of the transport both signals\nshare (internal/service/observe/internal/otlp.HTTPConfig, where each field is\ndocumented once), not an alias of it: trace.OTLPHTTPConfig and\nmetrics.OTLPHTTPConfig stay two types a caller cannot hand to the wrong\nsignal's constructor.\n",
-      "file": "internal/service/observe/trace/otlphttp_config.go",
+      "file": "internal/service/observe/trace/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -82795,7 +82795,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Recorder accumulates finished spans in memory and hands them out in batches.\n\nIt is the SpanSink a Tracer ships with, and it is a real destination rather\nthan a test double — it is what the OTLP exporters read, and what a caller\nwires to a `scheduler` job that exports every N seconds.\n\n# Overflow is counted, never silent\n\nPast MaxSpans a span is DROPPED and a counter advances. Dropping the newest\nrather than the oldest is the choice that keeps a burst from erasing the spans\nthat preceded it — the beginning of an incident is more informative than its\nmiddle — and the count is published by Dropped, so \"we are losing spans\" is a\nnumber an operator can alert on rather than a silence.\n\nThe alternative, growing without bound, converts a collector outage into an\nOOM. The alternative to counting is worse: an integration that silently drops\ntelemetry looks exactly like a service that is quiet.\n",
-      "file": "internal/service/observe/trace/recorder.go",
+      "file": "internal/service/observe/trace/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -82902,7 +82902,7 @@
         }
       ],
       "doc": "RecorderConfig configures a Recorder: who produced the spans, what\ninstrumented them, and how many may wait between collections.\n",
-      "file": "internal/service/observe/trace/recorder_config.go",
+      "file": "internal/service/observe/trace/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -82978,7 +82978,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Tracer is the concrete core/observe/trace.Tracer. It holds a resolved configuration\nand no mutable state at all: a span is the only thing that changes, and each\none owns its own.\n\nThat is why there is no lock here and no Collect: the tracer FANS OUT to a\nSpanSink rather than accumulating, so N goroutines starting spans contend on\nnothing in this type. Whatever buffering a deployment wants lives in the sink,\nwhere its cost is visible.\n",
-      "file": "internal/service/observe/trace/tracer.go",
+      "file": "internal/service/observe/trace/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -83056,7 +83056,7 @@
         }
       ],
       "doc": "TracerConfig configures a Tracer. Every field has a resolved meaning when\nleft unset — none of them is inert (ADR 0031).\n",
-      "file": "internal/service/observe/trace/config.go",
+      "file": "internal/service/observe/trace/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },

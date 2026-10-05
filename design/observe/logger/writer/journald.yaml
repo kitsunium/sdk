@@ -91,7 +91,8 @@ packages:
       writer: github.com/kitsunium/sdk/internal/core/observe/logger/writer
     path: github.com/kitsunium/sdk/internal/service/observe/logger/writer/journald
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Config tunes the journald sink. Every field is optional: the zero
           Config connects the default systemd journal socket, inherits the
           handler-global level, and uses async's default ring. It carries only stdlib

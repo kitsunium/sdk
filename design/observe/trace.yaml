@@ -2269,7 +2269,8 @@ packages:
       otlp: github.com/kitsunium/sdk/internal/service/observe/internal/otlp
     path: github.com/kitsunium/sdk/internal/service/observe/trace
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           TracerConfig configures a Tracer. Every field has a resolved meaning when
           left unset — none of them is inert (ADR 0031).
         name: TracerConfig
@@ -2323,7 +2324,8 @@ packages:
                 slow or flaky, and usually both.
               name: Clock
               type: clock.Clock
-      - doc: |-
+      - decl: true
+        doc: |-
           OTLPHTTPConfig configures an OTLP/HTTP span exporter. Every field has a
           resolved meaning when left unset except Endpoint, which has none that could be
           right — see ADR 0051 §Decision 5: a full URL used as-is, so a caller writes
@@ -2339,7 +2341,8 @@ packages:
           signal's constructor.
         name: OTLPHTTPConfig
         underlying: otlp.HTTPConfig
-      - doc: |-
+      - decl: true
+        doc: |-
           Recorder accumulates finished spans in memory and hands them out in batches.
 
           It is the SpanSink a Tracer ships with, and it is a real destination rather
@@ -2411,8 +2414,56 @@ packages:
             recv: pointer
         name: Recorder
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - doc: resource and scope are stamped on every payload. Immutable.
+              name: resource
+              type: coreotel.ResourceValue
+            - name: scope
+              type: coreotel.ScopeValue
+            - doc: maxSpans is the resolved bound.
+              name: maxSpans
+              type: int
+            - doc: |-
+                mu guards spans and dropped. It is a sync.Mutex, and the choice was
+                MEASURED rather than reasoned — see BENCH.md §2.
+
+                This field held a sync.RWMutex, justified by "Len and Dropped are pure
+                reads an operator may poll while spans are still arriving". Every part of
+                that sentence is true and the conclusion is still backwards: `record`
+                takes the EXCLUSIVE side and runs once per span from every request
+                goroutine, while the shared side runs once per collection interval — and
+                `Collect`, which is what an export actually calls, takes the exclusive
+                side too, so it never benefited at all. A read-write lock was optimising
+                the rarest path and taxing the busiest one.
+
+                The measurement is not close. Writing alone, the RWMutex costs 1.27x to
+                1.65x more from one to eight goroutines. In the mixed shape its own
+                comment named — spans arriving while an operator polls Len — it costs
+                2.7x at one writer and 8.0x to 9.0x from two, because a writer's Lock
+                must drain the in-flight reader and pays a park/unpark round trip on
+                every acquisition.
+
+                What it gives up is stated too: with FOUR OR MORE goroutines doing
+                nothing but polling Len, the RWMutex was 1.20x to 1.23x faster. That is a
+                real regression on a scenario this type's own contract excludes — Collect
+                DRAINS, so a Recorder has exactly one reader — and at that one reader the
+                Mutex is marginally faster anyway (23.00 ns against 23.89).
+
+                TestRecorderTakesAnExclusiveLockOnEveryPath fails the build on a change
+                back.
+              name: mu
+              type: sync.Mutex
+            - doc: spans holds the finished spans awaiting collection, in end order.
+              name: spans
+              type: "[]coretrace.SpanValue"
+            - doc: |-
+                dropped counts spans refused since construction. It is CUMULATIVE and
+                deliberately not reset by Collect: a counter that resets on read cannot
+                be scraped by two readers, and this one is meant to be alerted on.
+              name: dropped
+              type: uint64
+      - decl: true
+        doc: |-
           RecorderConfig configures a Recorder: who produced the spans, what
           instrumented them, and how many may wait between collections.
         name: RecorderConfig
@@ -2435,7 +2486,8 @@ packages:
                 not be the dangerous answer.
               name: MaxSpans
               type: int
-      - doc: |-
+      - decl: true
+        doc: |-
           Tracer is the concrete core/observe/trace.Tracer. It holds a resolved configuration
           and no mutable state at all: a span is the only thing that changes, and each
           one owns its own.
@@ -2494,7 +2546,10 @@ packages:
             recv: pointer
         name: Tracer
         struct:
-          unexported: true
+          fields:
+            - doc: cfg is the resolved configuration — every clamp already applied.
+              name: cfg
+              type: TracerConfig
     variables:
       - doc: |-
           OTLPJSON is the default OTLP/JSON span exporter, registered to write each

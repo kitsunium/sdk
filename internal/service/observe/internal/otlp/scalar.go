@@ -29,28 +29,6 @@ const (
 // quotes, rounded up.
 const intBufferSize int = 24
 
-// Int64 is a signed 64-bit integer rendered as a DECIMAL STRING.
-//
-// That is the proto3 JSON mapping OTLP inherits — "64-bit integer numbers in
-// JSON-encoded payloads are encoded as decimal strings" — and the reason is
-// range, not taste: a JSON number is a double in most parsers, so an int64
-// past 2^53 loses its low bits on the way through.
-type Int64 int64
-
-// Uint64 is an unsigned 64-bit integer rendered as a decimal string, for the
-// same reason Int64 is: fixed64 and uint64 both map to a string. Every
-// timestamp in an OTLP payload uses it, and every one of them is past 2^53.
-type Uint64 uint64
-
-// Double is an IEEE-754 double rendered as a JSON number, or as one of the
-// three quoted spellings proto3 JSON gives a non-finite value.
-//
-// encoding/json refuses NaN and ±Inf outright ("json: unsupported value"), so
-// without this type a single NaN would fail the whole export. The model allows
-// the value — a gauge is whatever was sampled — and the specification says how
-// to spell it, so the encoder spells it.
-type Double float64
-
 // MarshalJSON renders the integer as a quoted decimal string.
 func (v Int64) MarshalJSON() (encoded []byte, err error) {
 	//: quote, digits, quote — no escaping is possible inside a decimal.

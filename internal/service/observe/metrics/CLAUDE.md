@@ -23,6 +23,7 @@ the excess into a single aggregated overflow series.
 
 | File | Surface |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `MeterConfig` and `OTLPHTTPConfig` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `meter.go` | `memMeter` + `NewMeter` / `NewMeterWithConfig` / `newMemMeter` + `Collect` (observables, delta consumption, arena layout, per-name sort) |
 | `meter_observable.go` | `observer` + the three `Observable*` registrations + `runObservers` + `observeSum`/`observeGauge` |
 | `meter_describe.go` | `Describe` — the `core/observe/metrics.Describer` half: the lazily-created `descriptions` map, the idempotent path, and the two panics |
@@ -39,7 +40,6 @@ the excess into a single aggregated overflow series.
 | `exporter_otlpjson.go` | `EncodeOTLPJSON` (the ENCODER — snapshot to bytes, no I/O) + the two refusals + `otlpJSONExporter` over the shared `otlp.Stream` + default **stderr** `OTLPJSON` + `NewOTLPJSONExporter`; the two `EXPORT_FAILED` wraps the shared marshal and stream leave under |
 | `otlp_request.go` | the OTLP payload TREE — a Go mirror of `collector/metrics` and `metrics/v1`, in schema field-number order, restricted to the fields this SDK produces; the `common`/`resource` messages and the proto3-JSON scalars it embeds are the shared package's |
 | `exporter_otlphttp.go` | the EMITTER: `NewOTLPHTTPExporter` + `OTLPRetryable` + `OTLPMetricsPath` + `DefaultOTLPTimeout`/`DefaultOTLPMaxResponseBytes` + `otlpSignal`, this signal's `otlp.SignalSpec` — its codes and wording for every verdict the shared sender reaches |
-| `otlphttp_config.go` | `OTLPHTTPConfig`, a DEFINED type over the shared `otlp.HTTPConfig` (endpoint, client, headers, timeout, response cap — documented there once) |
 | `otlp_export_response.go` | `ExportMetricsPartialSuccess` reduced to `rejectedDataPoints` + `decodeRejected`, the one member of the answer that is this signal's own |
 | `exporter_prometheus.go` | `prometheusExporter` + default **stderr** `Prometheus` + `NewPrometheusExporter` + the two name grammars |
 | `internal/core/observe/metrics` | its sentinels — `0.3.45.*`, declared in the core since ADR 0160 (INVALID_METRIC_NAME, INVALID_LABEL_NAME, RESERVED_LABEL_NAME, UNSUPPORTED_TEMPORALITY, OTLP_UNRESOLVED_TEMPORALITY, OTLP_INVALID_BUCKET_LAYOUT, OTLP_ENDPOINT_INVALID, OTLP_EXPORT_REJECTED, OTLP_EXPORT_UNAVAILABLE, OTLP_PARTIAL_SUCCESS) |

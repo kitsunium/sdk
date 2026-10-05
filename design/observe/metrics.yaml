@@ -1321,7 +1321,8 @@ packages:
       otlp: github.com/kitsunium/sdk/internal/service/observe/internal/otlp
     path: github.com/kitsunium/sdk/internal/service/observe/metrics
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           MeterConfig configures a Meter. Every field has a resolved meaning when left
           unset — none of them is inert (ADR 0031).
         name: MeterConfig
@@ -1380,7 +1381,8 @@ packages:
                 enough and a two-method test double still satisfies it (ADR 0039).
               name: Clock
               type: clock.Clock
-      - doc: |-
+      - decl: true
+        doc: |-
           OTLPHTTPConfig configures an OTLP/HTTP exporter. Every field has a resolved
           meaning when left unset except Endpoint, which has none that could be right:
           a full URL used as-is, so a caller writes

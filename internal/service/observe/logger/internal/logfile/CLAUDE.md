@@ -32,6 +32,7 @@ exactly the logger's engines rather than every package of the service layer.
 | File | Surface |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declaration of `RefusalSpec` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `logfile.go` | `KindSymlink` + `RefusalSpec` + `Open` + `RefuseSymlink` + `ExplainOpenFailure` |
 | `open_flags_unix.go` | `openFlags = O_APPEND \| O_CREATE \| O_WRONLY \| O_NOFOLLOW` — every `unix` GOOS, and why the tag is `unix` |
 | `open_flags_other.go` | `!unix` fallback (no `O_NOFOLLOW`): windows, plan9, js/wasm, wasip1 |

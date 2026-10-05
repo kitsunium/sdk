@@ -197,3 +197,7 @@ cd internal/service && GOWORK=off go test -run='^$' -bench=. -benchmem -benchtim
 - `sink/` — terminal `Sink` implementations (console, file, syslog, memory)
 - `writer/` — the log-transport writers behind the `core/observe/logger/writer` registry (console, dbsink, file, journald, levelgate, nettransport, rotfile), each a package with its own `CLAUDE.md`; beneath the logger since ADR 0155, as their registry is in the core
 - `internal/logfile/` — the hardened open `sink/file` and `writer/rotfile` share; Go's `internal/` rule confines it to this subtree, where both its importers sit
+
+## Declarations
+
+`decl_gen.go` is written by kit gen from the design (ADR 0170): the declarations of `Builder` and `TextHandler` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names.

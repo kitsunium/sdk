@@ -11,29 +11,6 @@ import (
 // field; it leaves a LenientInt64 at its zero, which means "fully accepted".
 const jsonNull string = "null"
 
-// RejectedCounter is a signal's partialSuccess message — ExportMetricsPartialSuccess,
-// ExportTracePartialSuccess — reduced to the one number the sender reads.
-//
-// The messages differ in exactly one member name (rejectedDataPoints,
-// rejectedSpans), so each signal declares its own small struct with its own
-// json tag and this method, and DecodeRejected decodes into it: the tags stay
-// static, which keeps encoding/json's matching rules what they were when each
-// signal decoded its own response type.
-type RejectedCounter interface {
-	RejectedCount() int64
-}
-
-// LenientInt64 decodes a 64-bit integer written EITHER as a JSON number OR as a
-// decimal string.
-//
-// This is not tolerance for its own sake, it is the specification: 64-bit
-// integers are encoded as decimal strings, "and either numbers or strings are
-// accepted when decoding". Collectors differ — the reference collector emits
-// the string form, some proxies re-serialise it as a number — and a decoder
-// that accepted only one of them would silently read every partial success as
-// a full one whenever it met the other.
-type LenientInt64 int64
-
 // UnmarshalJSON accepts 42 and "42" alike.
 func (v *LenientInt64) UnmarshalJSON(data []byte) error {
 	//: JSON null leaves the zero value, which means "fully accepted".

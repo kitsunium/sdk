@@ -94,7 +94,8 @@ packages:
       corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
     path: github.com/kitsunium/sdk/internal/service/observe/logger/middleware/tee
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Config configures a TeeSink: the primary sinks every record is fanned out
           to, plus an optional spill sink that receives a record only when every
           primary rejected it.
@@ -109,7 +110,8 @@ packages:
                 all primaries failed. A nil Spill disables the dead-letter seam.
               name: Spill
               type: corelogger.Sink
-      - doc: |-
+      - decl: true
+        doc: |-
           TeeSink fans every record out to all primary sinks. When — and only when —
           every primary rejects the record, it routes that record to the optional
           spill (dead-letter) sink. A record accepted by at least one primary is
@@ -154,4 +156,10 @@ packages:
             recv: pointer
         name: TeeSink
         struct:
-          unexported: true
+          fields:
+            - doc: primaries receive every Write; a record they all reject is spilled.
+              name: primaries
+              type: "[]corelogger.Sink"
+            - doc: spill is the optional dead-letter sink; nil disables the spill seam.
+              name: spill
+              type: corelogger.Sink

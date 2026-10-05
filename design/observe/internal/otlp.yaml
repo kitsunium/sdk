@@ -239,7 +239,8 @@ packages:
       http: net/http
     path: github.com/kitsunium/sdk/internal/service/observe/internal/otlp
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           AnyValue is common.v1.AnyValue, restricted to the four SCALAR cases the
           SDK's attribute model has: stringValue (1), boolValue (2), intValue (3),
           doubleValue (4).
@@ -264,7 +265,8 @@ packages:
             - name: DoubleValue
               tag: json:"doubleValue,omitempty"
               type: "*Double"
-      - doc: |-
+      - decl: true
+        doc: |-
           HTTPConfig configures an OTLP/HTTP sender. Every field has a resolved meaning
           when left unset except Endpoint, which has none that could be right.
 
@@ -334,7 +336,8 @@ packages:
                 DefaultMaxResponseBytes.
               name: MaxResponseBytes
               type: int64
-      - doc: |-
+      - decl: true
+        doc: |-
           KeyValue is common.v1.KeyValue: key (1) + value (2). One attribute of a
           resource, a data point, a span, an event or a link.
 
@@ -352,7 +355,8 @@ packages:
             - name: Value
               tag: json:"value"
               type: AnyValue
-      - doc: |-
+      - decl: true
+        doc: |-
           ResourceMessage is resource.v1.Resource: attributes (1).
 
           droppedAttributesCount (2) is absent because this SDK drops no resource
@@ -365,7 +369,8 @@ packages:
             - name: Attributes
               tag: json:"attributes,omitempty"
               type: "[]KeyValue"
-      - doc: |-
+      - decl: true
+        doc: |-
           RejectedCounter is a signal's partialSuccess message — ExportMetricsPartialSuccess,
           ExportTracePartialSuccess — reduced to the one number the sender reads.
 
@@ -380,7 +385,8 @@ packages:
               out:
                 - type: int64
         name: RejectedCounter
-      - doc: |-
+      - decl: true
+        doc: |-
           LenientInt64 decodes a 64-bit integer written EITHER as a JSON number OR as a
           decimal string.
 
@@ -401,7 +407,8 @@ packages:
             recv: pointer
         name: LenientInt64
         underlying: int64
-      - doc: |-
+      - decl: true
+        doc: |-
           Int64 is a signed 64-bit integer rendered as a DECIMAL STRING.
 
           That is the proto3 JSON mapping OTLP inherits — "64-bit integer numbers in
@@ -419,7 +426,8 @@ packages:
             recv: value
         name: Int64
         underlying: int64
-      - doc: |-
+      - decl: true
+        doc: |-
           Uint64 is an unsigned 64-bit integer rendered as a decimal string, for the
           same reason Int64 is: fixed64 and uint64 both map to a string. Every
           timestamp in an OTLP payload uses it, and every one of them is past 2^53.
@@ -434,7 +442,8 @@ packages:
             recv: value
         name: Uint64
         underlying: uint64
-      - doc: |-
+      - decl: true
+        doc: |-
           Double is an IEEE-754 double rendered as a JSON number, or as one of the
           three quoted spellings proto3 JSON gives a non-finite value.
 
@@ -455,7 +464,8 @@ packages:
             recv: value
         name: Double
         underlying: float64
-      - doc: |-
+      - decl: true
+        doc: |-
           ScopeMessage is common.v1.InstrumentationScope: name (1) + version (2). A Meter and
           a Tracer both normalise Name, so it is always present; Version is optional in
           the specification and omitted when the caller has none rather than emitted
@@ -473,7 +483,8 @@ packages:
             - name: Version
               tag: json:"version,omitempty"
               type: string
-      - doc: |-
+      - decl: true
+        doc: |-
           Sender POSTs encoded OTLP/JSON documents to one collector and maps each
           answer onto one of three verdicts, under the calling signal's codes.
 
@@ -507,8 +518,24 @@ packages:
             recv: pointer
         name: Sender
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - doc: endpoint is the validated full URL.
+              name: endpoint
+              type: string
+            - doc: client is the caller's, or the bounded redirect-refusing default.
+              name: client
+              type: "*http.Client"
+            - doc: headers are owned copies of the caller's, written on every request.
+              name: headers
+              type: map[string]string
+            - doc: maxResponse caps the response body read.
+              name: maxResponse
+              type: int64
+            - doc: signal names every verdict in the calling signal's words.
+              name: signal
+              type: "*SignalSpec"
+      - decl: true
+        doc: |-
           SignalSpec is one signal's vocabulary for the shared OTLP/HTTP sender: the
           sentinels each verdict wraps, the parameters each wrap of a FOREIGN cause
           uses, the field a partial success counts under, and how that signal's
@@ -575,7 +602,8 @@ packages:
                 otlp.DecodeRejected a fresh pointer to its own partial-success message.
               name: DecodeRejected
               type: func(payload []byte) int64
-      - doc: |-
+      - decl: true
+        doc: |-
           Stream writes whole OTLP/JSON documents to one io.Writer, each terminated by
           DocumentTerminator, so a stream of exports is newline-delimited JSON — what a
           file or a terminal wants, where an HTTP body wants the document alone.
@@ -600,4 +628,15 @@ packages:
             recv: pointer
         name: Stream
         struct:
-          unexported: true
+          fields:
+            - doc: mu serialises the one dst.Write of each document.
+              name: mu
+              type: sync.Mutex
+            - doc: dst is the caller's destination.
+              name: dst
+              type: io.Writer
+            - doc: |-
+                failure is the signal's wrap for a writer fault: its EXPORT_FAILED code
+                and its wording.
+              name: failure
+              type: errs.WrapParams

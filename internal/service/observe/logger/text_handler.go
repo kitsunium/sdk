@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"strconv"
-	"sync"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	"github.com/kitsunium/sdk/internal/core/observe/logger/level"
@@ -35,24 +34,6 @@ const floatFormat byte = 'g'
 // groupSeparator is the rune inserted between successive group names AND
 // between a group prefix and an attribute key in textual output ("a.b.k=v").
 const groupSeparator byte = '.'
-
-// TextHandler is a core.Handler that renders records as a single plain-text
-// line per event. It is safe for concurrent use via an internal mutex.
-type TextHandler struct {
-	// w is the backing sink; writes are serialised through mu.
-	w io.Writer
-	// mu serialises Write calls so concurrent goroutines emit atomic lines.
-	mu sync.Mutex
-	// attrs are prepended to every RecordEvent emitted through this handler.
-	attrs []corelogger.AttrValue
-	// groups carries the active group prefix stack (outermost first); each
-	// emitted attribute key is rendered as "g1.g2.….key" in the line.
-	groups []string
-	// min is the minimum level the handler emits; records below are dropped.
-	min level.Level
-	// clk sources the timestamp when RecordEvent.Time is the zero value.
-	clk clock.Clock
-}
 
 // NewTextHandler constructs a TextHandler that writes to w and filters records
 // strictly below min. The returned handler uses the real system clock.

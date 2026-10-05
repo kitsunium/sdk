@@ -18,8 +18,8 @@ family, never the path. A caller-supplied `Dialer` is used as given there too.
 
 | File | Role |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declaration of `Config` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `journald.go` | `Writer` singleton, `journaldFactory` (`Name`/`Open`) — connects the socket + composes the chain |
-| `journald_config.go` | `Config` value type (socket path, dialer seam, level, ring) |
 | `journald_sink.go` | `journaldSink` (`Write`/`Flush`/`Close`) — the datagram framing terminal |
 | `decode.go` | `journaldFactory.Decode` (`core/observe/logger/writer.Decoder`) + key coercion helpers |
 | `socket_windows.go` / `socket_other.go` | `unixDatagrams` — whether the default dialer's socket family exists here (not on Windows) |

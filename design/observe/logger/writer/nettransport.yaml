@@ -100,7 +100,8 @@ packages:
       writer: github.com/kitsunium/sdk/internal/core/observe/logger/writer
     path: github.com/kitsunium/sdk/internal/service/observe/logger/writer/nettransport
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           NetConfig tunes a network writer. Address is required (a host:port for
           tcp/udp, a URL for http); every other field is optional. It carries only
           stdlib types, so the package stays dep-light.

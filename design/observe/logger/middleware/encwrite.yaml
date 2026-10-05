@@ -91,7 +91,8 @@ packages:
       corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
     path: github.com/kitsunium/sdk/internal/service/observe/logger/middleware/encwrite
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Config configures an EncWriter: the downstream sink, the master key the
           per-sink subkey is derived from, and the HKDF info label that binds that
           subkey to a purpose.
@@ -109,7 +110,8 @@ packages:
                 back to a package default that binds the subkey to the sink purpose.
               name: Info
               type: string
-      - doc: |-
+      - decl: true
+        doc: |-
           EncWriter seals each record's bytes under a per-sink subkey and writes the
           length-prefixed sealed box to the downstream sink. Safe for concurrent use.
         methods:
@@ -149,4 +151,16 @@ packages:
             recv: pointer
         name: EncWriter
         struct:
-          unexported: true
+          fields:
+            - doc: mu serializes Write / Flush / Close against concurrent producers.
+              name: mu
+              type: sync.Mutex
+            - doc: downstream receives the framed sealed box plus the originating record.
+              name: downstream
+              type: corelogger.Sink
+            - doc: key is the master key, retained so Close can zeroize it on every path.
+              name: key
+              type: corecrypto.Key
+            - doc: subkey is the derived per-sink key used for sealing; zeroized on Close.
+              name: subkey
+              type: corecrypto.Key

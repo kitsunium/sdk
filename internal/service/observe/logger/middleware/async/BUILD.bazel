@@ -7,7 +7,7 @@ go_library(
     srcs = [
         "async_sink.go",
         "async_sink_policy.go",
-        "config.go",
+        "decl_gen.go",
         "doc.go",
         "drainer.go",
         "entry.go",

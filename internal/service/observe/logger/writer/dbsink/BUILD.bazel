@@ -7,6 +7,7 @@ go_library(
     srcs = [
         "dbsink.go",
         "dbsink_config.go",
+        "decl_gen.go",
         "doc.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/observe/logger/writer/dbsink",

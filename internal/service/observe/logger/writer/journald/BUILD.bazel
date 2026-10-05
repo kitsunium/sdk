@@ -5,10 +5,10 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "journald",
     srcs = [
+        "decl_gen.go",
         "decode.go",
         "doc.go",
         "journald.go",
-        "journald_config.go",
         "journald_sink.go",
         "socket_other.go",
         "socket_windows.go",

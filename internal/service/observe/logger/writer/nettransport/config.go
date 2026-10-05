@@ -1,64 +1,10 @@
 package nettransport
 
 import (
-	"net"
-	"net/http"
-
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
-	"github.com/kitsunium/sdk/internal/core/observe/logger/level"
 	"github.com/kitsunium/sdk/internal/service/observe/logger/middleware/async"
 	"github.com/kitsunium/sdk/internal/service/observe/logger/writer/levelgate"
 )
-
-// NetConfig tunes a network writer. Address is required (a host:port for
-// tcp/udp, a URL for http); every other field is optional. It carries only
-// stdlib types, so the package stays dep-light.
-type NetConfig struct {
-	// Address is the destination: "host:port" for tcp/udp, a full URL for http.
-	Address string
-	// Dialer, when non-nil, replaces net.Dial for tcp/udp connection setup.
-	// SECURITY (CWE-918): when Address is consumer-controlled, plug an
-	// allowlist dialer so an attacker cannot target internal services or the
-	// cloud-metadata endpoint (169.254.169.254). Nil falls back to net.Dial.
-	Dialer func(network, addr string) (conn net.Conn, err error)
-	// HTTPClient, when non-nil, replaces the default client for the http
-	// protocol. SECURITY: supply a client whose Transport enforces an SSRF
-	// allowlist for consumer-controlled URLs. Nil falls back to a
-	// timeout-bounded client that refuses redirects (CheckRedirect returns
-	// http.ErrUseLastResponse), NOT http.DefaultClient — so a redirect cannot
-	// bypass the validated target — on a connection pool of its own, which the
-	// sink's Close releases: a clone of http.DefaultTransport while that is the
-	// stdlib's *http.Transport, proxy environment included. A process that
-	// replaced http.DefaultTransport with another RoundTripper gets a fresh
-	// transport that keeps only the proxy environment and the idle reaping,
-	// never that RoundTripper — whatever it carries reaches this writer only
-	// through an HTTPClient that carries it.
-	//
-	// A supplied client is used AS-IS, Transport included, and its pool is the
-	// caller's: the sink's Close leaves it alone, so a caller that built one for
-	// this writer alone releases it with CloseIdleConnections after closing the
-	// writer. One whose Transport is http.DefaultTransport (a nil Transport is)
-	// shares that pool with the whole process, and anything that empties it —
-	// every httptest.Server.Close, every http.DefaultClient.CloseIdleConnections
-	// — can make a delivered record read as a failed write, which a failover or
-	// retry then duplicates. Give such a client a Transport of its own.
-	HTTPClient *http.Client
-	// MinLevel is the optional per-writer severity floor; the zero value
-	// (level.Info) inherits the handler-global level.
-	MinLevel level.Level
-	// BufferSize is the async ring capacity; a non-positive value applies
-	// async's own default. The producer never blocks on the network — drops
-	// surface through OnDrop instead.
-	BufferSize int
-	// OnDrop, when non-nil, is invoked with the count of records discarded
-	// because the non-blocking ring saturated (network slower than producers).
-	OnDrop func(dropped int)
-	// OnError, when non-nil, is invoked for every downstream send failure the
-	// async drainer observes (dial/write/non-2xx). Nil discards the error — the
-	// async ring is the only failure surface once the producer has handed off.
-	// Code-only, like Dialer/HTTPClient — never decoded from a config blob.
-	OnError func(err error)
-}
 
 // compose builds the network writer chain: the terminal per-record netSink
 // wrapped by async (non-blocking ring + OnDrop back-pressure) and then by

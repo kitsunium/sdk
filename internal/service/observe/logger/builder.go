@@ -9,34 +9,6 @@ import (
 	"github.com/kitsunium/sdk/internal/core/observe/logger/level"
 )
 
-// Builder is the chainable interface returned by Logger.Build. Every typed
-// accessor (Str / Int / Bool / …) returns the receiver so callers compose
-// the chain in a single expression. Send terminates the chain by emitting
-// the accumulated record through the underlying handler and returns the
-// builder to the recycler — callers MUST NOT use the builder after Send.
-type Builder interface {
-	// Str appends a string attribute.
-	Str(key, val string) Builder
-	// Int appends an int attribute (widened to int64 internally).
-	Int(key string, val int) Builder
-	// Int64 appends an int64 attribute.
-	Int64(key string, val int64) Builder
-	// Uint64 appends a uint64 attribute.
-	Uint64(key string, val uint64) Builder
-	// Bool appends a boolean attribute.
-	Bool(key string, val bool) Builder
-	// Float64 appends a float64 attribute.
-	Float64(key string, val float64) Builder
-	// Duration appends a time.Duration attribute.
-	Duration(key string, val time.Duration) Builder
-	// Time appends a time.Time attribute.
-	Time(key string, val time.Time) Builder
-	// Any appends an opaque attribute; handlers degrade unrecognised types to "?".
-	Any(key string, val any) Builder
-	// Send terminates the chain by emitting the accumulated record.
-	Send(ctx context.Context, msg string)
-}
-
 // chainBuilder is the default Builder implementation, recycled across Log
 // calls via recordPool. Recycling removes the builder + scratchpad from the
 // allocation profile; the handler's per-Send attrs clone keeps the

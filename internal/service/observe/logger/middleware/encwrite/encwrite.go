@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"math"
-	"sync"
 
 	corecrypto "github.com/kitsunium/sdk/internal/core/crypto"
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
@@ -33,19 +32,6 @@ const (
 var keyBytes func(k corecrypto.Key) []byte = func(k corecrypto.Key) []byte {
 	//: hand back the cipher-ready master-key copy from the opaque Key value.
 	return k.Bytes()
-}
-
-// EncWriter seals each record's bytes under a per-sink subkey and writes the
-// length-prefixed sealed box to the downstream sink. Safe for concurrent use.
-type EncWriter struct {
-	// mu serializes Write / Flush / Close against concurrent producers.
-	mu sync.Mutex
-	// downstream receives the framed sealed box plus the originating record.
-	downstream corelogger.Sink
-	// key is the master key, retained so Close can zeroize it on every path.
-	key corecrypto.Key
-	// subkey is the derived per-sink key used for sealing; zeroized on Close.
-	subkey corecrypto.Key
 }
 
 // NewEncWriter builds an EncWriter from cfg, deriving the per-sink subkey

@@ -1,8 +1,6 @@
 package trace
 
 import (
-	"sync"
-
 	coreotel "github.com/kitsunium/sdk/internal/core/observe/otel"
 	coretrace "github.com/kitsunium/sdk/internal/core/observe/trace"
 )
@@ -13,66 +11,6 @@ import (
 // enough that a collector which stopped collecting costs megabytes rather than
 // the process.
 const DefaultMaxSpans int = 2048
-
-// Recorder accumulates finished spans in memory and hands them out in batches.
-//
-// It is the SpanSink a Tracer ships with, and it is a real destination rather
-// than a test double — it is what the OTLP exporters read, and what a caller
-// wires to a `scheduler` job that exports every N seconds.
-//
-// # Overflow is counted, never silent
-//
-// Past MaxSpans a span is DROPPED and a counter advances. Dropping the newest
-// rather than the oldest is the choice that keeps a burst from erasing the spans
-// that preceded it — the beginning of an incident is more informative than its
-// middle — and the count is published by Dropped, so "we are losing spans" is a
-// number an operator can alert on rather than a silence.
-//
-// The alternative, growing without bound, converts a collector outage into an
-// OOM. The alternative to counting is worse: an integration that silently drops
-// telemetry looks exactly like a service that is quiet.
-type Recorder struct {
-	// resource and scope are stamped on every payload. Immutable.
-	resource coreotel.ResourceValue
-	scope    coreotel.ScopeValue
-	// maxSpans is the resolved bound.
-	maxSpans int
-
-	// mu guards spans and dropped. It is a sync.Mutex, and the choice was
-	// MEASURED rather than reasoned — see BENCH.md §2.
-	//
-	// This field held a sync.RWMutex, justified by "Len and Dropped are pure
-	// reads an operator may poll while spans are still arriving". Every part of
-	// that sentence is true and the conclusion is still backwards: `record`
-	// takes the EXCLUSIVE side and runs once per span from every request
-	// goroutine, while the shared side runs once per collection interval — and
-	// `Collect`, which is what an export actually calls, takes the exclusive
-	// side too, so it never benefited at all. A read-write lock was optimising
-	// the rarest path and taxing the busiest one.
-	//
-	// The measurement is not close. Writing alone, the RWMutex costs 1.27x to
-	// 1.65x more from one to eight goroutines. In the mixed shape its own
-	// comment named — spans arriving while an operator polls Len — it costs
-	// 2.7x at one writer and 8.0x to 9.0x from two, because a writer's Lock
-	// must drain the in-flight reader and pays a park/unpark round trip on
-	// every acquisition.
-	//
-	// What it gives up is stated too: with FOUR OR MORE goroutines doing
-	// nothing but polling Len, the RWMutex was 1.20x to 1.23x faster. That is a
-	// real regression on a scenario this type's own contract excludes — Collect
-	// DRAINS, so a Recorder has exactly one reader — and at that one reader the
-	// Mutex is marginally faster anyway (23.00 ns against 23.89).
-	//
-	// TestRecorderTakesAnExclusiveLockOnEveryPath fails the build on a change
-	// back.
-	mu sync.Mutex
-	// spans holds the finished spans awaiting collection, in end order.
-	spans []coretrace.SpanValue
-	// dropped counts spans refused since construction. It is CUMULATIVE and
-	// deliberately not reset by Collect: a counter that resets on read cannot
-	// be scraped by two readers, and this one is meant to be alerted on.
-	dropped uint64
-}
 
 // NewRecorder builds a Recorder from cfg, applying every clamp once.
 func NewRecorder(cfg RecorderConfig) *Recorder {

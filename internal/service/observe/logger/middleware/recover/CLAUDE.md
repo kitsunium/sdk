@@ -15,8 +15,8 @@ hot path.
 
 | File | Role |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declaration of `Config` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `recover_sink.go` | `recoverSink` + `New` / `NewWithConfig`; every method `defer`s its own recover block |
-| `config.go`       | `Config{OnPanic}` — observability hook (V34) |
 | `panic_value.go`  | `panicValue` adapter; `safeString` / `safeTypeName` panic-safe formatters |
 | `internal/core/observe/logger/middleware/recover` | its sentinels — range 0.3.21.\* — declared in the core mirror since ADR 0160; this package declares none |
 

@@ -5,9 +5,9 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "memory",
     srcs = [
+        "decl_gen.go",
         "doc.go",
         "memory.go",
-        "memory_compliance.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/observe/logger/sink/memory",
     visibility = [

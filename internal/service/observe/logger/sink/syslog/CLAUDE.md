@@ -20,9 +20,9 @@ allocation-friendly.
 
 | File | Role |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declaration of `Config` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `syslog_sink.go`        | `syslogSink` + `New` + `NewWithConfig` + `makeFrame` |
 | `priority.go`           | `severityFor` / `priorityFor` + RFC5424 severity constants |
-| `config.go`             | `Config{Dialer}` — pluggable allowlist-aware `net.Dial` |
 | `internal/core/observe/logger/sink/syslog` | its sentinels — range 0.3.15.\* — declared in the core mirror since ADR 0160; this package declares none |
 
 ## Constructors

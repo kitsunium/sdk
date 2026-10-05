@@ -18,6 +18,7 @@ level-floor composition once, so every DB writer inherits identical wiring.
 
 | File | Role |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declaration of `Config` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `dbsink.go` | unexported `dbSink` (batching terminal sink), the `execBatch` seam type, `Write`/`Flush`/`Close`, the batcher `deliver` relay |
 | `dbsink_config.go` | exported `Config` value type + `Compose` (the only exported constructor — builds `levelgate(async(dbSink))`) |
 | `dbsink_bench_test.go` | `BenchmarkWrite_NoAttrs` / `BenchmarkWrite_WithAttrs` |

@@ -935,12 +935,14 @@ packages:
           - name: err
             type: error
     imports:
+      clock: github.com/kitsunium/sdk/internal/kernel/clock
       corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
       encoder: github.com/kitsunium/sdk/internal/service/observe/logger/encoder
       level: github.com/kitsunium/sdk/internal/core/observe/logger/level
     path: github.com/kitsunium/sdk/internal/service/observe/logger
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Builder is the chainable interface returned by Logger.Build. Every typed
           accessor (Str / Int / Bool / …) returns the receiver so callers compose
           the chain in a single expression. Send terminates the chain by emitting
@@ -1036,7 +1038,8 @@ packages:
                   type: string
               name: Send
         name: Builder
-      - doc: |-
+      - decl: true
+        doc: |-
           TextHandler is a core.Handler that renders records as a single plain-text
           line per event. It is safe for concurrent use via an internal mutex.
         methods:
@@ -1084,7 +1087,27 @@ packages:
             recv: pointer
         name: TextHandler
         struct:
-          unexported: true
+          fields:
+            - doc: w is the backing sink; writes are serialised through mu.
+              name: w
+              type: io.Writer
+            - doc: mu serialises Write calls so concurrent goroutines emit atomic lines.
+              name: mu
+              type: sync.Mutex
+            - doc: attrs are prepended to every RecordEvent emitted through this handler.
+              name: attrs
+              type: "[]corelogger.AttrValue"
+            - doc: |-
+                groups carries the active group prefix stack (outermost first); each
+                emitted attribute key is rendered as "g1.g2.….key" in the line.
+              name: groups
+              type: "[]string"
+            - doc: min is the minimum level the handler emits; records below are dropped.
+              name: min
+              type: level.Level
+            - doc: clk sources the timestamp when RecordEvent.Time is the zero value.
+              name: clk
+              type: clock.Clock
   - aliases:
       - doc: |-
           Encoder is the format-side port now rooted in internal/core/observe/logger.
@@ -1381,7 +1404,8 @@ packages:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/service/observe/logger/internal/logfile
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           RefusalSpec is one sink's error vocabulary for the hardened open: the wrap a
           policy refusal leaves under, and the wrap a failed os.OpenFile does. Each
           carries the sink's own code, reason and wording, and a sink declares its
@@ -1419,12 +1443,15 @@ packages:
       corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
     path: github.com/kitsunium/sdk/internal/service/observe/logger/sink/memory
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Memory is a terminal Sink that retains a defensive snapshot of every
           RecordEvent it receives in a slice guarded by an RWMutex. It exists for tests
           that assert on what was logged without parsing an encoder's byte output.
           Write records; Records returns an independent copy of the buffer; Reset
           clears it. All methods are safe for concurrent use.
+        implements:
+          - corelogger.Sink
         methods:
           - doc: |-
               Write appends a defensive snapshot of r to the buffer and reports len(p) as
@@ -1484,7 +1511,25 @@ packages:
             recv: pointer
         name: Memory
         struct:
-          unexported: true
+          fields:
+            - doc: |-
+                mu guards records and writes; Write/Reset take the write lock, Records
+                the read lock so concurrent assertions never block each other.
+              name: mu
+              type: sync.RWMutex
+            - doc: |-
+                records holds a defensive copy of each received RecordEvent in arrival
+                order; each entry's Attrs slice is deep-cloned (including nested
+                KindGroup payloads) so caller mutation cannot corrupt recorded history.
+              name: records
+              type: "[]corelogger.RecordEvent"
+            - doc: |-
+                writes is the lifetime accepted-append count — equal to len(records)
+                until Reset (this sink never drops or dedups). It lets callers assert on
+                total throughput without diffing the slice and gives the struct a second
+                field beyond the guarded slice.
+              name: writes
+              type: int
   - codes:
       - const:
           - doc: |-

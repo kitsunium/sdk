@@ -14,6 +14,7 @@ each composes `levelgate(async(netSink))` over a stdlib `net.Conn` or
 
 | File | Role |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declaration of `NetConfig` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `nettransport.go` | `WriterTCP/UDP/HTTP` singletons, `netFactory{proto}` (`Name`/`Open`/`build`) |
 | `config.go` | `NetConfig` value type + `compose` (the `levelgate(async(netSink))` order) |
 | `netsink.go` | `netSink` per-record sink (`Write`/`Flush`/`Close`) + `sendFunc` seam |

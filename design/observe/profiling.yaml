@@ -694,7 +694,8 @@ packages:
       coreprofiling: github.com/kitsunium/sdk/internal/core/observe/profiling
     path: github.com/kitsunium/sdk/internal/service/observe/profiling
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           FoldConfig says how Fold reads a profile: which sample type, whose each
           sample is, how many functions to rank and how much of the flame to keep.
           Every zero field has a default.
@@ -733,7 +734,8 @@ packages:
                 positive means DefaultFlameMaxDepth.
               name: FlameMaxDepth
               type: int
-      - doc: |-
+      - decl: true
+        doc: |-
           GroupConfig says how GroupGoroutines groups: by which labels, and how many
           groups and frames to keep.
         name: GroupConfig

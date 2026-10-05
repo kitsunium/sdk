@@ -23,32 +23,6 @@ const (
 	DefaultFlameMaxDepth int = 64
 )
 
-// FoldConfig says how Fold reads a profile: which sample type, whose each
-// sample is, how many functions to rank and how much of the flame to keep.
-// Every zero field has a default.
-type FoldConfig struct {
-	// Attribute returns the owner a sample is charged to — a pprof label's
-	// value, the component whose code is on the stack — or "" when the
-	// sample belongs to nobody in particular. The attribution is the
-	// caller's: Fold only adds up. Nil charges every sample to nobody.
-	Attribute func(sample coreprofiling.SampleValue) string
-	// SampleType names the value folded — "cpu", "inuse_space". Empty is
-	// the profile's default sample type, else its last one.
-	SampleType string
-	// TopFunctions is how many functions FoldedValue.Top lists; not
-	// positive means DefaultTopFunctions.
-	TopFunctions int
-	// TopPerOwner is how many functions each owner's Top lists; not positive
-	// means DefaultTopPerOwner.
-	TopPerOwner int
-	// FlameMinShare prunes a flame frame costing less than this share of
-	// the total. Outside (0, 1), or NaN, means DefaultFlameMinShare.
-	FlameMinShare float64
-	// FlameMaxDepth is how deep the flame graph goes from its root; not
-	// positive means DefaultFlameMaxDepth.
-	FlameMaxDepth int
-}
-
 // Fold charges every sample of p to an owner and adds it all up: each owner's
 // cost and costliest functions, the costliest functions overall, and a flame
 // graph pruned of what costs less than the configured share. A frame with no

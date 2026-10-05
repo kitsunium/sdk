@@ -15,12 +15,12 @@ S3) so a backed-up drain never stalls the application.
 
 | File | Role |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `DropPolicy` and `Config` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `async_sink.go`        | `asyncSink` + `New` + `Write` / `Flush` / `Close`; the production drainer runs on a `kernel/concur/worker.LoopDaemon`, whose idempotent `Stop` is the join (ADR 0014 §D6) |
 | `async_sink_policy.go` | `DropPolicy` enum (`DropNewest` default, `DropOldest`) |
 | `drainer.go`           | drainer body: `drain` (the loop body the daemon runs and the white-box tests spawn directly; closes `done` via `doneOnce`) / `drainLoop` (selects on the sink's `stop`) / `forward` / `drainRemaining`; `maxSaneCap` (64 KiB) bounds pool retention against attacker-influenced records |
 | `runtime.go`           | helpers — `yieldOnce`, `isClosed`, `asyncCtx`, `forwardDownstreamError`, `swallowRingError` |
 | `entry.go`             | `recordEntry` recycled through `recycler.Pool` |
-| `config.go`            | `Config{BufferSize, Policy, OnDrop, OnError}` |
 | `internal/core/observe/logger/middleware/async` | its sentinels — range 0.3.17.\* — declared in the core mirror since ADR 0160; this package declares none |
 
 ## Behaviour

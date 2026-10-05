@@ -100,7 +100,8 @@ packages:
       corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
     path: github.com/kitsunium/sdk/internal/service/observe/logger/middleware/recover
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Config tunes the recover sink at construction time. Every field is
           optional — the zero-value Config produces a sink with the documented
           defaults (no callback), so the panic-absorption behaviour is byte-for-byte

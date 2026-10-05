@@ -24,18 +24,18 @@ sentinels as `coretrace.X` and declares none.
 | File | Surface |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `TracerConfig`, `OTLPHTTPConfig`, `Recorder`, `RecorderConfig` and `Tracer` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `tracer.go` | `Tracer` + `NewTracer` + `Start` (the mint/sample/inherit sequence) |
 | `config.go` | `TracerConfig` + every clamp, applied once in `resolved()` |
 | `span.go` | the recording `span`: mutex-guarded attrs/events/status, idempotent `End`; `finish` TRANSFERS its slices to the exported value rather than cloning them, and `sortedIncoming` skips the clone `SortAttrs` makes when there is one attribute to merge — both in §Cost |
 | `noop_span.go` | the span an unsampled trace gets — and why it still carries a context |
 | `sampler.go` | `AlwaysSample` / `NeverSample` / `ParentBased` / `Ratio` |
 | `idgen.go` | `NewTraceID` / `NewSpanID` over `drawTraceID` / `drawSpanID`, which read `crypto/rand` directly: since Go 1.24 it never returns an error (a failing source crashes the program), so the published error is always nil, the tracer's mint cannot fail, and `EntropyFailed` stays declared and published but is returned by nothing |
-| `recorder.go` / `recorder_config.go` | `Recorder` + `Sink` / `Collect` / `Len` / `Dropped`; `RecorderConfig` |
+| `recorder.go` | `Recorder` + `Sink` / `Collect` / `Len` / `Dropped`; `RecorderConfig` |
 | `record_error.go` | `RecordError` — the conventional `exception` event |
 | `otlp_request.go` | the Go mirror of `collector/trace` and `trace.proto`, in FIELD-NUMBER order; the `common.proto` / `resource.proto` messages and the proto3-JSON scalars are the shared package's |
 | `exporter_otlpjson.go` | `EncodeOTLPJSON` + the writer-bound exporter over the shared `otlp.Stream` + `OTLPJSON` (registered, stderr) + the two `EXPORT_FAILED` wraps the shared marshal and stream leave under |
 | `exporter_otlphttp.go` | `NewOTLPHTTPExporter` + `OTLPRetryable` + `OTLPTracesPath` + `otlpSignal`, this signal's `otlp.SignalSpec` — its codes and wording for every verdict the shared sender reaches |
-| `otlphttp_config.go` | `OTLPHTTPConfig`, a DEFINED type over the shared `otlp.HTTPConfig` |
 | `otlp_export_response.go` | `ExportTracePartialSuccess` reduced to `rejectedSpans` + `decodeRejected` — the one member of the answer that is this signal's own |
 | `http_server.go` | `ServerMiddleware` + the semantic-convention keys + `statusRecorder` |
 | `http_client.go` | `ClientMiddleware` + `tracedRoundTripper` |

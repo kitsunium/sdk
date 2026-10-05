@@ -974,7 +974,7 @@ type Builder interface {
 ```
 
 <a name="Builder.Any"></a>
-### func \(Builder\) [Any](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/logger/builder.go>)
+### func \(Builder\) [Any](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/logger/decl_gen.go>)
 
 ```go
 func (Builder) Any(key string, val any) Builder
@@ -983,7 +983,7 @@ func (Builder) Any(key string, val any) Builder
 Any appends an opaque attribute; handlers degrade unrecognised types to "?".
 
 <a name="Builder.Bool"></a>
-### func \(Builder\) [Bool](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/logger/builder.go>)
+### func \(Builder\) [Bool](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/logger/decl_gen.go>)
 
 ```go
 func (Builder) Bool(key string, val bool) Builder
@@ -992,7 +992,7 @@ func (Builder) Bool(key string, val bool) Builder
 Bool appends a boolean attribute.
 
 <a name="Builder.Duration"></a>
-### func \(Builder\) [Duration](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/logger/builder.go>)
+### func \(Builder\) [Duration](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/logger/decl_gen.go>)
 
 ```go
 func (Builder) Duration(key string, val time.Duration) Builder
@@ -1001,7 +1001,7 @@ func (Builder) Duration(key string, val time.Duration) Builder
 Duration appends a time.Duration attribute.
 
 <a name="Builder.Float64"></a>
-### func \(Builder\) [Float64](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/logger/builder.go>)
+### func \(Builder\) [Float64](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/logger/decl_gen.go>)
 
 ```go
 func (Builder) Float64(key string, val float64) Builder
@@ -1010,7 +1010,7 @@ func (Builder) Float64(key string, val float64) Builder
 Float64 appends a float64 attribute.
 
 <a name="Builder.Int"></a>
-### func \(Builder\) [Int](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/logger/builder.go>)
+### func \(Builder\) [Int](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/logger/decl_gen.go>)
 
 ```go
 func (Builder) Int(key string, val int) Builder
@@ -1019,7 +1019,7 @@ func (Builder) Int(key string, val int) Builder
 Int appends an int attribute (widened to int64 internally).
 
 <a name="Builder.Int64"></a>
-### func \(Builder\) [Int64](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/logger/builder.go>)
+### func \(Builder\) [Int64](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/logger/decl_gen.go>)
 
 ```go
 func (Builder) Int64(key string, val int64) Builder
@@ -1028,7 +1028,7 @@ func (Builder) Int64(key string, val int64) Builder
 Int64 appends an int64 attribute.
 
 <a name="Builder.Send"></a>
-### func \(Builder\) [Send](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/logger/builder.go>)
+### func \(Builder\) [Send](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/logger/decl_gen.go>)
 
 ```go
 func (Builder) Send(ctx context.Context, msg string)
@@ -1037,7 +1037,7 @@ func (Builder) Send(ctx context.Context, msg string)
 Send terminates the chain by emitting the accumulated record.
 
 <a name="Builder.Str"></a>
-### func \(Builder\) [Str](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/logger/builder.go>)
+### func \(Builder\) [Str](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/logger/decl_gen.go>)
 
 ```go
 func (Builder) Str(key string, val string) Builder
@@ -1046,7 +1046,7 @@ func (Builder) Str(key string, val string) Builder
 Str appends a string attribute.
 
 <a name="Builder.Time"></a>
-### func \(Builder\) [Time](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/logger/builder.go>)
+### func \(Builder\) [Time](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/logger/decl_gen.go>)
 
 ```go
 func (Builder) Time(key string, val time.Time) Builder
@@ -1055,7 +1055,7 @@ func (Builder) Time(key string, val time.Time) Builder
 Time appends a time.Time attribute.
 
 <a name="Builder.Uint64"></a>
-### func \(Builder\) [Uint64](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/logger/builder.go>)
+### func \(Builder\) [Uint64](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/logger/decl_gen.go>)
 
 ```go
 func (Builder) Uint64(key string, val uint64) Builder

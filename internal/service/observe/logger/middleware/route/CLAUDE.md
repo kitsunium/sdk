@@ -16,6 +16,7 @@ Use case: send `Error+` records to a remote alerting drain while keeping
 
 | File | Role |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `Predicate` and `Params` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `router_sink.go`        | `routerSink` + `New` + `Write` / `Flush` / `Close` |
 | `router_sink_params.go` | `Params{When, Sink}` + `Predicate` type + `LevelAtLeast` helper |
 | `internal/core/observe/logger/middleware/route` | its sentinels — range 0.3.18.\* — declared in the core mirror since ADR 0160; this package declares none |

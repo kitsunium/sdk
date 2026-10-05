@@ -35,6 +35,7 @@ returns them and declares none.
 
 | File | Tag | Lane that runs it |
 |---|---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `Config` and `EncWriter` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `encwrite_external_test.go`, `encwrite_internal_test.go` | — | `bazel test --config=race //...` (default) |
 | `frame_overflow_internal_test.go` | `//go:build !race` | race-off alloc lane — `make test-alloc` (listed in `tools/alloc-lane-targets.txt`) — and CI's `test-386` job, where `Test_frame_overflow` skips: `len` cannot exceed `MaxUint32` on a 32-bit `int` |
 | `encwrite_integration_test.go` | `//go:build integration` | **none** — opt-in, run by hand (below) |

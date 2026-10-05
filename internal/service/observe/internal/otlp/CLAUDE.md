@@ -46,16 +46,14 @@ public names a caller types — `OTLPHTTPConfig`, `NewOTLPHTTPExporter`,
 | File | Surface |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `AnyValue`, `HTTPConfig`, `KeyValue`, `ResourceMessage`, `RejectedCounter`, `LenientInt64`, `Int64`, `Uint64`, `Double`, `ScopeMessage`, `Sender`, `SignalSpec` and `Stream` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `otlp.go` | `DefaultTimeout` / `DefaultMaxResponseBytes` / `DocumentTerminator` |
 | `scalar.go` | `Int64` / `Uint64` (decimal strings) and `Double` (a number, or `"NaN"` / `"Infinity"` / `"-Infinity"`) with their `MarshalJSON` |
 | `key_value.go` | `KeyValue` + `Attrs` + `KeyValueOf` — the shared attribute model (`internal/core/observe/otel`) as `common.v1.KeyValue` |
-| `any_value.go` | `AnyValue` — the four scalar cases of the oneof, presence kept at the zero |
 | `resource_message.go` | `ResourceMessage` + `ResourceOf` |
 | `scope_message.go` | `ScopeMessage` + `ScopeOf` |
 | `marshal.go` | `Marshal` (one document, HTML escaping off, no trailing newline, a rendering fault under the caller's wrap) + `UnixNano` (the unset instant is 0) |
 | `stream.go` | `Stream` + `NewStream` + `Emit` — one terminated document per write, a writer fault under the caller's wrap |
-| `signal_spec.go` | `SignalSpec` — the per-signal vocabulary: four sentinels, three wraps of a foreign cause, the rejected field key, the response decoder |
-| `http_config.go` | `HTTPConfig` — each field documented once; each signal publishes it as a DEFINED type of its own |
 | `sender.go` | `Sender` + `NewSender` + `Post`, and everything behind them: `checkEndpoint`, `newClient`, `newTransport`, `closeResponse`, `swallowTeardown`, `classify`, `isRetryableStatus`, `retryAfterSeconds`, `partialSuccessOf` |
 | `response.go` | `LenientInt64` (number OR decimal string) + `RejectedCounter` + `DecodeRejected` |
 | `wire_external_test.go` | scalars, attributes, messages, the marshal, the caller's code on a fault, the unset instant, the stream under concurrency |

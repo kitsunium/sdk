@@ -17,20 +17,6 @@ const (
 	keyRoom      int  = 64
 )
 
-// GroupConfig says how GroupGoroutines groups: by which labels, and how many
-// groups and frames to keep.
-type GroupConfig struct {
-	// Labels are the label keys a group is keyed by, in order — "kit_node",
-	// "kit_loop" — beside the state and the top frame. None groups by state
-	// and top frame alone.
-	Labels []string
-	// MaxGroups keeps the largest groups only; not positive keeps them all.
-	MaxGroups int
-	// MaxStack cuts each group's stack to its innermost frames; not
-	// positive keeps it whole.
-	MaxStack int
-}
-
 // GroupGoroutines groups gs by the configured labels, the state and the top
 // frame, and returns the groups largest first — ties by labels in the
 // configured order, then state, then top frame. Nothing in gs is mutated.

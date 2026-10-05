@@ -5,7 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "tee",
     srcs = [
-        "config.go",
+        "decl_gen.go",
         "doc.go",
         "tee.go",
     ],

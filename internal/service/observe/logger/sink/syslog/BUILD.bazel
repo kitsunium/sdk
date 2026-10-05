@@ -5,7 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "syslog",
     srcs = [
-        "config.go",
+        "decl_gen.go",
         "doc.go",
         "priority.go",
         "syslog_sink.go",
