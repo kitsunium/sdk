@@ -24,20 +24,6 @@ import (
 // lies wins 64 KiB rather than the whole ceiling.
 const maxPresizedRead int64 = 64 << 10
 
-// Client performs guarded outbound HTTP calls.
-//
-// Every request it sends — including one forged through the *http.Client that
-// HTTP returns — passes through a transport that consults the policy first, so
-// the client's posture cannot be bypassed by forgetting a check at a call site.
-type Client struct {
-	// http carries the guarded transport; handing it out keeps the guarantee.
-	http *http.Client
-	// base is the origin relative paths resolve against; may be nil.
-	base *url.URL
-	// headers are applied to requests that do not already set them.
-	headers map[string]string
-}
-
 // New builds a client from cfg, the TLS identity, the policy and the hook.
 //
 // A nil policy is refused rather than defaulted to "allow everything": an

@@ -19,9 +19,6 @@ const DefaultKeepAlive time.Duration = 15 * time.Second
 // reading from pinning a goroutine and a socket buffer forever.
 const DefaultWriteTimeout time.Duration = 10 * time.Second
 
-// Option configures a Stream.
-type Option func(*config)
-
 // config is the resolved option set. It is unexported because every field has
 // a zero value that means something specific, and the meaning is decided by
 // resolve rather than by whoever fills the struct.

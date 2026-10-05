@@ -56,28 +56,6 @@ const (
 	maskWordAt3 int = 3 * maskWordWidth
 )
 
-// FrameHeaderValue is one parsed frame header (RFC 6455 §5.2).
-//
-// The RSV bits are absent on purpose. They only mean anything once an extension
-// has been negotiated, this domain negotiates none, and a set RSV bit is
-// therefore a protocol error rather than a value to carry — see
-// ParseFrameHeader.
-type FrameHeaderValue struct {
-	// Final is the FIN bit: this frame completes the message.
-	Final bool `json:"final"`
-	// OpCode is the frame type.
-	OpCode corenet.WSOpCode `json:"opcode"`
-	// Masked is the MASK bit. RFC 6455 §5.1 requires it on every client frame
-	// and forbids it on every server frame.
-	Masked bool `json:"masked"`
-	// MaskKey is the four-byte key, meaningful only when Masked.
-	MaskKey [MaskLen]byte `json:"mask_key"`
-	// Length is the payload length the frame announces. It is what the peer
-	// SAYS, not what it has sent — every bound must be checked against it
-	// BEFORE any buffer is sized from it.
-	Length uint64 `json:"length"`
-}
-
 // ValidateFromClient enforces the one framing rule whose answer depends on the
 // direction of travel: RFC 6455 §5.1 requires every client-to-server frame to
 // be masked.

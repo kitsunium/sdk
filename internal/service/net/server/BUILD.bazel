@@ -15,6 +15,7 @@ go_library(
         "conn_waiter.go",
         "datagram_source_linux.go",
         "datagram_source_other.go",
+        "decl_gen.go",
         "doc.go",
         "family_other.go",
         "family_windows.go",

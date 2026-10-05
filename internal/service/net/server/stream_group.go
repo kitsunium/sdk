@@ -6,39 +6,6 @@ import (
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 )
 
-// StreamGroup is a set of listeners sharing one handler, one middleware chain
-// and one policy. Grouping exists so a server can expose the same handler on a
-// TCP port and a Unix socket — or two ports with different TLS identities —
-// without the caller assembling the wiring twice.
-type StreamGroup struct {
-	// name identifies the group in logs, metrics and State.
-	name string
-	// addrs are the addresses to bind.
-	addrs []corenet.AddressValue
-	// handler serves each accepted connection.
-	handler corenet.ConnHandler
-	// middlewares decorate the handler, outermost first.
-	middlewares []corenet.Middleware[corenet.ConnHandler]
-	// identity turns the group's listeners into TLS or mTLS listeners.
-	identity corenet.IdentityValue
-	// limits bounds what the group may consume.
-	limits corenet.LimitsValue
-	// timeouts bounds each phase of a connection.
-	timeouts corenet.TimeoutsValue
-	// httpAdapter is set when the group serves an http.Handler, so the engine
-	// can shut the embedded http.Server down with the rest of the group.
-	httpAdapter *httpAdapter
-	// http holds the bounds only an HTTP group has: the header phase's own
-	// deadline and the header size cap. They live here rather than in
-	// core/net's Timeouts and Limits, which describe every protocol a group
-	// can serve, and "a request header" is not a word in most of them.
-	http httpBounds
-	// limiter caps concurrent connections; nil when the group has no ceiling.
-	limiter *connLimiter
-	// adopt names inherited sockets to take over instead of binding.
-	adopt []string
-}
-
 // Name returns the group's name.
 func (g *StreamGroup) Name() string {
 	//: fixed at declaration; used as the metrics and log dimension.

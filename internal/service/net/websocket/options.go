@@ -32,9 +32,6 @@ const DefaultMaxMessageSize int64 = 1 << 20 // 1 MiB
 // being checked is the number the attacker wrote.
 const DefaultMaxFrameSize int64 = 1 << 20 // 1 MiB
 
-// Option configures a Conn.
-type Option func(*config)
-
 // config is the resolved option set. It is unexported because several fields
 // have a zero value that means something specific, and the meaning is decided
 // by resolve rather than by whoever fills the struct.

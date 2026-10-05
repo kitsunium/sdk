@@ -3,10 +3,7 @@ package server
 import (
 	"context"
 	stdnet "net"
-	"os"
 	"slices"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
@@ -25,79 +22,6 @@ const (
 	// accepts does not rehash it on the accept path.
 	expectedLiveConns int = 256
 )
-
-// Server owns a set of listener groups and their lifecycle.
-//
-// It is safe for concurrent use. Declaration-time mistakes — a duplicate group
-// name, an unusable address — are recorded and returned by Start rather than
-// panicking or forcing an error check on every declaration, which is what keeps
-// wiring a server down to a handful of readable lines.
-type Server struct {
-	// mu guards the declaration-time fields below.
-	mu sync.RWMutex
-	// groups preserves declaration order so listeners bind predictably.
-	groups []*StreamGroup
-	// packetGroups preserves declaration order for the datagram side.
-	packetGroups []*PacketGroup
-	// packetByName rejects a duplicate datagram group name.
-	packetByName map[string]*PacketGroup
-	// packetConns are the live bound datagram sockets.
-	packetConns []*boundPacketConn
-	// byName rejects a duplicate group name at declaration time.
-	byName map[string]*StreamGroup
-	// declErr is the first declaration error, surfaced by Start.
-	declErr error
-	// listeners are the live bound listeners.
-	listeners []*boundListener
-	// states mirrors listeners for reporting, including any degradation.
-	states []corenet.ListenerStateValue
-	// drainTimeout bounds Shutdown.
-	drainTimeout time.Duration
-
-	// phase is the lifecycle phase, read without the mutex by State.
-	phase atomic.Uint32
-	// inFlight tracks connections being served, for the drain.
-	inFlight sync.WaitGroup
-	// active, total, rejected and oversized feed State.
-	active   atomic.Int64
-	total    atomic.Uint64
-	rejected atomic.Uint64
-	// oversized counts datagrams dropped for passing their group's ceiling. A
-	// read loop has nobody to hand an error to, so this counter is how the drop
-	// is reported instead of hidden.
-	oversized atomic.Uint64
-	// acceptBackoffs counts the waits accept loops took after a failed Accept —
-	// descriptor exhaustion, typically — so a server that is failing to accept
-	// says so in State instead of spinning a core per listener.
-	acceptBackoffs atomic.Uint64
-	// clk is the engine's clock: what an accept loop's backoff waits on.
-	clk clock.Timed
-	// connPool recycles the per-connection struct so a steady-state accept
-	// loop allocates nothing per connection.
-	connPool *recycler.Pool[*conn]
-	// nextID assigns each connection its correlation identifier.
-	nextID atomic.Uint64
-	// liveMu guards live.
-	liveMu sync.RWMutex
-	// live tracks the sockets currently being served, so an expired drain
-	// budget can sever them. Without this registry a stuck handler would make
-	// Shutdown block forever, which is precisely what a budget exists to
-	// prevent.
-	live map[uint64]stdnet.Conn
-	// inheritOnce reads the supervisor's socket table at most once per server.
-	inheritOnce sync.Once
-	// inherited is that table, held for the server's lifetime so no wrapper is
-	// ever collected and no finaliser closes a descriptor still to be adopted.
-	inherited map[string][]*os.File
-	// inheritErr is the failure to read it, reported to every adoption.
-	inheritErr error
-	// stop cancels every in-flight handler when the server shuts down.
-	stop context.CancelFunc
-	// runCtx is handed to every handler. It deliberately outlives the caller's
-	// start context so cancelling that context does not tear handlers down
-	// before the drain has had its budget.
-	runCtx context.Context
-}
 
 // newPooledConn mints an empty connection wrapper for the recycler.
 func newPooledConn() *conn {

@@ -8,6 +8,7 @@ go_library(
         "capped_body.go",
         "client.go",
         "conjunction.go",
+        "decl_gen.go",
         "defaults.go",
         "deny_policy.go",
         "doc.go",

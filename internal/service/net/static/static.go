@@ -35,44 +35,6 @@ const indexName string = "index.html"
 // allowedMethods is the Allow header of a 405: the two methods answered.
 const allowedMethods string = "GET, HEAD"
 
-// Config says how a tree is served. Its zero value is a working, strict
-// configuration: the default policies, no fallback, nothing cached for good.
-type Config struct {
-	// ContentSecurityPolicy is sent on every response. Empty sends
-	// DefaultContentSecurityPolicy; there is no way to send none. A value
-	// holding a control character is refused at construction.
-	ContentSecurityPolicy string
-	// ReferrerPolicy is sent on every response: one of the eight tokens the
-	// Referrer Policy specification defines, or a comma-separated list of
-	// them. Empty sends DefaultReferrerPolicy. Any other value is refused at
-	// construction, because a browser ignores a token it does not know and falls back
-	// to its own default, which sends the origin to every site.
-	ReferrerPolicy string
-	// SinglePageApp serves the root's index.html, with 200, for a path that
-	// has no extension and names nothing in the tree. A path with an
-	// extension that names nothing stays a 404, and so does a directory with
-	// no index.html.
-	SinglePageApp bool
-	// Immutable reports whether the file at name — slash-separated, relative
-	// to the root, as served: "assets/app-3f2a9c.js" — is content-hashed, so
-	// its response may be cached with ImmutableCacheControl. For a fallback it
-	// is asked about "index.html", the file actually served. Nil marks
-	// nothing.
-	Immutable func(name string) bool
-}
-
-// Handler serves one file tree. It is safe for concurrent use.
-//
-// The zero Handler has no tree and answers every request 500, with the
-// default headers. Build one with NewHandler.
-type Handler struct {
-	fsys      fs.FS
-	csp       string
-	referrer  string
-	spa       bool
-	immutable func(name string) bool
-}
-
 // NewHandler returns a Handler serving fsys as cfg says. It refuses, with the core
 // net sentinel STATIC_MISCONFIGURED and an "option" field naming what, a nil
 // fsys, a header value holding a control character, and a Referrer-Policy that

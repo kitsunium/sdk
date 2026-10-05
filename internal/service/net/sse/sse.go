@@ -3,7 +3,6 @@ package sse
 import (
 	"context"
 	"net/http"
-	"sync"
 	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
@@ -47,47 +46,6 @@ const retainUseFraction int = 2
 // which every client ignores by construction, so it can never be mistaken for
 // an event by a consumer that forgot to filter it.
 const keepAliveComment string = "keep-alive"
-
-// Stream is one open event stream: an HTTP response held open, written one
-// frame at a time and flushed after each.
-//
-// It is safe for concurrent use. That is not decoration — the keep-alive runs
-// on its own goroutine and shares the response writer with the handler, and a
-// handler that fans events in from several producers is the normal shape.
-type Stream struct {
-	// w is the response being streamed.
-	w http.ResponseWriter
-	// rc drives Flush and SetWriteDeadline through net/http's own controller,
-	// so a wrapped ResponseWriter that forwards Unwrap keeps working.
-	rc *http.ResponseController
-	// lastEventID is the id the client says it last processed, taken from the
-	// request header at construction.
-	lastEventID string
-	// writeTimeout bounds one frame's write, refreshed per frame.
-	writeTimeout time.Duration
-	// deadlines records whether the response supports write deadlines. A
-	// recorder or a hand-rolled ResponseWriter does not, and that is not a
-	// failure: the stream simply cannot bound its writes and says so here
-	// rather than refusing to run.
-	deadlines bool
-
-	// mu serialises frame writes. Every write must be whole: two interleaved
-	// frames are not two events, they are one corrupt one.
-	mu sync.Mutex
-	// frame is the reusable encode buffer, guarded by mu.
-	frame []byte
-
-	// done is closed exactly once, when the stream ends for any reason.
-	done chan struct{}
-	// endOnce guards close(done) against the several goroutines that can end a
-	// stream: the handler, the keep-alive, and the watcher.
-	endOnce sync.Once
-	// pinger owns the keep-alive goroutine; nil when keep-alive is disabled.
-	pinger *worker.LoopDaemon
-	// watcher owns the goroutine translating the request context and the
-	// server's drain signal into done.
-	watcher *worker.LoopDaemon
-}
 
 // New starts an event stream on w and returns it.
 //

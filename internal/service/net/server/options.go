@@ -6,12 +6,6 @@ import (
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 )
 
-// Option configures a Server.
-type Option func(*Server)
-
-// GroupOption configures a StreamGroup.
-type GroupOption func(*StreamGroup)
-
 // WithDrainTimeout bounds how long Shutdown waits for in-flight connections
 // before closing them hard.
 func WithDrainTimeout(d time.Duration) Option {

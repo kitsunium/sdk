@@ -78633,7 +78633,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Client performs guarded outbound HTTP calls.\n\nEvery request it sends — including one forged through the *http.Client that\nHTTP returns — passes through a transport that consults the policy first, so\nthe client's posture cannot be bypassed by forgetting a check at a call site.\n",
-      "file": "internal/service/net/client/client.go",
+      "file": "internal/service/net/client/decl_gen.go",
       "layer": "service",
       "family": "net"
     },
@@ -78744,7 +78744,7 @@
       "spelled": "func(*StreamGroup)",
       "canonical": "func(*github.com/kitsunium/sdk/internal/service/net/server.StreamGroup)",
       "doc": "GroupOption configures a StreamGroup.\n",
-      "file": "internal/service/net/server/options.go",
+      "file": "internal/service/net/server/decl_gen.go",
       "layer": "service",
       "family": "net"
     },
@@ -78840,7 +78840,7 @@
       "spelled": "func(*Server)",
       "canonical": "func(*github.com/kitsunium/sdk/internal/service/net/server.Server)",
       "doc": "Option configures a Server.\n",
-      "file": "internal/service/net/server/options.go",
+      "file": "internal/service/net/server/decl_gen.go",
       "layer": "service",
       "family": "net"
     },
@@ -78852,7 +78852,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "PacketGroup is a set of datagram sockets sharing one handler, one middleware\nchain and one policy. It mirrors StreamGroup deliberately: the whole point of\nthe domain is that a UDP service is wired the same way a TCP one is.\n",
-      "file": "internal/service/net/server/packet_group.go",
+      "file": "internal/service/net/server/decl_gen.go",
       "layer": "service",
       "family": "net"
     },
@@ -78952,7 +78952,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Server owns a set of listener groups and their lifecycle.\n\nIt is safe for concurrent use. Declaration-time mistakes — a duplicate group\nname, an unusable address — are recorded and returned by Start rather than\npanicking or forcing an error check on every declaration, which is what keeps\nwiring a server down to a handful of readable lines.\n",
-      "file": "internal/service/net/server/server.go",
+      "file": "internal/service/net/server/decl_gen.go",
       "layer": "service",
       "family": "net"
     },
@@ -79067,7 +79067,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "StreamGroup is a set of listeners sharing one handler, one middleware chain\nand one policy. Grouping exists so a server can expose the same handler on a\nTCP port and a Unix socket — or two ports with different TLS identities —\nwithout the caller assembling the wiring twice.\n",
-      "file": "internal/service/net/server/stream_group.go",
+      "file": "internal/service/net/server/decl_gen.go",
       "layer": "service",
       "family": "net"
     },
@@ -79254,7 +79254,7 @@
       "spelled": "func(*config)",
       "canonical": "func(*github.com/kitsunium/sdk/internal/service/net/sse.config)",
       "doc": "Option configures a Stream.\n",
-      "file": "internal/service/net/sse/options.go",
+      "file": "internal/service/net/sse/decl_gen.go",
       "layer": "service",
       "family": "net"
     },
@@ -79278,7 +79278,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Stream is one open event stream: an HTTP response held open, written one\nframe at a time and flushed after each.\n\nIt is safe for concurrent use. That is not decoration — the keep-alive runs\non its own goroutine and shares the response writer with the handler, and a\nhandler that fans events in from several producers is the normal shape.\n",
-      "file": "internal/service/net/sse/sse.go",
+      "file": "internal/service/net/sse/decl_gen.go",
       "layer": "service",
       "family": "net"
     },
@@ -79401,7 +79401,7 @@
         }
       ],
       "doc": "Config says how a tree is served. Its zero value is a working, strict\nconfiguration: the default policies, no fallback, nothing cached for good.\n",
-      "file": "internal/service/net/static/static.go",
+      "file": "internal/service/net/static/decl_gen.go",
       "layer": "service",
       "family": "net"
     },
@@ -79439,7 +79439,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Handler serves one file tree. It is safe for concurrent use.\n\nThe zero Handler has no tree and answers every request 500, with the\ndefault headers. Build one with NewHandler.\n",
-      "file": "internal/service/net/static/static.go",
+      "file": "internal/service/net/static/decl_gen.go",
       "layer": "service",
       "family": "net"
     },
@@ -79837,7 +79837,7 @@
         }
       ],
       "doc": "FrameHeaderValue is one parsed frame header (RFC 6455 §5.2).\n\nThe RSV bits are absent on purpose. They only mean anything once an extension\nhas been negotiated, this domain negotiates none, and a set RSV bit is\ntherefore a protocol error rather than a value to carry — see\nParseFrameHeader.\n",
-      "file": "internal/service/net/websocket/frame.go",
+      "file": "internal/service/net/websocket/decl_gen.go",
       "layer": "service",
       "family": "net"
     },
@@ -79937,7 +79937,7 @@
       "spelled": "func(*config)",
       "canonical": "func(*github.com/kitsunium/sdk/internal/service/net/websocket.config)",
       "doc": "Option configures a Conn.\n",
-      "file": "internal/service/net/websocket/options.go",
+      "file": "internal/service/net/websocket/decl_gen.go",
       "layer": "service",
       "family": "net"
     },

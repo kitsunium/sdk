@@ -4,24 +4,6 @@ import (
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 )
 
-// PacketGroup is a set of datagram sockets sharing one handler, one middleware
-// chain and one policy. It mirrors StreamGroup deliberately: the whole point of
-// the domain is that a UDP service is wired the same way a TCP one is.
-type PacketGroup struct {
-	// name identifies the group in logs, metrics and State.
-	name string
-	// addrs are the addresses to bind.
-	addrs []corenet.AddressValue
-	// handler serves each received datagram.
-	handler corenet.PacketHandler
-	// middlewares decorate the handler, outermost first.
-	middlewares []corenet.Middleware[corenet.PacketHandler]
-	// limits bounds what the group may consume.
-	limits corenet.LimitsValue
-	// adopt names inherited sockets to take over instead of binding.
-	adopt []string
-}
-
 // Name returns the group's name.
 func (g *PacketGroup) Name() string {
 	//: fixed at declaration; used as the metrics and log dimension.

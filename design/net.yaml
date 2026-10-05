@@ -2131,7 +2131,8 @@ packages:
       url: net/url
     path: github.com/kitsunium/sdk/internal/service/net/client
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Client performs guarded outbound HTTP calls.
 
           Every request it sends — including one forged through the *http.Client that
@@ -2185,7 +2186,16 @@ packages:
             recv: pointer
         name: Client
         struct:
-          unexported: true
+          fields:
+            - doc: http carries the guarded transport; handing it out keeps the guarantee.
+              name: http
+              type: "*http.Client"
+            - doc: base is the origin relative paths resolve against; may be nil.
+              name: base
+              type: "*url.URL"
+            - doc: headers are applied to requests that do not already set them.
+              name: headers
+              type: map[string]string
   - doc: |-
       Package server — adoption of listeners inherited from a supervisor.
 
@@ -2452,17 +2462,24 @@ packages:
           - type: "*Server"
         variadic: true
     imports:
+      atomic: sync/atomic
+      clock: github.com/kitsunium/sdk/internal/kernel/clock
       corenet: github.com/kitsunium/sdk/internal/core/net
       http: net/http
+      recycler: github.com/kitsunium/sdk/internal/kernel/concur/recycler
+      stdnet: net
     path: github.com/kitsunium/sdk/internal/service/net/server
     types:
-      - doc: Option configures a Server.
+      - decl: true
+        doc: Option configures a Server.
         name: Option
         underlying: func(*Server)
-      - doc: GroupOption configures a StreamGroup.
+      - decl: true
+        doc: GroupOption configures a StreamGroup.
         name: GroupOption
         underlying: func(*StreamGroup)
-      - doc: |-
+      - decl: true
+        doc: |-
           PacketGroup is a set of datagram sockets sharing one handler, one middleware
           chain and one policy. It mirrors StreamGroup deliberately: the whole point of
           the domain is that a UDP service is wired the same way a TCP one is.
@@ -2499,8 +2516,27 @@ packages:
             variadic: true
         name: PacketGroup
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - doc: name identifies the group in logs, metrics and State.
+              name: name
+              type: string
+            - doc: addrs are the addresses to bind.
+              name: addrs
+              type: "[]corenet.AddressValue"
+            - doc: handler serves each received datagram.
+              name: handler
+              type: corenet.PacketHandler
+            - doc: middlewares decorate the handler, outermost first.
+              name: middlewares
+              type: "[]corenet.Middleware[corenet.PacketHandler]"
+            - doc: limits bounds what the group may consume.
+              name: limits
+              type: corenet.LimitsValue
+            - doc: adopt names inherited sockets to take over instead of binding.
+              name: adopt
+              type: "[]string"
+      - decl: true
+        doc: |-
           Server owns a set of listener groups and their lifecycle.
 
           It is safe for concurrent use. Declaration-time mistakes — a duplicate group
@@ -2588,8 +2624,105 @@ packages:
             recv: pointer
         name: Server
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - doc: mu guards the declaration-time fields below.
+              name: mu
+              type: sync.RWMutex
+            - doc: groups preserves declaration order so listeners bind predictably.
+              name: groups
+              type: "[]*StreamGroup"
+            - doc: packetGroups preserves declaration order for the datagram side.
+              name: packetGroups
+              type: "[]*PacketGroup"
+            - doc: packetByName rejects a duplicate datagram group name.
+              name: packetByName
+              type: map[string]*PacketGroup
+            - doc: packetConns are the live bound datagram sockets.
+              name: packetConns
+              type: "[]*boundPacketConn"
+            - doc: byName rejects a duplicate group name at declaration time.
+              name: byName
+              type: map[string]*StreamGroup
+            - doc: declErr is the first declaration error, surfaced by Start.
+              name: declErr
+              type: error
+            - doc: listeners are the live bound listeners.
+              name: listeners
+              type: "[]*boundListener"
+            - doc: states mirrors listeners for reporting, including any degradation.
+              name: states
+              type: "[]corenet.ListenerStateValue"
+            - doc: drainTimeout bounds Shutdown.
+              name: drainTimeout
+              type: time.Duration
+            - doc: phase is the lifecycle phase, read without the mutex by State.
+              name: phase
+              type: atomic.Uint32
+            - doc: inFlight tracks connections being served, for the drain.
+              name: inFlight
+              type: sync.WaitGroup
+            - doc: active, total, rejected and oversized feed State.
+              name: active
+              type: atomic.Int64
+            - name: total
+              type: atomic.Uint64
+            - name: rejected
+              type: atomic.Uint64
+            - doc: |-
+                oversized counts datagrams dropped for passing their group's ceiling. A
+                read loop has nobody to hand an error to, so this counter is how the drop
+                is reported instead of hidden.
+              name: oversized
+              type: atomic.Uint64
+            - doc: |-
+                acceptBackoffs counts the waits accept loops took after a failed Accept —
+                descriptor exhaustion, typically — so a server that is failing to accept
+                says so in State instead of spinning a core per listener.
+              name: acceptBackoffs
+              type: atomic.Uint64
+            - doc: "clk is the engine's clock: what an accept loop's backoff waits on."
+              name: clk
+              type: clock.Timed
+            - doc: |-
+                connPool recycles the per-connection struct so a steady-state accept
+                loop allocates nothing per connection.
+              name: connPool
+              type: "*recycler.Pool[*conn]"
+            - doc: nextID assigns each connection its correlation identifier.
+              name: nextID
+              type: atomic.Uint64
+            - doc: liveMu guards live.
+              name: liveMu
+              type: sync.RWMutex
+            - doc: |-
+                live tracks the sockets currently being served, so an expired drain
+                budget can sever them. Without this registry a stuck handler would make
+                Shutdown block forever, which is precisely what a budget exists to
+                prevent.
+              name: live
+              type: map[uint64]stdnet.Conn
+            - doc: inheritOnce reads the supervisor's socket table at most once per server.
+              name: inheritOnce
+              type: sync.Once
+            - doc: |-
+                inherited is that table, held for the server's lifetime so no wrapper is
+                ever collected and no finaliser closes a descriptor still to be adopted.
+              name: inherited
+              type: map[string][]*os.File
+            - doc: inheritErr is the failure to read it, reported to every adoption.
+              name: inheritErr
+              type: error
+            - doc: stop cancels every in-flight handler when the server shuts down.
+              name: stop
+              type: context.CancelFunc
+            - doc: |-
+                runCtx is handed to every handler. It deliberately outlives the caller's
+                start context so cancelling that context does not tear handlers down
+                before the drain has had its budget.
+              name: runCtx
+              type: context.Context
+      - decl: true
+        doc: |-
           StreamGroup is a set of listeners sharing one handler, one middleware chain
           and one policy. Grouping exists so a server can expose the same handler on a
           TCP port and a Unix socket — or two ports with different TLS identities —
@@ -2644,7 +2777,46 @@ packages:
             variadic: true
         name: StreamGroup
         struct:
-          unexported: true
+          fields:
+            - doc: name identifies the group in logs, metrics and State.
+              name: name
+              type: string
+            - doc: addrs are the addresses to bind.
+              name: addrs
+              type: "[]corenet.AddressValue"
+            - doc: handler serves each accepted connection.
+              name: handler
+              type: corenet.ConnHandler
+            - doc: middlewares decorate the handler, outermost first.
+              name: middlewares
+              type: "[]corenet.Middleware[corenet.ConnHandler]"
+            - doc: identity turns the group's listeners into TLS or mTLS listeners.
+              name: identity
+              type: corenet.IdentityValue
+            - doc: limits bounds what the group may consume.
+              name: limits
+              type: corenet.LimitsValue
+            - doc: timeouts bounds each phase of a connection.
+              name: timeouts
+              type: corenet.TimeoutsValue
+            - doc: |-
+                httpAdapter is set when the group serves an http.Handler, so the engine
+                can shut the embedded http.Server down with the rest of the group.
+              name: httpAdapter
+              type: "*httpAdapter"
+            - doc: |-
+                http holds the bounds only an HTTP group has: the header phase's own
+                deadline and the header size cap. They live here rather than in
+                core/net's Timeouts and Limits, which describe every protocol a group
+                can serve, and "a request header" is not a word in most of them.
+              name: http
+              type: httpBounds
+            - doc: limiter caps concurrent connections; nil when the group has no ceiling.
+              name: limiter
+              type: "*connLimiter"
+            - doc: adopt names inherited sockets to take over instead of binding.
+              name: adopt
+              type: "[]string"
   - constants:
       - doc: |-
           DefaultKeepAlive is the comment cadence a stream uses when the caller sets
@@ -2798,12 +2970,15 @@ packages:
     imports:
       corenet: github.com/kitsunium/sdk/internal/core/net
       http: net/http
+      worker: github.com/kitsunium/sdk/internal/kernel/concur/worker
     path: github.com/kitsunium/sdk/internal/service/net/sse
     types:
-      - doc: Option configures a Stream.
+      - decl: true
+        doc: Option configures a Stream.
         name: Option
         underlying: func(*config)
-      - doc: |-
+      - decl: true
+        doc: |-
           Stream is one open event stream: an HTTP response held open, written one
           frame at a time and flushed after each.
 
@@ -2877,7 +3052,54 @@ packages:
             recv: pointer
         name: Stream
         struct:
-          unexported: true
+          fields:
+            - doc: w is the response being streamed.
+              name: w
+              type: http.ResponseWriter
+            - doc: |-
+                rc drives Flush and SetWriteDeadline through net/http's own controller,
+                so a wrapped ResponseWriter that forwards Unwrap keeps working.
+              name: rc
+              type: "*http.ResponseController"
+            - doc: |-
+                lastEventID is the id the client says it last processed, taken from the
+                request header at construction.
+              name: lastEventID
+              type: string
+            - doc: writeTimeout bounds one frame's write, refreshed per frame.
+              name: writeTimeout
+              type: time.Duration
+            - doc: |-
+                deadlines records whether the response supports write deadlines. A
+                recorder or a hand-rolled ResponseWriter does not, and that is not a
+                failure: the stream simply cannot bound its writes and says so here
+                rather than refusing to run.
+              name: deadlines
+              type: bool
+            - doc: |-
+                mu serialises frame writes. Every write must be whole: two interleaved
+                frames are not two events, they are one corrupt one.
+              name: mu
+              type: sync.Mutex
+            - doc: frame is the reusable encode buffer, guarded by mu.
+              name: frame
+              type: "[]byte"
+            - doc: done is closed exactly once, when the stream ends for any reason.
+              name: done
+              type: chan struct{}
+            - doc: |-
+                endOnce guards close(done) against the several goroutines that can end a
+                stream: the handler, the keep-alive, and the watcher.
+              name: endOnce
+              type: sync.Once
+            - doc: pinger owns the keep-alive goroutine; nil when keep-alive is disabled.
+              name: pinger
+              type: "*worker.LoopDaemon"
+            - doc: |-
+                watcher owns the goroutine translating the request context and the
+                server's drain signal into done.
+              name: watcher
+              type: "*worker.LoopDaemon"
   - constants:
       - doc: |-
           DefaultContentSecurityPolicy is the policy sent when Config names none: the
@@ -2961,7 +3183,8 @@ packages:
       http: net/http
     path: github.com/kitsunium/sdk/internal/service/net/static
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Config says how a tree is served. Its zero value is a working, strict
           configuration: the default policies, no fallback, nothing cached for good.
         name: Config
@@ -2996,7 +3219,8 @@ packages:
                 nothing.
               name: Immutable
               type: func(name string) bool
-      - doc: |-
+      - decl: true
+        doc: |-
           Handler serves one file tree. It is safe for concurrent use.
 
           The zero Handler has no tree and answers every request 500, with the
@@ -3014,7 +3238,17 @@ packages:
             recv: pointer
         name: Handler
         struct:
-          unexported: true
+          fields:
+            - name: fsys
+              type: fs.FS
+            - name: csp
+              type: string
+            - name: referrer
+              type: string
+            - name: spa
+              type: bool
+            - name: immutable
+              type: func(name string) bool
   - doc: |-
       Package tlsid loads TLS and mutual-TLS material into the opaque, redacting
       identity declared by internal/core/net (ADR 0029). It is the service half of
@@ -3490,7 +3724,8 @@ packages:
       stdnet: net
     path: github.com/kitsunium/sdk/internal/service/net/websocket
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           FrameHeaderValue is one parsed frame header (RFC 6455 §5.2).
 
           The RSV bits are absent on purpose. They only mean anything once an extension
@@ -3541,7 +3776,8 @@ packages:
               name: Length
               tag: json:"length"
               type: uint64
-      - doc: Option configures a Conn.
+      - decl: true
+        doc: Option configures a Conn.
         name: Option
         underlying: func(*config)
       - doc: |-

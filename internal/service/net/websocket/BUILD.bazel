@@ -6,6 +6,7 @@ go_library(
     name = "websocket",
     srcs = [
         "close.go",
+        "decl_gen.go",
         "doc.go",
         "frame.go",
         "handshake.go",

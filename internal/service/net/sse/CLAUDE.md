@@ -22,6 +22,7 @@ published**, measured in `BENCH.md` and gated by
 
 | File | Surface |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `Option` and `Stream` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `sse.go` | `Stream` — `New`, `Send`, `Comment`, `Done`, `LastEventID`, `Close`; the keep-alive and watcher goroutines; the flush probe; `retain` and the two constants that bound the encode buffer |
 | `options.go` | `Option` — `KeepAlive`, `WithoutKeepAlive`, `WriteTimeout`, `Retry`; `resolve` and the ADR 0031 clamp/refuse split |
 | `frame.go` | the encoder — `AppendEvent` (an event's wire form; `pkg/v1/net/sse.AppendEvent` forwards to it) and `AppendComment` (the keep-alive frame), the one-pass terminator scan (`appendData` and its two forward cursors), `validateComment` |
