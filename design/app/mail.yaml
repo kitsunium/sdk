@@ -1194,6 +1194,7 @@ packages:
           - name: cfg
             type: ComposerConfig
         name: NewComposer
+        impl: newComposer
         out:
           - type: "*Composer"
       - doc: |-
@@ -1296,6 +1297,7 @@ packages:
 
           Safe for concurrent use.
         name: NewMemory
+        impl: newMemory
         out:
           - type: coremail.FullTransport
       - doc: |-
@@ -1314,6 +1316,7 @@ packages:
           - name: keep
             type: int
         name: NewCapture
+        impl: newCapture
         out:
           - type: coremail.FullTransport
       - doc: |-

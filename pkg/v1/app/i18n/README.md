@@ -861,7 +861,7 @@ Select returns the CLDR category count falls in for this language.
 A language with no plural distinction carries no rule and every quantity is \`other\`; so does the zero PluralValue, which is ADR 0031's "the zero value is the safe one" — \`other\` is the one category every language defines and every message is required to carry.
 
 <a name="Plural.Valid"></a>
-### func \(Plural\) [Valid](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/i18n/plural_value.go>)
+### func \(Plural\) [Valid](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/i18n/decl_gen.go>)
 
 ```go
 func (Plural) Valid() bool
@@ -980,7 +980,7 @@ Keys returns the keys held for tag, sorted, as a copy, or nil when the store doe
 It is the \[corei18n.KeyLister] sibling, and its purpose is a test rather than a request: compare a language's keys against the fallback's and fail the build when one is missing. See [Store.Missing](#Store.Missing), which does exactly that.
 
 <a name="Store.Lookup"></a>
-### func \(Store\) [Lookup](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/i18n/store.go>)
+### func \(Store\) [Lookup](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/i18n/decl_gen.go>)
 
 ```go
 func (*Store) Lookup(tag corei18n.TagValue, key corei18n.Key) (message corei18n.MessageValue, ok bool)

@@ -231,9 +231,9 @@ func compareTags(a, b corei18n.TagValue) int {
 	return strings.Compare(a.String(), b.String())
 }
 
-// Lookup returns the message registered for exactly (tag, key). It performs no
-// fallback and no plural selection — see [corei18n.Catalog].
-func (s *Store) Lookup(tag corei18n.TagValue, key corei18n.Key) (message corei18n.MessageValue, ok bool) {
+// lookup is Store.Lookup's body: decl_gen.go writes Store.Lookup, from the
+// design, as one call of it.
+func (s *Store) lookup(tag corei18n.TagValue, key corei18n.Key) (message corei18n.MessageValue, ok bool) {
 	//: the language's compiled map, if the store holds one.
 	messages, known := s.byTag[tag]
 	//: an unknown language is a miss, not an error: the renderer's chain

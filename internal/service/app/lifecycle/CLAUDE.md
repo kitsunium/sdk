@@ -20,7 +20,7 @@ raises the core's.
 
 | File | Surface |
 |---|---|
-| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `Config`, `RunConfig`, `Supervisor`, `SupervisorConfig`, `SupervisionPhase` and `SupervisionEventValue` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `Config`, `RunConfig`, `Supervisor`, `SupervisorConfig`, `SupervisionPhase` and `SupervisionEventValue` — each struct with every field, unexported ones included; `Supervisor.Component`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
 | `lifecycle.go` | the unexported engine, `New(Config) core/app/lifecycle.Lifecycle`, `Add`, the shared state, `guard` (panic recovery) and `emit` |
 | `config.go` | `Config` — `Clock` / `StopTimeout` / `OnTransition`; `DefaultStopTimeout` (30s) and the two resolvers that apply the documented fallbacks |
 | `start.go` | `Start`, `callStart`, `abort`, `joinStartFailure` — the bring-up sequence and the unwind trigger |

@@ -26,13 +26,9 @@ func (p PluralValue) Select(count corei18n.CountValue) corei18n.Form {
 	return p.rule(count)
 }
 
-// Valid reports whether p describes a language.
-//
-// It reads the category SET rather than the rule, because Japanese and Chinese
-// legitimately carry no rule and are nonetheless perfectly valid entries. The
-// zero PluralValue describes nothing, and it is the only value this reports
-// false for.
-func (p PluralValue) Valid() bool {
+// valid is PluralValue.Valid's body: decl_gen.go writes PluralValue.Valid, from the
+// design, as one call of it.
+func (p PluralValue) valid() bool {
 	//: the zero PluralValue is what Rules returns for an unsupported language.
 	return len(p.forms) != 0
 }

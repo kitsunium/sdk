@@ -1029,6 +1029,7 @@ packages:
           - name: name
             type: string
         name: Component
+        impl: component
         out:
           - type: corelc.ComponentValue
       - doc: |-
@@ -1040,6 +1041,7 @@ packages:
           - name: cfg
             type: HandlerConfig
         name: NewStartupHandler
+        impl: newStartupHandler
         out:
           - type: http.Handler
       - doc: |-
@@ -1052,6 +1054,7 @@ packages:
           - name: cfg
             type: HandlerConfig
         name: NewReadinessHandler
+        impl: newReadinessHandler
         out:
           - type: http.Handler
       - doc: |-
@@ -1066,6 +1069,7 @@ packages:
           - name: cfg
             type: HandlerConfig
         name: NewLivenessHandler
+        impl: newLivenessHandler
         out:
           - type: http.Handler
       - doc: |-

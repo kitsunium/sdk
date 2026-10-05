@@ -706,7 +706,7 @@ type Supervisor struct{}
 ```
 
 <a name="Supervisor.Component"></a>
-### func \(Supervisor\) [Component](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/lifecycle/supervise.go>)
+### func \(Supervisor\) [Component](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/lifecycle/decl_gen.go>)
 
 ```go
 func (*Supervisor) Component() corelc.ComponentValue

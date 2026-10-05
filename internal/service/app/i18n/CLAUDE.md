@@ -19,7 +19,7 @@ Code range: `0.3.60.*` (ADR 0063), declared with the port's `0.2.30.*` in
 
 | File | Surface |
 |---|---|
-| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `EntryValue`, `Catalogue`, `Negotiator`, `PluralValue`, `Printer` and `Store` — each struct with every field, unexported ones included; the assertions `Store → corei18n.Catalog`, `Store → corei18n.KeyLister` and `Store → corei18n.Fallbacker`. Their methods, constructors and helpers stay hand-written, in the files this document names |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `EntryValue`, `Catalogue`, `Negotiator`, `PluralValue`, `Printer` and `Store` — each struct with every field, unexported ones included; `PluralValue.Valid`, `Store.Lookup`, `Plain` and `PluralForms`, each one call of its unexported body, measured to inline with the body inlined into it; the assertions `Store → corei18n.Catalog`, `Store → corei18n.KeyLister` and `Store → corei18n.Fallbacker`. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
 | `tag.go` | `ParseTag` — splits a written tag, places each subtag by length and order, and refuses BY NAME everything outside `language[-Script][-REGION]`; `corei18n.NewTag` then checks each subtag's shape and canonicalises its case |
 | `pattern.go` | `compilePattern` / `compileBraced` — the placeholder syntax, and every construct it refuses by name |
 | `pattern_compiler.go` | `patternCompiler` — the one-pass parser run at catalogue load; it hands its spans to `corei18n.NewPattern` |

@@ -70212,7 +70212,7 @@
       "spelled": "func(registry corehealth.Health, name string) corelc.ComponentValue",
       "canonical": "func(registry github.com/kitsunium/sdk/internal/core/app/health.Health, name string) github.com/kitsunium/sdk/internal/core/app/lifecycle.ComponentValue",
       "doc": "Component adapts a registry to core/app/lifecycle: its Start runs the startup\nchecks, and its Stop marks the process draining.\n\n# Add it LAST\n\nOne rule, and it happens to be right in both directions, because a\nLifecycle's stop order is the exact reverse of its Add order (ADR 0050):\n\n  - Added last, it STARTS last — so its startup checks run after every\n    component they might depend on is already up, which is the only order in\n    which \"the migration ran\" is a question worth asking.\n  - Added last, it STOPS first — so readiness flips to not-ready before a\n    single other component begins closing. That is the whole point: an\n    orchestrator observes the 503, withdraws the replica from routing, and\n    the drain then runs against a socket nothing new arrives on.\n\nGet that order wrong and the drain begins while the load balancer is still\nsending traffic — the connections the drain is waiting for keep being\ncreated, and the shutdown budget expires against work that never stops\narriving.\n\nLiveness deliberately keeps answering through the whole shutdown, so the\norchestrator withdraws the replica rather than killing it.\n",
-      "file": "internal/service/app/health/component.go",
+      "file": "internal/service/app/health/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -70347,7 +70347,7 @@
       "spelled": "func(registry corehealth.Health, cfg HandlerConfig) http.Handler",
       "canonical": "func(registry github.com/kitsunium/sdk/internal/core/app/health.Health, cfg github.com/kitsunium/sdk/internal/service/app/health.HandlerConfig) net/http.Handler",
       "doc": "NewLivenessHandler serves the liveness probe: 200 unless the process is\nirrecoverable.\n\nNothing outside the process can make this return 503, because nothing\noutside the process can be registered on it — see core/app/health.SelfCheck.\n",
-      "file": "internal/service/app/health/handler.go",
+      "file": "internal/service/app/health/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -70359,7 +70359,7 @@
       "spelled": "func(registry corehealth.Health, cfg HandlerConfig) http.Handler",
       "canonical": "func(registry github.com/kitsunium/sdk/internal/core/app/health.Health, cfg github.com/kitsunium/sdk/internal/service/app/health.HandlerConfig) net/http.Handler",
       "doc": "NewReadinessHandler serves the readiness probe: 200 while the replica can\ntake traffic (healthy OR degraded), 503 otherwise — including while starting\nand after Drain.\n",
-      "file": "internal/service/app/health/handler.go",
+      "file": "internal/service/app/health/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -70371,7 +70371,7 @@
       "spelled": "func(registry corehealth.Health, cfg HandlerConfig) http.Handler",
       "canonical": "func(registry github.com/kitsunium/sdk/internal/core/app/health.Health, cfg github.com/kitsunium/sdk/internal/service/app/health.HandlerConfig) net/http.Handler",
       "doc": "NewStartupHandler serves the startup probe: 200 once every startup check has\npassed, 503 while any has not.\n",
-      "file": "internal/service/app/health/handler.go",
+      "file": "internal/service/app/health/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -70541,7 +70541,7 @@
       "spelled": "func(text string) EntryValue",
       "canonical": "func(text string) github.com/kitsunium/sdk/internal/service/app/i18n.EntryValue",
       "doc": "Plain returns an uncounted [EntryValue].\n",
-      "file": "internal/service/app/i18n/entry_value.go",
+      "file": "internal/service/app/i18n/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -70553,7 +70553,7 @@
       "spelled": "func(forms map[string]string) EntryValue",
       "canonical": "func(forms map[string]string) github.com/kitsunium/sdk/internal/service/app/i18n.EntryValue",
       "doc": "PluralForms returns a counted [EntryValue] whose patterns are keyed by CLDR\ncategory name.\n\nA non-nil, EMPTY map still marks the entry counted, and is refused at load\nfor missing `other` — which is the honest answer to a translator who wrote\n`\"cart.items\": {}`.\n",
-      "file": "internal/service/app/i18n/entry_value.go",
+      "file": "internal/service/app/i18n/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -70604,7 +70604,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "Valid reports whether p describes a language.\n\nIt reads the category SET rather than the rule, because Japanese and Chinese\nlegitimately carry no rule and are nonetheless perfectly valid entries. The\nzero PluralValue describes nothing, and it is the only value this reports\nfalse for.\n",
-      "file": "internal/service/app/i18n/plural_value.go",
+      "file": "internal/service/app/i18n/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -70718,7 +70718,7 @@
       "spelled": "func(tag corei18n.TagValue, key corei18n.Key) (message corei18n.MessageValue, ok bool)",
       "canonical": "func(tag github.com/kitsunium/sdk/internal/core/app/i18n.TagValue, key github.com/kitsunium/sdk/internal/core/app/i18n.Key) (message github.com/kitsunium/sdk/internal/core/app/i18n.MessageValue, ok bool)",
       "doc": "Lookup returns the message registered for exactly (tag, key). It performs no\nfallback and no plural selection — see [corei18n.Catalog].\n",
-      "file": "internal/service/app/i18n/store.go",
+      "file": "internal/service/app/i18n/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -71205,7 +71205,7 @@
       "spelled": "func() corelc.ComponentValue",
       "canonical": "func() github.com/kitsunium/sdk/internal/core/app/lifecycle.ComponentValue",
       "doc": "Component returns the supervisor as a Lifecycle component: its name, Start\nas the component's Start, Stop as its Stop — so the Lifecycle budgets the\nwait for the function to return like any other shutdown.\n",
-      "file": "internal/service/app/lifecycle/supervise.go",
+      "file": "internal/service/app/lifecycle/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -71500,7 +71500,7 @@
       "spelled": "func(keep int) coremail.FullTransport",
       "canonical": "func(keep int) github.com/kitsunium/sdk/internal/core/app/mail.FullTransport",
       "doc": "NewCapture returns the transport a development server and a test deliver\nthrough: NewMemory's double — it composes every message, refuses what SMTP\nrefuses, dials nothing — keeping only the last keep deliveries, the oldest\ndropped first. Sent reads them, raw bytes included, for a mailbox to show or\na test to read a link from; Reset empties it.\n\nNewMemory keeps everything, which is what a test that sends three messages\nwants; a server that runs for days and captures every mail it would have\nsent needs a bound. A non-positive keep is [DefaultCaptureKeep]: its zero\nhas one reading, \"I did not think about it\", and a mailbox of the last two\nhundred is the answer that needs no explanation (ADR 0031).\n",
-      "file": "internal/service/app/mail/memory.go",
+      "file": "internal/service/app/mail/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -71512,7 +71512,7 @@
       "spelled": "func(cfg ComposerConfig) *Composer",
       "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/app/mail.ComposerConfig) *github.com/kitsunium/sdk/internal/service/app/mail.Composer",
       "doc": "NewComposer returns a composer wired from cfg.\n",
-      "file": "internal/service/app/mail/composer.go",
+      "file": "internal/service/app/mail/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -71524,7 +71524,7 @@
       "spelled": "func() coremail.FullTransport",
       "canonical": "func() github.com/kitsunium/sdk/internal/core/app/mail.FullTransport",
       "doc": "NewMemory returns a transport that composes every message and keeps the\nresult instead of dialling anything.\n\nIt COMPOSES, and that is the whole design. A stub that recorded the Message\nvalue would accept a subject carrying a CRLF, an inline attachment with no\nbody, a Bcc the caller expected in a header — every refusal the SMTP\ntransport makes, made nowhere — and a consumer's test suite would pass right\nup until production. Because this transport runs the same composer, a message\nrefused in production is refused in the test that was supposed to catch it,\nwith the same typed error.\n\nIt takes no arguments for the same reason core/data/vfs.NewMem does: every knob it\ncould offer is one a consumer's test must set before it can assert anything,\nand the value of a double is that it costs one line.\n\nSafe for concurrent use.\n",
-      "file": "internal/service/app/mail/memory.go",
+      "file": "internal/service/app/mail/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -72469,7 +72469,7 @@
       "spelled": "func(maxConcurrent int) coreres.Runner",
       "canonical": "func(maxConcurrent int) github.com/kitsunium/sdk/internal/core/app/resilience.Runner",
       "doc": "NewBulkhead returns a Runner that admits at most maxConcurrent simultaneous\noperations (clamped to >= 1). Excess calls return BulkheadFull immediately\n(reject mode — no queuing).\n",
-      "file": "internal/service/app/resilience/bulkhead.go",
+      "file": "internal/service/app/resilience/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -72481,7 +72481,7 @@
       "spelled": "func(cfg BreakerConfig) coreres.Runner",
       "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/app/resilience.BreakerConfig) github.com/kitsunium/sdk/internal/core/app/resilience.Runner",
       "doc": "NewCircuitBreaker returns a Runner guarding op with a Closed→Open→HalfOpen\nbreaker. Open calls return CircuitOpen until OpenDuration elapses; a\nnon-positive OpenDuration clamps to defaultOpenDuration, because a breaker\nwhose cooldown is zero admits the next call immediately and therefore\nprotects nothing (ADR 0031). An error rejected by cfg.Retryable is returned\nverbatim and left out of the state machine entirely, so deterministic\nfailures cannot trip the breaker.\n",
-      "file": "internal/service/app/resilience/breaker.go",
+      "file": "internal/service/app/resilience/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -72493,7 +72493,7 @@
       "spelled": "func(cfg FallbackConfig) coreres.Runner",
       "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/app/resilience.FallbackConfig) github.com/kitsunium/sdk/internal/core/app/resilience.Runner",
       "doc": "NewFallback returns a Runner that runs cfg.Fallback when the Operation passed\nto Run fails, and returns nil when the fallback succeeds — that masking IS\nthe policy. When both fail the result is FallbackFailed, carrying both\nmessages as fields so neither failure is lost.\n\nA cancelled context is reported as itself, never as FallbackFailed: when it\nis already dead after the primary the fallback does not run at all, and when\nit dies WHILE the fallback runs, a failed fallback returns ctx.Err(). A\nfallback that succeeds despite a late cancellation still returns nil — the\nwork was done.\n\nA nil cfg.Fallback is refused: every call returns PolicyMisconfigured without\nrunning the operation (ADR 0031). A fallback policy with no fallback would\nrun the primary and pass its error through unchanged — indistinguishable\nfrom no policy at all, while the caller believes their plan B is in place.\n\nThe primary error is NOT surfaced when the fallback succeeds; that is what a\nfallback is for. A caller who needs to know how often plan B fires\ninstruments the fallback Operation itself, which is an ordinary closure.\n",
-      "file": "internal/service/app/resilience/fallback.go",
+      "file": "internal/service/app/resilience/decl_gen.go",
       "layer": "service",
       "family": "app"
     },
@@ -72553,7 +72553,7 @@
       "spelled": "func(d time.Duration) coreres.Runner",
       "canonical": "func(d time.Duration) github.com/kitsunium/sdk/internal/core/app/resilience.Runner",
       "doc": "NewTimeout returns a Runner that fails an Operation with TimeoutExceeded if it\ndoes not finish within d. The Operation MUST honour ctx for the deadline to\nfire promptly (a ctx-ignoring op caps precision at op granularity).\n\nA non-positive d is refused: every call returns PolicyMisconfigured without\nrunning the operation (ADR 0031). context.WithTimeout(ctx, 0) yields an\nalready-expired context, so the previous behaviour failed even an\ninstantaneous operation with TimeoutExceeded — a policy that could never\nadmit anything, reporting it with the error it uses when it is working.\n",
-      "file": "internal/service/app/resilience/timeout.go",
+      "file": "internal/service/app/resilience/decl_gen.go",
       "layer": "service",
       "family": "app"
     },

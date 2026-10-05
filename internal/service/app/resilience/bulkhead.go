@@ -12,10 +12,9 @@ type bulkhead struct {
 	slots chan struct{}
 }
 
-// NewBulkhead returns a Runner that admits at most maxConcurrent simultaneous
-// operations (clamped to >= 1). Excess calls return BulkheadFull immediately
-// (reject mode — no queuing).
-func NewBulkhead(maxConcurrent int) coreres.Runner {
+// newBulkhead is NewBulkhead's body: decl_gen.go writes NewBulkhead, from the
+// design, as one call of it.
+func newBulkhead(maxConcurrent int) coreres.Runner {
 	//: at least one slot so the runner always admits a lone caller.
 	if maxConcurrent < 1 {
 		//: clamp non-positive limits to a single slot.

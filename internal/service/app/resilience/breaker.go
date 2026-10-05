@@ -33,14 +33,9 @@ type circuitBreaker struct {
 	openedAt  time.Time
 }
 
-// NewCircuitBreaker returns a Runner guarding op with a Closed→Open→HalfOpen
-// breaker. Open calls return CircuitOpen until OpenDuration elapses; a
-// non-positive OpenDuration clamps to defaultOpenDuration, because a breaker
-// whose cooldown is zero admits the next call immediately and therefore
-// protects nothing (ADR 0031). An error rejected by cfg.Retryable is returned
-// verbatim and left out of the state machine entirely, so deterministic
-// failures cannot trip the breaker.
-func NewCircuitBreaker(cfg BreakerConfig) coreres.Runner {
+// newCircuitBreaker is NewCircuitBreaker's body: decl_gen.go writes NewCircuitBreaker, from the
+// design, as one call of it.
+func newCircuitBreaker(cfg BreakerConfig) coreres.Runner {
 	//: default the clock to the system source.
 	clk := cfg.Clock
 	//: a nil clock falls back to the system source.

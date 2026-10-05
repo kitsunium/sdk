@@ -1174,6 +1174,7 @@ packages:
           - name: text
             type: string
         name: Plain
+        impl: plain
         out:
           - type: EntryValue
       - doc: |-
@@ -1187,6 +1188,7 @@ packages:
           - name: forms
             type: map[string]string
         name: PluralForms
+        impl: pluralForms
         out:
           - type: EntryValue
       - doc: |-
@@ -1601,6 +1603,7 @@ packages:
               zero PluralValue describes nothing, and it is the only value this reports
               false for.
             name: Valid
+            impl: valid
             out:
               - type: bool
             recv: value
@@ -1769,6 +1772,7 @@ packages:
               - name: key
                 type: corei18n.Key
             name: Lookup
+            impl: lookup
             out:
               - name: message
                 type: corei18n.MessageValue

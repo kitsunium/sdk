@@ -13,16 +13,9 @@ type timeoutRunner struct {
 	timeout time.Duration
 }
 
-// NewTimeout returns a Runner that fails an Operation with TimeoutExceeded if it
-// does not finish within d. The Operation MUST honour ctx for the deadline to
-// fire promptly (a ctx-ignoring op caps precision at op granularity).
-//
-// A non-positive d is refused: every call returns PolicyMisconfigured without
-// running the operation (ADR 0031). context.WithTimeout(ctx, 0) yields an
-// already-expired context, so the previous behaviour failed even an
-// instantaneous operation with TimeoutExceeded — a policy that could never
-// admit anything, reporting it with the error it uses when it is working.
-func NewTimeout(d time.Duration) coreres.Runner {
+// newTimeout is NewTimeout's body: decl_gen.go writes NewTimeout, from the
+// design, as one call of it.
+func newTimeout(d time.Duration) coreres.Runner {
 	//: a deadline IS this policy — there is no SDK-side duration that is not a
 	//: guess at the caller's requirement, so refuse rather than invent one.
 	if d <= 0 {

@@ -10,8 +10,9 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 )
 
-// NewComposer returns a composer wired from cfg.
-func NewComposer(cfg ComposerConfig) *Composer {
+// newComposer is NewComposer's body: decl_gen.go writes NewComposer, from the
+// design, as one call of it.
+func newComposer(cfg ComposerConfig) *Composer {
 	composer := &Composer{clock: cfg.Clock, random: cfg.Rand}
 	//: the system clock is the only defensible "now".
 	if composer.clock == nil {
