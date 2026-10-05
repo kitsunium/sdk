@@ -80,6 +80,7 @@ packages:
           NewManualClock returns a ManualClock reading start. Any instant is legal —
           before the Unix epoch, after 2038, in any location — which is the point:
           unlike testing/synctest's bubble clock, the origin is the caller's choice.
+        impl: newManualClock
         in:
           - name: start
             type: time.Time
@@ -88,7 +89,8 @@ packages:
           - type: "*ManualClock"
     path: github.com/kitsunium/sdk/internal/kernel/clock
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Clock produces timestamps and durations.
           Implementations must be safe for concurrent use by multiple goroutines.
 
@@ -108,7 +110,8 @@ packages:
               out:
                 - type: time.Duration
         name: Clock
-      - doc: |-
+      - decl: true
+        doc: |-
           Timed is a [Clock] that also drives waiting. It is the interface production
           code asks for when it needs both halves — a scheduler, a timeout, a retry
           backoff — and the one both [System] and [ManualClock] satisfy.
@@ -117,7 +120,8 @@ packages:
             - Clock
             - Waiter
         name: Timed
-      - doc: |-
+      - decl: true
+        doc: |-
           ManualClock is a [Timed] whose instant moves ONLY when the caller moves it,
           with [ManualClock.Advance] or [ManualClock.Set]. Every wait it hands out —
           After, NewTimer, NewTicker, Sleep — is due at an absolute instant on this
@@ -144,6 +148,10 @@ packages:
               depends on the woken goroutine having run, synchronise on something the
               goroutine itself signals; [ManualClock.BlockUntil] closes the mirror
               race (advancing before the goroutine has registered its wait).
+        implements:
+          - Clock
+          - Waiter
+          - Timed
         methods:
           - doc: Now returns the clock's current instant.
             name: Now
@@ -173,6 +181,7 @@ packages:
           - doc: |-
               NewTimer returns a one-shot [Timer] due d from the clock's current instant.
               A non-positive d is already elapsed and fires before NewTimer returns.
+            impl: newTimer
             in:
               - name: d
                 type: time.Duration
@@ -193,6 +202,7 @@ packages:
           - doc: |-
               Sleep blocks the calling goroutine until d has elapsed on this clock — which
               means until another goroutine advances it. A non-positive d returns at once.
+            impl: sleep
             in:
               - name: d
                 type: time.Duration
@@ -249,8 +259,29 @@ packages:
             recv: pointer
         name: ManualClock
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - doc: |-
+                mu guards every field below and is the lock cond is built on. It is an
+                RWMutex so the read-only accessors do not serialise a test's readers
+                against each other while a driving goroutine is between advances.
+              name: mu
+              type: sync.RWMutex
+            - doc: cond is broadcast whenever the wait set changes, so BlockUntil wakes.
+              name: cond
+              type: "*sync.Cond"
+            - doc: now is the clock's current instant.
+              name: now
+              type: time.Time
+            - doc: waits holds every armed wait, in registration order.
+              name: waits
+              type: "[]*manualWait"
+            - doc: |-
+                seq numbers registrations so waits due at the same instant fire in a
+                deterministic order (earliest registration first).
+              name: seq
+              type: uint64
+      - decl: true
+        doc: |-
           Ticker is a repeating wake-up scheduled on some clock. It mirrors the usable
           surface of *time.Ticker — including its drop-on-slow-receiver contract: the
           delivery channel holds at most one pending tick, and ticks that cannot be
@@ -280,7 +311,8 @@ packages:
                   type: time.Duration
               name: Reset
         name: Ticker
-      - doc: |-
+      - decl: true
+        doc: |-
           Timer is a one-shot wake-up scheduled on some clock. It mirrors the usable
           surface of *time.Timer, with one unavoidable difference: the stdlib exposes
           the delivery channel as a FIELD (t.C), and no interface can require a field,
@@ -313,7 +345,8 @@ packages:
               out:
                 - type: bool
         name: Timer
-      - doc: |-
+      - decl: true
+        doc: |-
           Waiter suspends a caller until a duration has elapsed on some clock. It is
           the half of the time abstraction that [Clock] deliberately does not carry.
 

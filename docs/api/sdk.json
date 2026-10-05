@@ -66919,7 +66919,7 @@
       "spelled": "interface{Now() time.Time; Since(t time.Time) time.Duration}",
       "canonical": "interface{Now() time.Time; Since(t time.Time) time.Duration}",
       "doc": "Clock produces timestamps and durations.\nImplementations must be safe for concurrent use by multiple goroutines.\n\nThis interface is DELIBERATELY not extended: see the package comment. New\ntime capabilities land on [Waiter] and are consumed through [Timed].\n",
-      "file": "internal/kernel/clock/clock.go",
+      "file": "internal/kernel/clock/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -66932,7 +66932,7 @@
       "spelled": "func() time.Time",
       "canonical": "func() time.Time",
       "doc": "Now returns the current instant.\n",
-      "file": "internal/kernel/clock/clock.go",
+      "file": "internal/kernel/clock/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -66945,7 +66945,7 @@
       "spelled": "func(t time.Time) time.Duration",
       "canonical": "func(t time.Time) time.Duration",
       "doc": "Since returns the elapsed duration between the given instant and Now.\n",
-      "file": "internal/kernel/clock/clock.go",
+      "file": "internal/kernel/clock/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -66957,7 +66957,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "ManualClock is a [Timed] whose instant moves ONLY when the caller moves it,\nwith [ManualClock.Advance] or [ManualClock.Set]. Every wait it hands out —\nAfter, NewTimer, NewTicker, Sleep — is due at an absolute instant on this\nclock, and fires exactly when the caller drives the clock past that instant.\nNo wall-clock time passes, so a test asserts cadence and ordering instead of\nsleeping and hoping.\n\nIt is a concrete struct, not an interface, for the same reason\nrecycler.Pool and snapshot.Value are: there is one implementation, and a\nsingle-impl interface would be over-abstraction. Always used behind the\npointer returned by [NewManualClock] — the embedded mutex and cond must not\nbe copied.\n\nSafe for concurrent use: every field is guarded by mu, and each wait's\nchannel is created once at registration and never reassigned.\n\nTwo hazards, both inherent to a clock that only a caller can move:\n\n  - [ManualClock.Sleep] blocks until ANOTHER goroutine advances the clock.\n    A test that sleeps on its own goroutine with nobody to advance hangs\n    until the test binary's timeout. Sleep on the code under test, advance\n    from the test.\n  - Advance wakes a waiter but does not schedule it. When the assertion\n    depends on the woken goroutine having run, synchronise on something the\n    goroutine itself signals; [ManualClock.BlockUntil] closes the mirror\n    race (advancing before the goroutine has registered its wait).\n",
-      "file": "internal/kernel/clock/manual.go",
+      "file": "internal/kernel/clock/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -67022,7 +67022,7 @@
       "spelled": "func(d time.Duration) Timer",
       "canonical": "func(d time.Duration) github.com/kitsunium/sdk/internal/kernel/clock.Timer",
       "doc": "NewTimer returns a one-shot [Timer] due d from the clock's current instant.\nA non-positive d is already elapsed and fires before NewTimer returns.\n",
-      "file": "internal/kernel/clock/manual.go",
+      "file": "internal/kernel/clock/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -67087,7 +67087,7 @@
       "spelled": "func(d time.Duration)",
       "canonical": "func(d time.Duration)",
       "doc": "Sleep blocks the calling goroutine until d has elapsed on this clock — which\nmeans until another goroutine advances it. A non-positive d returns at once.\n",
-      "file": "internal/kernel/clock/manual.go",
+      "file": "internal/kernel/clock/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -67099,7 +67099,7 @@
       "spelled": "func(start time.Time) *ManualClock",
       "canonical": "func(start time.Time) *github.com/kitsunium/sdk/internal/kernel/clock.ManualClock",
       "doc": "NewManualClock returns a ManualClock reading start. Any instant is legal —\nbefore the Unix epoch, after 2038, in any location — which is the point:\nunlike testing/synctest's bubble clock, the origin is the caller's choice.\n",
-      "file": "internal/kernel/clock/manual.go",
+      "file": "internal/kernel/clock/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -67123,7 +67123,7 @@
       "spelled": "interface{C() <-chan time.Time; Reset(d time.Duration); Stop()}",
       "canonical": "interface{C() <-chan time.Time; Reset(d time.Duration); Stop()}",
       "doc": "Ticker is a repeating wake-up scheduled on some clock. It mirrors the usable\nsurface of *time.Ticker — including its drop-on-slow-receiver contract: the\ndelivery channel holds at most one pending tick, and ticks that cannot be\ndelivered are discarded rather than queued.\n\nImplementations must be safe for concurrent use by multiple goroutines.\n",
-      "file": "internal/kernel/clock/ticker.go",
+      "file": "internal/kernel/clock/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -67136,7 +67136,7 @@
       "spelled": "func() <-chan time.Time",
       "canonical": "func() <-chan time.Time",
       "doc": "C returns the channel on which each tick instant is delivered. The same\nchannel is returned by every call; it is never closed.\n",
-      "file": "internal/kernel/clock/ticker.go",
+      "file": "internal/kernel/clock/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -67149,7 +67149,7 @@
       "spelled": "func(d time.Duration)",
       "canonical": "func(d time.Duration)",
       "doc": "Reset halts the Ticker and restarts it with period d: no tick from\nbefore the call is received after it, and the next arrives once d has\nelapsed. It PANICS on a non-positive d; see the package comment.\n",
-      "file": "internal/kernel/clock/ticker.go",
+      "file": "internal/kernel/clock/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -67162,7 +67162,7 @@
       "spelled": "func()",
       "canonical": "func()",
       "doc": "Stop halts the Ticker. It does NOT close the channel, so a concurrent\nreceiver never sees a spurious zero value, and after Stop returns no\ntick from before the call is received — the guarantee time.Ticker.Stop\nmakes since Go 1.23, whose channel is synchronous.\n",
-      "file": "internal/kernel/clock/ticker.go",
+      "file": "internal/kernel/clock/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -67174,7 +67174,7 @@
       "spelled": "interface{Clock; Waiter}",
       "canonical": "interface{github.com/kitsunium/sdk/internal/kernel/clock.Clock; github.com/kitsunium/sdk/internal/kernel/clock.Waiter}",
       "doc": "Timed is a [Clock] that also drives waiting. It is the interface production\ncode asks for when it needs both halves — a scheduler, a timeout, a retry\nbackoff — and the one both [System] and [ManualClock] satisfy.\n",
-      "file": "internal/kernel/clock/clock.go",
+      "file": "internal/kernel/clock/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -67186,7 +67186,7 @@
       "spelled": "interface{C() <-chan time.Time; Reset(d time.Duration) bool; Stop() bool}",
       "canonical": "interface{C() <-chan time.Time; Reset(d time.Duration) bool; Stop() bool}",
       "doc": "Timer is a one-shot wake-up scheduled on some clock. It mirrors the usable\nsurface of *time.Timer, with one unavoidable difference: the stdlib exposes\nthe delivery channel as a FIELD (t.C), and no interface can require a field,\nso it is a method here.\n\nImplementations must be safe for concurrent use by multiple goroutines.\n",
-      "file": "internal/kernel/clock/timer.go",
+      "file": "internal/kernel/clock/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -67199,7 +67199,7 @@
       "spelled": "func() <-chan time.Time",
       "canonical": "func() <-chan time.Time",
       "doc": "C returns the channel on which the fire instant is delivered. The same\nchannel is returned by every call; it is never closed.\n",
-      "file": "internal/kernel/clock/timer.go",
+      "file": "internal/kernel/clock/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -67212,7 +67212,7 @@
       "spelled": "func(d time.Duration) bool",
       "canonical": "func(d time.Duration) bool",
       "doc": "Reset re-arms the Timer to fire d from the clock's current instant and\nreports whether it was still armed. After Reset returns, no value from a\nprevious arming is left pending on C. A non-positive d fires at once.\n",
-      "file": "internal/kernel/clock/timer.go",
+      "file": "internal/kernel/clock/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -67225,7 +67225,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "Stop prevents a not-yet-fired Timer from firing and reports whether the\nTimer was still armed. After Stop returns, no value from a previous\narming is left pending on C.\n",
-      "file": "internal/kernel/clock/timer.go",
+      "file": "internal/kernel/clock/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -67237,7 +67237,7 @@
       "spelled": "interface{After(d time.Duration) <-chan time.Time; NewTicker(d time.Duration) Ticker; NewTimer(d time.Duration) Timer; Sleep(d time.Duration)}",
       "canonical": "interface{After(d time.Duration) <-chan time.Time; NewTicker(d time.Duration) github.com/kitsunium/sdk/internal/kernel/clock.Ticker; NewTimer(d time.Duration) github.com/kitsunium/sdk/internal/kernel/clock.Timer; Sleep(d time.Duration)}",
       "doc": "Waiter suspends a caller until a duration has elapsed on some clock. It is\nthe half of the time abstraction that [Clock] deliberately does not carry.\n\nImplementations must be safe for concurrent use by multiple goroutines.\n",
-      "file": "internal/kernel/clock/waiter.go",
+      "file": "internal/kernel/clock/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -67250,7 +67250,7 @@
       "spelled": "func(d time.Duration) <-chan time.Time",
       "canonical": "func(d time.Duration) <-chan time.Time",
       "doc": "After returns a channel that delivers the fire instant once d has\nelapsed. A non-positive d delivers at once.\n",
-      "file": "internal/kernel/clock/waiter.go",
+      "file": "internal/kernel/clock/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -67263,7 +67263,7 @@
       "spelled": "func(d time.Duration) Ticker",
       "canonical": "func(d time.Duration) github.com/kitsunium/sdk/internal/kernel/clock.Ticker",
       "doc": "NewTicker returns a repeating [Ticker] of period d. It PANICS on a\nnon-positive d; see the package comment.\n",
-      "file": "internal/kernel/clock/waiter.go",
+      "file": "internal/kernel/clock/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -67276,7 +67276,7 @@
       "spelled": "func(d time.Duration) Timer",
       "canonical": "func(d time.Duration) github.com/kitsunium/sdk/internal/kernel/clock.Timer",
       "doc": "NewTimer returns a one-shot [Timer] due d from now. A non-positive d\nfires at once.\n",
-      "file": "internal/kernel/clock/waiter.go",
+      "file": "internal/kernel/clock/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -67289,7 +67289,7 @@
       "spelled": "func(d time.Duration)",
       "canonical": "func(d time.Duration)",
       "doc": "Sleep blocks the calling goroutine until d has elapsed on this clock.\nA non-positive d returns at once.\n",
-      "file": "internal/kernel/clock/waiter.go",
+      "file": "internal/kernel/clock/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -69783,7 +69783,7 @@
       "spelled": "func(v string) bool",
       "canonical": "func(v string) bool",
       "doc": "IsPseudoVersion reports whether v is a Go pseudo-version: a valid version\nwhose pre-release ends in \"yyyymmddhhmmss-REVISION\", immediately preceded\neither by nothing, when the version is vX.0.0, or by an identifier \"0\" —\nthe three shapes of the Go modules reference, with or without build\nmetadata such as \"+incompatible\".\n\nIt recognises the SHAPE, as the toolchain's own pattern does: a stamp whose\nfourteen digits are not a real instant still makes a pseudo-version, and\n[PseudoVersionTime] is what reports that the time does not read.\n",
-      "file": "internal/kernel/semver/pseudo.go",
+      "file": "internal/kernel/semver/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -69795,7 +69795,7 @@
       "spelled": "func(v string) bool",
       "canonical": "func(v string) bool",
       "doc": "IsValid reports whether v is a version: SemVer 2.0.0 with a leading \"v\",\nor one of the shorthands \"vMAJOR\" and \"vMAJOR.MINOR\".\n",
-      "file": "internal/kernel/semver/semver.go",
+      "file": "internal/kernel/semver/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -69807,7 +69807,7 @@
       "spelled": "func(v string) string",
       "canonical": "func(v string) string",
       "doc": "Prerelease returns the pre-release part of v with its leading hyphen —\n\"-rc.1\" for \"v1.0.0-rc.1+build\" — or \"\" when v has none: a release, a\nshorthand, or a string that is not a version, which [IsValid] tells apart.\n",
-      "file": "internal/kernel/semver/semver.go",
+      "file": "internal/kernel/semver/decl_gen.go",
       "layer": "kernel",
       "family": "root"
     },
