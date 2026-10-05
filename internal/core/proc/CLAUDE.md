@@ -41,9 +41,9 @@ the package comment is `doc.go`'s alone, written by kit from the design (ADR 016
 | File | Surface |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `ExitValue`, `LimitValue`, `MemorySource`, `MemoryLimitValue`, `NotificationValue`, `Resource`, `Signal`, `Spec` and `StdioMode` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `proc.go` | `Resource` enum (`ResourceNoFile`/`ResourceNProc`/`ResourceCore`/`ResourceAS`/`ResourceCPU`/`ResourceFSize`/`ResourceData`/`ResourceStack`/`ResourceMemLock`; the zero is `ResourceUnknown`) + `String`/`Known` |
 | `signal.go` (+ `signal_unix.go` / `signal_other.go`) | `Signal` value type: `Parse` / `String` / `OS` / `Int` / `Known`; platform name table |
-| `spec.go` | `Spec` — process spawn spec (path/args/dir/env, creds, pgroup/session, rlimit/nice/umask/oom, **CgroupPath** for pre-exec cgroup v2 placement, **stdio**, **ExtraFiles** for socket activation). `Path` is a file path as written, or a bare name the service searches in the CHILD's PATH (`Env`'s, else the parent's) with os/exec's rules |
 | `stdio.go` | `StdioMode` — how a child's stdin/stdout/stderr are wired (`StdioInherit`/`StdioNull`/`StdioCapture`) + `String`/`Known` |
 | `exit.go` | `ExitValue` — exit code, terminating signal, CPU times, max RSS + `Success` |
 | `limit.go` | `LimitValue` — soft/hard rlimit pair + `LimitInfinity` |

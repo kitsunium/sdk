@@ -31339,7 +31339,7 @@
       "spelled": "func(ctx context.Context, invocation InvocationValue) error",
       "canonical": "func(ctx context.Context, invocation github.com/kitsunium/sdk/internal/core/app/cli.InvocationValue) error",
       "doc": "Action is what one command DOES. It receives the context [Executor.Execute]\nwas called with — a cancelled context is how a caller aborts a running\ncommand — and the resolved [InvocationValue].\n\nReturning a non-nil error is how a command fails. If it is an *errs.Error\nthe SDK's origin-wins rule (CLAUDE.md rule 6) preserves its Code and its\nexit status all the way out of Execute, so a command's own exit status is\nnever overwritten by the framework that called it.\n",
-      "file": "internal/core/app/cli/cli.go",
+      "file": "internal/core/app/cli/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -31368,7 +31368,7 @@
       "spelled": "func(flags *flag.FlagSet)",
       "canonical": "func(flags *flag.FlagSet)",
       "doc": "Binder declares one command's flags onto the set that will parse them.\n\nIt is handed the stdlib's *[flag.FlagSet] deliberately: every flag type the\nstdlib ships, and every [flag.Value] a caller has already written, works\nhere with no adapter. The set is fresh, its name is the command path, and\nits error handling is always [flag.ContinueOnError].\n\nA Binder MUST only touch the set it is given, and MUST be safe to call more\nthan once: the engine runs it once at construction to validate the\ndeclaration and to render help, and once per invocation to parse.\n\n# What concurrency the SDK cannot give you\n\nThe engine keeps no per-invocation state, so two concurrent\n[Executor.Execute] calls do not interfere. A Binder, however, usually writes\ninto a variable the CALLER closed over — fs.IntVar(&port, …) — and that\nvariable is the caller's, invisible to the SDK and written by every\nconcurrent invocation. Concurrent execution is therefore safe only when the\nBinder allocates its destination per call (fs.Int, fs.String, …) and the\n[Action] reads it back through [InvocationValue.Flags]. That is what those\nsets are for. The alternative would be the SDK taking a lock around memory\nit does not own, for a duration it cannot know.\n",
-      "file": "internal/core/app/cli/cli.go",
+      "file": "internal/core/app/cli/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -31573,7 +31573,7 @@
         }
       ],
       "doc": "CommandValue declares one command. The tree it forms is the whole\ndeclaration: the engine walks it to resolve an argument vector, and the help\nrenderer walks the SAME tree to render the text, so a command that exists\nand a command that is documented are one fact rather than two.\n\nA command is a LEAF or a GROUP, never both:\n\n  - a leaf has [CommandValue.Run] and no [CommandValue.Commands];\n  - a group has [CommandValue.Commands] and no Run.\n\nBoth other combinations are refused at construction. Neither Run nor\nCommands is an inert command — a name an operator can type that does\nnothing, which is exactly the zero value ADR 0031 refuses. Both is worse: it\nmakes `tool db migrate` mean \"run db with the argument migrate\" until\nsomebody adds a child named migrate, at which point the same command line\nsilently means something else. A declaration whose meaning changes when a\nSIBLING is added is not a declaration.\n\nCommandValue is a published concrete shape (pkg/v1/app/cli.Command aliases it),\nso ADR 0040 applies: it may still change while the module is v0, said out\nloud, and not after v1.\n",
-      "file": "internal/core/app/cli/cli_command.go",
+      "file": "internal/core/app/cli/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -31713,7 +31713,7 @@
         }
       ],
       "doc": "InvocationValue is one resolved command line: which command was reached,\nwhat was left over after its flags were parsed, the sets that parsed them,\nand the writer the command may print to.\n\nInvocationValue is a published concrete shape (pkg/v1/app/cli.Invocation aliases\nit), so ADR 0040 applies: it may still change while the module is v0, said\nout loud, and not after v1.\n",
-      "file": "internal/core/app/cli/cli_invocation.go",
+      "file": "internal/core/app/cli/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -32032,7 +32032,7 @@
         }
       ],
       "doc": "DeclaredValue declares the value one configuration key takes when NO Source\nsupplied it. It is the domain's answer to the question every configuration\nloader gets wrong: an absent key and a key explicitly set to the zero value\nare different statements, and only one of them may be overridden.\n\nA default is NOT a fallback applied to a zero value after decoding. It is a\nLAYER, merged under every Source before the decode happens, so presence is\ndecided while the operator's key still exists as a key. `timeout = 0` in a\nfile therefore stays 0, and an omitted `timeout` becomes the default —\nwhich a post-decode \"if zero then default\" can never distinguish.\n\nThe zero DeclaredValue declares nothing and is refused at construction: an\nempty Key names no configuration.\n\nA key that carries a default is never also REQUIRED. The two are mutually\nexclusive and the contradiction is refused at construction, because a\nrequired key the schema itself fills can never be missing — the requirement\nwould be a clause that cannot fire, and a rule that cannot fire is worse\nthan no rule: it is read as protection.\n\nDeclaredValue is a published concrete shape (pkg/v1/app/config.Default aliases\nit), so ADR 0040 applies: it may still change while the module is v0, said\nout loud, and not after v1.\n",
-      "file": "internal/core/app/config/schema.go",
+      "file": "internal/core/app/config/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -32143,7 +32143,7 @@
         }
       ],
       "doc": "OriginValue says which layer supplied the final value of one key of a load —\nand says it WITHOUT the value, which is the point: an origin is written to a\nstart-up log, a --show-config table, a diagnostics page, and a\nconfiguration value is routinely a password.\n\npkg/v1/app/config aliases it as Origin. It is a published shape the SDK RETURNS,\nso ADR 0040 applies with its full cost after v1.\n",
-      "file": "internal/core/app/config/origin.go",
+      "file": "internal/core/app/config/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -32436,7 +32436,7 @@
         }
       ],
       "doc": "DispatchValue reports what one [Bus.Publish] did: how many listeners ran,\nwhether one of them stopped the dispatch and which, how many never ran\nbecause of that, and how many failed.\n\nEvery field is a scalar, deliberately. A per-listener slice would allocate\non every publish — including the overwhelmingly common publish in which\nnothing goes wrong — and the per-listener detail already exists where it\nbelongs: each collected error carries the listener's name and the event's\ntype as fields. The report answers \"what happened to this dispatch\"; the\nerrors answer \"to whom\".\n",
-      "file": "internal/core/app/events/events_dispatch.go",
+      "file": "internal/core/app/events/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -32546,7 +32546,7 @@
       "spelled": "func(ctx context.Context, event any) error",
       "canonical": "func(ctx context.Context, event any) error",
       "doc": "Listener reacts to one published event. The dynamic type of event is\nexactly the [EventType] the subscription was registered for, so a listener\nmay assert it unconditionally — internal/service/app/events.On does that for\nthe caller and is the only registration path most code needs.\n\nDelivery is SYNCHRONOUS on the publisher's goroutine: a Listener that\nblocks blocks the publisher, and a Listener that takes a lock takes it in\nthe publisher's lock order. Keep it short, or hand off to something that\nowns its own goroutine — and if what you actually need is \"return now,\nfinish later, reliably\", see the package documentation's frontier.\n\nReturning [Halt] stops the dispatch: the listeners after this one in\npriority order are not called. Only a subscription that declared\n[SubscriptionValue.MayHalt] can do that; from any other listener it is a\nHALT_NOT_PERMITTED failure and the dispatch continues.\n\nReturning any other non-nil error is COLLECTED and the dispatch CONTINUES.\nThe other listeners are independent consequences of the same fact; making\ntheir delivery depend on this one's disk being full would reintroduce\nexactly the coupling a bus exists to remove.\n\nctx is the publisher's context, passed through untouched. The bus never\ninspects it: an event is a fact that has already happened, and cancelling\nhalf of its consequences produces the partial state the synchronous\ncontract exists to prevent. A Listener that must honour cancellation holds\nthe context and can.\n",
-      "file": "internal/core/app/events/events.go",
+      "file": "internal/core/app/events/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -32592,7 +32592,7 @@
       "spelled": "int",
       "canonical": "int",
       "doc": "Priority orders the listeners registered for one event type. LOWER RUNS\nFIRST, as with every ordering comparator in the stdlib, so a listener that\nmust observe the event before the others is registered at a negative\npriority and one that must clean up after them at a positive one.\n\nTwo subscriptions at the SAME priority run in REGISTRATION order — the\norder their Subscribe calls returned in. That is a promise, not an\nimplementation detail: a bus whose ties resolved by map iteration would\nproduce a different order on every run of the same program, and a listener\nset that works on Tuesday would be the same code that fails on Wednesday.\n\nEvery value is usable and none is reserved, so there is nothing here for\n[Bus.Subscribe] to refuse (ADR 0031: the zero value is the safe default,\nand the refusals this domain does make are in [InvalidSubscription]).\n",
-      "file": "internal/core/app/events/events_subscription.go",
+      "file": "internal/core/app/events/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -32639,7 +32639,7 @@
         }
       ],
       "doc": "SubscriptionValue is one named listener's registration against one event\ntype: what it is called, when it runs relative to its siblings, whether it\nis allowed to stop the dispatch, and what it does.\n\nThe zero value is not runnable and is refused by [Bus.Subscribe]\n([InvalidSubscription]) rather than accepted and silently skipped.\n",
-      "file": "internal/core/app/events/events_subscription.go",
+      "file": "internal/core/app/events/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -32736,7 +32736,7 @@
       "spelled": "func(ctx context.Context) error",
       "canonical": "func(ctx context.Context) error",
       "doc": "Check is the body of a startup or readiness check: work that may reach\noutside the process, bounded by the context it is given.\n\nIt MUST honour ctx. The engine cancels it when the check's own budget\nexpires, and a check that ignores that cancellation turns a probe endpoint\ninto a place the process can hang — the failure a health domain exists to\nprevent, not to cause.\n\nA nil error means the check passed. Any non-nil error means it failed; the\nerror travels verbatim into the report, and only its errs Public half is\never rendered into an HTTP body.\n",
-      "file": "internal/core/app/health/health.go",
+      "file": "internal/core/app/health/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -33168,7 +33168,7 @@
         }
       ],
       "doc": "LivenessCheckValue registers PROCESS-LOCAL evidence that this process is not\nirrecoverable. A liveness failure restarts the replica.\n\nIts body is a [SelfCheck] — a func() error, with no context — and that is\nthe whole mechanism by which a dependency check cannot land here: every API\nthat talks to something outside this process takes a context, and a\nSelfCheck has none to give it. `LivenessCheckValue{Check: db.PingContext}`\ndoes not compile, and neither does any assignment or conversion between the\ntwo function types.\n\nWhat a closure can still do, the type cannot prevent — but wrapping a\ndependency call in `func() error { return db.Ping() }`, inside a literal\nspelled Liveness, is a decision in the diff rather than a slip.\n\nThe zero value is not registrable and is refused by AddLiveness\n([InvalidCheck]).\n",
-      "file": "internal/core/app/health/health_check_liveness.go",
+      "file": "internal/core/app/health/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -33197,7 +33197,7 @@
       "spelled": "uint8",
       "canonical": "uint8",
       "doc": "Probe names which of the three questions is being asked. It is a closed set\nof three, and the three are not interchangeable — see the package comment.\n\nThe zero value is deliberately not one of them. A Probe is chosen by the\ncaller at every call site, and there is no defensible default: answering\n\"liveness\" to a caller who forgot to say what they wanted is how a\ndependency outage becomes a restart loop.\n",
-      "file": "internal/core/app/health/health_probe.go",
+      "file": "internal/core/app/health/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -33288,7 +33288,7 @@
         }
       ],
       "doc": "ReadinessCheckValue registers a check that gates ROUTING: the datastore, the\nbroker, the cache, the downstream API. This is where every dependency check\nbelongs, and the only registration that can express one.\n\nA readiness failure removes the replica from routing. It never restarts it,\nwhich is what stops a slow dependency from becoming a restart loop.\n\nThe zero value is not registrable and is refused by AddReadiness\n([InvalidCheck]).\n",
-      "file": "internal/core/app/health/health_check_readiness.go",
+      "file": "internal/core/app/health/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -33322,7 +33322,7 @@
         }
       ],
       "doc": "ReportValue is one probe's whole answer: the aggregate, and every check that\ncontributed to it.\n\nResults is empty for a probe that short-circuited — a readiness probe while\nthe process is starting or draining, a liveness probe while it is starting.\nThat emptiness is the honest report: those probes deliberately ran nothing,\nand listing checks with stale verdicts would suggest otherwise.\n",
-      "file": "internal/core/app/health/health_result.go",
+      "file": "internal/core/app/health/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -33371,7 +33371,7 @@
         }
       ],
       "doc": "ResultValue is one check's answer.\n\nIt reports DECISIONS, not only outcomes. A check abandoned at its budget\nproduces one, with TimedOut set — a report that only carried the checks that\nreturned would make a wedged dependency look exactly like one that was never\nregistered.\n",
-      "file": "internal/core/app/health/health_result.go",
+      "file": "internal/core/app/health/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -33396,7 +33396,7 @@
       "spelled": "func() error",
       "canonical": "func() error",
       "doc": "SelfCheck is the body of a LIVENESS check: process-local evidence that this\nprocess can still do its job.\n\nIt takes no context ON PURPOSE. Every API that talks to something outside\nthis process wants one, so a SelfCheck cannot hold a dependency call without\na closure that visibly throws the deadline away — which is a decision\nsomebody has to write down, not a slip.\n\nWhat belongs here: a supervised goroutine that stopped reporting, a queue\nthat has not drained in an hour, a deadlock detector, a broken in-memory\ninvariant. What does NOT belong here, ever: a database, a cache, a broker,\nan HTTP dependency, a DNS lookup, or a mutex whose holder is waiting on one\nof those.\n\nA nil error means the process is alive.\n",
-      "file": "internal/core/app/health/health.go",
+      "file": "internal/core/app/health/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -33442,7 +33442,7 @@
         }
       ],
       "doc": "StartupCheckValue registers a check that gates the startup probe: a\nmigration that must have run, a warm cache that must have filled, a\nconfiguration that must have been fetched.\n\nA startup check runs until it PASSES ONCE, and is then never run again. That\nlatch is per-check, so an expensive one-shot is not repeated because a\ncheaper sibling was still failing.\n\nThe zero value is not registrable and is refused by AddStartup\n([InvalidCheck]) rather than accepted and silently skipped.\n",
-      "file": "internal/core/app/health/health_check.go",
+      "file": "internal/core/app/health/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -33471,7 +33471,7 @@
       "spelled": "uint8",
       "canonical": "uint8",
       "doc": "Status is the verdict of one check or of a whole probe. It is a CLOSED set\nof three, ordered worst-first so that aggregating a set is `min` and the\nzero value is the conservative answer.\n\nThat ordering is deliberate and load-bearing (ADR 0031). A Status is\nreachable as a struct field, and if StatusHealthy were the zero value then a\nforgotten assignment — anywhere, in the SDK or in a caller's own reporting —\nwould read as \"everything is fine\". A forgotten assignment now reads as\n\"unhealthy\", which is wrong in the direction that gets noticed.\n",
-      "file": "internal/core/app/health/health_status.go",
+      "file": "internal/core/app/health/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -33577,7 +33577,7 @@
       "spelled": "map[string]string",
       "canonical": "map[string]string",
       "doc": "Args binds placeholder names to the text that replaces them.\n\nIt is map[string]string and deliberately not map[string]any. The values are\nsubstituted verbatim, so a caller that wants a number formatted for a locale\nmust format it — and discovers, at the call site, that this SDK does not\nship a locale-aware number formatter. An `any` here would call Go's default\nformatting instead and produce \"1234.5\" for a French reader, which is the\nsame bug with the discovery removed.\n\n# Where the values may come from, and where the PATTERNS may not\n\nA value is untrusted: it is a username, a filename, a count. It is inserted\nliterally and is never parsed, so a value containing \"{other}\" produces the\nsix characters and no second substitution. That is a property with a test.\n\nA message PATTERN is trusted input — it comes from a catalogue file the\ndeveloper ships, next to the code. A pattern assembled from user input would\nlet that user name a placeholder the caller happens to pass and read its\nvalue; the domain cannot detect that and does not try. See ADR 0063\n§\"What is NOT guaranteed\".\n\n# Nothing here escapes anything\n\nA rendered message is a string, never a trusted-HTML type. Placing it in a\npage goes through internal/service/app/view (ADR 0058), whose contextual\nescaping is aware of where the cursor is; escaping here as well would\ndouble-escape every apostrophe in every French sentence in the catalogue.\n",
-      "file": "internal/core/app/i18n/i18n.go",
+      "file": "internal/core/app/i18n/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -33886,7 +33886,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "CountValue is a quantity described by the CLDR plural operands, which is\nwhat a plural rule actually reads — never the Go number the caller started\nwith. pkg/v1/app/i18n publishes it as `Count`.\n\n# Why the caller states the DISPLAY precision\n\nCLDR's rules distinguish 1 from 1.0. In English \"1 file\" is `one` and\n\"1.0 files\" is `other`, because the operand v — the number of fraction\ndigits VISIBLE to the reader — is 0 in the first and 1 in the second. A\nfloat64 cannot carry that difference: 1.0 and 1 are the same bits. So the\ncaller supplies it, and [Int] is the shorthand for \"no fraction digits\".\n\n# The four operands implemented, and the four refused BY NAME\n\nImplemented: n (the absolute value), i (its integer part), v (the count of\nvisible fraction digits) and f (those digits as an integer). Together they\ndecide every rule of every language in this domain's supported set, which is\na checkable claim rather than a hope — see internal/service/app/i18n.\n\nRefused by name: w and t (the fraction digits with trailing zeros removed)\nand c/e (the compact-decimal exponent). No rule in the supported set reads\nw or t. c and e are refused for a harder reason: they exist to describe\n\"1M\" and \"1,2 mln\", and this domain ships no compact-decimal formatter, so\nan exponent could only ever be 0 here. The Romance `many` category, whose\nCLDR clause is written in terms of e, is therefore implemented at e = 0 —\nsee internal/service/app/i18n's rule table, which says so at each of the four\ncall sites.\n\nThe zero CountValue is the quantity zero with no fraction digits, which is a\nperfectly good quantity: \"0 files\" is a sentence, and refusing to describe\nit would make the zero value an obstacle rather than a hazard.\n",
-      "file": "internal/core/app/i18n/count_value.go",
+      "file": "internal/core/app/i18n/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -33987,7 +33987,7 @@
       "spelled": "uint8",
       "canonical": "uint8",
       "doc": "Form is a CLDR plural category: one of the six names the Unicode plural\nrules assign a quantity to.\n\n[FormOther] is the ZERO value, and that is ADR 0031's \"the zero value is the\nsafe one\" rather than an accident of ordering. CLDR guarantees every\nlanguage defines `other`; it is the only category that is always present, so\na [PluralRule] that forgets to set a result names the one form every message\nis required to carry — instead of naming `zero`, which most languages do not\nhave and which would turn a forgotten return into a lookup miss.\n",
-      "file": "internal/core/app/i18n/form.go",
+      "file": "internal/core/app/i18n/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -34089,7 +34089,7 @@
         }
       ],
       "doc": "FormPatternValue pairs a CLDR category with the compiled body that spells\nit, as a plural message carries it.\n\nIt is a slice element rather than a map entry because a message carries at\nmost five of these: a linear scan over five values in one cache line beats a\nhash, and it allocates nothing on the render path.\n",
-      "file": "internal/core/app/i18n/message_value.go",
+      "file": "internal/core/app/i18n/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -34224,7 +34224,7 @@
       "spelled": "string",
       "canonical": "string",
       "doc": "Key names a message inside a catalogue. It is a program identifier the\ndeveloper chooses — \"checkout.button.pay\" — and never prose: it is compared\nby byte equality, it travels in error fields, and it is what the renderer\nputs on screen when the translation is missing. That last use is why an\nempty key is refused: a blank on screen is a defect nobody reports.\n",
-      "file": "internal/core/app/i18n/message_value.go",
+      "file": "internal/core/app/i18n/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -34278,7 +34278,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "MessageValue is one translated message, compiled: its placeholders are\nparsed once, when the catalogue is built, so a malformed pattern fails at\nstartup and a render never parses anything. pkg/v1/app/i18n publishes it as\n`Message`.\n\nA MessageValue ALWAYS carries the [FormOther] pattern — the one category\nCLDR guarantees in every language — and carries the other five only when the\ntranslator supplied them. The zero MessageValue carries nothing and reports\n[PluralFormMissing] from [MessageValue.Format]; it is not an empty\ntranslation.\n\nA MessageValue does not know which language it is written in. That is\ndeliberate: the renderer walks the fallback chain and therefore already\nknows which language answered, and storing the tag here would put a second\ncopy of that fact where nothing checks it against the first. See the package\ncomment on why the plural rules follow the message.\n",
-      "file": "internal/core/app/i18n/message_value.go",
+      "file": "internal/core/app/i18n/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -34406,7 +34406,7 @@
         }
       ],
       "doc": "PartValue is one span of a compiled pattern: literal Text, or the Name of a\nplaceholder. Exactly one of the two is set — [NewPattern] refuses a span\nthat sets both or neither.\n\nThe two are told apart by which field is EMPTY rather than by a kind tag:\na placeholder name can never be empty, and a literal span never carries\none. One less byte per span and one less branch per render.\n",
-      "file": "internal/core/app/i18n/pattern.go",
+      "file": "internal/core/app/i18n/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -34418,7 +34418,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "PatternValue is one compiled message body: the spans a pattern's text was\nparsed into, in order.\n\nIts zero value is a pattern that was NEVER compiled, and it is not an empty\none: a [MessageValue] holding it reports [PluralFormMissing] rather than\nrendering \"\" and looking like a translation. NewPattern(nil) is the empty\npattern, compiled.\n",
-      "file": "internal/core/app/i18n/pattern.go",
+      "file": "internal/core/app/i18n/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -34447,7 +34447,7 @@
       "spelled": "func(count CountValue) Form",
       "canonical": "func(count github.com/kitsunium/sdk/internal/core/app/i18n.CountValue) github.com/kitsunium/sdk/internal/core/app/i18n.Form",
       "doc": "PluralRule reports which CLDR category a quantity falls in for ONE language.\n\nIt is a FUNC port rather than an interface, which satisfies ADR 0039\nstructurally: a func type cannot grow a method at all, so publishing it\nthrough pkg/v1/app/i18n cannot break a downstream implementation later. It is\nthe shape internal/core already uses for resilience.Operation,\nscheduler.Job, lifecycle.Start, validation.Constraint and authz.Policy.\n\nA rule MUST be total: every [CountValue] maps to a category, and the\ncategory is [FormOther] whenever no other clause matches. CLDR guarantees\n`other` exists in every language, which is why [FormOther] is the zero\n[Form] — ADR 0031's \"the zero value is the safe one\" applied to a port with\nno constructor to refuse in.\n",
-      "file": "internal/core/app/i18n/i18n.go",
+      "file": "internal/core/app/i18n/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -34459,7 +34459,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "TagValue is a language, optionally narrowed by a script and a region:\nexactly the `language[-Script][-REGION]` shape of BCP 47 and deliberately\nnothing else. pkg/v1/app/i18n publishes it as `Tag`.\n\nIt is a comparable struct, so it is a map key and an == operand, and it\nholds its canonical spelling, so [TagValue.String] allocates nothing. The\nzero TagValue is the absence of a tag: [TagValue.IsZero] reports it and\n[TagValue.String] renders \"\". ADR 0031 is honoured by REFUSAL rather than by\na default — no constructor in this domain reads a zero tag as \"use English\",\nbecause the SDK choosing a language for an application is exactly the silent\nwrong answer the domain exists to prevent.\n",
-      "file": "internal/core/app/i18n/tag_value.go",
+      "file": "internal/core/app/i18n/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -34954,7 +34954,7 @@
       "spelled": "string",
       "canonical": "string",
       "doc": "Scheme is the typed key under which a Generator registers (e.g. \"uuidv4\",\n\"uuidv7\", \"ulid\", \"snowflake\", \"nanoid\", \"ksuid\"). The zero value Scheme(\"\")\nis reserved invalid, mirroring codec.Format and transform.Algorithm.\n",
-      "file": "internal/core/app/id/id.go",
+      "file": "internal/core/app/id/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -35252,7 +35252,7 @@
         }
       ],
       "doc": "ComponentValue is one named unit of the application's startup order: what\nbrings it up, and what takes it down.\n\nThe zero value is not runnable and is refused by Add ([InvalidComponent])\nrather than accepted and silently skipped. Both halves are required: a\ncomponent with nothing to stop is still asked to declare that explicitly,\nbecause \"I forgot the teardown\" and \"there is no teardown\" are the same\nnil, and only one of them is a defect. `func(context.Context) error { return\nnil }` is two seconds of typing and it puts the claim in the diff.\n",
-      "file": "internal/core/app/lifecycle/lifecycle_component.go",
+      "file": "internal/core/app/lifecycle/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -35366,7 +35366,7 @@
       "spelled": "uint8",
       "canonical": "uint8",
       "doc": "Phase names which half of a component's contract a [TransitionValue]\nreports. It is a closed set of two: a component goes up or it goes down.\n",
-      "file": "internal/core/app/lifecycle/lifecycle_phase.go",
+      "file": "internal/core/app/lifecycle/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -35451,7 +35451,7 @@
       "spelled": "func(ctx context.Context) error",
       "canonical": "func(ctx context.Context) error",
       "doc": "Start brings one component up. It MUST honour ctx: the [Lifecycle] passes\nthe context Start was called with, so cancelling that context is how a\ncaller aborts a startup that is taking too long.\n\nReturning a non-nil error means the component is NOT up. The Lifecycle then\nstops every component that IS up, in reverse order, and never calls this\ncomponent's Stop — a Start that fails owns its own cleanup, which is the\nonly rule under which a Stop may assume its Start succeeded.\n",
-      "file": "internal/core/app/lifecycle/lifecycle.go",
+      "file": "internal/core/app/lifecycle/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -35480,7 +35480,7 @@
       "spelled": "func(ctx context.Context) error",
       "canonical": "func(ctx context.Context) error",
       "doc": "Stop takes one component down. It is called only for a component whose\n[Start] returned nil, and only once.\n\nctx carries this component's shutdown budget and is cancelled when that\nbudget expires. Cancellation is an ANNOUNCEMENT, not a severance: the\nLifecycle stops waiting, but it does not and cannot kill the goroutine, and\nit closes nothing on the component's behalf. A Stop that ignores ctx\ntherefore delays nothing except its own report — the components after it in\nthe reverse order each get their own full budget.\n",
-      "file": "internal/core/app/lifecycle/lifecycle.go",
+      "file": "internal/core/app/lifecycle/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -35592,7 +35592,7 @@
         }
       ],
       "doc": "TransitionValue reports one call the [Lifecycle] made into a component:\nwhich component, which half of its contract, when it began and ended, and\nwhat came back.\n\nIt reports DECISIONS, not only successes. A Stop abandoned at its budget\nproduces one too, with TimedOut set and an Err naming the component — a\nlifecycle that reported only the calls that returned would make a component\nwhich never stops look exactly like one that stops instantly, and would\nleave \"this component overran\" provable only by timing the process.\n",
-      "file": "internal/core/app/lifecycle/lifecycle_phase.go",
+      "file": "internal/core/app/lifecycle/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -36044,7 +36044,7 @@
         }
       ],
       "doc": "AddressValue is one RFC 5322 mailbox: an addr-spec and an optional display\nname.\n\nIt is deliberately NOT net/mail.Address, and the reason is measurable rather\nthan aesthetic. net/mail.Address.String() emits its Address field verbatim:\n\n\tmail.Address{Name: \"ok\", Address: \"u@exa\\r\\nmple.com\"}.String()\n\t  == \"\\\"ok\\\" <u@exa\\r\\nmple.com>\"\n\nThe CRLF survives into the header, which is the injection this whole domain\nexists to refuse. The display name is protected there (it is RFC 2047\nencoded, so a CRLF becomes \"=0D=0A\") and the address is not — so a caller who\nreached for the obvious stdlib helper would be protected on the field an\nattacker rarely controls and exposed on the one they usually do.\n",
-      "file": "internal/core/app/mail/address_value.go",
+      "file": "internal/core/app/mail/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -36091,7 +36091,7 @@
         }
       ],
       "doc": "AttachmentValue is one MIME body part carrying a file.\n\nThe distinction between an attachment and an inline image is ONE field.\nA non-empty ContentID makes the part inline: it is placed in a\nmultipart/related alongside the body (RFC 2387) and referenced from the HTML\nas cid:<ContentID> (RFC 2392 §2). An empty one makes it a regular attachment\nin a multipart/mixed (RFC 2046 §5.1.3).\n\nThat is why there is no Disposition field to set wrongly. The disposition and\nthe enclosing multipart subtype are two halves of one decision, and letting a\ncaller spell them separately is letting them disagree — which is exactly the\nmessage that renders as a broken image in one client and a stray attachment\nin another.\n",
-      "file": "internal/core/app/mail/attachment_value.go",
+      "file": "internal/core/app/mail/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -36521,7 +36521,7 @@
         }
       ],
       "doc": "DeliveryValue is one record of what a transport actually put on the wire.\n\nIt carries the composed BYTES and not the message, because those are two\ndifferent assertions. A test that checks the message checks what it itself\nbuilt a moment earlier; a test that checks Raw checks what the composer\nproduced — the encoded subject, the multipart structure, the absence of a\nBcc header — which is the only half that can be wrong.\n",
-      "file": "internal/core/app/mail/value.go",
+      "file": "internal/core/app/mail/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -36579,7 +36579,7 @@
         }
       ],
       "doc": "EnvelopeValue is what an SMTP session actually carries: one MAIL FROM and one\nor more RCPT TO (RFC 5321 §3.3). It is NOT the header block, and the\ndifference is the whole reason this type exists.\n\nA receiving MTA routes on the envelope and never on the headers. To, Cc and\nBcc are text a client renders; the envelope is the delivery instruction. They\nagree by convention and not by protocol, which is how a Bcc can exist at all\n— and how a forwarding rule can deliver a message to somebody who appears in\nno header.\n",
-      "file": "internal/core/app/mail/value.go",
+      "file": "internal/core/app/mail/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -36723,7 +36723,7 @@
         }
       ],
       "doc": "HeaderFieldValue is one additional header: a name and a value.\n\nIt is a slice element rather than a map entry for two reasons that both\nmatter: a map iterates in a random order, so the same message would compose\nto different bytes on different runs and no golden test could exist; and\nsome fields legitimately repeat (Received, References), which a map cannot\nexpress at all.\n",
-      "file": "internal/core/app/mail/header.go",
+      "file": "internal/core/app/mail/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -36977,7 +36977,7 @@
         }
       ],
       "doc": "MessageValue is one mail, as a value. It is deliberately a struct and not an\ninterface: a message has no behaviour worth abstracting, it is data, and a\nvalue can be built in a literal, compared field by field in a test, and\ncarried across a goroutine without a lock.\n\nNothing here is a wire format. The MIME structure the fields imply is chosen\nby the composer in internal/service/app/mail, and which parts appear is a pure\nfunction of which fields are populated — see that package's CLAUDE.md for\nthe table.\n\nEvery string field that reaches a header is validated by the guards in\ninternal/service/app/mail, which every transport runs before composing. The\nslices are never mutated by this package.\n",
-      "file": "internal/core/app/mail/message_value.go",
+      "file": "internal/core/app/mail/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -37532,7 +37532,7 @@
       "spelled": "func(ctx context.Context) error",
       "canonical": "func(ctx context.Context) error",
       "doc": "Operation is the unit of work a Runner guards. It MUST honour ctx\ncancellation (return promptly when ctx.Done fires) so timeout/cancellation\npropagate; a non-cancellable op caps a Timeout's precision at op granularity.\n\nThe port says nothing about idempotence, because most policies do not need\nit: retry replays an Operation only after it has failed, and every other\npolicy runs it at most once. The hedging policy is the exception — it runs\ncopies CONCURRENTLY, so a non-idempotent Operation produces a double effect\n(a double charge, a double insert) rather than a slow one. The SDK cannot\ndetect idempotence, so the hedging config makes the caller assert it in code\n(HedgeConfig.Idempotent) instead of trusting a doc comment.\n",
-      "file": "internal/core/app/resilience/resilience.go",
+      "file": "internal/core/app/resilience/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -37819,7 +37819,7 @@
         }
       ],
       "doc": "EntryValue is one registered pairing of a [Schedule] with a [Job], under a\nname that identifies it in every [ResultValue] and every error field.\n\nThe zero value is not runnable and is refused by Add ([InvalidEntry]) rather\nthan accepted and silently never fired.\n",
-      "file": "internal/core/app/scheduler/scheduler_entry.go",
+      "file": "internal/core/app/scheduler/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -37899,7 +37899,7 @@
       "spelled": "func(ctx context.Context) error",
       "canonical": "func(ctx context.Context) error",
       "doc": "Job is the unit of work a [Scheduler] fires. It MUST honour ctx: the\nscheduler passes the context Run was called with, so cancelling that context\nis how a shutdown reaches a running job. A Job that ignores ctx delays Run's\nreturn by its own duration — the scheduler waits for it rather than\nabandoning it, because a job still running after the caller believes the\nscheduler stopped is worse than a slow shutdown.\n\nA Job's error is reported through [ResultValue] and is otherwise ignored: a\nfailing job never stops the scheduler and never affects another entry.\n",
-      "file": "internal/core/app/scheduler/scheduler.go",
+      "file": "internal/core/app/scheduler/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -37965,7 +37965,7 @@
         }
       ],
       "doc": "ResultValue is what a [Scheduler] reports for every decision it takes about\nan entry — a run that happened, and a fire that was deliberately not run.\nReporting the second is the point: a scheduler that only reports runs makes\na permanently-skipped entry indistinguishable from an entry that is doing\nits job.\n\nIt is also the SDK's own test instrument. Because every decision emits one,\na test can WAIT for the decision it expects instead of sleeping to prove a\nnegative — which is what lets the scheduler suite assert cadences, missed\ndeadlines and overlap without a single time.Sleep.\n\nThis is a published concrete shape (pkg/v1/app/scheduler.Result is an alias), so\nADR 0040 applies: it may still gain or change a field while the module is\nv0, loudly and in the commit message, and not after v1.\n",
-      "file": "internal/core/app/scheduler/scheduler_result.go",
+      "file": "internal/core/app/scheduler/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -37977,7 +37977,7 @@
       "spelled": "func(after time.Time) (next time.Time, ok bool)",
       "canonical": "func(after time.Time) (next time.Time, ok bool)",
       "doc": "Schedule reports the first instant STRICTLY after `after` at which a job is\ndue, and whether such an instant exists at all. A false second return means\nthe schedule will never fire again; the scheduler disarms that entry and\nkeeps running the others.\n\nImplementations MUST be pure — the same `after` always yields the same\nanswer — and MUST be safe for concurrent use. The scheduler calls Next\nrepeatedly, including several times in one pass when fires were missed, and\na Schedule returning a value that is not strictly after its argument would\nmake that loop spin forever.\n",
-      "file": "internal/core/app/scheduler/scheduler.go",
+      "file": "internal/core/app/scheduler/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -38787,7 +38787,7 @@
         }
       ],
       "doc": "RecordValue is what a machine keeps about one entity beside the store: the\nstate it is in, since when, and the transitions that brought it there,\noldest first and bounded by the machine's history length.\n\nState and Entered describe the entity as the machine last saw it. When an\nentity's state changes behind the machine's back — a write that did not go\nthrough a transition — the machine records the new state with Entered set\nto the moment it learned of it, and adds no step: it knows the state, not a\ntransition.\n",
-      "file": "internal/core/app/statemachine/record.go",
+      "file": "internal/core/app/statemachine/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -38854,7 +38854,7 @@
         }
       ],
       "doc": "StepValue is one transition in a record's history: which, from where to\nwhere, what fired it, who asked, and when it was stored.\n",
-      "file": "internal/core/app/statemachine/record.go",
+      "file": "internal/core/app/statemachine/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -39011,7 +39011,7 @@
       "spelled": "uint8",
       "canonical": "uint8",
       "doc": "Trigger says what fired a transition. The set is closed: every transition a\nmachine can take is declared one of these ways, and a history names which.\n\nThe values are STABLE — a journal may store them as numbers, and none is\never renumbered — and the zero value is not a trigger, so a step read from\na journal that lost the field names no trigger rather than some default.\nString and ParseTrigger give the text form.\n",
-      "file": "internal/core/app/statemachine/trigger.go",
+      "file": "internal/core/app/statemachine/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -39279,7 +39279,7 @@
       "spelled": "[T any] func(path string, value T) ReportValue",
       "canonical": "[T any] func(path string, value T) github.com/kitsunium/sdk/internal/core/app/validation.ReportValue",
       "doc": "Constraint reports what is wrong with value, at the path by which value was\nreached. A value it accepts yields a nil [ReportValue] — the acceptance path\ntherefore allocates nothing, which matters because it is the path taken on\nevery field of every valid request.\n\npath is the position of value inside the structure being validated, in the\ngrammar [JoinField] / [JoinIndex] define; [RootPath] means \"the value itself\".\nA Constraint MUST propagate that path into every ViolationValue it reports,\nand MUST NOT invent a different grammar — the path is the whole reason a\nviolation is actionable on a nested structure.\n\nImplementations MUST be pure and safe for concurrent use: the same value at\nthe same path always yields the same report, and one compiled Constraint is\nshared by every goroutine validating that type.\n\nA Constraint MUST NOT copy the VALUE it rejected into the report. It names\nthe rule and the bound; the value may be a password, a token or a national\nidentifier, and a validation message is the one error message in a service\nthat is designed to reach the end user. See [ViolationValue].\n",
-      "file": "internal/core/app/validation/validation.go",
+      "file": "internal/core/app/validation/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -39349,7 +39349,7 @@
       "spelled": "[]ViolationValue",
       "canonical": "[]github.com/kitsunium/sdk/internal/core/app/validation.ViolationValue",
       "doc": "ReportValue is every violation one validation found, in the order the\nconstraints reported them. It is a SLICE rather than a struct so that the\nzero value — nil — is a passing report: a validator with no constraint\npasses, which is ADR 0046's first invariant and ADR 0031's \"an empty\nconfiguration is not the same thing as a broken one\".\n\nComposition is therefore plain append, and the accepting path allocates\nnothing at all.\n\nReportValue is a published concrete shape (pkg/v1/app/validation.Report aliases\nit), so ADR 0040 applies: it may still change while the module is v0, said\nout loud, and not after v1.\n",
-      "file": "internal/core/app/validation/report.go",
+      "file": "internal/core/app/validation/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -39482,7 +39482,7 @@
         }
       ],
       "doc": "ViolationValue is one located failure: WHERE it happened, WHICH rule it\nbroke, a wire-safe explanation, and a routable [errs.Code].\n\nIt is deliberately NOT an error. A validation normally produces several of\nthem, and errors.Join of five would render five bracket headers, lose the\nordering and bury the paths — while a single error would have to pick one\nviolation to be about. The aggregate that IS convertible to an error is\n[ReportValue]; see its Err method.\n\nThe zero value is not meaningful; constraints build one per failure.\n",
-      "file": "internal/core/app/validation/violation.go",
+      "file": "internal/core/app/validation/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -39683,7 +39683,7 @@
         }
       ],
       "doc": "Config parameterises every [Factory]. It is deliberately small: this domain\nships an extension point, not a template language.\n",
-      "file": "internal/core/app/view/config.go",
+      "file": "internal/core/app/view/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -39738,7 +39738,7 @@
       "spelled": "string",
       "canonical": "string",
       "doc": "Engine names a registered template engine.\n\nThe zero value is the reserved invalid name: [Register] refuses it at boot,\nso it can never reach [Lookup], [Open] or [Available].\n",
-      "file": "internal/core/app/view/factory.go",
+      "file": "internal/core/app/view/decl_gen.go",
       "layer": "core",
       "family": "app"
     },
@@ -40210,7 +40210,7 @@
       "spelled": "string",
       "canonical": "string",
       "doc": "Algorithm is the typed key under which an AEAD registers (e.g.\n\"aes-256-gcm\"). The zero value Algorithm(\"\") is reserved invalid, mirroring\ncodec.Format.\n",
-      "file": "internal/core/crypto/algorithm.go",
+      "file": "internal/core/crypto/decl_gen.go",
       "layer": "core",
       "family": "crypto"
     },
@@ -40912,7 +40912,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Key is an opaque, redacting 256-bit symmetric key. Its String / GoString\noutput is always \"<redacted>\" so an accidental %v / %s / %#v never leaks the\nsecret; Bytes hands a fresh copy to the cipher and is the only way out. All\ncopies of a Key share one backing array, so Zeroize on any copy clears the\nsecret everywhere — call it when you are done with the key.\n",
-      "file": "internal/core/crypto/key.go",
+      "file": "internal/core/crypto/decl_gen.go",
       "layer": "core",
       "family": "crypto"
     },
@@ -42407,7 +42407,7 @@
         }
       ],
       "doc": "EntryValue is what a caller stores: the value, how long it should live, and\nthe tags by which it can later be invalidated in bulk.\n\nIt is a VALUE — a store copies what it needs and never retains the slice the\ncaller passed, so a caller may reuse or mutate its Tags slice afterwards.\n",
-      "file": "internal/core/data/cache/entry.go",
+      "file": "internal/core/data/cache/decl_gen.go",
       "layer": "core",
       "family": "data"
     },
@@ -42419,7 +42419,7 @@
       "spelled": "[V any] func(ctx context.Context) (EntryValue[V], error)",
       "canonical": "[V any] func(ctx context.Context) (github.com/kitsunium/sdk/internal/core/data/cache.EntryValue[V], error)",
       "doc": "Fill computes the entry for a key that the cache does not hold. It is the\ncaller's code: a database query, an HTTP call, a derivation.\n\nIt is a FUNC port rather than a one-method interface, the shape\ninternal/core already admits for resilience.Operation, scheduler.Job and\nvalidation.Constraint — and, per ADR 0039, a func type satisfies the\nno-widening rule structurally, because it cannot grow a method at all.\n",
-      "file": "internal/core/data/cache/cache_interface.go",
+      "file": "internal/core/data/cache/decl_gen.go",
       "layer": "core",
       "family": "data"
     },
@@ -42823,7 +42823,7 @@
       "spelled": "string",
       "canonical": "string",
       "doc": "Format is the typed string identifier of a codec.\n",
-      "file": "internal/core/data/codec/format.go",
+      "file": "internal/core/data/codec/decl_gen.go",
       "layer": "core",
       "family": "data"
     },
@@ -46044,7 +46044,7 @@
         }
       ],
       "doc": "EntryValue is one stored document as the store holds it: its key and its\nJSON, for a caller that shows documents rather than decoding them.\n",
-      "file": "internal/core/data/docstore/value.go",
+      "file": "internal/core/data/docstore/decl_gen.go",
       "layer": "core",
       "family": "data"
     },
@@ -46119,7 +46119,7 @@
         }
       ],
       "doc": "IndexSpec declares one secondary index: a name to read it by, whether it is\nunique, and the function that gives a document its keys in it. Build one\nwith [Unique] or [Index], and give it to an engine's constructor — Open or\nOpenSQL in internal/service/data/docstore, which refuse the same\ndeclarations alike. The file engine rebuilds its indexes when the store\nopens; both keep them in step with every write.\n",
-      "file": "internal/core/data/docstore/index.go",
+      "file": "internal/core/data/docstore/decl_gen.go",
       "layer": "core",
       "family": "data"
     },
@@ -46211,7 +46211,7 @@
         }
       ],
       "doc": "StampValue is what a write says about the version it makes, for the\nStamped writes. Its zero value is what Put, Insert, Replace and Update say:\nnothing, and a new version.\n",
-      "file": "internal/core/data/docstore/value.go",
+      "file": "internal/core/data/docstore/decl_gen.go",
       "layer": "core",
       "family": "data"
     },
@@ -46342,7 +46342,7 @@
         }
       ],
       "doc": "VersionValue is one version of a document: its number, when the write that\nmade it ran, what that write's caller said about it, and the document as the\nversion holds it.\n",
-      "file": "internal/core/data/docstore/value.go",
+      "file": "internal/core/data/docstore/decl_gen.go",
       "layer": "core",
       "family": "data"
     },
@@ -46996,7 +46996,7 @@
         }
       ],
       "doc": "DeadLetterValue is one message the broker gave up on, together with why.\n\nA dead letter without its cause is an investigation nobody can run, so the\ncause is part of the record rather than a line in whatever log has since\nrotated away. What is kept of the cause is CLAUDE.md rule 4's split, and\nthe split is deliberate: the wire-safe Public half and the dotted-quad code\ngo to the store, the Private half stays in the log of the process that\nfailed, and [MessageValue.ID] joins the two. A dead-letter store is read by\nwhoever is investigating — frequently not the process, the host or the\ntrust domain that produced the failure — so it is the wrong place for the\nhalf of an error the SDK defines as log-only.\n",
-      "file": "internal/core/data/queue/capability.go",
+      "file": "internal/core/data/queue/decl_gen.go",
       "layer": "core",
       "family": "data"
     },
@@ -47038,7 +47038,7 @@
         }
       ],
       "doc": "DeliveryValue is one message handed to one consumer, with everything the\nconsumer needs to decide what to do about it.\n",
-      "file": "internal/core/data/queue/message.go",
+      "file": "internal/core/data/queue/decl_gen.go",
       "layer": "core",
       "family": "data"
     },
@@ -47062,7 +47062,7 @@
       "spelled": "func(ctx context.Context, delivery DeliveryValue) error",
       "canonical": "func(ctx context.Context, delivery github.com/kitsunium/sdk/internal/core/data/queue.DeliveryValue) error",
       "doc": "Handler processes one delivery. It is the port a consumer implements, and\nit is a FUNCTION type rather than an interface — the shape\ninternal/core/CLAUDE.md already admits for resilience.Operation,\nscheduler.Job, lifecycle.Start and events.Listener. ADR 0039's rule is that\na published port must not grow a method; a func type satisfies it\nstructurally, because it cannot grow one at all.\n\nIt receives the whole [DeliveryValue] and not just the payload, so that\n[DeliveryValue.Deliveries] is in front of whoever writes the handler. A\nhandler WILL be called more than once for the same message — that is the\nguarantee, not a malfunction — and the count is the only thing that lets it\nsay so in a log.\n\nReturning nil acknowledges. Returning an error nacks: the message is\nretried, or dead-lettered once it has exhausted\n[PolicyValue.MaxDeliveries]. Returning [DoNotRetry](err) says no retry can\nfix it, and the message is dead-lettered at once, with err, through a\nbroker's [Rejecter]. ctx is the consumer's and IS honoured: unlike\nevents.Listener, a handler that outlives its context is holding a lease it\nis about to lose, so abandoning the work is the correct response and the\nmessage will simply be redelivered.\n",
-      "file": "internal/core/data/queue/queue.go",
+      "file": "internal/core/data/queue/decl_gen.go",
       "layer": "core",
       "family": "data"
     },
@@ -47162,7 +47162,7 @@
         }
       ],
       "doc": "LeaseValue is a consumer's exclusive claim on one message: the receipt that\nproves it and the instant it lapses.\n\nThe two travel together because neither is usable alone. A receipt without\na deadline cannot tell a long-running handler whether it still owns the\nwork; a deadline without a receipt cannot acknowledge anything.\n",
-      "file": "internal/core/data/queue/message.go",
+      "file": "internal/core/data/queue/decl_gen.go",
       "layer": "core",
       "family": "data"
     },
@@ -47221,7 +47221,7 @@
         }
       ],
       "doc": "MessageValue is one unit of work as the broker minted it. Every field is\nassigned by [Broker.Publish]; a caller never fills one in, which is why\nPublish takes a payload rather than one of these.\n",
-      "file": "internal/core/data/queue/message.go",
+      "file": "internal/core/data/queue/decl_gen.go",
       "layer": "core",
       "family": "data"
     },
@@ -47250,7 +47250,7 @@
         }
       ],
       "doc": "NackValue is what [Broker.Nack] decided.\n\nIt exists because \"I reported the failure\" and \"that message is now dead\"\nare different facts, and a consumer that cannot tell them apart cannot log\nthe one that matters. Every field is a scalar: a nack is on the failure\npath, but it is on the failure path of a queue that is expected to retry,\nso it is not rare enough to allocate on.\n",
-      "file": "internal/core/data/queue/queue.go",
+      "file": "internal/core/data/queue/decl_gen.go",
       "layer": "core",
       "family": "data"
     },
@@ -47306,7 +47306,7 @@
         }
       ],
       "doc": "PolicyValue is the delivery discipline a broker enforces: how long a lease\nlasts, how many attempts a message gets, how long a failure waits, and how\nlarge a payload may be.\n\n# Its zero value is REFUSED, and that is the decision\n\nADR 0031 gives two branches — clamp where a working default needs no\nexplanation, refuse where any value the SDK invented would be arbitrary —\nand this one struct uses both, which is why they are worth reading side by\nside.\n\n  - [PolicyValue.VisibilityTimeout] and [PolicyValue.MaxDeliveries] are\n    REFUSED at zero. Each has two natural readings that are OPPOSITES, and\n    in each case one of them silently destroys the guarantee: a zero\n    visibility timeout is either \"redeliver immediately\", which is a\n    delivery storm, or \"never redeliver\", which is a lost message; zero\n    deliveries is either \"unlimited\", which lets one poison message loop\n    forever and the dead-letter store stay empty, or \"none\", which is a\n    queue that delivers nothing. This is core/app/lock's argument for refusing\n    a zero TTL, and it is the same argument because it is the same class of\n    value: a lifetime belongs to the work being protected, and only the\n    caller knows what that is.\n  - [PolicyValue.RetryDelay] and [PolicyValue.MaxMessageBytes] are CLAMPED.\n    A zero retry delay means \"as soon as the lease lapses\", which is one\n    reading, is harmless, and is what a caller who has not thought about\n    backoff wants. A zero size bound means [DefaultMaxMessageBytes].\n  - [PolicyValue.MaxRetryDelay] is neither: its zero is the behaviour the\n    struct had before the field existed — a retry delay that does not grow —\n    which is one reading and the only backward-compatible one.\n\nBoth branches in one struct is the point. A domain in which every zero is\nrefused teaches a reader nothing except that the author was nervous.\n\nThe three durations are bounded from ABOVE as well, by [MaxDeadlineOffset],\nand that refusal is about arithmetic rather than about readings: a deadline\nfurther out than that cannot be recorded by a durable broker at all.\n",
-      "file": "internal/core/data/queue/policy.go",
+      "file": "internal/core/data/queue/decl_gen.go",
       "layer": "core",
       "family": "data"
     },
@@ -47395,7 +47395,7 @@
       "spelled": "string",
       "canonical": "string",
       "doc": "ReceiptValue is the handle to ONE lease: the only thing [Broker.Ack],\n[Broker.Nack] and [LeaseExtender.Extend] accept, and the only proof that\nthis consumer is the one currently holding the message.\n\nIt is opaque and it is NOT the message identifier. Two deliveries of the\nsame message carry the same [MessageValue.ID] and different receipts, which\nis what lets a broker refuse an acknowledgement from a consumer whose lease\nhas already lapsed and been taken by somebody else. Do not parse it, do not\nconstruct one, and do not store one past the lease it names.\n\nIt is a defined string rather than a struct with an unexported field\nbecause a receipt has to survive being handed to a goroutine, put in a map\nand printed in a log, and because it is not a secret: it names a lease on a\nqueue the holder can already read. What it must not be is FORGEABLE into\nsomebody else's lease, and that is a property of how the implementation\nmints it, not of the type.\n",
-      "file": "internal/core/data/queue/message.go",
+      "file": "internal/core/data/queue/decl_gen.go",
       "layer": "core",
       "family": "data"
     },
@@ -47483,7 +47483,7 @@
         }
       ],
       "doc": "WakeValue is what an idle consumer waits on: an event, or an instant the\nbroker already knows about.\n",
-      "file": "internal/core/data/queue/wake.go",
+      "file": "internal/core/data/queue/decl_gen.go",
       "layer": "core",
       "family": "data"
     },
@@ -47973,7 +47973,7 @@
       "spelled": "uint8",
       "canonical": "uint8",
       "doc": "Dialect names a SQL engine whose savepoint grammar, placeholder syntax,\nidentifier quoting, row-lock clauses and advisory-lock mechanism this SDK\nknows exactly.\n\nThe set is CLOSED and small on purpose. Every feature this domain adds — a\nsavepoint, a `CREATE TABLE IF NOT EXISTS`, an advisory lock — is spelled\ndifferently by each engine, and there is no portable subset that covers all\nthree. So the domain refuses a dialect it cannot spell AT CONSTRUCTION,\nby name, rather than generating SQL that will fail at the first savepoint of\nthe first nested transaction on a production database (ADR 0055 §D4).\n\nThe zero value is [DialectUnknown] and is not usable: it is what an unset\nconfiguration field looks like, and reading it as \"probably Postgres\" is how\na MySQL deployment discovers the difference in production (ADR 0031).\n",
-      "file": "internal/core/data/sql/sql_dialect.go",
+      "file": "internal/core/data/sql/decl_gen.go",
       "layer": "core",
       "family": "data"
     },
@@ -48425,7 +48425,7 @@
         }
       ],
       "doc": "MigrationValue is one versioned schema change and its reversal.\n\nThe SDK does NOT own a migration FILE FORMAT, a directory layout, or a\nnaming convention, and it ships no example directory. A migration is a value\nthe consumer constructs, because the moment the SDK reads a directory it has\ninvented a convention every consumer must adopt and no consumer asked for\n(ADR 0055 §D8). Where the statements come from — a Go literal, an embed.FS,\na generator — is the caller's decision and none of the SDK's business.\n\nThe zero value is not runnable and is refused at construction.\n",
-      "file": "internal/core/data/sql/sql_migration.go",
+      "file": "internal/core/data/sql/decl_gen.go",
       "layer": "core",
       "family": "data"
     },
@@ -48606,7 +48606,7 @@
       "spelled": "func(ctx context.Context, ex Executor) error",
       "canonical": "func(ctx context.Context, ex github.com/kitsunium/sdk/internal/core/data/sql.Executor) error",
       "doc": "Step is one direction of a migration: the statements that move the schema.\n\nA FUNCTION port, for the same reason [TxFunc] is: one behaviour, so a named\nfunc IS the contract, and a func type cannot grow a method (ADR 0039).\n\nIt receives the SAME [Executor] the surrounding transaction runs on, which\nis what makes a migration and its version-table row commit together.\n",
-      "file": "internal/core/data/sql/sql_migration.go",
+      "file": "internal/core/data/sql/decl_gen.go",
       "layer": "core",
       "family": "data"
     },
@@ -48660,7 +48660,7 @@
       "spelled": "func(ctx context.Context, ex Executor) error",
       "canonical": "func(ctx context.Context, ex github.com/kitsunium/sdk/internal/core/data/sql.Executor) error",
       "doc": "TxFunc is the unit of work a [Transactor] runs inside a transaction.\n\nIt is a FUNCTION port, the shape internal/core/CLAUDE.md already admits for\nresilience.Operation, scheduler.Job and lifecycle.Start: one behaviour, so a\nnamed func IS the contract. ADR 0039 is satisfied structurally — a func type\ncannot grow a method at all.\n\nctx is the transaction-scoped context. Passing it on is what lets a callee\njoin THIS transaction rather than open a second one, and what lets a nested\n[Transactor.Transact] become a savepoint instead of a deadlock against the\ntransaction its own caller is holding.\n\nReturning nil commits (or releases the savepoint). Returning an error rolls\nback (or rolls back to the savepoint) and the error is returned to the\ncaller VERBATIM, so errors.Is keeps working across the boundary.\n\nex is valid ONLY for the duration of the call. Using it afterwards is\nrefused with a typed error rather than left to database/sql's ErrTxDone.\n",
-      "file": "internal/core/data/sql/sql.go",
+      "file": "internal/core/data/sql/decl_gen.go",
       "layer": "core",
       "family": "data"
     },
@@ -48684,7 +48684,7 @@
         }
       ],
       "doc": "TxOptionsValue parameterises ONE transaction. It is a value, not a manager\nsetting, because isolation is a property of the unit of work and not of the\npool it runs on.\n\nThe zero value is a working configuration: the driver's default isolation\nlevel, read-write. That is the only non-arbitrary default available — every\nengine defines its own default level and picking one here would silently\nchange the semantics of an existing application on migration (ADR 0031's\nclamp side, where the default needs no explanation because it is the\ndatabase's own).\n\nIt is deliberately a struct rather than two extra method parameters so\n[Transactor] stays frozen at one method: a new option is a new FIELD, which\nbreaks nobody, where a new method breaks every downstream double (ADR 0039).\n",
-      "file": "internal/core/data/sql/sql_txoptions.go",
+      "file": "internal/core/data/sql/decl_gen.go",
       "layer": "core",
       "family": "data"
     },
@@ -48773,7 +48773,7 @@
       "spelled": "string",
       "canonical": "string",
       "doc": "Algorithm is the typed key under which a Compressor registers (e.g. \"gzip\",\n\"flate\", \"zlib\"). The zero value Algorithm(\"\") is reserved invalid, mirroring\ncodec.Format and crypto.Algorithm. Note that \"flate\" is the raw DEFLATE\nstream of RFC 1951 and \"zlib\" is the RFC 1950 envelope HTTP misnames\n\"deflate\" — distinct Algorithms, not aliases.\n",
-      "file": "internal/core/data/transform/transform.go",
+      "file": "internal/core/data/transform/decl_gen.go",
       "layer": "core",
       "family": "data"
     },
@@ -49710,7 +49710,7 @@
         }
       ],
       "doc": "AddressValue names one socket to bind. It is a value type so a group's listen\nset is comparable and copyable, and so a configuration file can express it\ndirectly.\n",
-      "file": "internal/core/net/address.go",
+      "file": "internal/core/net/decl_gen.go",
       "layer": "core",
       "family": "net"
     },
@@ -49769,7 +49769,7 @@
       "spelled": "func(call CallValue)",
       "canonical": "func(call github.com/kitsunium/sdk/internal/core/net.CallValue)",
       "doc": "CallHook receives one CallValue per completed outbound call. It is a function\nport rather than an interface because it is a single-method contract with no\nstate, and a func keeps the domain free of a dependency on the logger or the\nmetrics package: the consumer wires it to whichever it uses.\n\nA CallHook MUST be safe for concurrent use and MUST NOT block — it runs on the\ncalling goroutine, so a slow hook slows every request.\n",
-      "file": "internal/core/net/call.go",
+      "file": "internal/core/net/decl_gen.go",
       "layer": "core",
       "family": "net"
     },
@@ -49818,7 +49818,7 @@
         }
       ],
       "doc": "CallValue records one completed outbound call for observation, so a caller\ncan log, meter or trace every egress without wrapping each call site by hand.\n\nIt is handed to a CallHook once the response body is FINISHED WITH — read to\nthe end, failed, or closed — not when the headers arrive. A body's size is\nonly known after it has been read, and an over-sized body or a failed close\nhappens later still, so a record emitted at the headers could carry neither:\nit reported every call as a clean success of zero bytes. A refused request\nand an unreachable upstream are still reported immediately, because in\nneither case is there a body to wait for.\n",
-      "file": "internal/core/net/call.go",
+      "file": "internal/core/net/decl_gen.go",
       "layer": "core",
       "family": "net"
     },
@@ -49892,7 +49892,7 @@
         }
       ],
       "doc": "ClientConfig describes an outbound client. Durations use DurationValue so a\nconfiguration file can say \"5s\" rather than a nanosecond count.\n\nIt sits in core beside LimitsValue and TimeoutsValue, which carry the same\nkind of knobs for the inbound half. Keeping both faces' configuration in one\nlayer is what lets a consumer decode a whole network stanza against the\ncontract package alone, without importing an implementation to name the type\nof a field it is setting.\n",
-      "file": "internal/core/net/client_config.go",
+      "file": "internal/core/net/decl_gen.go",
       "layer": "core",
       "family": "net"
     },
@@ -50523,7 +50523,7 @@
       "spelled": "func(ctx context.Context, c Conn) error",
       "canonical": "func(ctx context.Context, c github.com/kitsunium/sdk/internal/core/net.Conn) error",
       "doc": "ConnHandlerFunc adapts a plain function to ConnHandler.\n",
-      "file": "internal/core/net/conn.go",
+      "file": "internal/core/net/decl_gen.go",
       "layer": "core",
       "family": "net"
     },
@@ -50536,7 +50536,7 @@
       "spelled": "func(ctx context.Context, c Conn) error",
       "canonical": "func(ctx context.Context, c github.com/kitsunium/sdk/internal/core/net.Conn) error",
       "doc": "ServeConn implements ConnHandler by calling f.\n",
-      "file": "internal/core/net/conn.go",
+      "file": "internal/core/net/serve.go",
       "layer": "core",
       "family": "net"
     },
@@ -50594,7 +50594,7 @@
       "spelled": "int64",
       "canonical": "int64",
       "doc": "DurationValue is a time.Duration that round-trips through JSON as either a Go\nduration string (\"30s\", \"1m30s\") or a raw nanosecond count. The SDK's config\nloader (ADR 0028) decodes through a JSON round-trip, and encoding/json renders\na bare time.Duration as nanoseconds — which would force an operator to write\n30000000000 in a YAML file to mean thirty seconds. This type accepts both and\nalways emits the readable form.\n\nThe mixed receivers are required by encoding/json and are not a style slip:\nMarshalJSON must take a value so a non-pointer struct field marshals, and\nUnmarshalJSON must take a pointer so it can assign. The standard library's\ntime.Time carries the same asymmetry for the same reason.\n\nPROMOTION CANDIDATE: this type is domain-neutral and stdlib-only, so it\nbelongs in internal/kernel or internal/core/app/config the moment a second domain\nneeds it. It is declared here because the repo's bar for a shared primitive is\ntwo real consumers arising from an actual duplication, and today there is one.\n",
-      "file": "internal/core/net/duration.go",
+      "file": "internal/core/net/decl_gen.go",
       "layer": "core",
       "family": "net"
     },
@@ -50776,7 +50776,7 @@
         }
       ],
       "doc": "IdentityFileParams names TLS material to read from the filesystem. Every path\nis optional on its own; the combination is validated once the bytes are in\nhand, by the same core constructor that validates in-memory material.\n\nIt is the disk-sourced twin of IdentityParams and lives beside it on purpose:\nthe two describe one domain concept — the material an identity is built from\n— and splitting them across layers would let the rules that govern them drift\napart, which is exactly what this domain refuses for TLS.\n",
-      "file": "internal/core/net/identity_file_params.go",
+      "file": "internal/core/net/decl_gen.go",
       "layer": "core",
       "family": "net"
     },
@@ -50830,7 +50830,7 @@
         }
       ],
       "doc": "IdentityParams carries in-memory TLS material. Every field is optional on its\nown; the combination is what is validated by NewIdentity. Sourcing material\nfrom memory rather than from disk is what lets a consumer pull certificates\nout of a secret manager without ever writing them to a filesystem.\n",
-      "file": "internal/core/net/identity_params.go",
+      "file": "internal/core/net/decl_gen.go",
       "layer": "core",
       "family": "net"
     },
@@ -50842,7 +50842,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "IdentityValue is an opaque TLS identity: a certificate chain, the trust\nanchors used to verify the peer, and the negotiated-version policy. Its String\nand GoString output is always \"<redacted>\" so an accidental %v, %s or %#v can\nnever spill key material into a log line. The only way out is ClientConfig or\nServerConfig, which mint a fresh *tls.Config per call.\n\nThe zero value is valid and means \"no identity\" — IsZero reports it.\n",
-      "file": "internal/core/net/identity.go",
+      "file": "internal/core/net/decl_gen.go",
       "layer": "core",
       "family": "net"
     },
@@ -50991,7 +50991,7 @@
         }
       ],
       "doc": "LimitsValue bounds what one listener group may consume. Every field is\noptional; zero means \"use the domain default\", never \"unbounded\" — an unset\nceiling must not be the dangerous one.\n",
-      "file": "internal/core/net/limits.go",
+      "file": "internal/core/net/decl_gen.go",
       "layer": "core",
       "family": "net"
     },
@@ -51064,7 +51064,7 @@
         }
       ],
       "doc": "ListenerStateValue reports one bound listener.\n\nIt carries the address actually bound rather than the one requested, and it\nreports any fallback explicitly, so a caller never has to infer either.\n",
-      "file": "internal/core/net/state.go",
+      "file": "internal/core/net/decl_gen.go",
       "layer": "core",
       "family": "net"
     },
@@ -51076,7 +51076,7 @@
       "spelled": "[H any] func(next H) H",
       "canonical": "[H any] func(next H) H",
       "doc": "Middleware decorates a handler with another of the same type.\n\nIt is generic over the handler type so stream and datagram handlers share one\nshape and one Chain helper, instead of the domain carrying two near-identical\nmiddleware types that would inevitably drift.\n",
-      "file": "internal/core/net/middleware.go",
+      "file": "internal/core/net/decl_gen.go",
       "layer": "core",
       "family": "net"
     },
@@ -51231,7 +51231,7 @@
       "spelled": "func(ctx context.Context, p Packet) error",
       "canonical": "func(ctx context.Context, p github.com/kitsunium/sdk/internal/core/net.Packet) error",
       "doc": "PacketHandlerFunc adapts a plain function to PacketHandler.\n",
-      "file": "internal/core/net/packet.go",
+      "file": "internal/core/net/decl_gen.go",
       "layer": "core",
       "family": "net"
     },
@@ -51244,7 +51244,7 @@
       "spelled": "func(ctx context.Context, p Packet) error",
       "canonical": "func(ctx context.Context, p github.com/kitsunium/sdk/internal/core/net.Packet) error",
       "doc": "ServePacket implements PacketHandler by calling f.\n",
-      "file": "internal/core/net/packet.go",
+      "file": "internal/core/net/serve.go",
       "layer": "core",
       "family": "net"
     },
@@ -51273,7 +51273,7 @@
       "spelled": "uint8",
       "canonical": "uint8",
       "doc": "Phase is where a server sits in its lifecycle. It is reported by State so an\noperator — or a readiness probe — can tell \"not yet listening\" apart from\n\"listening\" and from \"draining\", which a single boolean cannot express.\n",
-      "file": "internal/core/net/phase.go",
+      "file": "internal/core/net/decl_gen.go",
       "layer": "core",
       "family": "net"
     },
@@ -51387,7 +51387,7 @@
       "spelled": "func(req RequestValue) error",
       "canonical": "func(req github.com/kitsunium/sdk/internal/core/net.RequestValue) error",
       "doc": "PolicyFunc adapts a plain function to the Policy interface.\n",
-      "file": "internal/core/net/policy.go",
+      "file": "internal/core/net/decl_gen.go",
       "layer": "core",
       "family": "net"
     },
@@ -51456,7 +51456,7 @@
         }
       ],
       "doc": "RequestValue describes an outbound request to the transport policy.\n\nTwo field choices are load-bearing and were paid for in a real integration:\n\n  - The path is the ESCAPED form, the one that goes on the wire. url.URL.Path\n    is already percent-DECODED, so a policy that judges it accepts \"%2e%2e\"\n    — which the upstream then reinterprets as \"..\". Judging the decoded form\n    makes a correctly written allowlist bypassable, so this type does not\n    carry it.\n  - RawQuery is present because a policy often needs to require a parameter,\n    not just permit a path. A read-only policy that cannot see the query\n    cannot, for instance, insist that a listing call passes the filter that\n    makes its result correct.\n\nThe value is immutable by construction: a policy receives a copy and cannot\nmutate the request it is judging.\n",
-      "file": "internal/core/net/response.go",
+      "file": "internal/core/net/decl_gen.go",
       "layer": "core",
       "family": "net"
     },
@@ -51502,7 +51502,7 @@
         }
       ],
       "doc": "ResponseValue is a fully-read outbound response.\n\nThe client returns this rather than an *http.Response on purpose. A returned\n*http.Response makes the caller responsible for closing the body and for\nreading it under a size cap, and a single forgotten Close leaks a connection.\nIt also makes an accurate byte count impossible: the size of a body is only\nknown once it has been read, so an observation hook firing at header time can\nnever report it. Reading and closing inside the client fixes both.\n",
-      "file": "internal/core/net/response.go",
+      "file": "internal/core/net/decl_gen.go",
       "layer": "core",
       "family": "net"
     },
@@ -51553,7 +51553,7 @@
         }
       ],
       "doc": "SSEEventValue is one Server-Sent Events frame.\n\nThe format has no escape mechanism. A line terminator inside a value is not\nquoted, it SPLITS the value: that is exactly what makes a multi-line payload\nexpressible — Data is emitted as one \"data:\" line per line and the client\nrejoins them with \"\\n\" — and exactly what makes a line terminator inside ID\nor Name unrepresentable. Those are refused rather than truncated, because a\nsilently shortened id is a resume token pointing at the wrong place.\n",
-      "file": "internal/core/net/sse.go",
+      "file": "internal/core/net/decl_gen.go",
       "layer": "core",
       "family": "net"
     },
@@ -51764,7 +51764,7 @@
         }
       ],
       "doc": "StateValue is a snapshot of the server's lifecycle and listeners.\n\nIt is a value, so a caller can hold it, log it, or compare it without racing\nthe server that produced it.\n",
-      "file": "internal/core/net/state.go",
+      "file": "internal/core/net/decl_gen.go",
       "layer": "core",
       "family": "net"
     },
@@ -51866,7 +51866,7 @@
         }
       ],
       "doc": "TimeoutsValue bounds each phase of a connection separately.\n\nPer-phase deadlines rather than one overall budget: a slow reader, a slow\nwriter and an idle keep-alive connection are three different problems with\nthree different right answers, and a single timeout cannot tell them apart.\n\nEvery field is a PER-OPERATION bound, refreshed each time, not a budget for\nthe connection's whole life. The distinction is the whole point: a peer\nsending one byte per second violates a per-read bound at once and stays\ninside a lifetime bound until the lifetime runs out.\n",
-      "file": "internal/core/net/timeouts.go",
+      "file": "internal/core/net/decl_gen.go",
       "layer": "core",
       "family": "net"
     },
@@ -51981,7 +51981,7 @@
       "spelled": "uint16",
       "canonical": "uint16",
       "doc": "WSCloseCode is the status code a Close frame carries (RFC 6455 §7.4).\n",
-      "file": "internal/core/net/websocket_close.go",
+      "file": "internal/core/net/decl_gen.go",
       "layer": "core",
       "family": "net"
     },
@@ -52339,7 +52339,7 @@
         }
       ],
       "doc": "WSMessageValue is one complete WebSocket application message, reassembled\nfrom however many frames carried it.\n\nA message is the unit an application reasons about; a frame is the unit the\ntransport reasons about. Handing the application frames would make\nfragmentation — which is the sender's private choice of chunk size, not a\nsemantic boundary — visible in every consumer.\n",
-      "file": "internal/core/net/websocket_message.go",
+      "file": "internal/core/net/decl_gen.go",
       "layer": "core",
       "family": "net"
     },
@@ -52364,7 +52364,7 @@
       "spelled": "byte",
       "canonical": "byte",
       "doc": "WSOpCode is a frame's four-bit type field (RFC 6455 §5.2).\n",
-      "file": "internal/core/net/websocket_opcode.go",
+      "file": "internal/core/net/decl_gen.go",
       "layer": "core",
       "family": "net"
     },
@@ -52576,7 +52576,7 @@
         }
       ],
       "doc": "AttrValue is an immutable key/value pair carried by a RecordEvent. Use the\ntyped Value constructors (StringValue, Int64Value, …) to build the Value\nfield — the zero Value is a valid KindAny carrying nil.\n",
-      "file": "internal/core/observe/logger/record.go",
+      "file": "internal/core/observe/logger/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -52909,7 +52909,7 @@
       "spelled": "int8",
       "canonical": "int8",
       "doc": "Kind discriminates the payload variant carried by a Value. Kind values are\nstable across the public API; new variants are appended at the end so old\nhandlers default to KindAny rather than panic on an unknown discriminant.\n",
-      "file": "internal/core/observe/logger/kind.go",
+      "file": "internal/core/observe/logger/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -53159,7 +53159,7 @@
         }
       ],
       "doc": "RecordEvent captures a single log event; handlers are responsible for writing\nor forwarding it. Instances are intended to be used read-only after\nconstruction by the Logger implementation.\n",
-      "file": "internal/core/observe/logger/record.go",
+      "file": "internal/core/observe/logger/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -53302,7 +53302,7 @@
       "spelled": "func(ctx context.Context) (trace TraceContextValue)",
       "canonical": "func(ctx context.Context) (trace github.com/kitsunium/sdk/internal/core/observe/logger.TraceContextValue)",
       "doc": "TraceContextSource reads the trace context carried by ctx.\n\nIt is a FUNC port, so ADR 0039 is satisfied structurally: a func type cannot\ngrow a method, so publishing it can never break a downstream implementation.\nIt returns the zero (invalid) value rather than an error or an ok flag —\nrunning outside a trace is the normal state of most code, not a fault, and\nIsValid is the single question every caller already has to ask.\n\nImplementations MUST NOT allocate: they run once per emitted record.\n",
-      "file": "internal/core/observe/logger/trace_context.go",
+      "file": "internal/core/observe/logger/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -53326,7 +53326,7 @@
         }
       ],
       "doc": "TraceContextValue is the trace correlation a single log record carries: the\nidentity of the span the record was emitted inside.\n\nIt is a VALUE and carries no flags and no tracestate, because a log line\nanswers exactly one question — \"which span produced this?\" — and the\nsampling decision that governs the trace is not a property of the line.\n\nThe zero value is the INVALID context, deliberately: an all-zero trace-id is\nwhat W3C Trace Context §3.2.2.3 declares invalid, and an all-zero span-id is\n§3.2.2.4's. So \"no trace here\" and \"a trace nobody may join\" are one value\nwith one spelling, and every consumer has exactly one check to make.\n",
-      "file": "internal/core/observe/logger/trace_context.go",
+      "file": "internal/core/observe/logger/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -53672,7 +53672,7 @@
       "spelled": "int8",
       "canonical": "int8",
       "doc": "Level represents the importance of a log record; higher values are more severe.\n",
-      "file": "internal/core/observe/logger/level/level.go",
+      "file": "internal/core/observe/logger/level/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -53763,7 +53763,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Var is an atomically mutable Level holder satisfying Leveler. Its zero value\nis ready to use and reports Info (the Level zero value), so a freshly\ndeclared Var gates at the same default as a config's unset MinLevel. Set and\nLevel are safe for concurrent use; a gate may read Level on the hot path\nwhile a control goroutine raises or lowers the floor via Set.\n",
-      "file": "internal/core/observe/logger/level/var.go",
+      "file": "internal/core/observe/logger/level/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -54868,7 +54868,7 @@
         }
       ],
       "doc": "ClickHouseConfig configures the \"clickhouse\" writer (registered by\nthird-party/db/writer/clickhouse). It carries no driver types — only plain\ndata — so it lives in the dep-light core layer; the concrete low-level driver\n(ClickHouse/ch-go) is confined to the third-party adapter. A batch maps to one\nnative-protocol block insert, so the sink batches by row count.\n",
-      "file": "internal/core/observe/logger/writer/config_clickhouse.go",
+      "file": "internal/core/observe/logger/writer/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -54927,7 +54927,7 @@
         }
       ],
       "doc": "CloudWatchConfig configures the \"cloudwatch\" writer (registered by\nthird-party/aws/writer/cloudwatch). Like S3Config it carries no AWS types and lives\nin core, re-exported as logger.CloudWatchConfig. Group, Stream and Region are\nrequired; the factory rejects empties with WriterConfigInvalid.\n",
-      "file": "internal/core/observe/logger/writer/config_cloudwatch.go",
+      "file": "internal/core/observe/logger/writer/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -55043,7 +55043,7 @@
         }
       ],
       "doc": "ConsoleConfig configures the \"console\" writer. The zero value is valid and\ntargets os.Stderr at the handler-global level.\n",
-      "file": "internal/core/observe/logger/writer/config_console.go",
+      "file": "internal/core/observe/logger/writer/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -55081,7 +55081,7 @@
       "spelled": "uint8",
       "canonical": "uint8",
       "doc": "ConsoleStream selects which standard stream the console writer targets.\n",
-      "file": "internal/core/observe/logger/writer/config_console.go",
+      "file": "internal/core/observe/logger/writer/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -55118,7 +55118,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "CredentialValue is an opaque, redacting AWS SigV4 credential set. Its String\noutput is always \"<redacted>\" so an accidental %v / %s never leaks the\nsecret; the typed accessors expose the material only to the transport factory\nthat explicitly asks for it.\n",
-      "file": "internal/core/observe/logger/writer/credentials.go",
+      "file": "internal/core/observe/logger/writer/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -55287,7 +55287,7 @@
         }
       ],
       "doc": "FileConfig configures the \"file\" writer — an append-only, symlink-hardened\non-disk file. Path is required; an empty Path is rejected by the factory with\nthe shared WriterConfigInvalid sentinel.\n",
-      "file": "internal/core/observe/logger/writer/config_file.go",
+      "file": "internal/core/observe/logger/writer/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -55363,7 +55363,7 @@
         }
       ],
       "doc": "MySQLConfig configures the \"mysql\" writer (registered by\nthird-party/db/writer/mysql). It carries no driver types — only plain data —\nso it lives in the dep-light core layer; the concrete driver\n(go-sql-driver/mysql) is confined to the third-party adapter. A batch is\ndelivered as a single multi-row INSERT, so the sink batches by row count.\n\nLocal-protocol by design: SocketPath points at a Unix domain socket\n(net=unix in the DSN the adapter builds), keeping log traffic off TCP.\n",
-      "file": "internal/core/observe/logger/writer/config_mysql.go",
+      "file": "internal/core/observe/logger/writer/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -55375,7 +55375,7 @@
       "spelled": "string",
       "canonical": "string",
       "doc": "Name is the typed key under which a Factory registers (e.g. \"console\",\n\"file\", \"s3\"). The zero value Name(\"\") is reserved invalid, mirroring\ncodec.Format.\n",
-      "file": "internal/core/observe/logger/writer/writer.go",
+      "file": "internal/core/observe/logger/writer/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -55489,7 +55489,7 @@
         }
       ],
       "doc": "RedisStreamConfig configures the \"redis\" writer (registered by\nthird-party/db/writer/redis). It carries no driver types — only plain data —\nso it lives in the dep-light core layer; the concrete driver (redis/go-redis)\nis confined to the third-party adapter. A batch is delivered as a pipelined\nrun of XADD commands, so the sink batches by entry count.\n\nLocal-protocol by design: SocketPath points at a Unix domain socket, keeping\nlog traffic off TCP.\n",
-      "file": "internal/core/observe/logger/writer/config_redis.go",
+      "file": "internal/core/observe/logger/writer/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -55560,7 +55560,7 @@
         }
       ],
       "doc": "RotFileConfig configures the \"rotfile\" writer — a size-capped, on-disk file\nthat rotates when a write would exceed MaxBytes. It is the concrete config a\ncaller passes as writer.Config to writer.Open(\"rotfile\", …); Path is required,\nan empty Path is rejected with the rotfile open sentinel. It lives in core\nalongside FileConfig / ConsoleConfig so the public facade can re-export it.\n\nOn rotation the active file is renamed Path -> Path.1 (shifting Path.1 ->\nPath.2 … up to MaxBackups, dropping the oldest; MaxBackups == 0 keeps all),\noptionally gzip'd when Compress is set, then Path is reopened fresh. Every\nreopen re-applies the O_NOFOLLOW + 0600 hardening (CWE-59), and every rotated\n.N / .N.gz sibling is forced to 0600 so a gzip never leaks default perms.\n\nMaxAgeDays additionally prunes rotated siblings whose modification time is\nolder than the cutoff, evaluated against Clock after every rotation. It\ncomposes with MaxBackups (count cap) — a backup is dropped when it exceeds\neither policy. The numeric .N backup naming is unchanged; calendar pruning\nreads each sibling's on-disk mtime rather than a name-embedded stamp, so the\nretention knobs are purely additive over the existing on-disk format.\n\nRotateEvery additionally drives a TIME-triggered rotation independent of\nMaxBytes: when positive, a background ticker forces a rotation on each\ninterval (the \"archive every 24h\" policy), composing with the size threshold\nand the MaxBackups / MaxAgeDays retention caps. It is opt-in — the zero value\nkeeps the prior size/manual-only behaviour, so plain file logging never spins\na goroutine it did not ask for.\n",
-      "file": "internal/core/observe/logger/writer/config_rotfile.go",
+      "file": "internal/core/observe/logger/writer/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -55624,7 +55624,7 @@
         }
       ],
       "doc": "S3Config configures the \"s3\" writer (registered by third-party/aws/writer/s3). It\ncarries no AWS types — only plain data — so it lives in the dep-light core\nlayer and is re-exported as logger.S3Config. Bucket and Region are required;\nthe factory rejects an empty Bucket/Region with WriterConfigInvalid.\n",
-      "file": "internal/core/observe/logger/writer/config_s3.go",
+      "file": "internal/core/observe/logger/writer/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -56484,7 +56484,7 @@
       "spelled": "string",
       "canonical": "string",
       "doc": "ExporterName is the typed key under which an Exporter registers (e.g. \"text\",\n\"prometheus\"). The zero value ExporterName(\"\") is reserved invalid.\n",
-      "file": "internal/core/observe/metrics/exporter.go",
+      "file": "internal/core/observe/metrics/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -56509,7 +56509,7 @@
       "spelled": "func(observe ObserveFloat64)",
       "canonical": "func(observe github.com/kitsunium/sdk/internal/core/observe/metrics.ObserveFloat64)",
       "doc": "Float64Callback is Int64Callback for a double-valued observable — an\nobservable gauge, whose reported value is a sampled reading and therefore has\nno temporality at all.\n",
-      "file": "internal/core/observe/metrics/observable.go",
+      "file": "internal/core/observe/metrics/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -56583,7 +56583,7 @@
         }
       ],
       "doc": "GaugeMetricValue is every series of ONE gauge instrument name.\n\nIt carries no Temporality, and that absence is the model, not an omission: a\ngauge is a sampled reading, so there is no window for it to cover and OTLP's\nGauge message has no temporality field either. The one-field struct exists so\nthat all three kinds present the same walk to an exporter — an exporter that\nhad to special-case gauges would special-case them in every format.\n",
-      "file": "internal/core/observe/metrics/snapshot_value.go",
+      "file": "internal/core/observe/metrics/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -56607,7 +56607,7 @@
         }
       ],
       "doc": "GaugeValue is one series of a gauge metric: the attribute set that identifies\nit plus its instantaneous reading.\n",
-      "file": "internal/core/observe/metrics/gauge_value.go",
+      "file": "internal/core/observe/metrics/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -56674,7 +56674,7 @@
         }
       ],
       "doc": "HistogramMetricValue is every series of ONE histogram instrument name, plus\nits temporality.\n\nExponential (base-2) histograms, which the OTel model also defines, are not\nimplemented: they are a different bucketing scheme with their own scale /\noffset / zero-count fields, and adding them is a second point type rather\nthan a field on this one. Deferred by ADR 0044 §Deferred.\n",
-      "file": "internal/core/observe/metrics/snapshot_value.go",
+      "file": "internal/core/observe/metrics/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -56713,7 +56713,7 @@
         }
       ],
       "doc": "HistogramValue is one series of a histogram metric: the attribute set that\nidentifies it, the explicit bucket upper bounds, the count per bucket\n(len == len(Bounds)+1, the last being the +Inf overflow), and the Sum/Count\nof every observation in the window.\n",
-      "file": "internal/core/observe/metrics/histogram_value.go",
+      "file": "internal/core/observe/metrics/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -56742,7 +56742,7 @@
       "spelled": "func(observe ObserveInt64)",
       "canonical": "func(observe github.com/kitsunium/sdk/internal/core/observe/metrics.ObserveInt64)",
       "doc": "Int64Callback is read ONCE PER COLLECTION and reports the instrument's\ncurrent ABSOLUTE value — not a delta. That is the OTel contract for an\nasynchronous sum: the callback states what the total is now\n(runtime.NumGoroutine(), bytes allocated since boot), and the SDK differences\nsuccessive observations itself when the meter is a delta reader.\n\nA callback MUST NOT call Collect on the meter that is collecting it, and MUST\nNOT block: it runs inline in the collection, so a slow callback is a slow\nscrape for every other instrument too.\n",
-      "file": "internal/core/observe/metrics/observable.go",
+      "file": "internal/core/observe/metrics/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -57038,7 +57038,7 @@
       "spelled": "func(value float64, attrs ...coreotel.AttrValue)",
       "canonical": "func(value float64, attrs ...github.com/kitsunium/sdk/internal/core/observe/otel.AttrValue)",
       "doc": "ObserveFloat64 is ObserveInt64 for a double-valued observable.\n",
-      "file": "internal/core/observe/metrics/observable.go",
+      "file": "internal/core/observe/metrics/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -57050,7 +57050,7 @@
       "spelled": "func(value int64, attrs ...coreotel.AttrValue)",
       "canonical": "func(value int64, attrs ...github.com/kitsunium/sdk/internal/core/observe/otel.AttrValue)",
       "doc": "ObserveInt64 reports ONE integer measurement, with its own attribute set,\nfrom inside an Int64Callback. It is valid only for the duration of that call;\nretaining it and calling it later observes into a collection that has already\nfinished.\n\nIt is a FUNC port, not a single-method interface, for the reason ADR 0041\ngives: a published func type cannot grow a method, so it cannot break a\ndownstream implementer the way widening an interface would (ADR 0039).\n",
-      "file": "internal/core/observe/metrics/observable.go",
+      "file": "internal/core/observe/metrics/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -57141,7 +57141,7 @@
         }
       ],
       "doc": "SnapshotValue is a point-in-time copy of every series in a Meter, handed to\nan Exporter. It is the OTel payload hierarchy flattened into one Go value:\nResource once, Scope once, then metrics keyed by name, each carrying its own\npoints — ResourceMetrics → ScopeMetrics → Metric → data points, with the two\nsingle-element levels collapsed because one Meter has exactly one of each.\n\nThe shape is deliberately \"instrument name -> its metric\", not\n\"series key -> value\": every wire format an exporter targets groups by name\nfirst (Prometheus emits one TYPE header per name followed by its series; OTLP\nnests data points inside one Metric). An exporter iterating these maps writes\nits header once per key and its points from the slice, with no regrouping\npass and no composite key to re-parse.\n\nTwo properties an exporter may rely on:\n\n  - Each Points slice is SORTED by attribute set, so a snapshot renders\n    byte-identically twice in a row given the same values — which is what\n    makes exporter output diffable and its tests writable without a sort of\n    their own.\n  - Each Attrs slice is sorted by Key and nil for the dimensionless series,\n    so len(Attrs) == 0 is the \"no braces\" case rather than something to\n    special-case per exporter.\n",
-      "file": "internal/core/observe/metrics/snapshot_value.go",
+      "file": "internal/core/observe/metrics/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -57175,7 +57175,7 @@
         }
       ],
       "doc": "SumMetricValue is every series of ONE sum instrument name, plus the two facts\nthe OTel data model attaches to the metric rather than to its points.\n\nA Counter and an UpDownCounter both produce a SumMetricValue; they differ\nonly by Monotonic. That is the model's own economy, and it is why the SDK has\ntwo instrument interfaces and one point shape.\n",
-      "file": "internal/core/observe/metrics/snapshot_value.go",
+      "file": "internal/core/observe/metrics/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -57199,7 +57199,7 @@
         }
       ],
       "doc": "SumValue is one series of a sum metric: the attribute set that identifies it\nplus its value. Monotonicity and temporality are NOT here — they belong to\nthe metric, not to the point, which is the OTel data model's own split.\n",
-      "file": "internal/core/observe/metrics/sum_value.go",
+      "file": "internal/core/observe/metrics/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -57211,7 +57211,7 @@
       "spelled": "uint8",
       "canonical": "uint8",
       "doc": "Temporality says which time window a metric's reported value covers. It is\nthe single most load-bearing concept in the OpenTelemetry metrics data model,\nbecause the same number means two different things under the two settings and\nnothing in the number itself says which.\n",
-      "file": "internal/core/observe/metrics/temporality.go",
+      "file": "internal/core/observe/metrics/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -57409,7 +57409,7 @@
       "spelled": "uint8",
       "canonical": "uint8",
       "doc": "AttrKind discriminates the type of an AttrValue's value. It is the OpenTelemetry\nattribute model: a value is a string, a bool, a signed 64-bit integer or a\ndouble — never a string that happens to spell one of the others.\n",
-      "file": "internal/core/observe/otel/attr_value.go",
+      "file": "internal/core/observe/otel/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -57493,7 +57493,7 @@
         }
       ],
       "doc": "AttrValue is one dimension — of a metric series, of a span, of a Resource: a\nKey naming the dimension and a TYPED value observed for it.\n\nThe Key is STRUCTURE and the value is DATA. A key is written at the call site\nand is constant for the lifetime of the process (\"http.request.method\"); a\nvalue comes from whatever the process is measuring and varies per observation\n(\"GET\", 503, true). That asymmetry is why an unusable key is a programmer\nerror the signal panics on, while an unbounded stream of values is a runtime\ncondition — the meter absorbs it into an overflow series.\n\nThe value is unexported and reachable only through Kind and the four typed\naccessors, so the only way to build a usable AttrValue is one of the four\nconstructors — String, Bool, Int64, Float64. A struct literal can still set\nKey, and the resulting AttrKindInvalid is refused rather than silently read\nas an empty string.\n",
-      "file": "internal/core/observe/otel/attr_value.go",
+      "file": "internal/core/observe/otel/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -57687,7 +57687,7 @@
         }
       ],
       "doc": "ResourceValue identifies the ENTITY that produced the telemetry — the\nservice, the process, the host. Its attributes are carried ONCE per payload\nrather than on every point or span, which is the whole reason the concept\nexists: service.name on ten thousand data points is ten thousand copies of\none fact.\n\nSchemaURL is deliberately absent. It is optional in the specification, this\nSDK emits no semantic-convention version, and a field that is always empty is\na placeholder (CLAUDE.md rule 5). It lands the day the SDK pins a convention\nversion, next to Attrs, and nothing else about the shape changes.\n",
-      "file": "internal/core/observe/otel/resource_value.go",
+      "file": "internal/core/observe/otel/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -57711,7 +57711,7 @@
         }
       ],
       "doc": "ScopeValue identifies the INSTRUMENTATION that produced the telemetry — the\nlibrary, package or module that minted the instruments or started the spans,\nas opposed to the service that runs it. OpenTelemetry calls it\nInstrumentationScope, and it is what lets a backend tell \"the SDK's own http\nmetrics\" apart from \"the application's\".\n\nSchemaURL and scope-level attributes are absent for the reason\nResourceValue's SchemaURL is: both are optional in the specification, nothing\nin this SDK produces either, and an always-empty field is a placeholder.\n",
-      "file": "internal/core/observe/otel/scope_value.go",
+      "file": "internal/core/observe/otel/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -57948,7 +57948,7 @@
         }
       ],
       "doc": "FlameNodeValue is one frame of a flame graph: a function reached along one\npath, and what the samples through it cost.\n",
-      "file": "internal/core/observe/profiling/folded.go",
+      "file": "internal/core/observe/profiling/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -58005,7 +58005,7 @@
         }
       ],
       "doc": "FoldedValue is a profile folded: in the sample type's own unit —\nnanoseconds of CPU, bytes of heap — never rounded.\n",
-      "file": "internal/core/observe/profiling/folded.go",
+      "file": "internal/core/observe/profiling/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -58044,7 +58044,7 @@
         }
       ],
       "doc": "FrameValue is one frame of a stack: a function, where it is defined, and\nthe line executing in it.\n",
-      "file": "internal/core/observe/profiling/profile.go",
+      "file": "internal/core/observe/profiling/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -58083,7 +58083,7 @@
         }
       ],
       "doc": "FunctionCostValue is what one function cost, flat and cumulative, and where\nit is defined.\n",
-      "file": "internal/core/observe/profiling/folded.go",
+      "file": "internal/core/observe/profiling/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -58122,7 +58122,7 @@
         }
       ],
       "doc": "GoroutineGroupValue is goroutines sharing their labels, their state and\ntheir top frame.\n",
-      "file": "internal/core/observe/profiling/goroutine.go",
+      "file": "internal/core/observe/profiling/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -58176,7 +58176,7 @@
         }
       ],
       "doc": "GoroutineValue is one goroutine of the process, as the runtime's dump\ndescribes it.\n",
-      "file": "internal/core/observe/profiling/goroutine.go",
+      "file": "internal/core/observe/profiling/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -58205,7 +58205,7 @@
         }
       ],
       "doc": "OwnerCostValue is what one owner cost: the sum of the samples charged to\nit, and its own costliest functions.\n",
-      "file": "internal/core/observe/profiling/folded.go",
+      "file": "internal/core/observe/profiling/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -58293,7 +58293,7 @@
         }
       ],
       "doc": "ProfileValue is a decoded pprof profile: what was measured, and every\nsample with its stack, its values and its labels. It is plain data — the\nprofile.proto message with its tables resolved — and safe to share once\nbuilt.\n",
-      "file": "internal/core/observe/profiling/profile.go",
+      "file": "internal/core/observe/profiling/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -58351,7 +58351,7 @@
         }
       ],
       "doc": "SampleTypeValue names what a value measures and its unit — {cpu\nnanoseconds}, {inuse_space bytes}.\n",
-      "file": "internal/core/observe/profiling/profile.go",
+      "file": "internal/core/observe/profiling/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -58385,7 +58385,7 @@
         }
       ],
       "doc": "SampleValue is one sample: a stack, a value per sample type, and the labels\nthe goroutine carried when it was taken.\n",
-      "file": "internal/core/observe/profiling/profile.go",
+      "file": "internal/core/observe/profiling/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -58778,7 +58778,7 @@
         }
       ],
       "doc": "EventValue is one thing that happened at an instant during a span, rather than\nover an interval — `opentelemetry/proto/trace/v1.Span.Event`.\n\nAn event is not a cheap child span, and the distinction is worth stating\nbecause the wrong choice is invisible until a trace is unreadable: an event\nhas no identity, no duration and no children, so nothing can be a child of it\nand nothing can link to it. Use one for a moment worth marking on a span's\ntimeline (a retry, a cache miss, an exception); use a child span for work that\ntook time.\n",
-      "file": "internal/core/observe/trace/event_value.go",
+      "file": "internal/core/observe/trace/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -58884,7 +58884,7 @@
       "spelled": "string",
       "canonical": "string",
       "doc": "ExporterName is the typed key under which a SpanExporter registers (e.g.\n\"otlpjson\"). The zero value ExporterName(\"\") is reserved invalid.\n\nThe registry is deliberately the same shape as core/observe/metrics' — the same\nkernel/plugin.Registry underneath, named, reached by blank-importing the\nexporter's package, config-addressable. It EARNS its\nkeep here for the reason it earns it there and for one more: ADR 0051\n§Decision 5 requires the OTLP/HTTP emitter to be absent from it, and \"absent\nfrom the registry\" is only a statement anyone can check if there is a registry\nto be absent from. A test pins that absence.\n",
-      "file": "internal/core/observe/trace/exporter.go",
+      "file": "internal/core/observe/trace/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -59019,7 +59019,7 @@
         }
       ],
       "doc": "LinkValue points at a span that is causally related to this one but is not its\nparent — `opentelemetry/proto/trace/v1.Span.Link`.\n\nThe canonical case is a batch: one consumer span processes fifty messages\nproduced by fifty different traces. Making any one of them the parent would be\na lie about forty-nine, and making the batch a child of all fifty is not a\ntree. A link says \"related, elsewhere\" without claiming ancestry.\n\nIt carries a whole SpanContextValue rather than a loose trace-id/span-id pair\nbecause the linked context's tracestate and sampled bit are part of what a\nbackend needs: a link into a trace that was never sampled points at spans\nnobody stored.\n",
-      "file": "internal/core/observe/trace/link_value.go",
+      "file": "internal/core/observe/trace/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -59282,7 +59282,7 @@
       "spelled": "func(params SamplingParams) bool",
       "canonical": "func(params github.com/kitsunium/sdk/internal/core/observe/trace.SamplingParams) bool",
       "doc": "Sampler decides whether a span is recorded and exported. It reports true to\nkeep the span, false to drop it.\n\nIt is a FUNC port, not an interface, applying ADR 0041 structurally: a\npublished func type cannot grow a method at all, so there is no widening to\nforbid and no sibling to invent later.\n\n# The decision is taken ONCE, at the root\n\nThis is the load-bearing rule of the whole domain and it is not a convention —\nit is what the `sampled` bit of traceparent is FOR. A Tracer consults a\nSampler only when it is starting a root span; every child, in this process or\nin any process downstream, inherits the answer through\nSpanContextValue.IsSampled.\n\nDeciding per span produces a trace with holes in the middle, and a trace with\nholes is worse than no trace: a span whose parent was dropped becomes an\norphan a backend renders as its own root, so one request appears as several\nunrelated ones and the latency of the whole is unrecoverable. The failure is\nalso invisible at the point that causes it — the process that dropped the\nparent shows nothing wrong at all.\n\nA Sampler is therefore consulted on ROOT spans only. That is a property of the\nTracer, stated here because this is where a reader will look for it.\n\n# Concurrency\n\nA Sampler MUST be safe for concurrent use and MUST NOT block: it runs inline\non the goroutine starting the span, before any work the span measures.\n",
-      "file": "internal/core/observe/trace/sampler.go",
+      "file": "internal/core/observe/trace/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -59326,7 +59326,7 @@
         }
       ],
       "doc": "SamplingParams is everything a Sampler sees. It describes a span that does not\nexist yet, which is the point: the decision is taken before the span is\ncreated, so an unsampled span costs no recording at all.\n\nTraceID is present and Parent may not be. On a ROOT span the trace id has just\nbeen minted and there is no parent; on a CHILD it is the parent's, inherited\nunchanged. A ratio sampler reads it either way, which is what makes the same\nsampler usable at both ends without a special case.\n",
-      "file": "internal/core/observe/trace/sampling_params.go",
+      "file": "internal/core/observe/trace/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -59466,7 +59466,7 @@
         }
       ],
       "doc": "SpanContextValue is the immutable identity of a span: what traceparent and\ntracestate carry between two processes, and what a child span inherits.\n\nIt is a VALUE, not a handle. A span context can be copied, compared field by\nfield and stored on a context.Context without any of it referring back to a\nlive span — which is what makes propagation across a process boundary the\nsame operation as propagation across a function call.\n\nThe zero value is the INVALID context, and that is deliberate rather than\nincidental: an all-zero TraceID is exactly what W3C Trace Context §3.2.2.3\ndeclares invalid, so \"no trace here\" and \"a trace nobody may join\" are one\nvalue with one spelling. Every consumer therefore has exactly one check to\nmake — IsValid — instead of a nil test and a validity test that can disagree.\n",
-      "file": "internal/core/observe/trace/span_context.go",
+      "file": "internal/core/observe/trace/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -59553,7 +59553,7 @@
       "spelled": "[8]byte",
       "canonical": "[8]byte",
       "doc": "SpanID identifies one span within a trace: 8 bytes, 16 lowercase hex digits.\nThe all-zero value is invalid for the same normative reason TraceID's is\n(§3.2.2.4), and is additionally how \"this span has no parent\" is spelled —\na root span's ParentSpanID is the zero value, which OTLP encodes as an\nomitted parentSpanId.\n",
-      "file": "internal/core/observe/trace/identifier.go",
+      "file": "internal/core/observe/trace/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -59617,7 +59617,7 @@
       "spelled": "int32",
       "canonical": "int32",
       "doc": "SpanKind says how a span relates to its parent and its children, which is what\nlets a backend assemble a latency waterfall instead of a flat list.\n\nThe five values and their integers are\nopentelemetry/proto/trace/v1.Span.SpanKind, copied from the schema so the OTLP\nencoder emits the integer directly (OTLP/JSON encodes an enum as its NUMBER,\nnever as its name).\n",
-      "file": "internal/core/observe/trace/span_kind.go",
+      "file": "internal/core/observe/trace/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -59755,7 +59755,7 @@
         }
       ],
       "doc": "SpanParams are the facts a span is born with.\n\nIt is a struct rather than a variadic option list because an option type is a\npublished func the SDK would then have to freeze (ADR 0039), and because the\nzero value has to be usable: SpanParams{} is an INTERNAL span starting now\nwith no attributes, which is the common case and reads as one at the call site.\n",
-      "file": "internal/core/observe/trace/link_value.go",
+      "file": "internal/core/observe/trace/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -59767,7 +59767,7 @@
       "spelled": "func(span SpanValue)",
       "canonical": "func(span github.com/kitsunium/sdk/internal/core/observe/trace.SpanValue)",
       "doc": "SpanSink receives every span that ends and was sampled. It is where a Tracer\nhands its output, and it is a func port for the reason Sampler is.\n\nIt is the seam a batching processor would occupy (ADR 0051 §Deferred): a batch\nis a SpanSink that buffers and forwards, which is why the port is one span at\na time rather than a slice — a sink that took slices would force every\nnon-batching consumer to allocate one.\n\nA SpanSink MUST be safe for concurrent use: spans end on whichever goroutine\nwas doing the work. It runs on that goroutine, so a slow sink slows the\nrequest it is observing.\n",
-      "file": "internal/core/observe/trace/sampler.go",
+      "file": "internal/core/observe/trace/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -59831,7 +59831,7 @@
         }
       ],
       "doc": "SpanValue is a completed span: the OpenTelemetry trace data model's `Span`\nmessage, in Go.\n\nIt is IMMUTABLE and it is what a live Span becomes at End. Splitting the two\nis what keeps an exporter from ever seeing a span mid-flight: the recording\ntype has mutators and no exporter can reach it, this one has no mutators and\nis all an exporter is given.\n\nTwo fields are whole SpanContextValues rather than loose identifiers, and both\npay for themselves:\n\n  - Context carries the trace-id, the span-id, the sampled bit and the\n    tracestate as ONE value — the same value that travelled in the\n    traceparent, so nothing has to be reassembled to know what was propagated.\n  - Parent carries its own Remote flag, which is the only place the fact is\n    recorded that this span's parent ran in another process. OTLP has a field\n    for exactly that (`flags`, SPAN_FLAGS_CONTEXT_IS_REMOTE_MASK), and a\n    backend uses it to tell a service boundary from an internal call.\n\nA root span's Parent is the invalid zero value, which OTLP encodes as an\nomitted parentSpanId — the schema's own spelling for \"no parent\".\n",
-      "file": "internal/core/observe/trace/span_value.go",
+      "file": "internal/core/observe/trace/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -59886,7 +59886,7 @@
         }
       ],
       "doc": "SpansValue is a batch of finished spans plus the two facts that describe all\nof them at once — the OTLP payload hierarchy flattened into one Go value.\n\nIt is the trace counterpart of metrics' SnapshotValue and it is shaped by the\nsame rule (ADR 0044 §Decision 9): an OTLP encoder must be able to walk it\nWITHOUT regrouping or reconstruction.\n\n\tSpansValue            -> resourceSpans[0]\n\t  .Resource           ->   .resource.attributes\n\t  .Scope              ->   .scopeSpans[0].scope {name, version}\n\t  .Spans[i]           ->   .scopeSpans[0].spans[]\n\nThe two single-element levels are single because one Tracer has exactly one\nResource and one Scope, exactly as one Meter does.\n\nIt carries NO StartTime/Time pair, and that absence is the model rather than\nan omission: a metrics snapshot is one window shared by every point, while\nevery span carries its own interval. Copying a payload-level window down onto\na span would overwrite the only timestamps a trace has.\n",
-      "file": "internal/core/observe/trace/spans_value.go",
+      "file": "internal/core/observe/trace/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -59911,7 +59911,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "StateBuilder assembles a StateValue member by member, LEFTMOST FIRST — the\norder a tracestate header lists them in, which is the opposite of Insert's\n\"newest at the front\". It is how the engine's header parser\n(internal/service/observe/trace.ParseTraceState) turns the list it read into\na value without this package parsing the header: reading the wire format is\nthe engine's mechanism, the list's invariants are this value's (ADR 0160 §4).\n\nEvery member is checked before it enters the list — the key against\n`simple-key` / `multi-tenant-key`, the value against `value = 0*255(chr)\nnblk-chr` — and so are the list's own two rules: a key appears once\n(§3.3.1.4) and there are at most MaxTraceStateMembers members. So a builder\ncan only produce a list Insert could have produced, which is why it is not\nthe \"second way in\" a from-parts constructor would be.\n\nThe zero value is a usable empty builder. A builder is not safe for\nconcurrent use.\n",
-      "file": "internal/core/observe/trace/state_builder.go",
+      "file": "internal/core/observe/trace/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -59949,7 +59949,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "StateValue is the parsed `tracestate` header: an ORDERED list of vendor\nentries, leftmost first.\n\nThe order is load-bearing and is the reason this is not a map. §3.5 states it\ntwice over: \"the order of unmodified key/value pairs MUST be preserved\" and\n\"modified keys SHOULD be moved to the beginning (left) of the list\", because\nthe leftmost entry is the system that touched the trace most recently. A map\nwould lose exactly that, and lose it silently.\n\nThe value is IMMUTABLE: Insert and Delete return a new StateValue rather\nthan mutating the receiver, so a span context handed to a handler cannot be\nedited underneath the caller that produced it. The zero value is a valid empty\nlist.\n\nThis SDK writes NO entry of its own. It is not a tracing vendor with state to\ncarry, and inventing a key would put a name nobody registered on every\noutbound request; Insert exists for a consumer who IS one.\n\nA list comes from three places only: the zero value, Insert, and a\nStateBuilder — the one the engine's header parser fills, member by member.\nEach of the last two checks every member against the grammar before it\nenters the list, so no StateValue holds an entry the next hop would refuse.\n",
-      "file": "internal/core/observe/trace/state_value.go",
+      "file": "internal/core/observe/trace/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -60026,7 +60026,7 @@
       "spelled": "int32",
       "canonical": "int32",
       "doc": "StatusCode is opentelemetry/proto/trace/v1.Status.StatusCode. Three values,\nand the third is not the negation of the second.\n",
-      "file": "internal/core/observe/trace/status_value.go",
+      "file": "internal/core/observe/trace/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -60102,7 +60102,7 @@
         }
       ],
       "doc": "StatusValue is a span's recorded outcome.\n\nThe Message field is only meaningful on StatusError, and the schema says so:\n\"message … SHOULD be used only if the code is ERROR\". This type enforces it in\nResolved rather than trusting the caller, because a message hanging off an OK\nstatus is the sort of thing that renders as an error in one backend's UI and\nvanishes in another's.\n",
-      "file": "internal/core/observe/trace/status_value.go",
+      "file": "internal/core/observe/trace/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -60140,7 +60140,7 @@
       "spelled": "byte",
       "canonical": "byte",
       "doc": "TraceFlags is the 8-bit field traceparent carries as its last component.\n\nVersion 00 of the specification defines exactly one bit, and §3.2.2.5.2 is\nexplicit about the rest: \"The behavior of other flags … is not defined and is\nreserved for future use. Vendors MUST set those to zero.\" This SDK therefore\nMASKS on output rather than trusting what it was handed — see Sanitized.\n",
-      "file": "internal/core/observe/trace/identifier.go",
+      "file": "internal/core/observe/trace/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -60191,7 +60191,7 @@
       "spelled": "[16]byte",
       "canonical": "[16]byte",
       "doc": "TraceID identifies one trace: 16 bytes, rendered as 32 lowercase hex digits\non the wire.\n\nThe ALL-ZERO value is invalid, and that is normative rather than stylistic —\nW3C Trace Context §3.2.2.3 says a receiver \"MUST ignore the traceparent\" when\nthe trace-id is all zeroes, and the OTLP schema documents the same. It is\ntherefore the zero value of this type AND its \"unset\" spelling, which is why\nIsValid exists and why nothing in this package accepts an id without asking.\n",
-      "file": "internal/core/observe/trace/identifier.go",
+      "file": "internal/core/observe/trace/decl_gen.go",
       "layer": "core",
       "family": "observe"
     },
@@ -60793,7 +60793,7 @@
         }
       ],
       "doc": "ExitValue is the immutable outcome of a finished process: its exit status, the\nsignal that terminated it (if any), and resource-usage accounting. It is the\nvalue returned by Process.Wait.\n",
-      "file": "internal/core/proc/exit.go",
+      "file": "internal/core/proc/decl_gen.go",
       "layer": "core",
       "family": "proc"
     },
@@ -61006,7 +61006,7 @@
         }
       ],
       "doc": "LimitValue is an immutable soft/hard resource-limit pair for setrlimit(2). The\nsoft limit is the enforced value; the hard limit is the ceiling an\nunprivileged process may raise the soft limit to.\n",
-      "file": "internal/core/proc/limit.go",
+      "file": "internal/core/proc/decl_gen.go",
       "layer": "core",
       "family": "proc"
     },
@@ -61090,7 +61090,7 @@
         }
       ],
       "doc": "MemoryLimitValue is an immutable record of one soft-memory-limit derivation:\nthe cgroup allowance it read, the limit it derived, and what decided the\noutcome.\n\nAllowance and Limit are zero on every outcome except MemorySourceCgroup, with\none exception: MemorySourceBelowFloor carries the Allowance it read, because\nthe reason the limit was discarded is only legible next to the cap that\nproduced it.\n",
-      "file": "internal/core/proc/memory.go",
+      "file": "internal/core/proc/decl_gen.go",
       "layer": "core",
       "family": "proc"
     },
@@ -61115,7 +61115,7 @@
       "spelled": "uint8",
       "canonical": "uint8",
       "doc": "MemorySource names what decided the Go soft memory limit, so a caller that\nsees no limit applied can tell WHY without re-deriving it.\n\nThe zero value is deliberately unclaimed. A MemorySource is produced by a\nderivation, never chosen by a caller, so a zero reaching a log line is a value\nthis package never minted rather than one of the four real outcomes wearing a\ndefault.\n",
-      "file": "internal/core/proc/memory.go",
+      "file": "internal/core/proc/decl_gen.go",
       "layer": "core",
       "family": "proc"
     },
@@ -61214,7 +61214,7 @@
         }
       ],
       "doc": "NotificationValue is a parsed sd_notify(3) datagram received by a Listener: the\nraw newline-separated state fields plus the kernel-verified sender PID. It\ncarries no policy — a supervisor decides what READY or WATCHDOG means for\nordering. The lifecycle flags are read through methods so State stays the\nsingle source of truth.\n",
-      "file": "internal/core/proc/notification.go",
+      "file": "internal/core/proc/decl_gen.go",
       "layer": "core",
       "family": "proc"
     },
@@ -61469,7 +61469,7 @@
       "spelled": "int",
       "canonical": "int",
       "doc": "Resource identifies a per-process resource governed by setrlimit(2). It is an\nabstract, platform-portable enum; the service layer maps each value to the\nplatform's RLIMIT_* constant. The zero value ResourceUnknown is the reserved\ninvalid sentinel.\n",
-      "file": "internal/core/proc/proc.go",
+      "file": "internal/core/proc/decl_gen.go",
       "layer": "core",
       "family": "proc"
     },
@@ -61654,7 +61654,7 @@
       "spelled": "int",
       "canonical": "int",
       "doc": "Signal is a typed, platform-portable OS signal. Its underlying value is the\nplatform signal number, so Signal(syscall.SIGTERM) and a Signal parsed from\n\"SIGTERM\" compare equal. The zero value is the reserved invalid signal.\n",
-      "file": "internal/core/proc/signal.go",
+      "file": "internal/core/proc/decl_gen.go",
       "layer": "core",
       "family": "proc"
     },
@@ -61849,7 +61849,7 @@
         }
       ],
       "doc": "Spec is the immutable description of a process to spawn: the executable and\nits environment, the credentials and isolation topology to apply, and the\nresource/scheduling attributes to set between fork and exec. It carries no\npolicy — restart, health, and dependency concerns belong to the caller.\n\nPointer fields (Umask, Nice, OOMScoreAdj) distinguish \"leave at the inherited\ndefault\" (nil) from \"set explicitly to zero\". Maps and slices are read by the\nservice layer and never mutated.\n",
-      "file": "internal/core/proc/spec.go",
+      "file": "internal/core/proc/decl_gen.go",
       "layer": "core",
       "family": "proc"
     },
@@ -61904,7 +61904,7 @@
       "spelled": "uint8",
       "canonical": "uint8",
       "doc": "StdioMode selects how a spawned child's standard streams are wired. The zero\nvalue is StdioInherit, preserving the historical behaviour where the child\nshares the parent's stdin/stdout/stderr (systemd StandardOutput=/StandardInput=\nis the analogue, but the choice is generic to anything that spawns processes).\n",
-      "file": "internal/core/proc/stdio.go",
+      "file": "internal/core/proc/decl_gen.go",
       "layer": "core",
       "family": "proc"
     },
@@ -62264,7 +62264,7 @@
         }
       ],
       "doc": "Conn is a connection with its peer's identity: what a Listener's Accept\nreturns to a listener and a Dialer's Dial to a client, Peer naming the\nother end.\n",
-      "file": "internal/core/proc/ipc/ipc.go",
+      "file": "internal/core/proc/ipc/decl_gen.go",
       "layer": "core",
       "family": "proc"
     },
@@ -62541,7 +62541,7 @@
         }
       ],
       "doc": "PeerValue is who is at the other end of a connection, as the kernel says:\nthe peer's user, group and process where the kernel names them, and whether\nit did (Verified) — false where only the directory's permissions admitted it.\n",
-      "file": "internal/core/proc/ipc/ipc.go",
+      "file": "internal/core/proc/ipc/decl_gen.go",
       "layer": "core",
       "family": "proc"
     },
@@ -62603,7 +62603,7 @@
       "spelled": "uint8",
       "canonical": "uint8",
       "doc": "AttrKind names the type an [AttrValue] carries. The kind is part of the\nattribute's identity, not a hint: a rule comparing strings and an attribute\nholding an integer do not compare — they MISMATCH, and the SDK says so\nrather than quietly answering false (see [AttributeKindMismatch]).\n",
-      "file": "internal/core/security/authz/attr_value.go",
+      "file": "internal/core/security/authz/decl_gen.go",
       "layer": "core",
       "family": "security"
     },
@@ -62639,7 +62639,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "AttrValue is one typed, named fact the caller attaches to a [RequestValue]:\nthe subject's department, whether MFA was satisfied, the owner recorded on\nthe resource. It is immutable once built, and its accessors report the kind\nmismatch rather than a zero value.\n\n# Why it is typed\n\nThe obvious shape for an attribute bag is map[string]string, and it has two\ndefects that this domain cannot afford. It cannot express a flag that is\npresent and FALSE — \"mfa_satisfied=false\" and \"mfa_satisfied absent\" become\nthe same empty string — and it makes every numeric comparison a string\ncomparison, in which \"9\" is greater than \"10\". Both failures resolve toward\npermission often enough to be worth four kinds and an explicit accessor.\n",
-      "file": "internal/core/security/authz/attr_value.go",
+      "file": "internal/core/security/authz/decl_gen.go",
       "layer": "core",
       "family": "security"
     },
@@ -62888,7 +62888,7 @@
       "spelled": "func(request RequestValue) (bool, error)",
       "canonical": "func(request github.com/kitsunium/sdk/internal/core/security/authz.RequestValue) (bool, error)",
       "doc": "Condition reports whether an attribute rule holds for request. It is the\nunit an ABAC rule is written in, and it is an ordinary Go predicate rather\nthan a sentence in a policy language: the caller already has a language, and\na second one would have to grow comparison, negation, arithmetic and short\ncircuits before it could express what an `if` expresses today.\n\nImplementations MUST be pure and safe for concurrent use, and MUST NOT\nperform I/O — a Condition is evaluated on the request path, possibly several\ntimes per request, with no context to cancel it. A rule that needs a lookup\nis a [Policy], which has one.\n\n# false and \"cannot tell\" are different answers\n\nReturning (false, nil) means the condition was evaluated and does not hold;\nthe rule carrying it declines to fire, and the decision is left to the other\npolicies. Returning a non-nil error means the condition could NOT be\nevaluated — most often because the request does not carry the attribute the\nrule names ([AttributeMissing]), or carries it as another kind\n([AttributeKindMismatch]).\n\nThose two MUST NOT be collapsed. An absent attribute compared to a wanted\nvalue is not a comparison that failed: it is a comparison that never\nhappened, and reporting it as false would let a request carrying no\nattributes at all slip past every \"deny if X\" rule in the system. The\nbuilt-in conditions in internal/service/security/authz report absence as an error,\nand every combinator over them treats an unevaluable branch as absorbing.\n",
-      "file": "internal/core/security/authz/authz.go",
+      "file": "internal/core/security/authz/decl_gen.go",
       "layer": "core",
       "family": "security"
     },
@@ -62917,7 +62917,7 @@
       "spelled": "uint8",
       "canonical": "uint8",
       "doc": "Decision is what a [Policy] answers: it permits, it refuses, or it has no\nopinion. Three states, not two.\n\n# Why the third state exists\n\nMost policies only know about part of the system. A policy that grants\n\"orders:write\" to a role has nothing to say about a request to read a\nprofile — and it must be able to SAY that. Folding \"no opinion\" into either\nof the other two breaks something:\n\n  - Folded into [Allow], a policy authorizes every request it does not\n    recognise. That is the hole.\n  - Folded into [Deny], a policy vetoes every request the OTHER policies\n    were meant to grant, because refusal is absorbing (see ADR 0057 §D2).\n    That is the outage, and the usual repair for it is to make the combiner\n    permissive — which reintroduces the hole one layer up.\n\n[Abstain] costs one enum value and removes both.\n\n# The zero value\n\nThe zero Decision is [Abstain], never [Allow]. A Policy that forgets to set\nits result therefore says \"I have no opinion\", and the request is refused by\nthe closure in internal/service/security/authz.Check — not permitted (which would be\na vulnerability) and not made to veto every other policy (which would be an\noutage from a forgotten assignment). This is ADR 0031 applied to a FUNC\nport: a func type has no constructor to refuse in, so the safe value has to\nbe the zero one.\n\nA Decision outside the three named constants is a defect in whoever produced\nit. The SDK treats it as [Deny] and reports [PolicyMisconfigured]; it is\nnever treated as permission. Use [Decision.Valid] to check, and\n[Decision.Granted] — never `!= Deny` — to read a verdict.\n",
-      "file": "internal/core/security/authz/decision.go",
+      "file": "internal/core/security/authz/decl_gen.go",
       "layer": "core",
       "family": "security"
     },
@@ -63092,7 +63092,7 @@
       "spelled": "func(ctx context.Context, request RequestValue) (Decision, error)",
       "canonical": "func(ctx context.Context, request github.com/kitsunium/sdk/internal/core/security/authz.RequestValue) (github.com/kitsunium/sdk/internal/core/security/authz.Decision, error)",
       "doc": "Policy answers whether request is permitted. Implementations MUST be pure\nwith respect to the decision — the same request yields the same decision —\nand safe for concurrent use, because one compiled Policy is shared by every\ngoroutine serving a request.\n\nA Policy returns [Abstain] when it has nothing to say about this request.\nThat is the common case for a policy that only knows about one action or one\nresource, and it is NOT a refusal: refusing is [Deny], and a policy that\nconflates the two silently vetoes every policy it is composed with.\n\n# A returned error is never an authorization\n\nThe error return means \"this policy could not be evaluated\" — a required\nattribute was absent, an attribute was not the kind the rule compares, a\nbacking store was unreachable. A caller MUST treat that as a refusal. The\nSDK's own combiner and closure do exactly that: an error is folded to [Deny]\nand the decision returned alongside it is ignored. A Policy that cannot\ndecide has not permitted anything.\n\nImplementations SHOULD return [Deny] alongside a non-nil error rather than\nthe zero [Abstain], so that a caller who reads only the decision — a mistake\nthis contract cannot prevent — still fails closed.\n",
-      "file": "internal/core/security/authz/authz.go",
+      "file": "internal/core/security/authz/decl_gen.go",
       "layer": "core",
       "family": "security"
     },
@@ -63121,7 +63121,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "RequestValue is the question: may Subject perform Action on Resource, given\nthese attributes. It is immutable once built, so one request value can be\nhanded to every policy in a composition without any of them being able to\nedit what the next one sees.\n\n# The three strings are the caller's vocabulary\n\nThe SDK attaches no meaning to them. \"orders\" and \"urn:acme:orders\" are\nequally valid resources, \"write\" and \"POST\" equally valid actions; nothing\nhere parses, splits or pattern-matches them, and there is no wildcard —\nmatching is byte equality, so a resource literally named \"*\" is a resource\nnamed \"*\" and nothing more. A hierarchy, if the application has one, is\nexpressed by the strings it chooses and the rules it writes.\n\n# Resource is the type, not the row\n\nA grant table answers about a KIND of thing — \"an editor may publish an\narticle\" — and an instance rule answers about one of them — \"…if they wrote\nit\". Put the type in Resource and the instance's facts in the attributes\n(owner, tenant, classification), then let RBAC answer the first question and\nan ABAC condition answer the second. That split is why this domain ships no\nwildcard and needs none; see ADR 0057 §D5.\n",
-      "file": "internal/core/security/authz/request_value.go",
+      "file": "internal/core/security/authz/decl_gen.go",
       "layer": "core",
       "family": "security"
     },
@@ -63276,7 +63276,7 @@
         }
       ],
       "doc": "DocumentValue is a JSON document with its secrets replaced, and whether it\nhad to be cut to fit its bound. It is what [Redactor.JSON] and\n[Redactor.Value] return.\n",
-      "file": "internal/core/security/redact/redact.go",
+      "file": "internal/core/security/redact/decl_gen.go",
       "layer": "core",
       "family": "security"
     },
@@ -64240,7 +64240,7 @@
         }
       ],
       "doc": "SubjectKeyValue is one subject's wrapped data key, as a [SubjectKeyStore]\nkeeps it and yields it from All.\n\npkg/v1/security/secret aliases it as WrappedKey. It is a published concrete shape\nthe SDK hands to callers, so ADR 0040 applies: a caller destructuring it\npositionally breaks on an added field, and the licence to change it ends at\nv1.\n",
-      "file": "internal/core/security/secret/subject.go",
+      "file": "internal/core/security/secret/decl_gen.go",
       "layer": "core",
       "family": "security"
     },
@@ -64483,7 +64483,7 @@
         }
       ],
       "doc": "VersionValue is one version of one secret: which secret, which version, the\nsecret itself, and when the store recorded it.\n\nIt renders safely: [Value] redacts itself, so %+v of a VersionValue, or its\nJSON, prints the name, the number and the instant, and the placeholder where\nthe secret would be.\n\npkg/v1/security/secret aliases it as Versioned. It is a published concrete shape the\nSDK RETURNS, so ADR 0040 applies with its full cost: a caller destructuring\nit positionally breaks on an added field, and the licence to change it ends\nat v1.\n",
-      "file": "internal/core/security/secret/secret.go",
+      "file": "internal/core/security/secret/decl_gen.go",
       "layer": "core",
       "family": "security"
     },
@@ -64803,7 +64803,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "ID is an opaque session identifier. It IS a bearer secret — whoever holds it\nis the session — so this type is built to make leaking it hard:\n\n  - String and GoString render \"<redacted>\", so an accidental %v, %s or %#v\n    in a log line, an error message or a struct dump prints nothing usable.\n    The public/private split of errs is the same idea applied to errors: a\n    Public string is read by third parties, so no sentinel in this domain\n    ever carries an identifier in one.\n  - [ID.Reveal] is the only way to the canonical string, and it is spelled\n    to read like a mistake at a call site that is not building a cookie.\n  - [ID.Equal] compares in constant time. Comparing identifiers with == on\n    the byte slice would not compile; comparing their Reveal strings would,\n    and would leak the length of the shared prefix.\n  - [ID.Digest] is the value a store indexes and names files by, so the\n    secret itself is never a map key, never a filename, and never at rest.\n",
-      "file": "internal/core/security/session/id.go",
+      "file": "internal/core/security/session/decl_gen.go",
       "layer": "core",
       "family": "security"
     },
@@ -65150,7 +65150,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "SessionValue is one session as a [Store] sees it: an identifier, the subject\nit is bound to, its two deadlines, and the caller's data. Every field is\nunexported and every mutator returns a COPY, so a value handed to two\ngoroutines cannot be changed under either of them.\n\nThe absence here is load-bearing. There is no WithSubject, no SetSubject and\nno Elevate: the subject is written exactly once, by [Store.Regenerate], and\nthat call always mints a new identifier. A caller therefore cannot express\n\"keep this identifier and log this user in\" — the sentence has no method.\n",
-      "file": "internal/core/security/session/session_value.go",
+      "file": "internal/core/security/session/decl_gen.go",
       "layer": "core",
       "family": "security"
     },
@@ -65381,7 +65381,7 @@
         }
       ],
       "doc": "StateValue is the full description of a session, with exported fields, from\nwhich [NewSessionValue] builds an immutable [SessionValue]. It exists because\n[Store] is a PUBLISHED port: a framework writing its own store — Redis,\nPostgres, whatever the deployment already runs — has to be able to construct\nthe value type it is contracted to return, and every field of [SessionValue]\nis unexported.\n\nIt is not a back door around the fixation rule. A caller can certainly build\na StateValue naming any subject; what they cannot do is persist it, because\n[Store.Save] compares the subject against the stored record and refuses a\nmismatch with [FixationRefused]. The forgery is possible and useless, which\nis the property worth having: the refusal is a runtime verdict a test can\nreach, not a comment asking people to behave.\n",
-      "file": "internal/core/security/session/state_value.go",
+      "file": "internal/core/security/session/decl_gen.go",
       "layer": "core",
       "family": "security"
     },
@@ -65512,7 +65512,7 @@
       "spelled": "uint8",
       "canonical": "uint8",
       "doc": "Algorithm is the signature algorithm a token issuer or verifier is bound to.\nThe zero value is [AlgorithmUnknown] and is never usable.\n\nThe set is closed and deliberately small: an algorithm reaches this enum only\nwhen the SDK's crypto domain already ships the primitive behind it. \"none\"\nis absent by construction.\n",
-      "file": "internal/core/security/token/token.go",
+      "file": "internal/core/security/token/decl_gen.go",
       "layer": "core",
       "family": "security"
     },
@@ -65774,7 +65774,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "ClaimsValue is one token's claim set: the seven registered claims as typed\nfields plus any number of application (\"private\") claims held as their raw\nJSON encoding.\n\nIt is an immutable value. Accessors copy every slice and map out, the With*\nmethods return a modified copy rather than mutating the receiver, and every\nfield is unexported so encoding/json cannot reach the contents by reflection\n— a claim set routinely carries personal data, and the only way it should\never be serialised is through a format package that knows what it is doing.\n\nPrivate claims are RAW JSON, not decoded values: this is the core layer, and\n\"what shape is a scope claim\" is the caller's question, not the domain's.\nDecode one with pkg/v1/security/token.PrivateClaim.\n",
-      "file": "internal/core/security/token/claims.go",
+      "file": "internal/core/security/token/decl_gen.go",
       "layer": "core",
       "family": "security"
     },

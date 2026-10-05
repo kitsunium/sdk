@@ -1,40 +1,5 @@
 package authz
 
-// Decision is what a [Policy] answers: it permits, it refuses, or it has no
-// opinion. Three states, not two.
-//
-// # Why the third state exists
-//
-// Most policies only know about part of the system. A policy that grants
-// "orders:write" to a role has nothing to say about a request to read a
-// profile — and it must be able to SAY that. Folding "no opinion" into either
-// of the other two breaks something:
-//
-//   - Folded into [Allow], a policy authorizes every request it does not
-//     recognise. That is the hole.
-//   - Folded into [Deny], a policy vetoes every request the OTHER policies
-//     were meant to grant, because refusal is absorbing (see ADR 0057 §D2).
-//     That is the outage, and the usual repair for it is to make the combiner
-//     permissive — which reintroduces the hole one layer up.
-//
-// [Abstain] costs one enum value and removes both.
-//
-// # The zero value
-//
-// The zero Decision is [Abstain], never [Allow]. A Policy that forgets to set
-// its result therefore says "I have no opinion", and the request is refused by
-// the closure in internal/service/security/authz.Check — not permitted (which would be
-// a vulnerability) and not made to veto every other policy (which would be an
-// outage from a forgotten assignment). This is ADR 0031 applied to a FUNC
-// port: a func type has no constructor to refuse in, so the safe value has to
-// be the zero one.
-//
-// A Decision outside the three named constants is a defect in whoever produced
-// it. The SDK treats it as [Deny] and reports [PolicyMisconfigured]; it is
-// never treated as permission. Use [Decision.Valid] to check, and
-// [Decision.Granted] — never `!= Deny` — to read a verdict.
-type Decision uint8
-
 const (
 	// Abstain means this policy has no opinion about this request. It is the
 	// zero value — FIRST in the iota run for exactly that reason — and it

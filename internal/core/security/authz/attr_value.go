@@ -2,12 +2,6 @@ package authz
 
 import "slices"
 
-// AttrKind names the type an [AttrValue] carries. The kind is part of the
-// attribute's identity, not a hint: a rule comparing strings and an attribute
-// holding an integer do not compare — they MISMATCH, and the SDK says so
-// rather than quietly answering false (see [AttributeKindMismatch]).
-type AttrKind uint8
-
 const (
 	// KindInvalid is the zero AttrKind — FIRST in the iota run for exactly
 	// that reason. It belongs to the zero [AttrValue] and to nothing else:
@@ -24,35 +18,6 @@ const (
 	// holds, the groups it belongs to, the scopes a token carries.
 	KindStrings
 )
-
-// AttrValue is one typed, named fact the caller attaches to a [RequestValue]:
-// the subject's department, whether MFA was satisfied, the owner recorded on
-// the resource. It is immutable once built, and its accessors report the kind
-// mismatch rather than a zero value.
-//
-// # Why it is typed
-//
-// The obvious shape for an attribute bag is map[string]string, and it has two
-// defects that this domain cannot afford. It cannot express a flag that is
-// present and FALSE — "mfa_satisfied=false" and "mfa_satisfied absent" become
-// the same empty string — and it makes every numeric comparison a string
-// comparison, in which "9" is greater than "10". Both failures resolve toward
-// permission often enough to be worth four kinds and an explicit accessor.
-type AttrValue struct {
-	// key names the attribute. Empty is not a name: NewRequestValue drops it.
-	key string
-	// kind selects which of the payload members below is meaningful.
-	kind AttrKind
-	// text carries KindString.
-	text string
-	// number carries KindInt64.
-	number int64
-	// flag carries KindBool.
-	flag bool
-	// list carries KindStrings; it is cloned in and cloned out, so no caller
-	// can mutate an attribute another goroutine is evaluating.
-	list []string
-}
 
 // AttrString builds a text attribute.
 func AttrString(key, value string) AttrValue {

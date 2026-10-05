@@ -1,8 +1,5 @@
 package level
 
-// Level represents the importance of a log record; higher values are more severe.
-type Level int8
-
 // Debug represents detailed tracing information useful during development.
 const Debug Level = -4
 

@@ -1,11 +1,5 @@
 package proc
 
-// Resource identifies a per-process resource governed by setrlimit(2). It is an
-// abstract, platform-portable enum; the service layer maps each value to the
-// platform's RLIMIT_* constant. The zero value ResourceUnknown is the reserved
-// invalid sentinel.
-type Resource int
-
 const (
 	// ResourceUnknown is the reserved zero value: no resource selected.
 	ResourceUnknown Resource = iota

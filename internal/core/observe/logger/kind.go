@@ -48,11 +48,6 @@ var kindLabels = [...]string{
 	KindGroup:    "group",
 }
 
-// Kind discriminates the payload variant carried by a Value. Kind values are
-// stable across the public API; new variants are appended at the end so old
-// handlers default to KindAny rather than panic on an unknown discriminant.
-type Kind int8
-
 // String returns the lowercase textual label associated with the Kind
 // receiver, suitable for diagnostic dumps and golden test fixtures.
 // "string", "time", "uint64", "group" — or "unknown" for future variants.

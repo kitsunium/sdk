@@ -439,6 +439,30 @@ packages:
           - type: "[]Code"
     path: github.com/kitsunium/sdk/internal/kernel/errs
     types:
+      - blockDoc: |-
+          Named octet types prevent positional-argument footguns in Pack.
+          PkgCode is spelled out (not `Pkg`) so callers keep `pkg` as an ordinary
+          variable name without shadowing.
+        name: Major
+        underlying: uint8
+      - blockDoc: |-
+          Named octet types prevent positional-argument footguns in Pack.
+          PkgCode is spelled out (not `Pkg`) so callers keep `pkg` as an ordinary
+          variable name without shadowing.
+        name: Layer
+        underlying: uint8
+      - blockDoc: |-
+          Named octet types prevent positional-argument footguns in Pack.
+          PkgCode is spelled out (not `Pkg`) so callers keep `pkg` as an ordinary
+          variable name without shadowing.
+        name: PkgCode
+        underlying: uint8
+      - blockDoc: |-
+          Named octet types prevent positional-argument footguns in Pack.
+          PkgCode is spelled out (not `Pkg`) so callers keep `pkg` as an ordinary
+          variable name without shadowing.
+        name: Serial
+        underlying: uint8
       - decl: true
         doc: |-
           Code packs a 4-byte dotted identifier (MM.LL.PP.SS) as uint32.
@@ -480,30 +504,6 @@ packages:
             recv: value
         name: Code
         underlying: uint32
-      - blockDoc: |-
-          Named octet types prevent positional-argument footguns in Pack.
-          PkgCode is spelled out (not `Pkg`) so callers keep `pkg` as an ordinary
-          variable name without shadowing.
-        name: Major
-        underlying: uint8
-      - blockDoc: |-
-          Named octet types prevent positional-argument footguns in Pack.
-          PkgCode is spelled out (not `Pkg`) so callers keep `pkg` as an ordinary
-          variable name without shadowing.
-        name: Layer
-        underlying: uint8
-      - blockDoc: |-
-          Named octet types prevent positional-argument footguns in Pack.
-          PkgCode is spelled out (not `Pkg`) so callers keep `pkg` as an ordinary
-          variable name without shadowing.
-        name: PkgCode
-        underlying: uint8
-      - blockDoc: |-
-          Named octet types prevent positional-argument footguns in Pack.
-          PkgCode is spelled out (not `Pkg`) so callers keep `pkg` as an ordinary
-          variable name without shadowing.
-        name: Serial
-        underlying: uint8
       - decl: true
         doc: |-
           Error is the SDK-wide typed error. Fields are unexported — consumers

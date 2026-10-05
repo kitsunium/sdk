@@ -1,16 +1,5 @@
 package health
 
-// Status is the verdict of one check or of a whole probe. It is a CLOSED set
-// of three, ordered worst-first so that aggregating a set is `min` and the
-// zero value is the conservative answer.
-//
-// That ordering is deliberate and load-bearing (ADR 0031). A Status is
-// reachable as a struct field, and if StatusHealthy were the zero value then a
-// forgotten assignment — anywhere, in the SDK or in a caller's own reporting —
-// would read as "everything is fine". A forgotten assignment now reads as
-// "unhealthy", which is wrong in the direction that gets noticed.
-type Status uint8
-
 const (
 	// StatusUnhealthy is a failing critical check, or a probe with one. The
 	// replica must not take traffic (readiness) or is irrecoverable

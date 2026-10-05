@@ -1,8 +1,5 @@
 package codec
 
-// Format is the typed string identifier of a codec.
-type Format string
-
 // Known reports whether f has been registered in the codec registry.
 func (f Format) Known() bool {
 	//: empty Formats are reserved as the invalid zero value.

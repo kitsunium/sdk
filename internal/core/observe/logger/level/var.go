@@ -1,18 +1,5 @@
 package level
 
-import "sync/atomic"
-
-// Var is an atomically mutable Level holder satisfying Leveler. Its zero value
-// is ready to use and reports Info (the Level zero value), so a freshly
-// declared Var gates at the same default as a config's unset MinLevel. Set and
-// Level are safe for concurrent use; a gate may read Level on the hot path
-// while a control goroutine raises or lowers the floor via Set.
-type Var struct {
-	// v stores the Level as an int32 so the holder is lock-free; Level is an
-	// int8, which round-trips through int32 without loss.
-	v atomic.Int32
-}
-
 // NewVar returns a Var initialised to initial. The returned pointer is the
 // Leveler a gate or sink holds; callers later retune it with Set.
 func NewVar(initial Level) *Var {

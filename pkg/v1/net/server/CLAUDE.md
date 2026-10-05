@@ -44,7 +44,7 @@ in the dimension that motivated the domain, whatever else it gained.
 this one under `pkg/v1/net` (ADR 0155) — see `pkg/v1/net/sse/CLAUDE.md`,
 `pkg/v1/net/websocket/CLAUDE.md` and `pkg/v1/net/static/CLAUDE.md`. The first
 two also record why there is no **client** for their protocol and what would
-have to change in `internal/core/net/response.go` for one.
+have to change in `internal/core/net/decl_gen.go` (`ResponseValue`, which kit declares from the design — ADR 0170) for one.
 
 ## Why-this-shape
 

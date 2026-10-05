@@ -299,7 +299,8 @@ packages:
             public: A writer is already registered under that name
             reason: DUPLICATE_REGISTRATION
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           ClickHouseConfig configures the "clickhouse" writer (registered by
           third-party/db/writer/clickhouse). It carries no driver types — only plain
           data — so it lives in the dep-light core layer; the concrete low-level driver
@@ -356,7 +357,8 @@ packages:
                 the background drainer.
               name: OnError
               type: func(err error)
-      - doc: |-
+      - decl: true
+        doc: |-
           CloudWatchConfig configures the "cloudwatch" writer (registered by
           third-party/aws/writer/cloudwatch). Like S3Config it carries no AWS types and lives
           in core, re-exported as logger.CloudWatchConfig. Group, Stream and Region are
@@ -405,10 +407,12 @@ packages:
                 by the background drainer.
               name: OnError
               type: func(err error)
-      - doc: ConsoleStream selects which standard stream the console writer targets.
+      - decl: true
+        doc: ConsoleStream selects which standard stream the console writer targets.
         name: ConsoleStream
         underlying: uint8
-      - doc: |-
+      - decl: true
+        doc: |-
           ConsoleConfig configures the "console" writer. The zero value is valid and
           targets os.Stderr at the handler-global level.
         name: ConsoleConfig
@@ -422,7 +426,8 @@ packages:
                 inherits the handler-global level.
               name: MinLevel
               type: level.Level
-      - doc: |-
+      - decl: true
+        doc: |-
           FileConfig configures the "file" writer — an append-only, symlink-hardened
           on-disk file. Path is required; an empty Path is rejected by the factory with
           the shared WriterConfigInvalid sentinel.
@@ -439,7 +444,8 @@ packages:
                 inherits the handler-global level.
               name: MinLevel
               type: level.Level
-      - doc: |-
+      - decl: true
+        doc: |-
           MySQLConfig configures the "mysql" writer (registered by
           third-party/db/writer/mysql). It carries no driver types — only plain data —
           so it lives in the dep-light core layer; the concrete driver
@@ -502,7 +508,8 @@ packages:
                 the background drainer. Without it those errors are lost.
               name: OnError
               type: func(err error)
-      - doc: |-
+      - decl: true
+        doc: |-
           RedisStreamConfig configures the "redis" writer (registered by
           third-party/db/writer/redis). It carries no driver types — only plain data —
           so it lives in the dep-light core layer; the concrete driver (redis/go-redis)
@@ -565,7 +572,8 @@ packages:
                 background drainer.
               name: OnError
               type: func(err error)
-      - doc: |-
+      - decl: true
+        doc: |-
           RotFileConfig configures the "rotfile" writer — a size-capped, on-disk file
           that rotates when a write would exceed MaxBytes. It is the concrete config a
           caller passes as writer.Config to writer.Open("rotfile", …); Path is required,
@@ -649,7 +657,8 @@ packages:
                 inherits the handler-global level.
               name: MinLevel
               type: level.Level
-      - doc: |-
+      - decl: true
+        doc: |-
           S3Config configures the "s3" writer (registered by third-party/aws/writer/s3). It
           carries no AWS types — only plain data — so it lives in the dep-light core
           layer and is re-exported as logger.S3Config. Bucket and Region are required;
@@ -707,7 +716,8 @@ packages:
                 cannot be blocked on a network failure).
               name: OnError
               type: func(err error)
-      - doc: |-
+      - decl: true
+        doc: |-
           CredentialValue is an opaque, redacting AWS SigV4 credential set. Its String
           output is always "<redacted>" so an accidental %v / %s never leaks the
           secret; the typed accessors expose the material only to the transport factory
@@ -747,8 +757,18 @@ packages:
             recv: value
         name: CredentialValue
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - doc: |-
+                accessKeyID / secretAccessKey / sessionToken hold SigV4 material; all
+                unexported so the only way out is the explicit accessors below.
+              name: accessKeyID
+              type: string
+            - name: secretAccessKey
+              type: string
+            - name: sessionToken
+              type: string
+      - decl: true
+        doc: |-
           Name is the typed key under which a Factory registers (e.g. "console",
           "file", "s3"). The zero value Name("") is reserved invalid, mirroring
           codec.Format.

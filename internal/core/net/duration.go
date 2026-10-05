@@ -16,24 +16,6 @@ const (
 	minQuotedLen int = 2
 )
 
-// DurationValue is a time.Duration that round-trips through JSON as either a Go
-// duration string ("30s", "1m30s") or a raw nanosecond count. The SDK's config
-// loader (ADR 0028) decodes through a JSON round-trip, and encoding/json renders
-// a bare time.Duration as nanoseconds — which would force an operator to write
-// 30000000000 in a YAML file to mean thirty seconds. This type accepts both and
-// always emits the readable form.
-//
-// The mixed receivers are required by encoding/json and are not a style slip:
-// MarshalJSON must take a value so a non-pointer struct field marshals, and
-// UnmarshalJSON must take a pointer so it can assign. The standard library's
-// time.Time carries the same asymmetry for the same reason.
-//
-// PROMOTION CANDIDATE: this type is domain-neutral and stdlib-only, so it
-// belongs in internal/kernel or internal/core/app/config the moment a second domain
-// needs it. It is declared here because the repo's bar for a shared primitive is
-// two real consumers arising from an actual duplication, and today there is one.
-type DurationValue time.Duration
-
 // Duration returns the value as a plain time.Duration.
 func (d DurationValue) Duration() time.Duration {
 	//: DurationValue is a defined type over time.Duration — the conversion is free.

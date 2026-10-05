@@ -6,9 +6,9 @@ go_library(
     name = "authz",
     srcs = [
         "attr_value.go",
-        "authz.go",
         "codes_gen.go",
         "decision.go",
+        "decl_gen.go",
         "doc.go",
         "errors.go",
         "request_value.go",

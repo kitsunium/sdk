@@ -326,7 +326,8 @@ packages:
             public: zlib transform failed
             reason: ZLIB_FAILED
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Algorithm is the typed key under which a Compressor registers (e.g. "gzip",
           "flate", "zlib"). The zero value Algorithm("") is reserved invalid, mirroring
           codec.Format and crypto.Algorithm. Note that "flate" is the raw DEFLATE

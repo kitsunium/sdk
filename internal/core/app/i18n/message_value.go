@@ -12,13 +12,6 @@ const (
 	asciiDelete byte = 0x7F
 )
 
-// Key names a message inside a catalogue. It is a program identifier the
-// developer chooses — "checkout.button.pay" — and never prose: it is compared
-// by byte equality, it travels in error fields, and it is what the renderer
-// puts on screen when the translation is missing. That last use is why an
-// empty key is refused: a blank on screen is a defect nobody reports.
-type Key string
-
 // ValidateKey reports whether key is usable, and returns [InvalidKey] when it
 // is not.
 //
@@ -48,46 +41,6 @@ func ValidateKey(key Key) error {
 	}
 	//: usable.
 	return nil
-}
-
-// MessageValue is one translated message, compiled: its placeholders are
-// parsed once, when the catalogue is built, so a malformed pattern fails at
-// startup and a render never parses anything. pkg/v1/app/i18n publishes it as
-// `Message`.
-//
-// A MessageValue ALWAYS carries the [FormOther] pattern — the one category
-// CLDR guarantees in every language — and carries the other five only when the
-// translator supplied them. The zero MessageValue carries nothing and reports
-// [PluralFormMissing] from [MessageValue.Format]; it is not an empty
-// translation.
-//
-// A MessageValue does not know which language it is written in. That is
-// deliberate: the renderer walks the fallback chain and therefore already
-// knows which language answered, and storing the tag here would put a second
-// copy of that fact where nothing checks it against the first. See the package
-// comment on why the plural rules follow the message.
-type MessageValue struct {
-	// other is the mandatory FormOther pattern.
-	other PatternValue
-	// plural holds the remaining categories, ascending by Form. It is nil for
-	// a message with no plural forms, which is the common case and the one
-	// worth keeping small.
-	plural []FormPatternValue
-}
-
-// FormPatternValue pairs a CLDR category with the compiled body that spells
-// it, as a plural message carries it.
-//
-// It is a slice element rather than a map entry because a message carries at
-// most five of these: a linear scan over five values in one cache line beats a
-// hash, and it allocates nothing on the render path.
-type FormPatternValue struct {
-	// Form is the category. [FormOther] is never one of these: a message
-	// carries its `other` body out of line, and [NewCompiledMessage] refuses
-	// it here.
-	Form Form
-	// Body is the compiled pattern for the category.
-	Body PatternValue
 }
 
 // NewCompiledMessage assembles a [MessageValue] from bodies already compiled,

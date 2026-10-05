@@ -624,7 +624,8 @@ packages:
             public: A view template is not valid
             reason: TEMPLATE_PARSE_FAILED
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Config parameterises every [Factory]. It is deliberately small: this domain
           ships an extension point, not a template language.
         name: Config
@@ -666,7 +667,8 @@ packages:
                 setting" reasoning applies here as to the WebSocket ceilings in ADR 0047.
               name: MaxBytes
               type: int
-      - doc: |-
+      - decl: true
+        doc: |-
           Engine names a registered template engine.
 
           The zero value is the reserved invalid name: [Register] refuses it at boot,

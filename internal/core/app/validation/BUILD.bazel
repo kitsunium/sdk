@@ -6,12 +6,11 @@ go_library(
     name = "validation",
     srcs = [
         "codes_gen.go",
+        "decl_gen.go",
         "doc.go",
         "errors.go",
         "path.go",
         "report.go",
-        "validation.go",
-        "violation.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/app/validation",
     visibility = [

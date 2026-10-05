@@ -1,10 +1,5 @@
 package net
 
-// Phase is where a server sits in its lifecycle. It is reported by State so an
-// operator — or a readiness probe — can tell "not yet listening" apart from
-// "listening" and from "draining", which a single boolean cannot express.
-type Phase uint8
-
 // The lifecycle phases, in the order a server passes through them.
 const (
 	// PhaseNew is a constructed server that has not bound anything yet.

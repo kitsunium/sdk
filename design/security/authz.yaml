@@ -399,14 +399,16 @@ packages:
             public: The condition cannot be built from the given arguments
             reason: CONDITION_INVALID
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           AttrKind names the type an [AttrValue] carries. The kind is part of the
           attribute's identity, not a hint: a rule comparing strings and an attribute
           holding an integer do not compare — they MISMATCH, and the SDK says so
           rather than quietly answering false (see [AttributeKindMismatch]).
         name: AttrKind
         underlying: uint8
-      - doc: |-
+      - decl: true
+        doc: |-
           AttrValue is one typed, named fact the caller attaches to a [RequestValue]:
           the subject's department, whether MFA was satisfied, the owner recorded on
           the resource. It is immutable once built, and its accessors report the kind
@@ -493,8 +495,29 @@ packages:
             recv: value
         name: AttrValue
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - doc: "key names the attribute. Empty is not a name: NewRequestValue drops it."
+              name: key
+              type: string
+            - doc: kind selects which of the payload members below is meaningful.
+              name: kind
+              type: AttrKind
+            - doc: text carries KindString.
+              name: text
+              type: string
+            - doc: number carries KindInt64.
+              name: number
+              type: int64
+            - doc: flag carries KindBool.
+              name: flag
+              type: bool
+            - doc: |-
+                list carries KindStrings; it is cloned in and cloned out, so no caller
+                can mutate an attribute another goroutine is evaluating.
+              name: list
+              type: "[]string"
+      - decl: true
+        doc: |-
           Policy answers whether request is permitted. Implementations MUST be pure
           with respect to the decision — the same request yields the same decision —
           and safe for concurrent use, because one compiled Policy is shared by every
@@ -519,7 +542,8 @@ packages:
           this contract cannot prevent — still fails closed.
         name: Policy
         underlying: func(ctx context.Context, request RequestValue) (Decision, error)
-      - doc: |-
+      - decl: true
+        doc: |-
           Condition reports whether an attribute rule holds for request. It is the
           unit an ABAC rule is written in, and it is an ordinary Go predicate rather
           than a sentence in a policy language: the caller already has a language, and
@@ -548,7 +572,8 @@ packages:
           and every combinator over them treats an unevaluable branch as absorbing.
         name: Condition
         underlying: func(request RequestValue) (bool, error)
-      - doc: |-
+      - decl: true
+        doc: |-
           Decision is what a [Policy] answers: it permits, it refuses, or it has no
           opinion. Three states, not two.
 
@@ -615,7 +640,8 @@ packages:
             recv: value
         name: Decision
         underlying: uint8
-      - doc: |-
+      - decl: true
+        doc: |-
           RequestValue is the question: may Subject perform Action on Resource, given
           these attributes. It is immutable once built, so one request value can be
           handed to every policy in a composition without any of them being able to
@@ -682,7 +708,27 @@ packages:
             recv: value
         name: RequestValue
         struct:
-          unexported: true
+          fields:
+            - doc: |-
+                subject is the authenticated principal, exactly as internal/core/security/session
+                or internal/core/security/token reported it. Empty means anonymous, which is a
+                legitimate request and never a special case: it matches whatever the
+                caller's rules say about the empty subject, which is normally nothing,
+                which is an abstention, which the closure refuses.
+              name: subject
+              type: string
+            - doc: action is the verb being attempted.
+              name: action
+              type: string
+            - doc: resource is the kind of thing being acted on.
+              name: resource
+              type: string
+            - doc: |-
+                attrs is the fact bag, keyed by attribute name. Every entry has a
+                non-empty key and a valid kind — NewRequestValue enforces both — so a
+                lookup that succeeds always yields a usable attribute.
+              name: attrs
+              type: map[string]AttrValue
   - doc: |-
       Package authz — hosts the attribute-based evaluator.
 

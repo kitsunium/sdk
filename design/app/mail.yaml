@@ -762,7 +762,8 @@ packages:
             public: The SMTP URL is not usable as written
             reason: INVALID_URL
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           AddressValue is one RFC 5322 mailbox: an addr-spec and an optional display
           name.
 
@@ -800,7 +801,8 @@ packages:
                 appear here.
               name: Addr
               type: string
-      - doc: |-
+      - decl: true
+        doc: |-
           AttachmentValue is one MIME body part carrying a file.
 
           The distinction between an attachment and an inline image is ONE field.
@@ -847,7 +849,8 @@ packages:
                 §6.8). An empty slice is a legal zero-length attachment.
               name: Content
               type: "[]byte"
-      - doc: |-
+      - decl: true
+        doc: |-
           HeaderFieldValue is one additional header: a name and a value.
 
           It is a slice element rather than a map entry for two reasons that both
@@ -869,7 +872,8 @@ packages:
                 outright when it carries CR, LF or NUL.
               name: Value
               type: string
-      - doc: |-
+      - decl: true
+        doc: |-
           MessageValue is one mail, as a value. It is deliberately a struct and not an
           interface: a message has no behaviour worth abstracting, it is data, and a
           value can be built in a literal, compared field by field in a test, and
@@ -948,7 +952,8 @@ packages:
                 referenced from the HTML body as cid:<ContentID> (RFC 2392 §2).
               name: Attachments
               type: "[]AttachmentValue"
-      - doc: |-
+      - decl: true
+        doc: |-
           DeliveryValue is one record of what a transport actually put on the wire.
 
           It carries the composed BYTES and not the message, because those are two
@@ -967,7 +972,8 @@ packages:
                 endings throughout.
               name: Raw
               type: "[]byte"
-      - doc: |-
+      - decl: true
+        doc: |-
           EnvelopeValue is what an SMTP session actually carries: one MAIL FROM and one
           or more RCPT TO (RFC 5321 §3.3). It is NOT the header block, and the
           difference is the whole reason this type exists.

@@ -1,14 +1,5 @@
 package proc
 
-// MemorySource names what decided the Go soft memory limit, so a caller that
-// sees no limit applied can tell WHY without re-deriving it.
-//
-// The zero value is deliberately unclaimed. A MemorySource is produced by a
-// derivation, never chosen by a caller, so a zero reaching a log line is a value
-// this package never minted rather than one of the four real outcomes wearing a
-// default.
-type MemorySource uint8
-
 const (
 	// MemorySourceOperator reports that GOMEMLIMIT carried a non-empty value.
 	// The Go runtime has already applied it and the derivation stands aside:
@@ -58,25 +49,6 @@ func (s MemorySource) String() string {
 		//: name the absence rather than invent a source.
 		return "unknown"
 	}
-}
-
-// MemoryLimitValue is an immutable record of one soft-memory-limit derivation:
-// the cgroup allowance it read, the limit it derived, and what decided the
-// outcome.
-//
-// Allowance and Limit are zero on every outcome except MemorySourceCgroup, with
-// one exception: MemorySourceBelowFloor carries the Allowance it read, because
-// the reason the limit was discarded is only legible next to the cap that
-// produced it.
-type MemoryLimitValue struct {
-	// Allowance is the tightest cgroup memory cap governing this process, in
-	// bytes, or zero when none was read.
-	Allowance int64
-	// Limit is the Go soft memory limit derived from Allowance, in bytes, or
-	// zero when no limit was applied.
-	Limit int64
-	// Source names what decided the outcome.
-	Source MemorySource
 }
 
 // Applied reports whether the derivation installed a limit. It is true for

@@ -20,9 +20,8 @@ by ADR 0121 and declared here since ADR 0160 §2 with its values unchanged.
 | File | Symbols |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
-| `profile.go` | `ProfileValue` (time, sample types, samples, comments, period, duration, default sample type), `SampleTypeValue`, `SampleValue` (stack, values, labels, numeric labels), `FrameValue` |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `FoldedValue`, `OwnerCostValue`, `FunctionCostValue`, `FlameNodeValue`, `GoroutineValue`, `GoroutineGroupValue`, `ProfileValue`, `SampleTypeValue`, `SampleValue` and `FrameValue` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `folded.go` | `FoldedValue` (owners, top functions, flame, total, unattributed), `OwnerCostValue`, `FunctionCostValue`, `FlameNodeValue`, `FlameRoot` |
-| `goroutine.go` | `GoroutineValue` (labels, state, wait, thread lock, stack, creator), `GoroutineGroupValue` |
 | `codes_gen.go` | the seven codes and sentinels below — written by kit gen from `design/observe/profiling.yaml` (ADR 0164) |
 | `errors.go` | hand-written beside them: `httpBadRequest`, `httpConflict`, `httpUnavailable` |
 

@@ -240,7 +240,8 @@ packages:
             public: The interval must be greater than zero
             reason: INVALID_INTERVAL
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Job is the unit of work a [Scheduler] fires. It MUST honour ctx: the
           scheduler passes the context Run was called with, so cancelling that context
           is how a shutdown reaches a running job. A Job that ignores ctx delays Run's
@@ -252,7 +253,8 @@ packages:
           failing job never stops the scheduler and never affects another entry.
         name: Job
         underlying: func(ctx context.Context) error
-      - doc: |-
+      - decl: true
+        doc: |-
           Schedule reports the first instant STRICTLY after `after` at which a job is
           due, and whether such an instant exists at all. A false second return means
           the schedule will never fire again; the scheduler disarms that entry and
@@ -265,7 +267,8 @@ packages:
           make that loop spin forever.
         name: Schedule
         underlying: func(after time.Time) (next time.Time, ok bool)
-      - doc: |-
+      - decl: true
+        doc: |-
           EntryValue is one registered pairing of a [Schedule] with a [Job], under a
           name that identifies it in every [ResultValue] and every error field.
 
@@ -296,7 +299,8 @@ packages:
                 same class of claim (ADR 0031).
               name: AllowOverlap
               type: bool
-      - doc: |-
+      - decl: true
+        doc: |-
           ResultValue is what a [Scheduler] reports for every decision it takes about
           an entry — a run that happened, and a fire that was deliberately not run.
           Reporting the second is the point: a scheduler that only reports runs makes

@@ -40,50 +40,6 @@ func buildPow10() [maxFractionDigits + 1]uint64 {
 	return table
 }
 
-// CountValue is a quantity described by the CLDR plural operands, which is
-// what a plural rule actually reads — never the Go number the caller started
-// with. pkg/v1/app/i18n publishes it as `Count`.
-//
-// # Why the caller states the DISPLAY precision
-//
-// CLDR's rules distinguish 1 from 1.0. In English "1 file" is `one` and
-// "1.0 files" is `other`, because the operand v — the number of fraction
-// digits VISIBLE to the reader — is 0 in the first and 1 in the second. A
-// float64 cannot carry that difference: 1.0 and 1 are the same bits. So the
-// caller supplies it, and [Int] is the shorthand for "no fraction digits".
-//
-// # The four operands implemented, and the four refused BY NAME
-//
-// Implemented: n (the absolute value), i (its integer part), v (the count of
-// visible fraction digits) and f (those digits as an integer). Together they
-// decide every rule of every language in this domain's supported set, which is
-// a checkable claim rather than a hope — see internal/service/app/i18n.
-//
-// Refused by name: w and t (the fraction digits with trailing zeros removed)
-// and c/e (the compact-decimal exponent). No rule in the supported set reads
-// w or t. c and e are refused for a harder reason: they exist to describe
-// "1M" and "1,2 mln", and this domain ships no compact-decimal formatter, so
-// an exponent could only ever be 0 here. The Romance `many` category, whose
-// CLDR clause is written in terms of e, is therefore implemented at e = 0 —
-// see internal/service/app/i18n's rule table, which says so at each of the four
-// call sites.
-//
-// The zero CountValue is the quantity zero with no fraction digits, which is a
-// perfectly good quantity: "0 files" is a sentence, and refusing to describe
-// it would make the zero value an obstacle rather than a hazard.
-type CountValue struct {
-	// integerPart is CLDR operand i: the integer digits of the ABSOLUTE
-	// value. CLDR's operands ignore the sign, and so does every rule:
-	// "-1 degree" is `one` in English exactly as "1 degree" is.
-	integerPart uint64
-	// fractionValue is CLDR operand f: the visible fraction digits read as an
-	// integer, trailing zeros included.
-	fractionValue uint64
-	// visibleFractionDigits is CLDR operand v: how many fraction digits the
-	// reader sees.
-	visibleFractionDigits uint8
-}
-
 // Int returns the [CountValue] of an exact integer, displayed with no fraction
 // digits. It cannot fail.
 //

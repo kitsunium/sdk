@@ -1,7 +1,6 @@
 package logger
 
 import (
-	"context"
 	"encoding/hex"
 )
 
@@ -31,24 +30,6 @@ const (
 	// SpanIDKey is the top-level field name carrying the span identifier.
 	SpanIDKey string = "span_id"
 )
-
-// TraceContextValue is the trace correlation a single log record carries: the
-// identity of the span the record was emitted inside.
-//
-// It is a VALUE and carries no flags and no tracestate, because a log line
-// answers exactly one question — "which span produced this?" — and the
-// sampling decision that governs the trace is not a property of the line.
-//
-// The zero value is the INVALID context, deliberately: an all-zero trace-id is
-// what W3C Trace Context §3.2.2.3 declares invalid, and an all-zero span-id is
-// §3.2.2.4's. So "no trace here" and "a trace nobody may join" are one value
-// with one spelling, and every consumer has exactly one check to make.
-type TraceContextValue struct {
-	// TraceID identifies the whole trace; rendered as 32 lowercase hex digits.
-	TraceID [TraceIDLen]byte
-	// SpanID identifies the span within the trace; 16 lowercase hex digits.
-	SpanID [SpanIDLen]byte
-}
 
 // IsValid reports whether the pair names a span a backend can join: both
 // identifiers present and non-zero.
@@ -99,14 +80,3 @@ func (c TraceContextValue) AppendSpanIDHex(dst []byte) []byte {
 	//: hand back the extended buffer.
 	return append(dst, buf[:]...)
 }
-
-// TraceContextSource reads the trace context carried by ctx.
-//
-// It is a FUNC port, so ADR 0039 is satisfied structurally: a func type cannot
-// grow a method, so publishing it can never break a downstream implementation.
-// It returns the zero (invalid) value rather than an error or an ok flag —
-// running outside a trace is the normal state of most code, not a fault, and
-// IsValid is the single question every caller already has to ask.
-//
-// Implementations MUST NOT allocate: they run once per emitted record.
-type TraceContextSource func(ctx context.Context) (trace TraceContextValue)

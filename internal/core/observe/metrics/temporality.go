@@ -7,12 +7,6 @@ const (
 	temporalityCumulativeText  string = "cumulative"
 )
 
-// Temporality says which time window a metric's reported value covers. It is
-// the single most load-bearing concept in the OpenTelemetry metrics data model,
-// because the same number means two different things under the two settings and
-// nothing in the number itself says which.
-type Temporality uint8
-
 const (
 	// TemporalityUnspecified is the zero value and means "the caller has not
 	// chosen". It is legal ONLY in a MeterConfig, where it resolves to

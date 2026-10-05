@@ -160,7 +160,8 @@ packages:
             public: The operation and its fallback both failed
             reason: FALLBACK_FAILED
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Operation is the unit of work a Runner guards. It MUST honour ctx
           cancellation (return promptly when ctx.Done fires) so timeout/cancellation
           propagate; a non-cancellable op caps a Timeout's precision at op granularity.

@@ -49,33 +49,6 @@ const (
 	traceStatePairByte byte = '='
 )
 
-// StateValue is the parsed `tracestate` header: an ORDERED list of vendor
-// entries, leftmost first.
-//
-// The order is load-bearing and is the reason this is not a map. §3.5 states it
-// twice over: "the order of unmodified key/value pairs MUST be preserved" and
-// "modified keys SHOULD be moved to the beginning (left) of the list", because
-// the leftmost entry is the system that touched the trace most recently. A map
-// would lose exactly that, and lose it silently.
-//
-// The value is IMMUTABLE: Insert and Delete return a new StateValue rather
-// than mutating the receiver, so a span context handed to a handler cannot be
-// edited underneath the caller that produced it. The zero value is a valid empty
-// list.
-//
-// This SDK writes NO entry of its own. It is not a tracing vendor with state to
-// carry, and inventing a key would put a name nobody registered on every
-// outbound request; Insert exists for a consumer who IS one.
-//
-// A list comes from three places only: the zero value, Insert, and a
-// StateBuilder — the one the engine's header parser fills, member by member.
-// Each of the last two checks every member against the grammar before it
-// enters the list, so no StateValue holds an entry the next hop would refuse.
-type StateValue struct {
-	// entries is the ordered list, leftmost first. nil is the empty list.
-	entries []traceStateEntry
-}
-
 // Len reports how many list members the state carries.
 func (s StateValue) Len() int {
 	//: nil entries is the empty list.

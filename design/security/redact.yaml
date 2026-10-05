@@ -188,7 +188,8 @@ packages:
             public: The value cannot be encoded as JSON and was not redacted
             reason: VALUE_UNENCODABLE
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           DocumentValue is a JSON document with its secrets replaced, and whether it
           had to be cut to fit its bound. It is what [Redactor.JSON] and
           [Redactor.Value] return.

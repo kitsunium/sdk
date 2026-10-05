@@ -704,6 +704,7 @@ packages:
       http: net/http
       stdnet: net
       tls: crypto/tls
+      x509: crypto/x509
     path: github.com/kitsunium/sdk/internal/core/net
     ports:
       - doc: |-
@@ -1186,7 +1187,8 @@ packages:
             public: The static file handler configuration is not valid
             reason: STATIC_MISCONFIGURED
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           AddressValue names one socket to bind. It is a value type so a group's listen
           set is comparable and copyable, and so a configuration file can express it
           directly.
@@ -1211,7 +1213,8 @@ packages:
               name: Addr
               tag: json:"addr"
               type: string
-      - doc: |-
+      - decl: true
+        doc: |-
           CallValue records one completed outbound call for observation, so a caller
           can log, meter or trace every egress without wrapping each call site by hand.
 
@@ -1252,7 +1255,8 @@ packages:
                 response ceiling, or a failed close. Nil when the body was read in full.
               name: Err
               type: error
-      - doc: |-
+      - decl: true
+        doc: |-
           CallHook receives one CallValue per completed outbound call. It is a function
           port rather than an interface because it is a single-method contract with no
           state, and a func keeps the domain free of a dependency on the logger or the
@@ -1262,7 +1266,8 @@ packages:
           calling goroutine, so a slow hook slows every request.
         name: CallHook
         underlying: func(call CallValue)
-      - doc: |-
+      - decl: true
+        doc: |-
           ClientConfig describes an outbound client. Durations use DurationValue so a
           configuration file can say "5s" rather than a nanosecond count.
 
@@ -1314,7 +1319,10 @@ packages:
               name: DefaultHeaders
               tag: json:"default_headers"
               type: map[string]string
-      - doc: ConnHandlerFunc adapts a plain function to ConnHandler.
+      - decl: true
+        doc: ConnHandlerFunc adapts a plain function to ConnHandler.
+        implements:
+          - ConnHandler
         methods:
           - doc: ServeConn implements ConnHandler by calling f.
             in:
@@ -1328,7 +1336,8 @@ packages:
             recv: value
         name: ConnHandlerFunc
         underlying: func(ctx context.Context, c Conn) error
-      - doc: |-
+      - decl: true
+        doc: |-
           DurationValue is a time.Duration that round-trips through JSON as either a Go
           duration string ("30s", "1m30s") or a raw nanosecond count. The SDK's config
           loader (ADR 0028) decodes through a JSON round-trip, and encoding/json renders
@@ -1379,7 +1388,8 @@ packages:
             recv: pointer
         name: DurationValue
         underlying: time.Duration
-      - doc: |-
+      - decl: true
+        doc: |-
           IdentityValue is an opaque TLS identity: a certificate chain, the trust
           anchors used to verify the peer, and the negotiated-version policy. Its String
           and GoString output is always "<redacted>" so an accidental %v, %s or %#v can
@@ -1440,8 +1450,30 @@ packages:
             recv: value
         name: IdentityValue
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - doc: certs holds the parsed keypair; empty for a client that only verifies.
+              name: certs
+              type: "[]tls.Certificate"
+            - doc: roots verifies the peer; nil means "use the platform trust store".
+              name: roots
+              type: "*x509.CertPool"
+            - doc: clientCAs verifies client certificates on a server identity.
+              name: clientCAs
+              type: "*x509.CertPool"
+            - doc: serverName overrides the verified peer name.
+              name: serverName
+              type: string
+            - doc: minVersion is the resolved TLS floor, never zero after construction.
+              name: minVersion
+              type: uint16
+            - doc: nextProtos is the ALPN list.
+              name: nextProtos
+              type: "[]string"
+            - doc: requireClientCert promotes a server identity to mutual TLS.
+              name: requireClientCert
+              type: bool
+      - decl: true
+        doc: |-
           IdentityFileParams names TLS material to read from the filesystem. Every path
           is optional on its own; the combination is validated once the bytes are in
           hand, by the same core constructor that validates in-memory material.
@@ -1503,7 +1535,8 @@ packages:
               name: RequireClientCert
               tag: json:"require_client_cert"
               type: bool
-      - doc: |-
+      - decl: true
+        doc: |-
           IdentityParams carries in-memory TLS material. Every field is optional on its
           own; the combination is what is validated by NewIdentity. Sourcing material
           from memory rather than from disk is what lets a consumer pull certificates
@@ -1548,7 +1581,8 @@ packages:
                 present a certificate that chains to ClientCAPEM.
               name: RequireClientCert
               type: bool
-      - doc: |-
+      - decl: true
+        doc: |-
           LimitsValue bounds what one listener group may consume. Every field is
           optional; zero means "use the domain default", never "unbounded" — an unset
           ceiling must not be the dangerous one.
@@ -1593,7 +1627,8 @@ packages:
               name: BatchSize
               tag: json:"batch_size"
               type: int
-      - doc: |-
+      - decl: true
+        doc: |-
           Middleware decorates a handler with another of the same type.
 
           It is generic over the handler type so stream and datagram handlers share one
@@ -1604,7 +1639,10 @@ packages:
           - constraint: any
             name: H
         underlying: func(next H) H
-      - doc: PacketHandlerFunc adapts a plain function to PacketHandler.
+      - decl: true
+        doc: PacketHandlerFunc adapts a plain function to PacketHandler.
+        implements:
+          - PacketHandler
         methods:
           - doc: ServePacket implements PacketHandler by calling f.
             in:
@@ -1618,7 +1656,8 @@ packages:
             recv: value
         name: PacketHandlerFunc
         underlying: func(ctx context.Context, p Packet) error
-      - doc: |-
+      - decl: true
+        doc: |-
           Phase is where a server sits in its lifecycle. It is reported by State so an
           operator — or a readiness probe — can tell "not yet listening" apart from
           "listening" and from "draining", which a single boolean cannot express.
@@ -1630,7 +1669,10 @@ packages:
             recv: value
         name: Phase
         underlying: uint8
-      - doc: PolicyFunc adapts a plain function to the Policy interface.
+      - decl: true
+        doc: PolicyFunc adapts a plain function to the Policy interface.
+        implements:
+          - Policy
         methods:
           - doc: Allow implements Policy by calling f.
             in:
@@ -1642,7 +1684,8 @@ packages:
             recv: value
         name: PolicyFunc
         underlying: func(req RequestValue) error
-      - doc: |-
+      - decl: true
+        doc: |-
           ResponseValue is a fully-read outbound response.
 
           The client returns this rather than an *http.Response on purpose. A returned
@@ -1667,7 +1710,8 @@ packages:
                 size cap. It is nil for a status that carries no body, such as 204.
               name: Body
               type: "[]byte"
-      - doc: |-
+      - decl: true
+        doc: |-
           RequestValue describes an outbound request to the transport policy.
 
           Two field choices are load-bearing and were paid for in a real integration:
@@ -1707,7 +1751,8 @@ packages:
             - doc: RawQuery is the encoded query string, without the leading "?".
               name: RawQuery
               type: string
-      - doc: |-
+      - decl: true
+        doc: |-
           SSEEventValue is one Server-Sent Events frame.
 
           The format has no escape mechanism. A line terminator inside a value is not
@@ -1765,7 +1810,8 @@ packages:
               name: Retry
               tag: json:"retry"
               type: DurationValue
-      - doc: |-
+      - decl: true
+        doc: |-
           StateValue is a snapshot of the server's lifecycle and listeners.
 
           It is a value, so a caller can hold it, log it, or compare it without racing
@@ -1821,7 +1867,8 @@ packages:
               name: AcceptBackoffs
               tag: json:"accept_backoffs"
               type: uint64
-      - doc: |-
+      - decl: true
+        doc: |-
           ListenerStateValue reports one bound listener.
 
           It carries the address actually bound rather than the one requested, and it
@@ -1865,7 +1912,8 @@ packages:
               name: Adopted
               tag: json:"adopted"
               type: bool
-      - doc: |-
+      - decl: true
+        doc: |-
           TimeoutsValue bounds each phase of a connection separately.
 
           Per-phase deadlines rather than one overall budget: a slow reader, a slow
@@ -1899,7 +1947,8 @@ packages:
               name: Handshake
               tag: json:"handshake"
               type: DurationValue
-      - doc: WSCloseCode is the status code a Close frame carries (RFC 6455 §7.4).
+      - decl: true
+        doc: WSCloseCode is the status code a Close frame carries (RFC 6455 §7.4).
         methods:
           - doc: |-
               Sendable reports whether the code may appear in a Close frame on the wire.
@@ -1927,7 +1976,8 @@ packages:
             recv: value
         name: WSCloseCode
         underlying: uint16
-      - doc: |-
+      - decl: true
+        doc: |-
           WSMessageValue is one complete WebSocket application message, reassembled
           from however many frames carried it.
 
@@ -1957,7 +2007,8 @@ packages:
               name: Data
               tag: json:"data"
               type: "[]byte"
-      - doc: WSOpCode is a frame's four-bit type field (RFC 6455 §5.2).
+      - decl: true
+        doc: WSOpCode is a frame's four-bit type field (RFC 6455 §5.2).
         methods:
           - doc: |-
               IsControl reports whether the opcode names a control frame.

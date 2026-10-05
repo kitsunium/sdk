@@ -1,9 +1,5 @@
 package redact
 
-import (
-	"encoding/json"
-)
-
 // Placeholder replaces every secret a [Redactor] recognises. A caller that
 // shows a redacted value compares against it, so every implementation writes
 // exactly this text.
@@ -23,15 +19,3 @@ const MinBytes int = 16
 // Unencodable is the text a log attribute holding a value encoding/json
 // refuses is rendered as by [Redactor.Attrs]: the marker, never the value.
 const Unencodable string = "[unencodable]"
-
-// DocumentValue is a JSON document with its secrets replaced, and whether it
-// had to be cut to fit its bound. It is what [Redactor.JSON] and
-// [Redactor.Value] return.
-type DocumentValue struct {
-	// JSON is always one well-formed JSON value, never longer than the bound.
-	JSON json.RawMessage
-	// Truncated reports that members, elements or the tail of a string were
-	// left out to fit the bound. The containers that were cut are still
-	// closed, so JSON stays well-formed.
-	Truncated bool
-}

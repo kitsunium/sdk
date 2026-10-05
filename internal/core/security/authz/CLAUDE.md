@@ -19,7 +19,7 @@ Every code of the domain is in this package; the engine declares none.
 
 | File | Surface |
 |---|---|
-| `authz.go` | `Policy func(ctx, RequestValue) (Decision, error)` · `Condition func(RequestValue) (bool, error)` |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `AttrKind`, `AttrValue`, `Policy`, `Condition`, `Decision` and `RequestValue` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `decision.go` | `Decision` + `Abstain` / `Allow` / `Deny` + `Granted` / `Valid` / `String` |
 | `request_value.go` | `RequestValue` + `NewRequestValue` + `Subject` / `Action` / `Resource` / `Attr` / `AttrCount` |
 | `attr_value.go` | `AttrKind` (`KindInvalid` / `KindString` / `KindInt64` / `KindBool` / `KindStrings`) + `AttrValue` + `AttrString` / `AttrInt64` / `AttrBool` / `AttrStrings` + `Key` / `Kind`, the `(value, ok)` accessors and `Contains` |

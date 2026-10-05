@@ -344,7 +344,8 @@ packages:
             public: A listener tried to stop the dispatch without the authority to
             reason: HALT_NOT_PERMITTED
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Listener reacts to one published event. The dynamic type of event is
           exactly the [EventType] the subscription was registered for, so a listener
           may assert it unconditionally — internal/service/app/events.On does that for
@@ -373,7 +374,8 @@ packages:
           the context and can.
         name: Listener
         underlying: func(ctx context.Context, event any) error
-      - doc: |-
+      - decl: true
+        doc: |-
           DispatchValue reports what one [Bus.Publish] did: how many listeners ran,
           whether one of them stopped the dispatch and which, how many never ran
           because of that, and how many failed.
@@ -416,7 +418,8 @@ packages:
                 and never ran because the dispatch was halted before reaching them.
               name: Skipped
               type: int
-      - doc: |-
+      - decl: true
+        doc: |-
           Priority orders the listeners registered for one event type. LOWER RUNS
           FIRST, as with every ordering comparator in the stdlib, so a listener that
           must observe the event before the others is registered at a negative
@@ -433,7 +436,8 @@ packages:
           and the refusals this domain does make are in [InvalidSubscription]).
         name: Priority
         underlying: int
-      - doc: |-
+      - decl: true
+        doc: |-
           SubscriptionValue is one named listener's registration against one event
           type: what it is called, when it runs relative to its siblings, whether it
           is allowed to stop the dispatch, and what it does.

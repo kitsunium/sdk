@@ -13,50 +13,6 @@ import (
 // the kind of literal that gets "fixed" to 16 by a well-meaning edit.
 const decimalBase int = 10
 
-// Step is one direction of a migration: the statements that move the schema.
-//
-// A FUNCTION port, for the same reason [TxFunc] is: one behaviour, so a named
-// func IS the contract, and a func type cannot grow a method (ADR 0039).
-//
-// It receives the SAME [Executor] the surrounding transaction runs on, which
-// is what makes a migration and its version-table row commit together.
-type Step func(ctx context.Context, ex Executor) error
-
-// MigrationValue is one versioned schema change and its reversal.
-//
-// The SDK does NOT own a migration FILE FORMAT, a directory layout, or a
-// naming convention, and it ships no example directory. A migration is a value
-// the consumer constructs, because the moment the SDK reads a directory it has
-// invented a convention every consumer must adopt and no consumer asked for
-// (ADR 0055 §D8). Where the statements come from — a Go literal, an embed.FS,
-// a generator — is the caller's decision and none of the SDK's business.
-//
-// The zero value is not runnable and is refused at construction.
-type MigrationValue struct {
-	// Version orders the migration. It must be non-zero and unique within one
-	// set: zero is reserved as "before every migration", the value Down takes
-	// to reverse everything.
-	//
-	// Any strictly-increasing scheme works; a UTC timestamp (20260910143000)
-	// is the conventional one because two branches developed in parallel then
-	// merge without colliding.
-	Version uint64
-	// Name is the human label recorded in the version table. It must be
-	// non-empty: a schema history whose rows say only "42" is a schema
-	// history nobody can read during an incident.
-	Name string
-	// Up applies the change. Required.
-	Up Step
-	// Down reverses it. Required — and [Irreversible] is how a caller says
-	// "this one cannot be reversed" OUT LOUD.
-	//
-	// A nil Down is refused rather than accepted as "irreversible", because
-	// "I forgot the reversal" and "there is no reversal" are the same nil and
-	// only one of them is a defect. The same rule core/app/lifecycle applies to a
-	// nil Stop, for the same reason.
-	Down Step
-}
-
 // Irreversible is the [Step] a caller assigns to [MigrationValue.Down] to
 // declare that the migration cannot be reversed. It always fails, with a typed
 // error naming the version.

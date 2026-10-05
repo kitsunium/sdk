@@ -13,30 +13,6 @@ import (
 // peer to accommodate; a caller that genuinely needs 1.2 must say so explicitly.
 const defaultMinVersion uint16 = tls.VersionTLS12 + 1 // tls.VersionTLS13
 
-// IdentityValue is an opaque TLS identity: a certificate chain, the trust
-// anchors used to verify the peer, and the negotiated-version policy. Its String
-// and GoString output is always "<redacted>" so an accidental %v, %s or %#v can
-// never spill key material into a log line. The only way out is ClientConfig or
-// ServerConfig, which mint a fresh *tls.Config per call.
-//
-// The zero value is valid and means "no identity" — IsZero reports it.
-type IdentityValue struct {
-	// certs holds the parsed keypair; empty for a client that only verifies.
-	certs []tls.Certificate
-	// roots verifies the peer; nil means "use the platform trust store".
-	roots *x509.CertPool
-	// clientCAs verifies client certificates on a server identity.
-	clientCAs *x509.CertPool
-	// serverName overrides the verified peer name.
-	serverName string
-	// minVersion is the resolved TLS floor, never zero after construction.
-	minVersion uint16
-	// nextProtos is the ALPN list.
-	nextProtos []string
-	// requireClientCert promotes a server identity to mutual TLS.
-	requireClientCert bool
-}
-
 // String implements fmt.Stringer and always redacts so key material never
 // reaches a log line through %v or %s.
 func (i IdentityValue) String() string {

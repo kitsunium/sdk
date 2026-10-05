@@ -2,17 +2,6 @@ package i18n
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"
 
-// Form is a CLDR plural category: one of the six names the Unicode plural
-// rules assign a quantity to.
-//
-// [FormOther] is the ZERO value, and that is ADR 0031's "the zero value is the
-// safe one" rather than an accident of ordering. CLDR guarantees every
-// language defines `other`; it is the only category that is always present, so
-// a [PluralRule] that forgets to set a result names the one form every message
-// is required to carry — instead of naming `zero`, which most languages do not
-// have and which would turn a forgotten return into a lookup miss.
-type Form uint8
-
 // The six categories, `other` first so it is the zero value.
 const (
 	// FormOther is the catch-all category. Every language defines it and

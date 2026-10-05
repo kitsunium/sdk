@@ -1,9 +1,5 @@
 package trace
 
-// StatusCode is opentelemetry/proto/trace/v1.Status.StatusCode. Three values,
-// and the third is not the negation of the second.
-type StatusCode int32
-
 // The three codes, in the schema's own declaration order: iota reproduces
 // STATUS_CODE_UNSET = 0 through STATUS_CODE_ERROR = 2 exactly, which is what the
 // OTLP encoder emits as the enum's integer.
@@ -20,23 +16,6 @@ const (
 	// StatusError is STATUS_CODE_ERROR (2): the operation failed.
 	StatusError
 )
-
-// StatusValue is a span's recorded outcome.
-//
-// The Message field is only meaningful on StatusError, and the schema says so:
-// "message … SHOULD be used only if the code is ERROR". This type enforces it in
-// Resolved rather than trusting the caller, because a message hanging off an OK
-// status is the sort of thing that renders as an error in one backend's UI and
-// vanishes in another's.
-type StatusValue struct {
-	// Code is the verdict.
-	Code StatusCode
-	// Message describes the failure. It is dropped unless Code is
-	// StatusError, and it is the ONE free-text field a span carries — so it
-	// must not be given a value the operator cannot see safely. It is not an
-	// errs Public: a span message is read by whoever reads the trace.
-	Message string
-}
 
 // Resolved returns the status a span actually carries: an undeclared code
 // clamps to StatusUnset, and a Message survives only on StatusError.

@@ -6,6 +6,7 @@ go_library(
     name = "id",
     srcs = [
         "codes_gen.go",
+        "decl_gen.go",
         "design_gen.go",
         "doc.go",
         "id.go",

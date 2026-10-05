@@ -2,13 +2,6 @@ package net
 
 import "slices"
 
-// Middleware decorates a handler with another of the same type.
-//
-// It is generic over the handler type so stream and datagram handlers share one
-// shape and one Chain helper, instead of the domain carrying two near-identical
-// middleware types that would inevitably drift.
-type Middleware[H any] func(next H) H
-
 // Chain applies middlewares to a handler, outermost first.
 //
 // Chain(h, a, b, c) yields a(b(c(h))): the first middleware listed is the first

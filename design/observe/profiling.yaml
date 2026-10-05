@@ -169,7 +169,8 @@ packages:
             public: The profile does not measure that
             reason: SAMPLE_TYPE_MISSING
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           FoldedValue is a profile folded: in the sample type's own unit —
           nanoseconds of CPU, bytes of heap — never rounded.
         name: FoldedValue
@@ -199,7 +200,8 @@ packages:
                 Unattributed plus every owner's Value.
               name: Unattributed
               type: int64
-      - doc: |-
+      - decl: true
+        doc: |-
           OwnerCostValue is what one owner cost: the sum of the samples charged to
           it, and its own costliest functions.
         name: OwnerCostValue
@@ -214,7 +216,8 @@ packages:
             - doc: Value is the sum of the samples charged to the owner.
               name: Value
               type: int64
-      - doc: |-
+      - decl: true
+        doc: |-
           FunctionCostValue is what one function cost, flat and cumulative, and where
           it is defined.
         name: FunctionCostValue
@@ -237,7 +240,8 @@ packages:
             - doc: StartLine is the function's first line; zero when unknown.
               name: StartLine
               type: int
-      - doc: |-
+      - decl: true
+        doc: |-
           FlameNodeValue is one frame of a flame graph: a function reached along one
           path, and what the samples through it cost.
         name: FlameNodeValue
@@ -252,7 +256,8 @@ packages:
             - doc: Value is the cost of every sample through this path.
               name: Value
               type: int64
-      - doc: |-
+      - decl: true
+        doc: |-
           GoroutineValue is one goroutine of the process, as the runtime's dump
           describes it.
         name: GoroutineValue
@@ -291,7 +296,8 @@ packages:
             - doc: LockedToThread says the goroutine is locked to its OS thread.
               name: LockedToThread
               type: bool
-      - doc: |-
+      - decl: true
+        doc: |-
           GoroutineGroupValue is goroutines sharing their labels, their state and
           their top frame.
         name: GoroutineGroupValue
@@ -317,7 +323,8 @@ packages:
             - doc: Count is how many goroutines share the group.
               name: Count
               type: int
-      - doc: |-
+      - decl: true
+        doc: |-
           ProfileValue is a decoded pprof profile: what was measured, and every
           sample with its stack, its values and its labels. It is plain data — the
           profile.proto message with its tables resolved — and safe to share once
@@ -357,7 +364,8 @@ packages:
             - doc: Period is the sampling period, in PeriodType's unit.
               name: Period
               type: int64
-      - doc: |-
+      - decl: true
+        doc: |-
           SampleTypeValue names what a value measures and its unit — {cpu
           nanoseconds}, {inuse_space bytes}.
         name: SampleTypeValue
@@ -369,7 +377,8 @@ packages:
             - doc: "Unit is its unit: \"nanoseconds\", \"count\", \"bytes\"."
               name: Unit
               type: string
-      - doc: |-
+      - decl: true
+        doc: |-
           SampleValue is one sample: a stack, a value per sample type, and the labels
           the goroutine carried when it was taken.
         name: SampleValue
@@ -395,7 +404,8 @@ packages:
             - doc: Values holds one value per ProfileValue.SampleTypes entry.
               name: Values
               type: "[]int64"
-      - doc: |-
+      - decl: true
+        doc: |-
           FrameValue is one frame of a stack: a function, where it is defined, and
           the line executing in it.
         name: FrameValue

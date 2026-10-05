@@ -53,41 +53,6 @@ func IsRegisteredClaim(name string) bool {
 	return slices.Contains(registeredClaims, name)
 }
 
-// ClaimsValue is one token's claim set: the seven registered claims as typed
-// fields plus any number of application ("private") claims held as their raw
-// JSON encoding.
-//
-// It is an immutable value. Accessors copy every slice and map out, the With*
-// methods return a modified copy rather than mutating the receiver, and every
-// field is unexported so encoding/json cannot reach the contents by reflection
-// — a claim set routinely carries personal data, and the only way it should
-// ever be serialised is through a format package that knows what it is doing.
-//
-// Private claims are RAW JSON, not decoded values: this is the core layer, and
-// "what shape is a scope claim" is the caller's question, not the domain's.
-// Decode one with pkg/v1/security/token.PrivateClaim.
-type ClaimsValue struct {
-	// issuer is the "iss" claim, empty when absent.
-	issuer string
-	// subject is the "sub" claim, empty when absent.
-	subject string
-	// id is the "jti" claim, empty when absent.
-	id string
-	// audience is the "aud" claim. JWT allows one string or an array of them
-	// (RFC 7519 §4.1.3), so the general shape is a slice; PASETO allows only
-	// one, which its encoder enforces.
-	audience []string
-	// expiry is the "exp" claim; the zero Time means the claim was absent.
-	expiry time.Time
-	// notBefore is the "nbf" claim; the zero Time means it was absent.
-	notBefore time.Time
-	// issuedAt is the "iat" claim; the zero Time means it was absent.
-	issuedAt time.Time
-	// private maps an application claim name to its raw JSON encoding. Raw,
-	// because re-encoding a decoded value would change bytes the issuer signed.
-	private map[string][]byte
-}
-
 // NewClaimsValue returns an empty claim set to build on. The zero ClaimsValue
 // is equally valid and equally empty; this constructor exists so a call site
 // reads as a statement of intent rather than a struct literal.

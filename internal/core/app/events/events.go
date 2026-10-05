@@ -1,7 +1,6 @@
 package events
 
 import (
-	"context"
 	"reflect"
 )
 
@@ -22,31 +21,3 @@ import (
 // never fire. That registration is refused rather than accepted and silently
 // starved — see [InvalidEventType].
 type EventType = reflect.Type
-
-// Listener reacts to one published event. The dynamic type of event is
-// exactly the [EventType] the subscription was registered for, so a listener
-// may assert it unconditionally — internal/service/app/events.On does that for
-// the caller and is the only registration path most code needs.
-//
-// Delivery is SYNCHRONOUS on the publisher's goroutine: a Listener that
-// blocks blocks the publisher, and a Listener that takes a lock takes it in
-// the publisher's lock order. Keep it short, or hand off to something that
-// owns its own goroutine — and if what you actually need is "return now,
-// finish later, reliably", see the package documentation's frontier.
-//
-// Returning [Halt] stops the dispatch: the listeners after this one in
-// priority order are not called. Only a subscription that declared
-// [SubscriptionValue.MayHalt] can do that; from any other listener it is a
-// HALT_NOT_PERMITTED failure and the dispatch continues.
-//
-// Returning any other non-nil error is COLLECTED and the dispatch CONTINUES.
-// The other listeners are independent consequences of the same fact; making
-// their delivery depend on this one's disk being full would reintroduce
-// exactly the coupling a bus exists to remove.
-//
-// ctx is the publisher's context, passed through untouched. The bus never
-// inspects it: an event is a fact that has already happened, and cancelling
-// half of its consequences produces the partial state the synchronous
-// contract exists to prevent. A Listener that must honour cancellation holds
-// the context and can.
-type Listener func(ctx context.Context, event any) error

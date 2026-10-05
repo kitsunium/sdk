@@ -214,13 +214,15 @@ packages:
           - type: ScopeValue
     path: github.com/kitsunium/sdk/internal/core/observe/otel
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           AttrKind discriminates the type of an AttrValue's value. It is the OpenTelemetry
           attribute model: a value is a string, a bool, a signed 64-bit integer or a
           double — never a string that happens to spell one of the others.
         name: AttrKind
         underlying: uint8
-      - doc: |-
+      - decl: true
+        doc: |-
           AttrValue is one dimension — of a metric series, of a span, of a Resource: a
           Key naming the dimension and a TYPED value observed for it.
 
@@ -301,8 +303,17 @@ packages:
                 in an attribute set; ValidateAttrs checks both.
               name: Key
               type: string
-          unexported: true
-      - doc: |-
+            - doc: kind discriminates which of num/str carries the value.
+              name: kind
+              type: AttrKind
+            - doc: num carries a bool, an int64 or the IEEE-754 bits of a float64.
+              name: num
+              type: uint64
+            - doc: str carries a string value, and only a string value.
+              name: str
+              type: string
+      - decl: true
+        doc: |-
           ResourceValue identifies the ENTITY that produced the telemetry — the
           service, the process, the host. Its attributes are carried ONCE per payload
           rather than on every point or span, which is the whole reason the concept
@@ -321,7 +332,8 @@ packages:
                 normalised by NormalizeResource always carries ServiceNameKey.
               name: Attrs
               type: "[]AttrValue"
-      - doc: |-
+      - decl: true
+        doc: |-
           ScopeValue identifies the INSTRUMENTATION that produced the telemetry — the
           library, package or module that minted the instruments or started the spans,
           as opposed to the service that runs it. OpenTelemetry calls it

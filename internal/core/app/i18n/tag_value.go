@@ -25,27 +25,6 @@ const (
 	asciiCaseBit byte = 'a' - 'A'
 )
 
-// TagValue is a language, optionally narrowed by a script and a region:
-// exactly the `language[-Script][-REGION]` shape of BCP 47 and deliberately
-// nothing else. pkg/v1/app/i18n publishes it as `Tag`.
-//
-// It is a comparable struct, so it is a map key and an == operand, and it
-// holds its canonical spelling, so [TagValue.String] allocates nothing. The
-// zero TagValue is the absence of a tag: [TagValue.IsZero] reports it and
-// [TagValue.String] renders "". ADR 0031 is honoured by REFUSAL rather than by
-// a default — no constructor in this domain reads a zero tag as "use English",
-// because the SDK choosing a language for an application is exactly the silent
-// wrong answer the domain exists to prevent.
-type TagValue struct {
-	// canonical is the canonical form: lowercase language, Titlecase script,
-	// UPPERCASE alpha region. The three accessors slice it, so they cost
-	// nothing and cannot disagree with it.
-	canonical string
-	// langN, scriptN and regionN are the subtag lengths inside canonical. A
-	// zero scriptN or regionN means the subtag is absent.
-	langN, scriptN, regionN uint8
-}
-
 // NewTag assembles a [TagValue] from its subtags, or returns [InvalidTag].
 //
 // language is mandatory: 2 or 3 ASCII letters. script is empty or 4 ASCII

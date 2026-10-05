@@ -15,28 +15,3 @@ const (
 	// its position in the sources a load was given, counting from 0.
 	LayerSource string = "source"
 )
-
-// OriginValue says which layer supplied the final value of one key of a load —
-// and says it WITHOUT the value, which is the point: an origin is written to a
-// start-up log, a --show-config table, a diagnostics page, and a
-// configuration value is routinely a password.
-//
-// pkg/v1/app/config aliases it as Origin. It is a published shape the SDK RETURNS,
-// so ADR 0040 applies with its full cost after v1.
-type OriginValue struct {
-	// Key is the operator's key in the dotted grammar — "database.dsn".
-	Key string
-	// Layer names the kind of layer that supplied the final value: one of the
-	// Layer* constants, or the kind a [Describer] reports. It is EMPTY when the
-	// key is absent from the merged layers — no layer supplied it, or a later
-	// layer erased it by replacing one of its tables with a scalar or a null —
-	// and the field then holds its Go zero value.
-	Layer string
-	// Detail is what an operator acts on: the variable that set the key, the
-	// file that holds it. Empty when the layer has nothing more to say.
-	Detail string
-	// Secret reports that the key's field holds a core/security/secret.Value. The
-	// origin never carries a value either way; Secret is what tells a
-	// rendering that the value, if it shows one, must be masked.
-	Secret bool
-}

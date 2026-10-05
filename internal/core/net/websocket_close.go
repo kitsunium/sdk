@@ -59,9 +59,6 @@ const (
 	wsClosePrivateHigh WSCloseCode = 4999
 )
 
-// WSCloseCode is the status code a Close frame carries (RFC 6455 §7.4).
-type WSCloseCode uint16
-
 // Sendable reports whether the code may appear in a Close frame on the wire.
 //
 // It is deliberately a property of the CODE rather than a check inside the

@@ -656,7 +656,8 @@ packages:
             public: The session store location is reached through a link
             reason: PATH_REDIRECTED
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           ID is an opaque session identifier. It IS a bearer secret — whoever holds it
           is the session — so this type is built to make leaking it hard:
 
@@ -736,8 +737,14 @@ packages:
             recv: value
         name: ID
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - doc: |-
+                raw holds exactly IDLen bytes; the zero value holds nil and is not
+                usable. NewID and ParseID are the only producers, and both copy.
+              name: raw
+              type: "[]byte"
+      - decl: true
+        doc: |-
           SessionValue is one session as a [Store] sees it: an identifier, the subject
           it is bound to, its two deadlines, and the caller's data. Every field is
           unexported and every mutator returns a COPY, so a value handed to two
@@ -877,8 +884,40 @@ packages:
             recv: value
         name: SessionValue
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - doc: |-
+                id names the session; it is the presented identifier, never one read
+                back from storage (a store keeps only ID.Digest, see id.go).
+              name: id
+              type: ID
+            - doc: |-
+                subject is the authenticated principal, or "" for anonymous. Written
+                only by the regeneration path.
+              name: subject
+              type: string
+            - doc: |-
+                createdAt anchors the absolute deadline and never moves for the life of
+                this identifier.
+              name: createdAt
+              type: time.Time
+            - doc: lastSeen anchors the idle deadline and moves on every Load.
+              name: lastSeen
+              type: time.Time
+            - doc: |-
+                absoluteExpiry is createdAt + AbsoluteTimeout — the ceiling. It is
+                stamped once and no operation extends it.
+              name: absoluteExpiry
+              type: time.Time
+            - doc: |-
+                idleExpiry is lastSeen + IdleTimeout, ALREADY CLAMPED to absoluteExpiry
+                by whoever built the value, so ExpiresAt needs no special case.
+              name: idleExpiry
+              type: time.Time
+            - doc: data is the caller's key/value payload; nil until something is set.
+              name: data
+              type: map[string]string
+      - decl: true
+        doc: |-
           StateValue is the full description of a session, with exported fields, from
           which [NewSessionValue] builds an immutable [SessionValue]. It exists because
           [Store] is a PUBLISHED port: a framework writing its own store — Redis,

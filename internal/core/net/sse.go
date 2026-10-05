@@ -20,34 +20,6 @@ const SSEMinRetry time.Duration = time.Millisecond
 // carrying the id of the last event it processed.
 const SSELastEventIDHeader string = "Last-Event-ID"
 
-// SSEEventValue is one Server-Sent Events frame.
-//
-// The format has no escape mechanism. A line terminator inside a value is not
-// quoted, it SPLITS the value: that is exactly what makes a multi-line payload
-// expressible — Data is emitted as one "data:" line per line and the client
-// rejoins them with "\n" — and exactly what makes a line terminator inside ID
-// or Name unrepresentable. Those are refused rather than truncated, because a
-// silently shortened id is a resume token pointing at the wrong place.
-type SSEEventValue struct {
-	// ID is the frame's "id" field. A client stores the last non-empty id it
-	// saw and sends it back as Last-Event-ID when it reconnects, so this is the
-	// resume token — and it is the CALLER's to mint, because only the caller
-	// knows what it means. Empty emits no id field, which leaves the client's
-	// stored id untouched; that is the format's own behaviour, not an omission.
-	ID string `json:"id"`
-	// Name is the frame's "event" field — the event type the client dispatches
-	// under. Empty means the default type, "message".
-	Name string `json:"event"`
-	// Data is the payload. Every line terminator it carries (LF, CR or CRLF)
-	// becomes a separate "data:" line, which the client rejoins with "\n". A
-	// payload that mixed terminators therefore arrives normalised to LF: the
-	// value is preserved, its byte spelling is not.
-	Data string `json:"data"`
-	// Retry is the reconnection delay hint, emitted as an integer millisecond
-	// count. Zero emits no retry field.
-	Retry DurationValue `json:"retry"`
-}
-
 // IsZero reports whether the frame carries no field at all.
 func (e SSEEventValue) IsZero() bool {
 	//: every field empty means there is nothing to serialise.

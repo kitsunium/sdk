@@ -67,19 +67,3 @@ func isSubjectByte(b byte) bool {
 	//: the anchors, and the four separators a derived reference uses.
 	return isAnchor(b) || b == '-' || b == '_' || b == '.' || b == ':'
 }
-
-// SubjectKeyValue is one subject's wrapped data key, as a [SubjectKeyStore]
-// keeps it and yields it from All.
-//
-// pkg/v1/security/secret aliases it as WrappedKey. It is a published concrete shape
-// the SDK hands to callers, so ADR 0040 applies: a caller destructuring it
-// positionally breaks on an added field, and the licence to change it ends at
-// v1.
-type SubjectKeyValue struct {
-	// Subject is whom the key belongs to, in the grammar [ValidateSubject]
-	// accepts.
-	Subject string
-	// Wrapped is the data key sealed under the root keyring: ciphertext,
-	// bound to Subject, readable by nothing without the root.
-	Wrapped []byte
-}

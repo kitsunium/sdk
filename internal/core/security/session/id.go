@@ -22,27 +22,6 @@ const IDLen int = 32
 // encoding on every call.
 var canonicalEncoding = base64.RawURLEncoding.Strict()
 
-// ID is an opaque session identifier. It IS a bearer secret — whoever holds it
-// is the session — so this type is built to make leaking it hard:
-//
-//   - String and GoString render "<redacted>", so an accidental %v, %s or %#v
-//     in a log line, an error message or a struct dump prints nothing usable.
-//     The public/private split of errs is the same idea applied to errors: a
-//     Public string is read by third parties, so no sentinel in this domain
-//     ever carries an identifier in one.
-//   - [ID.Reveal] is the only way to the canonical string, and it is spelled
-//     to read like a mistake at a call site that is not building a cookie.
-//   - [ID.Equal] compares in constant time. Comparing identifiers with == on
-//     the byte slice would not compile; comparing their Reveal strings would,
-//     and would leak the length of the shared prefix.
-//   - [ID.Digest] is the value a store indexes and names files by, so the
-//     secret itself is never a map key, never a filename, and never at rest.
-type ID struct {
-	// raw holds exactly IDLen bytes; the zero value holds nil and is not
-	// usable. NewID and ParseID are the only producers, and both copy.
-	raw []byte
-}
-
 // NewID builds an ID from raw, which MUST be exactly [IDLen] bytes. A wrong
 // length returns [InvalidID] rather than padding or truncating — a truncated
 // identifier is a weaker secret that would still work. The bytes are copied so

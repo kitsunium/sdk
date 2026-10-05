@@ -6,11 +6,11 @@ go_library(
     name = "events",
     srcs = [
         "codes_gen.go",
+        "decl_gen.go",
         "design_gen.go",
         "doc.go",
         "errors.go",
         "events.go",
-        "events_dispatch.go",
         "events_subscription.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/app/events",

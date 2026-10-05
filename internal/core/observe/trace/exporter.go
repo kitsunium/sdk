@@ -5,18 +5,6 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/plugin"
 )
 
-// ExporterName is the typed key under which a SpanExporter registers (e.g.
-// "otlpjson"). The zero value ExporterName("") is reserved invalid.
-//
-// The registry is deliberately the same shape as core/observe/metrics' — the same
-// kernel/plugin.Registry underneath, named, reached by blank-importing the
-// exporter's package, config-addressable. It EARNS its
-// keep here for the reason it earns it there and for one more: ADR 0051
-// §Decision 5 requires the OTLP/HTTP emitter to be absent from it, and "absent
-// from the registry" is only a statement anyone can check if there is a registry
-// to be absent from. A test pins that absence.
-type ExporterName string
-
 // String returns the raw name.
 func (n ExporterName) String() string {
 	//: direct cast back to a plain string.

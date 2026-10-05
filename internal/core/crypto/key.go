@@ -7,17 +7,6 @@ import "bytes"
 // fixed length keeps the surface tiny and the validation total.
 const KeyLen int = 32
 
-// Key is an opaque, redacting 256-bit symmetric key. Its String / GoString
-// output is always "<redacted>" so an accidental %v / %s / %#v never leaks the
-// secret; Bytes hands a fresh copy to the cipher and is the only way out. All
-// copies of a Key share one backing array, so Zeroize on any copy clears the
-// secret everywhere — call it when you are done with the key.
-type Key struct {
-	// raw holds the symmetric key bytes behind a slice so a value-receiver
-	// Zeroize can clear the shared backing array; NewKey is the only producer.
-	raw []byte
-}
-
 // NewKey builds a Key from raw, which MUST be exactly KeyLen (32) bytes. A wrong
 // length returns InvalidKey rather than silently truncating or padding; the
 // bytes are copied so a later mutation of raw cannot affect the Key.

@@ -1380,7 +1380,8 @@ packages:
             public: A scheme is already registered under that algorithm or wire id
             reason: DUPLICATE_REGISTRATION
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Algorithm is the typed key under which an AEAD registers (e.g.
           "aes-256-gcm"). The zero value Algorithm("") is reserved invalid, mirroring
           codec.Format.
@@ -1397,7 +1398,8 @@ packages:
             recv: value
         name: Algorithm
         underlying: string
-      - doc: |-
+      - decl: true
+        doc: |-
           Key is an opaque, redacting 256-bit symmetric key. Its String / GoString
           output is always "<redacted>" so an accidental %v / %s / %#v never leaks the
           secret; Bytes hands a fresh copy to the cipher and is the only way out. All
@@ -1433,7 +1435,12 @@ packages:
             recv: value
         name: Key
         struct:
-          unexported: true
+          fields:
+            - doc: |-
+                raw holds the symmetric key bytes behind a slice so a value-receiver
+                Zeroize can clear the shared backing array; NewKey is the only producer.
+              name: raw
+              type: "[]byte"
   - doc: |-
       Package aesgcm registers the "aes-256-gcm" AEAD scheme (ADR 0013). Importing
       the package (typically a blank import via pkg/v1/crypto) self-registers the

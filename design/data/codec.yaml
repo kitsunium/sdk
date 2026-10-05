@@ -267,7 +267,8 @@ packages:
             public: A codec is already registered under that name, MIME type or extension
             reason: DUPLICATE_REGISTRATION
     types:
-      - doc: Format is the typed string identifier of a codec.
+      - decl: true
+        doc: Format is the typed string identifier of a codec.
         methods:
           - doc: Known reports whether f has been registered in the codec registry.
             name: Known

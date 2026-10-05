@@ -7,11 +7,11 @@ go_library(
     srcs = [
         "codes_gen.go",
         "count_value.go",
+        "decl_gen.go",
         "design_gen.go",
         "doc.go",
         "errors.go",
         "form.go",
-        "i18n.go",
         "message_value.go",
         "pattern.go",
         "tag_value.go",

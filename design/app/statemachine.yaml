@@ -621,7 +621,8 @@ packages:
             public: The request ended while the entity was busy
             reason: WAIT_ABANDONED
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           RecordValue is what a machine keeps about one entity beside the store: the
           state it is in, since when, and the transitions that brought it there,
           oldest first and bounded by the machine's history length.
@@ -653,7 +654,8 @@ packages:
         typeParams:
           - constraint: comparable
             name: S
-      - doc: |-
+      - decl: true
+        doc: |-
           StepValue is one transition in a record's history: which, from where to
           where, what fired it, who asked, and when it was stored.
         name: StepValue
@@ -689,7 +691,8 @@ packages:
         typeParams:
           - constraint: comparable
             name: S
-      - doc: |-
+      - decl: true
+        doc: |-
           Trigger says what fired a transition. The set is closed: every transition a
           machine can take is declared one of these ways, and a history names which.
 

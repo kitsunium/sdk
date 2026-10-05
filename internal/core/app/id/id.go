@@ -1,10 +1,5 @@
 package id
 
-// Scheme is the typed key under which a Generator registers (e.g. "uuidv4",
-// "uuidv7", "ulid", "snowflake", "nanoid", "ksuid"). The zero value Scheme("")
-// is reserved invalid, mirroring codec.Format and transform.Algorithm.
-type Scheme string
-
 // String implements fmt.Stringer and returns the raw identifier.
 func (s Scheme) String() string {
 	//: direct cast from the typed string back to a plain string.

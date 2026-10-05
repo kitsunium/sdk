@@ -6,12 +6,12 @@ go_library(
     name = "session",
     srcs = [
         "codes_gen.go",
+        "decl_gen.go",
         "design_gen.go",
         "doc.go",
         "errors.go",
         "id.go",
         "session_value.go",
-        "state_value.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/security/session",
     visibility = [

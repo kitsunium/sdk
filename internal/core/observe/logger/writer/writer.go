@@ -1,10 +1,5 @@
 package writer
 
-// Name is the typed key under which a Factory registers (e.g. "console",
-// "file", "s3"). The zero value Name("") is reserved invalid, mirroring
-// codec.Format.
-type Name string
-
 // String implements fmt.Stringer and returns the raw identifier.
 func (n Name) String() string {
 	//: direct cast from the typed string back to a plain string.

@@ -1,14 +1,5 @@
 package health
 
-// Probe names which of the three questions is being asked. It is a closed set
-// of three, and the three are not interchangeable — see the package comment.
-//
-// The zero value is deliberately not one of them. A Probe is chosen by the
-// caller at every call site, and there is no defensible default: answering
-// "liveness" to a caller who forgot to say what they wanted is how a
-// dependency outage becomes a restart loop.
-type Probe uint8
-
 const (
 	// ProbeStartup asks "is this process still coming up?". While it answers
 	// no, the orchestrator must neither route to the replica nor restart it.

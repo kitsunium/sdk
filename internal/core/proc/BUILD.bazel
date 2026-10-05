@@ -6,6 +6,7 @@ go_library(
     name = "proc",
     srcs = [
         "codes_gen.go",
+        "decl_gen.go",
         "design_gen.go",
         "doc.go",
         "errors.go",
@@ -17,7 +18,6 @@ go_library(
         "signal.go",
         "signal_other.go",
         "signal_unix.go",
-        "spec.go",
         "stdio.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/proc",

@@ -130,3 +130,7 @@ choosing stderr, but by having no destination in the port at all.
 bazel test --config=race //internal/core/app/view:view_test
 # or: cd internal/core && GOWORK=off go test -race ./app/view/...
 ```
+
+## Declarations
+
+`decl_gen.go` is written by kit gen from the design (ADR 0170): the declarations of `Config` and `Engine` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names.

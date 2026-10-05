@@ -6,10 +6,10 @@ go_library(
     name = "level",
     srcs = [
         "codes_gen.go",
+        "decl_gen.go",
         "design_gen.go",
         "doc.go",
         "level.go",
-        "level_compliance.go",
         "parse.go",
         "var.go",
     ],

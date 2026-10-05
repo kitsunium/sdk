@@ -761,7 +761,8 @@ packages:
             public: Could not deliver the captured output to the writer
             reason: STDIO_CAPTURE_FAILED
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           ExitValue is the immutable outcome of a finished process: its exit status, the
           signal that terminated it (if any), and resource-usage accounting. It is the
           value returned by Process.Wait.
@@ -800,7 +801,8 @@ packages:
                 rusage; it is 0 when the platform does not supply it.
               name: MaxRSS
               type: int64
-      - doc: |-
+      - decl: true
+        doc: |-
           LimitValue is an immutable soft/hard resource-limit pair for setrlimit(2). The
           soft limit is the enforced value; the hard limit is the ceiling an
           unprivileged process may raise the soft limit to.
@@ -813,7 +815,8 @@ packages:
             - doc: Hard is the ceiling for Soft; raising it typically requires privilege.
               name: Hard
               type: uint64
-      - doc: |-
+      - decl: true
+        doc: |-
           MemorySource names what decided the Go soft memory limit, so a caller that
           sees no limit applied can tell WHY without re-deriving it.
 
@@ -832,7 +835,8 @@ packages:
             recv: value
         name: MemorySource
         underlying: uint8
-      - doc: |-
+      - decl: true
+        doc: |-
           MemoryLimitValue is an immutable record of one soft-memory-limit derivation:
           the cgroup allowance it read, the limit it derived, and what decided the
           outcome.
@@ -867,7 +871,8 @@ packages:
             - doc: Source names what decided the outcome.
               name: Source
               type: MemorySource
-      - doc: |-
+      - decl: true
+        doc: |-
           NotificationValue is a parsed sd_notify(3) datagram received by a Listener: the
           raw newline-separated state fields plus the kernel-verified sender PID. It
           carries no policy — a supervisor decides what READY or WATCHDOG means for
@@ -914,7 +919,8 @@ packages:
                 unavailable.
               name: SenderPID
               type: int
-      - doc: |-
+      - decl: true
+        doc: |-
           Resource identifies a per-process resource governed by setrlimit(2). It is an
           abstract, platform-portable enum; the service layer maps each value to the
           platform's RLIMIT_* constant. The zero value ResourceUnknown is the reserved
@@ -935,7 +941,8 @@ packages:
             recv: value
         name: Resource
         underlying: int
-      - doc: |-
+      - decl: true
+        doc: |-
           Signal is a typed, platform-portable OS signal. Its underlying value is the
           platform signal number, so Signal(syscall.SIGTERM) and a Signal parsed from
           "SIGTERM" compare equal. The zero value is the reserved invalid signal.
@@ -966,7 +973,8 @@ packages:
             recv: value
         name: Signal
         underlying: int
-      - doc: |-
+      - decl: true
+        doc: |-
           Spec is the immutable description of a process to spawn: the executable and
           its environment, the credentials and isolation topology to apply, and the
           resource/scheduling attributes to set between fork and exec. It carries no
@@ -1085,7 +1093,8 @@ packages:
                 Env so the child finds them at fd 3..3+len-1. nil means no extra fds.
               name: ExtraFiles
               type: "[]*os.File"
-      - doc: |-
+      - decl: true
+        doc: |-
           StdioMode selects how a spawned child's standard streams are wired. The zero
           value is StdioInherit, preserving the historical behaviour where the child
           shares the parent's stdin/stdout/stderr (systemd StandardOutput=/StandardInput=

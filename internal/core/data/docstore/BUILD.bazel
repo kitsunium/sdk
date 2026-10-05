@@ -6,11 +6,11 @@ go_library(
     name = "docstore",
     srcs = [
         "codes_gen.go",
+        "decl_gen.go",
         "design_gen.go",
         "doc.go",
         "errors.go",
         "index.go",
-        "value.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/data/docstore",
     visibility = [

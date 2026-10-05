@@ -19,31 +19,6 @@ const (
 	SpanIDHexLen int = SpanIDLen * 2
 )
 
-// TraceID identifies one trace: 16 bytes, rendered as 32 lowercase hex digits
-// on the wire.
-//
-// The ALL-ZERO value is invalid, and that is normative rather than stylistic —
-// W3C Trace Context §3.2.2.3 says a receiver "MUST ignore the traceparent" when
-// the trace-id is all zeroes, and the OTLP schema documents the same. It is
-// therefore the zero value of this type AND its "unset" spelling, which is why
-// IsValid exists and why nothing in this package accepts an id without asking.
-type TraceID [TraceIDLen]byte
-
-// SpanID identifies one span within a trace: 8 bytes, 16 lowercase hex digits.
-// The all-zero value is invalid for the same normative reason TraceID's is
-// (§3.2.2.4), and is additionally how "this span has no parent" is spelled —
-// a root span's ParentSpanID is the zero value, which OTLP encodes as an
-// omitted parentSpanId.
-type SpanID [SpanIDLen]byte
-
-// TraceFlags is the 8-bit field traceparent carries as its last component.
-//
-// Version 00 of the specification defines exactly one bit, and §3.2.2.5.2 is
-// explicit about the rest: "The behavior of other flags … is not defined and is
-// reserved for future use. Vendors MUST set those to zero." This SDK therefore
-// MASKS on output rather than trusting what it was handed — see Sanitized.
-type TraceFlags byte
-
 // FlagSampled is the sampled bit: the least significant one. When set, the
 // caller "may have recorded trace data" (§3.2.2.5.1), which is what makes the
 // sampling decision a property of the TRACE rather than of each span.

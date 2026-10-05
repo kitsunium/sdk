@@ -35,7 +35,7 @@ Inlining `Level` into `internal/core/observe/logger` was rejected because:
 - `var.go` — `Var`, an atomic `Level` holder (`NewVar`/`Set`/`Level`) for runtime-adjustable thresholds.
 - `parse.go` — `ParseLevel(name) (Level, error)`, the canonical case-insensitive string→`Level` parser.
 - `codes_gen.go` — `CodeLevelUnknown` (`0.2.17.1`) + the `LevelUnknown` sentinel `ParseLevel` returns on an unknown name, written by kit gen from the design (ADR 0164).
-- `level_compliance.go` — interface-assertion (`KTN-IFACE-ASSERT-PLACEMENT`).
+- `decl_gen.go` — kit's (see Declarations below): `Var`'s `Leveler` assertion sat in `level_compliance.go`, gone with it.
 
 Tests: `level_external_test.go` (`String()` windows + `Debug < Info < Warn < Error` ordering), `parse_external_test.go` (parse + round-trip), `var_external_test.go` (concurrent `Var`, and `TestLeveler_Interface`).
 
@@ -63,3 +63,7 @@ bazel test --config=race //internal/core/observe/logger/level:level_test
 cd internal/core && GOWORK=off go test -race -cover ./observe/logger/level/...
 # expected: 100% line coverage.
 ```
+
+## Declarations
+
+`decl_gen.go` is written by kit gen from the design (ADR 0170): the declarations of `Level` and `Var` — each struct with every field, unexported ones included; the assertion `Var → Leveler`. Their methods, constructors and helpers stay hand-written, in the files this document names.

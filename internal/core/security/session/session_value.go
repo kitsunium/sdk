@@ -7,37 +7,6 @@ import (
 	"time"
 )
 
-// SessionValue is one session as a [Store] sees it: an identifier, the subject
-// it is bound to, its two deadlines, and the caller's data. Every field is
-// unexported and every mutator returns a COPY, so a value handed to two
-// goroutines cannot be changed under either of them.
-//
-// The absence here is load-bearing. There is no WithSubject, no SetSubject and
-// no Elevate: the subject is written exactly once, by [Store.Regenerate], and
-// that call always mints a new identifier. A caller therefore cannot express
-// "keep this identifier and log this user in" — the sentence has no method.
-type SessionValue struct {
-	// id names the session; it is the presented identifier, never one read
-	// back from storage (a store keeps only ID.Digest, see id.go).
-	id ID
-	// subject is the authenticated principal, or "" for anonymous. Written
-	// only by the regeneration path.
-	subject string
-	// createdAt anchors the absolute deadline and never moves for the life of
-	// this identifier.
-	createdAt time.Time
-	// lastSeen anchors the idle deadline and moves on every Load.
-	lastSeen time.Time
-	// absoluteExpiry is createdAt + AbsoluteTimeout — the ceiling. It is
-	// stamped once and no operation extends it.
-	absoluteExpiry time.Time
-	// idleExpiry is lastSeen + IdleTimeout, ALREADY CLAMPED to absoluteExpiry
-	// by whoever built the value, so ExpiresAt needs no special case.
-	idleExpiry time.Time
-	// data is the caller's key/value payload; nil until something is set.
-	data map[string]string
-}
-
 // NewSessionValue builds an immutable [SessionValue] from state. It is the only
 // producer of the value type outside this package's own accessors.
 //

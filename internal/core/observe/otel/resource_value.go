@@ -16,22 +16,6 @@ const ServiceNameKey string = "service.name"
 // identity and would silently become one on a dashboard.
 const UnknownService string = "unknown_service"
 
-// ResourceValue identifies the ENTITY that produced the telemetry — the
-// service, the process, the host. Its attributes are carried ONCE per payload
-// rather than on every point or span, which is the whole reason the concept
-// exists: service.name on ten thousand data points is ten thousand copies of
-// one fact.
-//
-// SchemaURL is deliberately absent. It is optional in the specification, this
-// SDK emits no semantic-convention version, and a field that is always empty is
-// a placeholder (CLAUDE.md rule 5). It lands the day the SDK pins a convention
-// version, next to Attrs, and nothing else about the shape changes.
-type ResourceValue struct {
-	// Attrs are the producer's attributes, sorted by Key. A ResourceValue
-	// normalised by NormalizeResource always carries ServiceNameKey.
-	Attrs []AttrValue
-}
-
 // NormalizeResource returns the ResourceValue a Meter or a Tracer publishes:
 // attributes sorted, validated, owned, and carrying ServiceNameKey whether or
 // not the caller supplied it. An unusable attribute set panics with refusal's

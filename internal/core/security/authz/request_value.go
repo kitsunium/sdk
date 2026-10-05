@@ -1,44 +1,5 @@
 package authz
 
-// RequestValue is the question: may Subject perform Action on Resource, given
-// these attributes. It is immutable once built, so one request value can be
-// handed to every policy in a composition without any of them being able to
-// edit what the next one sees.
-//
-// # The three strings are the caller's vocabulary
-//
-// The SDK attaches no meaning to them. "orders" and "urn:acme:orders" are
-// equally valid resources, "write" and "POST" equally valid actions; nothing
-// here parses, splits or pattern-matches them, and there is no wildcard —
-// matching is byte equality, so a resource literally named "*" is a resource
-// named "*" and nothing more. A hierarchy, if the application has one, is
-// expressed by the strings it chooses and the rules it writes.
-//
-// # Resource is the type, not the row
-//
-// A grant table answers about a KIND of thing — "an editor may publish an
-// article" — and an instance rule answers about one of them — "…if they wrote
-// it". Put the type in Resource and the instance's facts in the attributes
-// (owner, tenant, classification), then let RBAC answer the first question and
-// an ABAC condition answer the second. That split is why this domain ships no
-// wildcard and needs none; see ADR 0057 §D5.
-type RequestValue struct {
-	// subject is the authenticated principal, exactly as internal/core/security/session
-	// or internal/core/security/token reported it. Empty means anonymous, which is a
-	// legitimate request and never a special case: it matches whatever the
-	// caller's rules say about the empty subject, which is normally nothing,
-	// which is an abstention, which the closure refuses.
-	subject string
-	// action is the verb being attempted.
-	action string
-	// resource is the kind of thing being acted on.
-	resource string
-	// attrs is the fact bag, keyed by attribute name. Every entry has a
-	// non-empty key and a valid kind — NewRequestValue enforces both — so a
-	// lookup that succeeds always yields a usable attribute.
-	attrs map[string]AttrValue
-}
-
 // NewRequestValue builds the immutable question. Attributes are indexed by
 // their key; a later attribute with the same key replaces an earlier one, so
 // the caller can layer defaults and then override them.

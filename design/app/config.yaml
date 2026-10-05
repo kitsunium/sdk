@@ -268,7 +268,8 @@ packages:
             public: The configuration carries keys the target does not define
             reason: CONFIG_UNKNOWN_KEY
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           OriginValue says which layer supplied the final value of one key of a load —
           and says it WITHOUT the value, which is the point: an origin is written to a
           start-up log, a --show-config table, a diagnostics page, and a
@@ -301,7 +302,8 @@ packages:
                 rendering that the value, if it shows one, must be masked.
               name: Secret
               type: bool
-      - doc: |-
+      - decl: true
+        doc: |-
           DeclaredValue declares the value one configuration key takes when NO Source
           supplied it. It is the domain's answer to the question every configuration
           loader gets wrong: an absent key and a key explicitly set to the zero value

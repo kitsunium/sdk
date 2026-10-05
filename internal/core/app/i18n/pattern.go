@@ -14,37 +14,6 @@ import (
 // allocations per render.
 const argSizeGuess int = 16
 
-// PartValue is one span of a compiled pattern: literal Text, or the Name of a
-// placeholder. Exactly one of the two is set — [NewPattern] refuses a span
-// that sets both or neither.
-//
-// The two are told apart by which field is EMPTY rather than by a kind tag:
-// a placeholder name can never be empty, and a literal span never carries
-// one. One less byte per span and one less branch per render.
-type PartValue struct {
-	// Text is the literal span. It is empty for a placeholder.
-	Text string
-	// Name is the placeholder name. It is empty for a literal span.
-	Name string
-}
-
-// PatternValue is one compiled message body: the spans a pattern's text was
-// parsed into, in order.
-//
-// Its zero value is a pattern that was NEVER compiled, and it is not an empty
-// one: a [MessageValue] holding it reports [PluralFormMissing] rather than
-// rendering "" and looking like a translation. NewPattern(nil) is the empty
-// pattern, compiled.
-type PatternValue struct {
-	// parts is the compiled span list, in order.
-	parts []PartValue
-	// size is the sum of the literal lengths, used to size the builder.
-	size int
-	// set distinguishes a compiled EMPTY pattern from a pattern that was never
-	// compiled at all.
-	set bool
-}
-
 // NewPattern assembles a compiled body from its spans, or returns
 // [InvalidPattern].
 //

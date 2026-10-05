@@ -7,11 +7,6 @@ import (
 	"syscall"
 )
 
-// Signal is a typed, platform-portable OS signal. Its underlying value is the
-// platform signal number, so Signal(syscall.SIGTERM) and a Signal parsed from
-// "SIGTERM" compare equal. The zero value is the reserved invalid signal.
-type Signal int
-
 // OS bridges s to the os.Signal expected by os/signal and Process.Signal. It is
 // a zero-cost conversion to syscall.Signal — the canonical os.Signal carrier.
 func (s Signal) OS() os.Signal {

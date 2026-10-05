@@ -68,6 +68,7 @@ packages:
         out:
           - type: "*Var"
     imports:
+      atomic: sync/atomic
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/observe/logger/level
     ports:
@@ -98,7 +99,8 @@ packages:
             public: log level name is not recognised
             reason: LEVEL_UNKNOWN
     types:
-      - doc: Level represents the importance of a log record; higher values are more severe.
+      - decl: true
+        doc: Level represents the importance of a log record; higher values are more severe.
         methods:
           - doc: String returns the uppercase textual label associated with the Level receiver.
             name: String
@@ -107,12 +109,15 @@ packages:
             recv: value
         name: Level
         underlying: int8
-      - doc: |-
+      - decl: true
+        doc: |-
           Var is an atomically mutable Level holder satisfying Leveler. Its zero value
           is ready to use and reports Info (the Level zero value), so a freshly
           declared Var gates at the same default as a config's unset MinLevel. Set and
           Level are safe for concurrent use; a gate may read Level on the hot path
           while a control goroutine raises or lowers the floor via Set.
+        implements:
+          - Leveler
         methods:
           - doc: |-
               Set replaces the current threshold with lvl. The store is atomic, so a
@@ -132,4 +137,9 @@ packages:
             recv: pointer
         name: Var
         struct:
-          unexported: true
+          fields:
+            - doc: |-
+                v stores the Level as an int32 so the holder is lock-free; Level is an
+                int8, which round-trips through int32 without loss.
+              name: v
+              type: atomic.Int32

@@ -19,20 +19,6 @@ const pathSeparator string = ", "
 // list from a shortened one.
 const truncationMark string = "…"
 
-// ReportValue is every violation one validation found, in the order the
-// constraints reported them. It is a SLICE rather than a struct so that the
-// zero value — nil — is a passing report: a validator with no constraint
-// passes, which is ADR 0046's first invariant and ADR 0031's "an empty
-// configuration is not the same thing as a broken one".
-//
-// Composition is therefore plain append, and the accepting path allocates
-// nothing at all.
-//
-// ReportValue is a published concrete shape (pkg/v1/app/validation.Report aliases
-// it), so ADR 0040 applies: it may still change while the module is v0, said
-// out loud, and not after v1.
-type ReportValue []ViolationValue
-
 // OK reports whether the value satisfied every constraint. It is the question
 // to ask; comparing len(report) to zero says the same thing less clearly.
 func (r ReportValue) OK() bool {

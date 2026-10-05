@@ -2,27 +2,6 @@ package trace
 
 import "slices"
 
-// StateBuilder assembles a StateValue member by member, LEFTMOST FIRST — the
-// order a tracestate header lists them in, which is the opposite of Insert's
-// "newest at the front". It is how the engine's header parser
-// (internal/service/observe/trace.ParseTraceState) turns the list it read into
-// a value without this package parsing the header: reading the wire format is
-// the engine's mechanism, the list's invariants are this value's (ADR 0160 §4).
-//
-// Every member is checked before it enters the list — the key against
-// `simple-key` / `multi-tenant-key`, the value against `value = 0*255(chr)
-// nblk-chr` — and so are the list's own two rules: a key appears once
-// (§3.3.1.4) and there are at most MaxTraceStateMembers members. So a builder
-// can only produce a list Insert could have produced, which is why it is not
-// the "second way in" a from-parts constructor would be.
-//
-// The zero value is a usable empty builder. A builder is not safe for
-// concurrent use.
-type StateBuilder struct {
-	// entries is the list so far, leftmost first.
-	entries []traceStateEntry
-}
-
 // NewStateBuilder returns an empty builder with room for size members. A size
 // above MaxTraceStateMembers is clamped to it — no list holds more — and a
 // negative one is read as zero.

@@ -311,7 +311,8 @@ packages:
             public: The help could not be written
             reason: HELP_WRITE_FAILED
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Action is what one command DOES. It receives the context [Executor.Execute]
           was called with — a cancelled context is how a caller aborts a running
           command — and the resolved [InvocationValue].
@@ -322,7 +323,8 @@ packages:
           never overwritten by the framework that called it.
         name: Action
         underlying: func(ctx context.Context, invocation InvocationValue) error
-      - doc: |-
+      - decl: true
+        doc: |-
           Binder declares one command's flags onto the set that will parse them.
 
           It is handed the stdlib's *[flag.FlagSet] deliberately: every flag type the
@@ -347,7 +349,8 @@ packages:
           it does not own, for a duration it cannot know.
         name: Binder
         underlying: func(flags *flag.FlagSet)
-      - doc: |-
+      - decl: true
+        doc: |-
           CommandValue declares one command. The tree it forms is the whole
           declaration: the engine walks it to resolve an argument vector, and the help
           renderer walks the SAME tree to render the text, so a command that exists
@@ -418,7 +421,8 @@ packages:
                 children may not share a Name.
               name: Commands
               type: "[]CommandValue"
-      - doc: |-
+      - decl: true
+        doc: |-
           InvocationValue is one resolved command line: which command was reached,
           what was left over after its flags were parsed, the sets that parsed them,
           and the writer the command may print to.

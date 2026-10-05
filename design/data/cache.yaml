@@ -398,7 +398,8 @@ packages:
             public: A tier of the cache chain could not serve the operation
             reason: CACHE_TIER_FAILED
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Fill computes the entry for a key that the cache does not hold. It is the
           caller's code: a database query, an HTTP call, a derivation.
 
@@ -411,7 +412,8 @@ packages:
           - constraint: any
             name: V
         underlying: func(ctx context.Context) (EntryValue[V], error)
-      - doc: |-
+      - decl: true
+        doc: |-
           EntryValue is what a caller stores: the value, how long it should live, and
           the tags by which it can later be invalidated in bulk.
 

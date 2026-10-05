@@ -24,9 +24,6 @@ const (
 	WSPong WSOpCode = 0xA
 )
 
-// WSOpCode is a frame's four-bit type field (RFC 6455 §5.2).
-type WSOpCode byte
-
 // IsControl reports whether the opcode names a control frame.
 //
 // Control frames are the ones that may be injected BETWEEN the fragments of a

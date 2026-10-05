@@ -927,7 +927,8 @@ packages:
             public: A rewrite of versions may only drop or rewrite the versions it was given
             reason: VERSIONS_REWRITE_REFUSED
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           IndexSpec declares one secondary index: a name to read it by, whether it is
           unique, and the function that gives a document its keys in it. Build one
           with [Unique] or [Index], and give it to an engine's constructor — Open or
@@ -951,7 +952,8 @@ packages:
         typeParams:
           - constraint: any
             name: T
-      - doc: |-
+      - decl: true
+        doc: |-
           EntryValue is one stored document as the store holds it: its key and its
           JSON, for a caller that shows documents rather than decoding them.
         name: EntryValue
@@ -963,7 +965,8 @@ packages:
             - doc: JSON is the document, a copy the caller owns.
               name: JSON
               type: json.RawMessage
-      - doc: |-
+      - decl: true
+        doc: |-
           VersionValue is one version of a document: its number, when the write that
           made it ran, what that write's caller said about it, and the document as the
           version holds it.
@@ -995,7 +998,8 @@ packages:
                 written again is a new document, and starts again at 1.
               name: Number
               type: uint64
-      - doc: |-
+      - decl: true
+        doc: |-
           StampValue is what a write says about the version it makes, for the
           Stamped writes. Its zero value is what Put, Insert, Replace and Update say:
           nothing, and a new version.

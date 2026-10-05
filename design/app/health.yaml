@@ -518,7 +518,8 @@ packages:
             public: The process answered that it is not ready
             reason: ASK_NOT_READY
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Check is the body of a startup or readiness check: work that may reach
           outside the process, bounded by the context it is given.
 
@@ -532,7 +533,8 @@ packages:
           ever rendered into an HTTP body.
         name: Check
         underlying: func(ctx context.Context) error
-      - doc: |-
+      - decl: true
+        doc: |-
           SelfCheck is the body of a LIVENESS check: process-local evidence that this
           process can still do its job.
 
@@ -550,7 +552,8 @@ packages:
           A nil error means the process is alive.
         name: SelfCheck
         underlying: func() error
-      - doc: |-
+      - decl: true
+        doc: |-
           StartupCheckValue registers a check that gates the startup probe: a
           migration that must have run, a warm cache that must have filled, a
           configuration that must have been fetched.
@@ -585,7 +588,8 @@ packages:
                 signal that tells the orchestrator to keep waiting.
               name: Timeout
               type: time.Duration
-      - doc: |-
+      - decl: true
+        doc: |-
           LivenessCheckValue registers PROCESS-LOCAL evidence that this process is not
           irrecoverable. A liveness failure restarts the replica.
 
@@ -624,7 +628,8 @@ packages:
                 budget is itself evidence worth reporting.
               name: Timeout
               type: time.Duration
-      - doc: |-
+      - decl: true
+        doc: |-
           ReadinessCheckValue registers a check that gates ROUTING: the datastore, the
           broker, the cache, the downstream API. This is where every dependency check
           belongs, and the only registration that can express one.
@@ -685,7 +690,8 @@ packages:
                 outage ended.
               name: MaxAge
               type: time.Duration
-      - doc: |-
+      - decl: true
+        doc: |-
           Probe names which of the three questions is being asked. It is a closed set
           of three, and the three are not interchangeable — see the package comment.
 
@@ -704,7 +710,8 @@ packages:
             recv: value
         name: Probe
         underlying: uint8
-      - doc: |-
+      - decl: true
+        doc: |-
           ResultValue is one check's answer.
 
           It reports DECISIONS, not only outcomes. A check abandoned at its budget
@@ -774,7 +781,8 @@ packages:
                 response. See internal/service/app/health §"what the handler hides".
               name: Err
               type: error
-      - doc: |-
+      - decl: true
+        doc: |-
           ReportValue is one probe's whole answer: the aggregate, and every check that
           contributed to it.
 
@@ -803,7 +811,8 @@ packages:
                 probes render differently and a diff of two responses unreadable.
               name: Results
               type: "[]ResultValue"
-      - doc: |-
+      - decl: true
+        doc: |-
           Status is the verdict of one check or of a whole probe. It is a CLOSED set
           of three, ordered worst-first so that aggregating a set is `min` and the
           zero value is the conservative answer.

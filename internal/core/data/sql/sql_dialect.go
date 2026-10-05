@@ -7,22 +7,6 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// Dialect names a SQL engine whose savepoint grammar, placeholder syntax,
-// identifier quoting, row-lock clauses and advisory-lock mechanism this SDK
-// knows exactly.
-//
-// The set is CLOSED and small on purpose. Every feature this domain adds — a
-// savepoint, a `CREATE TABLE IF NOT EXISTS`, an advisory lock — is spelled
-// differently by each engine, and there is no portable subset that covers all
-// three. So the domain refuses a dialect it cannot spell AT CONSTRUCTION,
-// by name, rather than generating SQL that will fail at the first savepoint of
-// the first nested transaction on a production database (ADR 0055 §D4).
-//
-// The zero value is [DialectUnknown] and is not usable: it is what an unset
-// configuration field looks like, and reading it as "probably Postgres" is how
-// a MySQL deployment discovers the difference in production (ADR 0031).
-type Dialect uint8
-
 const (
 	// DialectUnknown is the unusable zero value.
 	DialectUnknown Dialect = iota

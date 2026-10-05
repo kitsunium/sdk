@@ -2,15 +2,6 @@ package statemachine
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"
 
-// Trigger says what fired a transition. The set is closed: every transition a
-// machine can take is declared one of these ways, and a history names which.
-//
-// The values are STABLE — a journal may store them as numbers, and none is
-// ever renumbered — and the zero value is not a trigger, so a step read from
-// a journal that lost the field names no trigger rather than some default.
-// String and ParseTrigger give the text form.
-type Trigger uint8
-
 const (
 	// TriggerStart is the creation of an entity: the step into its initial
 	// state.

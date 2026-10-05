@@ -238,7 +238,8 @@ packages:
             public: Struct tag validation requires a struct type
             reason: UNSUPPORTED_TARGET
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           ReportValue is every violation one validation found, in the order the
           constraints reported them. It is a SLICE rather than a struct so that the
           zero value — nil — is a passing report: a validator with no constraint
@@ -297,7 +298,8 @@ packages:
             recv: value
         name: ReportValue
         underlying: "[]ViolationValue"
-      - doc: |-
+      - decl: true
+        doc: |-
           Constraint reports what is wrong with value, at the path by which value was
           reached. A value it accepts yields a nil [ReportValue] — the acceptance path
           therefore allocates nothing, which matters because it is the path taken on
@@ -322,7 +324,8 @@ packages:
           - constraint: any
             name: T
         underlying: func(path string, value T) ReportValue
-      - doc: |-
+      - decl: true
+        doc: |-
           ViolationValue is one located failure: WHERE it happened, WHICH rule it
           broke, a wire-safe explanation, and a routable [errs.Code].
 

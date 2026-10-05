@@ -6,11 +6,10 @@ go_library(
     name = "profiling",
     srcs = [
         "codes_gen.go",
+        "decl_gen.go",
         "doc.go",
         "errors.go",
         "folded.go",
-        "goroutine.go",
-        "profile.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/observe/profiling",
     visibility = [

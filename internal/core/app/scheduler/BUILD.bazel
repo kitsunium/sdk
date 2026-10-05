@@ -6,12 +6,10 @@ go_library(
     name = "scheduler",
     srcs = [
         "codes_gen.go",
+        "decl_gen.go",
         "design_gen.go",
         "doc.go",
         "errors.go",
-        "scheduler.go",
-        "scheduler_entry.go",
-        "scheduler_result.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/app/scheduler",
     visibility = [

@@ -812,7 +812,8 @@ packages:
             public: The trace collector accepted the request but rejected some spans
             reason: OTLP_PARTIAL_SUCCESS
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           EventValue is one thing that happened at an instant during a span, rather than
           over an interval — `opentelemetry/proto/trace/v1.Span.Event`.
 
@@ -845,7 +846,8 @@ packages:
             - doc: Attrs are the event's typed dimensions, sorted by Key.
               name: Attrs
               type: "[]coreotel.AttrValue"
-      - doc: |-
+      - decl: true
+        doc: |-
           ExporterName is the typed key under which a SpanExporter registers (e.g.
           "otlpjson"). The zero value ExporterName("") is reserved invalid.
 
@@ -864,7 +866,8 @@ packages:
             recv: value
         name: ExporterName
         underlying: string
-      - doc: |-
+      - decl: true
+        doc: |-
           TraceID identifies one trace: 16 bytes, rendered as 32 lowercase hex digits
           on the wire.
 
@@ -890,7 +893,8 @@ packages:
             recv: value
         name: TraceID
         underlying: "[TraceIDLen]byte"
-      - doc: |-
+      - decl: true
+        doc: |-
           SpanID identifies one span within a trace: 8 bytes, 16 lowercase hex digits.
           The all-zero value is invalid for the same normative reason TraceID's is
           (§3.2.2.4), and is additionally how "this span has no parent" is spelled —
@@ -909,7 +913,8 @@ packages:
             recv: value
         name: SpanID
         underlying: "[SpanIDLen]byte"
-      - doc: |-
+      - decl: true
+        doc: |-
           TraceFlags is the 8-bit field traceparent carries as its last component.
 
           Version 00 of the specification defines exactly one bit, and §3.2.2.5.2 is
@@ -948,7 +953,8 @@ packages:
             recv: value
         name: TraceFlags
         underlying: byte
-      - doc: |-
+      - decl: true
+        doc: |-
           LinkValue points at a span that is causally related to this one but is not its
           parent — `opentelemetry/proto/trace/v1.Span.Link`.
 
@@ -985,7 +991,8 @@ packages:
             - doc: Attrs describe the relationship, sorted by Key.
               name: Attrs
               type: "[]coreotel.AttrValue"
-      - doc: |-
+      - decl: true
+        doc: |-
           SpanParams are the facts a span is born with.
 
           It is a struct rather than a variadic option list because an option type is a
@@ -1016,7 +1023,8 @@ packages:
                 tracer does, not a value chosen on the caller's behalf (ADR 0031).
               name: StartTime
               type: time.Time
-      - doc: |-
+      - decl: true
+        doc: |-
           Sampler decides whether a span is recorded and exported. It reports true to
           keep the span, false to drop it.
 
@@ -1048,7 +1056,8 @@ packages:
           on the goroutine starting the span, before any work the span measures.
         name: Sampler
         underlying: func(params SamplingParams) bool
-      - doc: |-
+      - decl: true
+        doc: |-
           SpanSink receives every span that ends and was sampled. It is where a Tracer
           hands its output, and it is a func port for the reason Sampler is.
 
@@ -1062,7 +1071,8 @@ packages:
           request it is observing.
         name: SpanSink
         underlying: func(span SpanValue)
-      - doc: |-
+      - decl: true
+        doc: |-
           SamplingParams is everything a Sampler sees. It describes a span that does not
           exist yet, which is the point: the decision is taken before the span is
           created, so an unsampled span costs no recording at all.
@@ -1097,7 +1107,8 @@ packages:
             - doc: Links are the links supplied at Start.
               name: Links
               type: "[]LinkValue"
-      - doc: |-
+      - decl: true
+        doc: |-
           SpanContextValue is the immutable identity of a span: what traceparent and
           tracestate carry between two processes, and what a child span inherits.
 
@@ -1165,7 +1176,8 @@ packages:
                 a backend needs it to tell "my caller" from "my own parent span".
               name: Remote
               type: bool
-      - doc: |-
+      - decl: true
+        doc: |-
           SpanKind says how a span relates to its parent and its children, which is what
           lets a backend assemble a latency waterfall instead of a flat list.
 
@@ -1198,7 +1210,8 @@ packages:
             recv: value
         name: SpanKind
         underlying: int32
-      - doc: |-
+      - decl: true
+        doc: |-
           SpanValue is a completed span: the OpenTelemetry trace data model's `Span`
           message, in Go.
 
@@ -1272,7 +1285,8 @@ packages:
             - doc: Status is the recorded outcome, already resolved.
               name: Status
               type: StatusValue
-      - doc: |-
+      - decl: true
+        doc: |-
           SpansValue is a batch of finished spans plus the two facts that describe all
           of them at once — the OTLP payload hierarchy flattened into one Go value.
 
@@ -1317,7 +1331,8 @@ packages:
                 causal — a parent ends after its children.
               name: Spans
               type: "[]SpanValue"
-      - doc: |-
+      - decl: true
+        doc: |-
           StateBuilder assembles a StateValue member by member, LEFTMOST FIRST — the
           order a tracestate header lists them in, which is the opposite of Insert's
           "newest at the front". It is how the engine's header parser
@@ -1360,8 +1375,12 @@ packages:
             recv: pointer
         name: StateBuilder
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - doc: entries is the list so far, leftmost first.
+              name: entries
+              type: "[]traceStateEntry"
+      - decl: true
+        doc: |-
           StateValue is the parsed `tracestate` header: an ORDERED list of vendor
           entries, leftmost first.
 
@@ -1451,8 +1470,12 @@ packages:
             recv: value
         name: StateValue
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - doc: entries is the ordered list, leftmost first. nil is the empty list.
+              name: entries
+              type: "[]traceStateEntry"
+      - decl: true
+        doc: |-
           StatusCode is opentelemetry/proto/trace/v1.Status.StatusCode. Three values,
           and the third is not the negation of the second.
         methods:
@@ -1465,7 +1488,8 @@ packages:
             recv: value
         name: StatusCode
         underlying: int32
-      - doc: |-
+      - decl: true
+        doc: |-
           StatusValue is a span's recorded outcome.
 
           The Message field is only meaningful on StatusError, and the schema says so:

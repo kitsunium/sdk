@@ -829,7 +829,8 @@ packages:
             public: The queue handler panicked and was recovered
             reason: HANDLER_PANICKED
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           DeadLetterValue is one message the broker gave up on, together with why.
 
           A dead letter without its cause is an investigation nobody can run, so the
@@ -882,7 +883,8 @@ packages:
                 the message had for one a handler rejected ([Rejecter]).
               name: Deliveries
               type: int
-      - doc: |-
+      - decl: true
+        doc: |-
           MessageValue is one unit of work as the broker minted it. Every field is
           assigned by [Broker.Publish]; a caller never fills one in, which is why
           Publish takes a payload rather than one of these.
@@ -915,7 +917,8 @@ packages:
                 without corrupting a redelivery.
               name: Payload
               type: "[]byte"
-      - doc: |-
+      - decl: true
+        doc: |-
           ReceiptValue is the handle to ONE lease: the only thing [Broker.Ack],
           [Broker.Nack] and [LeaseExtender.Extend] accept, and the only proof that
           this consumer is the one currently holding the message.
@@ -934,7 +937,8 @@ packages:
           mints it, not of the type.
         name: ReceiptValue
         underlying: string
-      - doc: |-
+      - decl: true
+        doc: |-
           LeaseValue is a consumer's exclusive claim on one message: the receipt that
           proves it and the instant it lapses.
 
@@ -958,7 +962,8 @@ packages:
             - doc: Receipt names this lease to [Broker.Ack] and [Broker.Nack].
               name: Receipt
               type: ReceiptValue
-      - doc: |-
+      - decl: true
+        doc: |-
           DeliveryValue is one message handed to one consumer, with everything the
           consumer needs to decide what to do about it.
         name: DeliveryValue
@@ -987,7 +992,8 @@ packages:
                 message gets before the dead-letter store.
               name: Deliveries
               type: int
-      - doc: |-
+      - decl: true
+        doc: |-
           PolicyValue is the delivery discipline a broker enforces: how long a lease
           lasts, how many attempts a message gets, how long a failure waits, and how
           large a payload may be.
@@ -1123,7 +1129,8 @@ packages:
                 is not a bound at all and the caller who wrote it meant something.
               name: MaxMessageBytes
               type: int
-      - doc: |-
+      - decl: true
+        doc: |-
           Handler processes one delivery. It is the port a consumer implements, and
           it is a FUNCTION type rather than an interface — the shape
           internal/core/CLAUDE.md already admits for resilience.Operation,
@@ -1147,7 +1154,8 @@ packages:
           message will simply be redelivered.
         name: Handler
         underlying: func(ctx context.Context, delivery DeliveryValue) error
-      - doc: |-
+      - decl: true
+        doc: |-
           NackValue is what [Broker.Nack] decided.
 
           It exists because "I reported the failure" and "that message is now dead"
@@ -1175,7 +1183,8 @@ packages:
                 it ([DeadLetterManager]).
               name: DeadLettered
               type: bool
-      - doc: |-
+      - decl: true
+        doc: |-
           WakeValue is what an idle consumer waits on: an event, or an instant the
           broker already knows about.
         name: WakeValue

@@ -1,14 +1,5 @@
 package trace
 
-// SpanKind says how a span relates to its parent and its children, which is what
-// lets a backend assemble a latency waterfall instead of a flat list.
-//
-// The five values and their integers are
-// opentelemetry/proto/trace/v1.Span.SpanKind, copied from the schema so the OTLP
-// encoder emits the integer directly (OTLP/JSON encodes an enum as its NUMBER,
-// never as its name).
-type SpanKind int32
-
 // The five kinds, in the schema's own declaration order: iota reproduces
 // SPAN_KIND_UNSPECIFIED = 0 through SPAN_KIND_CONSUMER = 5 exactly, which is
 // what the OTLP encoder emits as the enum's integer.

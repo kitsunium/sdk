@@ -516,7 +516,8 @@ packages:
             public: Log write failed
             reason: WRITE_FAILED
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Kind discriminates the payload variant carried by a Value. Kind values are
           stable across the public API; new variants are appended at the end so old
           handlers default to KindAny rather than panic on an unknown discriminant.
@@ -531,7 +532,8 @@ packages:
             recv: value
         name: Kind
         underlying: int8
-      - doc: |-
+      - decl: true
+        doc: |-
           RecordEvent captures a single log event; handlers are responsible for writing
           or forwarding it. Instances are intended to be used read-only after
           construction by the Logger implementation.
@@ -566,7 +568,8 @@ packages:
                 which an attribute cannot be: WithGroup would prefix it. See ADR 0062.
               name: TraceContext
               type: TraceContextValue
-      - doc: |-
+      - decl: true
+        doc: |-
           AttrValue is an immutable key/value pair carried by a RecordEvent. Use the
           typed Value constructors (StringValue, Int64Value, …) to build the Value
           field — the zero Value is a valid KindAny carrying nil.
@@ -579,7 +582,8 @@ packages:
             - doc: Value carries the typed payload; handlers dispatch on Value.Kind().
               name: Value
               type: Value
-      - doc: |-
+      - decl: true
+        doc: |-
           TraceContextValue is the trace correlation a single log record carries: the
           identity of the span the record was emitted inside.
 
@@ -646,7 +650,8 @@ packages:
             - doc: SpanID identifies the span within the trace; 16 lowercase hex digits.
               name: SpanID
               type: "[SpanIDLen]byte"
-      - doc: |-
+      - decl: true
+        doc: |-
           TraceContextSource reads the trace context carried by ctx.
 
           It is a FUNC port, so ADR 0039 is satisfied structurally: a func type cannot

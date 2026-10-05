@@ -2,12 +2,6 @@ package proc
 
 import "strconv"
 
-// StdioMode selects how a spawned child's standard streams are wired. The zero
-// value is StdioInherit, preserving the historical behaviour where the child
-// shares the parent's stdin/stdout/stderr (systemd StandardOutput=/StandardInput=
-// is the analogue, but the choice is generic to anything that spawns processes).
-type StdioMode uint8
-
 const (
 	// StdioInherit shares the parent's stdin/stdout/stderr with the child — the
 	// default, and the only behaviour that existed before per-process wiring.

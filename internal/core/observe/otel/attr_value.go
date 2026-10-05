@@ -20,11 +20,6 @@ const (
 	floatBits   int  = 64
 )
 
-// AttrKind discriminates the type of an AttrValue's value. It is the OpenTelemetry
-// attribute model: a value is a string, a bool, a signed 64-bit integer or a
-// double — never a string that happens to spell one of the others.
-type AttrKind uint8
-
 const (
 	// AttrKindInvalid is the zero value, and it names no type. An AttrValue
 	// carrying it was built by a struct literal rather than by a
@@ -40,33 +35,6 @@ const (
 	// AttrKindFloat64 marks an IEEE-754 double attribute.
 	AttrKindFloat64
 )
-
-// AttrValue is one dimension — of a metric series, of a span, of a Resource: a
-// Key naming the dimension and a TYPED value observed for it.
-//
-// The Key is STRUCTURE and the value is DATA. A key is written at the call site
-// and is constant for the lifetime of the process ("http.request.method"); a
-// value comes from whatever the process is measuring and varies per observation
-// ("GET", 503, true). That asymmetry is why an unusable key is a programmer
-// error the signal panics on, while an unbounded stream of values is a runtime
-// condition — the meter absorbs it into an overflow series.
-//
-// The value is unexported and reachable only through Kind and the four typed
-// accessors, so the only way to build a usable AttrValue is one of the four
-// constructors — String, Bool, Int64, Float64. A struct literal can still set
-// Key, and the resulting AttrKindInvalid is refused rather than silently read
-// as an empty string.
-type AttrValue struct {
-	// Key names the dimension. It must be non-empty and appear at most once
-	// in an attribute set; ValidateAttrs checks both.
-	Key string
-	// kind discriminates which of num/str carries the value.
-	kind AttrKind
-	// num carries a bool, an int64 or the IEEE-754 bits of a float64.
-	num uint64
-	// str carries a string value, and only a string value.
-	str string
-}
 
 // String returns a string-valued AttrValue. It is the shortest of the four to write
 // because a string dimension is the overwhelmingly common one.

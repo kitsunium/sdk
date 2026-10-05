@@ -1,10 +1,5 @@
 package writer
 
-import "github.com/kitsunium/sdk/internal/core/observe/logger/level"
-
-// ConsoleStream selects which standard stream the console writer targets.
-type ConsoleStream uint8
-
 const (
 	// ConsoleStderr writes to os.Stderr. It is the zero value, so a
 	// ConsoleConfig{} targets stderr by default: a caller who has not named a
@@ -15,13 +10,3 @@ const (
 	// ConsoleStdout writes to os.Stdout. Reachable only by naming it.
 	ConsoleStdout
 )
-
-// ConsoleConfig configures the "console" writer. The zero value is valid and
-// targets os.Stderr at the handler-global level.
-type ConsoleConfig struct {
-	// Stream selects stderr (default) or stdout.
-	Stream ConsoleStream
-	// MinLevel is the optional per-writer severity floor; the zero value
-	// inherits the handler-global level.
-	MinLevel level.Level
-}

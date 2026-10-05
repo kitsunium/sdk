@@ -2,31 +2,6 @@ package sql
 
 import stdsql "database/sql"
 
-// TxOptionsValue parameterises ONE transaction. It is a value, not a manager
-// setting, because isolation is a property of the unit of work and not of the
-// pool it runs on.
-//
-// The zero value is a working configuration: the driver's default isolation
-// level, read-write. That is the only non-arbitrary default available — every
-// engine defines its own default level and picking one here would silently
-// change the semantics of an existing application on migration (ADR 0031's
-// clamp side, where the default needs no explanation because it is the
-// database's own).
-//
-// It is deliberately a struct rather than two extra method parameters so
-// [Transactor] stays frozen at one method: a new option is a new FIELD, which
-// breaks nobody, where a new method breaks every downstream double (ADR 0039).
-type TxOptionsValue struct {
-	// Isolation is the transaction isolation level. The zero value
-	// (sql.LevelDefault) defers to the driver.
-	Isolation stdsql.IsolationLevel
-	// ReadOnly asks the engine to refuse writes. Not every driver enforces
-	// it; those that do not report an error at Begin rather than accepting
-	// writes silently, which is why this is passed through rather than
-	// emulated.
-	ReadOnly bool
-}
-
 // IsZero reports whether the options ask for nothing beyond the driver's
 // defaults.
 //

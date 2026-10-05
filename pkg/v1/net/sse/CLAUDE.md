@@ -67,7 +67,7 @@ shape change, ADR 0040). `Validate` stayed with the value.
 ## The client side is NOT here, and that is a decision
 
 There is no SSE **client** in this SDK, and adding one is not a matter of
-writing a parser. `internal/core/net/response.go` documents the outbound
+writing a parser. `internal/core/net/decl_gen.go` (`ResponseValue`, which kit declares from the design — ADR 0170) documents the outbound
 contract:
 
 ```go
@@ -127,4 +127,4 @@ cd pkg && GOWORK=off go test -race -cover ./v1/net/sse/...
 - ADR 0029 — `docs/adr/0029-sdk-net-domain.md`
 - ADR 0030 (stdout is a protocol channel), ADR 0031 (zero values are never inert)
 - `internal/service/net/sse/CLAUDE.md`, `internal/core/net/CLAUDE.md`
-- The outbound contract this cites — `internal/core/net/response.go`
+- The outbound contract this cites — `internal/core/net/decl_gen.go` (`ResponseValue`, which kit declares from the design — ADR 0170)

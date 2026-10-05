@@ -815,7 +815,8 @@ packages:
             public: Two migrations declare the same version
             reason: DUPLICATE_MIGRATION
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           TxFunc is the unit of work a [Transactor] runs inside a transaction.
 
           It is a FUNCTION port, the shape internal/core/CLAUDE.md already admits for
@@ -836,7 +837,8 @@ packages:
           refused with a typed error rather than left to database/sql's ErrTxDone.
         name: TxFunc
         underlying: func(ctx context.Context, ex Executor) error
-      - doc: |-
+      - decl: true
+        doc: |-
           Dialect names a SQL engine whose savepoint grammar, placeholder syntax,
           identifier quoting, row-lock clauses and advisory-lock mechanism this SDK
           knows exactly.
@@ -953,7 +955,8 @@ packages:
             recv: value
         name: Dialect
         underlying: uint8
-      - doc: |-
+      - decl: true
+        doc: |-
           Step is one direction of a migration: the statements that move the schema.
 
           A FUNCTION port, for the same reason [TxFunc] is: one behaviour, so a named
@@ -963,7 +966,8 @@ packages:
           is what makes a migration and its version-table row commit together.
         name: Step
         underlying: func(ctx context.Context, ex Executor) error
-      - doc: |-
+      - decl: true
+        doc: |-
           MigrationValue is one versioned schema change and its reversal.
 
           The SDK does NOT own a migration FILE FORMAT, a directory layout, or a
@@ -1017,7 +1021,8 @@ packages:
                 nil Stop, for the same reason.
               name: Down
               type: Step
-      - doc: |-
+      - decl: true
+        doc: |-
           TxOptionsValue parameterises ONE transaction. It is a value, not a manager
           setting, because isolation is a property of the unit of work and not of the
           pool it runs on.

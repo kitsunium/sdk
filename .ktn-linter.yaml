@@ -321,19 +321,6 @@ rules:
       - "**/third-party/**"
       - "third-party/**"
 
-  KTN-STRUCT-PARTITION:
-    # internal/core/data/sql's sql.go and sql_txoptions.go each lost their
-    # package-comment fragment to doc.go (ADR 0167) and fell under the rule's
-    # "small file" bound, which made TxFunc and TxOptionsValue read as one
-    # group split across two files. Their declarations did not move;
-    # colocating them is a change of its own, not a consequence of where a
-    # comment lives.
-    exclude:
-      - "**/internal/core/data/sql/sql.go"
-      - "internal/core/data/sql/sql.go"
-      - "**/internal/core/data/sql/sql_txoptions.go"
-      - "internal/core/data/sql/sql_txoptions.go"
-
   KTN-STRUCT-COHESION:
     exclude:
       - "**/pkg/v1/data/codec/codec.go"

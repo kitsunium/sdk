@@ -100,7 +100,7 @@ package stands alone for a consumer using plain `net/http`.
 ## The client side is NOT here, and that is a decision
 
 There is no WebSocket **client** in this SDK, and the obstacle is the same one
-that blocks an SSE client. `internal/core/net/response.go` documents the
+that blocks an SSE client. `internal/core/net/decl_gen.go` (`ResponseValue`, which kit declares from the design — ADR 0170) documents the
 outbound contract:
 
 ```go
@@ -162,4 +162,4 @@ cd pkg && GOWORK=off go test -race -cover ./v1/net/websocket/...
 - ADR 0029 (the net domain), ADR 0043 (drain is a signal)
 - ADR 0030 (stdout is a protocol channel), ADR 0031 (zero values are never inert)
 - `internal/service/net/websocket/CLAUDE.md`, `internal/core/net/CLAUDE.md`
-- The outbound contract this cites — `internal/core/net/response.go`
+- The outbound contract this cites — `internal/core/net/decl_gen.go` (`ResponseValue`, which kit declares from the design — ADR 0170)

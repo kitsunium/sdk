@@ -1,10 +1,5 @@
 package crypto
 
-// Algorithm is the typed key under which an AEAD registers (e.g.
-// "aes-256-gcm"). The zero value Algorithm("") is reserved invalid, mirroring
-// codec.Format.
-type Algorithm string
-
 // String implements fmt.Stringer and returns the raw identifier.
 func (a Algorithm) String() string {
 	//: direct cast from the typed string back to a plain string.

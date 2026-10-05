@@ -276,7 +276,8 @@ packages:
             public: Identifier generation observed a clock outside the scheme's timestamp range
             reason: ID_TIMESTAMP_RANGE
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Scheme is the typed key under which a Generator registers (e.g. "uuidv4",
           "uuidv7", "ulid", "snowflake", "nanoid", "ksuid"). The zero value Scheme("")
           is reserved invalid, mirroring codec.Format and transform.Algorithm.

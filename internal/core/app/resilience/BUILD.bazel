@@ -6,10 +6,10 @@ go_library(
     name = "resilience",
     srcs = [
         "codes_gen.go",
+        "decl_gen.go",
         "design_gen.go",
         "doc.go",
         "errors.go",
-        "resilience.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/app/resilience",
     visibility = [

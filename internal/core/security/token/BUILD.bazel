@@ -8,6 +8,7 @@ go_library(
         "claims.go",
         "claims_with.go",
         "codes_gen.go",
+        "decl_gen.go",
         "design_gen.go",
         "doc.go",
         "errors.go",

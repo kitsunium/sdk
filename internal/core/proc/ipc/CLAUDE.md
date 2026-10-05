@@ -102,3 +102,7 @@ cd internal/core && GOWORK=off go test -race ./proc/ipc/...
 `Test_theConnectionPortsTakeADouble` drives code that holds the two ports with
 `net.Pipe` doubles, and sees the `CLOSED` and `DIAL_FAILED` verdicts the
 engine gives.
+
+## Declarations
+
+`decl_gen.go` is written by kit gen from the design (ADR 0170): the declarations of `PeerValue` and `Conn` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names.

@@ -133,3 +133,7 @@ engine replaces keys while it ranges.
 ```
 bazel test --config=race //internal/core/security/secret:secret_test
 ```
+
+## Declarations
+
+`decl_gen.go` is written by kit gen from the design (ADR 0170): the declarations of `VersionValue` and `SubjectKeyValue` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names.

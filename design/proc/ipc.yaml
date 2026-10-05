@@ -219,7 +219,8 @@ packages:
             public: The private socket's path runs through a directory another account controls
             reason: PATH_UNSAFE
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           PeerValue is who is at the other end of a connection, as the kernel says:
           the peer's user, group and process where the kernel names them, and whether
           it did (Verified) — false where only the directory's permissions admitted it.
@@ -249,7 +250,8 @@ packages:
                 when only the directory's permissions admitted it.
               name: Verified
               type: bool
-      - doc: |-
+      - decl: true
+        doc: |-
           Conn is a connection with its peer's identity: what a Listener's Accept
           returns to a listener and a Dialer's Dial to a client, Peer naming the
           other end.

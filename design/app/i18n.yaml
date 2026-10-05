@@ -711,7 +711,8 @@ packages:
             public: Language negotiation was set up with no supported languages
             reason: NEGOTIATION_EMPTY
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           CountValue is a quantity described by the CLDR plural operands, which is
           what a plural rule actually reads — never the Go number the caller started
           with. pkg/v1/app/i18n publishes it as `Count`.
@@ -779,8 +780,25 @@ packages:
             recv: value
         name: CountValue
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - doc: |-
+                integerPart is CLDR operand i: the integer digits of the ABSOLUTE
+                value. CLDR's operands ignore the sign, and so does every rule:
+                "-1 degree" is `one` in English exactly as "1 degree" is.
+              name: integerPart
+              type: uint64
+            - doc: |-
+                fractionValue is CLDR operand f: the visible fraction digits read as an
+                integer, trailing zeros included.
+              name: fractionValue
+              type: uint64
+            - doc: |-
+                visibleFractionDigits is CLDR operand v: how many fraction digits the
+                reader sees.
+              name: visibleFractionDigits
+              type: uint8
+      - decl: true
+        doc: |-
           Form is a CLDR plural category: one of the six names the Unicode plural
           rules assign a quantity to.
 
@@ -809,7 +827,8 @@ packages:
             recv: value
         name: Form
         underlying: uint8
-      - doc: |-
+      - decl: true
+        doc: |-
           PluralRule reports which CLDR category a quantity falls in for ONE language.
 
           It is a FUNC port rather than an interface, which satisfies ADR 0039
@@ -825,7 +844,8 @@ packages:
           no constructor to refuse in.
         name: PluralRule
         underlying: func(count CountValue) Form
-      - doc: |-
+      - decl: true
+        doc: |-
           Args binds placeholder names to the text that replaces them.
 
           It is map[string]string and deliberately not map[string]any. The values are
@@ -855,7 +875,8 @@ packages:
           double-escape every apostrophe in every French sentence in the catalogue.
         name: Args
         underlying: map[string]string
-      - doc: |-
+      - decl: true
+        doc: |-
           Key names a message inside a catalogue. It is a program identifier the
           developer chooses — "checkout.button.pay" — and never prose: it is compared
           by byte equality, it travels in error fields, and it is what the renderer
@@ -863,7 +884,8 @@ packages:
           empty key is refused: a blank on screen is a defect nobody reports.
         name: Key
         underlying: string
-      - doc: |-
+      - decl: true
+        doc: |-
           MessageValue is one translated message, compiled: its placeholders are
           parsed once, when the catalogue is built, so a malformed pattern fails at
           startup and a render never parses anything. pkg/v1/app/i18n publishes it as
@@ -933,8 +955,18 @@ packages:
             recv: value
         name: MessageValue
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - doc: other is the mandatory FormOther pattern.
+              name: other
+              type: PatternValue
+            - doc: |-
+                plural holds the remaining categories, ascending by Form. It is nil for
+                a message with no plural forms, which is the common case and the one
+                worth keeping small.
+              name: plural
+              type: "[]FormPatternValue"
+      - decl: true
+        doc: |-
           FormPatternValue pairs a CLDR category with the compiled body that spells
           it, as a plural message carries it.
 
@@ -953,7 +985,8 @@ packages:
             - doc: Body is the compiled pattern for the category.
               name: Body
               type: PatternValue
-      - doc: |-
+      - decl: true
+        doc: |-
           PartValue is one span of a compiled pattern: literal Text, or the Name of a
           placeholder. Exactly one of the two is set — [NewPattern] refuses a span
           that sets both or neither.
@@ -970,7 +1003,8 @@ packages:
             - doc: Name is the placeholder name. It is empty for a literal span.
               name: Name
               type: string
-      - doc: |-
+      - decl: true
+        doc: |-
           PatternValue is one compiled message body: the spans a pattern's text was
           parsed into, in order.
 
@@ -980,8 +1014,20 @@ packages:
           pattern, compiled.
         name: PatternValue
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - doc: parts is the compiled span list, in order.
+              name: parts
+              type: "[]PartValue"
+            - doc: size is the sum of the literal lengths, used to size the builder.
+              name: size
+              type: int
+            - doc: |-
+                set distinguishes a compiled EMPTY pattern from a pattern that was never
+                compiled at all.
+              name: set
+              type: bool
+      - decl: true
+        doc: |-
           TagValue is a language, optionally narrowed by a script and a region:
           exactly the `language[-Script][-REGION]` shape of BCP 47 and deliberately
           nothing else. pkg/v1/app/i18n publishes it as `Tag`.
@@ -1050,7 +1096,26 @@ packages:
             recv: value
         name: TagValue
         struct:
-          unexported: true
+          fields:
+            - doc: |-
+                canonical is the canonical form: lowercase language, Titlecase script,
+                UPPERCASE alpha region. The three accessors slice it, so they cost
+                nothing and cannot disagree with it.
+              name: canonical
+              type: string
+            - doc: |-
+                langN, scriptN and regionN are the subtag lengths inside canonical. A
+                zero scriptN or regionN means the subtag is absent.
+              name: langN
+            - doc: |-
+                langN, scriptN and regionN are the subtag lengths inside canonical. A
+                zero scriptN or regionN means the subtag is absent.
+              name: scriptN
+            - doc: |-
+                langN, scriptN and regionN are the subtag lengths inside canonical. A
+                zero scriptN or regionN means the subtag is absent.
+              name: regionN
+              type: uint8
   - doc: |-
       Package i18n — the RFC 9110 Accept-Language header parser.
 

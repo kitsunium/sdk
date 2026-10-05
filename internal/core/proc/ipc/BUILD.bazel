@@ -6,10 +6,10 @@ go_library(
     name = "ipc",
     srcs = [
         "codes_gen.go",
+        "decl_gen.go",
         "design_gen.go",
         "doc.go",
         "errors.go",
-        "ipc.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/proc/ipc",
     visibility = [

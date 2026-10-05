@@ -753,7 +753,8 @@ packages:
             public: The OTLP collector accepted the request but rejected some data points
             reason: OTLP_PARTIAL_SUCCESS
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           ExporterName is the typed key under which an Exporter registers (e.g. "text",
           "prometheus"). The zero value ExporterName("") is reserved invalid.
         methods:
@@ -764,7 +765,8 @@ packages:
             recv: value
         name: ExporterName
         underlying: string
-      - doc: |-
+      - decl: true
+        doc: |-
           GaugeValue is one series of a gauge metric: the attribute set that identifies
           it plus its instantaneous reading.
         name: GaugeValue
@@ -778,7 +780,8 @@ packages:
             - doc: Value is the last reading taken.
               name: Value
               type: float64
-      - doc: |-
+      - decl: true
+        doc: |-
           HistogramValue is one series of a histogram metric: the attribute set that
           identifies it, the explicit bucket upper bounds, the count per bucket
           (len == len(Bounds)+1, the last being the +Inf overflow), and the Sum/Count
@@ -808,7 +811,8 @@ packages:
             - doc: Count is how many observations the window holds.
               name: Count
               type: uint64
-      - doc: |-
+      - decl: true
+        doc: |-
           ObserveInt64 reports ONE integer measurement, with its own attribute set,
           from inside an Int64Callback. It is valid only for the duration of that call;
           retaining it and calling it later observes into a collection that has already
@@ -819,10 +823,12 @@ packages:
           downstream implementer the way widening an interface would (ADR 0039).
         name: ObserveInt64
         underlying: func(value int64, attrs ...coreotel.AttrValue)
-      - doc: ObserveFloat64 is ObserveInt64 for a double-valued observable.
+      - decl: true
+        doc: ObserveFloat64 is ObserveInt64 for a double-valued observable.
         name: ObserveFloat64
         underlying: func(value float64, attrs ...coreotel.AttrValue)
-      - doc: |-
+      - decl: true
+        doc: |-
           Int64Callback is read ONCE PER COLLECTION and reports the instrument's
           current ABSOLUTE value — not a delta. That is the OTel contract for an
           asynchronous sum: the callback states what the total is now
@@ -834,13 +840,15 @@ packages:
           scrape for every other instrument too.
         name: Int64Callback
         underlying: func(observe ObserveInt64)
-      - doc: |-
+      - decl: true
+        doc: |-
           Float64Callback is Int64Callback for a double-valued observable — an
           observable gauge, whose reported value is a sampled reading and therefore has
           no temporality at all.
         name: Float64Callback
         underlying: func(observe ObserveFloat64)
-      - doc: |-
+      - decl: true
+        doc: |-
           SumMetricValue is every series of ONE sum instrument name, plus the two facts
           the OTel data model attaches to the metric rather than to its points.
 
@@ -870,7 +878,8 @@ packages:
             - doc: Points holds the name's series, sorted by attribute set.
               name: Points
               type: "[]SumValue"
-      - doc: |-
+      - decl: true
+        doc: |-
           GaugeMetricValue is every series of ONE gauge instrument name.
 
           It carries no Temporality, and that absence is the model, not an omission: a
@@ -889,7 +898,8 @@ packages:
             - doc: Points holds the name's series, sorted by attribute set.
               name: Points
               type: "[]GaugeValue"
-      - doc: |-
+      - decl: true
+        doc: |-
           HistogramMetricValue is every series of ONE histogram instrument name, plus
           its temporality.
 
@@ -913,7 +923,8 @@ packages:
             - doc: Points holds the name's series, sorted by attribute set.
               name: Points
               type: "[]HistogramValue"
-      - doc: |-
+      - decl: true
+        doc: |-
           SnapshotValue is a point-in-time copy of every series in a Meter, handed to
           an Exporter. It is the OTel payload hierarchy flattened into one Go value:
           Resource once, Scope once, then metrics keyed by name, each carrying its own
@@ -972,7 +983,8 @@ packages:
             - doc: Histograms maps an instrument name to its histogram metric.
               name: Histograms
               type: map[string]HistogramMetricValue
-      - doc: |-
+      - decl: true
+        doc: |-
           SumValue is one series of a sum metric: the attribute set that identifies it
           plus its value. Monotonicity and temporality are NOT here — they belong to
           the metric, not to the point, which is the OTel data model's own split.
@@ -997,7 +1009,8 @@ packages:
                 SumMetricValue.Temporality.
               name: Value
               type: int64
-      - doc: |-
+      - decl: true
+        doc: |-
           Temporality says which time window a metric's reported value covers. It is
           the single most load-bearing concept in the OpenTelemetry metrics data model,
           because the same number means two different things under the two settings and

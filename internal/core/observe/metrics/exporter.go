@@ -5,10 +5,6 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/plugin"
 )
 
-// ExporterName is the typed key under which an Exporter registers (e.g. "text",
-// "prometheus"). The zero value ExporterName("") is reserved invalid.
-type ExporterName string
-
 // String returns the raw name.
 func (n ExporterName) String() string {
 	//: direct cast back to a plain string.

@@ -32,6 +32,32 @@ content moved and never deleted.
 | `ResultValue` | one check's outcome, carried into the report; `Age(now)` says how stale it is. |
 | `ReportValue` | one probe's whole answer: the `Probe`, the aggregate `Status`, `At`, and the `Results` that produced it. |
 
+## What each registration may express
+
+The three registrations differ in what they are ALLOWED to express, and the
+differences are absences rather than documentation (this note sat above
+`StartupCheckValue` in `health_check.go` until kit came to declare the three
+types in `decl_gen.go` — ADR 0170):
+
+|  | Startup | Readiness | Liveness |
+|---|---|---|---|
+| body | `Check` (ctx) | `Check` (ctx) | `SelfCheck` (none) |
+| may call out | yes | yes | no — no ctx to bound it |
+| `NonCritical` | absent | present | absent |
+| `MaxAge` (cache) | absent | present | absent |
+
+Each absence is a decision recorded in the field set:
+
+- Liveness has no ctx, so a dependency API cannot be assigned to it.
+- Liveness has no `NonCritical`, because "somewhat irrecoverable" restarts
+  nothing; the process is beyond saving or it is not.
+- Liveness has no `MaxAge`, because a cached liveness answer means a dead
+  process can keep reporting the "alive" it recorded before it died.
+- Startup has no `NonCritical`, because a startup check that does not gate
+  startup is not a startup check.
+- Startup has no `MaxAge`, because a startup check runs until it passes once
+  and then never runs again — the strongest cache there is.
+
 ## Why the two checks are different types
 
 This is the load-bearing decision, and it is structural rather than
@@ -93,3 +119,7 @@ code keeps its value when its declaration moves):
 ```
 cd internal/core && GOWORK=off go test -race ./app/health/...
 ```
+
+## Declarations
+
+`decl_gen.go` is written by kit gen from the design (ADR 0170): the declarations of `Check`, `SelfCheck`, `StartupCheckValue`, `LivenessCheckValue`, `ReadinessCheckValue`, `Probe`, `ResultValue`, `ReportValue` and `Status` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names.

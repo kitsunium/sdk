@@ -1,11 +1,5 @@
 package trace
 
-import (
-	"time"
-
-	coreotel "github.com/kitsunium/sdk/internal/core/observe/otel"
-)
-
 // ExceptionEventName and the three attribute keys around it are the OpenTelemetry
 // semantic convention for recording an error on a span.
 //
@@ -25,25 +19,6 @@ const (
 	// recording site would name the wrong goroutine.
 	ExceptionStacktraceKey string = "exception.stacktrace"
 )
-
-// EventValue is one thing that happened at an instant during a span, rather than
-// over an interval — `opentelemetry/proto/trace/v1.Span.Event`.
-//
-// An event is not a cheap child span, and the distinction is worth stating
-// because the wrong choice is invisible until a trace is unreadable: an event
-// has no identity, no duration and no children, so nothing can be a child of it
-// and nothing can link to it. Use one for a moment worth marking on a span's
-// timeline (a retry, a cache miss, an exception); use a child span for work that
-// took time.
-type EventValue struct {
-	// Time is when it happened. An unset instant encodes as 0, which is what
-	// the schema means by an unknown timestamp.
-	Time time.Time
-	// Name is the event's low-cardinality label.
-	Name string
-	// Attrs are the event's typed dimensions, sorted by Key.
-	Attrs []coreotel.AttrValue
-}
 
 // Normalized returns the event a span actually records: attributes sorted,
 // validated and owned, so the caller's slice cannot be mutated afterwards

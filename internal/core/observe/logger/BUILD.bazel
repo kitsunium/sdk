@@ -6,11 +6,11 @@ go_library(
     name = "logger",
     srcs = [
         "codes_gen.go",
+        "decl_gen.go",
         "design_gen.go",
         "doc.go",
         "errors.go",
         "kind.go",
-        "record.go",
         "trace_context.go",
         "value.go",
     ],

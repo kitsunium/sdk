@@ -1,17 +1,5 @@
 package writer
 
-// CredentialValue is an opaque, redacting AWS SigV4 credential set. Its String
-// output is always "<redacted>" so an accidental %v / %s never leaks the
-// secret; the typed accessors expose the material only to the transport factory
-// that explicitly asks for it.
-type CredentialValue struct {
-	// accessKeyID / secretAccessKey / sessionToken hold SigV4 material; all
-	// unexported so the only way out is the explicit accessors below.
-	accessKeyID     string
-	secretAccessKey string
-	sessionToken    string
-}
-
 // NewCredentialValue builds a CredentialValue from SigV4 material. An empty
 // sessionToken is valid for long-lived keys; supply it for STS / assumed roles.
 func NewCredentialValue(accessKeyID, secretAccessKey, sessionToken string) CredentialValue {

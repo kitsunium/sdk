@@ -1,13 +1,5 @@
 package token
 
-// Algorithm is the signature algorithm a token issuer or verifier is bound to.
-// The zero value is [AlgorithmUnknown] and is never usable.
-//
-// The set is closed and deliberately small: an algorithm reaches this enum only
-// when the SDK's crypto domain already ships the primitive behind it. "none"
-// is absent by construction.
-type Algorithm uint8
-
 const (
 	// AlgorithmUnknown is the zero value — the algorithm nobody chose. Every
 	// constructor refuses it rather than defaulting to one.

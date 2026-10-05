@@ -681,7 +681,8 @@ packages:
             public: The token repeats a member name
             reason: DUPLICATE_MEMBER
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           ClaimsValue is one token's claim set: the seven registered claims as typed
           fields plus any number of application ("private") claims held as their raw
           JSON encoding.
@@ -873,8 +874,38 @@ packages:
             recv: value
         name: ClaimsValue
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - doc: issuer is the "iss" claim, empty when absent.
+              name: issuer
+              type: string
+            - doc: subject is the "sub" claim, empty when absent.
+              name: subject
+              type: string
+            - doc: id is the "jti" claim, empty when absent.
+              name: id
+              type: string
+            - doc: |-
+                audience is the "aud" claim. JWT allows one string or an array of them
+                (RFC 7519 §4.1.3), so the general shape is a slice; PASETO allows only
+                one, which its encoder enforces.
+              name: audience
+              type: "[]string"
+            - doc: expiry is the "exp" claim; the zero Time means the claim was absent.
+              name: expiry
+              type: time.Time
+            - doc: notBefore is the "nbf" claim; the zero Time means it was absent.
+              name: notBefore
+              type: time.Time
+            - doc: issuedAt is the "iat" claim; the zero Time means it was absent.
+              name: issuedAt
+              type: time.Time
+            - doc: |-
+                private maps an application claim name to its raw JSON encoding. Raw,
+                because re-encoding a decoded value would change bytes the issuer signed.
+              name: private
+              type: map[string][]byte
+      - decl: true
+        doc: |-
           Algorithm is the signature algorithm a token issuer or verifier is bound to.
           The zero value is [AlgorithmUnknown] and is never usable.
 

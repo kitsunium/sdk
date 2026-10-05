@@ -5,10 +5,10 @@ package(default_visibility = ["//internal/core:core_consumers"])
 go_library(
     name = "cli",
     srcs = [
-        "cli.go",
         "cli_command.go",
         "cli_invocation.go",
         "codes_gen.go",
+        "decl_gen.go",
         "design_gen.go",
         "doc.go",
         "errors.go",
