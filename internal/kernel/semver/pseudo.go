@@ -13,16 +13,9 @@ const stampLayout string = "20060102150405"
 // of the stamp "yyyymmddhhmmss-abcdefabcdef".
 const stampLen int = len(stampLayout)
 
-// IsPseudoVersion reports whether v is a Go pseudo-version: a valid version
-// whose pre-release ends in "yyyymmddhhmmss-REVISION", immediately preceded
-// either by nothing, when the version is vX.0.0, or by an identifier "0" —
-// the three shapes of the Go modules reference, with or without build
-// metadata such as "+incompatible".
-//
-// It recognises the SHAPE, as the toolchain's own pattern does: a stamp whose
-// fourteen digits are not a real instant still makes a pseudo-version, and
-// [PseudoVersionTime] is what reports that the time does not read.
-func IsPseudoVersion(v string) bool {
+// isPseudoVersion is IsPseudoVersion's body: decl_gen.go writes IsPseudoVersion, from the
+// design, as one call of it.
+func isPseudoVersion(v string) bool {
 	_, ok := pseudoStamp(v)
 	//: a pseudo-version is whatever carries a stamp in the right place.
 	return ok

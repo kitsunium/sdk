@@ -1,8 +1,8 @@
 package semver
 
-// IsValid reports whether v is a version: SemVer 2.0.0 with a leading "v",
-// or one of the shorthands "vMAJOR" and "vMAJOR.MINOR".
-func IsValid(v string) bool {
+// isValid is IsValid's body: decl_gen.go writes IsValid, from the
+// design, as one call of it.
+func isValid(v string) bool {
 	_, ok := parse(v)
 	//: a version is whatever parses; nothing else is checked.
 	return ok
@@ -42,10 +42,9 @@ func Compare(v, w string) int {
 	return comparePrereleases(left.prerelease, right.prerelease)
 }
 
-// Prerelease returns the pre-release part of v with its leading hyphen —
-// "-rc.1" for "v1.0.0-rc.1+build" — or "" when v has none: a release, a
-// shorthand, or a string that is not a version, which [IsValid] tells apart.
-func Prerelease(v string) string {
+// prerelease is Prerelease's body: decl_gen.go writes Prerelease, from the
+// design, as one call of it.
+func prerelease(v string) string {
 	parts, _ := parse(v)
 	//: a string that does not parse yields empty components, so its
 	//: pre-release is "" like a release's.

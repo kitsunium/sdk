@@ -5,14 +5,12 @@ package clock
 // implementations drift apart. Each clock is asserted against all three of
 // Clock, Waiter and Timed on purpose: Clock is the frozen, downstream-visible
 // half of the port, and losing it silently would be the one break this package
-// is shaped to avoid.
+// is shaped to avoid. ManualClock's three are its design's (implements:),
+// which kit gen writes in decl_gen.go.
 var (
 	_ Clock  = (*systemClock)(nil)
 	_ Waiter = (*systemClock)(nil)
 	_ Timed  = (*systemClock)(nil)
-	_ Clock  = (*ManualClock)(nil)
-	_ Waiter = (*ManualClock)(nil)
-	_ Timed  = (*ManualClock)(nil)
 	_ Timer  = (*systemTimer)(nil)
 	_ Ticker = (*systemTicker)(nil)
 	_ Timer  = (*manualTimer)(nil)
