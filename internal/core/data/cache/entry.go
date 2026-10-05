@@ -1,3 +1,7 @@
+// Package cache — range 0.2.18.* (ADR 0049 core/data/cache block), and the
+// chained store's 0.3.48.* (ADR 0049 service/data/cache block, declared here
+// since ADR 0160).
+//
 // Package cache — the immutable value a caller hands to a Store.
 package cache
 

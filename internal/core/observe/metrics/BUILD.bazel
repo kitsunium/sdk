@@ -6,10 +6,9 @@ go_library(
     name = "metrics",
     srcs = [
         "attrs.go",
-        "codes.go",
+        "codes_gen.go",
         "counter.go",
         "design_gen.go",
-        "errors.go",
         "exporter.go",
         "gauge_value.go",
         "histogram_value.go",

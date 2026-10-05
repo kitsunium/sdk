@@ -5,7 +5,7 @@ package(default_visibility = ["//internal/core:core_consumers"])
 go_library(
     name = "resilience",
     srcs = [
-        "codes.go",
+        "codes_gen.go",
         "design_gen.go",
         "errors.go",
         "resilience.go",
@@ -37,8 +37,5 @@ filegroup(
 go_test(
     name = "resilience_test",
     srcs = ["api_gen_test.go"],
-    deps = [
-        ":resilience",
-        "//internal/kernel/errs",
-    ],
+    deps = [":resilience"],
 )

@@ -190,8 +190,8 @@ without revisiting that ratio would make the guard bite legitimate traffic.
 | `transform.go` | package doc, `DefaultMaxDecompressedBytes`, `checkLimit` |
 | `zstd.go` | `Zstd` singleton, `ZstdCompressor`, `NewZstdCompressor`, `ZstdLevel`, `encoderLevel`, `isLimitError` |
 | `s2.go` | `S2` singleton, `S2Compressor`, `NewS2Compressor` |
-| `codes.go` | `0.3.63.1`–`0.3.63.4` |
-| `errors.go` | `ZstdFailed`, `S2Failed`, `DecompressionLimitExceeded`, `LimitMisconfigured` + `zstdWrap` / `s2Wrap` |
+| `codes_gen.go` | `0.3.63.1`–`0.3.63.4`; `ZstdFailed`, `S2Failed`, `DecompressionLimitExceeded`, `LimitMisconfigured` — written by kit gen from `design/third-party/transform.yaml` (ADR 0164) |
+| `errors.go` | hand-written beside them: `exitDataErr`, `zstdWrap`, `s2Wrap` |
 | `BENCH.md` | the numbers, the choice table, and the pprof behind the one optimisation |
 
 ## Error codes (range `0.3.63.*`)

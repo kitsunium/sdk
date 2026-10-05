@@ -19,7 +19,8 @@ consumer of this writer gets the AWS SDK and `internal/*` — no other vendor.
 | `cwsink.go`      | `cwSink` batching terminal sink + `deliverFunc` seam (AWS-free, unit-tested) |
 | `client.go`      | `newDeliverFunc` — returns the AWS PutLogEvents closure (**only** AWS-importing file) |
 | `cred_adapter.go`| `credAdapter` — bridges `writer.CredentialProvider` → `aws.CredentialsProvider` |
-| `codes.go`, `errors.go` | sentinels — range 0.3.25.\* (`ClientInitFailed`, `PutFailed`, `EventRejected`) |
+| `codes_gen.go` | sentinels — range 0.3.25.\* (`ClientInitFailed`, `PutFailed`, `EventRejected`) — written by kit gen from `design/third-party/aws.yaml` (ADR 0164) |
+| `errors.go` | hand-written beside them: `exitIOErr` |
 
 ## Delivery model
 

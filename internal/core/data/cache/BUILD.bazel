@@ -7,7 +7,7 @@ go_library(
     srcs = [
         "cache.go",
         "cache_interface.go",
-        "codes.go",
+        "codes_gen.go",
         "design_gen.go",
         "entry.go",
         "errors.go",

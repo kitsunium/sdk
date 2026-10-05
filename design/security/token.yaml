@@ -1,7 +1,194 @@
 apiVersion: kit.kitsunium/design/v2
 domain: security/token
 packages:
-  - constants:
+  - codes:
+      - const:
+          - doc: |-
+              CodeMalformed identifies a token whose structure could not be read at all:
+              the wrong number of segments, a segment that is not unpadded base64url, a
+              header or payload that is not a JSON object.
+            name: CodeMalformed
+            note: "range: 0.2.13.0 - 0.2.13.255"
+            value: "0x00_02_0D_01"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeAlgorithmNone identifies a token presenting the unsecured "none"
+              algorithm of RFC 7519 §6 (in any capitalisation). It is always refused and
+              there is no configuration that enables it.
+            name: CodeAlgorithmNone
+            value: "0x00_02_0D_02"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeAlgorithmMismatch identifies a token whose algorithm header names an
+              algorithm other than the one the verifier is bound to. This is the code an
+              algorithm-confusion attempt produces.
+            name: CodeAlgorithmMismatch
+            value: "0x00_02_0D_03"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeSignatureInvalid identifies a token whose signature or MAC tag did not
+              authenticate under the bound key.
+            name: CodeSignatureInvalid
+            value: "0x00_02_0D_04"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeExpired identifies an authenticated token whose "exp" claim is in the
+              past, after the configured leeway.
+            name: CodeExpired
+            value: "0x00_02_0D_05"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeNotYetValid identifies an authenticated token whose "nbf" claim is in
+              the future, after the configured leeway.
+            name: CodeNotYetValid
+            value: "0x00_02_0D_06"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeExpiryRequired identifies a token carrying no "exp" claim where the
+              profile requires one — the default. It is also raised by an issuer asked to
+              mint a token with neither an explicit expiry nor a configured lifetime.
+            name: CodeExpiryRequired
+            value: "0x00_02_0D_07"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeAudienceMismatch identifies an authenticated token whose "aud" claim
+              does not contain the audience the verifier was configured with.
+            name: CodeAudienceMismatch
+            value: "0x00_02_0D_08"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeIssuerMismatch identifies an authenticated token whose "iss" claim is
+              not the issuer the verifier was configured with.
+            name: CodeIssuerMismatch
+            value: "0x00_02_0D_09"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeTooLarge identifies an input past a declared size bound: the token
+              string, the decoded header, or the number of claims.
+            name: CodeTooLarge
+            value: "0x00_02_0D_0A"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeTooDeep identifies a claims payload whose JSON nesting exceeds the
+              configured depth bound.
+            name: CodeTooDeep
+            value: "0x00_02_0D_0B"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeKeyUnsuitable identifies a key that cannot be used for the algorithm it
+              was handed to: the wrong length, the wrong curve, or a key type for which
+              this domain implements no algorithm.
+            name: CodeKeyUnsuitable
+            value: "0x00_02_0D_0C"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodePolicyMisconfigured identifies an issuer or verifier built with a
+              configuration it cannot honour — a negative or absurd leeway, a negative
+              lifetime, a bound below the floor. Every call is refused without touching
+              the token (ADR 0031).
+            name: CodePolicyMisconfigured
+            value: "0x00_02_0D_0D"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeIssueFailed identifies an issuer that could not render the claims it was
+              given — a claim the target format cannot express, or a signing fault.
+            name: CodeIssueFailed
+            value: "0x00_02_0D_0E"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeClaimNameInvalid identifies a private claim whose name is empty or
+              shadows one of the seven registered claim names.
+            name: CodeClaimNameInvalid
+            value: "0x00_02_0D_0F"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeLifetimeTooLong identifies an authenticated token whose exp-iat span
+              exceeds the maximum lifetime the verifier accepts.
+            name: CodeLifetimeTooLong
+            value: "0x00_02_0D_10"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeHeaderUnsupported identifies a JOSE header the engine will not act on:
+              a non-empty "crit" (RFC 7515 §4.1.11 makes an unrecognised critical
+              parameter a mandatory rejection), or a "typ" that does not match the one the
+              verifier requires.
+            name: CodeHeaderUnsupported
+            note: |-
+              range: 0.3.44.0 - 0.3.44.255
+
+              What is specific to the two concrete formats the engine in
+              internal/service/security/token implements — header parameters, key-set
+              selection, PASETO framing. The verdicts a caller matches on are the 0.2.13.*
+              block above. The range was allocated in the service layer (LL = 3) and is
+              declared here since ADR 0160: LL records the layer that allocated a range,
+              not the directory its declaration lives in, so the values never change.
+            value: "0x00_03_2C_01"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeKeyNotFound identifies a token whose "kid" names no key in the JWK Set
+              the verifier was built from.
+            name: CodeKeyNotFound
+            value: "0x00_03_2C_02"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeKeyIDMissing identifies a token presented to a key-set verifier with no
+              "kid" header. A set verifier selects by id; it does not try every key it
+              holds.
+            name: CodeKeyIDMissing
+            value: "0x00_03_2C_03"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeKeyIDAmbiguous identifies a "kid" carried by more candidates than the
+              verifier will try. Trying a bounded number of candidates is the rotation
+              path; trying an unbounded number is a CPU amplifier a publisher controls.
+            name: CodeKeyIDAmbiguous
+            value: "0x00_03_2C_04"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeFooterMismatch identifies a PASETO token whose footer is not the one the
+              verifier expects — including a footer present where none was configured.
+            name: CodeFooterMismatch
+            value: "0x00_03_2C_05"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeSchemeUnsupported identifies a PASETO version+purpose the engine does
+              not implement: any local (encrypted) purpose, and every version other than
+              v4. See internal/service/security/token/CLAUDE.md for why v4.local is
+              absent.
+            name: CodeSchemeUnsupported
+            value: "0x00_03_2C_06"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeDuplicateMember identifies a JOSE header or claims object carrying the
+              same member name twice. Go's encoding/json silently keeps the last one, so
+              two readers of the same bytes could disagree about what the token says
+              (RFC 8725 §2.6).
+            name: CodeDuplicateMember
+            value: "0x00_03_2C_07"
+        type: errs.Code
+    constants:
       - name: ClaimIssuer
         type: string
         value: "\"iss\""
@@ -26,75 +213,6 @@ packages:
       - name: MaxPrivateClaims
         type: int
         value: "64"
-      - name: CodeMalformed
-        type: errs.Code
-        value: "0x00_02_0D_01"
-      - name: CodeAlgorithmNone
-        type: errs.Code
-        value: "0x00_02_0D_02"
-      - name: CodeAlgorithmMismatch
-        type: errs.Code
-        value: "0x00_02_0D_03"
-      - name: CodeSignatureInvalid
-        type: errs.Code
-        value: "0x00_02_0D_04"
-      - name: CodeExpired
-        type: errs.Code
-        value: "0x00_02_0D_05"
-      - name: CodeNotYetValid
-        type: errs.Code
-        value: "0x00_02_0D_06"
-      - name: CodeExpiryRequired
-        type: errs.Code
-        value: "0x00_02_0D_07"
-      - name: CodeAudienceMismatch
-        type: errs.Code
-        value: "0x00_02_0D_08"
-      - name: CodeIssuerMismatch
-        type: errs.Code
-        value: "0x00_02_0D_09"
-      - name: CodeTooLarge
-        type: errs.Code
-        value: "0x00_02_0D_0A"
-      - name: CodeTooDeep
-        type: errs.Code
-        value: "0x00_02_0D_0B"
-      - name: CodeKeyUnsuitable
-        type: errs.Code
-        value: "0x00_02_0D_0C"
-      - name: CodePolicyMisconfigured
-        type: errs.Code
-        value: "0x00_02_0D_0D"
-      - name: CodeIssueFailed
-        type: errs.Code
-        value: "0x00_02_0D_0E"
-      - name: CodeClaimNameInvalid
-        type: errs.Code
-        value: "0x00_02_0D_0F"
-      - name: CodeLifetimeTooLong
-        type: errs.Code
-        value: "0x00_02_0D_10"
-      - name: CodeHeaderUnsupported
-        type: errs.Code
-        value: "0x00_03_2C_01"
-      - name: CodeKeyNotFound
-        type: errs.Code
-        value: "0x00_03_2C_02"
-      - name: CodeKeyIDMissing
-        type: errs.Code
-        value: "0x00_03_2C_03"
-      - name: CodeKeyIDAmbiguous
-        type: errs.Code
-        value: "0x00_03_2C_04"
-      - name: CodeFooterMismatch
-        type: errs.Code
-        value: "0x00_03_2C_05"
-      - name: CodeSchemeUnsupported
-        type: errs.Code
-        value: "0x00_03_2C_06"
-      - name: CodeDuplicateMember
-        type: errs.Code
-        value: "0x00_03_2C_07"
       - name: AlgorithmUnknown
         type: Algorithm
         value: "0"
@@ -171,6 +289,293 @@ packages:
               - type: ClaimsValue
               - type: error
         name: Verifier
+    sentinels:
+      - var:
+          - code: CodeMalformed
+            doc: |-
+              Malformed is returned when the input cannot be read as a token: the
+              wrong segment count, a segment that is not unpadded base64url, a header
+              or payload that is not a JSON object.
+            name: Malformed
+            options:
+              - errs.WithExitCode(exitDataErr)
+              - errs.WithHTTPStatus(statusUnauthorized)
+            private: "core/security/token: token structure unreadable — segment count, base64url decode, or JSON shape"
+            public: The token is malformed
+            reason: MALFORMED
+          - code: CodeAlgorithmNone
+            doc: |-
+              AlgorithmNone is returned for a token presenting the unsecured "none"
+              algorithm (RFC 7519 §6), in any capitalisation. It is unconditional:
+              this domain has no Algorithm value for "none" and no option enabling it.
+            name: AlgorithmNone
+            options:
+              - errs.WithExitCode(exitNoPerm)
+              - errs.WithHTTPStatus(statusUnauthorized)
+            private: "core/security/token: alg=none refused unconditionally; there is no configuration that accepts it"
+            public: The token declares the unsecured none algorithm
+            reason: ALGORITHM_NONE
+          - code: CodeAlgorithmMismatch
+            doc: |-
+              AlgorithmMismatch is returned when the token's algorithm header names
+              something other than the algorithm the verifier is bound to. It is the
+              verdict an algorithm-confusion attempt produces, and it is reached
+              BEFORE any key is handed to any primitive.
+            name: AlgorithmMismatch
+            options:
+              - errs.WithExitCode(exitNoPerm)
+              - errs.WithHTTPStatus(statusUnauthorized)
+            private: "core/security/token: header alg differs from the bound algorithm; the header never selects a key"
+            public: The token algorithm is not the one this verifier accepts
+            reason: ALGORITHM_MISMATCH
+          - code: CodeSignatureInvalid
+            doc: |-
+              SignatureInvalid is returned when the signature or MAC tag did not
+              authenticate the token under the bound key. It is deliberately the same
+              verdict for "wrong key" and "tampered bytes": the two are the same event.
+            name: SignatureInvalid
+            options:
+              - errs.WithExitCode(exitNoPerm)
+              - errs.WithHTTPStatus(statusUnauthorized)
+            private: "core/security/token: signature or MAC tag did not verify under the bound key"
+            public: The token signature is not valid
+            reason: SIGNATURE_INVALID
+          - code: CodeExpired
+            doc: |-
+              Expired is returned when an AUTHENTICATED token's exp claim is in the
+              past. Reaching it means the signature already verified — claim verdicts
+              are never reported for a token that failed authentication.
+            name: Expired
+            options:
+              - errs.WithExitCode(exitNoPerm)
+              - errs.WithHTTPStatus(statusUnauthorized)
+            private: "core/security/token: exp is in the past after leeway; signature had already verified"
+            public: The token has expired
+            reason: EXPIRED
+          - code: CodeNotYetValid
+            doc: |-
+              NotYetValid is returned when an authenticated token's nbf claim is in
+              the future after leeway.
+            name: NotYetValid
+            options:
+              - errs.WithExitCode(exitNoPerm)
+              - errs.WithHTTPStatus(statusUnauthorized)
+            private: "core/security/token: nbf is in the future after leeway"
+            public: The token is not valid yet
+            reason: NOT_YET_VALID
+          - code: CodeExpiryRequired
+            doc: |-
+              ExpiryRequired is returned when a token carries no exp claim and the
+              profile requires one — which is the default, because RFC 7519 §4.1.4
+              makes exp OPTIONAL and a token that never expires is a password.
+            name: ExpiryRequired
+            options:
+              - errs.WithExitCode(exitNoPerm)
+              - errs.WithHTTPStatus(statusUnauthorized)
+            private: "core/security/token: exp absent and the profile requires it; set AllowMissingExpiry to opt out"
+            public: The token carries no expiry
+            reason: EXPIRY_REQUIRED
+          - code: CodeAudienceMismatch
+            doc: |-
+              AudienceMismatch is returned when an authenticated token's aud claim
+              does not contain this recipient. A correctly signed token addressed to
+              another API is not a valid token here (RFC 8725 §3.9).
+            name: AudienceMismatch
+            options:
+              - errs.WithExitCode(exitNoPerm)
+              - errs.WithHTTPStatus(statusUnauthorized)
+            private: "core/security/token: configured audience absent from the aud claim"
+            public: The token is not addressed to this audience
+            reason: AUDIENCE_MISMATCH
+          - code: CodeIssuerMismatch
+            doc: |-
+              IssuerMismatch is returned when an authenticated token's iss claim is
+              not the configured issuer (RFC 8725 §3.8).
+            name: IssuerMismatch
+            options:
+              - errs.WithExitCode(exitNoPerm)
+              - errs.WithHTTPStatus(statusUnauthorized)
+            private: "core/security/token: iss differs from the configured issuer"
+            public: The token issuer is not the expected one
+            reason: ISSUER_MISMATCH
+          - code: CodeTooLarge
+            doc: |-
+              TooLarge is returned when an input passes a declared size bound before
+              any parsing happens — the token string, the decoded header, the claim
+              count. The bound is checked FIRST so a hostile input never funds the
+              work of discovering that it is hostile.
+            name: TooLarge
+            options:
+              - errs.WithExitCode(exitDataErr)
+              - errs.WithHTTPStatus(statusUnauthorized)
+            private: "core/security/token: input past a declared bound (token length, header size, or claim count)"
+            public: The token exceeds the accepted size
+            reason: TOO_LARGE
+          - code: CodeTooDeep
+            doc: |-
+              TooDeep is returned when the claims payload nests deeper than the
+              configured bound. The depth is measured by a linear scan of the raw
+              bytes, before encoding/json ever sees them.
+            name: TooDeep
+            options:
+              - errs.WithExitCode(exitDataErr)
+              - errs.WithHTTPStatus(statusUnauthorized)
+            private: "core/security/token: claim nesting past MaxClaimDepth, measured before JSON decoding"
+            public: The token claims are nested too deeply
+            reason: TOO_DEEP
+          - code: CodeKeyUnsuitable
+            doc: |-
+              KeyUnsuitable is returned when a key cannot serve the algorithm it was
+              handed to: wrong length, wrong curve, or a key type for which this
+              domain implements nothing.
+            name: KeyUnsuitable
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "core/security/token: key type, curve or length does not match the bound algorithm"
+            public: The key cannot be used for this token algorithm
+            reason: KEY_UNSUITABLE
+          - code: CodePolicyMisconfigured
+            doc: |-
+              PolicyMisconfigured is returned by every call to an issuer or verifier
+              built with a configuration it cannot honour. Like its resilience
+              namesake it is permanent, not transient: the fix is at the construction
+              site, never a retry (ADR 0031).
+            name: PolicyMisconfigured
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "core/security/token: issuer or verifier built with a configuration it cannot honour; fields name the knob"
+            public: The token policy is misconfigured
+            reason: POLICY_MISCONFIGURED
+          - code: CodeIssueFailed
+            doc: |-
+              IssueFailed is returned when an issuer cannot render the claims it was
+              given — a claim the target format cannot express, or a signing fault.
+            name: IssueFailed
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "core/security/token: claims unrenderable in the target format, or the signing primitive failed"
+            public: The token could not be issued
+            reason: ISSUE_FAILED
+          - code: CodeClaimNameInvalid
+            doc: |-
+              ClaimNameInvalid is returned by ClaimsValue.WithPrivateRaw for an empty
+              name or one shadowing a registered claim.
+            name: ClaimNameInvalid
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "core/security/token: private claim name empty or colliding with a registered claim name"
+            public: The claim name is empty or reserved
+            reason: CLAIM_NAME_INVALID
+          - code: CodeLifetimeTooLong
+            doc: |-
+              LifetimeTooLong is returned when an authenticated token's exp-iat span
+              exceeds the maximum the verifier accepts. A long-lived bearer token is
+              a credential with no revocation story, so a recipient is allowed to say
+              no to one even when its issuer said yes.
+            name: LifetimeTooLong
+            options:
+              - errs.WithExitCode(exitNoPerm)
+              - errs.WithHTTPStatus(statusUnauthorized)
+            private: "core/security/token: exp-iat span past MaxLifetime"
+            public: The token lifetime exceeds what this recipient accepts
+            reason: LIFETIME_TOO_LONG
+          - code: CodeHeaderUnsupported
+            doc: |-
+              HeaderUnsupported is returned for a JOSE header the engine will not act
+              on: a non-empty "crit", or a "typ" other than the required one.
+
+              A non-empty "crit" is a rejection and not a warning because RFC 7515
+              §4.1.11 says so: the parameters it names MUST be understood, the engine
+              understands none of them, and "ignore what you do not understand" is how
+              a security-relevant extension gets silently dropped.
+            name: HeaderUnsupported
+            note: |-
+              The refusals specific to the two concrete formats (0.3.44.*). They are
+              raised by internal/service/security/token — their Private names that
+              package, the one that raises them — and declared here since ADR 0160, so
+              every code of the domain is in one place. As above, the Public half names
+              the check that refused the token and never echoes a value out of it — not
+              a kid, not a footer, not a claim.
+            options:
+              - errs.WithExitCode(exitNoPerm)
+              - errs.WithHTTPStatus(statusUnauthorized)
+            private: "service/security/token: non-empty crit, or typ differs from the required value"
+            public: The token header carries parameters this verifier will not accept
+            reason: HEADER_UNSUPPORTED
+          - code: CodeKeyNotFound
+            doc: KeyNotFound is returned when the token's kid names no key in the set.
+            name: KeyNotFound
+            options:
+              - errs.WithExitCode(exitNoPerm)
+              - errs.WithHTTPStatus(statusUnauthorized)
+            private: "service/security/token: kid absent from the JWK Set"
+            public: No key in the key set matches this token
+            reason: KEY_NOT_FOUND
+          - code: CodeKeyIDMissing
+            doc: |-
+              KeyIDMissing is returned when a key-set verifier is handed a token with
+              no kid header. Selecting by id is the contract; trying every key in the
+              set instead would turn a large published JWKS into a work multiplier and
+              would quietly accept a token the publisher never routed to that key.
+            name: KeyIDMissing
+            options:
+              - errs.WithExitCode(exitNoPerm)
+              - errs.WithHTTPStatus(statusUnauthorized)
+            private: "service/security/token: set verifier requires a kid header; use a single-key verifier when tokens carry none"
+            public: The token carries no key identifier
+            reason: KEY_ID_MISSING
+          - code: CodeKeyIDAmbiguous
+            doc: |-
+              KeyIDAmbiguous is returned when more keys carry the kid than the
+              verifier will try. jwk.Set refuses to pick between duplicate kids
+              because nothing distinguishes them; a signature does distinguish them,
+              so the engine tries the candidates — but a bounded number of them.
+            name: KeyIDAmbiguous
+            options:
+              - errs.WithExitCode(exitNoPerm)
+              - errs.WithHTTPStatus(statusUnauthorized)
+            private: "service/security/token: candidate count past MaxKeyCandidates; a bounded rotation window is the supported case"
+            public: Too many keys share this token key identifier
+            reason: KEY_ID_AMBIGUOUS
+          - code: CodeFooterMismatch
+            doc: |-
+              FooterMismatch is returned for a PASETO footer that is not the expected
+              one, including a footer present where the verifier expects none. The
+              footer is authenticated but is not returned through the Verifier port,
+              so accepting an arbitrary one would authenticate data and then drop it.
+            name: FooterMismatch
+            options:
+              - errs.WithExitCode(exitNoPerm)
+              - errs.WithHTTPStatus(statusUnauthorized)
+            private: "service/security/token: PASETO footer differs from the configured value, or is present with none configured"
+            public: The token footer is not the expected one
+            reason: FOOTER_MISMATCH
+          - code: CodeSchemeUnsupported
+            doc: |-
+              SchemeUnsupported is returned for a PASETO version+purpose the engine
+              does not implement — every local (encrypted) purpose, and every version
+              other than v4. It is returned instead of Malformed so an operator can
+              tell "this is not a token" from "this is a token I did not build for".
+            name: SchemeUnsupported
+            options:
+              - errs.WithExitCode(exitNoPerm)
+              - errs.WithHTTPStatus(statusUnauthorized)
+            private: "service/security/token: only PASETO v4.public is implemented; v4.local needs primitives the SDK keeps in third-party"
+            public: This token version and purpose are not supported
+            reason: SCHEME_UNSUPPORTED
+          - code: CodeDuplicateMember
+            doc: |-
+              DuplicateMember is returned when a JOSE header or a claims object
+              carries the same member name twice. encoding/json would silently keep
+              the last, so a token could say one thing to this reader and another to
+              the next (RFC 8725 §2.6).
+            name: DuplicateMember
+            options:
+              - errs.WithExitCode(exitDataErr)
+              - errs.WithHTTPStatus(statusUnauthorized)
+            private: "service/security/token: duplicate JSON member in the header or the claims object"
+            public: The token repeats a member name
+            reason: DUPLICATE_MEMBER
     types:
       - methods:
           - name: Issuer
@@ -303,53 +708,6 @@ packages:
             recv: value
         name: Algorithm
         underlying: uint8
-    variables:
-      - name: Malformed
-        type: "*errs.Error"
-      - name: AlgorithmNone
-        type: "*errs.Error"
-      - name: AlgorithmMismatch
-        type: "*errs.Error"
-      - name: SignatureInvalid
-        type: "*errs.Error"
-      - name: Expired
-        type: "*errs.Error"
-      - name: NotYetValid
-        type: "*errs.Error"
-      - name: ExpiryRequired
-        type: "*errs.Error"
-      - name: AudienceMismatch
-        type: "*errs.Error"
-      - name: IssuerMismatch
-        type: "*errs.Error"
-      - name: TooLarge
-        type: "*errs.Error"
-      - name: TooDeep
-        type: "*errs.Error"
-      - name: KeyUnsuitable
-        type: "*errs.Error"
-      - name: PolicyMisconfigured
-        type: "*errs.Error"
-      - name: IssueFailed
-        type: "*errs.Error"
-      - name: ClaimNameInvalid
-        type: "*errs.Error"
-      - name: LifetimeTooLong
-        type: "*errs.Error"
-      - name: HeaderUnsupported
-        type: "*errs.Error"
-      - name: KeyNotFound
-        type: "*errs.Error"
-      - name: KeyIDMissing
-        type: "*errs.Error"
-      - name: KeyIDAmbiguous
-        type: "*errs.Error"
-      - name: FooterMismatch
-        type: "*errs.Error"
-      - name: SchemeUnsupported
-        type: "*errs.Error"
-      - name: DuplicateMember
-        type: "*errs.Error"
   - constants:
       - name: DefaultMaxTokenLen
         type: int

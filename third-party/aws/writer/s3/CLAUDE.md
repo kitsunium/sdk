@@ -20,7 +20,8 @@ consumer of this writer gets the AWS SDK and `internal/*`, no other vendor.
 | `s3sink.go`      | `s3Sink` batching terminal sink + `uploadFunc` seam (AWS-free, unit-tested) |
 | `client.go`      | `newUploadFunc` — returns the AWS PutObject closure (**only** AWS-importing file) |
 | `cred_adapter.go`| `credAdapter` — bridges `writer.CredentialProvider` → `aws.CredentialsProvider` |
-| `codes.go`, `errors.go` | sentinels — range 0.3.35.\* (`ClientInitFailed`, `PutFailed`) |
+| `codes_gen.go` | sentinels — range 0.3.35.\* (`ClientInitFailed`, `PutFailed`) — written by kit gen from `design/third-party/aws.yaml` (ADR 0164) |
+| `errors.go` | hand-written beside them: `exitIOErr` |
 
 ## Delivery model
 

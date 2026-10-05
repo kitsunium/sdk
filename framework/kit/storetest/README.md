@@ -44,7 +44,7 @@ const CodeRolledBack errs.Code = 0x00_04_04_01 // 0.4.4.1
 ```
 
 <a name="Run"></a>
-## func [Run](<https://github.com/kitsunium/sdk/blob/main/framework/kit/storetest/storetest.go#L171>)
+## func [Run](<https://github.com/kitsunium/sdk/blob/main/framework/kit/storetest/storetest.go#L165>)
 
 ```go
 func Run(t *testing.T, b BackendConfig)
@@ -53,7 +53,7 @@ func Run(t *testing.T, b BackendConfig)
 Run runs every case of the suite on b.
 
 <a name="BackendConfig"></a>
-## type [BackendConfig](<https://github.com/kitsunium/sdk/blob/main/framework/kit/storetest/storetest.go#L113-L122>)
+## type [BackendConfig](<https://github.com/kitsunium/sdk/blob/main/framework/kit/storetest/storetest.go#L107-L116>)
 
 BackendConfig is where Run runs kit's stores: a name for the subtests and the options that place the stores there.
 

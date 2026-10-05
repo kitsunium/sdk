@@ -1,26 +1,61 @@
 apiVersion: kit.kitsunium/design/v2
 domain: observe/logger/middleware/async
 packages:
-  - constants:
-      - name: CodeAsyncStopped
+  - codes:
+      - const:
+          - doc: |-
+              CodeAsyncStopped identifies a Write call after Close has terminated the
+              drainer goroutine — the buffered queue can no longer accept work.
+            name: CodeAsyncStopped
+            note: "range: 0.3.17.0 - 0.3.17.255"
+            value: "0x00_03_11_01"
         type: errs.Code
-        value: "0x00_03_11_01"
-      - name: CodeAsyncBufferFull
+      - const:
+          - doc: |-
+              CodeAsyncBufferFull identifies a Write call where the policy is DropNewest
+              and the ring is saturated; the entry is dropped and the OnDrop callback
+              fires for the caller's metric pipeline.
+            name: CodeAsyncBufferFull
+            value: "0x00_03_11_02"
         type: errs.Code
-        value: "0x00_03_11_02"
-      - name: CodeAsyncCtxCancelled
+      - const:
+          - doc: |-
+              CodeAsyncCtxCancelled identifies a Write or Flush call whose context was
+              already done. Wraps the stdlib context error so the typed-errors-only SDK
+              rule is satisfied and consumers can HasCode / errors.Is against it.
+            name: CodeAsyncCtxCancelled
+            value: "0x00_03_11_03"
         type: errs.Code
-        value: "0x00_03_11_03"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/observe/logger/middleware/async
-    variables:
-      - name: Stopped
-        type: "*errs.Error"
-      - name: BufferFull
-        type: "*errs.Error"
-      - name: CtxCancelled
-        type: "*errs.Error"
+    sentinels:
+      - var:
+          - code: CodeAsyncStopped
+            doc: |-
+              Stopped is returned by Write after Close has stopped the drainer
+              goroutine. Subsequent Write calls drop the payload immediately.
+            name: Stopped
+            private: service/observe/logger/middleware/async.Write called after Close
+            public: Async sink is stopped
+            reason: ASYNC_STOPPED
+          - code: CodeAsyncBufferFull
+            doc: |-
+              BufferFull is returned by Write under the DropNewest policy when the
+              ring is saturated; the entry is dropped and the OnDrop callback fires.
+            name: BufferFull
+            private: service/observe/logger/middleware/async.Write saw a saturated ring under DropNewest policy
+            public: Async sink ring buffer is full
+            reason: ASYNC_BUFFER_FULL
+          - code: CodeAsyncCtxCancelled
+            doc: |-
+              CtxCancelled wraps a context that was already done when Write or
+              Flush was entered. Provided as a typed sentinel so consumers match
+              via HasCode / errors.Is without reaching for stdlib context errors.
+            name: CtxCancelled
+            private: service/observe/logger/middleware/async.Write or Flush saw a cancelled context
+            public: Async sink aborted due to cancellation
+            reason: ASYNC_CTX_CANCELLED
   - constants:
       - name: DropNewest
         type: DropPolicy

@@ -5,8 +5,8 @@ package(default_visibility = ["//internal/core:core_consumers"])
 go_library(
     name = "encwrite",
     srcs = [
-        "codes.go",
-        "errors.go",
+        "codes_gen.go",
+        "doc.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/observe/logger/middleware/encwrite",
     visibility = [
@@ -35,8 +35,5 @@ filegroup(
 go_test(
     name = "encwrite_test",
     srcs = ["api_gen_test.go"],
-    deps = [
-        ":encwrite",
-        "//internal/kernel/errs",
-    ],
+    deps = [":encwrite"],
 )

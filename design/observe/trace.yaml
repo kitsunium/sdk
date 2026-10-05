@@ -1,52 +1,133 @@
 apiVersion: kit.kitsunium/design/v2
 domain: observe/trace
 packages:
-  - constants:
-      - name: CodeInvalidTraceParent
+  - codes:
+      - const:
+          - doc: |-
+              CodeInvalidTraceParent identifies a traceparent header that cannot be read as
+              a span context: a malformed field, the invalid version "ff", or an all-zero
+              trace-id or parent-id — the two values W3C Trace Context declares invalid.
+            name: CodeInvalidTraceParent
+            note: "range: 0.2.20.0 - 0.2.20.255"
+            value: "0x00_02_14_01"
         type: errs.Code
-        value: "0x00_02_14_01"
-      - name: CodeInvalidTraceState
+      - const:
+          - doc: |-
+              CodeInvalidTraceState identifies a tracestate header that does not match the
+              W3C list grammar: a key or value outside its character set, more than 32 list
+              members, or the same key twice.
+            name: CodeInvalidTraceState
+            value: "0x00_02_14_02"
         type: errs.Code
-        value: "0x00_02_14_02"
-      - name: CodeUnknownExporter
+      - const:
+          - doc: |-
+              CodeUnknownExporter identifies an Export/Lookup naming a span exporter that no
+              imported package has registered.
+            name: CodeUnknownExporter
+            value: "0x00_02_14_03"
         type: errs.Code
-        value: "0x00_02_14_03"
-      - name: CodeExportFailed
+      - const:
+          - doc: |-
+              CodeExportFailed identifies a span exporter that returned an error while
+              shipping a batch (the exporter's cause rides the wrap trail).
+            name: CodeExportFailed
+            value: "0x00_02_14_04"
         type: errs.Code
-        value: "0x00_02_14_04"
-      - name: CodeDuplicateRegistration
+      - const:
+          - doc: |-
+              CodeDuplicateRegistration identifies a boot-time SpanExporter registry
+              collision: a nil exporter, or a distinct exporter claiming a taken Name.
+            name: CodeDuplicateRegistration
+            value: "0x00_02_14_05"
         type: errs.Code
-        value: "0x00_02_14_05"
-      - name: CodeInvalidSpanName
+      - const:
+          - doc: |-
+              CodeInvalidSpanName identifies a Start call with an empty span name. A span's
+              name is the low-cardinality operation label every backend groups on, so an
+              empty one produces a trace nobody can search for.
+            name: CodeInvalidSpanName
+            value: "0x00_02_14_06"
         type: errs.Code
-        value: "0x00_02_14_06"
-      - name: CodeInvalidAttribute
+      - const:
+          - doc: |-
+              CodeInvalidAttribute identifies an attribute set a span, an event, a link or
+              a Resource cannot carry: an attribute with an empty Key, the same Key twice,
+              or a value no constructor ever set (AttrKindInvalid). The rules are the
+              shared model's (internal/core/observe/otel); this code is the trace signal's own,
+              where it used to borrow the metrics one (0.2.9.4) because the model lived in
+              internal/core/observe/metrics.
+            name: CodeInvalidAttribute
+            value: "0x00_02_14_07"
         type: errs.Code
-        value: "0x00_02_14_07"
-      - name: CodeEntropyFailed
+      - const:
+          - doc: |-
+              CodeEntropyFailed identified a crypto/rand.Read failure while drawing the
+              bytes of a trace or span identifier. Nothing returns it since Go 1.24,
+              whose crypto/rand.Read cannot fail; the code stays allocated and published.
+            name: CodeEntropyFailed
+            note: |-
+              range: 0.3.50.0 - 0.3.50.255 — allocated to the tracing engine,
+              internal/service/observe/trace (ADR 0051 service/observe/trace block), and
+              declared here since ADR 0160: the engine returns these and declares none.
+            value: "0x00_03_32_01"
         type: errs.Code
-        value: "0x00_03_32_01"
-      - name: CodeInvalidSampleRatio
+      - const:
+          - doc: |-
+              CodeInvalidSampleRatio identifies a Ratio sampler asked for a fraction that
+              is not one: NaN, negative, above 1, or exactly 0 — which is NeverSample under
+              a name that also spells "unconfigured" (ADR 0031).
+            name: CodeInvalidSampleRatio
+            value: "0x00_03_32_02"
         type: errs.Code
-        value: "0x00_03_32_02"
-      - name: CodeOTLPInvalidSpanContext
+      - const:
+          - doc: |-
+              CodeOTLPInvalidSpanContext identifies a span handed to the OTLP/JSON encoder
+              whose trace-id or span-id is all zeroes. Both are declared invalid by W3C
+              Trace Context and required by the schema, so there is no honest hex to emit.
+            name: CodeOTLPInvalidSpanContext
+            value: "0x00_03_32_03"
         type: errs.Code
-        value: "0x00_03_32_03"
-      - name: CodeOTLPSpanNotEnded
+      - const:
+          - doc: |-
+              CodeOTLPSpanNotEnded identifies a span handed to the OTLP/JSON encoder with no
+              EndTime. `end_time_unix_nano` is required, and a zero would claim the span
+              ended at the Unix epoch.
+            name: CodeOTLPSpanNotEnded
+            value: "0x00_03_32_04"
         type: errs.Code
-        value: "0x00_03_32_04"
-      - name: CodeOTLPEndpointInvalid
+      - const:
+          - doc: |-
+              CodeOTLPEndpointInvalid identifies an OTLP/HTTP exporter configured with an
+              endpoint that is not an absolute http(s) URL carrying a path — the address
+              the POST would otherwise be sent to blind.
+            name: CodeOTLPEndpointInvalid
+            value: "0x00_03_32_05"
         type: errs.Code
-        value: "0x00_03_32_05"
-      - name: CodeOTLPExportRejected
+      - const:
+          - doc: |-
+              CodeOTLPExportRejected identifies a collector that refused the payload
+              PERMANENTLY: an HTTP status outside the specification's retryable set, so
+              replaying the same bytes would fail the same way.
+            name: CodeOTLPExportRejected
+            value: "0x00_03_32_06"
         type: errs.Code
-        value: "0x00_03_32_06"
-      - name: CodeOTLPExportUnavailable
+      - const:
+          - doc: |-
+              CodeOTLPExportUnavailable identifies a TRANSIENT OTLP/HTTP failure — a
+              transport fault, or one of the four statuses the specification lists as
+              retryable. The same bytes may succeed later.
+            name: CodeOTLPExportUnavailable
+            value: "0x00_03_32_07"
         type: errs.Code
-        value: "0x00_03_32_07"
-      - name: CodeOTLPPartialSuccess
+      - const:
+          - doc: |-
+              CodeOTLPPartialSuccess identifies a collector that accepted the request
+              (HTTP 200) but rejected some of its spans. The specification forbids retrying
+              it, so the loss is reported rather than replayed.
+            name: CodeOTLPPartialSuccess
+            value: "0x00_03_32_08"
         type: errs.Code
-        value: "0x00_03_32_08"
+    constants:
       - name: ExceptionEventName
         type: string
         value: "\"exception\""
@@ -330,6 +411,107 @@ packages:
           - doc: End closes the span and hands it to the Tracer's SpanSink.
             name: End
         name: Span
+    sentinels:
+      - var:
+          - code: CodeInvalidTraceParent
+            doc: |-
+              InvalidTraceParent is returned when a traceparent header cannot be read.
+              Its Public never echoes the header: it is attacker-controlled text.
+            name: InvalidTraceParent
+            private: "service/observe/trace.ParseTraceParent: the header failed the W3C Trace Context grammar, or carried an all-zero trace-id or parent-id"
+            public: The traceparent header is not a valid W3C trace context
+            reason: INVALID_TRACE_PARENT
+          - code: CodeInvalidTraceState
+            doc: InvalidTraceState is returned when a tracestate header cannot be read.
+            name: InvalidTraceState
+            private: "service/observe/trace.ParseTraceState, StateValue.Insert or StateBuilder.Add: a member failed the W3C list grammar, or the list exceeded 32 members or repeated a key"
+            public: The tracestate header is not a valid W3C trace state list
+            reason: INVALID_TRACE_STATE
+          - code: CodeUnknownExporter
+            doc: UnknownExporter is returned when no SpanExporter is registered under a Name.
+            name: UnknownExporter
+            private: "core/observe/trace.Export: exporter absent from registry; blank-import the exporter's package"
+            public: No trace exporter is registered under that name
+            reason: UNKNOWN_EXPORTER
+          - code: CodeExportFailed
+            doc: ExportFailed wraps an exporter's failure while shipping spans.
+            name: ExportFailed
+            private: "core/observe/trace.Export: the registered exporter returned an error"
+            public: The trace exporter failed to ship the spans
+            reason: EXPORT_FAILED
+          - code: CodeDuplicateRegistration
+            doc: DuplicateRegistration is the boot-time SpanExporter-registry panic sentinel.
+            name: DuplicateRegistration
+            private: "core/observe/trace.RegisterExporter: a distinct exporter already claims this name, or a nil exporter was supplied"
+            public: A trace exporter is already registered under that name
+            reason: DUPLICATE_REGISTRATION
+          - code: CodeInvalidSpanName
+            doc: InvalidSpanName is the panic sentinel for a Start call with no name.
+            name: InvalidSpanName
+            private: "core/observe/trace: Tracer.Start requires a low-cardinality operation name; an empty one produces a trace no backend can group"
+            public: A span name must not be empty
+            reason: INVALID_SPAN_NAME
+          - code: CodeInvalidAttribute
+            doc: |-
+              InvalidAttribute is the panic sentinel for an unusable attribute set on
+              a span, an event, a link or a Resource.
+            name: InvalidAttribute
+            private: "core/observe/trace: an attribute set must name each dimension once, with a non-empty key and a value from String/Bool/Int64/Float64"
+            public: An attribute key is empty or repeated, or its value was never set
+            reason: INVALID_ATTRIBUTE
+          - code: CodeEntropyFailed
+            doc: |-
+              EntropyFailed was the wrap of a crypto/rand.Read failure while drawing
+              trace or span id bytes. Nothing returns it since Go 1.24, whose
+              crypto/rand.Read never fails; it stays published with its value.
+            name: EntropyFailed
+            private: "service/observe/trace: crypto/rand.Read returned an error"
+            public: Trace identifier generation failed to read secure random bytes
+            reason: ENTROPY_FAILED
+          - code: CodeInvalidSampleRatio
+            doc: |-
+              InvalidSampleRatio is returned when Ratio is handed a fraction it will
+              not turn into a sampler.
+            name: InvalidSampleRatio
+            private: "service/observe/trace.Ratio: use NeverSample for none and AlwaysSample for all; 0 also spells an unset field, so it is refused rather than guessed"
+            public: A sampling ratio must be greater than 0 and at most 1
+            reason: INVALID_SAMPLE_RATIO
+          - code: CodeOTLPInvalidSpanContext
+            doc: OTLPInvalidSpanContext is returned when a span carries an unusable id.
+            name: OTLPInvalidSpanContext
+            private: "service/observe/trace: OTLP requires 16 trace-id bytes and 8 span-id bytes, and W3C Trace Context declares the all-zero form of each invalid"
+            public: A span carries an all-zero trace or span identifier
+            reason: OTLP_INVALID_SPAN_CONTEXT
+          - code: CodeOTLPSpanNotEnded
+            doc: OTLPSpanNotEnded is returned when a span reaches the encoder unended.
+            name: OTLPSpanNotEnded
+            private: "service/observe/trace: endTimeUnixNano is required; a zero would claim the span ended at the Unix epoch"
+            public: A span reached the exporter without an end time
+            reason: OTLP_SPAN_NOT_ENDED
+          - code: CodeOTLPEndpointInvalid
+            doc: OTLPEndpointInvalid is returned when an OTLP/HTTP endpoint is unusable.
+            name: OTLPEndpointInvalid
+            private: "service/observe/trace.NewOTLPHTTPExporter: a bare host connects, answers 404 and looks exactly like a collector that is up"
+            public: The OTLP endpoint must be an absolute http(s) URL with a path
+            reason: OTLP_ENDPOINT_INVALID
+          - code: CodeOTLPExportRejected
+            doc: OTLPExportRejected reports a permanent refusal by the collector.
+            name: OTLPExportRejected
+            private: "service/observe/trace: the collector answered a status the OTLP specification says MUST NOT be retried"
+            public: The trace collector rejected the export
+            reason: OTLP_EXPORT_REJECTED
+          - code: CodeOTLPExportUnavailable
+            doc: OTLPExportUnavailable reports a transient failure worth retrying.
+            name: OTLPExportUnavailable
+            private: "service/observe/trace: a transport fault, or one of the four statuses the OTLP specification lists as retryable"
+            public: The trace collector is unavailable
+            reason: OTLP_EXPORT_UNAVAILABLE
+          - code: CodeOTLPPartialSuccess
+            doc: OTLPPartialSuccess reports an accepted request with rejected spans.
+            name: OTLPPartialSuccess
+            private: "service/observe/trace: the OTLP specification forbids retrying a partial success, so the loss is reported rather than replayed"
+            public: The trace collector accepted the request but rejected some spans
+            reason: OTLP_PARTIAL_SUCCESS
     types:
       - methods:
           - name: Normalized
@@ -603,37 +785,6 @@ packages:
               type: StatusCode
             - name: Message
               type: string
-    variables:
-      - name: InvalidTraceParent
-        type: "*errs.Error"
-      - name: InvalidTraceState
-        type: "*errs.Error"
-      - name: UnknownExporter
-        type: "*errs.Error"
-      - name: ExportFailed
-        type: "*errs.Error"
-      - name: DuplicateRegistration
-        type: "*errs.Error"
-      - name: InvalidSpanName
-        type: "*errs.Error"
-      - name: InvalidAttribute
-        type: "*errs.Error"
-      - name: EntropyFailed
-        type: "*errs.Error"
-      - name: InvalidSampleRatio
-        type: "*errs.Error"
-      - name: OTLPInvalidSpanContext
-        type: "*errs.Error"
-      - name: OTLPSpanNotEnded
-        type: "*errs.Error"
-      - name: OTLPEndpointInvalid
-        type: "*errs.Error"
-      - name: OTLPExportRejected
-        type: "*errs.Error"
-      - name: OTLPExportUnavailable
-        type: "*errs.Error"
-      - name: OTLPPartialSuccess
-        type: "*errs.Error"
   - constants:
       - name: OTLPTracesPath
         type: string

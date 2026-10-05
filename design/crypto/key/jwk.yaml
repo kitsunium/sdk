@@ -1,66 +1,212 @@
 apiVersion: kit.kitsunium/design/v2
 domain: crypto/key/jwk
 packages:
-  - constants:
-      - name: CodeJWKMalformed
+  - codes:
+      - const:
+          - doc: |-
+              CodeJWKMalformed identifies a document that is not the JSON shape RFC 7517
+              describes — invalid JSON, a non-object where a JWK was expected, or a JWK Set
+              whose "keys" member is not an array.
+            name: CodeJWKMalformed
+            note: "range: 0.3.42.0 - 0.3.42.255"
+            value: "0x00_03_2A_01"
         type: errs.Code
-        value: "0x00_03_2A_01"
-      - name: CodeJWKMissingMember
+      - const:
+          - doc: |-
+              CodeJWKMissingMember identifies a JWK (or JWK Set) whose required member for
+              the declared key type is absent or empty — "kty", "crv", "x", "k", "keys".
+            name: CodeJWKMissingMember
+            value: "0x00_03_2A_02"
         type: errs.Code
-        value: "0x00_03_2A_02"
-      - name: CodeJWKUnsupportedKeyType
+      - const:
+          - doc: |-
+              CodeJWKUnsupportedKeyType identifies a "kty" this package does not model.
+              RSA lands here on purpose: the SDK ships no RSA signer, so representing an
+              RSA key would promise an interop the crypto domain cannot honour.
+            name: CodeJWKUnsupportedKeyType
+            value: "0x00_03_2A_03"
         type: errs.Code
-        value: "0x00_03_2A_03"
-      - name: CodeJWKUnsupportedCurve
+      - const:
+          - doc: |-
+              CodeJWKUnsupportedCurve identifies a "crv" that is unknown, or known but
+              paired with the wrong "kty" (P-256 under OKP, Ed25519 under EC).
+            name: CodeJWKUnsupportedCurve
+            value: "0x00_03_2A_04"
         type: errs.Code
-        value: "0x00_03_2A_04"
-      - name: CodeJWKInvalidEncoding
+      - const:
+          - doc: |-
+              CodeJWKInvalidEncoding identifies a member that is not unpadded base64url
+              (RFC 7515 §2), or whose decoded length is not the fixed size the declared
+              curve mandates (RFC 7518 §6.2.1.2 forbids stripping leading zero octets).
+            name: CodeJWKInvalidEncoding
+            value: "0x00_03_2A_05"
         type: errs.Code
-        value: "0x00_03_2A_05"
-      - name: CodeJWKKeyMismatch
+      - const:
+          - doc: |-
+              CodeJWKKeyMismatch identifies well-encoded material that does not describe a
+              key on the declared curve: an off-curve or identity point, a private scalar
+              outside [1, n-1], or a "d" whose derived public key differs from the declared
+              "x"/"y". It is the one check a naive JWK parser skips.
+            name: CodeJWKKeyMismatch
+            value: "0x00_03_2A_06"
         type: errs.Code
-        value: "0x00_03_2A_06"
-      - name: CodeJWKNoPublicForm
+      - const:
+          - doc: |-
+              CodeJWKNoPublicForm identifies the public-serialisation refusal: a symmetric
+              ("oct") key has no public half, so emitting it on the public path would
+              publish the secret itself. See ADR 0030 — the default is never the dangerous
+              one.
+            name: CodeJWKNoPublicForm
+            value: "0x00_03_2A_07"
         type: errs.Code
-        value: "0x00_03_2A_07"
-      - name: CodeJWKNoPrivateMaterial
+      - const:
+          - doc: |-
+              CodeJWKNoPrivateMaterial identifies a private-path call on a key that holds
+              only public members — MarshalPrivate, Ed25519Private, ECDSAPrivate, Secret.
+            name: CodeJWKNoPrivateMaterial
+            value: "0x00_03_2A_08"
         type: errs.Code
-        value: "0x00_03_2A_08"
-      - name: CodeJWKTypeMismatch
+      - const:
+          - doc: |-
+              CodeJWKTypeMismatch identifies a typed accessor called for the wrong "kty" —
+              Ed25519Public on an EC key, Secret on an OKP key.
+            name: CodeJWKTypeMismatch
+            value: "0x00_03_2A_09"
         type: errs.Code
-        value: "0x00_03_2A_09"
-      - name: CodeJWKKeyNotFound
+      - const:
+          - doc: |-
+              CodeJWKKeyNotFound identifies a Set lookup whose "kid" matches no member, or
+              a lookup with an empty "kid" (which would otherwise match every key that
+              carries none).
+            name: CodeJWKKeyNotFound
+            value: "0x00_03_2A_0A"
         type: errs.Code
-        value: "0x00_03_2A_0A"
-      - name: CodeJWKAmbiguousKid
+      - const:
+          - doc: |-
+              CodeJWKAmbiguousKid identifies a Set lookup whose "kid" matches more than one
+              member. Picking one would depend on JSON member order; rotation callers use
+              AllByKid and decide explicitly (ADR 0031 — refuse rather than guess).
+            name: CodeJWKAmbiguousKid
+            value: "0x00_03_2A_0B"
         type: errs.Code
-        value: "0x00_03_2A_0B"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/crypto/key/jwk
-    variables:
-      - name: Malformed
-        type: "*errs.Error"
-      - name: MissingMember
-        type: "*errs.Error"
-      - name: UnsupportedKeyType
-        type: "*errs.Error"
-      - name: UnsupportedCurve
-        type: "*errs.Error"
-      - name: InvalidEncoding
-        type: "*errs.Error"
-      - name: KeyMismatch
-        type: "*errs.Error"
-      - name: NoPublicForm
-        type: "*errs.Error"
-      - name: NoPrivateMaterial
-        type: "*errs.Error"
-      - name: TypeMismatch
-        type: "*errs.Error"
-      - name: KeyNotFound
-        type: "*errs.Error"
-      - name: AmbiguousKid
-        type: "*errs.Error"
+    sentinels:
+      - var:
+          - code: CodeJWKMalformed
+            doc: |-
+              Malformed is returned when the document is not the JSON shape RFC 7517
+              describes — invalid JSON, a non-object JWK, or a non-array "keys".
+            name: Malformed
+            options:
+              - errs.WithHTTPStatus(httpBadRequest)
+              - errs.WithExitCode(exitDataErr)
+            private: "service/crypto/key/jwk: json.Unmarshal rejected the document, or a JWK/JWK-Set member had the wrong JSON kind"
+            public: JWK document is malformed
+            reason: MALFORMED
+          - code: CodeJWKMissingMember
+            doc: |-
+              MissingMember is returned when a member required for the declared key
+              type is absent or empty.
+            name: MissingMember
+            options:
+              - errs.WithHTTPStatus(httpBadRequest)
+              - errs.WithExitCode(exitDataErr)
+            private: "service/crypto/key/jwk: a member required by the declared kty (kty/crv/x/y/k, or keys on a Set) is absent or empty"
+            public: JWK is missing a required member
+            reason: MISSING_MEMBER
+          - code: CodeJWKUnsupportedKeyType
+            doc: |-
+              UnsupportedKeyType is returned for a "kty" this package does not model.
+              RSA is deliberately here: the SDK ships no RSA signer.
+            name: UnsupportedKeyType
+            options:
+              - errs.WithHTTPStatus(httpBadRequest)
+              - errs.WithExitCode(exitDataErr)
+            private: "service/crypto/key/jwk: kty is not EC, OKP or oct; RSA is unsupported because the SDK ships no RSA scheme"
+            public: JWK key type is not supported
+            reason: UNSUPPORTED_KEY_TYPE
+          - code: CodeJWKUnsupportedCurve
+            doc: |-
+              UnsupportedCurve is returned for an unknown "crv", or a known curve
+              paired with the wrong "kty".
+            name: UnsupportedCurve
+            options:
+              - errs.WithHTTPStatus(httpBadRequest)
+              - errs.WithExitCode(exitDataErr)
+            private: "service/crypto/key/jwk: crv is unknown, or valid for a different kty (P-256 under OKP, Ed25519 under EC)"
+            public: JWK curve is not supported
+            reason: UNSUPPORTED_CURVE
+          - code: CodeJWKInvalidEncoding
+            doc: |-
+              InvalidEncoding is returned when a member is not unpadded base64url, or
+              its decoded length is not the fixed size the declared curve mandates.
+            name: InvalidEncoding
+            options:
+              - errs.WithHTTPStatus(httpBadRequest)
+              - errs.WithExitCode(exitDataErr)
+            private: "service/crypto/key/jwk: base64.RawURLEncoding rejected a member, or its decoded length is not the curve's fixed octet length"
+            public: JWK member is not valid unpadded base64url
+            reason: INVALID_ENCODING
+          - code: CodeJWKKeyMismatch
+            doc: |-
+              KeyMismatch is returned when well-encoded material does not describe a
+              key on the declared curve — off-curve point, out-of-range scalar, or a
+              private member whose derived public key differs from the declared one.
+            name: KeyMismatch
+            options:
+              - errs.WithHTTPStatus(httpBadRequest)
+              - errs.WithExitCode(exitDataErr)
+            private: "service/crypto/key/jwk: point is off-curve or the identity, scalar is outside [1,n-1], or d does not derive the declared x/y"
+            public: JWK material does not match the declared curve
+            reason: KEY_MISMATCH
+          - code: CodeJWKNoPublicForm
+            doc: |-
+              NoPublicForm is the public-serialisation refusal: a symmetric key has no
+              public half, so the public path cannot represent it without publishing
+              the secret. Only MarshalPrivate may emit it.
+            name: NoPublicForm
+            private: "service/crypto/key/jwk: MarshalPublic/MarshalJSON refused an oct key; the k member IS the secret, use MarshalPrivate deliberately"
+            public: Symmetric keys have no public JWK form
+            reason: NO_PUBLIC_FORM
+          - code: CodeJWKNoPrivateMaterial
+            doc: |-
+              NoPrivateMaterial is returned by a private-path call on a key that holds
+              only public members.
+            name: NoPrivateMaterial
+            private: "service/crypto/key/jwk: MarshalPrivate/ECDSAPrivate/Ed25519Private/Secret called on a public-only key"
+            public: JWK holds no private key material
+            reason: NO_PRIVATE_MATERIAL
+          - code: CodeJWKTypeMismatch
+            doc: TypeMismatch is returned by a typed accessor called for the wrong "kty".
+            name: TypeMismatch
+            private: "service/crypto/key/jwk: a kty-specific accessor was called on a key of another type"
+            public: JWK accessor does not match the key type
+            reason: TYPE_MISMATCH
+          - code: CodeJWKKeyNotFound
+            doc: |-
+              KeyNotFound is returned when a Set lookup resolves no key, including the
+              empty-kid lookup that would otherwise match every key carrying none.
+            name: KeyNotFound
+            options:
+              - errs.WithHTTPStatus(httpNotFound)
+              - errs.WithExitCode(exitDataErr)
+            private: "service/crypto/key/jwk: Set.ByKid matched no member, or was called with an empty kid"
+            public: No key in the set carries that key id
+            reason: KEY_NOT_FOUND
+          - code: CodeJWKAmbiguousKid
+            doc: |-
+              AmbiguousKid is returned when a Set lookup matches more than one key.
+              Selecting one would depend on JSON member order; callers rotating keys
+              enumerate the candidates with AllByKid instead.
+            name: AmbiguousKid
+            options:
+              - errs.WithHTTPStatus(httpBadRequest)
+              - errs.WithExitCode(exitDataErr)
+            private: "service/crypto/key/jwk: Set.ByKid matched more than one member; use AllByKid and choose explicitly (ADR 0031)"
+            public: Several keys in the set carry that key id
+            reason: AMBIGUOUS_KID
   - constants:
       - name: TypeEC
         type: Type

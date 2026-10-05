@@ -10,6 +10,7 @@ package(default_visibility = ["//visibility:public"])
 go_library(
     name = "sqlite",
     srcs = [
+        "codes_gen.go",
         "driver.go",
         "driver_none.go",
         "sqlite.go",

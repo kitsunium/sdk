@@ -1,3 +1,14 @@
+// Package redact — range 0.3.73.* (ADR 0101), declared here since ADR 0160.
+//
+// Package redact — declares the sentinel *errs.Error outcomes. Each var's name
+// equals its errs.Define Reason in SCREAMING_SNAKE form.
+//
+// Neither refusal carries a byte of what it refused: this domain exists to
+// keep secrets out of what is shown, and an error message is shown. They are
+// raised by the engine in internal/service/security/redact — their Private
+// names that package, the one that raises them — and declared here since ADR
+// 0160, so every code of the domain is in one place.
+//
 // Package redact declares the SDK's display-redaction port: the [Redactor]
 // that renders a Go value, a JSON document, a text or log attributes for
 // DISPLAY with every secret it recognises replaced, within a byte bound, never

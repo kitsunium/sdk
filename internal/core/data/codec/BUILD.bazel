@@ -6,7 +6,7 @@ go_library(
     name = "codec",
     srcs = [
         "codec_interface.go",
-        "codes.go",
+        "codes_gen.go",
         "design_gen.go",
         "errors.go",
         "format.go",

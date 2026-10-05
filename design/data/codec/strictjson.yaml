@@ -1,51 +1,159 @@
 apiVersion: kit.kitsunium/design/v2
 domain: data/codec/strictjson
 packages:
-  - constants:
-      - name: CodeDocumentTooLarge
+  - codes:
+      - const:
+          - doc: |-
+              CodeDocumentTooLarge identifies a JSON document longer than the bound the
+              caller gave.
+            name: CodeDocumentTooLarge
+            note: "range: 0.3.72.0 - 0.3.72.255"
+            value: "0x00_03_48_01"
         type: errs.Code
-        value: "0x00_03_48_01"
-      - name: CodeDocumentEmpty
+      - const:
+          - doc: |-
+              CodeDocumentEmpty identifies a JSON document of zero bytes: no value at all,
+              which a caller may read as "no body" rather than as a malformed one.
+            name: CodeDocumentEmpty
+            value: "0x00_03_48_02"
         type: errs.Code
-        value: "0x00_03_48_02"
-      - name: CodeDocumentMalformed
+      - const:
+          - doc: |-
+              CodeDocumentMalformed identifies a document that is not exactly one
+              well-formed JSON value: a syntax error, a truncation, trailing data, a
+              duplicated member name, or invalid UTF-8.
+            name: CodeDocumentMalformed
+            value: "0x00_03_48_03"
         type: errs.Code
-        value: "0x00_03_48_03"
-      - name: CodeMemberUnknown
+      - const:
+          - doc: |-
+              CodeMemberUnknown identifies an object member the target type does not
+              declare.
+            name: CodeMemberUnknown
+            value: "0x00_03_48_04"
         type: errs.Code
-        value: "0x00_03_48_04"
-      - name: CodeValueMismatched
+      - const:
+          - doc: |-
+              CodeValueMismatched identifies a well-formed value the target cannot hold:
+              the wrong JSON kind, a number out of the field's range, a value a field's
+              own unmarshaler refused.
+            name: CodeValueMismatched
+            value: "0x00_03_48_05"
         type: errs.Code
-        value: "0x00_03_48_05"
-      - name: CodeMediaTypeUnsupported
+      - const:
+          - doc: |-
+              CodeMediaTypeUnsupported identifies a request body whose Content-Type is not
+              application/json or a +json structured-syntax type.
+            name: CodeMediaTypeUnsupported
+            value: "0x00_03_48_06"
         type: errs.Code
-        value: "0x00_03_48_06"
-      - name: CodeDocumentUnreadable
+      - const:
+          - doc: |-
+              CodeDocumentUnreadable identifies a reader that failed before the document
+              ended — a connection reset, a cancelled request.
+            name: CodeDocumentUnreadable
+            value: "0x00_03_48_07"
         type: errs.Code
-        value: "0x00_03_48_07"
-      - name: CodeDecodeMisconfigured
+      - const:
+          - doc: |-
+              CodeDecodeMisconfigured identifies a call the decoder refuses before
+              reading anything: a non-positive bound, or a target that is not a non-nil
+              pointer.
+            name: CodeDecodeMisconfigured
+            value: "0x00_03_48_08"
         type: errs.Code
-        value: "0x00_03_48_08"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/data/codec/strictjson
-    variables:
-      - name: DocumentTooLarge
-        type: "*errs.Error"
-      - name: DocumentEmpty
-        type: "*errs.Error"
-      - name: DocumentMalformed
-        type: "*errs.Error"
-      - name: MemberUnknown
-        type: "*errs.Error"
-      - name: ValueMismatched
-        type: "*errs.Error"
-      - name: MediaTypeUnsupported
-        type: "*errs.Error"
-      - name: DocumentUnreadable
-        type: "*errs.Error"
-      - name: DecodeMisconfigured
-        type: "*errs.Error"
+    sentinels:
+      - var:
+          - code: CodeDocumentTooLarge
+            doc: |-
+              DocumentTooLarge refuses a document longer than the caller's bound,
+              whatever the bytes beyond it would have said.
+            name: DocumentTooLarge
+            options:
+              - errs.WithHTTPStatus(httpContentTooLarge)
+              - errs.WithExitCode(exitDataErr)
+            private: "service/data/codec/strictjson: more bytes arrived than the bound allows; the limit field is the bound"
+            public: The JSON document is larger than the limit
+            reason: DOCUMENT_TOO_LARGE
+          - code: CodeDocumentEmpty
+            doc: |-
+              DocumentEmpty reports a document of zero bytes. It is its own code so a
+              caller for whom a body is optional can tell "no body" from "a broken
+              one" without reading the input again.
+            name: DocumentEmpty
+            options:
+              - errs.WithHTTPStatus(httpBadRequest)
+              - errs.WithExitCode(exitDataErr)
+            private: "service/data/codec/strictjson: the reader ended before the first byte"
+            public: The JSON document is empty
+            reason: DOCUMENT_EMPTY
+          - code: CodeDocumentMalformed
+            doc: |-
+              DocumentMalformed refuses a document that is not exactly one
+              well-formed JSON value.
+            name: DocumentMalformed
+            options:
+              - errs.WithHTTPStatus(httpBadRequest)
+              - errs.WithExitCode(exitDataErr)
+            private: "service/data/codec/strictjson: a syntax error, a truncation, trailing data, a duplicate name or invalid UTF-8; the offset field locates it"
+            public: The JSON document is not well-formed
+            reason: DOCUMENT_MALFORMED
+          - code: CodeMemberUnknown
+            doc: |-
+              MemberUnknown refuses an object member the target does not declare,
+              including one that differs from a declared name only by case.
+            name: MemberUnknown
+            options:
+              - errs.WithHTTPStatus(httpBadRequest)
+              - errs.WithExitCode(exitDataErr)
+            private: "service/data/codec/strictjson: an object member matches no field of the target; PointerOf locates it"
+            public: The JSON document has a member the target does not accept
+            reason: MEMBER_UNKNOWN
+          - code: CodeValueMismatched
+            doc: ValueMismatched refuses a well-formed value the target cannot hold.
+            name: ValueMismatched
+            options:
+              - errs.WithHTTPStatus(httpBadRequest)
+              - errs.WithExitCode(exitDataErr)
+            private: "service/data/codec/strictjson: a value does not fit the field it maps to; PointerOf locates it"
+            public: The JSON document has a value of the wrong type or out of range
+            reason: VALUE_MISMATCHED
+          - code: CodeMediaTypeUnsupported
+            doc: |-
+              MediaTypeUnsupported refuses a request body that does not declare itself
+              JSON.
+            name: MediaTypeUnsupported
+            options:
+              - errs.WithHTTPStatus(httpUnsupportedMediaType)
+              - errs.WithExitCode(exitDataErr)
+            private: "service/data/codec/strictjson: the Content-Type is absent, unparsable, or names another media type"
+            public: The request body must be application/json or a +json media type
+            reason: MEDIA_TYPE_UNSUPPORTED
+          - code: CodeDocumentUnreadable
+            doc: |-
+              DocumentUnreadable wraps a reader that failed before the document
+              ended. The reader's own error stays in the chain.
+            name: DocumentUnreadable
+            options:
+              - errs.WithHTTPStatus(httpBadRequest)
+              - errs.WithExitCode(exitIOErr)
+            private: "service/data/codec/strictjson: the reader returned an error other than end-of-input"
+            public: The JSON document could not be read
+            reason: DOCUMENT_UNREADABLE
+          - code: CodeDecodeMisconfigured
+            doc: |-
+              DecodeMisconfigured refuses a call the decoder can never honour: a
+              non-positive bound — whose two readings, "unbounded" and "nothing", are
+              opposites (ADR 0031) — or a target that is not a non-nil pointer.
+            name: DecodeMisconfigured
+            options:
+              - errs.WithExitCode(exitSoftware)
+            private: "service/data/codec/strictjson: the field names the argument: a non-positive bound or a target that is not a non-nil pointer"
+            public: The JSON decoder was called with an argument it cannot use
+            reason: DECODE_MISCONFIGURED
   - constants:
       - name: MaxPointerBytes
         type: int

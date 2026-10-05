@@ -1,25 +1,74 @@
 apiVersion: kit.kitsunium/design/v2
 domain: data/cache
 packages:
-  - constants:
-      - name: CodeCacheMisconfigured
+  - codes:
+      - const:
+          - doc: |-
+              CodeCacheMisconfigured identifies a store refused AT CONSTRUCTION because
+              its configuration cannot be honoured — a non-positive capacity, a negative
+              default TTL. It is never an operational outcome: no entry was ever stored.
+            name: CodeCacheMisconfigured
+            note: "range: 0.2.18.0 - 0.2.18.255"
+            value: "0x00_02_12_01"
         type: errs.Code
-        value: "0x00_02_12_01"
-      - name: CodeCacheBackendFailed
+      - const:
+          - doc: |-
+              CodeCacheBackendFailed identifies a store that could not serve an operation
+              for a reason of its own — the transport, the medium, the process it depends
+              on. A plain MISS is not this: a cache that does not hold something has done
+              nothing wrong and reports (zero, false, nil).
+            name: CodeCacheBackendFailed
+            value: "0x00_02_12_02"
         type: errs.Code
-        value: "0x00_02_12_02"
-      - name: CodeCacheFillFailed
+      - const:
+          - doc: |-
+              CodeCacheFillFailed identifies a Loader.Load whose caller-supplied fill
+              returned an error. NOTHING was stored: a failed fill must not be cached, or
+              one bad minute at the origin becomes a TTL's worth of bad answers.
+
+              It applies only when the fill's error carries no SDK code of its own. One
+              that does propagates untouched, because relabelling it would discard the
+              origin's own diagnosis (ADR 0005 §origin wins).
+            name: CodeCacheFillFailed
+            value: "0x00_02_12_03"
         type: errs.Code
-        value: "0x00_02_12_03"
-      - name: CodeCacheEntryRejected
+      - const:
+          - doc: |-
+              CodeCacheEntryRejected identifies an entry a store refuses to store: an
+              empty key, an empty tag, or a negative TTL that is not cache.NoExpiry.
+
+              Each of the three is a value that has no meaning rather than an unusual one,
+              and storing it would produce an entry the caller can never deliberately
+              fetch, invalidate or replace.
+            name: CodeCacheEntryRejected
+            value: "0x00_02_12_04"
         type: errs.Code
-        value: "0x00_02_12_04"
-      - name: CodeCacheChainMisconfigured
+      - const:
+          - doc: |-
+              CodeCacheChainMisconfigured identifies a NewChain refused AT CONSTRUCTION:
+              fewer than two tiers, a nil tier, or a tier that cannot answer the whole
+              contract a tier must answer (see the errors.go sentinel for why that is
+              checked once, up front, rather than discovered per call).
+            name: CodeCacheChainMisconfigured
+            note: |-
+              range: 0.3.48.0 - 0.3.48.255 — the chained store's own codes, allocated by
+              the service layer (LL = 3) and declared here since ADR 0160: a code keeps the
+              value its layer allocated when its declaration moves.
+            value: "0x00_03_30_01"
         type: errs.Code
-        value: "0x00_03_30_01"
-      - name: CodeCacheTierFailed
+      - const:
+          - doc: |-
+              CodeCacheTierFailed identifies a chained operation that failed inside one
+              specific tier.
+
+              It is distinct from CACHE_BACKEND_FAILED because a chain has more than one
+              backend, and "the cache is broken" and "the far tier is broken" are
+              different incidents with different responses: the first is an outage, the
+              second is a degradation the near tier is still absorbing.
+            name: CodeCacheTierFailed
+            value: "0x00_03_30_02"
         type: errs.Code
-        value: "0x00_03_30_02"
+    constants:
       - name: NoExpiry
         type: time.Duration
         value: "-1"
@@ -186,6 +235,92 @@ packages:
         typeParams:
           - constraint: any
             name: V
+    sentinels:
+      - var:
+          - code: CodeCacheMisconfigured
+            doc: |-
+              CacheMisconfigured is returned by a store CONSTRUCTOR whose
+              configuration it cannot honour.
+
+              It is ADR 0031's refuse half. A capacity is the caller's intent and any
+              number the SDK picked would be arbitrary, so a non-positive one is
+              refused rather than clamped — and refusing at construction is what keeps
+              the other outcome off the table: a cache built with an unusable
+              configuration still answers every call correctly, it just never HOLDS
+              anything, and nothing downstream can tell the difference between that
+              and a genuinely cold workload.
+            name: CacheMisconfigured
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "core/data/cache: a store constructor received a capacity or a default TTL it cannot honour; the fields name the option and the value"
+            public: The cache cannot be built from the given configuration
+            reason: CACHE_MISCONFIGURED
+          - code: CodeCacheBackendFailed
+            doc: |-
+              CacheBackendFailed is returned when the store itself could not serve the
+              operation. A miss is NOT this — a miss is (zero, false, nil).
+            name: CacheBackendFailed
+            private: "core/data/cache: a store failed for a reason of its own rather than reporting a miss; the fields name the operation and the key"
+            public: The cache backend could not serve the operation
+            reason: CACHE_BACKEND_FAILED
+          - code: CodeCacheFillFailed
+            doc: |-
+              CacheFillFailed is returned by Loader.Load when the caller's fill fails
+              and its error carries no SDK code of its own.
+
+              Nothing is stored. Caching a failure would turn one bad minute at the
+              origin into a full TTL of bad answers, served confidently, to every
+              caller — the failure mode a cache is least able to explain afterwards.
+            name: CacheFillFailed
+            private: "core/data/cache: a Loader.Load fill returned an error carrying no SDK code; the fields name the key"
+            public: The cache fill function failed and nothing was stored
+            reason: CACHE_FILL_FAILED
+          - code: CodeCacheEntryRejected
+            doc: |-
+              CacheEntryRejected is returned by Set for an entry the store refuses:
+              an empty key, an empty tag, or a negative TTL other than NoExpiry.
+
+              Refusing is the point. An empty key is fetchable only by another empty
+              key, an empty tag names a set nobody can ask for, and a negative TTL
+              would be read by the underlying primitive as "no expiry" — so the three
+              silent outcomes of accepting them are an entry nobody meant to write, an
+              entry nobody can invalidate, and an entry that never goes away.
+            name: CacheEntryRejected
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "core/data/cache: Set received an empty key, an empty tag, or a negative TTL that is not cache.NoExpiry; the fields name the offending part"
+            public: The cache entry is not storable as given
+            reason: CACHE_ENTRY_REJECTED
+          - code: CodeCacheChainMisconfigured
+            doc: |-
+              CacheChainMisconfigured is returned by NewChain for a tier set it cannot
+              honour.
+
+              The interesting refusal is the third one. Every tier must implement
+              [EntryFetcher] and [Tagger], and that is checked ONCE, at construction,
+              rather than per call. The reason is the whole point of tagging:
+              promoting a value into a nearer tier WITHOUT its tags produces a copy
+              that InvalidateTag can no longer reach, so the invalidation reports
+              success, the far tier forgets the entry, and the near tier keeps
+              serving it until its TTL runs out. A tag invalidation that silently
+              misses one copy is worse than one that was never offered — so the chain
+              refuses to be built rather than degrade at the moment nobody is looking.
+            name: CacheChainMisconfigured
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "service/data/cache: NewChain received fewer than two tiers, a nil tier, or a tier that does not implement EntryFetcher and Tagger; the fields name the position and the missing capability"
+            public: The cache chain cannot be built from the given tiers
+            reason: CACHE_CHAIN_MISCONFIGURED
+          - code: CodeCacheTierFailed
+            doc: |-
+              CacheTierFailed is returned when a chained operation failed inside one
+              tier. Its fields name the tier's position and the operation, because a
+              chain's caller holds one Store and would otherwise have no way to tell
+              which of two backends broke.
+            name: CacheTierFailed
+            private: "service/data/cache: one tier of a chained store returned an error; the fields name the tier position, the operation and the key"
+            public: A tier of the cache chain could not serve the operation
+            reason: CACHE_TIER_FAILED
     types:
       - name: Fill
         typeParams:
@@ -204,19 +339,6 @@ packages:
         typeParams:
           - constraint: any
             name: V
-    variables:
-      - name: CacheMisconfigured
-        type: "*errs.Error"
-      - name: CacheBackendFailed
-        type: "*errs.Error"
-      - name: CacheFillFailed
-        type: "*errs.Error"
-      - name: CacheEntryRejected
-        type: "*errs.Error"
-      - name: CacheChainMisconfigured
-        type: "*errs.Error"
-      - name: CacheTierFailed
-        type: "*errs.Error"
   - functions:
       - in:
           - name: cfg

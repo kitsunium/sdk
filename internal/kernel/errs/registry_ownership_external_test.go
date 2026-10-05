@@ -22,142 +22,24 @@ import (
 const layerZeroOwner string = "internal/kernel/errs"
 
 // codeRangeOwners is the authoritative MM.LL.PP -> owning package table for the
-// ADR 0005 registry invariant "each package owns a PP slot".
+// ADR 0005 registry invariant "each package owns a PP slot". It is kit's since
+// ADR 0164: codes_gen_test.go, written from the `codes.ranges` block of
+// design/sdk.yaml.
 //
-// It is deliberately HAND-MAINTAINED and independent of the constants it
-// audits. Deriving it from the tree (or from docs/error-codes.yaml, which is
-// itself generated from those constants) would make any range squatting
-// self-legitimising: the offending package would simply be recorded as the
-// owner and the audit would stay green. A separate table is the only thing that
-// can disagree with the code.
+// It stays INDEPENDENT of the constants it audits. Deriving it from the tree
+// (or from docs/error-codes.yaml, which is itself generated from those
+// constants) would make any range squatting self-legitimising: the offending
+// package would simply be recorded as the owner and the audit would stay
+// green. The codes are written from each package's `codes:` in its domain's
+// design file, the table from a separate block of the project file that nobody
+// derives from them — so the table is still the one thing that can disagree
+// with the code, and the audit below compares two inputs authored apart.
 //
 // Keys are the resolved Code value with the SS byte cleared. Values are the
-// repo-relative directory of the OWNING package. Adding a range here is the
-// just-in-time allocation step: do it in the same change that introduces the
-// codes, and never renumber a published code to make this table fit.
-var codeRangeOwners = map[uint64]string{
-	0x00_01_03_00: "internal/kernel/collections/ring",
-	0x00_01_05_00: "internal/kernel/concur/batcher",
-	0x00_02_02_00: "internal/core/data/codec",
-	0x00_02_03_00: "internal/core/observe/logger/writer",
-	0x00_02_04_00: "internal/core/crypto",
-	0x00_02_05_00: "internal/core/data/transform",
-	0x00_02_06_00: "internal/core/proc",
-	0x00_02_07_00: "internal/core/app/id",
-	0x00_02_08_00: "internal/core/app/resilience",
-	0x00_02_09_00: "internal/core/observe/metrics",
-	0x00_02_0A_00: "internal/core/app/config",
-	0x00_02_0B_00: "internal/core/net",
-	0x00_02_0C_00: "internal/core/app/scheduler",
-	0x00_02_0D_00: "internal/core/security/token",
-	0x00_02_0E_00: "internal/core/security/session",
-	0x00_02_0F_00: "internal/core/app/validation",
-	0x00_02_11_00: "internal/core/observe/logger/level",
-	0x00_02_12_00: "internal/core/data/cache",
-	0x00_02_13_00: "internal/core/app/lifecycle",
-	0x00_02_14_00: "internal/core/observe/trace",
-	0x00_02_15_00: "internal/core/app/lock",
-	0x00_02_16_00: "internal/core/app/events",
-	0x00_02_17_00: "internal/core/data/queue",
-	0x00_02_1A_00: "internal/core/security/authz",
-	0x00_02_1B_00: "internal/core/app/view",
-	0x00_02_18_00: "internal/core/data/sql",
-	0x00_02_19_00: "internal/core/data/vfs",
-	0x00_02_1D_00: "internal/core/app/health",
-	0x00_02_1E_00: "internal/core/app/i18n",
-	0x00_02_1F_00: "internal/core/app/mail",
-	0x00_02_20_00: "internal/core/app/cli",
-	0x00_02_21_00: "framework/internal/core/git",
-	0x00_02_22_00: "framework/internal/core/selfupdate",
-	0x00_02_23_00: "framework/internal/core/entitlement",
-	0x00_02_24_00: "framework/internal/core/gate",
-	0x00_02_25_00: "internal/core/security/secret",
-	0x00_02_38_00: "internal/core/app/statemachine",
-	0x00_03_01_00: "internal/core/observe/logger",
-	0x00_03_02_00: "internal/core/data/codec/json",
-	0x00_03_03_00: "internal/core/data/codec/xml",
-	0x00_03_04_00: "internal/core/data/codec/yaml",
-	0x00_03_05_00: "internal/core/data/codec/toml",
-	0x00_03_06_00: "internal/core/data/codec/cbor",
-	0x00_03_07_00: "internal/core/data/codec/msgpack",
-	0x00_03_08_00: "internal/core/data/codec/csv",
-	0x00_03_09_00: "internal/core/data/codec/asn1",
-	0x00_03_0A_00: "internal/core/data/codec/pem",
-	0x00_03_0B_00: "internal/core/data/codec/ndjson",
-	0x00_03_0D_00: "internal/core/observe/logger/sink/console",
-	0x00_03_0E_00: "internal/core/observe/logger/sink/file",
-	0x00_03_0F_00: "internal/core/observe/logger/sink/syslog",
-	0x00_03_10_00: "internal/core/observe/logger/middleware/multi",
-	0x00_03_11_00: "internal/core/observe/logger/middleware/async",
-	0x00_03_12_00: "internal/core/observe/logger/middleware/route",
-	0x00_03_13_00: "internal/core/observe/logger/middleware/failover",
-	0x00_03_14_00: "internal/core/observe/logger/middleware/sample",
-	0x00_03_15_00: "internal/core/observe/logger/middleware/recover",
-	0x00_03_16_00: "internal/core/data/codec/tlv",
-	0x00_03_17_00: "internal/core/data/codec/flatbuffers",
-	0x00_03_18_00: "internal/core/data/codec/baseenc",
-	0x00_03_19_00: "third-party/aws/writer/cloudwatch",
-	0x00_03_1A_00: "internal/core/data/transform",
-	0x00_03_1B_00: "internal/core/observe/logger/writer/rotfile",
-	0x00_03_1C_00: "internal/core/observe/logger/middleware/encwrite",
-	0x00_03_1D_00: "internal/core/observe/logger/middleware/tee",
-	0x00_03_1E_00: "internal/core/observe/logger/writer/nettransport",
-	0x00_03_1F_00: "internal/core/observe/logger/writer/journald",
-	0x00_03_20_00: "third-party/db/writer/mysql",
-	0x00_03_21_00: "third-party/db/writer/clickhouse",
-	0x00_03_22_00: "third-party/db/writer/redis",
-	0x00_03_23_00: "third-party/aws/writer/s3",
-	0x00_03_24_00: "internal/core/data/codec/bson",
-	0x00_03_25_00: "third-party/codec/hcl",
-	0x00_03_26_00: "third-party/codec/protobuf",
-	0x00_03_27_00: "internal/core/app/id",
-	0x00_03_28_00: "internal/core/data/codec/form",
-	0x00_03_29_00: "internal/core/data/codec/multipart",
-	0x00_03_2A_00: "internal/core/crypto/key/jwk",
-	0x00_03_2B_00: "internal/core/app/scheduler",
-	0x00_03_2C_00: "internal/core/security/token",
-	0x00_03_2D_00: "internal/core/observe/metrics",
-	0x00_03_2E_00: "internal/core/security/session",
-	0x00_03_2F_00: "internal/core/app/validation",
-	0x00_03_30_00: "internal/core/data/cache",
-	0x00_03_31_00: "internal/core/app/lifecycle",
-	0x00_03_32_00: "internal/core/observe/trace",
-	0x00_03_33_00: "internal/core/app/lock",
-	0x00_03_34_00: "internal/core/app/events",
-	0x00_03_35_00: "internal/core/data/queue",
-	0x00_03_38_00: "internal/core/security/authz",
-	0x00_03_39_00: "internal/core/app/view",
-	0x00_03_36_00: "internal/core/data/sql",
-	0x00_03_37_00: "internal/core/data/vfs",
-	0x00_03_3B_00: "internal/core/app/health",
-	0x00_03_3C_00: "internal/core/app/i18n",
-	0x00_03_3D_00: "internal/core/app/mail",
-	0x00_03_3E_00: "internal/core/app/cli",
-	0x00_03_3F_00: "third-party/transform",
-	0x00_03_41_00: "framework/connectors/ssh",
-	0x00_03_42_00: "framework/internal/service/selfupdate",
-	0x00_03_43_00: "framework/internal/service/entitlement",
-	0x00_03_44_00: "internal/core/security/secret",
-	0x00_03_48_00: "internal/core/data/codec/strictjson",
-	0x00_03_49_00: "internal/core/security/redact",
-	0x00_03_4D_00: "third-party/codec/yaml", // yaml.v3 behind the opt-in "yaml-full" Format
-	0x00_03_50_00: "internal/core/data/docstore",
-	0x00_03_51_00: "internal/core/app/mail/spool",
-	0x00_03_58_00: "internal/core/app/statemachine",
-	0x00_03_59_00: "internal/core/observe/profiling",
-	0x00_03_5A_00: "internal/core/data/codec/jsonpatch",
-	0x00_03_5B_00: "internal/core/proc/ipc",        // ADR 0148
-	0x00_04_01_00: "framework/model/internal/core", // ADR 0147: layer 4 is the framework's
-	0x00_04_02_00: "framework/internal/kit",
-	0x00_04_03_00: "framework/telemetry", // ADR 0149
-	0x00_04_04_00: "framework/kit/storetest",
-	0x00_04_10_00: "framework/connectors/postgres",
-	0x00_04_11_00: "framework/connectors/mysql",
-	0x00_04_12_00: "framework/connectors/sqlite",
-	0x01_01_00_00: "pkg/v1/observe/logger",
-	0x01_01_01_00: "pkg/v1/observe/logger/slogbridge",
-	0x01_02_00_00: "pkg/v1/data/codec",
-}
+// repo-relative directory of the OWNING package. Adding a range to
+// `codes.ranges` is the just-in-time allocation step: do it in the same change
+// that introduces the codes, and never renumber a published code to make the
+// table fit.
 
 // codeDecl is one resolved `const X Code = <value>` declaration, paired with
 // the package that declares it.

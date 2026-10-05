@@ -37,8 +37,7 @@ its marker carries the whole method set for `make api-check`.
 | `redact.go` | `MinBytes` | `16` — the floor every bound is raised to (ADR 0031's clamp) |
 | `redact.go` | `Unencodable` | `"[unencodable]"` — what `Attrs` shows for a value `encoding/json` refuses |
 | `redact.go` | `DocumentValue` | `JSON` (one well-formed value, never over the bound) + `Truncated` — what `JSON` and `Value` return |
-| `codes.go` | `CodeDocumentInvalid`, `CodeValueUnencodable` | `0.3.73.1`, `0.3.73.2` |
-| `errors.go` | `DocumentInvalid`, `ValueUnencodable` | `errs.Define` |
+| `codes_gen.go` | `CodeDocumentInvalid`, `CodeValueUnencodable` | `0.3.73.1`, `0.3.73.2`; `DocumentInvalid`, `ValueUnencodable` | `errs.Define` — written by kit gen from `design/security/redact.yaml` (ADR 0164) |
 
 ## Error codes
 

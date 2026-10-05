@@ -1,3 +1,5 @@
+// Package writer — range 0.2.3.* (ADR 0012 core/observe/logger/writer block).
+//
 // Package writer — ClickHouseConfig value type for the "clickhouse" writer.
 package writer
 

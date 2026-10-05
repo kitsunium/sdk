@@ -11,6 +11,8 @@ project:
   type: library
   module: github.com/kitsunium/sdk
   workspace: go.work
+  kit:
+    version: v0.1.0-rc.2
   surface: closed
 # The cells: bazel-ci.yml's cross-build matrix, one table, which
 # check-platforms.sh holds equal to the matrix and genindex writes docs/api on.
@@ -78,14 +80,269 @@ families:
       - proc
       - security
 # A code is errs.Code's dotted quad (ADR 0005), declared by the core at the
-# engine's path (ADR 0160); codeRangeOwners owns the ranges (ADR 0035), and
+# engine's path (ADR 0160): its package's codes: and sentinels: in the
+# domain's design file, which kit gen writes into codes_gen.go (ADR 0164).
+# The ranges below own the ranges (ADR 0035): kit writes them into
+# codeRangeOwners, and they are authored apart from the codes they audit.
 # //:audit_sources is what the errs audits read (check-audit-coverage.sh).
 codes:
   placement: core-at-engine-path
   type: go:github.com/kitsunium/sdk/internal/kernel/errs.Code
   define: go:github.com/kitsunium/sdk/internal/kernel/errs.Define
-  owners: internal/kernel/errs/registry_ownership_external_test.go#codeRangeOwners
+  owners: internal/kernel/errs/codes_gen_test.go#codeRangeOwners
   audit: BUILD.bazel#audit_sources
+  # The ranges' table (ADR 0035, ADR 0164): each range MM.LL.PP and the
+  # directory of the package that owns it. kit writes it into
+  # internal/kernel/errs/codes_gen_test.go (codeRangeOwners), which the
+  # registry audits compare the codes with; it is authored here, apart from
+  # the codes, and never derived from them.
+  ranges:
+    - range: 0.1.3
+      owner: internal/kernel/collections/ring
+    - range: 0.1.5
+      owner: internal/kernel/concur/batcher
+    - range: 0.2.2
+      owner: internal/core/data/codec
+    - range: 0.2.3
+      owner: internal/core/observe/logger/writer
+    - range: 0.2.4
+      owner: internal/core/crypto
+    - range: 0.2.5
+      owner: internal/core/data/transform
+    - range: 0.2.6
+      owner: internal/core/proc
+    - range: 0.2.7
+      owner: internal/core/app/id
+    - range: 0.2.8
+      owner: internal/core/app/resilience
+    - range: 0.2.9
+      owner: internal/core/observe/metrics
+    - range: 0.2.10
+      owner: internal/core/app/config
+    - range: 0.2.11
+      owner: internal/core/net
+    - range: 0.2.12
+      owner: internal/core/app/scheduler
+    - range: 0.2.13
+      owner: internal/core/security/token
+    - range: 0.2.14
+      owner: internal/core/security/session
+    - range: 0.2.15
+      owner: internal/core/app/validation
+    - range: 0.2.17
+      owner: internal/core/observe/logger/level
+    - range: 0.2.18
+      owner: internal/core/data/cache
+    - range: 0.2.19
+      owner: internal/core/app/lifecycle
+    - range: 0.2.20
+      owner: internal/core/observe/trace
+    - range: 0.2.21
+      owner: internal/core/app/lock
+    - range: 0.2.22
+      owner: internal/core/app/events
+    - range: 0.2.23
+      owner: internal/core/data/queue
+    - range: 0.2.26
+      owner: internal/core/security/authz
+    - range: 0.2.27
+      owner: internal/core/app/view
+    - range: 0.2.24
+      owner: internal/core/data/sql
+    - range: 0.2.25
+      owner: internal/core/data/vfs
+    - range: 0.2.29
+      owner: internal/core/app/health
+    - range: 0.2.30
+      owner: internal/core/app/i18n
+    - range: 0.2.31
+      owner: internal/core/app/mail
+    - range: 0.2.32
+      owner: internal/core/app/cli
+    - range: 0.2.33
+      owner: framework/internal/core/git
+    - range: 0.2.34
+      owner: framework/internal/core/selfupdate
+    - range: 0.2.35
+      owner: framework/internal/core/entitlement
+    - range: 0.2.36
+      owner: framework/internal/core/gate
+    - range: 0.2.37
+      owner: internal/core/security/secret
+    - range: 0.2.56
+      owner: internal/core/app/statemachine
+    - range: 0.3.1
+      owner: internal/core/observe/logger
+    - range: 0.3.2
+      owner: internal/core/data/codec/json
+    - range: 0.3.3
+      owner: internal/core/data/codec/xml
+    - range: 0.3.4
+      owner: internal/core/data/codec/yaml
+    - range: 0.3.5
+      owner: internal/core/data/codec/toml
+    - range: 0.3.6
+      owner: internal/core/data/codec/cbor
+    - range: 0.3.7
+      owner: internal/core/data/codec/msgpack
+    - range: 0.3.8
+      owner: internal/core/data/codec/csv
+    - range: 0.3.9
+      owner: internal/core/data/codec/asn1
+    - range: 0.3.10
+      owner: internal/core/data/codec/pem
+    - range: 0.3.11
+      owner: internal/core/data/codec/ndjson
+    - range: 0.3.13
+      owner: internal/core/observe/logger/sink/console
+    - range: 0.3.14
+      owner: internal/core/observe/logger/sink/file
+    - range: 0.3.15
+      owner: internal/core/observe/logger/sink/syslog
+    - range: 0.3.16
+      owner: internal/core/observe/logger/middleware/multi
+    - range: 0.3.17
+      owner: internal/core/observe/logger/middleware/async
+    - range: 0.3.18
+      owner: internal/core/observe/logger/middleware/route
+    - range: 0.3.19
+      owner: internal/core/observe/logger/middleware/failover
+    - range: 0.3.20
+      owner: internal/core/observe/logger/middleware/sample
+    - range: 0.3.21
+      owner: internal/core/observe/logger/middleware/recover
+    - range: 0.3.22
+      owner: internal/core/data/codec/tlv
+    - range: 0.3.23
+      owner: internal/core/data/codec/flatbuffers
+    - range: 0.3.24
+      owner: internal/core/data/codec/baseenc
+    - range: 0.3.25
+      owner: third-party/aws/writer/cloudwatch
+    - range: 0.3.26
+      owner: internal/core/data/transform
+    - range: 0.3.27
+      owner: internal/core/observe/logger/writer/rotfile
+    - range: 0.3.28
+      owner: internal/core/observe/logger/middleware/encwrite
+    - range: 0.3.29
+      owner: internal/core/observe/logger/middleware/tee
+    - range: 0.3.30
+      owner: internal/core/observe/logger/writer/nettransport
+    - range: 0.3.31
+      owner: internal/core/observe/logger/writer/journald
+    - range: 0.3.32
+      owner: third-party/db/writer/mysql
+    - range: 0.3.33
+      owner: third-party/db/writer/clickhouse
+    - range: 0.3.34
+      owner: third-party/db/writer/redis
+    - range: 0.3.35
+      owner: third-party/aws/writer/s3
+    - range: 0.3.36
+      owner: internal/core/data/codec/bson
+    - range: 0.3.37
+      owner: third-party/codec/hcl
+    - range: 0.3.38
+      owner: third-party/codec/protobuf
+    - range: 0.3.39
+      owner: internal/core/app/id
+    - range: 0.3.40
+      owner: internal/core/data/codec/form
+    - range: 0.3.41
+      owner: internal/core/data/codec/multipart
+    - range: 0.3.42
+      owner: internal/core/crypto/key/jwk
+    - range: 0.3.43
+      owner: internal/core/app/scheduler
+    - range: 0.3.44
+      owner: internal/core/security/token
+    - range: 0.3.45
+      owner: internal/core/observe/metrics
+    - range: 0.3.46
+      owner: internal/core/security/session
+    - range: 0.3.47
+      owner: internal/core/app/validation
+    - range: 0.3.48
+      owner: internal/core/data/cache
+    - range: 0.3.49
+      owner: internal/core/app/lifecycle
+    - range: 0.3.50
+      owner: internal/core/observe/trace
+    - range: 0.3.51
+      owner: internal/core/app/lock
+    - range: 0.3.52
+      owner: internal/core/app/events
+    - range: 0.3.53
+      owner: internal/core/data/queue
+    - range: 0.3.56
+      owner: internal/core/security/authz
+    - range: 0.3.57
+      owner: internal/core/app/view
+    - range: 0.3.54
+      owner: internal/core/data/sql
+    - range: 0.3.55
+      owner: internal/core/data/vfs
+    - range: 0.3.59
+      owner: internal/core/app/health
+    - range: 0.3.60
+      owner: internal/core/app/i18n
+    - range: 0.3.61
+      owner: internal/core/app/mail
+    - range: 0.3.62
+      owner: internal/core/app/cli
+    - range: 0.3.63
+      owner: third-party/transform
+    - range: 0.3.65
+      owner: framework/connectors/ssh
+    - range: 0.3.66
+      owner: framework/internal/service/selfupdate
+    - range: 0.3.67
+      owner: framework/internal/service/entitlement
+    - range: 0.3.68
+      owner: internal/core/security/secret
+    - range: 0.3.72
+      owner: internal/core/data/codec/strictjson
+    - range: 0.3.73
+      owner: internal/core/security/redact
+    - range: 0.3.77
+      owner: third-party/codec/yaml
+      note: "yaml.v3 behind the opt-in \"yaml-full\" Format"
+    - range: 0.3.80
+      owner: internal/core/data/docstore
+    - range: 0.3.81
+      owner: internal/core/app/mail/spool
+    - range: 0.3.88
+      owner: internal/core/app/statemachine
+    - range: 0.3.89
+      owner: internal/core/observe/profiling
+    - range: 0.3.90
+      owner: internal/core/data/codec/jsonpatch
+    - range: 0.3.91
+      owner: internal/core/proc/ipc
+      note: ADR 0148
+    - range: 0.4.1
+      owner: framework/model/internal/core
+      note: "ADR 0147: layer 4 is the framework's"
+    - range: 0.4.2
+      owner: framework/internal/kit
+    - range: 0.4.3
+      owner: framework/telemetry
+      note: ADR 0149
+    - range: 0.4.4
+      owner: framework/kit/storetest
+    - range: 0.4.16
+      owner: framework/connectors/postgres
+    - range: 0.4.17
+      owner: framework/connectors/mysql
+    - range: 0.4.18
+      owner: framework/connectors/sqlite
+    - range: 1.1.0
+      owner: pkg/v1/observe/logger
+    - range: 1.1.1
+      owner: pkg/v1/observe/logger/slogbridge
+    - range: 1.2.0
+      owner: pkg/v1/data/codec
 # ADR 0156 §1: the SDK module requires no module outside the standard
 # library; the vendor modules are ADR 0157's, and the framework's connectors
 # ADR 0158's.

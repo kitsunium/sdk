@@ -15,9 +15,6 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
 
-// CodeCLIFailed marks the span of a CLI command that exited non-zero.
-const CodeCLIFailed errs.Code = 0x00_04_02_3B // 0.4.2.59 — a CLI command exited with a non-zero status
-
 // exitSoftware is sysexits' EX_SOFTWARE: the status of a command that
 // panicked.
 const exitSoftware int = 70

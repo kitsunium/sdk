@@ -8,7 +8,7 @@ go_library(
         "address.go",
         "call.go",
         "client_config.go",
-        "codes.go",
+        "codes_gen.go",
         "conn.go",
         "design_gen.go",
         "drain.go",

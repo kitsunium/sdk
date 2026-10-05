@@ -1,26 +1,48 @@
 apiVersion: kit.kitsunium/design/v2
 domain: data/codec/csv
 packages:
-  - constants:
-      - name: CodeCSVMarshalFailed
+  - codes:
+      - const:
+          - doc: CodeCSVMarshalFailed identifies a failure inside encoding/csv.Writer.
+            name: CodeCSVMarshalFailed
+            note: "range: 0.3.8.0 - 0.3.8.255"
+            value: "0x00_03_08_01"
         type: errs.Code
-        value: "0x00_03_08_01"
-      - name: CodeCSVUnmarshalFailed
+      - const:
+          - doc: CodeCSVUnmarshalFailed identifies a failure inside encoding/csv.Reader.
+            name: CodeCSVUnmarshalFailed
+            value: "0x00_03_08_02"
         type: errs.Code
-        value: "0x00_03_08_02"
-      - name: CodeCSVValueInvalid
+      - const:
+          - doc: |-
+              CodeCSVValueInvalid identifies a Marshal / Unmarshal call whose target is
+              not a *[][]string (CSV only serialises a records matrix).
+            name: CodeCSVValueInvalid
+            value: "0x00_03_08_03"
         type: errs.Code
-        value: "0x00_03_08_03"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/data/codec/csv
-    variables:
-      - name: MarshalFailed
-        type: "*errs.Error"
-      - name: UnmarshalFailed
-        type: "*errs.Error"
-      - name: ValueInvalid
-        type: "*errs.Error"
+    sentinels:
+      - var:
+          - code: CodeCSVMarshalFailed
+            doc: MarshalFailed wraps a failure from encoding/csv.Writer.Write(All).
+            name: MarshalFailed
+            private: "service/data/codec/csv: encoding/csv.Writer.WriteAll returned an error"
+            public: CSV encoding failed
+            reason: MARSHAL_FAILED
+          - code: CodeCSVUnmarshalFailed
+            doc: UnmarshalFailed wraps a failure from encoding/csv.Reader.ReadAll.
+            name: UnmarshalFailed
+            private: "service/data/codec/csv: encoding/csv.Reader.ReadAll returned an error"
+            public: CSV decoding failed
+            reason: UNMARSHAL_FAILED
+          - code: CodeCSVValueInvalid
+            doc: ValueInvalid fires when the caller does not pass a *[][]string.
+            name: ValueInvalid
+            private: "service/data/codec/csv: Marshal/Unmarshal called with non-[][]string argument"
+            public: CSV codec requires a [][]string value
+            reason: VALUE_INVALID
   - functions:
       - name: New
         out:

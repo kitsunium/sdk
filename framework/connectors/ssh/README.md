@@ -97,7 +97,7 @@ var EnrolmentFailed = errs.Define(CodeEnrolmentFailed, "ENROLMENT_FAILED",
 ```
 
 <a name="DefaultSSHDir"></a>
-## func [DefaultSSHDir](<https://github.com/kitsunium/sdk/blob/main/framework/connectors/ssh/discover.go#L167>)
+## func [DefaultSSHDir](<https://github.com/kitsunium/sdk/blob/main/framework/connectors/ssh/discover.go#L182>)
 
 ```go
 func DefaultSSHDir() string
@@ -106,7 +106,7 @@ func DefaultSSHDir() string
 DefaultSSHDir returns the conventional key location for the current user.
 
 <a name="DiscoverSubject"></a>
-## func [DiscoverSubject](<https://github.com/kitsunium/sdk/blob/main/framework/connectors/ssh/discover.go#L109>)
+## func [DiscoverSubject](<https://github.com/kitsunium/sdk/blob/main/framework/connectors/ssh/discover.go#L124>)
 
 ```go
 func DiscoverSubject(sshDir string) (uuid string, err error)

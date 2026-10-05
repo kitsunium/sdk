@@ -12,7 +12,7 @@ go_library(
     name = "redis",
     srcs = [
         "client.go",
-        "codes.go",
+        "codes_gen.go",
         "errors.go",
         "redis.go",
         "redissink.go",

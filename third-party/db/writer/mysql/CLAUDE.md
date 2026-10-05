@@ -21,7 +21,8 @@ driver; no CI lane asserts it).
 | `mysql.go` | `Writer` singleton, `mysqlFactory` (`Name`/`Open`) — composes the dbsink chain |
 | `mysqlsink.go` | `mysqlSink` wrapper that closes the `*sql.DB` after the chain drains |
 | `client.go` | the ONLY driver-importing file: `newClient` (lazy `sql.Open`) + `buildDSN` + `buildInsert` + `validIdent` |
-| `codes.go`, `errors.go` | sentinels — range 0.3.32.\* (service slot 0x20) |
+| `codes_gen.go` | sentinels — range 0.3.32.\* (service slot 0x20) — written by kit gen from `design/third-party/db/writer/mysql.yaml` (ADR 0164) |
+| `errors.go` | hand-written beside them: `exitIOErr`, `wrapClientInit`, `wrapInsert` |
 
 ## Table schema (operator-provided)
 

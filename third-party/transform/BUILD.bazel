@@ -11,7 +11,7 @@ package(default_visibility = ["//visibility:public"])
 go_library(
     name = "transform",
     srcs = [
-        "codes.go",
+        "codes_gen.go",
         "errors.go",
         "s2.go",
         "transform.go",

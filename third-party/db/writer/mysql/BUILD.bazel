@@ -12,7 +12,7 @@ go_library(
     name = "mysql",
     srcs = [
         "client.go",
-        "codes.go",
+        "codes_gen.go",
         "errors.go",
         "mysql.go",
         "mysqlsink.go",

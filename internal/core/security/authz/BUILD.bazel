@@ -7,7 +7,7 @@ go_library(
     srcs = [
         "attr_value.go",
         "authz.go",
-        "codes.go",
+        "codes_gen.go",
         "decision.go",
         "errors.go",
         "request_value.go",

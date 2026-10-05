@@ -7,7 +7,7 @@ go_library(
     srcs = [
         "address_value.go",
         "attachment_value.go",
-        "codes.go",
+        "codes_gen.go",
         "design_gen.go",
         "errors.go",
         "header.go",
@@ -39,10 +39,7 @@ go_test(
         "api_gen_test.go",
         "port_external_test.go",
     ],
-    deps = [
-        ":mail",
-        "//internal/kernel/errs",
-    ],
+    deps = [":mail"],
 )
 
 # audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.

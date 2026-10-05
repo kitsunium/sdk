@@ -12,10 +12,9 @@ go_library(
     name = "yaml",
     srcs = [
         "codec.go",
-        "codes.go",
+        "codes_gen.go",
         "decoder.go",
         "encoder.go",
-        "errors.go",
     ],
     importpath = "github.com/kitsunium/sdk/third-party/codec/yaml",
     visibility = ["//visibility:public"],

@@ -1,16 +1,28 @@
 apiVersion: kit.kitsunium/design/v2
 domain: third-party/codec/yaml
 packages:
-  - constants:
+  - codes:
+      - const:
+          - doc: |-
+              CodeYAMLFullMarshalFailed identifies a failure encoding a value through
+              gopkg.in/yaml.v3 (a MarshalYAML hook that failed, or a stream whose writer
+              failed).
+            name: CodeYAMLFullMarshalFailed
+            note: "range: 0.3.77.0 - 0.3.77.255"
+            value: "0x00_03_4D_01"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeYAMLFullUnmarshalFailed identifies a failure decoding through
+              gopkg.in/yaml.v3: a syntax error, a value its target cannot hold, or an
+              input over the 10 MiB cap.
+            name: CodeYAMLFullUnmarshalFailed
+            value: "0x00_03_4D_02"
+        type: errs.Code
+    constants:
       - name: Format
         type: string
         value: "\"yaml-full\""
-      - name: CodeYAMLFullMarshalFailed
-        type: errs.Code
-        value: "0x00_03_4D_01"
-      - name: CodeYAMLFullUnmarshalFailed
-        type: errs.Code
-        value: "0x00_03_4D_02"
     functions:
       - name: New
         out:
@@ -19,10 +31,22 @@ packages:
       codec: github.com/kitsunium/sdk/internal/core/data/codec
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/third-party/codec/yaml
+    sentinels:
+      - var:
+          - code: CodeYAMLFullMarshalFailed
+            doc: MarshalFailed marks a gopkg.in/yaml.v3 encode failure.
+            name: MarshalFailed
+            private: "third-party/codec/yaml: gopkg.in/yaml.v3 failed to encode the value"
+            public: YAML encoding failed
+            reason: YAML_FULL_MARSHAL_FAILED
+          - code: CodeYAMLFullUnmarshalFailed
+            doc: |-
+              UnmarshalFailed marks a gopkg.in/yaml.v3 decode failure, or an input over
+              the 10 MiB cap.
+            name: UnmarshalFailed
+            private: "third-party/codec/yaml: gopkg.in/yaml.v3 failed to decode the document, or the input exceeds maxYAMLBytes"
+            public: YAML decoding failed
+            reason: YAML_FULL_UNMARSHAL_FAILED
     variables:
       - name: Codec
         type: codec.Codec
-      - name: MarshalFailed
-        type: "*errs.Error"
-      - name: UnmarshalFailed
-        type: "*errs.Error"

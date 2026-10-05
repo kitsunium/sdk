@@ -47,10 +47,17 @@ packages:
       coregate: github.com/kitsunium/sdk/framework/internal/core/gate
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/framework/gate
-  - constants:
-      - name: CodePolicyInvalid
+  - codes:
+      - const:
+          - doc: |-
+              CodePolicyInvalid identifies a gate policy that could not be used as written
+              — an unset update action, a recovery command that is gated, or no exemption
+              at all. Every one of them is a construction fault, reported at start-up
+              rather than at the first refused invocation.
+            name: CodePolicyInvalid
+            value: "0x00_02_24_01"
         type: errs.Code
-        value: "0x00_02_24_01"
+    constants:
       - name: OutcomeAllow
         type: Outcome
         value: "1"

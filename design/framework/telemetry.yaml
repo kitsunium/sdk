@@ -1,13 +1,22 @@
 apiVersion: kit.kitsunium/design/v2
 domain: framework/telemetry
 packages:
-  - constants:
-      - name: CodeMisconfigured
+  - codes:
+      - const:
+          - doc: |-
+              CodeMisconfigured identifies an exporter configuration that cannot be
+              honoured: no socket path, a buffer outside its bounds, an ID outside the
+              grammar in the node table.
+            name: CodeMisconfigured
+            note: "range: 0.4.3.0 - 0.4.3.255"
+            value: "0x00_04_03_01"
         type: errs.Code
-        value: "0x00_04_03_01"
-      - name: CodeRunning
+      - const:
+          - doc: CodeRunning identifies a Start on an exporter already started.
+            name: CodeRunning
+            value: "0x00_04_03_02"
         type: errs.Code
-        value: "0x00_04_03_02"
+    constants:
       - name: KindSpan
         type: Kind
         value: "1"
@@ -132,6 +141,24 @@ packages:
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/framework/telemetry
+    sentinels:
+      - var:
+          - code: CodeMisconfigured
+            doc: |-
+              Misconfigured refuses an exporter that cannot be built as asked; the
+              rule field says which rule failed.
+            name: Misconfigured
+            options:
+              - errs.WithExitCode(78)
+            private: "framework/telemetry: no socket path, a buffer outside [64, 1<<20], or a node ID outside the grammar; the rule field says which"
+            public: The telemetry exporter is misconfigured
+            reason: MISCONFIGURED
+          - code: CodeRunning
+            doc: Running refuses a second Start.
+            name: Running
+            private: "framework/telemetry: Start called on a started exporter"
+            public: The telemetry exporter is already running
+            reason: RUNNING
     types:
       - name: Kind
         underlying: uint8
@@ -237,10 +264,6 @@ packages:
               name: Emit
         name: Emitter
     variables:
-      - name: Misconfigured
-        type: "*errs.Error"
-      - name: Running
-        type: "*errs.Error"
       - name: OpNames
         type: "[23]string"
       - name: Nop

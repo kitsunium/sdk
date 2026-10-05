@@ -10,6 +10,7 @@ package(default_visibility = ["//visibility:public"])
 go_library(
     name = "postgres",
     srcs = [
+        "codes_gen.go",
         "credentials.go",
         "postgres.go",
     ],

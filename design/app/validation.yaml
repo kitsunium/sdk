@@ -1,34 +1,83 @@
 apiVersion: kit.kitsunium/design/v2
 domain: app/validation
 packages:
-  - constants:
-      - name: CodeValidationFailed
+  - codes:
+      - const:
+          - doc: |-
+              CodeValidationFailed identifies the aggregate error a non-empty ReportValue
+              converts to. It is the code an error-typed contract sees; the individual
+              rules keep their own codes inside the report.
+            name: CodeValidationFailed
+            note: "range: 0.2.15.0 - 0.2.15.255"
+            value: "0x00_02_0F_01"
         type: errs.Code
-        value: "0x00_02_0F_01"
-      - name: CodeConstraintMisconfigured
+      - const:
+          - doc: |-
+              CodeConstraintMisconfigured identifies a constraint refused AT CONSTRUCTION
+              because its configuration cannot be honoured — an inverted numeric range, a
+              negative length bound, an empty allowed set, an uncompilable pattern. It is
+              never a validation outcome: the value was never reached.
+            name: CodeConstraintMisconfigured
+            value: "0x00_02_0F_02"
         type: errs.Code
-        value: "0x00_02_0F_02"
-      - name: CodeRequired
+      - const:
+          - doc: |-
+              CodeRequired identifies a value that is absent where presence was required.
+              It is a VIOLATION code — it travels on a ViolationValue, not on an error.
+            name: CodeRequired
+            note: |-
+              range: 0.3.47.0 - 0.3.47.255
+
+              The rules' violation codes and the tag compiler's refusals. The range was
+              allocated to internal/service/app/validation, whose constraints and tag
+              compiler use these codes, and it is declared here with the port's so that
+              every code of the domain is in one place (ADR 0160). A code keeps the value
+              its allocation gave it whichever layer declares it, so the layer byte still
+              reads 3.
+            value: "0x00_03_2F_01"
         type: errs.Code
-        value: "0x00_03_2F_01"
-      - name: CodeOutOfRange
+      - const:
+          - doc: CodeOutOfRange identifies an ordered value outside its allowed bounds.
+            name: CodeOutOfRange
+            value: "0x00_03_2F_02"
         type: errs.Code
-        value: "0x00_03_2F_02"
-      - name: CodeLengthOutOfRange
+      - const:
+          - doc: |-
+              CodeLengthOutOfRange identifies a string, slice or array whose SIZE is
+              outside its allowed bounds. It is distinct from CodeOutOfRange because
+              "between 3 and 10" and "3 to 10 characters long" are different rules with
+              different fixes, and a caller routing on the code should not have to guess
+              which one fired.
+            name: CodeLengthOutOfRange
+            value: "0x00_03_2F_03"
         type: errs.Code
-        value: "0x00_03_2F_03"
-      - name: CodeNotInSet
+      - const:
+          - doc: CodeNotInSet identifies a value absent from the constraint's allowed set.
+            name: CodeNotInSet
+            value: "0x00_03_2F_04"
         type: errs.Code
-        value: "0x00_03_2F_04"
-      - name: CodePatternMismatch
+      - const:
+          - doc: CodePatternMismatch identifies a string that did not match its pattern.
+            name: CodePatternMismatch
+            value: "0x00_03_2F_05"
         type: errs.Code
-        value: "0x00_03_2F_05"
-      - name: CodeInvalidRule
+      - const:
+          - doc: |-
+              CodeInvalidRule identifies a struct tag refused at COMPILE time: an unknown
+              rule, a malformed argument, a rule applied to a kind it cannot check, or a
+              construct this dialect refuses by name. It is an error, never a violation —
+              the value was never reached.
+            name: CodeInvalidRule
+            value: "0x00_03_2F_06"
         type: errs.Code
-        value: "0x00_03_2F_06"
-      - name: CodeUnsupportedTarget
+      - const:
+          - doc: |-
+              CodeUnsupportedTarget identifies a Struct[T] whose T the tag engine cannot
+              walk — anything that is not a struct type.
+            name: CodeUnsupportedTarget
+            value: "0x00_03_2F_07"
         type: errs.Code
-        value: "0x00_03_2F_07"
+    constants:
       - name: RootPath
         type: string
         value: "\"\""
@@ -51,6 +100,65 @@ packages:
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/app/validation
+    sentinels:
+      - var:
+          - code: CodeValidationFailed
+            doc: |-
+              ValidationFailed is what ReportValue.Err returns for a non-empty report.
+              Its fields carry the violation count, the first rule, and the list of
+              paths — never a message and never a value. The full report stays the
+              ReportValue; this error is the shape an error-typed contract can hold.
+            name: ValidationFailed
+            options:
+              - errs.WithHTTPStatus(httpUnprocessable)
+            private: "core/app/validation: a ReportValue was converted to an error; the fields carry the violation count and the offending paths"
+            public: One or more values did not satisfy their constraints
+            reason: VALIDATION_FAILED
+          - code: CodeConstraintMisconfigured
+            doc: |-
+              ConstraintMisconfigured is returned by a constraint CONSTRUCTOR whose
+              arguments it cannot honour: a minimum above its maximum, a negative
+              length, an empty allowed set, an uncompilable pattern.
+
+              It is the ADR 0031 half that must not be confused with the other: a
+              validator with NO constraint is legitimate and passes, while a
+              constraint that could never be satisfied — or never be evaluated — is
+              refused before it can quietly reject, or quietly accept, everything.
+            name: ConstraintMisconfigured
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "core/app/validation: a constraint constructor received bounds or arguments it cannot honour; the fields name the rule and the clause that failed"
+            public: The constraint cannot be built from the given configuration
+            reason: CONSTRAINT_MISCONFIGURED
+          - code: CodeInvalidRule
+            doc: |-
+              InvalidRule is returned by Struct when a validate tag cannot be
+              compiled. The fields name the field, the rule and the clause that
+              failed; the message never guesses at what was meant, it names what was
+              refused — an unsupported dialect construct is refused BY NAME so the fix
+              is one word, not an investigation.
+            name: InvalidRule
+            note: |-
+              The struct-tag compiler's refusals, raised by internal/service/app/validation.
+              They are declared here, with the port's, so that the domain's codes and
+              sentinels are in one place (ADR 0160).
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "service/app/validation: a validate tag names an unknown rule, a malformed argument, or a rule the field's kind cannot answer; the fields carry the field name, the rule and the clause"
+            public: The validate struct tag could not be compiled
+            reason: INVALID_RULE
+          - code: CodeUnsupportedTarget
+            doc: |-
+              UnsupportedTarget is returned by Struct when T is not a struct type.
+              The tag engine walks fields; there is nothing to walk on a scalar, a
+              slice or a pointer, and inventing a meaning for those would be a
+              different feature wearing this one's name.
+            name: UnsupportedTarget
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "service/app/validation: Struct[T] was instantiated with a non-struct T; the field carries the kind that was seen"
+            public: Struct tag validation requires a struct type
+            reason: UNSUPPORTED_TARGET
     types:
       - methods:
           - name: OK
@@ -90,15 +198,6 @@ packages:
               type: string
             - name: Code
               type: errs.Code
-    variables:
-      - name: ValidationFailed
-        type: "*errs.Error"
-      - name: ConstraintMisconfigured
-        type: "*errs.Error"
-      - name: InvalidRule
-        type: "*errs.Error"
-      - name: UnsupportedTarget
-        type: "*errs.Error"
   - constants:
       - name: Unbounded
         type: int

@@ -30,7 +30,7 @@ port or its doc comment changes in the design, then `kit gen`, then `make api`
 They moved there from `queue.go`, `capability.go`, `wake.go` and
 `deadletter.go`, content moved and never deleted; `deadletter.go`, left with
 nothing but its package comment, is gone (rule 5), that comment now closing
-`codes.go`'s — go/doc joins every file's package comment in file-name order, so
+`codes_gen.go`'s — go/doc joins every file's package comment in file-name order, so
 `go doc` reads it as before.
 
 ## Contents
@@ -44,8 +44,8 @@ nothing but its package comment, is gone (rule 5), that comment now closing
 | `wake.go` | `WakeValue`, what the third sibling, `Waker`, answers with (ADR 0104) |
 | `retry.go` | `DoNotRetry(cause)`: the mark a handler puts on a failure no retry can fix (ADR 0151) |
 | `policy.go` | `PolicyValue` (with `MaxRetryDelay`, ADR 0151), `Validate` + `validateRetryGrowth`, `Normalized`, `DefaultMaxMessageBytes`, `MaxDeadlineOffset` |
-| `codes.go` | the seven `0.2.23.*` codes, then the five `0.3.53.*` codes of the brokers and the consumer engine (ADR 0160) |
-| `errors.go` | the seven port sentinels, then `QueueBackendFailed`, `QueueDirectoryUnusable`, `ConsumerMisconfigured`, `HandlerPanicked` and `SQLQueueMisconfigured`, which `internal/service/data/queue` emits — declared here since ADR 0160 under the service layer's `LL = 3` they were allocated with |
+| `codes_gen.go` | the seven `0.2.23.*` codes, then the five `0.3.53.*` codes of the brokers and the consumer engine (ADR 0160); the seven port sentinels, then `QueueBackendFailed`, `QueueDirectoryUnusable`, `ConsumerMisconfigured`, `HandlerPanicked` and `SQLQueueMisconfigured`, which `internal/service/data/queue` emits — declared here since ADR 0160 under the service layer's `LL = 3` they were allocated with — written by kit gen from `design/data/queue.yaml` (ADR 0164) |
+| `errors.go` | hand-written beside them: `exitConfig`, `exitTempFail`, `exitDataErr`, `exitNoInput`, `exitIOErr`, `httpNotFound` |
 
 ## The five things this domain decided
 

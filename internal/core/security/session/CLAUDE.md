@@ -33,8 +33,8 @@ package comment in file-name order, so `go doc` reads it as before.
 | `id.go` | `ID` + `IDLen` + `NewID` / `ParseID` (strict base64url, one spelling); `Reveal` / `Digest` / `Equal` / `IsZero` / redacting `String` + `GoString` |
 | `session_value.go` | `SessionValue` + `NewSessionValue` (its only producer) — accessors, copy-on-write `Set` / `Delete`, `ExpiresAt` / `LiveAt`, shape-only `String` |
 | `state_value.go` | `StateValue` — the exported description a third-party `Store` hands to `NewSessionValue` |
-| `codes.go` | `Code*` constants — ranges 0.2.14.* (verdicts) and 0.3.46.* (the engines' refusals) |
-| `errors.go` | the verdicts `NotFound` / `Expired` / `InvalidID` / `InvalidConfig` / `IdentifierCollision` / `EntropyFailed` / `StoreUnavailable` / `SealInvalid` / `FixationRefused`, and the engines' refusals `RecordCorrupt` / `DirectoryUnsafe` / `LockFailed` / `PayloadTooLarge` / `InvalidPurpose` / `PathRedirected` — raised only by `internal/service/security/session`, whose `Private` names it |
+| `codes_gen.go` | `Code*` constants — ranges 0.2.14.* (verdicts) and 0.3.46.* (the engines' refusals); the verdicts `NotFound` / `Expired` / `InvalidID` / `InvalidConfig` / `IdentifierCollision` / `EntropyFailed` / `StoreUnavailable` / `SealInvalid` / `FixationRefused`, and the engines' refusals `RecordCorrupt` / `DirectoryUnsafe` / `LockFailed` / `PayloadTooLarge` / `InvalidPurpose` / `PathRedirected` — raised only by `internal/service/security/session`, whose `Private` names it — written by kit gen from `design/security/session.yaml` (ADR 0164) |
+| `errors.go` | hand-written beside them: `exitConfig`, `exitTempFail`, `httpUnauthorized`, `httpUnavailable`, `exitDataErr`, `httpPayloadTooLarge` |
 
 ## A session is not a token — say it before anything else
 

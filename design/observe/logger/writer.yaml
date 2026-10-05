@@ -4,22 +4,44 @@ packages:
   - aliases:
       - name: Config
         target: any
+    codes:
+      - const:
+          - doc: |-
+              CodeDuplicateRegistration identifies an init-time collision on the writer
+              registry; two distinct factories tried to claim the same Name. Surfaced via
+              panic at boot through the DuplicateRegistration sentinel.
+            name: CodeDuplicateRegistration
+            note: "range: 0.2.3.0 - 0.2.3.255"
+            value: "0x00_02_03_01"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeWriterUnknownName identifies an Open call for a Name that no imported
+              package has registered.
+            name: CodeWriterUnknownName
+            value: "0x00_02_03_02"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeWriterConfigInvalid identifies a factory receiving a Config whose
+              concrete type does not match what it expects.
+            name: CodeWriterConfigInvalid
+            value: "0x00_02_03_03"
+        type: errs.Code
+      - const:
+          - doc: CodeWriterNil identifies a Register call made with a nil Factory.
+            name: CodeWriterNil
+            value: "0x00_02_03_04"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeWriterNameEmpty identifies a Register call whose Factory reports the
+              reserved invalid empty Name. Surfaced via panic at boot (see registry.go),
+              not as an *Error sentinel.
+            name: CodeWriterNameEmpty
+            value: "0x00_02_03_05"
+        type: errs.Code
     constants:
-      - name: CodeDuplicateRegistration
-        type: errs.Code
-        value: "0x00_02_03_01"
-      - name: CodeWriterUnknownName
-        type: errs.Code
-        value: "0x00_02_03_02"
-      - name: CodeWriterConfigInvalid
-        type: errs.Code
-        value: "0x00_02_03_03"
-      - name: CodeWriterNil
-        type: errs.Code
-        value: "0x00_02_03_04"
-      - name: CodeWriterNameEmpty
-        type: errs.Code
-        value: "0x00_02_03_05"
       - name: ConsoleStderr
         type: ConsoleStream
         value: "0"
@@ -149,6 +171,35 @@ packages:
               - name: err
                 type: error
         name: Factory
+    sentinels:
+      - var:
+          - code: CodeWriterUnknownName
+            doc: |-
+              WriterUnknownName is returned by Open when no factory is registered
+              under the requested Name — typically a missing blank-import.
+            name: WriterUnknownName
+            private: "core/observe/logger/writer.Open: name absent from registry; blank-import the writer's package to register it"
+            public: No writer is registered under that name
+            reason: WRITER_UNKNOWN_NAME
+          - code: CodeWriterConfigInvalid
+            doc: |-
+              WriterConfigInvalid is the shared sentinel every factory returns when
+              the supplied Config is of the wrong concrete type. Factories attach an
+              errs Field naming the writer so the offender is identifiable.
+            name: WriterConfigInvalid
+            private: core/observe/logger/writer factory received a Config of an unexpected concrete type
+            public: Writer configuration has the wrong type
+            reason: WRITER_CONFIG_INVALID
+          - code: CodeDuplicateRegistration
+            doc: |-
+              DuplicateRegistration is the conflict Register refuses at boot: a
+              distinct factory already holds the Name a second one claims. Register
+              panics with conflictText of it, so the panic carries the dotted-quad
+              header AND the Name that collided.
+            name: DuplicateRegistration
+            private: "core/observe/logger/writer.Register: a distinct factory already holds this Name"
+            public: A writer is already registered under that name
+            reason: DUPLICATE_REGISTRATION
     types:
       - name: ClickHouseConfig
         struct:
@@ -342,13 +393,6 @@ packages:
               type: Name
             - name: Config
               type: Config
-    variables:
-      - name: WriterUnknownName
-        type: "*errs.Error"
-      - name: WriterConfigInvalid
-        type: "*errs.Error"
-      - name: DuplicateRegistration
-        type: "*errs.Error"
   - imports:
       writer: github.com/kitsunium/sdk/internal/core/observe/logger/writer
     path: github.com/kitsunium/sdk/internal/service/observe/logger/writer/console

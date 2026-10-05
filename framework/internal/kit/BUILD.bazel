@@ -19,6 +19,7 @@ go_library(
         "classify_walk.go",
         "classify_warn.go",
         "cli.go",
+        "codes_gen.go",
         "command.go",
         "config.go",
         "configcmd.go",

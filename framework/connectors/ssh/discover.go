@@ -1,3 +1,18 @@
+// Package ssh — the one error-code range this package owns.
+//
+// Everything it says about VERIFICATION is said in the entitlement contract's
+// vocabulary — framework/entitlement's sentinels, 0.2.35.*: a missing key, a
+// mismatched fingerprint and an unproven possession are the contract's
+// situations, and an ssh implementation reporting them in its own dialect would
+// make every caller learn a second set for the same three answers.
+//
+// ENROLMENT is not in that contract. Minting a pair is something this package
+// does and the port does not describe, so its failures have nowhere to borrow a
+// code from, and they carried none at all until this range existed.
+//
+// Hand-registered in codeRangeOwners (ADR 0035) and already listed in
+// //:audit_sources.
+//
 // Package ssh — discovering which subject this machine is enrolled as,
 // from the layout ssh keys actually have on disk.
 //

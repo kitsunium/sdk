@@ -1,34 +1,134 @@
 apiVersion: kit.kitsunium/design/v2
 domain: observe/profiling
 packages:
-  - constants:
-      - name: CodeWindowInvalid
+  - codes:
+      - const:
+          - doc: |-
+              CodeWindowInvalid identifies a CPU capture window that is not positive or
+              exceeds the engine's MaxCPUWindow.
+            name: CodeWindowInvalid
+            note: "range: 0.3.89.0 - 0.3.89.255"
+            value: "0x00_03_59_01"
         type: errs.Code
-        value: "0x00_03_59_01"
-      - name: CodeProfilerBusy
+      - const:
+          - doc: |-
+              CodeProfilerBusy identifies a CPU capture refused because the process's one
+              CPU profiler is already running.
+            name: CodeProfilerBusy
+            value: "0x00_03_59_02"
         type: errs.Code
-        value: "0x00_03_59_02"
-      - name: CodeCaptureCanceled
+      - const:
+          - doc: |-
+              CodeCaptureCanceled identifies a CPU capture whose context ended before its
+              window.
+            name: CodeCaptureCanceled
+            value: "0x00_03_59_03"
         type: errs.Code
-        value: "0x00_03_59_03"
-      - name: CodeCaptureFailed
+      - const:
+          - doc: CodeCaptureFailed identifies a profile the runtime could not write.
+            name: CodeCaptureFailed
+            value: "0x00_03_59_04"
         type: errs.Code
-        value: "0x00_03_59_04"
-      - name: CodeProfileMalformed
+      - const:
+          - doc: |-
+              CodeProfileMalformed identifies bytes that are not a well-formed pprof
+              profile.
+            name: CodeProfileMalformed
+            value: "0x00_03_59_05"
         type: errs.Code
-        value: "0x00_03_59_05"
-      - name: CodeProfileTooLarge
+      - const:
+          - doc: |-
+              CodeProfileTooLarge identifies a profile over the engine's MaxProfileBytes,
+              compressed or decompressed, or whose stacks resolve to more than its
+              MaxFrames frames.
+            name: CodeProfileTooLarge
+            value: "0x00_03_59_06"
         type: errs.Code
-        value: "0x00_03_59_06"
-      - name: CodeSampleTypeMissing
+      - const:
+          - doc: |-
+              CodeSampleTypeMissing identifies a fold asked for a sample type the profile
+              does not measure.
+            name: CodeSampleTypeMissing
+            value: "0x00_03_59_07"
         type: errs.Code
-        value: "0x00_03_59_07"
+    constants:
       - name: FlameRoot
         type: string
         value: "\"root\""
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/observe/profiling
+    sentinels:
+      - var:
+          - code: CodeWindowInvalid
+            doc: |-
+              WindowInvalid refuses a CPU window that is not positive — a profile
+              of no time is empty by construction — or that exceeds MaxCPUWindow.
+            name: WindowInvalid
+            options:
+              - errs.WithHTTPStatus(httpBadRequest)
+            private: "service/observe/profiling: CaptureCPU was given a window outside (0, MaxCPUWindow]; the window field says what"
+            public: A CPU profile needs a window longer than zero and at most five minutes
+            reason: WINDOW_INVALID
+          - code: CodeProfilerBusy
+            doc: |-
+              ProfilerBusy refuses a CPU capture while the process's one CPU profiler
+              is running — started by another capture, or by anyone's
+              pprof.StartCPUProfile. It is not queued: the caller decides whether to
+              wait.
+            name: ProfilerBusy
+            options:
+              - errs.WithHTTPStatus(httpConflict)
+            private: "service/observe/profiling: pprof.StartCPUProfile refused: the runtime's CPU profiler is in use; the runtime's own error is joined"
+            public: A CPU profile is already being recorded
+            reason: PROFILER_BUSY
+          - code: CodeCaptureCanceled
+            doc: |-
+              CaptureCanceled is a CPU capture whose context ended before the window
+              did. The profiler is stopped and nothing is returned: a partial window
+              would read as the whole one. The context's error is joined.
+            name: CaptureCanceled
+            options:
+              - errs.WithHTTPStatus(httpUnavailable)
+            private: "service/observe/profiling: the context ended during CaptureCPU's window; the profiler was stopped and the samples dropped"
+            public: The profile was abandoned before its window ended
+            reason: CAPTURE_CANCELED
+          - code: CodeCaptureFailed
+            doc: |-
+              CaptureFailed wraps an error runtime/pprof returned while writing a
+              profile: the heap, or the goroutines.
+            name: CaptureFailed
+            private: "service/observe/profiling: runtime/pprof could not write the profile; the profile field names it"
+            public: The profile could not be written
+            reason: CAPTURE_FAILED
+          - code: CodeProfileMalformed
+            doc: |-
+              ProfileMalformed refuses bytes that are not a well-formed pprof
+              profile: a truncated field, a wire type a field cannot have, an index
+              into the string, function or location table that points nowhere, a
+              sample whose values do not match the sample types, a gzip stream that
+              does not inflate. The field says which part; the input is never quoted.
+            name: ProfileMalformed
+            private: "service/observe/profiling: the profile did not decode; the reading field names the part"
+            public: That is not a well-formed pprof profile
+            reason: PROFILE_MALFORMED
+          - code: CodeProfileTooLarge
+            doc: |-
+              ProfileTooLarge refuses a profile over MaxProfileBytes, before reading
+              it or once it inflates past the bound, and one whose stacks resolve to
+              more than MaxFrames frames.
+            name: ProfileTooLarge
+            private: "service/observe/profiling: the profile, compressed or inflated, exceeds MaxProfileBytes, or its stacks exceed MaxFrames; the bytes or bound field says which"
+            public: The profile is too large to read
+            reason: PROFILE_TOO_LARGE
+          - code: CodeSampleTypeMissing
+            doc: |-
+              SampleTypeMissing refuses a fold asked for a sample type the profile
+              does not measure — "cpu" of a heap profile.
+            name: SampleTypeMissing
+            private: "service/observe/profiling: FoldConfig.SampleType names no sample type of the profile; the sample_type field says which"
+            public: The profile does not measure that
+            reason: SAMPLE_TYPE_MISSING
     types:
       - name: FoldedValue
         struct:
@@ -158,21 +258,6 @@ packages:
               type: int
             - name: Address
               type: uint64
-    variables:
-      - name: WindowInvalid
-        type: "*errs.Error"
-      - name: ProfilerBusy
-        type: "*errs.Error"
-      - name: CaptureCanceled
-        type: "*errs.Error"
-      - name: CaptureFailed
-        type: "*errs.Error"
-      - name: ProfileMalformed
-        type: "*errs.Error"
-      - name: ProfileTooLarge
-        type: "*errs.Error"
-      - name: SampleTypeMissing
-        type: "*errs.Error"
   - constants:
       - name: DefaultTopFunctions
         type: int

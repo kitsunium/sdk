@@ -61,7 +61,7 @@
         "value": "0.3.65.1"
       },
       "doc": "CodeEnrolmentFailed identifies a key pair that could not be minted.\n\nIt covers every step of GenerateKeyPair after the subject has been\nvalidated: creating the key directory, generating the pair, serialising\neither half, and writing either half. The fields name which.\n\nIt is deliberately NOT CodeNoLicence. That one says \"this machine is not\nenrolled\", whose remedy is to enrol; this one says the attempt to enrol just\nfailed, whose remedy is whatever the filesystem reported. Reporting the\nsecond as the first sends an operator to run the command that has already\nfailed.\n",
-      "file": "codes.go",
+      "file": "codes_gen.go",
       "layer": "framework"
     },
     {
@@ -99,7 +99,7 @@
         "public": "the entitlement key pair could not be created"
       },
       "doc": "EnrolmentFailed is returned when GenerateKeyPair cannot mint the pair.\n\nNothing partial is left behind that a later run cannot overwrite, but\nthe private half IS written before the public one, so a failure between\nthe two leaves a key with no published half — which the next\nDiscoverSubject reads as an unusable identity rather than as an\nenrolled one, and which re-running enrolment replaces.\n",
-      "file": "errors.go",
+      "file": "codes_gen.go",
       "layer": "framework"
     },
     {

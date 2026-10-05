@@ -1,16 +1,30 @@
 apiVersion: kit.kitsunium/design/v2
 domain: third-party/codec/hcl
 packages:
-  - constants:
-      - name: CodeHCLMarshalFailed
+  - codes:
+      - const:
+          - doc: |-
+              CodeHCLMarshalFailed identifies a failure encoding a value to HCL via
+              gohcl.EncodeIntoBody (e.g. a top-level non-struct value, or an unsupported
+              field type — recovered from the library panic).
+            name: CodeHCLMarshalFailed
+            note: "range: 0.3.37.0 - 0.3.37.255"
+            value: "0x00_03_25_01"
         type: errs.Code
-        value: "0x00_03_25_01"
-      - name: CodeHCLUnmarshalFailed
+      - const:
+          - doc: |-
+              CodeHCLUnmarshalFailed identifies a failure parsing/decoding HCL via
+              hclsimple.Decode (syntax error or schema mismatch).
+            name: CodeHCLUnmarshalFailed
+            value: "0x00_03_25_02"
         type: errs.Code
-        value: "0x00_03_25_02"
-      - name: CodeHCLSizeExceeded
+      - const:
+          - doc: |-
+              CodeHCLSizeExceeded identifies an Unmarshal input over the 10 MiB cap
+              (CWE-400 defence before the parser allocates).
+            name: CodeHCLSizeExceeded
+            value: "0x00_03_25_03"
         type: errs.Code
-        value: "0x00_03_25_03"
     functions:
       - name: New
         out:
@@ -19,12 +33,26 @@ packages:
       codec: github.com/kitsunium/sdk/internal/core/data/codec
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/third-party/codec/hcl
+    sentinels:
+      - var:
+          - code: CodeHCLMarshalFailed
+            doc: MarshalFailed wraps an HCL encode failure (gohcl.EncodeIntoBody).
+            name: MarshalFailed
+            private: "third-party/codec/hcl: gohcl.EncodeIntoBody failed or the top-level value is not a struct"
+            public: HCL encoding failed
+            reason: HCL_MARSHAL_FAILED
+          - code: CodeHCLUnmarshalFailed
+            doc: UnmarshalFailed wraps an HCL parse/decode failure (hclsimple.Decode).
+            name: UnmarshalFailed
+            private: "third-party/codec/hcl: hclsimple.Decode returned diagnostics"
+            public: HCL decoding failed
+            reason: HCL_UNMARSHAL_FAILED
+          - code: CodeHCLSizeExceeded
+            doc: SizeExceeded marks an Unmarshal input over the 10 MiB hard cap.
+            name: SizeExceeded
+            private: "third-party/codec/hcl: len(data) exceeds maxHCLBytes"
+            public: HCL input exceeds size limit
+            reason: HCL_SIZE_EXCEEDED
     variables:
       - name: Codec
         type: codec.Codec
-      - name: MarshalFailed
-        type: "*errs.Error"
-      - name: UnmarshalFailed
-        type: "*errs.Error"
-      - name: SizeExceeded
-        type: "*errs.Error"

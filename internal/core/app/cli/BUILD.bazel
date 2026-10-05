@@ -8,7 +8,7 @@ go_library(
         "cli.go",
         "cli_command.go",
         "cli_invocation.go",
-        "codes.go",
+        "codes_gen.go",
         "design_gen.go",
         "errors.go",
     ],

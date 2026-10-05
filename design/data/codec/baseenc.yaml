@@ -1,31 +1,69 @@
 apiVersion: kit.kitsunium/design/v2
 domain: data/codec/baseenc
 packages:
-  - constants:
-      - name: CodeBaseEncMarshalFailed
+  - codes:
+      - const:
+          - doc: |-
+              CodeBaseEncMarshalFailed identifies a JSON-encode failure that happens
+              before the base-N step in the universal "flatten to JSON, then base-N"
+              pipeline.
+            name: CodeBaseEncMarshalFailed
+            note: "range: 0.3.24.0 - 0.3.24.255"
+            value: "0x00_03_18_01"
         type: errs.Code
-        value: "0x00_03_18_01"
-      - name: CodeBaseEncUnmarshalFailed
+      - const:
+          - doc: |-
+              CodeBaseEncUnmarshalFailed identifies a JSON-decode failure that happens
+              after the base-N step in the universal "base-N decode, then JSON" pipeline.
+            name: CodeBaseEncUnmarshalFailed
+            value: "0x00_03_18_02"
         type: errs.Code
-        value: "0x00_03_18_02"
-      - name: CodeBaseEncDecodeFailed
+      - const:
+          - doc: |-
+              CodeBaseEncDecodeFailed identifies a base-N decode failure (malformed
+              input rejected by the stdlib encoding/{hex,base32,base64,ascii85}
+              decoders).
+            name: CodeBaseEncDecodeFailed
+            value: "0x00_03_18_03"
         type: errs.Code
-        value: "0x00_03_18_03"
-      - name: CodeBaseEncSizeExceeded
+      - const:
+          - doc: |-
+              CodeBaseEncSizeExceeded identifies an Unmarshal input whose length
+              exceeds the 10 MiB hard cap (CWE-400 memory-exhaustion defence).
+            name: CodeBaseEncSizeExceeded
+            value: "0x00_03_18_04"
         type: errs.Code
-        value: "0x00_03_18_04"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/data/codec/baseenc
-    variables:
-      - name: BaseEncMarshalFailed
-        type: "*errs.Error"
-      - name: BaseEncUnmarshalFailed
-        type: "*errs.Error"
-      - name: BaseEncDecodeFailed
-        type: "*errs.Error"
-      - name: BaseEncSizeExceeded
-        type: "*errs.Error"
+    sentinels:
+      - var:
+          - code: CodeBaseEncMarshalFailed
+            doc: BaseEncMarshalFailed wraps a JSON-side failure before base-N encoding.
+            name: BaseEncMarshalFailed
+            private: "service/data/codec/baseenc: encoding/json.Marshal returned an error before the base-N step"
+            public: base-N encoding failed
+            reason: BASE_ENC_MARSHAL_FAILED
+          - code: CodeBaseEncUnmarshalFailed
+            doc: BaseEncUnmarshalFailed wraps a JSON-side failure after base-N decoding.
+            name: BaseEncUnmarshalFailed
+            private: "service/data/codec/baseenc: encoding/json.Unmarshal returned an error after the base-N step"
+            public: base-N decoding failed
+            reason: BASE_ENC_UNMARSHAL_FAILED
+          - code: CodeBaseEncDecodeFailed
+            doc: |-
+              BaseEncDecodeFailed wraps a malformed base-N input rejected by the
+              stdlib decoder.
+            name: BaseEncDecodeFailed
+            private: "service/data/codec/baseenc: stdlib base-N decoder rejected the input bytes"
+            public: base-N decoding failed
+            reason: BASE_ENC_DECODE_FAILED
+          - code: CodeBaseEncSizeExceeded
+            doc: BaseEncSizeExceeded fires when an Unmarshal input exceeds the 10 MiB cap.
+            name: BaseEncSizeExceeded
+            private: "service/data/codec/baseenc: len(data) exceeds maxBaseEncBytes (CWE-400 defence)"
+            public: base-N input exceeds size limit
+            reason: BASE_ENC_SIZE_EXCEEDED
   - imports:
       codec: github.com/kitsunium/sdk/internal/core/data/codec
     path: github.com/kitsunium/sdk/internal/service/data/codec/baseenc

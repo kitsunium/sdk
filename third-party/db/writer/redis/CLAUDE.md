@@ -22,7 +22,8 @@ driver type.
 | `redis.go` | `Writer` singleton, `redisFactory` (`Name`/`Open`) — composes the dbsink chain |
 | `redissink.go` | `redisSink` wrapper that calls the client `closeFn` after the chain drains |
 | `client.go` | the ONLY driver-importing file: `newClient` + `resolveCreds` + `buildValues` |
-| `codes.go`, `errors.go` | sentinels — range 0.3.34.\* (service slot 0x22) |
+| `codes_gen.go` | sentinels — range 0.3.34.\* (service slot 0x22) — written by kit gen from `design/third-party/db/writer/redis.yaml` (ADR 0164) |
+| `errors.go` | hand-written beside them: `exitIOErr`, `wrapClientInit`, `wrapAdd` |
 
 ## Behaviour
 

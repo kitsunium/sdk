@@ -1,3 +1,5 @@
+// Package net — range 0.2.11.* (ADR 0029 core/net block).
+//
 // Package net — the accepted stream connection port.
 package net
 

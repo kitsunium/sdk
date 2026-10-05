@@ -16,10 +16,6 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/proc/ipc"
 )
 
-// CodeSingletonHeld reports a start refused because another process of the
-// app holds its singleton lock.
-const CodeSingletonHeld errs.Code = 0x00_04_02_3A // 0.4.2.58 — another process of the app holds its singleton lock
-
 // minIdleStep bounds how often the idle watch looks at the listeners.
 const minIdleStep time.Duration = 10 * time.Millisecond
 

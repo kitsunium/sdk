@@ -16,7 +16,7 @@ the importers spell it `coregit`.
 |---|---|
 | `git.go` | the `ChangedSet` port, FROZEN at four methods, and `ResolutionValue` + `Degraded` |
 | `line_range.go` | `LineRangeValue` + its inclusive `Contains` |
-| `codes.go` / `errors.go` | the `0.2.33.*` range and its three sentinels |
+| `codes_gen.go` | the `0.2.33.*` range and its three sentinels — written by kit gen from `design/framework/git.yaml` (ADR 0164) |
 
 Code range `0.2.33.*` (`0x00_02_21_*`), owned solely by this package. It is a
 layer-2 value although the package is the framework's: a code keeps its value

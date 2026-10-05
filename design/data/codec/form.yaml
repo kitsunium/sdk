@@ -1,26 +1,62 @@
 apiVersion: kit.kitsunium/design/v2
 domain: data/codec/form
 packages:
-  - constants:
-      - name: CodeFormValueInvalid
+  - codes:
+      - const:
+          - doc: |-
+              CodeFormValueInvalid identifies a Marshal / Append / Unmarshal call whose
+              argument is not one of the shapes the urlencoded wire format models
+              (url.Values, map[string][]string, map[string]string, or a pointer to one).
+            name: CodeFormValueInvalid
+            note: "range: 0.3.40.0 - 0.3.40.255"
+            value: "0x00_03_28_01"
         type: errs.Code
-        value: "0x00_03_28_01"
-      - name: CodeFormUnmarshalFailed
+      - const:
+          - doc: |-
+              CodeFormUnmarshalFailed identifies a decode refusal: a malformed
+              percent-escape, the ';' separator net/url rejects since Go 1.17, or an
+              input that trips one of the package's decode bounds.
+            name: CodeFormUnmarshalFailed
+            value: "0x00_03_28_02"
         type: errs.Code
-        value: "0x00_03_28_02"
-      - name: CodeFormMultiValue
+      - const:
+          - doc: |-
+              CodeFormMultiValue identifies a decode into a single-valued target
+              (map[string]string) of a body that repeats a key — the one case where the
+              requested Go shape cannot hold what the wire carries.
+            name: CodeFormMultiValue
+            value: "0x00_03_28_03"
         type: errs.Code
-        value: "0x00_03_28_03"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/data/codec/form
-    variables:
-      - name: ValueInvalid
-        type: "*errs.Error"
-      - name: UnmarshalFailed
-        type: "*errs.Error"
-      - name: MultiValue
-        type: "*errs.Error"
+    sentinels:
+      - var:
+          - code: CodeFormValueInvalid
+            doc: |-
+              ValueInvalid fires when the caller does not pass a urlencoded-shaped
+              value (url.Values / map[string][]string / map[string]string, or a
+              non-nil pointer to one).
+            name: ValueInvalid
+            private: "service/data/codec/form: Marshal/Append/Unmarshal called with an unsupported argument shape"
+            public: form codec requires a url.Values-shaped value
+            reason: VALUE_INVALID
+          - code: CodeFormUnmarshalFailed
+            doc: |-
+              UnmarshalFailed wraps a refusal from net/url.ParseQuery or a decode
+              bound (maxFormBytes / maxFormPairs).
+            name: UnmarshalFailed
+            private: "service/data/codec/form: net/url.ParseQuery returned an error or a decode bound was exceeded"
+            public: form decoding failed
+            reason: UNMARSHAL_FAILED
+          - code: CodeFormMultiValue
+            doc: |-
+              MultiValue fires when a repeated key is decoded into a map[string]string
+              target, which can hold exactly one value per key.
+            name: MultiValue
+            private: "service/data/codec/form: map[string]string target cannot hold a repeated key"
+            public: form key carries multiple values
+            reason: MULTI_VALUE
   - functions:
       - name: New
         out:

@@ -1,26 +1,60 @@
 apiVersion: kit.kitsunium/design/v2
 domain: data/codec/flatbuffers
 packages:
-  - constants:
-      - name: CodeFlatbuffersBadType
+  - codes:
+      - const:
+          - doc: |-
+              CodeFlatbuffersBadType identifies a Marshal call whose value is neither
+              []byte nor an implementation of BytesProvider.
+            name: CodeFlatbuffersBadType
+            note: "range: 0.3.23.0 - 0.3.23.255"
+            value: "0x00_03_17_01"
         type: errs.Code
-        value: "0x00_03_17_01"
-      - name: CodeFlatbuffersBadTarget
+      - const:
+          - doc: |-
+              CodeFlatbuffersBadTarget identifies an Unmarshal call whose target is
+              neither *[]byte nor an implementation of BytesAcceptor.
+            name: CodeFlatbuffersBadTarget
+            value: "0x00_03_17_02"
         type: errs.Code
-        value: "0x00_03_17_02"
-      - name: CodeFlatbuffersTruncated
+      - const:
+          - doc: |-
+              CodeFlatbuffersTruncated identifies a buffer shorter than the 4-byte
+              root-offset header required by the FlatBuffers wire format, or larger
+              than the package-level CWE-400 ceiling.
+            name: CodeFlatbuffersTruncated
+            value: "0x00_03_17_03"
         type: errs.Code
-        value: "0x00_03_17_03"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/data/codec/flatbuffers
-    variables:
-      - name: FlatbuffersBadType
-        type: "*errs.Error"
-      - name: FlatbuffersBadTarget
-        type: "*errs.Error"
-      - name: FlatbuffersTruncated
-        type: "*errs.Error"
+    sentinels:
+      - var:
+          - code: CodeFlatbuffersBadType
+            doc: |-
+              FlatbuffersBadType fires when Marshal cannot extract a byte payload
+              from the argument (not []byte, not a BytesProvider).
+            name: FlatbuffersBadType
+            private: "service/data/codec/flatbuffers: Marshal argument is not []byte and does not implement BytesProvider"
+            public: FlatBuffers codec requires []byte or a BytesProvider value
+            reason: FLATBUFFERS_BAD_TYPE
+          - code: CodeFlatbuffersBadTarget
+            doc: |-
+              FlatbuffersBadTarget fires when Unmarshal cannot publish the payload
+              through the target (not *[]byte, not a BytesAcceptor).
+            name: FlatbuffersBadTarget
+            private: "service/data/codec/flatbuffers: Unmarshal target is not *[]byte and does not implement BytesAcceptor"
+            public: FlatBuffers codec requires a *[]byte or BytesAcceptor target
+            reason: FLATBUFFERS_BAD_TARGET
+          - code: CodeFlatbuffersTruncated
+            doc: |-
+              FlatbuffersTruncated fires when the buffer is shorter than the
+              4-byte root-offset header mandated by the FlatBuffers wire format
+              or larger than the package-level CWE-400 ceiling.
+            name: FlatbuffersTruncated
+            private: "service/data/codec/flatbuffers: buffer length is invalid for the FlatBuffers wire format"
+            public: FlatBuffers buffer is truncated
+            reason: FLATBUFFERS_TRUNCATED
   - constants:
       - name: PromotionMagic
         type: uint32

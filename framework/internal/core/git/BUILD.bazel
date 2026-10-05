@@ -5,8 +5,7 @@ package(default_visibility = ["//visibility:public"])
 go_library(
     name = "git",
     srcs = [
-        "codes.go",
-        "errors.go",
+        "codes_gen.go",
         "git.go",
         "line_range.go",
     ],
@@ -37,8 +36,5 @@ filegroup(
 go_test(
     name = "git_test",
     srcs = ["api_gen_test.go"],
-    deps = [
-        ":git",
-        "//internal/kernel/errs",
-    ],
+    deps = [":git"],
 )

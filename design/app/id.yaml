@@ -1,34 +1,93 @@
 apiVersion: kit.kitsunium/design/v2
 domain: app/id
 packages:
-  - constants:
-      - name: CodeUnknownScheme
+  - codes:
+      - const:
+          - doc: |-
+              CodeUnknownScheme identifies a New/Lookup call naming a Scheme that no
+              imported package has registered (a missing blank-import of the scheme).
+            name: CodeUnknownScheme
+            note: "range: 0.2.7.0 - 0.2.7.255"
+            value: "0x00_02_07_01"
         type: errs.Code
-        value: "0x00_02_07_01"
-      - name: CodeDuplicateRegistration
+      - const:
+          - doc: |-
+              CodeDuplicateRegistration identifies a boot-time collision on the Generator
+              registry: a nil scheme, or a distinct generator claiming an already-registered
+              Scheme. Surfaced via panic at boot (see registry.go). Reason
+              DUPLICATE_REGISTRATION keeps the bracket header a valid (code,reason) pairing
+              per ADR 0005, mirroring codec/transform (0.2.2.1 / 0.2.5.5).
+            name: CodeDuplicateRegistration
+            value: "0x00_02_07_05"
         type: errs.Code
-        value: "0x00_02_07_05"
-      - name: CodeIDEntropyFailed
+      - const:
+          - doc: |-
+              CodeIDEntropyFailed identified a crypto/rand.Read failure while drawing the
+              random bytes of an identifier. Nothing returns it since Go 1.24, whose
+              crypto/rand.Read cannot fail; the code stays allocated and published.
+            name: CodeIDEntropyFailed
+            note: |-
+              range: 0.3.39.0 - 0.3.39.255
+
+              The generators' outcomes. The range was allocated to internal/service/app/id,
+              whose schemes raise these codes, and it is declared here with the registry's
+              so that every code of the domain is in one place (ADR 0160). A code keeps
+              the value its allocation gave it whichever layer declares it, so the layer
+              byte still reads 3.
+            value: "0x00_03_27_01"
         type: errs.Code
-        value: "0x00_03_27_01"
-      - name: CodeIDClockBackwards
+      - const:
+          - doc: |-
+              CodeIDClockBackwards identifies a snowflake generation where the monotonic
+              clock moved backwards past the last-issued timestamp beyond the recoverable
+              same-millisecond sequence space.
+            name: CodeIDClockBackwards
+            value: "0x00_03_27_02"
         type: errs.Code
-        value: "0x00_03_27_02"
-      - name: CodeIDClockStalled
+      - const:
+          - doc: |-
+              CodeIDClockStalled identifies a snowflake same-millisecond overflow wait that
+              gave up because the clock stopped advancing. Distinct from ClockBackwards: the
+              clock did not regress, it simply never ticked, so the wait could not complete.
+            name: CodeIDClockStalled
+            value: "0x00_03_27_03"
         type: errs.Code
-        value: "0x00_03_27_03"
-      - name: CodeIDInvalidSize
+      - const:
+          - doc: |-
+              CodeIDInvalidSize identifies a NanoID constructor call naming a non-positive
+              identifier length. A zero-length identifier identifies nothing, so the
+              constructor refuses rather than hand back a generator that mints "" forever
+              (ADR 0031).
+            name: CodeIDInvalidSize
+            value: "0x00_03_27_04"
         type: errs.Code
-        value: "0x00_03_27_04"
-      - name: CodeIDInvalidPrefix
+      - const:
+          - doc: |-
+              CodeIDInvalidPrefix identifies a TypeID constructor or parse call whose type
+              prefix is empty or breaks the lowercase-ASCII shape. The prefix IS the value
+              of the scheme — an identifier that cannot name its own type is the degraded
+              identifier ADR 0031 forbids minting silently.
+            name: CodeIDInvalidPrefix
+            value: "0x00_03_27_05"
         type: errs.Code
-        value: "0x00_03_27_05"
-      - name: CodeIDMalformed
+      - const:
+          - doc: |-
+              CodeIDMalformed identifies a parse that rejected its input: a wrong length, a
+              symbol outside the scheme's alphabet, or a magnitude past what the scheme's
+              fixed width can represent. Carries a "rule" field naming which of the three
+              fired; never echoes the input.
+            name: CodeIDMalformed
+            value: "0x00_03_27_06"
         type: errs.Code
-        value: "0x00_03_27_06"
-      - name: CodeIDTimestampRange
+      - const:
+          - doc: |-
+              CodeIDTimestampRange identifies a generation where the clock sits outside the
+              window the scheme's timestamp field can represent — the KSUID 32-bit second
+              counter, whose epoch starts in 2014 and saturates in 2150. Encoding it anyway
+              would wrap the prefix and destroy the sortability the format exists for.
+            name: CodeIDTimestampRange
+            value: "0x00_03_27_07"
         type: errs.Code
-        value: "0x00_03_27_07"
     functions:
       - in:
           - name: scheme
@@ -80,6 +139,88 @@ packages:
               - name: err
                 type: error
         name: Generator
+    sentinels:
+      - var:
+          - code: CodeUnknownScheme
+            doc: |-
+              UnknownScheme is returned when no Generator is registered under the
+              requested Scheme — typically a missing blank-import of the scheme.
+            name: UnknownScheme
+            private: "core/app/id.New: scheme absent from registry; blank-import the scheme's package to register it"
+            public: No identifier generator is registered under that scheme
+            reason: UNKNOWN_SCHEME
+          - code: CodeDuplicateRegistration
+            doc: |-
+              DuplicateRegistration is the boot-time panic sentinel for the Generator
+              registry: a nil generator or a distinct generator claiming a taken Scheme.
+            name: DuplicateRegistration
+            private: "core/app/id.Register: a distinct generator already claims this scheme, or a nil generator was supplied"
+            public: A generator is already registered under that scheme
+            reason: DUPLICATE_REGISTRATION
+          - code: CodeIDEntropyFailed
+            doc: |-
+              EntropyFailed was the wrap of a crypto/rand.Read failure while drawing id
+              bytes. Nothing returns it since Go 1.24, whose crypto/rand.Read never
+              fails (a failing source crashes the program); it stays published with its
+              value, so a consumer matching it keeps compiling.
+            name: EntropyFailed
+            note: |-
+              The schemes' outcomes, raised by internal/service/app/id. They are declared
+              here, with the registry's, so that the domain's codes and sentinels are in
+              one place (ADR 0160).
+            private: "service/app/id: crypto/rand.Read returned an error"
+            public: Identifier generation failed to read secure random bytes
+            reason: ID_ENTROPY_FAILED
+          - code: CodeIDClockBackwards
+            doc: |-
+              ClockBackwards is returned when the snowflake clock regressed past the
+              recoverable sequence window.
+            name: ClockBackwards
+            private: "service/app/id: snowflake clock regressed beyond the same-millisecond sequence space"
+            public: Identifier generation observed the clock moving backwards
+            reason: ID_CLOCK_BACKWARDS
+          - code: CodeIDClockStalled
+            doc: |-
+              ClockStalled is returned when the snowflake same-millisecond overflow wait
+              gave up because the clock stopped advancing.
+            name: ClockStalled
+            private: "service/app/id: snowflake overflow wait exceeded its spin budget without the clock ticking"
+            public: Identifier generation gave up waiting for the clock to advance
+            reason: ID_CLOCK_STALLED
+          - code: CodeIDInvalidSize
+            doc: |-
+              InvalidSize is returned by NewNanoID when the requested identifier length
+              is not positive. Carries a "size" field.
+            name: InvalidSize
+            private: "service/app/id: NewNanoID received a size <= 0; a zero-length identifier identifies nothing"
+            public: Identifier generation requires a positive identifier length
+            reason: ID_INVALID_SIZE
+          - code: CodeIDInvalidPrefix
+            doc: |-
+              InvalidPrefix is returned by NewTypeID/FormatTypeID/ParseTypeID when the
+              type prefix is empty or breaks the lowercase-ASCII shape. Carries a "rule"
+              field naming the clause that failed, and never echoes the prefix.
+            name: InvalidPrefix
+            private: "service/app/id: a TypeID prefix is 1..63 chars of [a-z], with '_' allowed only between two letters"
+            public: Identifier generation requires a valid lowercase type prefix
+            reason: ID_INVALID_PREFIX
+          - code: CodeIDMalformed
+            doc: |-
+              Malformed is returned by ParseKSUID/ParseTypeID/FormatTypeID when the
+              input is not a well-formed rendering. Carries a "rule" field naming which
+              check fired (length / alphabet / overflow), never the input itself.
+            name: Malformed
+            private: "service/app/id: a parse rejected the input's length, alphabet, or magnitude"
+            public: The identifier is not well formed for its scheme
+            reason: ID_MALFORMED
+          - code: CodeIDTimestampRange
+            doc: |-
+              TimestampRange is returned when the clock sits outside the window a
+              scheme's timestamp field can represent (KSUID: 2014-05-13 .. 2150-06-19).
+            name: TimestampRange
+            private: "service/app/id: the KSUID 32-bit second counter cannot represent this clock reading"
+            public: Identifier generation observed a clock outside the scheme's timestamp range
+            reason: ID_TIMESTAMP_RANGE
     types:
       - methods:
           - name: String
@@ -92,25 +233,6 @@ packages:
             recv: value
         name: Scheme
         underlying: string
-    variables:
-      - name: UnknownScheme
-        type: "*errs.Error"
-      - name: DuplicateRegistration
-        type: "*errs.Error"
-      - name: EntropyFailed
-        type: "*errs.Error"
-      - name: ClockBackwards
-        type: "*errs.Error"
-      - name: ClockStalled
-        type: "*errs.Error"
-      - name: InvalidSize
-        type: "*errs.Error"
-      - name: InvalidPrefix
-        type: "*errs.Error"
-      - name: Malformed
-        type: "*errs.Error"
-      - name: TimestampRange
-        type: "*errs.Error"
   - functions:
       - in:
           - name: s

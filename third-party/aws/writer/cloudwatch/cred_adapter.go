@@ -1,3 +1,5 @@
+// Package cloudwatch — range 0.3.25.* (ADR 0015 writer registry; PP octet 0x19).
+//
 // Package cloudwatch — bridges writer.CredentialProvider onto the AWS SDK's
 // aws.CredentialsProvider so credentials refresh on each Retrieve. Split from
 // client.go to keep one struct per file.

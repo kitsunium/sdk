@@ -23,7 +23,8 @@ by ADR 0121 and declared here since ADR 0160 §2 with its values unchanged.
 | `profile.go` | `ProfileValue` (time, sample types, samples, comments, period, duration, default sample type), `SampleTypeValue`, `SampleValue` (stack, values, labels, numeric labels), `FrameValue` |
 | `folded.go` | `FoldedValue` (owners, top functions, flame, total, unattributed), `OwnerCostValue`, `FunctionCostValue`, `FlameNodeValue`, `FlameRoot` |
 | `goroutine.go` | `GoroutineValue` (labels, state, wait, thread lock, stack, creator), `GoroutineGroupValue` |
-| `codes.go` / `errors.go` | the seven codes and sentinels below |
+| `codes_gen.go` | the seven codes and sentinels below — written by kit gen from `design/observe/profiling.yaml` (ADR 0164) |
+| `errors.go` | hand-written beside them: `httpBadRequest`, `httpConflict`, `httpUnavailable` |
 
 What stays in the engine, and why: `FoldConfig` and `GroupConfig` are the
 parameters of `Fold` and `GroupGoroutines`, and an engine's configuration

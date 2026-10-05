@@ -20,7 +20,8 @@ surface (`clickhouse.OpenDB`, lazy) so the code mirrors the mysql writer exactly
 | `clickhouse.go` | `Writer` singleton, `clickhouseFactory` (`Name`/`Open`) — composes the dbsink chain |
 | `clickhousesink.go` | `chSink` wrapper that closes the `*sql.DB` after the chain drains |
 | `client.go` | the ONLY driver-importing file: `newClient` (lazy `OpenDB`) + `resolveCreds` + `buildInsert` + `validIdent` |
-| `codes.go`, `errors.go` | sentinels — range 0.3.33.\* (service slot 0x21) |
+| `codes_gen.go` | sentinels — range 0.3.33.\* (service slot 0x21) — written by kit gen from `design/third-party/db/writer/clickhouse.yaml` (ADR 0164) |
+| `errors.go` | hand-written beside them: `exitIOErr`, `wrapClientInit`, `wrapInsert` |
 
 ## Table schema (operator-provided)
 

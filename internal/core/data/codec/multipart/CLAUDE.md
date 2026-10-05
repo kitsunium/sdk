@@ -11,8 +11,8 @@ Stdlib-only: this package imports `internal/kernel/errs` and nothing else.
 
 | File | Declares |
 |---|---|
-| `codes.go` | 6 `errs.Code` constants, range `0.3.41.*` |
-| `errors.go` | 6 `errs.Define` sentinels, one per code |
+| `codes_gen.go` | 6 `errs.Code` constants, range `0.3.41.*`; 6 `errs.Define` sentinels, one per code — written by kit gen from `design/data/codec/multipart.yaml` (ADR 0164) |
+| `doc.go` | the package comment, kept when its codes and sentinels moved to the design (ADR 0164) |
 
 ## Error codes (range `0.3.41.*`)
 

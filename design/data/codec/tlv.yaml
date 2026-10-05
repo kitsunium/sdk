@@ -1,41 +1,93 @@
 apiVersion: kit.kitsunium/design/v2
 domain: data/codec/tlv
 packages:
-  - constants:
-      - name: CodeTLVMarshalFailed
+  - codes:
+      - const:
+          - doc: |-
+              CodeTLVMarshalFailed identifies an encode-side failure (reflection
+              dispatch, unsupported value, writer error during streaming encode).
+            name: CodeTLVMarshalFailed
+            note: "range: 0.3.22.0 - 0.3.22.255"
+            value: "0x00_03_16_01"
         type: errs.Code
-        value: "0x00_03_16_01"
-      - name: CodeTLVUnmarshalFailed
+      - const:
+          - doc: |-
+              CodeTLVUnmarshalFailed identifies a decode-side failure (malformed
+              record, type mismatch, reader error during streaming decode).
+            name: CodeTLVUnmarshalFailed
+            value: "0x00_03_16_02"
         type: errs.Code
-        value: "0x00_03_16_02"
-      - name: CodeTLVUnsupportedType
+      - const:
+          - doc: |-
+              CodeTLVUnsupportedType identifies a value whose reflect.Kind cannot be
+              TLV-encoded (chan, func, complex*, unsafe.Pointer).
+            name: CodeTLVUnsupportedType
+            value: "0x00_03_16_03"
         type: errs.Code
-        value: "0x00_03_16_03"
-      - name: CodeTLVDepthExceeded
+      - const:
+          - doc: |-
+              CodeTLVDepthExceeded identifies a nested value whose depth exceeds the
+              hard cap of 32 levels (CWE-674 stack-exhaustion defence).
+            name: CodeTLVDepthExceeded
+            value: "0x00_03_16_04"
         type: errs.Code
-        value: "0x00_03_16_04"
-      - name: CodeTLVSizeExceeded
+      - const:
+          - doc: |-
+              CodeTLVSizeExceeded identifies an Unmarshal input whose length exceeds
+              the 10 MiB hard cap (CWE-400 memory-exhaustion defence).
+            name: CodeTLVSizeExceeded
+            value: "0x00_03_16_05"
         type: errs.Code
-        value: "0x00_03_16_05"
-      - name: CodeTLVTruncated
+      - const:
+          - doc: |-
+              CodeTLVTruncated identifies a buffer that ends mid-record (length
+              declared but value bytes missing, or varint declared but bytes missing).
+            name: CodeTLVTruncated
+            value: "0x00_03_16_06"
         type: errs.Code
-        value: "0x00_03_16_06"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/data/codec/tlv
-    variables:
-      - name: MarshalFailed
-        type: "*errs.Error"
-      - name: UnmarshalFailed
-        type: "*errs.Error"
-      - name: UnsupportedType
-        type: "*errs.Error"
-      - name: DepthExceeded
-        type: "*errs.Error"
-      - name: SizeExceeded
-        type: "*errs.Error"
-      - name: Truncated
-        type: "*errs.Error"
+    sentinels:
+      - var:
+          - code: CodeTLVMarshalFailed
+            doc: MarshalFailed wraps an encode-side failure in the TLV codec.
+            name: MarshalFailed
+            private: "service/data/codec/tlv: Marshal/Append/Encode failed during reflection-driven encode"
+            public: TLV encoding failed
+            reason: MARSHAL_FAILED
+          - code: CodeTLVUnmarshalFailed
+            doc: UnmarshalFailed wraps a decode-side failure in the TLV codec.
+            name: UnmarshalFailed
+            private: "service/data/codec/tlv: Unmarshal/Decode failed (malformed record, type mismatch, reader error)"
+            public: TLV decoding failed
+            reason: UNMARSHAL_FAILED
+          - code: CodeTLVUnsupportedType
+            doc: |-
+              UnsupportedType fires for values the TLV format cannot represent
+              (chan, func, complex*, unsafe.Pointer).
+            name: UnsupportedType
+            private: "service/data/codec/tlv: reflect.Kind is not representable in the TLV wire format"
+            public: TLV codec cannot encode this type
+            reason: UNSUPPORTED_TYPE
+          - code: CodeTLVDepthExceeded
+            doc: DepthExceeded fires when a nested value exceeds the 32-level cap.
+            name: DepthExceeded
+            private: "service/data/codec/tlv: nesting depth > maxTLVDepth (CWE-674 defence)"
+            public: TLV nesting depth exceeds limit
+            reason: DEPTH_EXCEEDED
+          - code: CodeTLVSizeExceeded
+            doc: SizeExceeded fires when an Unmarshal input exceeds the 10 MiB cap.
+            name: SizeExceeded
+            private: "service/data/codec/tlv: len(data) exceeds maxTLVBytes (CWE-400 defence)"
+            public: TLV input exceeds size limit
+            reason: SIZE_EXCEEDED
+          - code: CodeTLVTruncated
+            doc: Truncated fires when a buffer ends mid-record.
+            name: Truncated
+            private: "service/data/codec/tlv: buffer ended before the declared record length was satisfied"
+            public: TLV buffer truncated
+            reason: TRUNCATED
   - functions:
       - name: New
         out:

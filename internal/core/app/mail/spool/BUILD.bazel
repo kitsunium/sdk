@@ -5,7 +5,7 @@ package(default_visibility = ["//internal/core:core_consumers"])
 go_library(
     name = "spool",
     srcs = [
-        "codes.go",
+        "codes_gen.go",
         "errors.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/app/mail/spool",
@@ -35,8 +35,5 @@ filegroup(
 go_test(
     name = "spool_test",
     srcs = ["api_gen_test.go"],
-    deps = [
-        ":spool",
-        "//internal/kernel/errs",
-    ],
+    deps = [":spool"],
 )

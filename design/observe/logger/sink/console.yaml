@@ -1,26 +1,52 @@
 apiVersion: kit.kitsunium/design/v2
 domain: observe/logger/sink/console
 packages:
-  - constants:
-      - name: CodeWriterNil
+  - codes:
+      - const:
+          - doc: CodeWriterNil identifies a New call made with a nil io.Writer.
+            name: CodeWriterNil
+            note: "range: 0.3.13.0 - 0.3.13.255"
+            value: "0x00_03_0D_01"
         type: errs.Code
-        value: "0x00_03_0D_01"
-      - name: CodeCtxCancelled
+      - const:
+          - comment: 0.3.13.10 (serial 10)
+            doc: CodeCtxCancelled identifies a Write call whose context was already done.
+            name: CodeCtxCancelled
+            value: "0x00_03_0D_0A"
         type: errs.Code
-        value: "0x00_03_0D_0A"
-      - name: CodeWriteFailed
+      - const:
+          - comment: 0.3.13.20 (serial 20)
+            doc: |-
+              CodeWriteFailed identifies a Write call whose underlying io.Writer
+              returned a non-nil error; ExitCode defaults to 74 (EX_IOERR) for this case.
+            name: CodeWriteFailed
+            value: "0x00_03_0D_14"
         type: errs.Code
-        value: "0x00_03_0D_14"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/observe/logger/sink/console
-    variables:
-      - name: WriterNil
-        type: "*errs.Error"
-      - name: CtxCancelled
-        type: "*errs.Error"
-      - name: WriteFailed
-        type: "*errs.Error"
+    sentinels:
+      - var:
+          - code: CodeWriterNil
+            doc: WriterNil is returned when New receives a nil io.Writer.
+            name: WriterNil
+            private: service/observe/logger/sink/console.New called with nil io.Writer
+            public: Console sink requires a non-nil writer
+            reason: WRITER_NIL
+          - code: CodeCtxCancelled
+            doc: CtxCancelled wraps a cancelled context at Write time.
+            name: CtxCancelled
+            private: service/observe/logger/sink/console.Write invoked with cancelled context
+            public: Logging aborted due to cancellation
+            reason: CTX_CANCELLED
+          - code: CodeWriteFailed
+            doc: WriteFailed wraps the underlying writer's error at Write time.
+            name: WriteFailed
+            options:
+              - errs.WithExitCode(exitIOErr)
+            private: service/observe/logger/sink/console.Write underlying io.Writer returned an error
+            public: Console write failed
+            reason: WRITE_FAILED
   - functions:
       - in:
           - name: w

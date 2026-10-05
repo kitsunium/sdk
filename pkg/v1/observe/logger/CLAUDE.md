@@ -31,9 +31,9 @@ tracecontext.go — TraceContext / TraceContextSource aliases + TraceContextFrom
 kind.go        — Kind alias + KindAny|Bool|Duration|Float64|Int64|String|Time|Uint64|Group
                  constants (what Value.Kind() returns; needed to assert on MemorySink records)
 version.go     — Version var (ldflags injection point), FrameworkVersion()
-codes.go       — CodeWriterRequired / CodeSinkConfigRequired / CodeWriterSpecInvalid
+codes_gen.go   — CodeWriterRequired / CodeSinkConfigRequired / CodeWriterSpecInvalid
                  / CodeTopologyInvalid (range 1.1.0.*)
-errors.go      — WriterRequired / SinkConfigRequired / WriterSpecInvalid /
+codes_gen.go   — WriterRequired / SinkConfigRequired / WriterSpecInvalid /
                  TopologyInvalid sentinels (errs.Define)
 caller.go      — WithCaller (adds the emitting call site; skip reserves frames for
                  wrapper layers)

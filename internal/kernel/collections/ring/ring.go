@@ -1,3 +1,9 @@
+// Package ring — range 0.1.3.* (ADR 0005 kernel/collections/ring block).
+//
+// Package ring — declares the sentinels returned by this package's
+// constructor and TryWrite / TryRead operations. Each var's name equals its
+// errs.Define Reason in SCREAMING_SNAKE form.
+//
 // Package ring provides a lock-free single-producer / single-consumer (SPSC)
 // ring buffer built on sync/atomic. The SPSC constraint gives the maximum
 // throughput for any hot-path producer that serialises enqueues — metrics

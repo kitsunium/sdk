@@ -5,7 +5,7 @@ package(default_visibility = ["//internal/core:core_consumers"])
 go_library(
     name = "syslog",
     srcs = [
-        "codes.go",
+        "codes_gen.go",
         "errors.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/observe/logger/sink/syslog",
@@ -32,7 +32,6 @@ go_test(
         "errors_internal_test.go",
     ],
     embed = [":syslog"],
-    deps = ["//internal/kernel/errs"],
 )
 
 # audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.

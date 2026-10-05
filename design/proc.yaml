@@ -1,76 +1,171 @@
 apiVersion: kit.kitsunium/design/v2
 domain: proc
 packages:
-  - constants:
-      - name: CodeUnsupportedPlatform
+  - codes:
+      - const:
+          - doc: |-
+              CodeUnsupportedPlatform identifies a primitive invoked on an operating system
+              that cannot provide it (e.g. cgroup or subreaper off Linux). The no-op stub
+              returns it instead of panicking.
+            name: CodeUnsupportedPlatform
+            note: "range: 0.2.6.0 - 0.2.6.255"
+            value: "0x00_02_06_01"
         type: errs.Code
-        value: "0x00_02_06_01"
-      - name: CodeInvalidSpec
+      - const:
+          - doc: |-
+              CodeInvalidSpec identifies a Start call whose Spec is malformed — an empty
+              Path or a contradictory attribute combination.
+            name: CodeInvalidSpec
+            value: "0x00_02_06_02"
         type: errs.Code
-        value: "0x00_02_06_02"
-      - name: CodeUnknownUser
+      - const:
+          - doc: |-
+              CodeUnknownUser identifies a Spec naming a User that does not resolve to a uid
+              on the host.
+            name: CodeUnknownUser
+            value: "0x00_02_06_03"
         type: errs.Code
-        value: "0x00_02_06_03"
-      - name: CodeUnknownGroup
+      - const:
+          - doc: |-
+              CodeUnknownGroup identifies a Spec naming a Group or supplementary group that
+              does not resolve to a gid on the host.
+            name: CodeUnknownGroup
+            value: "0x00_02_06_04"
         type: errs.Code
-        value: "0x00_02_06_04"
-      - name: CodeSpawnFailed
+      - const:
+          - doc: |-
+              CodeSpawnFailed identifies a fork/exec failure when starting the process — a
+              missing binary, a permission denial, or a kernel resource fault.
+            name: CodeSpawnFailed
+            value: "0x00_02_06_05"
         type: errs.Code
-        value: "0x00_02_06_05"
-      - name: CodeWaitFailed
+      - const:
+          - doc: |-
+              CodeWaitFailed identifies a wait4 failure while reaping the leader — a host
+              fault, not a normal non-zero exit (which is reported via ExitValue).
+            name: CodeWaitFailed
+            value: "0x00_02_06_06"
         type: errs.Code
-        value: "0x00_02_06_06"
-      - name: CodeSignalFailed
+      - const:
+          - doc: |-
+              CodeSignalFailed identifies a kill(2) failure delivering a signal to a process
+              or process group.
+            name: CodeSignalFailed
+            value: "0x00_02_06_07"
         type: errs.Code
-        value: "0x00_02_06_07"
-      - name: CodeStopFailed
+      - const:
+          - doc: |-
+              CodeStopFailed identifies a graceful-stop that could not terminate the process
+              group even after escalating to SIGKILL.
+            name: CodeStopFailed
+            value: "0x00_02_06_08"
         type: errs.Code
-        value: "0x00_02_06_08"
-      - name: CodeUnknownSignal
+      - const:
+          - doc: |-
+              CodeUnknownSignal identifies a Parse call whose name or number is not in the
+              platform signal table.
+            name: CodeUnknownSignal
+            value: "0x00_02_06_09"
         type: errs.Code
-        value: "0x00_02_06_09"
-      - name: CodeRelayFailed
+      - const:
+          - doc: |-
+              CodeRelayFailed identifies a Relay that could not forward a received signal to
+              its target process or group.
+            name: CodeRelayFailed
+            value: "0x00_02_06_0A"
         type: errs.Code
-        value: "0x00_02_06_0A"
-      - name: CodeSubreaperFailed
+      - const:
+          - doc: |-
+              CodeSubreaperFailed identifies a prctl(PR_SET_CHILD_SUBREAPER) failure when
+              arming subreaper semantics for a non-PID1 supervisor.
+            name: CodeSubreaperFailed
+            value: "0x00_02_06_0B"
         type: errs.Code
-        value: "0x00_02_06_0B"
-      - name: CodeReapFailed
+      - const:
+          - doc: |-
+              CodeReapFailed identifies a wait4 failure during a reap sweep other than the
+              benign "no children" condition.
+            name: CodeReapFailed
+            value: "0x00_02_06_0C"
         type: errs.Code
-        value: "0x00_02_06_0C"
-      - name: CodeUnknownResource
+      - const:
+          - doc: |-
+              CodeUnknownResource identifies an Apply call naming a Resource the platform
+              does not map to an RLIMIT_* constant.
+            name: CodeUnknownResource
+            value: "0x00_02_06_0D"
         type: errs.Code
-        value: "0x00_02_06_0D"
-      - name: CodeRlimitFailed
+      - const:
+          - doc: |-
+              CodeRlimitFailed identifies a setrlimit(2) failure applying a per-process
+              resource limit.
+            name: CodeRlimitFailed
+            value: "0x00_02_06_0E"
         type: errs.Code
-        value: "0x00_02_06_0E"
-      - name: CodeCgroupUnavailable
+      - const:
+          - doc: |-
+              CodeCgroupUnavailable identifies a cgroup operation attempted where cgroup v2
+              is not mounted or not delegated to the caller.
+            name: CodeCgroupUnavailable
+            value: "0x00_02_06_0F"
         type: errs.Code
-        value: "0x00_02_06_0F"
-      - name: CodeCgroupCreateFailed
+      - const:
+          - doc: |-
+              CodeCgroupCreateFailed identifies a failure creating a control-group directory
+              under the cgroup v2 hierarchy.
+            name: CodeCgroupCreateFailed
+            value: "0x00_02_06_10"
         type: errs.Code
-        value: "0x00_02_06_10"
-      - name: CodeCgroupWriteFailed
+      - const:
+          - doc: |-
+              CodeCgroupWriteFailed identifies a failure writing a controller file
+              (memory.max, cpu.max, pids.max, io.max, cgroup.procs).
+            name: CodeCgroupWriteFailed
+            value: "0x00_02_06_11"
         type: errs.Code
-        value: "0x00_02_06_11"
-      - name: CodeCgroupDeleteFailed
+      - const:
+          - doc: CodeCgroupDeleteFailed identifies a failure removing a control-group directory.
+            name: CodeCgroupDeleteFailed
+            value: "0x00_02_06_12"
         type: errs.Code
-        value: "0x00_02_06_12"
-      - name: CodeNotifyFailed
+      - const:
+          - doc: |-
+              CodeNotifyFailed identifies a failure sending an sd_notify datagram to
+              $NOTIFY_SOCKET (distinct from the no-op when the variable is unset).
+            name: CodeNotifyFailed
+            value: "0x00_02_06_13"
         type: errs.Code
-        value: "0x00_02_06_13"
-      - name: CodeListenFailed
+      - const:
+          - doc: |-
+              CodeListenFailed identifies a failure creating or binding the supervisor-side
+              sd_notify datagram socket.
+            name: CodeListenFailed
+            value: "0x00_02_06_14"
         type: errs.Code
-        value: "0x00_02_06_14"
-      - name: CodeInvalidNotification
+      - const:
+          - doc: |-
+              CodeInvalidNotification identifies a received sd_notify datagram that could not
+              be parsed into NAME=value fields.
+            name: CodeInvalidNotification
+            value: "0x00_02_06_15"
         type: errs.Code
-        value: "0x00_02_06_15"
-      - name: CodeCredentialMismatch
+      - const:
+          - doc: |-
+              CodeCredentialMismatch identifies a received datagram whose kernel-verified
+              sender credentials did not match the expected supervised process.
+            name: CodeCredentialMismatch
+            value: "0x00_02_06_16"
         type: errs.Code
-        value: "0x00_02_06_16"
-      - name: CodeStdioCaptureFailed
+      - const:
+          - doc: |-
+              CodeStdioCaptureFailed identifies a StdioCapture spawn whose output copier
+              could not deliver the child's stdout/stderr to the caller's writer (the writer
+              itself returned an error). Surfaced from Wait when the process otherwise
+              exited cleanly.
+            name: CodeStdioCaptureFailed
+            value: "0x00_02_06_17"
         type: errs.Code
-        value: "0x00_02_06_17"
+    constants:
       - name: LimitInfinity
         type: uint64
         value: "18446744073709551615"
@@ -312,6 +407,239 @@ packages:
               - type: int
               - type: error
         name: Reaper
+    sentinels:
+      - var:
+          - code: CodeUnsupportedPlatform
+            doc: |-
+              UnsupportedPlatform is returned by a primitive invoked on an operating
+              system that cannot provide it; the no-op stub returns it, never a panic.
+            name: UnsupportedPlatform
+            options:
+              - errs.WithExitCode(exitUnavailable)
+            private: "core/proc: primitive unavailable on the current GOOS; the stub returns this instead of acting"
+            public: This operation is not supported on this platform
+            reason: UNSUPPORTED_PLATFORM
+          - code: CodeInvalidSpec
+            doc: |-
+              InvalidSpec is returned by Start when the Spec is malformed — an empty Path
+              or a contradictory attribute combination.
+            name: InvalidSpec
+            options:
+              - errs.WithExitCode(exitUsage)
+            private: "service/proc/exec.Start: Spec is malformed (empty Path or contradictory attributes)"
+            public: Process specification is invalid
+            reason: INVALID_SPEC
+          - code: CodeUnknownUser
+            doc: |-
+              UnknownUser is returned when a Spec names a User that does not resolve to a
+              uid on the host.
+            name: UnknownUser
+            options:
+              - errs.WithExitCode(exitNoUser)
+            private: "service/proc/exec.Start: Spec.User did not resolve to a uid via os/user"
+            public: The requested user does not exist
+            reason: UNKNOWN_USER
+          - code: CodeUnknownGroup
+            doc: |-
+              UnknownGroup is returned when a Spec names a Group or supplementary group
+              that does not resolve to a gid on the host.
+            name: UnknownGroup
+            options:
+              - errs.WithExitCode(exitNoUser)
+            private: "service/proc/exec.Start: Spec.Group/Groups did not resolve to a gid via os/user"
+            public: The requested group does not exist
+            reason: UNKNOWN_GROUP
+          - code: CodeSpawnFailed
+            doc: |-
+              SpawnFailed is returned when fork/exec fails — a missing binary, a
+              permission denial, or a kernel resource fault.
+            name: SpawnFailed
+            options:
+              - errs.WithExitCode(exitOSErr)
+            private: "service/proc/exec.Start: fork/exec failed"
+            public: Could not start the process
+            reason: SPAWN_FAILED
+          - code: CodeWaitFailed
+            doc: |-
+              WaitFailed is returned when wait4 fails reaping the leader — a host fault,
+              not a normal non-zero exit (reported via ExitValue instead).
+            name: WaitFailed
+            options:
+              - errs.WithExitCode(exitOSErr)
+            private: "service/proc/exec.Wait: wait4 returned an unexpected error"
+            public: Could not wait for the process to exit
+            reason: WAIT_FAILED
+          - code: CodeSignalFailed
+            doc: |-
+              SignalFailed is returned when kill(2) fails delivering a signal to a
+              process or process group.
+            name: SignalFailed
+            options:
+              - errs.WithExitCode(exitOSErr)
+            private: "service/proc: kill(2) failed for the target pid or process group"
+            public: Could not deliver the signal
+            reason: SIGNAL_FAILED
+          - code: CodeStopFailed
+            doc: |-
+              StopFailed is returned when a graceful stop cannot terminate the process
+              group even after escalating to SIGKILL.
+            name: StopFailed
+            options:
+              - errs.WithExitCode(exitOSErr)
+            private: "service/proc/exec.Stop: process group survived signal escalation to SIGKILL"
+            public: Could not stop the process
+            reason: STOP_FAILED
+          - code: CodeUnknownSignal
+            doc: |-
+              UnknownSignal is returned by Parse when the name or number is not in the
+              platform signal table.
+            name: UnknownSignal
+            options:
+              - errs.WithExitCode(exitUsage)
+            private: "core/proc.Parse: input is not a signal known on this platform"
+            public: Unknown signal name or number
+            reason: UNKNOWN_SIGNAL
+          - code: CodeRelayFailed
+            doc: |-
+              RelayFailed is returned by Relay when a received signal cannot be forwarded
+              to its target process or group.
+            name: RelayFailed
+            options:
+              - errs.WithExitCode(exitOSErr)
+            private: "service/proc/signal.Relay: forwarding the signal to the target failed"
+            public: Could not relay the signal to the target
+            reason: RELAY_FAILED
+          - code: CodeSubreaperFailed
+            doc: |-
+              SubreaperFailed is returned when prctl(PR_SET_CHILD_SUBREAPER) fails arming
+              subreaper semantics for a non-PID1 supervisor.
+            name: SubreaperFailed
+            options:
+              - errs.WithExitCode(exitOSErr)
+            private: "service/proc/reaper.SetChildSubreaper: prctl(PR_SET_CHILD_SUBREAPER) failed"
+            public: Could not enable child-subreaper mode
+            reason: SUBREAPER_FAILED
+          - code: CodeReapFailed
+            doc: |-
+              ReapFailed is returned when a reap sweep hits a wait4 error other than the
+              benign "no children" condition.
+            name: ReapFailed
+            options:
+              - errs.WithExitCode(exitOSErr)
+            private: "service/proc/reaper.ReapOnce: wait4 failed with an error other than ECHILD"
+            public: Could not reap child processes
+            reason: REAP_FAILED
+          - code: CodeUnknownResource
+            doc: |-
+              UnknownResource is returned by Apply when a Resource has no RLIMIT_*
+              mapping on the platform.
+            name: UnknownResource
+            options:
+              - errs.WithExitCode(exitUsage)
+            private: "service/proc/rlimit.Apply: Resource has no RLIMIT_* mapping on this platform"
+            public: Unknown or unsupported resource limit
+            reason: UNKNOWN_RESOURCE
+          - code: CodeRlimitFailed
+            doc: |-
+              RlimitFailed is returned when setrlimit(2) fails applying a per-process
+              resource limit.
+            name: RlimitFailed
+            options:
+              - errs.WithExitCode(exitOSErr)
+            private: "service/proc/rlimit.Apply: setrlimit(2) failed"
+            public: Could not apply the resource limit
+            reason: RLIMIT_FAILED
+          - code: CodeCgroupUnavailable
+            doc: |-
+              CgroupUnavailable is returned when a cgroup operation runs where cgroup v2
+              is not mounted or not delegated to the caller.
+            name: CgroupUnavailable
+            options:
+              - errs.WithExitCode(exitUnavailable)
+            private: "service/proc/cgroup: the unified cgroup v2 hierarchy is absent or not writable by the caller"
+            public: cgroup v2 is not available or not delegated
+            reason: CGROUP_UNAVAILABLE
+          - code: CodeCgroupCreateFailed
+            doc: |-
+              CgroupCreateFailed is returned when a control-group directory cannot be
+              created under the cgroup v2 hierarchy.
+            name: CgroupCreateFailed
+            options:
+              - errs.WithExitCode(exitOSErr)
+            private: "service/proc/cgroup.Create: mkdir under the cgroup v2 hierarchy failed"
+            public: Could not create the control group
+            reason: CGROUP_CREATE_FAILED
+          - code: CodeCgroupWriteFailed
+            doc: |-
+              CgroupWriteFailed is returned when a controller file cannot be written
+              (memory.max, cpu.max, pids.max, io.max, cgroup.procs).
+            name: CgroupWriteFailed
+            options:
+              - errs.WithExitCode(exitOSErr)
+            private: "service/proc/cgroup: writing a controller file failed (controller disabled or value rejected)"
+            public: Could not write the cgroup controller file
+            reason: CGROUP_WRITE_FAILED
+          - code: CodeCgroupDeleteFailed
+            doc: |-
+              CgroupDeleteFailed is returned when a control-group directory cannot be
+              removed.
+            name: CgroupDeleteFailed
+            options:
+              - errs.WithExitCode(exitOSErr)
+            private: "service/proc/cgroup.Delete: rmdir of the control group failed (still populated?)"
+            public: Could not delete the control group
+            reason: CGROUP_DELETE_FAILED
+          - code: CodeNotifyFailed
+            doc: |-
+              NotifyFailed is returned when an sd_notify datagram cannot be sent to
+              $NOTIFY_SOCKET — distinct from the no-op when the variable is unset.
+            name: NotifyFailed
+            options:
+              - errs.WithExitCode(exitOSErr)
+            private: "service/proc/systemd/notify: writing to $NOTIFY_SOCKET failed"
+            public: Could not send the sd_notify datagram
+            reason: NOTIFY_FAILED
+          - code: CodeListenFailed
+            doc: |-
+              ListenFailed is returned when the supervisor-side sd_notify datagram socket
+              cannot be created or bound.
+            name: ListenFailed
+            options:
+              - errs.WithExitCode(exitOSErr)
+            private: "service/proc/systemd/notify.Listen: creating or binding the AF_UNIX datagram socket failed"
+            public: Could not create the sd_notify listener socket
+            reason: LISTEN_FAILED
+          - code: CodeInvalidNotification
+            doc: |-
+              InvalidNotification is returned when a received sd_notify datagram cannot
+              be parsed into NAME=value fields.
+            name: InvalidNotification
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "service/proc/systemd/notify.Recv: datagram did not parse into NAME=value fields"
+            public: Received sd_notify datagram is malformed
+            reason: INVALID_NOTIFICATION
+          - code: CodeCredentialMismatch
+            doc: |-
+              CredentialMismatch is returned when a received datagram's kernel-verified
+              sender credentials do not match the expected supervised process.
+            name: CredentialMismatch
+            options:
+              - errs.WithExitCode(exitNoPerm)
+            private: "service/proc/systemd/notify.Recv: SO_PASSCRED sender pid is not the expected supervised process"
+            public: Datagram sender credentials did not match
+            reason: CREDENTIAL_MISMATCH
+          - code: CodeStdioCaptureFailed
+            doc: |-
+              StdioCaptureFailed is returned from Wait when a StdioCapture copier could
+              not deliver the child's stdout/stderr to the caller's writer (the writer
+              itself errored), even though the process exited cleanly.
+            name: StdioCaptureFailed
+            options:
+              - errs.WithExitCode(exitIOErr)
+            private: "service/proc/exec: a StdioCapture copier failed writing the child's stdout/stderr to the caller's sink"
+            public: Could not deliver the captured output to the writer
+            reason: STDIO_CAPTURE_FAILED
     types:
       - methods:
           - name: Success
@@ -471,53 +799,6 @@ packages:
             recv: value
         name: StdioMode
         underlying: uint8
-    variables:
-      - name: UnsupportedPlatform
-        type: "*errs.Error"
-      - name: InvalidSpec
-        type: "*errs.Error"
-      - name: UnknownUser
-        type: "*errs.Error"
-      - name: UnknownGroup
-        type: "*errs.Error"
-      - name: SpawnFailed
-        type: "*errs.Error"
-      - name: WaitFailed
-        type: "*errs.Error"
-      - name: SignalFailed
-        type: "*errs.Error"
-      - name: StopFailed
-        type: "*errs.Error"
-      - name: UnknownSignal
-        type: "*errs.Error"
-      - name: RelayFailed
-        type: "*errs.Error"
-      - name: SubreaperFailed
-        type: "*errs.Error"
-      - name: ReapFailed
-        type: "*errs.Error"
-      - name: UnknownResource
-        type: "*errs.Error"
-      - name: RlimitFailed
-        type: "*errs.Error"
-      - name: CgroupUnavailable
-        type: "*errs.Error"
-      - name: CgroupCreateFailed
-        type: "*errs.Error"
-      - name: CgroupWriteFailed
-        type: "*errs.Error"
-      - name: CgroupDeleteFailed
-        type: "*errs.Error"
-      - name: NotifyFailed
-        type: "*errs.Error"
-      - name: ListenFailed
-        type: "*errs.Error"
-      - name: InvalidNotification
-        type: "*errs.Error"
-      - name: CredentialMismatch
-        type: "*errs.Error"
-      - name: StdioCaptureFailed
-        type: "*errs.Error"
   - functions:
       - name: Available
         out:

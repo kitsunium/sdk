@@ -72,7 +72,7 @@ before.
 | `sum_value.go` / `gauge_value.go` / `histogram_value.go` | the three per-series point types |
 | `snapshot_value.go` | `SumMetricValue`/`GaugeMetricValue`/`HistogramMetricValue` + `SnapshotValue` |
 | `exporter.go` | `ExporterName` + the `Exporter` registry (`RegisterExporter`/`LookupExporter`/`AvailableExporters`/`Export`) over `internal/kernel/plugin.Registry` — the table `core/observe/trace`'s exporter registry runs on too |
-| `codes.go` / `errors.go` | `0.2.9.*` (UNKNOWN_EXPORTER, EXPORT_FAILED, INSTRUMENT_KIND_CONFLICT, INVALID_ATTRIBUTE, DUPLICATE_REGISTRATION, INVALID_TEMPORALITY, INVALID_DESCRIPTION, DESCRIPTION_CONFLICT) and the engine's `0.3.45.*` (INVALID_METRIC_NAME, INVALID_LABEL_NAME, RESERVED_LABEL_NAME, UNSUPPORTED_TEMPORALITY, OTLP_UNRESOLVED_TEMPORALITY, OTLP_INVALID_BUCKET_LAYOUT, OTLP_ENDPOINT_INVALID, OTLP_EXPORT_REJECTED, OTLP_EXPORT_UNAVAILABLE, OTLP_PARTIAL_SUCCESS — ADR 0160) |
+| `codes_gen.go` | `0.2.9.*` (UNKNOWN_EXPORTER, EXPORT_FAILED, INSTRUMENT_KIND_CONFLICT, INVALID_ATTRIBUTE, DUPLICATE_REGISTRATION, INVALID_TEMPORALITY, INVALID_DESCRIPTION, DESCRIPTION_CONFLICT) and the engine's `0.3.45.*` (INVALID_METRIC_NAME, INVALID_LABEL_NAME, RESERVED_LABEL_NAME, UNSUPPORTED_TEMPORALITY, OTLP_UNRESOLVED_TEMPORALITY, OTLP_INVALID_BUCKET_LAYOUT, OTLP_ENDPOINT_INVALID, OTLP_EXPORT_REJECTED, OTLP_EXPORT_UNAVAILABLE, OTLP_PARTIAL_SUCCESS — ADR 0160) — written by kit gen from `design/observe/metrics.yaml` (ADR 0164) |
 
 `pkg/v1/observe/metrics` publishes these under shorter names — `Snapshot`,
 `SumPoint`/`SumMetric`, … — and aliases `Attr`, `Resource` and `Scope` to

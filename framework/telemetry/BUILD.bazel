@@ -5,8 +5,7 @@ package(default_visibility = ["//visibility:public"])
 go_library(
     name = "telemetry",
     srcs = [
-        "codes.go",
-        "errors.go",
+        "codes_gen.go",
         "exporter.go",
         "exporter_compliance.go",
         "telemetry.go",

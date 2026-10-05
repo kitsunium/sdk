@@ -38,7 +38,7 @@
         "value": "0.3.38.1"
       },
       "doc": "CodeProtobufMarshalFailed identifies a Marshal failure — either the value is\nnot a proto.Message (Protobuf is schema-bound) or google.golang.org/protobuf\n/proto.Marshal returned an error.\n",
-      "file": "codes.go",
+      "file": "codes_gen.go",
       "layer": "thirdparty"
     },
     {
@@ -53,7 +53,7 @@
         "value": "0.3.38.3"
       },
       "doc": "CodeProtobufSizeExceeded identifies an Unmarshal input over the 10 MiB cap\n(CWE-400 defence before the decoder allocates).\n",
-      "file": "codes.go",
+      "file": "codes_gen.go",
       "layer": "thirdparty"
     },
     {
@@ -68,7 +68,7 @@
         "value": "0.3.38.2"
       },
       "doc": "CodeProtobufUnmarshalFailed identifies an Unmarshal failure — the target is\nnot a proto.Message, or proto.Unmarshal rejected the wire bytes.\n",
-      "file": "codes.go",
+      "file": "codes_gen.go",
       "layer": "thirdparty"
     },
     {
@@ -95,7 +95,7 @@
         "public": "Protobuf encoding failed"
       },
       "doc": "MarshalFailed wraps a non-proto.Message value or a proto.Marshal failure.\n",
-      "file": "errors.go",
+      "file": "codes_gen.go",
       "layer": "thirdparty"
     },
     {
@@ -122,7 +122,7 @@
         "public": "Protobuf input exceeds size limit"
       },
       "doc": "SizeExceeded marks an Unmarshal input over the 10 MiB hard cap.\n",
-      "file": "errors.go",
+      "file": "codes_gen.go",
       "layer": "thirdparty"
     },
     {
@@ -138,7 +138,7 @@
         "public": "Protobuf decoding failed"
       },
       "doc": "UnmarshalFailed wraps a non-proto.Message target or a proto.Unmarshal failure.\n",
-      "file": "errors.go",
+      "file": "codes_gen.go",
       "layer": "thirdparty"
     }
   ]

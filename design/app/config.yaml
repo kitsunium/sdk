@@ -1,28 +1,66 @@
 apiVersion: kit.kitsunium/design/v2
 domain: app/config
 packages:
-  - constants:
-      - name: CodeConfigSourceFailed
+  - codes:
+      - const:
+          - doc: |-
+              CodeConfigSourceFailed identifies a Source.Load that failed to read its backing
+              store (missing file, unreadable env, etc.).
+            name: CodeConfigSourceFailed
+            note: "range: 0.2.10.0 - 0.2.10.255"
+            value: "0x00_02_0A_01"
         type: errs.Code
-        value: "0x00_02_0A_01"
-      - name: CodeConfigDecodeFailed
+      - const:
+          - doc: |-
+              CodeConfigDecodeFailed identifies a merged-map → target-struct decode failure (type
+              mismatch, malformed value).
+            name: CodeConfigDecodeFailed
+            value: "0x00_02_0A_02"
         type: errs.Code
-        value: "0x00_02_0A_02"
-      - name: CodeConfigValidationFailed
+      - const:
+          - doc: |-
+              CodeConfigValidationFailed identifies a decoded config whose Validate() returned an
+              error (the wrap cause is the validation error).
+            name: CodeConfigValidationFailed
+            value: "0x00_02_0A_03"
         type: errs.Code
-        value: "0x00_02_0A_03"
-      - name: CodeConfigWatchFailed
+      - const:
+          - doc: |-
+              CodeConfigWatchFailed identifies a Watcher that could not observe its source (stat
+              failure, unsupported target).
+            name: CodeConfigWatchFailed
+            value: "0x00_02_0A_04"
         type: errs.Code
-        value: "0x00_02_0A_04"
-      - name: CodeConfigSchemaInvalid
+      - const:
+          - doc: |-
+              CodeConfigSchemaInvalid identifies a Schema refused AT CONSTRUCTION: a
+              malformed key, a key that names nothing in the target type, a duplicate key,
+              a default value that cannot travel through the loader's JSON round trip, or a
+              default that violates the very constraint the schema declares for its own key.
+              It is never a load outcome — no source was ever read.
+            name: CodeConfigSchemaInvalid
+            value: "0x00_02_0A_05"
         type: errs.Code
-        value: "0x00_02_0A_05"
-      - name: CodeConfigKeyMissing
+      - const:
+          - doc: |-
+              CodeConfigKeyMissing identifies a load in which the schema declared a key
+              REQUIRED and no source supplied it. It is a load outcome, not a construction
+              one: the schema was well-formed, the deployment was not. Every missing key is
+              named in one error — an operator who restarts a service to discover the next
+              one is the failure a report prevents.
+            name: CodeConfigKeyMissing
+            value: "0x00_02_0A_06"
         type: errs.Code
-        value: "0x00_02_0A_06"
-      - name: CodeConfigUnknownKey
+      - const:
+          - doc: |-
+              CodeConfigUnknownKey identifies a load in which a source supplied a key the
+              target type cannot address. The default is to REFUSE it, because the usual
+              cause is a typo in an environment variable and the usual symptom of ignoring
+              it is a production incident in which a setting silently never applied.
+            name: CodeConfigUnknownKey
+            value: "0x00_02_0A_07"
         type: errs.Code
-        value: "0x00_02_0A_07"
+    constants:
       - name: LayerDefault
         type: string
         value: "\"default\""
@@ -95,6 +133,94 @@ packages:
             out:
               - type: error
         name: Watcher
+    sentinels:
+      - var:
+          - code: CodeConfigSourceFailed
+            doc: ConfigSourceFailed wraps a Source.Load read failure.
+            name: ConfigSourceFailed
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "service/app/config: a Source.Load failed to read its backing store"
+            public: A configuration source could not be read
+            reason: CONFIG_SOURCE_FAILED
+          - code: CodeConfigDecodeFailed
+            doc: ConfigDecodeFailed wraps a merged-map → struct decode failure.
+            name: ConfigDecodeFailed
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "service/app/config: merged map did not decode into the target struct"
+            public: The configuration could not be decoded into the target
+            reason: CONFIG_DECODE_FAILED
+          - code: CodeConfigValidationFailed
+            doc: ConfigValidationFailed wraps a decoded config's Validate() error.
+            name: ConfigValidationFailed
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "service/app/config: the decoded config's Validate() returned an error"
+            public: The configuration failed validation
+            reason: CONFIG_VALIDATION_FAILED
+          - code: CodeConfigWatchFailed
+            doc: ConfigWatchFailed wraps a Watcher observation failure.
+            name: ConfigWatchFailed
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "service/app/config: the poll watcher failed to stat its target"
+            public: The configuration watcher could not observe its source
+            reason: CONFIG_WATCH_FAILED
+          - code: CodeConfigSchemaInvalid
+            doc: |-
+              ConfigSchemaInvalid is returned by the Schema CONSTRUCTOR, never by a
+              load: the schema itself contradicts the type it declares, or contradicts
+              itself. Its fields name the key and the clause that failed and NEVER the
+              value, because a default may be a credential the author wrote in source.
+
+              It is the ADR 0031 half that must not be confused with the other: a
+              configuration with NO schema is legitimate and loads, while a schema that
+              declares a default outside the bounds it also declares would silently
+              produce an invalid configuration whenever the operator omitted the key —
+              a failure that appears only on the deployment where nobody set it.
+            name: ConfigSchemaInvalid
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "service/app/config: a Schema was refused at construction; the fields name the key and the clause that failed"
+            public: The configuration schema cannot be built as declared
+            reason: CONFIG_SCHEMA_INVALID
+          - code: CodeConfigKeyMissing
+            doc: |-
+              ConfigKeyMissing is returned by a LOAD when the schema declares a key
+              required and no source supplied it. Its fields name every missing key —
+              all of them, in one error — and the count. It never names a value,
+              because a missing key has none and a neighbouring one may be a secret.
+
+              It is distinct from the validation domain's `required` rule on purpose,
+              and the difference is the one this domain exists to keep: this sentinel
+              answers "was the KEY supplied?", decided on the merged map while the key
+              is still a key; validation's `required` answers "is the VALUE non-zero?",
+              decided after the decode, where an absent key and an explicit zero are
+              the same bytes. `port = 0` satisfies this one and fails that one.
+            name: ConfigKeyMissing
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "service/app/config: a schema declared keys required and no source supplied them"
+            public: The configuration is missing required keys
+            reason: CONFIG_KEY_MISSING
+          - code: CodeConfigUnknownKey
+            doc: |-
+              ConfigUnknownKey is returned by a LOAD when a source supplied a key the
+              target type cannot address, and the schema did not opt out of the check.
+
+              Refusing is the default because the alternative has a name: a typo in an
+              environment variable that passes silently. `APP_PORTT=9090` decodes into
+              nothing, the process starts on the old port, and the only evidence is the
+              absence of an effect. A schema is the statement "these are the keys I
+              read", so a key outside it is either a mistake or a deliberate one the
+              author opts into by name.
+            name: ConfigUnknownKey
+            options:
+              - errs.WithExitCode(exitConfig)
+            private: "service/app/config: a source supplied keys no field of the target addresses"
+            public: The configuration carries keys the target does not define
+            reason: CONFIG_UNKNOWN_KEY
     types:
       - name: OriginValue
         struct:
@@ -114,21 +240,6 @@ packages:
               type: string
             - name: Value
               type: any
-    variables:
-      - name: ConfigSourceFailed
-        type: "*errs.Error"
-      - name: ConfigDecodeFailed
-        type: "*errs.Error"
-      - name: ConfigValidationFailed
-        type: "*errs.Error"
-      - name: ConfigWatchFailed
-        type: "*errs.Error"
-      - name: ConfigSchemaInvalid
-        type: "*errs.Error"
-      - name: ConfigKeyMissing
-        type: "*errs.Error"
-      - name: ConfigUnknownKey
-        type: "*errs.Error"
   - functions:
       - in:
           - name: prefix

@@ -1,16 +1,33 @@
 apiVersion: kit.kitsunium/design/v2
 domain: data/codec/jsonpatch
 packages:
-  - constants:
-      - name: CodeNotJSON
+  - codes:
+      - const:
+          - doc: |-
+              CodeNotJSON identifies a document to compare that is not exactly one JSON
+              value, read strictly: a syntax error, a truncation, trailing data, a
+              duplicated member name, invalid UTF-8, or nesting past the reader's bound.
+            name: CodeNotJSON
+            note: "range: 0.3.90.0 - 0.3.90.255"
+            value: "0x00_03_5A_01"
         type: errs.Code
-        value: "0x00_03_5A_01"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/data/codec/jsonpatch
-    variables:
-      - name: NotJSON
-        type: "*errs.Error"
+    sentinels:
+      - var:
+          - code: CodeNotJSON
+            doc: |-
+              NotJSON refuses a document that is not exactly one JSON value. The fields
+              name which document — "from" or "to" — and the byte offset where reading
+              stopped, never what the document held.
+            name: NotJSON
+            options:
+              - errs.WithHTTPStatus(httpBadRequest)
+              - errs.WithExitCode(exitDataErr)
+            private: "service/data/codec/jsonpatch: a document is not exactly one well-formed JSON value; the fields name the document and the offset, never its content"
+            public: A document to compare is not a JSON value
+            reason: NOT_JSON
   - constants:
       - name: Add
         type: Op

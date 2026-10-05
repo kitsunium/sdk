@@ -1,5 +1,16 @@
 //go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /framework/internal/core/selfupdate .
 
+// Package selfupdate — the error-code range owned by this domain (ADR 0005 §Registry).
+//
+// Package selfupdate — the sentinels every implementation of this domain returns.
+//
+// The first five are the trust chain, and their ORDER is the contract: a build
+// with no vendor key cannot install at all; a manifest with no signature is not
+// authenticated; a signature that does not verify ends it; only then is the
+// archive's digest compared against a manifest that is now trusted. A digest
+// checked against an unauthenticated manifest proves nothing, which is why
+// CodeChecksumMismatch can only be reached after CodeSignatureInvalid was not.
+//
 // Package selfupdate is the contract for a binary that replaces itself: the
 // ports it needs from its environment, and the values it reports.
 //

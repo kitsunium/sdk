@@ -36,7 +36,7 @@ reaches the SDK only through `pkg/v1/*` and `internal/kernel/errs`
 | `roughtime*.go` | signed network time — advisory, fail-open, servers ship empty |
 | `version.go` | the version floor a roster can mandate |
 | `product.go` | `ProductValue`, `Label`, `PublishedOrigins`, `Validate` |
-| `errors.go` | the one code this implementation owns, `0.3.67.*`, and its sentinel |
+| `codes_gen.go` | the one code this implementation owns, `0.3.67.*`, and its sentinel — written by kit gen from `design/framework/entitlement.yaml` (ADR 0164) |
 | `wrap.go` | `refuse` / `classify` / `classifyForeign` / `annotate`, plus `diagnose` |
 
 ## How it works

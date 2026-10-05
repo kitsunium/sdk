@@ -9,19 +9,7 @@ import (
 
 	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
-
-// Profiles: the process's heap and goroutines, folded onto the graph. The
-// SDK's profiling package captures, decodes, folds and groups them, behind
-// the profiler framework/kit/studio plugs in (plug.StudioProfiler); kit
-// says whose work each sample was. A heap sample is charged to the node
-// whose code is on its stack. Dev only: the routes live behind the Studio's
-// guard, which only an app that imports the Studio mounts.
-
-// CodeProfileRead reports a profile of the process that could not be written
-// or read back. It is in the framework's 0.4.2.* range.
-const CodeProfileRead errs.Code = 0x00_04_02_30 // 0.4.2.48
 
 // serveHeapProfile answers GET /_kit/api/profile/heap: the live heap, after
 // a collection, folded onto the graph.

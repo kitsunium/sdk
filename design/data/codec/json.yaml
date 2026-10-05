@@ -1,21 +1,35 @@
 apiVersion: kit.kitsunium/design/v2
 domain: data/codec/json
 packages:
-  - constants:
-      - name: CodeJSONMarshalFailed
+  - codes:
+      - const:
+          - doc: CodeJSONMarshalFailed identifies a failure inside encoding/json.Marshal.
+            name: CodeJSONMarshalFailed
+            note: "range: 0.3.2.0 - 0.3.2.255"
+            value: "0x00_03_02_01"
         type: errs.Code
-        value: "0x00_03_02_01"
-      - name: CodeJSONUnmarshalFailed
+      - const:
+          - doc: CodeJSONUnmarshalFailed identifies a failure inside encoding/json.Unmarshal.
+            name: CodeJSONUnmarshalFailed
+            value: "0x00_03_02_02"
         type: errs.Code
-        value: "0x00_03_02_02"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/data/codec/json
-    variables:
-      - name: MarshalFailed
-        type: "*errs.Error"
-      - name: UnmarshalFailed
-        type: "*errs.Error"
+    sentinels:
+      - var:
+          - code: CodeJSONMarshalFailed
+            doc: MarshalFailed wraps a failure from encoding/json.Marshal.
+            name: MarshalFailed
+            private: "service/data/codec/json: encoding/json.Marshal returned an error"
+            public: JSON encoding failed
+            reason: MARSHAL_FAILED
+          - code: CodeJSONUnmarshalFailed
+            doc: UnmarshalFailed wraps a failure from encoding/json.Unmarshal.
+            name: UnmarshalFailed
+            private: "service/data/codec/json: encoding/json.Unmarshal returned an error"
+            public: JSON decoding failed
+            reason: UNMARSHAL_FAILED
   - functions:
       - name: New
         out:

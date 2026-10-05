@@ -1,5 +1,7 @@
 //go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /framework/internal/core/entitlement .
 
+// Package entitlement — the error-code range this domain owns (framework/connectors/ssh block).
+//
 // Package entitlement is the contract for machine entitlement: turning local
 // key material plus a vendor-signed roster into a grant, or a typed refusal.
 //

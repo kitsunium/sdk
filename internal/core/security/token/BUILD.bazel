@@ -7,7 +7,7 @@ go_library(
     srcs = [
         "claims.go",
         "claims_with.go",
-        "codes.go",
+        "codes_gen.go",
         "design_gen.go",
         "errors.go",
         "token.go",

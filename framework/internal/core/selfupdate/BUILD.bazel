@@ -5,8 +5,7 @@ package(default_visibility = ["//visibility:public"])
 go_library(
     name = "selfupdate",
     srcs = [
-        "codes.go",
-        "errors.go",
+        "codes_gen.go",
         "selfupdate.go",
         "selfupdate_interface.go",
         "update_value.go",
@@ -38,8 +37,5 @@ filegroup(
 go_test(
     name = "selfupdate_test",
     srcs = ["api_gen_test.go"],
-    deps = [
-        ":selfupdate",
-        "//internal/kernel/errs",
-    ],
+    deps = [":selfupdate"],
 )

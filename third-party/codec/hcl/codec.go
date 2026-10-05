@@ -10,6 +10,10 @@
 // HCL is decode-oriented; symmetric value-marshal is struct-only via
 // gohcl.EncodeIntoBody, so the top-level value MUST be a struct (or pointer to
 // one) with `hcl:"…"` field tags. Non-streaming; implements the optional Appender.
+//
+// Package hcl — range 0.3.37.* (ADR 0022 third-party/codec/hcl block).
+//
+// Package hcl — declares the sentinel *errs.Error values for the HCL codec.
 package hcl
 
 import (

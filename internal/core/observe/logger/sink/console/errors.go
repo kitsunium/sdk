@@ -1,29 +1,14 @@
+// Package console declares the codes and sentinels of the logger's console
+// sink, internal/service/observe/logger/sink/console: range 0.3.13.*, allocated
+// to that engine (ADR 0005 service/observe/logger/sink/console block) and
+// declared here since ADR 0160, so the engine declares none.
+//
 // Package console — declares the sentinels the console sink's constructor and
 // Write method return. Each var's name equals its errs.Define Reason in
 // SCREAMING_SNAKE form.
 package console
 
-import "github.com/kitsunium/sdk/internal/kernel/errs"
-
 // exitIOErr matches sysexits EX_IOERR — used by WriteFailed to let CLI
 // consumers treat a console-write failure as an I/O problem rather than a
 // generic internal software error (70).
 const exitIOErr int = 74
-
-var (
-	// WriterNil is returned when New receives a nil io.Writer.
-	WriterNil = errs.Define(CodeWriterNil, "WRITER_NIL",
-		"Console sink requires a non-nil writer",
-		"service/observe/logger/sink/console.New called with nil io.Writer")
-
-	// CtxCancelled wraps a cancelled context at Write time.
-	CtxCancelled = errs.Define(CodeCtxCancelled, "CTX_CANCELLED",
-		"Logging aborted due to cancellation",
-		"service/observe/logger/sink/console.Write invoked with cancelled context")
-
-	// WriteFailed wraps the underlying writer's error at Write time.
-	WriteFailed = errs.Define(CodeWriteFailed, "WRITE_FAILED",
-		"Console write failed",
-		"service/observe/logger/sink/console.Write underlying io.Writer returned an error",
-		errs.WithExitCode(exitIOErr))
-)

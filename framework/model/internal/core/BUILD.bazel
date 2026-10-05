@@ -7,11 +7,11 @@ go_library(
     srcs = [
         "architecture.go",
         "code.go",
+        "codes_gen.go",
         "connector.go",
         "devtools.go",
         "doc.go",
         "edge_kind.go",
-        "errors.go",
         "event_type.go",
         "graph.go",
         "history.go",

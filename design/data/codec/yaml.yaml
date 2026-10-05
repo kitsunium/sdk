@@ -1,66 +1,155 @@
 apiVersion: kit.kitsunium/design/v2
 domain: data/codec/yaml
 packages:
-  - constants:
-      - name: CodeYAMLMarshalFailed
+  - codes:
+      - const:
+          - doc: |-
+              CodeYAMLMarshalFailed identifies a value the encoder cannot write as YAML:
+              an unsupported Go kind, a string that is not UTF-8, a key that is not a
+              scalar, nesting past the bound, a MarshalYAML hook that failed, or a stream
+              whose writer failed.
+            name: CodeYAMLMarshalFailed
+            note: "range: 0.3.4.0 - 0.3.4.255"
+            value: "0x00_03_04_01"
         type: errs.Code
-        value: "0x00_03_04_01"
-      - name: CodeYAMLUnmarshalFailed
+      - const:
+          - doc: |-
+              CodeYAMLUnmarshalFailed identifies a document the decoder cannot read: a
+              syntax error, input past a bound, or a value its Go target cannot hold.
+              Every refusal below carries it in its trail, so errs.HasCode answers for
+              all of them.
+            name: CodeYAMLUnmarshalFailed
+            value: "0x00_03_04_02"
         type: errs.Code
-        value: "0x00_03_04_02"
-      - name: CodeYAMLAnchorRefused
+      - const:
+          - doc: "CodeYAMLAnchorRefused identifies an anchor (&name): outside the subset."
+            name: CodeYAMLAnchorRefused
+            value: "0x00_03_04_03"
         type: errs.Code
-        value: "0x00_03_04_03"
-      - name: CodeYAMLAliasRefused
+      - const:
+          - doc: "CodeYAMLAliasRefused identifies an alias (*name): outside the subset."
+            name: CodeYAMLAliasRefused
+            value: "0x00_03_04_04"
         type: errs.Code
-        value: "0x00_03_04_04"
-      - name: CodeYAMLTagRefused
+      - const:
+          - doc: |-
+              CodeYAMLTagRefused identifies an explicit tag (!local, !!str, !<uri>):
+              outside the subset.
+            name: CodeYAMLTagRefused
+            value: "0x00_03_04_05"
         type: errs.Code
-        value: "0x00_03_04_05"
-      - name: CodeYAMLMergeKeyRefused
+      - const:
+          - doc: "CodeYAMLMergeKeyRefused identifies a merge key (<<): outside the subset."
+            name: CodeYAMLMergeKeyRefused
+            value: "0x00_03_04_06"
         type: errs.Code
-        value: "0x00_03_04_06"
-      - name: CodeYAMLMultiDocRefused
+      - const:
+          - doc: |-
+              CodeYAMLMultiDocRefused identifies a second document where one was
+              expected.
+            name: CodeYAMLMultiDocRefused
+            value: "0x00_03_04_07"
         type: errs.Code
-        value: "0x00_03_04_07"
-      - name: CodeYAMLComplexKeyRefused
+      - const:
+          - doc: |-
+              CodeYAMLComplexKeyRefused identifies a complex mapping key (the ? indicator,
+              or a collection used as a key): outside the subset.
+            name: CodeYAMLComplexKeyRefused
+            value: "0x00_03_04_08"
         type: errs.Code
-        value: "0x00_03_04_08"
-      - name: CodeYAMLDirectiveRefused
+      - const:
+          - doc: |-
+              CodeYAMLDirectiveRefused identifies a directive (%YAML, %TAG): outside the
+              subset.
+            name: CodeYAMLDirectiveRefused
+            value: "0x00_03_04_09"
         type: errs.Code
-        value: "0x00_03_04_09"
-      - name: CodeYAMLDuplicateKey
+      - const:
+          - doc: CodeYAMLDuplicateKey identifies a mapping that holds the same key twice.
+            name: CodeYAMLDuplicateKey
+            value: "0x00_03_04_0A"
         type: errs.Code
-        value: "0x00_03_04_0A"
-      - name: CodeYAMLLeadingZeroRefused
+      - const:
+          - doc: |-
+              CodeYAMLLeadingZeroRefused identifies an integer written with a leading zero
+              read into a target whose value depends on it: YAML 1.1 reads 0644 as octal
+              420, YAML 1.2 as decimal 644.
+            name: CodeYAMLLeadingZeroRefused
+            value: "0x00_03_04_0B"
         type: errs.Code
-        value: "0x00_03_04_0B"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/data/codec/yaml
-    variables:
-      - name: MarshalFailed
-        type: "*errs.Error"
-      - name: UnmarshalFailed
-        type: "*errs.Error"
-      - name: AnchorRefused
-        type: "*errs.Error"
-      - name: AliasRefused
-        type: "*errs.Error"
-      - name: TagRefused
-        type: "*errs.Error"
-      - name: MergeKeyRefused
-        type: "*errs.Error"
-      - name: MultipleDocumentsRefused
-        type: "*errs.Error"
-      - name: ComplexKeyRefused
-        type: "*errs.Error"
-      - name: DirectiveRefused
-        type: "*errs.Error"
-      - name: DuplicateKey
-        type: "*errs.Error"
-      - name: LeadingZeroRefused
-        type: "*errs.Error"
+    sentinels:
+      - var:
+          - code: CodeYAMLMarshalFailed
+            doc: MarshalFailed marks a value the encoder cannot write as YAML.
+            name: MarshalFailed
+            private: "service/data/codec/yaml: the value cannot be written in the supported YAML subset"
+            public: YAML encoding failed
+            reason: MARSHAL_FAILED
+          - code: CodeYAMLUnmarshalFailed
+            doc: UnmarshalFailed marks a document the decoder cannot read into its target.
+            name: UnmarshalFailed
+            private: "service/data/codec/yaml: not YAML of the supported subset, past a bound, or a value its target cannot hold"
+            public: YAML decoding failed
+            reason: UNMARSHAL_FAILED
+          - code: CodeYAMLAnchorRefused
+            doc: AnchorRefused marks an anchor, refused by name.
+            name: AnchorRefused
+            private: "service/data/codec/yaml: an anchor names a node for an alias to repeat; the subset has neither"
+            public: YAML anchors (&) are outside the supported subset
+            reason: ANCHOR_REFUSED
+          - code: CodeYAMLAliasRefused
+            doc: AliasRefused marks an alias, refused by name.
+            name: AliasRefused
+            private: "service/data/codec/yaml: an alias repeats an anchored node; refused, so no document expands past its size"
+            public: YAML aliases (*) are outside the supported subset
+            reason: ALIAS_REFUSED
+          - code: CodeYAMLTagRefused
+            doc: TagRefused marks an explicit tag, refused by name.
+            name: TagRefused
+            private: "service/data/codec/yaml: a tag overrides the core schema; the subset resolves every scalar by the core schema alone"
+            public: YAML tags (! and !!) are outside the supported subset
+            reason: TAG_REFUSED
+          - code: CodeYAMLMergeKeyRefused
+            doc: MergeKeyRefused marks a merge key, refused by name.
+            name: MergeKeyRefused
+            private: "service/data/codec/yaml: a merge key is a YAML 1.1 type that copies another mapping; quote it to mean the text <<"
+            public: YAML merge keys (<<) are outside the supported subset
+            reason: MERGE_KEY_REFUSED
+          - code: CodeYAMLMultiDocRefused
+            doc: MultipleDocumentsRefused marks a second document in a single-document read.
+            name: MultipleDocumentsRefused
+            private: "service/data/codec/yaml: Unmarshal reads exactly one document; a stream of documents is read with NewDecoder"
+            public: YAML input holds more than one document
+            reason: MULTIPLE_DOCUMENTS_REFUSED
+          - code: CodeYAMLComplexKeyRefused
+            doc: ComplexKeyRefused marks a complex mapping key, refused by name.
+            name: ComplexKeyRefused
+            private: "service/data/codec/yaml: a mapping key must be a scalar on one line; ? and collection keys are refused"
+            public: YAML complex keys (?) are outside the supported subset
+            reason: COMPLEX_KEY_REFUSED
+          - code: CodeYAMLDirectiveRefused
+            doc: DirectiveRefused marks a directive, refused by name.
+            name: DirectiveRefused
+            private: "service/data/codec/yaml: the subset is YAML 1.2.2 with no tag handle, so a directive has nothing to declare"
+            public: YAML directives (%YAML, %TAG) are outside the supported subset
+            reason: DIRECTIVE_REFUSED
+          - code: CodeYAMLDuplicateKey
+            doc: DuplicateKey marks a mapping that holds the same key twice.
+            name: DuplicateKey
+            private: "service/data/codec/yaml: two keys of one mapping read the same; neither is chosen over the other"
+            public: YAML mapping holds the same key twice
+            reason: DUPLICATE_KEY
+          - code: CodeYAMLLeadingZeroRefused
+            doc: |-
+              LeadingZeroRefused marks an integer whose leading zero changes its value
+              between YAML versions.
+            name: LeadingZeroRefused
+            private: "service/data/codec/yaml: write 0o644 for octal, 644 for decimal, or quote the text"
+            public: YAML integer with a leading zero is octal in YAML 1.1 and decimal in 1.2
+            reason: LEADING_ZERO_REFUSED
   - functions:
       - name: New
         out:

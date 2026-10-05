@@ -1,16 +1,30 @@
 apiVersion: kit.kitsunium/design/v2
 domain: third-party/codec/protobuf
 packages:
-  - constants:
-      - name: CodeProtobufMarshalFailed
+  - codes:
+      - const:
+          - doc: |-
+              CodeProtobufMarshalFailed identifies a Marshal failure — either the value is
+              not a proto.Message (Protobuf is schema-bound) or google.golang.org/protobuf
+              /proto.Marshal returned an error.
+            name: CodeProtobufMarshalFailed
+            note: "range: 0.3.38.0 - 0.3.38.255"
+            value: "0x00_03_26_01"
         type: errs.Code
-        value: "0x00_03_26_01"
-      - name: CodeProtobufUnmarshalFailed
+      - const:
+          - doc: |-
+              CodeProtobufUnmarshalFailed identifies an Unmarshal failure — the target is
+              not a proto.Message, or proto.Unmarshal rejected the wire bytes.
+            name: CodeProtobufUnmarshalFailed
+            value: "0x00_03_26_02"
         type: errs.Code
-        value: "0x00_03_26_02"
-      - name: CodeProtobufSizeExceeded
+      - const:
+          - doc: |-
+              CodeProtobufSizeExceeded identifies an Unmarshal input over the 10 MiB cap
+              (CWE-400 defence before the decoder allocates).
+            name: CodeProtobufSizeExceeded
+            value: "0x00_03_26_03"
         type: errs.Code
-        value: "0x00_03_26_03"
     functions:
       - name: New
         out:
@@ -19,12 +33,26 @@ packages:
       codec: github.com/kitsunium/sdk/internal/core/data/codec
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/third-party/codec/protobuf
+    sentinels:
+      - var:
+          - code: CodeProtobufMarshalFailed
+            doc: MarshalFailed wraps a non-proto.Message value or a proto.Marshal failure.
+            name: MarshalFailed
+            private: "third-party/codec/protobuf: value is not a proto.Message or proto.Marshal returned an error"
+            public: Protobuf encoding failed
+            reason: PROTOBUF_MARSHAL_FAILED
+          - code: CodeProtobufUnmarshalFailed
+            doc: UnmarshalFailed wraps a non-proto.Message target or a proto.Unmarshal failure.
+            name: UnmarshalFailed
+            private: "third-party/codec/protobuf: target is not a proto.Message or proto.Unmarshal returned an error"
+            public: Protobuf decoding failed
+            reason: PROTOBUF_UNMARSHAL_FAILED
+          - code: CodeProtobufSizeExceeded
+            doc: SizeExceeded marks an Unmarshal input over the 10 MiB hard cap.
+            name: SizeExceeded
+            private: "third-party/codec/protobuf: len(data) exceeds maxProtobufBytes"
+            public: Protobuf input exceeds size limit
+            reason: PROTOBUF_SIZE_EXCEEDED
     variables:
       - name: Codec
         type: codec.Codec
-      - name: MarshalFailed
-        type: "*errs.Error"
-      - name: UnmarshalFailed
-        type: "*errs.Error"
-      - name: SizeExceeded
-        type: "*errs.Error"

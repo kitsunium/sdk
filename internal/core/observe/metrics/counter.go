@@ -1,3 +1,6 @@
+// Package metrics — range 0.2.9.* (ADR 0027 core/observe/metrics block), and
+// range 0.3.45.*, the metrics engine's, declared here since ADR 0160.
+//
 // Package metrics declares the observability port of the SDK, shaped on the
 // OpenTelemetry metrics DATA MODEL — the specification, never the library.
 // Instruments (Counter, UpDownCounter, Gauge, Histogram and their observable

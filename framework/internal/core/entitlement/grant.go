@@ -1,3 +1,11 @@
+// Package entitlement — the sentinels every implementation of this domain
+// returns.
+//
+// Each names a distinct operator situation rather than a generic failure,
+// because callers map them to exit codes and an operator acts on the
+// difference: a revoked subject, an expired window and an unreachable roster
+// need three different responses.
+//
 // Package entitlement - the record of a verification that succeeded. A daemon
 // ages against it: memory of a past check must not outlive the roster window,
 // otherwise revocation would never reach a long-running process.

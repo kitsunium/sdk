@@ -1,21 +1,41 @@
 apiVersion: kit.kitsunium/design/v2
 domain: data/codec/msgpack
 packages:
-  - constants:
-      - name: CodeMsgPackMarshalFailed
+  - codes:
+      - const:
+          - doc: |-
+              CodeMsgPackMarshalFailed identifies an encode failure: a value MessagePack
+              cannot represent, a marshal method's error, a nesting past the depth limit,
+              or a writer's error on the streaming path.
+            name: CodeMsgPackMarshalFailed
+            note: "range: 0.3.7.0 - 0.3.7.255"
+            value: "0x00_03_07_01"
         type: errs.Code
-        value: "0x00_03_07_01"
-      - name: CodeMsgPackUnmarshalFailed
+      - const:
+          - doc: |-
+              CodeMsgPackUnmarshalFailed identifies a decode failure: malformed or
+              truncated input, an input over the size or depth limit, trailing bytes, or a
+              value that does not fit its Go target.
+            name: CodeMsgPackUnmarshalFailed
+            value: "0x00_03_07_02"
         type: errs.Code
-        value: "0x00_03_07_02"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/data/codec/msgpack
-    variables:
-      - name: MarshalFailed
-        type: "*errs.Error"
-      - name: UnmarshalFailed
-        type: "*errs.Error"
+    sentinels:
+      - var:
+          - code: CodeMsgPackMarshalFailed
+            doc: MarshalFailed is the sentinel of an encode failure.
+            name: MarshalFailed
+            private: "service/data/codec/msgpack: Marshal/Append/Encode failed"
+            public: MessagePack encoding failed
+            reason: MARSHAL_FAILED
+          - code: CodeMsgPackUnmarshalFailed
+            doc: UnmarshalFailed is the sentinel of a decode failure.
+            name: UnmarshalFailed
+            private: "service/data/codec/msgpack: Unmarshal/Decode failed"
+            public: MessagePack decoding failed
+            reason: UNMARSHAL_FAILED
   - functions:
       - name: New
         out:

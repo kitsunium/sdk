@@ -1,21 +1,48 @@
 apiVersion: kit.kitsunium/design/v2
 domain: data/codec/cbor
 packages:
-  - constants:
-      - name: CodeCBORMarshalFailed
+  - codes:
+      - const:
+          - doc: |-
+              CodeCBORMarshalFailed identifies an encoding failure: a value of a type
+              CBOR cannot carry, a string that is not UTF-8, a nesting deeper than the
+              decoder accepts, a failing writer, MarshalBinary or MarshalCBOR.
+            name: CodeCBORMarshalFailed
+            note: "range: 0.3.6.0 - 0.3.6.255"
+            value: "0x00_03_06_01"
         type: errs.Code
-        value: "0x00_03_06_01"
-      - name: CodeCBORUnmarshalFailed
+      - const:
+          - doc: |-
+              CodeCBORUnmarshalFailed identifies a decoding failure: input that is not
+              one well-formed, valid data item, a bound exceeded, or an item the target
+              cannot hold.
+            name: CodeCBORUnmarshalFailed
+            value: "0x00_03_06_02"
         type: errs.Code
-        value: "0x00_03_06_02"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/data/codec/cbor
-    variables:
-      - name: MarshalFailed
-        type: "*errs.Error"
-      - name: UnmarshalFailed
-        type: "*errs.Error"
+    sentinels:
+      - doc: Sentinels, matched with errors.Is or errs.HasCode / errs.HasReason.
+        var:
+          - code: CodeCBORMarshalFailed
+            doc: |-
+              MarshalFailed is the sentinel every encoding failure matches: a value
+              CBOR cannot carry, a string that is not UTF-8, a nesting deeper than
+              the decoder accepts, a failing writer, MarshalBinary or MarshalCBOR.
+            name: MarshalFailed
+            private: "service/data/codec/cbor: a value could not be encoded as CBOR"
+            public: CBOR encoding failed
+            reason: MARSHAL_FAILED
+          - code: CodeCBORUnmarshalFailed
+            doc: |-
+              UnmarshalFailed is the sentinel every decoding failure matches: input
+              that is not one well-formed, valid data item, a bound exceeded, or an
+              item the target cannot hold.
+            name: UnmarshalFailed
+            private: "service/data/codec/cbor: the input could not be decoded as CBOR"
+            public: CBOR decoding failed
+            reason: UNMARSHAL_FAILED
   - functions:
       - name: New
         out:

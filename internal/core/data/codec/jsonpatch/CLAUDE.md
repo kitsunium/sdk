@@ -11,8 +11,8 @@ Stdlib-only: this package imports `internal/kernel/errs` and nothing else.
 
 | File | Declares |
 |---|---|
-| `codes.go` | 1 `errs.Code` constant, range `0.3.90.*` |
-| `errors.go` | 1 `errs.Define` sentinel, one per code |
+| `codes_gen.go` | 1 `errs.Code` constant, range `0.3.90.*`; 1 `errs.Define` sentinel, one per code — written by kit gen from `design/data/codec/jsonpatch.yaml` (ADR 0164) |
+| `errors.go` | hand-written beside them: `exitDataErr`, `httpBadRequest` |
 
 ## Error codes (range `0.3.90.*`)
 

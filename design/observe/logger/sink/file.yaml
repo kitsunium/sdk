@@ -1,41 +1,97 @@
 apiVersion: kit.kitsunium/design/v2
 domain: observe/logger/sink/file
 packages:
-  - constants:
-      - name: CodePathEmpty
+  - codes:
+      - const:
+          - doc: CodePathEmpty identifies a New call made with an empty file path.
+            name: CodePathEmpty
+            note: "range: 0.3.14.0 - 0.3.14.255"
+            value: "0x00_03_0E_01"
         type: errs.Code
-        value: "0x00_03_0E_01"
-      - name: CodeOpenFailed
+      - const:
+          - doc: CodeOpenFailed identifies a New call whose os.OpenFile invocation failed.
+            name: CodeOpenFailed
+            value: "0x00_03_0E_02"
         type: errs.Code
-        value: "0x00_03_0E_02"
-      - name: CodeCtxCancelled
+      - const:
+          - comment: 0.3.14.10 (serial 10)
+            doc: CodeCtxCancelled identifies a Write call whose context was already done.
+            name: CodeCtxCancelled
+            value: "0x00_03_0E_0A"
         type: errs.Code
-        value: "0x00_03_0E_0A"
-      - name: CodeWriteFailed
+      - const:
+          - comment: 0.3.14.20 (serial 20)
+            doc: |-
+              CodeWriteFailed identifies a Write call whose underlying *os.File returned
+              a non-nil error; ExitCode defaults to 74 (EX_IOERR) for this case.
+            name: CodeWriteFailed
+            value: "0x00_03_0E_14"
         type: errs.Code
-        value: "0x00_03_0E_14"
-      - name: CodeSyncFailed
+      - const:
+          - comment: 0.3.14.30 (serial 30)
+            doc: |-
+              CodeSyncFailed identifies a Flush call whose *os.File.Sync returned an
+              error; surfaces fsync(2) failures to upstream sinks (e.g. async).
+            name: CodeSyncFailed
+            value: "0x00_03_0E_1E"
         type: errs.Code
-        value: "0x00_03_0E_1E"
-      - name: CodeCloseFailed
+      - const:
+          - comment: 0.3.14.40 (serial 40)
+            doc: |-
+              CodeCloseFailed identifies a Close call whose *os.File.Close returned an
+              error; surfaces fclose(2) failures so callers can react.
+            name: CodeCloseFailed
+            value: "0x00_03_0E_28"
         type: errs.Code
-        value: "0x00_03_0E_28"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/observe/logger/sink/file
-    variables:
-      - name: PathEmpty
-        type: "*errs.Error"
-      - name: OpenFailed
-        type: "*errs.Error"
-      - name: CtxCancelled
-        type: "*errs.Error"
-      - name: WriteFailed
-        type: "*errs.Error"
-      - name: SyncFailed
-        type: "*errs.Error"
-      - name: CloseFailed
-        type: "*errs.Error"
+    sentinels:
+      - var:
+          - code: CodePathEmpty
+            doc: PathEmpty is returned when New receives an empty file path.
+            name: PathEmpty
+            private: service/observe/logger/sink/file.New called with empty path
+            public: File sink requires a non-empty path
+            reason: PATH_EMPTY
+          - code: CodeOpenFailed
+            doc: OpenFailed wraps an os.OpenFile failure at construction time.
+            name: OpenFailed
+            options:
+              - errs.WithExitCode(exitIOErr)
+            private: "service/observe/logger/sink/file.New: os.OpenFile returned an error"
+            public: File sink could not open the destination file
+            reason: OPEN_FAILED
+          - code: CodeCtxCancelled
+            doc: CtxCancelled wraps a cancelled context at Write time.
+            name: CtxCancelled
+            private: service/observe/logger/sink/file.Write invoked with cancelled context
+            public: Logging aborted due to cancellation
+            reason: CTX_CANCELLED
+          - code: CodeWriteFailed
+            doc: WriteFailed wraps the underlying *os.File.Write error at Write time.
+            name: WriteFailed
+            options:
+              - errs.WithExitCode(exitIOErr)
+            private: service/observe/logger/sink/file.Write underlying *os.File returned an error
+            public: File write failed
+            reason: WRITE_FAILED
+          - code: CodeSyncFailed
+            doc: SyncFailed wraps the underlying *os.File.Sync error at Flush time.
+            name: SyncFailed
+            options:
+              - errs.WithExitCode(exitIOErr)
+            private: service/observe/logger/sink/file.Flush underlying *os.File.Sync returned an error
+            public: File flush failed
+            reason: SYNC_FAILED
+          - code: CodeCloseFailed
+            doc: CloseFailed wraps the underlying *os.File.Close error at Close time.
+            name: CloseFailed
+            options:
+              - errs.WithExitCode(exitIOErr)
+            private: service/observe/logger/sink/file.Close underlying *os.File.Close returned an error
+            public: File close failed
+            reason: CLOSE_FAILED
   - functions:
       - in:
           - name: path
