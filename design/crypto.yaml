@@ -1591,7 +1591,8 @@ packages:
       corecrypto: github.com/kitsunium/sdk/internal/core/crypto
     path: github.com/kitsunium/sdk/internal/service/crypto/hash/stdhash
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           DigestWriter tees every Write into both an underlying io.Writer and a running
           hash, so a caller can stream bytes to a destination and read the digest of
           everything written so far without a second pass. The digest is public (a
@@ -1626,8 +1627,15 @@ packages:
             recv: pointer
         name: DigestWriter
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - doc: dst receives every byte unchanged; the digest never alters the stream.
+              name: dst
+              type: io.Writer
+            - doc: hsh is the running hash updated in lockstep with dst.
+              name: hsh
+              type: hash.Hash
+      - decl: true
+        doc: |-
           VerifyingReader wraps a source reader and folds every byte read into a running
           hash. The digest is compared against the expected hex ONLY on the terminal
           read (the one returning io.EOF): on a match it surfaces io.EOF unchanged; on a
@@ -1651,7 +1659,16 @@ packages:
             recv: pointer
         name: VerifyingReader
         struct:
-          unexported: true
+          fields:
+            - doc: src is the wrapped source; its EOF is the trigger for verification.
+              name: src
+              type: io.Reader
+            - doc: hsh is the running hash advanced in lockstep with every Read.
+              name: hsh
+              type: hash.Hash
+            - doc: wantHex is the expected canonical lowercase hex digest.
+              name: wantHex
+              type: string
   - doc: |-
       Package hkdfsha256 registers the "hkdf-sha256" key-derivation scheme
       (ADR 0013). Importing the package (typically a blank import via pkg/v1/crypto/kdf)
@@ -1696,7 +1713,8 @@ packages:
       corecrypto: github.com/kitsunium/sdk/internal/core/crypto
     path: github.com/kitsunium/sdk/internal/service/crypto/kdf/keytree
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           KeyTree is an immutable node in a path-addressed key-derivation tree. It
           holds the derivation algorithm, a shared master Key, and the accumulated
           path; Child returns a new node and never mutates the receiver.
@@ -1722,7 +1740,13 @@ packages:
             recv: value
         name: KeyTree
         struct:
-          unexported: true
+          fields:
+            - name: algo
+              type: corecrypto.Algorithm
+            - name: master
+              type: corecrypto.Key
+            - name: path
+              type: "[]string"
   - doc: |-
       Package keyenvelope wraps a symmetric DEK at rest under a passphrase.
 

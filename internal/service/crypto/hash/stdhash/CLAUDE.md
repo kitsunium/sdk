@@ -19,6 +19,7 @@ public. Keyed integrity belongs to the MAC / AEAD / signature ports.
 | File | Role |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `DigestWriter` and `VerifyingReader` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `sha256_hasher.go` / `sha512_hasher.go` / `sha3_hasher.go` / `crc32c_hasher.go` / `fnv_hasher.go` | one empty-struct `Hasher` singleton per file (`Algorithm` / `New`), each self-registering via a package-level `var _ = corecrypto.RegisterHasher(…)`; `crc32c_hasher.go` also owns the shared `castagnoli` CRC-32C table |
 | `digest_writer.go` | `DigestWriter` — tees `Write` into a destination + a running hash; `Sum` / `SumHex` over everything written (`NewDigestWriter`) |
 | `verifying_reader.go` | `VerifyingReader` — hashes a stream and verifies it against an expected hex digest on the final (EOF) read only, surfacing the core `DigestMismatch` sentinel; never fails mid-stream (`NewVerifyingReader`) |

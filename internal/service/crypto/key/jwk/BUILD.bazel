@@ -7,6 +7,7 @@ go_library(
     srcs = [
         "bridge.go",
         "curve.go",
+        "decl_gen.go",
         "doc.go",
         "jwk.go",
         "marshal.go",

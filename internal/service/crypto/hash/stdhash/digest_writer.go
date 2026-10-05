@@ -2,22 +2,10 @@ package stdhash
 
 import (
 	"encoding/hex"
-	"hash"
 	"io"
 
 	corecrypto "github.com/kitsunium/sdk/internal/core/crypto"
 )
-
-// DigestWriter tees every Write into both an underlying io.Writer and a running
-// hash, so a caller can stream bytes to a destination and read the digest of
-// everything written so far without a second pass. The digest is public (a
-// content ID / cache key) — it is NOT authentication.
-type DigestWriter struct {
-	// dst receives every byte unchanged; the digest never alters the stream.
-	dst io.Writer
-	// hsh is the running hash updated in lockstep with dst.
-	hsh hash.Hash
-}
 
 // NewDigestWriter returns a DigestWriter that tees writes into dst while hashing
 // them under the Hasher registered as a. An unregistered algorithm returns

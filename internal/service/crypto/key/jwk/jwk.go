@@ -13,9 +13,6 @@ import (
 // key, which is seed||public.
 const ed25519KeyLen int = 32
 
-// Type is the JWK "kty" member — the key-type family a JWK describes.
-type Type string
-
 const (
 	// TypeEC is an elliptic-curve key over a NIST prime curve (RFC 7518 §6.2):
 	// public members "x"/"y", private member "d".
@@ -27,9 +24,6 @@ const (
 	// no public half, which is why MarshalPublic refuses it.
 	TypeOct Type = "oct"
 )
-
-// Curve is the JWK "crv" member — the curve a key lives on.
-type Curve string
 
 const (
 	// CurveP256 is NIST P-256, the curve behind JOSE "ES256" and the SDK's
@@ -44,38 +38,6 @@ const (
 	// CurveEd25519 is the Edwards curve behind JOSE "EdDSA" (RFC 8037).
 	CurveEd25519 Curve = "Ed25519"
 )
-
-// KeyValue is one parsed or constructed JSON Web Key. It is an immutable value:
-// the constructors copy every octet slice in, the accessors copy every octet
-// slice out, and the With* methods return a modified copy rather than mutating
-// the receiver.
-//
-// Every field is unexported so encoding/json cannot reach the material by
-// reflection; the only serialisation paths are the named MarshalPublic /
-// MarshalPrivate pair and the MarshalJSON delegate.
-type KeyValue struct {
-	// kty is the key-type family; the empty string marks the zero KeyValue.
-	kty Type
-	// crv is the curve for EC and OKP keys, empty for oct.
-	crv Curve
-	// kid is the optional "kid" member — a hint, never an authenticator.
-	kid string
-	// use is the optional "use" member ("sig" or "enc").
-	use string
-	// alg is the optional "alg" member (e.g. "ES256", "EdDSA", "HS256").
-	alg string
-	// keyOps is the optional "key_ops" member, preserved verbatim.
-	keyOps []string
-	// x holds the EC affine x coordinate, or the OKP public key.
-	x []byte
-	// y holds the EC affine y coordinate; nil for OKP and oct.
-	y []byte
-	// priv holds the secret member: the EC "d" scalar, the OKP "d" seed, or the
-	// oct "k" key. Nil on a public-only key. One field, because exactly one of
-	// those members can be set and "does this key hold a secret" must be a
-	// single question.
-	priv []byte
-}
 
 // Kty reports the key's "kty" member. The zero KeyValue reports the empty Type.
 func (k KeyValue) Kty() Type {

@@ -478,13 +478,16 @@ packages:
       corecrypto: github.com/kitsunium/sdk/internal/core/crypto
     path: github.com/kitsunium/sdk/internal/service/crypto/key/jwk
     types:
-      - doc: Type is the JWK "kty" member — the key-type family a JWK describes.
+      - decl: true
+        doc: Type is the JWK "kty" member — the key-type family a JWK describes.
         name: Type
         underlying: string
-      - doc: Curve is the JWK "crv" member — the curve a key lives on.
+      - decl: true
+        doc: Curve is the JWK "crv" member — the curve a key lives on.
         name: Curve
         underlying: string
-      - doc: |-
+      - decl: true
+        doc: |-
           KeyValue is one parsed or constructed JSON Web Key. It is an immutable value:
           the constructors copy every octet slice in, the accessors copy every octet
           slice out, and the With* methods return a modified copy rather than mutating
@@ -748,8 +751,40 @@ packages:
             recv: value
         name: KeyValue
         struct:
-          unexported: true
-      - doc: |-
+          fields:
+            - doc: kty is the key-type family; the empty string marks the zero KeyValue.
+              name: kty
+              type: Type
+            - doc: crv is the curve for EC and OKP keys, empty for oct.
+              name: crv
+              type: Curve
+            - doc: kid is the optional "kid" member — a hint, never an authenticator.
+              name: kid
+              type: string
+            - doc: use is the optional "use" member ("sig" or "enc").
+              name: use
+              type: string
+            - doc: alg is the optional "alg" member (e.g. "ES256", "EdDSA", "HS256").
+              name: alg
+              type: string
+            - doc: keyOps is the optional "key_ops" member, preserved verbatim.
+              name: keyOps
+              type: "[]string"
+            - doc: x holds the EC affine x coordinate, or the OKP public key.
+              name: x
+              type: "[]byte"
+            - doc: y holds the EC affine y coordinate; nil for OKP and oct.
+              name: "y"
+              type: "[]byte"
+            - doc: |-
+                priv holds the secret member: the EC "d" scalar, the OKP "d" seed, or the
+                oct "k" key. Nil on a public-only key. One field, because exactly one of
+                those members can be set and "does this key hold a secret" must be a
+                single question.
+              name: priv
+              type: "[]byte"
+      - decl: true
+        doc: |-
           Set is an RFC 7517 §5 JWK Set: an ordered collection of keys published
           together. It is an immutable value — constructors copy in, accessors copy
           out — and it redacts under %v the same way KeyValue does.
@@ -849,4 +884,9 @@ packages:
             recv: value
         name: Set
         struct:
-          unexported: true
+          fields:
+            - doc: |-
+                keys holds the members in document order, which AllByKid preserves so a
+                caller's "newest first" convention survives the round trip.
+              name: keys
+              type: "[]KeyValue"

@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "keytree",
     srcs = [
+        "decl_gen.go",
         "doc.go",
         "keytree.go",
     ],

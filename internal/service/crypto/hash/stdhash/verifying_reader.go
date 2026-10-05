@@ -2,26 +2,10 @@ package stdhash
 
 import (
 	"encoding/hex"
-	"hash"
 	"io"
 
 	corecrypto "github.com/kitsunium/sdk/internal/core/crypto"
 )
-
-// VerifyingReader wraps a source reader and folds every byte read into a running
-// hash. The digest is compared against the expected hex ONLY on the terminal
-// read (the one returning io.EOF): on a match it surfaces io.EOF unchanged; on a
-// mismatch it returns DigestMismatch instead. The check never fires mid-stream,
-// so a partial read can never leak the verification outcome, and the digest is
-// public so the comparison is non-oracle.
-type VerifyingReader struct {
-	// src is the wrapped source; its EOF is the trigger for verification.
-	src io.Reader
-	// hsh is the running hash advanced in lockstep with every Read.
-	hsh hash.Hash
-	// wantHex is the expected canonical lowercase hex digest.
-	wantHex string
-}
 
 // NewVerifyingReader returns a VerifyingReader over src that hashes the stream
 // under the Hasher registered as a and compares the result to wantHex at EOF. An

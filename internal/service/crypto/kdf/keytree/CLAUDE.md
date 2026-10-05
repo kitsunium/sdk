@@ -28,3 +28,7 @@ prefix-free, so `Child("a/b").Child("c")` and `Child("a").Child("b/c")` derive
   receiver is untouched. The master Key is shared by reference; the **root
   owns the Zeroize lifetime** — zeroizing the master invalidates all nodes.
 - **Self-activating.** Blank-imports `hkdfsha256` so the deriver is registered.
+
+## Declarations
+
+`decl_gen.go` is written by kit gen from the design (ADR 0170): the declaration of `KeyTree` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names.

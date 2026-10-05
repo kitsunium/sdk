@@ -73707,7 +73707,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "DigestWriter tees every Write into both an underlying io.Writer and a running\nhash, so a caller can stream bytes to a destination and read the digest of\neverything written so far without a second pass. The digest is public (a\ncontent ID / cache key) — it is NOT authentication.\n",
-      "file": "internal/service/crypto/hash/stdhash/digest_writer.go",
+      "file": "internal/service/crypto/hash/stdhash/decl_gen.go",
       "layer": "service",
       "family": "crypto"
     },
@@ -73782,7 +73782,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "VerifyingReader wraps a source reader and folds every byte read into a running\nhash. The digest is compared against the expected hex ONLY on the terminal\nread (the one returning io.EOF): on a match it surfaces io.EOF unchanged; on a\nmismatch it returns DigestMismatch instead. The check never fires mid-stream,\nso a partial read can never leak the verification outcome, and the digest is\npublic so the comparison is non-oracle.\n",
-      "file": "internal/service/crypto/hash/stdhash/verifying_reader.go",
+      "file": "internal/service/crypto/hash/stdhash/decl_gen.go",
       "layer": "service",
       "family": "crypto"
     },
@@ -73819,7 +73819,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "KeyTree is an immutable node in a path-addressed key-derivation tree. It\nholds the derivation algorithm, a shared master Key, and the accumulated\npath; Child returns a new node and never mutates the receiver.\n",
-      "file": "internal/service/crypto/kdf/keytree/keytree.go",
+      "file": "internal/service/crypto/kdf/keytree/decl_gen.go",
       "layer": "service",
       "family": "crypto"
     },
@@ -73869,7 +73869,7 @@
       "spelled": "string",
       "canonical": "string",
       "doc": "Curve is the JWK \"crv\" member — the curve a key lives on.\n",
-      "file": "internal/service/crypto/key/jwk/jwk.go",
+      "file": "internal/service/crypto/key/jwk/decl_gen.go",
       "layer": "service",
       "family": "crypto"
     },
@@ -73993,7 +73993,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "KeyValue is one parsed or constructed JSON Web Key. It is an immutable value:\nthe constructors copy every octet slice in, the accessors copy every octet\nslice out, and the With* methods return a modified copy rather than mutating\nthe receiver.\n\nEvery field is unexported so encoding/json cannot reach the material by\nreflection; the only serialisation paths are the named MarshalPublic /\nMarshalPrivate pair and the MarshalJSON delegate.\n",
-      "file": "internal/service/crypto/key/jwk/jwk.go",
+      "file": "internal/service/crypto/key/jwk/decl_gen.go",
       "layer": "service",
       "family": "crypto"
     },
@@ -74379,7 +74379,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Set is an RFC 7517 §5 JWK Set: an ordered collection of keys published\ntogether. It is an immutable value — constructors copy in, accessors copy\nout — and it redacts under %v the same way KeyValue does.\n",
-      "file": "internal/service/crypto/key/jwk/set.go",
+      "file": "internal/service/crypto/key/jwk/decl_gen.go",
       "layer": "service",
       "family": "crypto"
     },
@@ -74508,7 +74508,7 @@
       "spelled": "string",
       "canonical": "string",
       "doc": "Type is the JWK \"kty\" member — the key-type family a JWK describes.\n",
-      "file": "internal/service/crypto/key/jwk/jwk.go",
+      "file": "internal/service/crypto/key/jwk/decl_gen.go",
       "layer": "service",
       "family": "crypto"
     },

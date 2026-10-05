@@ -6,6 +6,7 @@ go_library(
     name = "stdhash",
     srcs = [
         "crc32c_hasher.go",
+        "decl_gen.go",
         "digest_writer.go",
         "doc.go",
         "fnv_hasher.go",

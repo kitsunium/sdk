@@ -9,15 +9,6 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// Set is an RFC 7517 §5 JWK Set: an ordered collection of keys published
-// together. It is an immutable value — constructors copy in, accessors copy
-// out — and it redacts under %v the same way KeyValue does.
-type Set struct {
-	// keys holds the members in document order, which AllByKid preserves so a
-	// caller's "newest first" convention survives the round trip.
-	keys []KeyValue
-}
-
 // NewSet builds a Set from keys, in the given order.
 func NewSet(keys ...KeyValue) Set {
 	//: clone so a later mutation of the caller's slice cannot reach the Set.

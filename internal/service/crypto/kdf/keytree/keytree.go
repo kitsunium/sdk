@@ -12,15 +12,6 @@ import (
 // each path segment in the canonical HKDF info, making the encoding injective.
 const lenPrefixBytes int = 4
 
-// KeyTree is an immutable node in a path-addressed key-derivation tree. It
-// holds the derivation algorithm, a shared master Key, and the accumulated
-// path; Child returns a new node and never mutates the receiver.
-type KeyTree struct {
-	algo   corecrypto.Algorithm
-	master corecrypto.Key
-	path   []string
-}
-
 // NewKeyTree returns the root KeyTree for master, deriving children under algo.
 func NewKeyTree(algo corecrypto.Algorithm, master corecrypto.Key) KeyTree {
 	//: the root carries an empty path; children append to a copy
