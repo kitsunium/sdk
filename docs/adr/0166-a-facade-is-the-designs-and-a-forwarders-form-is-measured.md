@@ -201,9 +201,13 @@ re-measures every budgeted forwarder.
   edit on a package comment or on a hand-written declaration still does not.
 - The exported surface is identical — same names, kinds, values, signatures
   and doc texts — so the release is a patch.
-- `token`'s package comment still says "the codes are re-exported in
-  codes.go": the comment is kept byte for byte (§4), and the sentence is now
-  out of date; correcting it is a doc edit of its own.
+- Three package-comment sentences now name a file that no longer holds what
+  they say: `token`'s "the codes are re-exported in codes.go", and `errs`'s
+  "introspection (this file)" in `accessors.go` and "accessors.go re-exports
+  the read-only introspection surface" in `construct.go` — the declarations
+  are in `facade_gen.go`. Every package comment is kept byte for byte here
+  (§4: `docs/api`'s package records and the READMEs unchanged but for their
+  links), so correcting them is a doc edit of its own, which needs no kit.
 
 ## Breaking changes
 
