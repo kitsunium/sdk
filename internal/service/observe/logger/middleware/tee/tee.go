@@ -10,10 +10,9 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// NewTeeSink builds a TeeSink from cfg. The primaries slice is copied so
-// later caller mutation cannot affect the sink. A nil cfg.Spill disables the
-// dead-letter seam.
-func NewTeeSink(cfg Config) *TeeSink {
+// newTeeSink is NewTeeSink's body: decl_gen.go writes NewTeeSink, from the
+// design, as one call of it.
+func newTeeSink(cfg Config) *TeeSink {
 	//: defensive copy so post-construction mutation by the caller is harmless.
 	cp := slices.Clone(cfg.Primaries)
 	//: hand back the fan-out sink wrapping the configured primaries and spill.

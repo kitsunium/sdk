@@ -32,16 +32,12 @@ func New(inner corelogger.Sink, min level.Level) corelogger.Sink {
 	return &gateSink{inner: inner, min: min}
 }
 
-// Floor wraps inner so only records with Level >= min reach it, for every min —
-// Info included. It is the gate without New's reading of Info as "inherit":
-// that reading belongs to a writer configuration, whose zero MinLevel must not
-// narrow anything, and a caller who names a floor outside one means the floor
-// it named. A nil inner yields nil, which a fan-out skips and NewWithSink
-// refuses, rather than a gate that fails on its first record.
+// floor is Floor's body: decl_gen.go writes Floor, from the
+// design, as one call of it.
 //
 // IFACE-PLUGIN: the gate is returned behind the Sink interface; the concrete
 // gateSink type stays unexported.
-func Floor(inner corelogger.Sink, min level.Level) corelogger.Sink {
+func floor(inner corelogger.Sink, min level.Level) corelogger.Sink {
 	//: a gate over nothing is nothing, not a panic deferred to the first write.
 	if inner == nil {
 		//: nil: skipped by a fan-out, refused by NewWithSink.

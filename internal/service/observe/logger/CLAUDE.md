@@ -200,4 +200,4 @@ cd internal/service && GOWORK=off go test -run='^$' -bench=. -benchmem -benchtim
 
 ## Declarations
 
-`decl_gen.go` is written by kit gen from the design (ADR 0170): the declarations of `Builder` and `TextHandler` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names.
+`decl_gen.go` is written by kit gen from the design (ADR 0170): the declarations of `Builder` and `TextHandler` — each struct with every field, unexported ones included; `TextHandler.Enabled`, `TextHandler.WithAttrs`, `TextHandler.WithGroup`, `NewHandler`, `Owning` and `WithCaller`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name.

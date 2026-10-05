@@ -1018,6 +1018,7 @@ packages:
           - name: min
             type: level.Level
         name: Floor
+        impl: floor
         out:
           - type: corelogger.Sink
     imports:

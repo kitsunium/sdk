@@ -59,18 +59,16 @@ type memMeter struct {
 	descriptions map[string]string
 }
 
-// NewMeter returns a fresh in-memory Meter with every MeterConfig knob at its
-// resolved default: bounded at DefaultMaxSeriesPerInstrument, cumulative,
-// service.name=unknown_service, this SDK as the scope, and the system clock.
-func NewMeter() coremetrics.FullMeter {
+// newMeter is NewMeter's body: decl_gen.go writes NewMeter, from the
+// design, as one call of it.
+func newMeter() coremetrics.FullMeter {
 	//: the zero config is the defaulted config, never the inert one.
 	return newMemMeter(MeterConfig{})
 }
 
-// NewMeterWithConfig returns a fresh in-memory Meter honouring cfg. Every unset
-// field resolves to a working value and none of them to an inert one — see
-// MeterConfig for each knob's rule.
-func NewMeterWithConfig(cfg MeterConfig) coremetrics.FullMeter {
+// newMeterWithConfig is NewMeterWithConfig's body: decl_gen.go writes NewMeterWithConfig, from the
+// design, as one call of it.
+func newMeterWithConfig(cfg MeterConfig) coremetrics.FullMeter {
 	//: delegate; both exported constructors stay INLINABLE on purpose.
 	return newMemMeter(cfg)
 }

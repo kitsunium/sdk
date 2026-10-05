@@ -1314,7 +1314,7 @@ func (*Recorder) Scope() coreotel.ScopeValue
 Scope returns the instrumentation scope this Recorder stamps on every payload.
 
 <a name="Recorder.Sink"></a>
-### func \(Recorder\) [Sink](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/trace/recorder.go>)
+### func \(Recorder\) [Sink](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/trace/decl_gen.go>)
 
 ```go
 func (*Recorder) Sink() coretrace.SpanSink
@@ -1387,7 +1387,7 @@ type SDKTracer struct{}
 ```
 
 <a name="SDKTracer.Resource"></a>
-### func \(SDKTracer\) [Resource](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/trace/tracer.go>)
+### func \(SDKTracer\) [Resource](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/trace/decl_gen.go>)
 
 ```go
 func (*SDKTracer) Resource() coreotel.ResourceValue
@@ -1396,7 +1396,7 @@ func (*SDKTracer) Resource() coreotel.ResourceValue
 Resource returns the producing resource this Tracer stamps on its payloads.
 
 <a name="SDKTracer.Scope"></a>
-### func \(SDKTracer\) [Scope](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/trace/tracer.go>)
+### func \(SDKTracer\) [Scope](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/trace/decl_gen.go>)
 
 ```go
 func (*SDKTracer) Scope() coreotel.ScopeValue

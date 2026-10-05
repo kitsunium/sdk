@@ -7,8 +7,9 @@ import (
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 )
 
-// NewMemory returns an empty Memory sink ready to record received records.
-func NewMemory() *Memory {
+// newMemory is NewMemory's body: decl_gen.go writes NewMemory, from the
+// design, as one call of it.
+func newMemory() *Memory {
 	//: the zero value is usable; hand back a pointer so methods share state.
 	return &Memory{}
 }

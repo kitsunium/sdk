@@ -80328,7 +80328,7 @@
       "spelled": "func(dst io.Writer, failure *errs.WrapParams) *Stream",
       "canonical": "func(dst io.Writer, failure *github.com/kitsunium/sdk/internal/kernel/errs.WrapParams) *github.com/kitsunium/sdk/internal/service/observe/internal/otlp.Stream",
       "doc": "NewStream binds a Stream to dst. failure is the wrap a writer fault leaves\nunder — the calling signal's EXPORT_FAILED, in its own words.\n",
-      "file": "internal/service/observe/internal/otlp/stream.go",
+      "file": "internal/service/observe/internal/otlp/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80383,7 +80383,7 @@
       "spelled": "func(resource coreotel.ResourceValue) ResourceMessage",
       "canonical": "func(resource github.com/kitsunium/sdk/internal/core/observe/otel.ResourceValue) github.com/kitsunium/sdk/internal/service/observe/internal/otlp.ResourceMessage",
       "doc": "ResourceOf renders the shared ResourceValue a Meter or a Tracer publishes.\nIts attributes are already sorted, validated and owned, so this is a field\ncopy and nothing else.\n",
-      "file": "internal/service/observe/internal/otlp/resource_message.go",
+      "file": "internal/service/observe/internal/otlp/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80419,7 +80419,7 @@
       "spelled": "func(scope coreotel.ScopeValue) ScopeMessage",
       "canonical": "func(scope github.com/kitsunium/sdk/internal/core/observe/otel.ScopeValue) github.com/kitsunium/sdk/internal/service/observe/internal/otlp.ScopeMessage",
       "doc": "ScopeOf renders the shared ScopeValue a Meter or a Tracer publishes.\n",
-      "file": "internal/service/observe/internal/otlp/scope_message.go",
+      "file": "internal/service/observe/internal/otlp/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80755,7 +80755,7 @@
       "spelled": "func(enc encoder.Encoder, sink corelogger.Sink, min level.Level) (h corelogger.Handler, err error)",
       "canonical": "func(enc github.com/kitsunium/sdk/internal/service/observe/logger/encoder.Encoder, sink github.com/kitsunium/sdk/internal/core/observe/logger.Sink, min github.com/kitsunium/sdk/internal/core/observe/logger/level.Level) (h github.com/kitsunium/sdk/internal/core/observe/logger.Handler, err error)",
       "doc": "NewHandler composes enc with sink and gates emission on the supplied\nminimum level. A nil enc OR sink is rejected so callers cannot\naccidentally construct a dead handler.\n",
-      "file": "internal/service/observe/logger/handler.go",
+      "file": "internal/service/observe/logger/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80791,7 +80791,7 @@
       "spelled": "func(lg corelogger.Logger, owned io.Closer) corelogger.Logger",
       "canonical": "func(lg github.com/kitsunium/sdk/internal/core/observe/logger.Logger, owned io.Closer) github.com/kitsunium/sdk/internal/core/observe/logger.Logger",
       "doc": "Owning returns lg carrying owned as the resources it owns, so that Close\nreleases them.\n\nIt exists for a constructor that OPENS writers on its caller's behalf —\npkg/v1/observe/logger.NewMulti resolves each spec through the writer registry, so the\ncaller never holds a Sink it could close — and hands back a Logger that was\notherwise the only thing referring to them. Without it those files were held\nuntil a collection ran their finalizers: a descriptor leak for a program that\nrebuilds its logger, and on Windows a log file nothing could delete or rotate\nwhile the process lived (ADR 0095).\n\nThe result is still this package's concrete Logger, so Build and LogAttrs\nkeep their fast path. A Logger this package did not build is returned\nunchanged — it has no Close to carry the resources to.\n",
-      "file": "internal/service/observe/logger/owning.go",
+      "file": "internal/service/observe/logger/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80829,7 +80829,7 @@
       "spelled": "func(ctx context.Context, r corelogger.RecordEvent) bool",
       "canonical": "func(ctx context.Context, r github.com/kitsunium/sdk/internal/core/observe/logger.RecordEvent) bool",
       "doc": "Enabled reports whether the handler would emit a record at r.Level, taking\ncontext cancellation into account.\n",
-      "file": "internal/service/observe/logger/text_handler.go",
+      "file": "internal/service/observe/logger/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80855,7 +80855,7 @@
       "spelled": "func(attrs []corelogger.AttrValue) corelogger.Handler",
       "canonical": "func(attrs []github.com/kitsunium/sdk/internal/core/observe/logger.AttrValue) github.com/kitsunium/sdk/internal/core/observe/logger.Handler",
       "doc": "WithAttrs returns a derived TextHandler sharing the writer but owning a new\nattrs slice that prepends the given attributes to every record.\n",
-      "file": "internal/service/observe/logger/text_handler.go",
+      "file": "internal/service/observe/logger/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80868,7 +80868,7 @@
       "spelled": "func(name string) corelogger.Handler",
       "canonical": "func(name string) github.com/kitsunium/sdk/internal/core/observe/logger.Handler",
       "doc": "WithGroup returns a derived TextHandler that namespaces every subsequent\nattribute key under the given group name (rendered as \"name.key\").\n",
-      "file": "internal/service/observe/logger/text_handler.go",
+      "file": "internal/service/observe/logger/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80880,7 +80880,7 @@
       "spelled": "func(lg corelogger.Logger, skip int) corelogger.Logger",
       "canonical": "func(lg github.com/kitsunium/sdk/internal/core/observe/logger.Logger, skip int) github.com/kitsunium/sdk/internal/core/observe/logger.Logger",
       "doc": "WithCaller returns a derived Logger whose emitted records carry a \"source\"\nattribute resolving the captured call-site program counter into\nfile:line:function. The skip argument is the extra stack-frame offset\nreserved for wrapper layers; pass 0 for direct callers. Foreign Logger\nimplementations (not produced by New) are returned unchanged so callers fail\nsafe rather than losing their logger. A nil Logger is returned as-is.\n",
-      "file": "internal/service/observe/logger/source.go",
+      "file": "internal/service/observe/logger/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80892,7 +80892,7 @@
       "spelled": "func(dst []byte, text string) []byte",
       "canonical": "func(dst []byte, text string) []byte",
       "doc": "AppendSanitized copies text onto dst replacing '\\n', '\\r', and NUL\nwith a single space so the content can never inject a new frame in a\nline-framed downstream sink. Other control characters are preserved to\nkeep the rendering faithful; only framing-sensitive bytes are stripped.\nIt scrubs every attacker-influenceable textual field — the Message, group\nnames, and attribute keys — not just the Message (V110).\n\nIt is exported for one caller outside this package: the legacy\nservice/observe/logger.TextHandler, which renders the same line shape without going\nthrough an Encoder. That handler once appended all three fields verbatim —\nthe scrub existed, but only here — so a line break in any of them forged a\nlog line. One function shared by both renderers cannot drift from itself.\n",
-      "file": "internal/service/observe/logger/encoder/text.go",
+      "file": "internal/service/observe/logger/encoder/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80917,7 +80917,7 @@
       "spelled": "func(clk clock.Clock) Encoder",
       "canonical": "func(clk github.com/kitsunium/sdk/internal/kernel/clock.Clock) github.com/kitsunium/sdk/internal/service/observe/logger/encoder.Encoder",
       "doc": "NewJSON builds an Encoder that renders records as single-line JSON. Pass\nclock.System for production use; tests inject a fake clock. A nil clock\nfalls back to the real wall clock so callers can pass clock.System or nil\ninterchangeably.\nIFACE-PLUGIN: returns the Encoder contract so callers depend on the\npublic surface; the concrete jsonEncoder is intentionally hidden.\n",
-      "file": "internal/service/observe/logger/encoder/json.go",
+      "file": "internal/service/observe/logger/encoder/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80929,7 +80929,7 @@
       "spelled": "func(clk clock.Clock) Encoder",
       "canonical": "func(clk github.com/kitsunium/sdk/internal/kernel/clock.Clock) github.com/kitsunium/sdk/internal/service/observe/logger/encoder.Encoder",
       "doc": "NewText builds an Encoder bound to the supplied clock. Pass clock.System\nfor production use; tests inject a fake clock. A nil clock falls back to\nthe real wall clock so callers can pass clock.System or nil interchangeably.\nIFACE-PLUGIN: returns the Encoder contract so callers depend on the\npublic surface; the concrete textEncoder is intentionally hidden.\n",
-      "file": "internal/service/observe/logger/encoder/text.go",
+      "file": "internal/service/observe/logger/encoder/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -80954,7 +80954,7 @@
       "spelled": "func(key string) bool",
       "canonical": "func(key string) bool",
       "doc": "ReservesKey reports whether a TOP-LEVEL attribute key must be renamed under\n[ReservedPrefix]: the two the SDK emits as fields of its own — trace_id and\nspan_id, the correlation OpenTelemetry prescribes and ADR 0062 writes on\nevery record emitted inside a span — and anything already in the reserved\nnamespace.\n\nTwo members of one JSON object cannot both be \"trace_id\" — a decoder keeps\none of them, and which one is the decoder's business — so an attribute\ncarrying that key beside the SDK's field could replace the correlation on the\nway in, and could carry a value from anywhere. It is renamed rather than\ndropped: nothing a caller logged is lost, and nothing it logged can be\nmistaken for the span this line came from.\n\nThe namespace is reserved WITH the two keys because the rename has to be\ninjective, and prefixing alone is not: a caller logging both trace_id and a\nliteral attr.trace_id would otherwise land both on \"attr.trace_id\" and the\nambiguity would survive one name over. Prefixing anything already inside the\nnamespace makes the mapping one-to-one — attr.trace_id becomes\nattr.attr.trace_id — so two distinct keys always render distinct.\n\nInside a group the key is already prefixed (\"http.trace_id\"), so it cannot\ncollide and is left alone.\n",
-      "file": "internal/service/observe/logger/encoder/encoder.go",
+      "file": "internal/service/observe/logger/encoder/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -81270,7 +81270,7 @@
       "spelled": "func(downstream corelogger.Sink, cfg Config) (sink corelogger.Sink, err error)",
       "canonical": "func(downstream github.com/kitsunium/sdk/internal/core/observe/logger.Sink, cfg github.com/kitsunium/sdk/internal/service/observe/logger/middleware/recover.Config) (sink github.com/kitsunium/sdk/internal/core/observe/logger.Sink, err error)",
       "doc": "NewWithConfig wraps downstream with panic recovery and the supplied\nConfig. A zero-value cfg is equivalent to New: panics in Write / Flush /\nClose become Panicked sentinels and no callback fires. Setting\ncfg.OnPanic makes each absorbed panic observable without changing the\nreturned error — see Finding V34.\n",
-      "file": "internal/service/observe/logger/middleware/recover/recover_sink.go",
+      "file": "internal/service/observe/logger/middleware/recover/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -81378,7 +81378,7 @@
       "spelled": "func(cfg Config) *TeeSink",
       "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/observe/logger/middleware/tee.Config) *github.com/kitsunium/sdk/internal/service/observe/logger/middleware/tee.TeeSink",
       "doc": "NewTeeSink builds a TeeSink from cfg. The primaries slice is copied so\nlater caller mutation cannot affect the sink. A nil cfg.Spill disables the\ndead-letter seam.\n",
-      "file": "internal/service/observe/logger/middleware/tee/tee.go",
+      "file": "internal/service/observe/logger/middleware/tee/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -81453,7 +81453,7 @@
       "spelled": "func() corelogger.Sink",
       "canonical": "func() github.com/kitsunium/sdk/internal/core/observe/logger.Sink",
       "doc": "NewStderr is a convenience constructor binding the sink to os.Stderr.\n",
-      "file": "internal/service/observe/logger/sink/console/console.go",
+      "file": "internal/service/observe/logger/sink/console/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -81465,7 +81465,7 @@
       "spelled": "func() corelogger.Sink",
       "canonical": "func() github.com/kitsunium/sdk/internal/core/observe/logger.Sink",
       "doc": "NewStdout is a convenience constructor binding the sink to os.Stdout.\n",
-      "file": "internal/service/observe/logger/sink/console/console.go",
+      "file": "internal/service/observe/logger/sink/console/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -81579,7 +81579,7 @@
       "spelled": "func() *Memory",
       "canonical": "func() *github.com/kitsunium/sdk/internal/service/observe/logger/sink/memory.Memory",
       "doc": "NewMemory returns an empty Memory sink ready to record received records.\n",
-      "file": "internal/service/observe/logger/sink/memory/memory.go",
+      "file": "internal/service/observe/logger/sink/memory/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -81775,7 +81775,7 @@
       "spelled": "func(inner corelogger.Sink, min level.Level) corelogger.Sink",
       "canonical": "func(inner github.com/kitsunium/sdk/internal/core/observe/logger.Sink, min github.com/kitsunium/sdk/internal/core/observe/logger/level.Level) github.com/kitsunium/sdk/internal/core/observe/logger.Sink",
       "doc": "Floor wraps inner so only records with Level >= min reach it, for every min —\nInfo included. It is the gate without New's reading of Info as \"inherit\":\nthat reading belongs to a writer configuration, whose zero MinLevel must not\nnarrow anything, and a caller who names a floor outside one means the floor\nit named. A nil inner yields nil, which a fan-out skips and NewWithSink\nrefuses, rather than a gate that fails on its first record.\n\nIFACE-PLUGIN: the gate is returned behind the Sink interface; the concrete\ngateSink type stays unexported.\n",
-      "file": "internal/service/observe/logger/writer/levelgate/gate.go",
+      "file": "internal/service/observe/logger/writer/levelgate/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -82001,7 +82001,7 @@
       "spelled": "func() coremetrics.FullMeter",
       "canonical": "func() github.com/kitsunium/sdk/internal/core/observe/metrics.FullMeter",
       "doc": "NewMeter returns a fresh in-memory Meter with every MeterConfig knob at its\nresolved default: bounded at DefaultMaxSeriesPerInstrument, cumulative,\nservice.name=unknown_service, this SDK as the scope, and the system clock.\n",
-      "file": "internal/service/observe/metrics/meter.go",
+      "file": "internal/service/observe/metrics/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -82013,7 +82013,7 @@
       "spelled": "func(cfg MeterConfig) coremetrics.FullMeter",
       "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/observe/metrics.MeterConfig) github.com/kitsunium/sdk/internal/core/observe/metrics.FullMeter",
       "doc": "NewMeterWithConfig returns a fresh in-memory Meter honouring cfg. Every unset\nfield resolves to a working value and none of them to an inert one — see\nMeterConfig for each knob's rule.\n",
-      "file": "internal/service/observe/metrics/meter.go",
+      "file": "internal/service/observe/metrics/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -82132,7 +82132,7 @@
       "spelled": "func(err error) bool",
       "canonical": "func(err error) bool",
       "doc": "OTLPRetryable reports whether err is an OTLP/HTTP failure the specification\nsays may be replayed: a transport fault, or one of HTTP 429 / 502 / 503 /\n504. Everything else — a rejected payload, a partial success, an\nunrepresentable snapshot — is false, because replaying identical bytes at a\ncollector that already refused them only costs the retry budget.\n\nIts signature is exactly resilience.RetryConfig.Retryable's, so it drops\nstraight into a retry policy without an adapter. That is the whole reason\nthis exporter classifies instead of looping.\n",
-      "file": "internal/service/observe/metrics/exporter_otlphttp.go",
+      "file": "internal/service/observe/metrics/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -82652,7 +82652,7 @@
       "spelled": "func(cfg TracerConfig) *Tracer",
       "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/observe/trace.TracerConfig) *github.com/kitsunium/sdk/internal/service/observe/trace.Tracer",
       "doc": "NewTracer builds a Tracer from cfg, applying every clamp once.\n\nIt returns the concrete type rather than the core/observe/trace.Tracer interface so a\ncaller keeps reach to anything the concrete type grows later without the\ninterface having to (ADR 0039 §widening a returned value is safe). It cannot\nfail: every field of TracerConfig has a resolved meaning, and the only inputs\nthat could be refused — a sampling ratio, an OTLP endpoint — are refused by\ntheir own constructors, before they ever reach here.\n",
-      "file": "internal/service/observe/trace/tracer.go",
+      "file": "internal/service/observe/trace/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -82710,7 +82710,7 @@
       "spelled": "func(err error) bool",
       "canonical": "func(err error) bool",
       "doc": "OTLPRetryable reports whether err is an OTLP/HTTP failure the specification\nsays may be replayed: a transport fault, or one of HTTP 429 / 502 / 503 / 504.\nEverything else — a rejected payload, a partial success, an unencodable span —\nis false, because replaying identical bytes at a collector that already refused\nthem only costs the retry budget.\n\nIts signature is exactly resilience.RetryConfig.Retryable's, so it drops\nstraight into a retry policy without an adapter. That is the whole reason this\nexporter classifies instead of looping.\n",
-      "file": "internal/service/observe/trace/exporter_otlphttp.go",
+      "file": "internal/service/observe/trace/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -82735,7 +82735,7 @@
       "spelled": "func(root coretrace.Sampler) coretrace.Sampler",
       "canonical": "func(root github.com/kitsunium/sdk/internal/core/observe/trace.Sampler) github.com/kitsunium/sdk/internal/core/observe/trace.Sampler",
       "doc": "ParentBased returns a Sampler that HONOURS a valid parent's decision and\nconsults root only when there is no parent.\n\nIt is the sampler almost every deployment wants, and the reason is the whole\ndesign of the domain: the decision is taken once, at the root, and travels in\nthe traceparent's sampled bit. A process that re-decided for an inbound\nrequest with a valid parent would produce a trace with a hole in the middle —\nits own spans missing from a trace the caller kept, or present in one the\ncaller dropped, so the backend stores fragments of a request nobody can\nreassemble.\n\nA nil root CLAMPS to AlwaysSample rather than refusing. The nil means \"the\ncaller did not name a root policy\", and a sampler that dropped everything\nwould silently turn tracing off — the ADR 0031 failure this whole family is\nwritten against. Every other constructor in this file refuses instead; this\none clamps because AlwaysSample is a description of the safe direction, not a\nnumber chosen on the caller's behalf.\n",
-      "file": "internal/service/observe/trace/sampler.go",
+      "file": "internal/service/observe/trace/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -82873,7 +82873,7 @@
       "spelled": "func() coretrace.SpanSink",
       "canonical": "func() github.com/kitsunium/sdk/internal/core/observe/trace.SpanSink",
       "doc": "Sink returns the core/observe/trace.SpanSink to hand to a TracerConfig.\n\nIt is a method returning a bound method value rather than the Recorder\nimplementing an interface, because SpanSink is a FUNC port — which is the\npoint of a func port: there is no interface for a caller to satisfy, so there\nis nothing for a future version to widen (ADR 0041).\n",
-      "file": "internal/service/observe/trace/recorder.go",
+      "file": "internal/service/observe/trace/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -82991,7 +82991,7 @@
       "spelled": "func() coreotel.ResourceValue",
       "canonical": "func() github.com/kitsunium/sdk/internal/core/observe/otel.ResourceValue",
       "doc": "Resource returns the producing resource this Tracer stamps on its payloads.\n",
-      "file": "internal/service/observe/trace/tracer.go",
+      "file": "internal/service/observe/trace/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },
@@ -83004,7 +83004,7 @@
       "spelled": "func() coreotel.ScopeValue",
       "canonical": "func() github.com/kitsunium/sdk/internal/core/observe/otel.ScopeValue",
       "doc": "Scope returns the instrumentation scope this Tracer stamps on its payloads.\n",
-      "file": "internal/service/observe/trace/tracer.go",
+      "file": "internal/service/observe/trace/decl_gen.go",
       "layer": "service",
       "family": "observe"
     },

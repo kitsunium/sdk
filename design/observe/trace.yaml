@@ -1833,6 +1833,7 @@ packages:
           - name: err
             type: error
         name: OTLPRetryable
+        impl: otlpRetryable
         out:
           - type: bool
       - doc: |-
@@ -2128,6 +2129,7 @@ packages:
           - name: root
             type: coretrace.Sampler
         name: ParentBased
+        impl: parentBased
         out:
           - type: coretrace.Sampler
       - doc: |-
@@ -2241,6 +2243,7 @@ packages:
           - name: cfg
             type: TracerConfig
         name: NewTracer
+        impl: newTracer
         out:
           - type: "*Tracer"
       - doc: |-
@@ -2400,6 +2403,7 @@ packages:
               point of a func port: there is no interface for a caller to satisfy, so there
               is nothing for a future version to widen (ADR 0041).
             name: Sink
+            impl: sink
             out:
               - type: coretrace.SpanSink
             recv: pointer
@@ -2517,11 +2521,13 @@ packages:
         methods:
           - doc: Resource returns the producing resource this Tracer stamps on its payloads.
             name: Resource
+            impl: resource
             out:
               - type: coreotel.ResourceValue
             recv: pointer
           - doc: Scope returns the instrumentation scope this Tracer stamps on its payloads.
             name: Scope
+            impl: scope
             out:
               - type: coreotel.ScopeValue
             recv: pointer

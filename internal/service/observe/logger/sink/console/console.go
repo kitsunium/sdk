@@ -31,14 +31,16 @@ func New(w io.Writer) (sink corelogger.Sink, err error) {
 	return &consoleSink{w: w}, nil
 }
 
-// NewStderr is a convenience constructor binding the sink to os.Stderr.
-func NewStderr() corelogger.Sink {
+// newStderr is NewStderr's body: decl_gen.go writes NewStderr, from the
+// design, as one call of it.
+func newStderr() corelogger.Sink {
 	//: os.Stderr is non-nil by construction — bypass the validation entirely.
 	return &consoleSink{w: os.Stderr}
 }
 
-// NewStdout is a convenience constructor binding the sink to os.Stdout.
-func NewStdout() corelogger.Sink {
+// newStdout is NewStdout's body: decl_gen.go writes NewStdout, from the
+// design, as one call of it.
+func newStdout() corelogger.Sink {
 	//: os.Stdout is non-nil by construction — bypass the validation entirely.
 	return &consoleSink{w: os.Stdout}
 }

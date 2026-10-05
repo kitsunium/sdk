@@ -7,27 +7,23 @@ import (
 	coretrace "github.com/kitsunium/sdk/internal/core/observe/trace"
 )
 
-// NewTracer builds a Tracer from cfg, applying every clamp once.
-//
-// It returns the concrete type rather than the core/observe/trace.Tracer interface so a
-// caller keeps reach to anything the concrete type grows later without the
-// interface having to (ADR 0039 §widening a returned value is safe). It cannot
-// fail: every field of TracerConfig has a resolved meaning, and the only inputs
-// that could be refused — a sampling ratio, an OTLP endpoint — are refused by
-// their own constructors, before they ever reach here.
-func NewTracer(cfg TracerConfig) *Tracer {
+// newTracer is NewTracer's body: decl_gen.go writes NewTracer, from the
+// design, as one call of it.
+func newTracer(cfg TracerConfig) *Tracer {
 	//: resolve once, so nothing on the per-span path tests a nil field.
 	return &Tracer{cfg: cfg.resolved()}
 }
 
-// Resource returns the producing resource this Tracer stamps on its payloads.
-func (t *Tracer) Resource() coreotel.ResourceValue {
+// resource is Tracer.Resource's body: decl_gen.go writes Tracer.Resource, from the
+// design, as one call of it.
+func (t *Tracer) resource() coreotel.ResourceValue {
 	//: already normalised at construction.
 	return t.cfg.Resource
 }
 
-// Scope returns the instrumentation scope this Tracer stamps on its payloads.
-func (t *Tracer) Scope() coreotel.ScopeValue {
+// scope is Tracer.Scope's body: decl_gen.go writes Tracer.Scope, from the
+// design, as one call of it.
+func (t *Tracer) scope() coreotel.ScopeValue {
 	//: already normalised at construction.
 	return t.cfg.Scope
 }

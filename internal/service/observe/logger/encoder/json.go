@@ -58,13 +58,12 @@ type jsonEncoder struct {
 	clk clock.Clock
 }
 
-// NewJSON builds an Encoder that renders records as single-line JSON. Pass
-// clock.System for production use; tests inject a fake clock. A nil clock
-// falls back to the real wall clock so callers can pass clock.System or nil
-// interchangeably.
+// newJSON is NewJSON's body: decl_gen.go writes NewJSON, from the
+// design, as one call of it.
+//
 // IFACE-PLUGIN: returns the Encoder contract so callers depend on the
 // public surface; the concrete jsonEncoder is intentionally hidden.
-func NewJSON(clk clock.Clock) Encoder {
+func newJSON(clk clock.Clock) Encoder {
 	//: clock is mandatory — fall back to the real wall clock on nil.
 	if clk == nil {
 		//: defensive default avoids a nil-pointer panic in Append.

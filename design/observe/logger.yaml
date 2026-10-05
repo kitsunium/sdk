@@ -829,6 +829,7 @@ packages:
           - name: min
             type: level.Level
         name: NewHandler
+        impl: newHandler
         out:
           - name: h
             type: corelogger.Handler
@@ -915,6 +916,7 @@ packages:
           - name: owned
             type: io.Closer
         name: Owning
+        impl: owning
         out:
           - type: corelogger.Logger
       - doc: |-
@@ -930,6 +932,7 @@ packages:
           - name: skip
             type: int
         name: WithCaller
+        impl: withCaller
         out:
           - type: corelogger.Logger
       - doc: |-
@@ -1064,6 +1067,7 @@ packages:
               - name: r
                 type: corelogger.RecordEvent
             name: Enabled
+            impl: enabled
             out:
               - type: bool
             recv: pointer
@@ -1074,6 +1078,7 @@ packages:
               - name: attrs
                 type: "[]corelogger.AttrValue"
             name: WithAttrs
+            impl: withAttrs
             out:
               - type: corelogger.Handler
             recv: pointer
@@ -1084,6 +1089,7 @@ packages:
               - name: name
                 type: string
             name: WithGroup
+            impl: withGroup
             out:
               - type: corelogger.Handler
             recv: pointer
@@ -1205,6 +1211,7 @@ packages:
           - name: key
             type: string
         name: ReservesKey
+        impl: reservesKey
         out:
           - type: bool
       - doc: |-
@@ -1218,6 +1225,7 @@ packages:
           - name: clk
             type: clock.Clock
         name: NewJSON
+        impl: newJSON
         out:
           - type: Encoder
       - doc: |-
@@ -1230,6 +1238,7 @@ packages:
           - name: clk
             type: clock.Clock
         name: NewText
+        impl: newText
         out:
           - type: Encoder
       - doc: |-
@@ -1251,6 +1260,7 @@ packages:
           - name: text
             type: string
         name: AppendSanitized
+        impl: appendSanitized
         out:
           - type: "[]byte"
     imports:
@@ -1449,6 +1459,7 @@ packages:
     functions:
       - doc: NewMemory returns an empty Memory sink ready to record received records.
         name: NewMemory
+        impl: newMemory
         out:
           - type: "*Memory"
     imports:

@@ -122,16 +122,9 @@ func NewOTLPHTTPExporter(name coretrace.ExporterName, cfg OTLPHTTPConfig) (expor
 	return &otlpHTTPExporter{name: name, sender: sender}, nil
 }
 
-// OTLPRetryable reports whether err is an OTLP/HTTP failure the specification
-// says may be replayed: a transport fault, or one of HTTP 429 / 502 / 503 / 504.
-// Everything else — a rejected payload, a partial success, an unencodable span —
-// is false, because replaying identical bytes at a collector that already refused
-// them only costs the retry budget.
-//
-// Its signature is exactly resilience.RetryConfig.Retryable's, so it drops
-// straight into a retry policy without an adapter. That is the whole reason this
-// exporter classifies instead of looping.
-func OTLPRetryable(err error) bool {
+// otlpRetryable is OTLPRetryable's body: decl_gen.go writes OTLPRetryable, from the
+// design, as one call of it.
+func otlpRetryable(err error) bool {
 	//: one code carries the transient verdict; HasCode walks the wrap trail.
 	return errs.HasCode(err, coretrace.CodeOTLPExportUnavailable)
 }

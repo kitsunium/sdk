@@ -46,7 +46,7 @@ public names a caller types — `OTLPHTTPConfig`, `NewOTLPHTTPExporter`,
 | File | Surface |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
-| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `AnyValue`, `HTTPConfig`, `KeyValue`, `ResourceMessage`, `RejectedCounter`, `LenientInt64`, `Int64`, `Uint64`, `Double`, `ScopeMessage`, `Sender`, `SignalSpec` and `Stream` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `AnyValue`, `HTTPConfig`, `KeyValue`, `ResourceMessage`, `RejectedCounter`, `LenientInt64`, `Int64`, `Uint64`, `Double`, `ScopeMessage`, `Sender`, `SignalSpec` and `Stream` — each struct with every field, unexported ones included; `ResourceOf`, `ScopeOf` and `NewStream`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
 | `otlp.go` | `DefaultTimeout` / `DefaultMaxResponseBytes` / `DocumentTerminator` |
 | `scalar.go` | `Int64` / `Uint64` (decimal strings) and `Double` (a number, or `"NaN"` / `"Infinity"` / `"-Infinity"`) with their `MarshalJSON` |
 | `key_value.go` | `KeyValue` + `Attrs` + `KeyValueOf` — the shared attribute model (`internal/core/observe/otel`) as `common.v1.KeyValue` |

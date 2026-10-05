@@ -175,6 +175,7 @@ packages:
           - name: resource
             type: coreotel.ResourceValue
         name: ResourceOf
+        impl: resourceOf
         out:
           - type: ResourceMessage
       - doc: |-
@@ -200,6 +201,7 @@ packages:
           - name: scope
             type: coreotel.ScopeValue
         name: ScopeOf
+        impl: scopeOf
         out:
           - type: ScopeMessage
       - doc: |-
@@ -231,6 +233,7 @@ packages:
           - name: failure
             type: "*errs.WrapParams"
         name: NewStream
+        impl: newStream
         out:
           - type: "*Stream"
     imports:

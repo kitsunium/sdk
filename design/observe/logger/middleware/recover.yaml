@@ -91,6 +91,7 @@ packages:
           - name: cfg
             type: Config
         name: NewWithConfig
+        impl: newWithConfig
         out:
           - name: sink
             type: corelogger.Sink

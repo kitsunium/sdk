@@ -6,9 +6,9 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// NewStream binds a Stream to dst. failure is the wrap a writer fault leaves
-// under — the calling signal's EXPORT_FAILED, in its own words.
-func NewStream(dst io.Writer, failure *errs.WrapParams) *Stream {
+// newStream is NewStream's body: decl_gen.go writes NewStream, from the
+// design, as one call of it.
+func newStream(dst io.Writer, failure *errs.WrapParams) *Stream {
 	//: own a copy of the wrap, so the caller's value cannot change it later.
 	return &Stream{dst: dst, failure: *failure}
 }

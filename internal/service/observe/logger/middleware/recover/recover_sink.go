@@ -27,12 +27,9 @@ func New(downstream corelogger.Sink) (sink corelogger.Sink, err error) {
 	return NewWithConfig(downstream, Config{})
 }
 
-// NewWithConfig wraps downstream with panic recovery and the supplied
-// Config. A zero-value cfg is equivalent to New: panics in Write / Flush /
-// Close become Panicked sentinels and no callback fires. Setting
-// cfg.OnPanic makes each absorbed panic observable without changing the
-// returned error — see Finding V34.
-func NewWithConfig(downstream corelogger.Sink, cfg Config) (sink corelogger.Sink, err error) {
+// newWithConfig is NewWithConfig's body: decl_gen.go writes NewWithConfig, from the
+// design, as one call of it.
+func newWithConfig(downstream corelogger.Sink, cfg Config) (sink corelogger.Sink, err error) {
 	//: refuse a nil downstream — there would be nothing to wrap.
 	if downstream == nil {
 		//: documented sentinel — caller must supply a downstream sink.

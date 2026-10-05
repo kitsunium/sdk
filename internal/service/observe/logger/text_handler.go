@@ -47,9 +47,9 @@ func NewTextHandler(w io.Writer, min level.Level) (h *TextHandler, err error) {
 	return &TextHandler{w: w, min: min, clk: clock.System}, nil
 }
 
-// Enabled reports whether the handler would emit a record at r.Level, taking
-// context cancellation into account.
-func (h *TextHandler) Enabled(ctx context.Context, r corelogger.RecordEvent) bool {
+// enabled is TextHandler.Enabled's body: decl_gen.go writes TextHandler.Enabled, from the
+// design, as one call of it.
+func (h *TextHandler) enabled(ctx context.Context, r corelogger.RecordEvent) bool {
 	//: honour context cancellation: cancelled contexts short-circuit to disabled.
 	if ctx != nil && ctx.Err() != nil {
 		//: caller's context is already done; skip emission entirely.
@@ -59,9 +59,9 @@ func (h *TextHandler) Enabled(ctx context.Context, r corelogger.RecordEvent) boo
 	return r.Level >= h.min
 }
 
-// WithAttrs returns a derived TextHandler sharing the writer but owning a new
-// attrs slice that prepends the given attributes to every record.
-func (h *TextHandler) WithAttrs(attrs []corelogger.AttrValue) corelogger.Handler {
+// withAttrs is TextHandler.WithAttrs's body: decl_gen.go writes TextHandler.WithAttrs, from the
+// design, as one call of it.
+func (h *TextHandler) withAttrs(attrs []corelogger.AttrValue) corelogger.Handler {
 	//: copy-on-write — child must not alias the parent's attrs slice.
 	cp := make([]corelogger.AttrValue, len(h.attrs)+len(attrs))
 	//: preserve ordering: parent attrs first, then the freshly bound ones.
@@ -71,9 +71,9 @@ func (h *TextHandler) WithAttrs(attrs []corelogger.AttrValue) corelogger.Handler
 	return &TextHandler{w: h.w, attrs: cp, groups: h.groups, min: h.min, clk: h.clk}
 }
 
-// WithGroup returns a derived TextHandler that namespaces every subsequent
-// attribute key under the given group name (rendered as "name.key").
-func (h *TextHandler) WithGroup(name string) corelogger.Handler {
+// withGroup is TextHandler.WithGroup's body: decl_gen.go writes TextHandler.WithGroup, from the
+// design, as one call of it.
+func (h *TextHandler) withGroup(name string) corelogger.Handler {
 	//: empty group is a documented no-op so callers can pass user input.
 	if name == "" {
 		//: return the receiver unchanged — no extra wrapping.

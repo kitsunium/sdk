@@ -43,13 +43,9 @@ func (r *Recorder) Scope() coreotel.ScopeValue {
 	return r.scope
 }
 
-// Sink returns the core/observe/trace.SpanSink to hand to a TracerConfig.
-//
-// It is a method returning a bound method value rather than the Recorder
-// implementing an interface, because SpanSink is a FUNC port — which is the
-// point of a func port: there is no interface for a caller to satisfy, so there
-// is nothing for a future version to widen (ADR 0041).
-func (r *Recorder) Sink() coretrace.SpanSink {
+// sink is Recorder.Sink's body: decl_gen.go writes Recorder.Sink, from the
+// design, as one call of it.
+func (r *Recorder) sink() coretrace.SpanSink {
 	//: a bound method value, allocated once per call rather than per span.
 	return r.record
 }

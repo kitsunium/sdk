@@ -130,3 +130,7 @@ Benchmarks and their reasoning live in `BENCH.md`; refresh with
 ```
 cd internal/service && GOWORK=off go test -run='^$' -bench=. -benchmem -benchtime=1s -count=3 ./observe/logger/encoder/
 ```
+
+## Declarations
+
+`decl_gen.go` is written by kit gen from the design (ADR 0170): the declaration of ; `ReservesKey`, `NewJSON`, `NewText` and `AppendSanitized`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name.

@@ -29,21 +29,9 @@ func (o *onceCloser) Close() error {
 	return o.err
 }
 
-// Owning returns lg carrying owned as the resources it owns, so that Close
-// releases them.
-//
-// It exists for a constructor that OPENS writers on its caller's behalf —
-// pkg/v1/observe/logger.NewMulti resolves each spec through the writer registry, so the
-// caller never holds a Sink it could close — and hands back a Logger that was
-// otherwise the only thing referring to them. Without it those files were held
-// until a collection ran their finalizers: a descriptor leak for a program that
-// rebuilds its logger, and on Windows a log file nothing could delete or rotate
-// while the process lived (ADR 0095).
-//
-// The result is still this package's concrete Logger, so Build and LogAttrs
-// keep their fast path. A Logger this package did not build is returned
-// unchanged — it has no Close to carry the resources to.
-func Owning(lg corelogger.Logger, owned io.Closer) corelogger.Logger {
+// owning is Owning's body: decl_gen.go writes Owning, from the
+// design, as one call of it.
+func owning(lg corelogger.Logger, owned io.Closer) corelogger.Logger {
 	impl, ok := lg.(*loggerImpl)
 	//: a foreign Logger, or nothing to own.
 	if !ok || owned == nil {

@@ -1220,6 +1220,7 @@ packages:
           - name: err
             type: error
         name: OTLPRetryable
+        impl: otlpRetryable
         out:
           - type: bool
       - doc: |-
@@ -1307,6 +1308,7 @@ packages:
           resolved default: bounded at DefaultMaxSeriesPerInstrument, cumulative,
           service.name=unknown_service, this SDK as the scope, and the system clock.
         name: NewMeter
+        impl: newMeter
         out:
           - type: coremetrics.FullMeter
       - doc: |-
@@ -1317,6 +1319,7 @@ packages:
           - name: cfg
             type: MeterConfig
         name: NewMeterWithConfig
+        impl: newMeterWithConfig
         out:
           - type: coremetrics.FullMeter
     imports:

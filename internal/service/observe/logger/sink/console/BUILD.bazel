@@ -6,6 +6,7 @@ go_library(
     name = "console",
     srcs = [
         "console.go",
+        "decl_gen.go",
         "doc.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/observe/logger/sink/console",

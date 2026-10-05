@@ -18,7 +18,7 @@ seam, not a retry queue. Compose retry behind the spill sink.
 
 | File | Role |
 |---|---|
-| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `Config` and `TeeSink` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `Config` and `TeeSink` — each struct with every field, unexported ones included; `NewTeeSink`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
 | `tee.go` | `TeeSink` + `NewTeeSink` (returns `*TeeSink`) + `Write` / `Flush` / `Close` + wrap helpers |
 | `internal/core/observe/logger/middleware/tee` | its sentinels — range 0.3.29.\* — declared in the core mirror since ADR 0160; this package declares none |
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167): scope, non-goals, concurrency |

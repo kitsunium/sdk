@@ -12,7 +12,7 @@ output. Mirrors apex/log's memory handler.
 
 | File | Role |
 |---|---|
-| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declaration of `Memory` — each struct with every field, unexported ones included; the assertion `Memory → corelogger.Sink`. Their methods, constructors and helpers stay hand-written, in the files this document names |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declaration of `Memory` — each struct with every field, unexported ones included; `NewMemory`, each one call of its unexported body, measured to inline with the body inlined into it; the assertion `Memory → corelogger.Sink`. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
 | `memory.go`            | `Memory` struct + `NewMemory` + `Write` / `Flush` / `Close` / `Records` / `Len` / `Reset` |
 | `doc.go`               | the package comment — kit writes it from the design (ADR 0167) |
 

@@ -13,6 +13,7 @@ emit atomic lines. It backs `pkg/v1/observe/logger`'s `ConsoleStderr` /
 
 | File | Role |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declaration of ; `NewStderr` and `NewStdout`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
 | `console.go`            | `consoleSink` + `New` / `NewStderr` / `NewStdout` |
 | `internal/core/observe/logger/sink/console` | its sentinels — range 0.3.13.\* — declared in the core mirror since ADR 0160; this package declares none |
 

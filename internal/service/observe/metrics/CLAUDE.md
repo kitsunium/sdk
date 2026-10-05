@@ -23,7 +23,7 @@ the excess into a single aggregated overflow series.
 
 | File | Surface |
 |---|---|
-| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `MeterConfig` and `OTLPHTTPConfig` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `MeterConfig` and `OTLPHTTPConfig` — each struct with every field, unexported ones included; `OTLPRetryable`, `NewMeter` and `NewMeterWithConfig`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
 | `meter.go` | `memMeter` + `NewMeter` / `NewMeterWithConfig` / `newMemMeter` + `Collect` (observables, delta consumption, arena layout, per-name sort) |
 | `meter_observable.go` | `observer` + the three `Observable*` registrations + `runObservers` + `observeSum`/`observeGauge` |
 | `meter_describe.go` | `Describe` — the `core/observe/metrics.Describer` half: the lazily-created `descriptions` map, the idempotent path, and the two panics |

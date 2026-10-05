@@ -80,10 +80,12 @@ packages:
             type: error
       - doc: NewStderr is a convenience constructor binding the sink to os.Stderr.
         name: NewStderr
+        impl: newStderr
         out:
           - type: corelogger.Sink
       - doc: NewStdout is a convenience constructor binding the sink to os.Stdout.
         name: NewStdout
+        impl: newStdout
         out:
           - type: corelogger.Sink
     imports:
