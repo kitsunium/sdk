@@ -1,18 +1,3 @@
-// Package msgpack — the per-type encoders. Reflection runs ONCE per Go type:
-// encoderFor builds an encodeFunc for the type and caches it, so encoding a
-// value is a walk of precomputed closures and, for a struct, an append of
-// each key's pre-encoded bytes. A recursive type is handled the way
-// encoding/json handles it: a placeholder is cached first and forwards to the
-// real encoder once that exists.
-//
-// A type that encodes itself takes precedence over its kind, in the order the
-// vendor-backed codec checked: time.Time (the timestamp extension), then
-// MarshalMsgpack() ([]byte, error) — the method the vendor called, kept so a
-// type written for it still controls its own bytes — then
-// encoding.BinaryMarshaler and encoding.TextMarshaler, both written as a bin,
-// as before. A pointer-receiver method is called on the value's address, or on
-// an addressable copy when the value has none, so the bytes of a value never
-// depend on whether it was passed by pointer.
 package msgpack
 
 import (

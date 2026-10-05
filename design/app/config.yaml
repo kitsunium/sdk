@@ -61,18 +61,64 @@ packages:
             value: "0x00_02_0A_07"
         type: errs.Code
     constants:
-      - name: LayerDefault
+      - blockDoc: |-
+          The layer names a traced load reports. They are strings, not an enum, on
+          purpose: a Source that is none of these names its own kind through
+          [Describer], and a closed set would force it to lie.
+        doc: LayerDefault is the schema's default layer, merged under every source.
+        name: LayerDefault
         type: string
         value: "\"default\""
-      - name: LayerFile
+      - blockDoc: |-
+          The layer names a traced load reports. They are strings, not an enum, on
+          purpose: a Source that is none of these names its own kind through
+          [Describer], and a closed set would force it to lie.
+        doc: LayerFile is a file source; its detail is the file's path.
+        name: LayerFile
         type: string
         value: "\"file\""
-      - name: LayerEnv
+      - blockDoc: |-
+          The layer names a traced load reports. They are strings, not an enum, on
+          purpose: a Source that is none of these names its own kind through
+          [Describer], and a closed set would force it to lie.
+        doc: |-
+          LayerEnv is the environment source; its detail is the VARIABLE that set
+          the key, such as "APP_DATA_DIR".
+        name: LayerEnv
         type: string
         value: "\"env\""
-      - name: LayerSource
+      - blockDoc: |-
+          The layer names a traced load reports. They are strings, not an enum, on
+          purpose: a Source that is none of these names its own kind through
+          [Describer], and a closed set would force it to lie.
+        doc: |-
+          LayerSource is a source that does not describe itself; its detail is
+          its position in the sources a load was given, counting from 0.
+        name: LayerSource
         type: string
         value: "\"source\""
+    doc: |-
+      Package config — range 0.2.10.* (ADR 0028 core/app/config block).
+
+      Package config — declares the sentinel *errs.Error values. Each var's name
+      equals its errs.Define Reason in SCREAMING_SNAKE form.
+
+      Package config — provenance: which layer supplied a key's final value, and
+      the sibling a Source implements to say so.
+
+      Package config — the schema's declared value: one key and what it holds when
+      nobody supplied it.
+
+      Package config declares the configuration port of the SDK: a Source that
+      yields a flat key→value map, a Validator the decoded struct may implement, and
+      a Watcher that re-fires on change. A core sibling admitted by ADR 0028 (closes
+      the Phase-B wave). Concrete sources (env, file), the merge+decode loader, and
+      the cross-OS poll watcher live in internal/service/app/config; this package owns
+      only the contract + the typed failure sentinels.
+
+      Package config — the optional self-validation contract.
+
+      Package config — the change-observer contract.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/app/config
@@ -222,32 +268,180 @@ packages:
             public: The configuration carries keys the target does not define
             reason: CONFIG_UNKNOWN_KEY
     types:
-      - name: OriginValue
+      - doc: |-
+          OriginValue says which layer supplied the final value of one key of a load —
+          and says it WITHOUT the value, which is the point: an origin is written to a
+          start-up log, a --show-config table, a diagnostics page, and a
+          configuration value is routinely a password.
+
+          pkg/v1/app/config aliases it as Origin. It is a published shape the SDK RETURNS,
+          so ADR 0040 applies with its full cost after v1.
+        name: OriginValue
         struct:
           fields:
-            - name: Key
+            - doc: Key is the operator's key in the dotted grammar — "database.dsn".
+              name: Key
               type: string
-            - name: Layer
+            - doc: |-
+                Layer names the kind of layer that supplied the final value: one of the
+                Layer* constants, or the kind a [Describer] reports. It is EMPTY when the
+                key is absent from the merged layers — no layer supplied it, or a later
+                layer erased it by replacing one of its tables with a scalar or a null —
+                and the field then holds its Go zero value.
+              name: Layer
               type: string
-            - name: Detail
+            - doc: |-
+                Detail is what an operator acts on: the variable that set the key, the
+                file that holds it. Empty when the layer has nothing more to say.
+              name: Detail
               type: string
-            - name: Secret
+            - doc: |-
+                Secret reports that the key's field holds a core/security/secret.Value. The
+                origin never carries a value either way; Secret is what tells a
+                rendering that the value, if it shows one, must be masked.
+              name: Secret
               type: bool
-      - name: DeclaredValue
+      - doc: |-
+          DeclaredValue declares the value one configuration key takes when NO Source
+          supplied it. It is the domain's answer to the question every configuration
+          loader gets wrong: an absent key and a key explicitly set to the zero value
+          are different statements, and only one of them may be overridden.
+
+          A default is NOT a fallback applied to a zero value after decoding. It is a
+          LAYER, merged under every Source before the decode happens, so presence is
+          decided while the operator's key still exists as a key. `timeout = 0` in a
+          file therefore stays 0, and an omitted `timeout` becomes the default —
+          which a post-decode "if zero then default" can never distinguish.
+
+          The zero DeclaredValue declares nothing and is refused at construction: an
+          empty Key names no configuration.
+
+          A key that carries a default is never also REQUIRED. The two are mutually
+          exclusive and the contradiction is refused at construction, because a
+          required key the schema itself fills can never be missing — the requirement
+          would be a clause that cannot fire, and a rule that cannot fire is worse
+          than no rule: it is read as protection.
+
+          DeclaredValue is a published concrete shape (pkg/v1/app/config.Default aliases
+          it), so ADR 0040 applies: it may still change while the module is v0, said
+          out loud, and not after v1.
+        name: DeclaredValue
         struct:
           fields:
-            - name: Key
+            - doc: |-
+                Key is the operator's key, in the dotted grammar
+                core/app/validation.JoinField produces — "database.max_conns", never
+                "MaxConns". A segment is one level of nesting in the merged map, so the
+                key an author declares here, the key an operator writes in a TOML table,
+                and the path a violation reports are the SAME string. That is the whole
+                reason the grammar is shared rather than reinvented: a message naming
+                something the operator never typed cannot be acted on.
+
+                A key with an empty segment, a leading or trailing separator, or no
+                counterpart in the target type is refused at construction — a default
+                nothing reads is worse than no default, because it looks configured.
+              name: Key
               type: string
-            - name: Value
+            - doc: |-
+                Value is the typed Go value the key takes when it is absent. It travels
+                the loader's ordinary path — marshalled to JSON with every other layer
+                and decoded by the same round trip — so a default cannot be typed by
+                rules a Source's value is not. A value the round trip cannot carry is
+                refused at construction rather than at the first load that needs it.
+
+                It is never echoed into an error: a default may be a placeholder
+                credential, and a refusal names the key and the clause instead.
+              name: Value
               type: any
-  - functions:
-      - in:
+  - doc: |-
+      Package config — environment-variable Source.
+
+      Package config — file Source (codec-dispatched parse).
+
+      Package config — file Source over an io/fs.FS (codec-dispatched parse).
+
+      Package config — the merge + decode + validate loader.
+
+      Package config — recursive layer merge.
+
+      Package config — traced loads: the same pipeline, and for every key of the
+      target which layer supplied its final value (ADR 0097).
+
+      Package config — cross-OS poll watcher.
+
+      Package config — the compiled schema: typed defaults, required keys, the
+      unknown-key policy, and the constraints the decoded configuration must
+      satisfy.
+
+      A schema is compiled ONCE and refused at construction when it contradicts
+      either the type it describes or itself. Nothing here decides anything at load
+      time that could have been decided here.
+
+      Package config — resolving a declaration into a compiled schema.
+
+      Everything in this file runs once, inside NewSchema, and every failure it
+      reports is CONFIG_SCHEMA_INVALID: the author's declaration, not the
+      operator's deployment.
+
+      Package config — the key grammar a schema declares in, and its resolution
+      against the target type.
+
+      Everything here runs ONCE, inside NewSchema. Nothing in this file runs during
+      a Load: a schema that compiled is a schema whose keys have already been
+      proven to name something.
+
+      Package config — the KEY pass: which keys a load must find, and which it
+      must refuse.
+
+      It runs on the MERGED MAP, before the decode, and that position is the whole
+      argument. After the decode an absent key and a key set to its zero are the
+      same bytes, so no constraint over the decoded value can tell "the operator
+      did not configure a port" from "the operator configured port 0". Before it,
+      the question is trivial: the key is either there or it is not.
+
+      Package config — how a schema refuses, and what a refusal is allowed to say.
+
+      Every message in this file names KEYS and RULES and never a value. A
+      configuration value is routinely a password, a token or a connection string,
+      and a start-up error is the one message in a service that reaches a log
+      aggregator, a terminal and a ticket. The keys are the author's own literals,
+      so echoing them is what makes a refusal actionable; the values are the
+      operator's, so echoing them is a leak. It is the same rule ADR 0046 states
+      for a violation message, applied one layer up, and it has its own test.
+
+      Package config — the default layer, seen as an ordinary Source.
+
+      Package config — the schema declaration: what an author writes.
+
+      Package config provides concrete configuration sources (env, file), the
+      merge+decode loader, and a cross-OS poll watcher implementing core/app/config.
+      Stdlib-only (file parsing dispatches through the codec registry). ADR 0028.
+    functions:
+      - doc: |-
+          EnvSource returns a Source reading "PREFIX_KEY=value" env vars, stripping the
+          prefix and lower-casing the key. An EMPTY prefix — and only an empty prefix —
+          reads every variable.
+
+          The separating underscore is supplied by the Source, and a trailing one on
+          prefix is absorbed rather than doubled: EnvSource("APP") and EnvSource("APP_")
+          name the same namespace. Both spellings are natural to write, and the second
+          used to build the prefix "APP__", which matches nothing — Load then returned
+          an empty configuration and a nil error, so a typo cost the caller the whole
+          config with no signal at all.
+
+          That absorption can never empty a non-empty prefix. "" is not "a namespace
+          whose name is empty", it is the whole environment, so a prefix made only of
+          underscores names the "_" namespace instead of collapsing onto it.
+        in:
           - name: prefix
             type: string
         name: EnvSource
         out:
           - type: coreconfig.Source
-      - in:
+      - doc: |-
+          FileSource returns a Source reading path and parsing it as format (the codec
+          must be registered — blank-import its package, e.g. pkg/v1/data/codec).
+        in:
           - name: format
             type: codec.Format
           - name: path
@@ -255,7 +449,35 @@ packages:
         name: FileSource
         out:
           - type: coreconfig.Source
-      - in:
+      - doc: |-
+          FSSource returns a Source reading path inside fsys and parsing it as format
+          (the codec must be registered — blank-import its package, e.g.
+          pkg/v1/data/codec). It is [FileSource] over an fs.FS: the same codec dispatch,
+          the same CONFIG_SOURCE_FAILED for every way the file cannot be read or
+          parsed, and the same description — layer "file", detail the path as given —
+          so a traced load reports it as a file. The reason it exists is a program
+          that carries its configuration inside its own binary:
+
+          	//go:embed config
+          	var files embed.FS
+
+          	source := config.FSSource(files, "yaml", "config/config.yaml")
+
+          path is an io/fs name — slash-separated and unrooted, fs.ValidPath — and a
+          name that is not one is refused when the source loads, before the
+          filesystem is asked: an fs.ReadFileFS receives the name as given, and one
+          that resolved "../x" would otherwise read outside the tree.
+
+          A file the filesystem does not hold is REFUSED, exactly as FileSource
+          refuses a path it cannot open, and never read as an empty layer. The two are
+          one source over two filesystems and must answer alike; and the usual reason
+          a file is missing from an embedded tree is a build mistake — an embed
+          pattern that matched nothing, a file renamed and not re-embedded — which,
+          read as empty, starts the program on its defaults with nothing said. A layer
+          that is optional by design is the caller's decision, one fs.Stat away.
+
+          A nil fsys is refused when the source loads, rather than panicking there.
+        in:
           - name: fsys
             type: fs.FS
           - name: format
@@ -265,7 +487,19 @@ packages:
         name: FSSource
         out:
           - type: coreconfig.Source
-      - in:
+      - doc: |-
+          Load merges every source (later overrides earlier) into target, then runs
+          target.Validate() when target implements core/app/config.Validator. A source read
+          failure, a decode failure, or a validation failure abort with the matching
+          typed sentinel.
+
+          It declares no schema: no key is required, no default is applied, and a key
+          no field of T addresses is DROPPED by the decode exactly as encoding/json
+          drops it. That is a legitimate way to load a configuration — there is nothing
+          to contradict — and it is why the schema arrived as a second entry point
+          rather than as a widened signature nobody could opt out of. A caller who
+          wants the typo caught declares a schema and calls [LoadSchema].
+        in:
           - name: target
             type: "*T"
           - name: sources
@@ -277,7 +511,60 @@ packages:
           - constraint: any
             name: T
         variadic: true
-      - in:
+      - doc: |-
+          LoadSchema is [Load] with a compiled [SchemaValue]: the schema's typed
+          defaults are merged UNDER every source, its required keys and its vocabulary
+          are checked against the merged map, and its constraints run over the decoded
+          result before the target's own Validate.
+
+          # The layer order, which is the whole contract
+
+          	default  <  file  <  env  <  any later source
+
+          The default layer is placed first STRUCTURALLY, not by argument order: there
+          is no way to spell a load in which a default outranks a source, because a
+          default that could win is not a default. Everything after it is the caller's
+          order, so an explicit override is simply the last Source — the port is one
+          method, and the SDK does not need a special type for "the values I decided
+          at the call site".
+
+          # An absent key and a key set to zero are different statements
+
+          Defaults are a LAYER merged before the decode, so presence is decided while
+          the operator's key still exists as a key. `timeout = 0` in a file is a key
+          that was supplied and stays 0; an omitted `timeout` is a key that was not,
+          and takes the default. A post-decode "if the field is zero, apply the
+          default" cannot tell those apart, and would silently overrule the operator
+          on every field whose zero value is meaningful — which is most of them.
+
+          A partially-supplied table keeps its unmentioned defaults: the merge folds
+          key-by-key, so a file setting `database.host` does not erase a default for
+          `database.max_conns`.
+
+          # The key pass runs first, and it runs once
+
+          A required key no source supplied fails HERE, at start-up, before anything
+          reads the value — that is the entire reason a schema exists. Every missing
+          key is named in one error, together with every key the target type cannot
+          address, so one restart tells an operator the whole truth.
+
+          The key pass is not merged into the value report that follows it. A key
+          nobody supplied decodes to a zero the operator never wrote, and running the
+          bounds on that zero would report a rule nobody violated — burying the one
+          fact that matters under a fact derived from it. The report is not truncated;
+          the second pass is simply not run over input already known to be fiction.
+
+          # What a failure says
+
+          A violation is reported at the OPERATOR's key ("database.max_conns"), never
+          at the Go field name, because the decode goes through a json round trip and
+          the json tag is literally the key they typed. The error carries the count,
+          the first rule and the offending keys; it carries no message and no value,
+          because a configuration value may be a password, a token or a connection
+          string. SchemaValue.Check returns the full report when messages are wanted.
+
+          A nil schema is refused by name rather than silently loading nothing.
+        in:
           - name: target
             type: "*T"
           - name: schema
@@ -291,7 +578,24 @@ packages:
           - constraint: any
             name: T
         variadic: true
-      - in:
+      - doc: |-
+          LoadWithOrigins is [Load], and it also reports where every key of T got its
+          final value: one core/app/config.OriginValue per leaf key of T, sorted by key.
+
+          An origin names the LAYER — "default", "file", "env", or the kind a source
+          reports through core/app/config.Describer, else "source" with the source's
+          position — and the DETAIL an operator acts on: the variable that set the
+          key ("APP_DATA_DIR"), the file that holds it. It never carries the value,
+          and a key whose field holds a core/security/secret.Value is marked Secret, so a
+          --show-config rendering knows to mask whatever it prints beside it. A key
+          absent from the merged layers — no layer supplied it, or a later one erased
+          it by replacing one of its tables with a scalar or a null — is reported with
+          an empty Layer: its field holds its zero.
+
+          The load itself is exactly [Load]'s — same order, same verdicts — and on a
+          failure no origin is returned: a configuration that did not load has no
+          provenance worth reading.
+        in:
           - name: target
             type: "*T"
           - name: sources
@@ -306,7 +610,11 @@ packages:
           - constraint: any
             name: T
         variadic: true
-      - in:
+      - doc: |-
+          LoadSchemaWithOrigins is [LoadSchema] with the origins [LoadWithOrigins]
+          reports; a key the schema's defaults supplied is reported as "default". A
+          nil schema is refused by name, as LoadSchema refuses it.
+        in:
           - name: target
             type: "*T"
           - name: schema
@@ -323,7 +631,10 @@ packages:
           - constraint: any
             name: T
         variadic: true
-      - in:
+      - doc: |-
+          PollWatcher returns a Watcher that polls path every interval and invokes the
+          onChange callback when the file's mtime or size changes.
+        in:
           - name: path
             type: string
           - name: interval
@@ -331,7 +642,39 @@ packages:
         name: PollWatcher
         out:
           - type: coreconfig.Watcher
-      - in:
+      - doc: |-
+          NewSchemaValue compiles spec into a [SchemaValue], refusing at CONSTRUCTION every
+          declaration that could not work — which is the whole point of having one.
+
+          Refused with CONFIG_SCHEMA_INVALID, each naming the key and the clause:
+
+            - a key outside the grammar (empty, an empty segment, a leading or
+              trailing separator);
+            - a key that names no field of T — a typo in a declared key would
+              otherwise produce a default that silently never applies, or a
+              requirement that can never be satisfied, which are the two quietest ways
+              a configuration can be wrong;
+            - the same key declared twice, or declared both as a value and as a table;
+            - a key declared both REQUIRED and with a default, in either order and at
+              either nesting level. The schema would fill the key itself, so the
+              requirement could never fire, and a clause that cannot fire is read as
+              protection;
+            - a default the loader's JSON round trip cannot carry, or that does not
+              decode into the field it targets ("eighty" for an int port);
+            - a default that violates the constraint the schema itself declares for
+              that key. That is ADR 0031's exact trap: a schema whose default sits
+              outside its own bounds produces an invalid configuration on precisely
+              the deployment where nobody set the key, and reports it as the
+              OPERATOR's fault.
+
+          A tag the validation domain refuses surfaces THAT domain's error unchanged
+          (INVALID_RULE / CONSTRAINT_MISCONFIGURED), not a config code: its fields
+          already name the field, the rule and the clause, and relabelling would throw
+          away the diagnosis to gain a code the caller has to look up anyway.
+
+          A T with no `validate` tag, no Required and no Default is a valid, accepting
+          schema — which still refuses an unknown key.
+        in:
           - name: spec
             type: SchemaSpec[T]
         name: NewSchemaValue
@@ -350,12 +693,49 @@ packages:
       fs: io/fs
     path: github.com/kitsunium/sdk/internal/service/app/config
     types:
-      - methods:
-          - name: Source
+      - doc: |-
+          SchemaValue is a compiled configuration shape: the default LAYER it
+          contributes, the keys it requires, the vocabulary it accepts, and the
+          constraint the decoded configuration must satisfy. Build one with
+          [NewSchemaValue]; the zero value is not usable and [LoadSchema] refuses a nil one
+          by name rather than loading nothing and reporting success.
+
+          It is safe for concurrent use and is meant to be built once, at start-up,
+          and kept. pkg/v1/app/config.Schema aliases it.
+        methods:
+          - doc: |-
+              Source returns the default LAYER as an ordinary [coreconfig.Source]. It is
+              exposed so a caller can inspect the effective defaults — printing them for a
+              `--show-config` flag, or diffing two releases — not so a caller can order
+              them: [LoadSchema] always merges this layer first, and a default that could
+              be placed after a file would not be a default.
+
+              Each Load returns a fresh copy, so a caller that mutates the map it was
+              handed cannot change what the next load sees.
+            name: Source
             out:
               - type: coreconfig.Source
             recv: pointer
-          - in:
+          - doc: |-
+              Check runs the schema's VALUE constraints against an already-decoded value
+              and returns the FULL located report — every violation, at the operator's key.
+
+              It answers only the value question. The KEY questions — was a required key
+              supplied, did a source carry a key nothing reads — are not answerable from a
+              decoded T at all: after the decode an absent key and a key set to its zero
+              are the same bytes. Those are decided during [LoadSchema], on the merged map,
+              and they are the reason this domain has a schema rather than a validator.
+
+              It is what makes core/app/config.Validator a consumer of this engine rather than
+              a competitor of it: a struct that wants to keep its own Validate method
+              implements it in one line, and [LoadSchema] still calls that method after
+              running the same constraints itself.
+
+              	func (c Conf) Validate() error { return appSchema.Check(c).Err() }
+
+              The report carries messages the error cannot; the error carries the count,
+              the first rule and the offending keys. Neither carries a value.
+            in:
               - name: value
                 type: T
             name: Check
@@ -368,21 +748,240 @@ packages:
         typeParams:
           - constraint: any
             name: T
-      - name: SchemaSpec
+      - doc: |-
+          SchemaSpec declares a configuration's SHAPE: which keys the application
+          reads, which of them it cannot start without, what each holds when nobody
+          supplies it, and what the decoded result must satisfy.
+
+          The zero value is a legitimate declaration. It requires nothing, defaults
+          nothing, and adds no rule of its own — but the `validate` struct tags of T
+          still apply, because a schema that ignored the tags on the very type it
+          describes would be a second place to look for the same answer, and it still
+          refuses an unknown key, because that is the check the zero value must not
+          silently disarm. A configuration with nothing declared passes, which is
+          ADR 0031's accepting half: "nothing is declared" and "something is declared
+          wrongly" are opposite states and only the second is a defect.
+        name: SchemaSpec
         struct:
           fields:
-            - name: Required
+            - doc: |-
+                Required names the keys a load must find in some source. A key listed
+                here and absent from every layer fails the LOAD — at start-up, before
+                anything reads the value — and every missing key is named in one error
+                rather than the first one found.
+
+                It is a KEY-level statement, decided on the merged map while the key is
+                still a key. That is what distinguishes it from the validation domain's
+                `required` tag, which is a VALUE-level statement decided after the
+                decode, where an absent key and an explicit zero are the same bytes.
+                `port = 0` written in a file satisfies this and fails `validate:"required"`;
+                declare both when both are meant.
+
+                A required key may not also carry a default: see Defaults.
+              name: Required
               type: "[]string"
-            - name: Defaults
+            - doc: |-
+                Defaults are the typed values keys take when NO Source supplied them.
+                Each is checked at construction against the type, against the grammar,
+                and against the constraints the schema itself declares for that key.
+
+                A key here may not also appear in Required — nor may either be nested
+                under the other. A required key the schema itself fills can never be
+                missing, so the requirement would be a clause that cannot fire, and a
+                clause that cannot fire is worse than no clause: it is read as
+                protection. The contradiction is refused at construction (ADR 0031).
+              name: Defaults
               type: "[]coreconfig.DeclaredValue"
-            - name: AllowUnknownKeys
+            - doc: |-
+                AllowUnknownKeys stops the load refusing a key no field of T addresses.
+
+                The zero value REFUSES, and that is the whole point: a schema is the
+                statement "these are the keys I read", so a key outside it is either a
+                typo or a deliberate extra. Ignoring it silently is the classic
+                production incident — `APP_PORTT=9090` decodes into nothing, the process
+                starts on the old port, and the only evidence is the absence of an
+                effect.
+
+                Set it when the source genuinely carries more than this type reads: a
+                configuration file shared by two services, or an unprefixed EnvSource,
+                which hands over every variable in the process environment. Those are
+                facts about the SOURCE, and the opt-out is where the author says so.
+              name: AllowUnknownKeys
               type: bool
-            - name: Rule
+            - doc: |-
+                Rule is one extra constraint, composed with the `validate` tags of T
+                into a single report. It is where a CROSS-FIELD rule lives — "a TLS
+                certificate without its key", "a replica count above the node count" —
+                because a per-field tag has no vocabulary for a second field and
+                inventing one is how a tag dialect turns into a language (ADR 0046).
+
+                It is deliberately singular. The validation domain already ships the
+                combinator (validation.All), so a slice here would be a second spelling
+                of composition that the reader has to learn — and the one that cannot
+                express "all of these, but stop at the first" the way the real
+                combinators can. Pass validation.All(a, b) for several.
+
+                A rule reports at core/app/validation.RootPath when no single key is at
+                fault, which is exactly what the grammar reserves the root for.
+              name: Rule
               type: corevalidation.Constraint[T]
         typeParams:
           - constraint: any
             name: T
-  - facade:
+  - doc: |-
+      Package config is the public facade for the SDK's configuration domain: layer
+      configuration from env + files, [Load] into a typed struct (later sources
+      override earlier), self-[Validator] the result, and [PollWatcher] for cross-OS
+      hot-reload.
+
+      	type Conf struct{ Port int `json:"port"` }
+      	var c Conf
+      	err := config.Load(&c,
+      	    config.FileSource("json", "/etc/app.json"), // blank-import pkg/v1/data/codec
+      	    config.EnvSource("APP"),                     // APP_PORT overrides the file
+      	)
+
+      File parsing dispatches through the codec registry — blank-import the format's
+      codec (e.g. pkg/v1/data/codec) so it is registered. Failures surface typed
+      sentinels (SourceFailed / DecodeFailed / ValidationFailed / WatchFailed).
+
+      # A configuration carried in the binary
+
+      [FSSource] is [FileSource] over an io/fs.FS, for a program whose committed
+      configuration travels inside it:
+
+      	//go:embed config
+      	var files embed.FS
+
+      	err := config.Load(&c,
+      	    config.FSSource(files, "yaml", "config/config.yaml"),
+      	    config.EnvSource("APP"), // the environment still wins
+      	)
+
+      It dispatches through the same codecs, refuses with the same SourceFailed,
+      and describes itself the same way — a traced load reports its keys under
+      the layer "file" with the path as given. A file the filesystem does not hold
+      is refused, as FileSource refuses one it cannot open, and never read as an
+      empty layer: absent from an embedded tree usually means an embed pattern
+      that matched nothing, and read as empty it would start the program on its
+      defaults without a word. A layer that is optional by design — one document
+      per environment, where some environments have none — is the caller's
+      decision, one fs.Stat away, and only an absence makes it optional:
+
+      	name := "config/" + env + ".yaml"
+      	switch _, err := fs.Stat(files, name); {
+      	case err == nil:
+      	    sources = append(sources, config.FSSource(files, "yaml", name))
+      	case !errors.Is(err, fs.ErrNotExist):
+      	    return err // present but unreadable is not the optional absence
+      	}
+
+      # The schema: required keys, defaults, and a closed vocabulary
+
+      [NewSchema] compiles a [SchemaSpec] into a [Schema]: which keys the
+      application cannot start without, the typed [Default] each key takes when
+      nobody supplies it, and the constraints the decoded result must satisfy — the
+      `validate` struct tags of the type, composed with any cross-field rule the
+      caller adds. [LoadSchema] is [Load] with one.
+
+      	type Conf struct {
+      	    Port     int    `json:"port"      validate:"min=1,max=65535"`
+      	    Database struct {
+      	        DSN      string `json:"dsn"       validate:"required"`
+      	        MaxConns int    `json:"max_conns" validate:"min=1,max=512"`
+      	    } `json:"database" validate:"dive"`
+      	}
+
+      	schema, err := config.NewSchema[Conf](config.SchemaSpec[Conf]{
+      	    Required: []string{"database.dsn"},
+      	    Defaults: []config.Default{
+      	        {Key: "port", Value: 8080},
+      	        {Key: "database.max_conns", Value: 16},
+      	    },
+      	})
+      	// …
+      	var c Conf
+      	err = config.LoadSchema(&c, schema,
+      	    config.FileSource("json", "/etc/app.json"),
+      	    config.EnvSource("APP"),
+      	)
+
+      Five properties are the reason it exists.
+
+      A required key that no source supplied fails the LOAD — at start-up, before
+      anything reads the value, which is the entire point of declaring one. Every
+      missing key is named in ONE error rather than the first one found, so an
+      operator does not restart the service once per typo. It is a key-level check,
+      decided on the merged map while the key is still a key; `validate:"required"`
+      is the value-level one, decided after the decode. `port = 0` satisfies the
+      first and fails the second. Declare both when both are meant.
+
+      A key no field of the type addresses is REFUSED by default. Ignoring it is
+      the classic production incident: APP_PORTT=9090 decodes into nothing, the
+      process starts on the old port, and the only evidence is the absence of an
+      effect. Set [SchemaSpec].AllowUnknownKeys where the source genuinely carries
+      more than this type reads — a file shared by two services, or an unprefixed
+      EnvSource, which hands over every variable in the environment.
+
+      A default is a LAYER, not a post-decode fallback. It is merged under every
+      source before the decode, so presence is decided while the operator's key is
+      still a key: an omitted "port" takes 8080, and `port = 0` written in a file
+      stays 0. The layer order is default < file < env < any later source, and the
+      default layer is placed first structurally — there is no way to spell a load
+      in which it wins, because a default that could win is not a default. A key
+      may not be both required and defaulted: the schema would fill it itself, so
+      the requirement could never fire.
+
+      A violation names the OPERATOR's key ("database.max_conns"), never the Go
+      field, because every format is decoded through a json round trip and the json
+      tag is literally the key they typed.
+
+      A message never contains the value that was refused. A configuration value is
+      routinely a password, a token or a connection string, and a validation
+      message is the one error message designed to reach a human. The error carries
+      the violation count, the first rule and the offending keys; [Schema].Check
+      returns the full report when per-key messages are wanted.
+
+      A schema that contradicts itself — a default outside the bounds it also
+      declares, a key naming no field of the type, the same key twice, a key both
+      required and defaulted — is refused by [NewSchema] with SchemaInvalid, before
+      any source is read. A schema that declares nothing is legitimate and accepts
+      (and still refuses an unknown key).
+
+      [SchemaSpec].Rule and [Schema].Check speak in the vocabulary of
+      pkg/v1/app/validation: a rule is a validation.Constraint and a report is a
+      validation.Report. They are the same types, not converted ones — this domain
+      composes that engine rather than reimplementing it, and a rule written for an
+      HTTP body is the same value here. The schema describes the SHAPE (which keys,
+      required or not, and what they default to); the constraints on a VALUE stay
+      where they already are.
+
+      # Where each value came from
+
+      [LoadWithOrigins] and [LoadSchemaWithOrigins] are the same loads, and they
+      also return one [Origin] per leaf key of the target, sorted: the layer that
+      supplied its final value — "default", "file", "env", or a kind a source
+      names through [Describer] — and the detail an operator acts on, such as the
+      variable "APP_DATA_DIR" or the file "/etc/app.json". A key absent from the
+      merged layers has an empty Layer — no layer supplied it, or a later layer
+      erased it by replacing one of its tables with a scalar or a null.
+
+      	origins, err := config.LoadSchemaWithOrigins(&c, schema,
+      	    config.FileSource("json", "/etc/app.json"),
+      	    config.EnvSource("APP"),
+      	)
+      	for _, o := range origins {
+      	    fmt.Printf("%-20s %-8s %s\n", o.Key, o.Layer, o.Detail) // never the value
+      	}
+
+      An origin never carries a value. A key whose field holds a secret.Value
+      (pkg/v1/security/secret) is marked Secret, so a --show-config rendering knows to mask
+      what it prints beside it — and such a field is filled from the environment's
+      RAW text: the JSON coercion that turns "8080" into an int would turn a
+      numeric secret like "1e3" into 1000, so it is bypassed for secrets, on every
+      entry point, traced or not. No refusal in this package ever repeats a value,
+      a secret's least of all.
+    facade:
       - const:
           - doc: LayerDefault is a schema default.
             name: LayerDefault
@@ -649,14 +1248,24 @@ packages:
           out:
             - type: Watcher
     functions:
-      - in:
+      - doc: |-
+          FileSource returns a Source reading path and parsing it as format (the codec
+          must be registered — blank-import its package, e.g. pkg/v1/data/codec).
+        in:
           - name: format
           - name: path
             type: string
         name: FileSource
         out:
           - type: Source
-      - in:
+      - doc: |-
+          FSSource returns a Source reading path inside fsys and parsing it as format
+          — [FileSource] over an io/fs.FS, such as an embed.FS. path is an io/fs name:
+          slash-separated and unrooted. It fails with SourceFailed exactly where
+          FileSource does, a file fsys does not hold included, and a nil fsys is
+          refused when the source loads. A traced load reports it as [LayerFile] with
+          path as the detail.
+        in:
           - name: fsys
             type: fs.FS
           - name: format

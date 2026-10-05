@@ -1,4 +1,3 @@
-// Package kit — services: a bounded context and the building blocks it owns.
 package kit
 
 import (

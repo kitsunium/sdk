@@ -1,10 +1,3 @@
-// Package validation — the compiled struct-tag plan and its per-type cache.
-//
-// A plan is compiled ONCE per (type, mode) and reused by every validation of
-// that type. Parsing a struct tag on every request would put string splitting
-// and reflect.StructField lookups on the hot path of every field of every
-// request — which is exactly the shape of the "we added validation and the p99
-// moved" post-mortem. See BENCH.md for what the cache is worth.
 package validation
 
 import (

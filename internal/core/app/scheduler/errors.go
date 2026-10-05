@@ -1,9 +1,3 @@
-// Package scheduler — ranges 0.2.12.* (ADR 0041 core/app/scheduler block) and
-// 0.3.43.* (ADR 0041 service/app/scheduler block, declared here since ADR 0160).
-//
-// Package scheduler — declares the sentinel *errs.Error outcomes of the
-// domain: the registration refusals, and the parser's refusals of a schedule.
-// Each var's name equals its errs.Define Reason in SCREAMING_SNAKE form.
 package scheduler
 
 // exitConfig matches sysexits EX_CONFIG (78). A refused registration is a

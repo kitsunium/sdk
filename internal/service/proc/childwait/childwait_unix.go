@@ -1,8 +1,5 @@
 //go:build unix
 
-// Package childwait — the Unix half: the status wait4 reports, and the one
-// wait4 for any child in the SDK (wait4(-1); wait4(0) on illumos and Solaris,
-// see waitany_solaris.go).
 package childwait
 
 import "syscall"

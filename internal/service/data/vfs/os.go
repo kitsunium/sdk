@@ -1,5 +1,3 @@
-// Package vfs — the disk-backed filesystem: its constructor, its read half,
-// and the guards every write goes through.
 package vfs
 
 import (

@@ -1,4 +1,3 @@
-// Package net — the per-phase deadlines.
 package net
 
 // TimeoutsValue bounds each phase of a connection separately.

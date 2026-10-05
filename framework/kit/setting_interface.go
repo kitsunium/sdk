@@ -1,5 +1,3 @@
-// Package kit — the interfaces of settings: the values a setting holds, and
-// what kit reads of a declaration.
 package kit
 
 import (

@@ -1,4 +1,3 @@
-// Package sql — hosts MigrationValue and the Step both of its halves are.
 package sql
 
 import (

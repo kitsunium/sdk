@@ -1,5 +1,3 @@
-// Package memory — defines the Memory sink, an in-memory Sink that buffers a
-// defensive snapshot of every received RecordEvent for test assertions.
 package memory
 
 import (

@@ -1,13 +1,3 @@
-// Package encoder provides concrete Encoder implementations (Text today;
-// NDJSON and JSON to land in follow-up commits). The Encoder interface
-// itself lives in internal/core/observe/logger — this package is implementation-
-// only, exposing the interface via a type alias so existing call sites
-// that import "service/observe/logger/encoder".Encoder keep compiling.
-//
-// Per ADR 0005 hexagonal layering: core/ holds ports, service/ holds
-// adapters. Previously Encoder lived here, creating an asymmetry where
-// Sink lived in core/ and Encoder lived in service/ even though both are
-// ports of the Handler.
 package encoder
 
 import (

@@ -1,5 +1,3 @@
-// Package resilience — the exponential backoff every waiting policy computes,
-// re-exported from the kernel package that owns it.
 package resilience
 
 import kbackoff "github.com/kitsunium/sdk/internal/kernel/backoff"

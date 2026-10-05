@@ -1,4 +1,3 @@
-// Package kit — Main: the whole main function of a product.
 package kit
 
 import (

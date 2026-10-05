@@ -1,6 +1,3 @@
-// Package profiling — a profile folded onto owners: what each owner and each
-// function cost, and the flame graph, in the sample type's own unit. Folding
-// is the engine's, internal/service/observe/profiling.Fold.
 package profiling
 
 // FlameRoot is the name of a flame graph's root frame, which stands for the

@@ -1,4 +1,3 @@
-// Package otel — InstrumentationScope: what instrumented the telemetry.
 package otel
 
 // ScopeValue identifies the INSTRUMENTATION that produced the telemetry — the

@@ -1,12 +1,3 @@
-// Package config — how a schema refuses, and what a refusal is allowed to say.
-//
-// Every message in this file names KEYS and RULES and never a value. A
-// configuration value is routinely a password, a token or a connection string,
-// and a start-up error is the one message in a service that reaches a log
-// aggregator, a terminal and a ticket. The keys are the author's own literals,
-// so echoing them is what makes a refusal actionable; the values are the
-// operator's, so echoing them is a leak. It is the same rule ADR 0046 states
-// for a violation message, applied one layer up, and it has its own test.
 package config
 
 import (

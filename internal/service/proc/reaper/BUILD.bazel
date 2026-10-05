@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "reaper",
     srcs = [
+        "doc.go",
         "reaper.go",
         "reaper_other.go",
         "reaper_unix.go",

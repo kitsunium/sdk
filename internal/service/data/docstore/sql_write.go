@@ -1,6 +1,3 @@
-// Package docstore — the SQL store's writes: each one atomic on its own, in a
-// transaction of the store's or a savepoint of the caller's, and announced
-// once the transaction that holds it has committed.
 package docstore
 
 import (

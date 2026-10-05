@@ -1,6 +1,3 @@
-// Package jsonshape — the members encoding/json writes for a struct, resolved
-// by its own rules: json/v2's field walk under the v1 options Go 1.27's
-// encoding/json runs with.
 package jsonshape
 
 import (

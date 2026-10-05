@@ -52,6 +52,22 @@ packages:
             name: CodeMultipartLimitsInvalid
             value: "0x00_03_29_06"
         type: errs.Code
+    doc: |-
+      Package multipart declares the error codes and the sentinels of the
+      multipart/form-data codec, internal/service/data/codec/multipart — range
+      0.3.41.* (ADR 0005 service/data/codec/multipart block).
+
+      The codes live in the core at the path that mirrors the package emitting
+      them (ADR 0160 §2) and keep the values they were allocated with: the LL
+      byte 3 records the layer that allocated the range, not the directory that
+      declares it today (ADR 0160 §3). Nothing here encodes or decodes — the
+      mechanism, and the constructors that attach a failure's detail, stay in
+      the service package.
+
+      Package multipart — the sentinel *errs.Error values, one per code. Each
+      Reason derives from its var name or from its Code constant (ADR 0020);
+      the Public and Private texts are the ones the service package always
+      emitted, so moving the declaration changed no rendering.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/data/codec/multipart
@@ -94,20 +110,113 @@ packages:
             public: multipart limits are not usable
             reason: LIMITS_INVALID
   - constants:
-      - name: JSONPartName
+      - doc: |-
+          JSONPartName is the field name of the part the JSON-mediated shape writes
+          and reads. It matches pkg/v1/data/codec's csv promotion header for the same
+          reason: one recognisable label for "the SDK put a JSON document here".
+        name: JSONPartName
         type: string
         value: "\"_json\""
-      - name: DefaultMaxPartBytes
+      - doc: |-
+          DefaultMaxPartBytes caps one part body at 32 MiB. Generous for a form field
+          or a document upload, and small enough that a single part cannot exhaust a
+          container's memory budget. Callers moving larger objects raise the bound
+          explicitly through NewWithLimits.
+        name: DefaultMaxPartBytes
         type: int64
         value: 32 << 20
-      - name: DefaultMaxParts
+      - doc: |-
+          DefaultMaxParts caps a body at 1024 parts. A boundary flood costs the
+          attacker one header line per part while costing the decoder a header parse
+          and a slice entry each, so the part COUNT needs its own ceiling — the byte
+          bounds alone do not constrain it on a streaming reader.
+        name: DefaultMaxParts
         type: int
         value: "1024"
-      - name: DefaultMaxTotalBytes
+      - doc: |-
+          DefaultMaxTotalBytes caps the sum of every part body at 64 MiB. Without it
+          the real ceiling would be DefaultMaxPartBytes × DefaultMaxParts, which is
+          not a bound anybody chose.
+        name: DefaultMaxTotalBytes
         type: int64
         value: 64 << 20
+    doc: |-
+      Package multipart — boundary recovery and validation.
+
+      The delimiter that separates the parts of a multipart body is announced in
+      the message's Content-Type header, NOT in the body. codec.Codec carries no
+      header, so this file is where the gap is closed: the boundary is re-emitted
+      on every delimiter line, which makes a well-formed body self-describing, and
+      these helpers read it back out. See CLAUDE.md §The boundary problem for what
+      that buys and what it does not.
+
+      Package multipart implements RFC 7578 multipart/form-data as a
+      codec.StreamingCodec registered under Format("multipart"). Blank-importing
+      this package is enough to make it resolvable via the core/data/codec registry.
+
+      The format is a CONTAINER, not a value serialisation: its native Go shape is
+      [FormValue], a list of named [PartValue] sections. Any other value takes the
+      JSON-mediated shape — a single part named [JSONPartName] carrying
+      encoding/json's output — so the universal Marshal(F, v) / Unmarshal(F, b, &v)
+      contract holds without a facade-side promotion rule. baseenc is the in-tree
+      precedent for a JSON-mediated pipeline.
+
+      Streaming is the point of the format, so [codec.StreamingCodec] is the
+      interface that matters here: NewEncoder writes one part per Encode straight
+      to the io.Writer, NewDecoder reads one part per Decode straight off the
+      io.Reader, and neither holds more than a single part body at a time. Marshal
+      and Unmarshal are the same two paths driven over a scratch buffer.
+
+      The delimiter lives in the message's Content-Type header, which the Codec
+      contract cannot carry. See CLAUDE.md §The boundary problem for how that gap
+      is closed ([ContentType] on the write side, [Boundary] on the read side) and
+      for the one case it is NOT closed (a body with a "--"-prefixed preamble,
+      which only the real header can disambiguate — hence [BoundaryCodec]).
+
+      Package multipart — the running tally a LimitsConfig is checked against.
+
+      Package multipart — adapts mime/multipart.Reader to codec.Decoder.
+
+      This is the ONLY read path in the package: Unmarshal drives this decoder
+      over a bytes.Reader, so a body parsed from memory and a body streamed off a
+      socket go through identical code and identical bounds.
+
+      Package multipart — reading a part's Content-Disposition, and the one rule
+      its filename is reduced by on every operating system.
+
+      Package multipart — adapts mime/multipart.Writer to codec.Encoder.
+
+      This is the ONLY write path in the package: Marshal and Append both drive
+      this encoder over a scratch buffer, so a body built in memory and a body
+      streamed to a socket go through identical code and identical bounds.
+
+      Package multipart — the two value types that model a body: one section
+      (PartValue) and the container that frames them (FormValue). They live in one
+      file because neither is meaningful without the other.
+
+      Package multipart — the memory bound applied to every decode AND every
+      encode. A multipart body is the shape an upload arrives in, so the decoder
+      is the SDK surface most exposed to a hostile stream: unbounded, a single
+      crafted part drives io.ReadAll to an OOM, and a boundary flood does the same
+      with a very large number of empty parts. Three bounds close both doors
+      (per-part bytes, part count, aggregate bytes); the encoder enforces the
+      identical set so the codec never emits a body it would refuse to read back.
+
+      Package multipart — compile-time proof that the concrete types satisfy the
+      contracts this package advertises. Kept in its own *_compliance.go file so
+      the assertions live where a reader looks for them and nowhere else.
     functions:
-      - in:
+      - doc: |-
+          Boundary recovers the RFC 2046 delimiter from a multipart body by reading it
+          back off the body's first delimiter line.
+
+          This is EXACT for every body this package produced and for every
+          RFC 7578 form-data body in the wild, because form-data producers emit no
+          preamble. It is a recovery, not an oracle: a body whose preamble contains a
+          line that both starts with "--" and parses as a valid boundary would hand
+          back the wrong answer. When the real Content-Type header is available, pass
+          it to NewDecoderWithBoundary instead of relying on this.
+        in:
           - name: data
             type: "[]byte"
         name: Boundary
@@ -116,7 +225,14 @@ packages:
             type: string
           - name: err
             type: error
-      - in:
+      - doc: |-
+          ContentType returns the full Content-Type header value for a body this
+          package produced — "multipart/form-data; boundary=…", quoted by
+          mime.FormatMediaType when the boundary needs it.
+
+          Marshal cannot set a header, so this is how the caller obtains the one piece
+          of the message the Codec contract has nowhere to put.
+        in:
           - name: data
             type: "[]byte"
         name: ContentType
@@ -125,10 +241,19 @@ packages:
             type: string
           - name: err
             type: error
-      - name: New
+      - doc: New returns the multipart codec singleton, bounded by the package defaults.
+        name: New
         out:
           - type: codec.Codec
-      - in:
+      - doc: |-
+          NewWithLimits returns an unregistered codec bounded by l. Zero fields take
+          the package defaults; a negative field is refused with LimitsInvalid rather
+          than guessed at (ADR 0031).
+
+          The instance is deliberately NOT added to the registry: Format("multipart")
+          already resolves to the default-bounded singleton, and a second registration
+          under the same name would panic at boot. csv.NewWithEscape is the precedent.
+        in:
           - name: l
             type: LimitsConfig
         name: NewWithLimits
@@ -141,11 +266,23 @@ packages:
       codec: github.com/kitsunium/sdk/internal/core/data/codec
     path: github.com/kitsunium/sdk/internal/service/data/codec/multipart
     types:
-      - interface:
+      - doc: |-
+          BoundaryCodec is the optional extension this package implements on top of
+          codec.StreamingCodec: the two constructors that take the boundary from the
+          caller instead of recovering it from the bytes.
+
+          This is the honest form of the streaming API. An HTTP server already holds
+          the authoritative boundary in the request's Content-Type header, and an HTTP
+          client must set that header before it writes the first body byte — neither
+          can be expressed through NewEncoder / NewDecoder, whose signatures the
+          domain fixes. Callers reach it with a type assertion, the same way they
+          reach codec.Appender.
+        interface:
           embeds:
             - codec.Codec
           methods:
-            - in:
+            - doc: NewEncoderWithBoundary streams a body framed by the given boundary.
+              in:
                 - name: w
                   type: io.Writer
                 - name: boundary
@@ -156,7 +293,10 @@ packages:
                   type: codec.Encoder
                 - name: err
                   type: error
-            - in:
+            - doc: |-
+                NewDecoderWithBoundary streams a body framed by the given boundary,
+                bypassing recovery from the wire entirely.
+              in:
                 - name: r
                   type: io.Reader
                 - name: boundary
@@ -168,45 +308,159 @@ packages:
                 - name: err
                   type: error
         name: BoundaryCodec
-      - interface:
+      - doc: |-
+          BoundaryProvider is implemented by the codec.Encoder this package returns,
+          so a caller streaming a request body can read the generated delimiter and
+          set its Content-Type header before the first byte goes out.
+        interface:
           methods:
-            - name: Boundary
+            - doc: Boundary returns the delimiter the encoder writes.
+              name: Boundary
               out:
                 - type: string
         name: BoundaryProvider
-      - name: FormValue
+      - doc: |-
+          FormValue is a whole multipart/form-data body: its RFC 2046 delimiter and
+          its sections, in wire order.
+
+          Boundary is the one field that has no equivalent in the codec.Codec
+          contract, which carries no Content-Type. Empty on Marshal means "generate
+          one"; Unmarshal always fills it with the delimiter it recovered, so a decode
+          → encode round trip keeps the original delimiter. It reproduces the whole
+          body byte for byte only for a body this package encoded, and whose
+          filenames carry no path separator: a PartValue models a part's name,
+          filename, media type and bytes, so any other part header — a
+          Content-Transfer-Encoding, a custom one — and another producer's header
+          order or casing are not carried through, and a filename is decoded to its
+          last path element (see PartValue.FileName).
+        name: FormValue
         struct:
           fields:
-            - name: Boundary
+            - doc: Boundary is the RFC 2046 delimiter framing the parts.
+              name: Boundary
               type: string
-            - name: Parts
+            - doc: Parts are the body's sections, in wire order.
+              name: Parts
               type: "[]PartValue"
-      - name: PartValue
+      - doc: |-
+          PartValue is one section of a multipart/form-data body: a named field,
+          optionally a filename and a media type, and the bytes themselves.
+
+          The body is materialised. Streaming happens BETWEEN parts (one part per
+          Encode / Decode), not inside one: codec.Decoder's Decode(v any) has nowhere
+          to hand back an io.Reader the caller must drain before the next call, so a
+          part body is read whole under LimitsConfig.MaxPartBytes. A consumer moving
+          objects too large for that ceiling raises it with NewWithLimits, or reaches
+          for mime/multipart directly — see CLAUDE.md §Not covered.
+
+          Name, FileName and ContentType are written into the part's header block, so
+          a CR, an LF or a NUL in any of them is refused with ValueInvalid naming the
+          field: a line break there would end the header line and let the rest of the
+          value write headers of its own. Nothing is escaped or repaired on the way.
+        name: PartValue
         struct:
           fields:
-            - name: Name
+            - doc: |-
+                Name is the form field name (Content-Disposition name=). Required: Encode
+                refuses a part without one, and decoding refuses a body carrying one.
+              name: Name
               type: string
-            - name: FileName
+            - doc: |-
+                FileName is the optional filename= parameter; empty for a plain field.
+                UTF-8 is written as-is (RFC 7578 §4.2); only CR, LF and NUL are refused.
+
+                Decoding keeps only its LAST PATH ELEMENT, and reads both '/' and '\' as
+                separators on every operating system: RFC 7578 §4.2 has the receiver drop
+                the directory information a sender may include, and the sender writes it
+                with its own separator. `C:\Users\ada\cv.pdf` and `dir/cv.pdf` both
+                decode to `cv.pdf`, wherever the decoder runs. Nothing else is removed —
+                "." and ".." come back as sent — so a caller turning it into a path still
+                validates it first.
+              name: FileName
               type: string
-            - name: ContentType
+            - doc: ContentType is the optional per-part media type; empty omits the header.
+              name: ContentType
               type: string
-            - name: Data
+            - doc: Data is the part body.
+              name: Data
               type: "[]byte"
-      - name: LimitsConfig
+      - doc: |-
+          LimitsConfig bounds what a multipart body may materialise. Every field is a
+          ceiling, never a target.
+
+          A ZERO field means "use this package's documented default" — never
+          "unlimited" (ADR 0031: a policy's zero value is a safe default or an
+          explicit refusal, never an inert policy). A NEGATIVE field is refused at
+          construction with LimitsInvalid: the SDK can supply a ceiling the caller
+          forgot, but it cannot tell a typo apart from a request for no ceiling at
+          all, and guessing would silently remove the guard the type exists to place.
+
+          There is deliberately no way to spell "unlimited". A decoder without a
+          ceiling is the defect this type prevents.
+        name: LimitsConfig
         struct:
           fields:
-            - name: MaxPartBytes
+            - doc: MaxPartBytes caps a single part body; 0 selects DefaultMaxPartBytes.
+              name: MaxPartBytes
               type: int64
-            - name: MaxParts
+            - doc: MaxParts caps the number of parts; 0 selects DefaultMaxParts.
+              name: MaxParts
               type: int
-            - name: MaxTotalBytes
+            - doc: MaxTotalBytes caps the sum of part bodies; 0 selects DefaultMaxTotalBytes.
+              name: MaxTotalBytes
               type: int64
     variables:
-      - name: Codec
+      - blockDoc: "Package-level state: the codec singleton plus the hoisted MIME table."
+        doc: |-
+          : register the singleton and expose it as a typed package var. The
+          : registered instance carries the package defaults; a caller needing
+          : other bounds builds an unregistered one with NewWithLimits.
+        name: Codec
         type: codec.Codec
   - constants:
-      - name: Format
+      - doc: |-
+          Format is the name multipart/form-data is registered under. It is an untyped
+          constant, so it goes wherever a format name is taken — the codec package's
+          Marshal, config.FSSource's string, i18n.LoadFS's codec.Format — without a
+          conversion.
+        name: Format
         value: "\"multipart\""
+    doc: |-
+      Package multipart registers the multipart/form-data codec with the SDK's
+      codec registry — and no other codec — when it is imported (ADR 0134):
+
+      	import _ "github.com/kitsunium/sdk/pkg/v1/data/codec/multipart"
+
+      The codec is RFC 7578's multipart/form-data on the standard library's
+      mime/multipart. Its native value is a [Form] of [Part]s — a file upload is a
+      part with a FileName and a ContentType; any other value travels as one
+      JSON-mediated part. The boundary belongs in the Content-Type header, which a
+      codec has nowhere to return, so [ContentType] recovers the header value from
+      the body Marshal wrote. Parts, part sizes and the whole body are bounded.
+      It streams.
+
+      Everything that dispatches through the registry by format name then
+      reads and writes it: the codec package's Marshal and Unmarshal,
+      config.FSSource and i18n.LoadFS. Importing
+      github.com/kitsunium/sdk/pkg/v1/data/codec instead registers every
+      format the SDK ships; this package links this one codec, the core
+      package declaring its codes and the standard library, and nothing else.
+      Importing both is harmless: a format is registered by the package that
+      implements it, which Go initialises once however many packages import it.
+
+      # Errors
+
+      Failures carry the range 0.3.41.*; match them with errs.HasCode, or the
+      sentinels with errors.Is:
+
+      	CodeMarshalFailed    0.3.41.1  a part could not be written
+      	CodeUnmarshalFailed  0.3.41.2  a malformed part, a part with no name, a missing closing delimiter
+      	CodeValueInvalid     0.3.41.3  an unusable value — no name, or a CR, LF or NUL in a header field
+      	CodeBoundaryInvalid  0.3.41.4  no usable RFC 2046 boundary
+      	CodeLimitExceeded    0.3.41.5  a part, the part count or the body crossed its bound
+      	CodeLimitsInvalid    0.3.41.6  a negative bound
+
+      No error message quotes the input.
     facade:
       - const:
           - doc: "CodeMarshalFailed is 0.3.41.1: a part could not be written."

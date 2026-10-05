@@ -1,5 +1,3 @@
-// Package tee — declares the Config value type consumed by New. Kept in its
-// own file per the one-exported-struct rule.
 package tee
 
 import corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"

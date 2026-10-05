@@ -1,6 +1,3 @@
-// Package lock — hosts the compile-time interface assertions, keeping them out
-// of the production source so the runtime binary carries no diagnostic-only
-// declarations.
 package lock
 
 import corelock "github.com/kitsunium/sdk/internal/core/app/lock"

@@ -1,4 +1,3 @@
-// Package server — the pooled datagram.
 package server
 
 import (

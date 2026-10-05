@@ -1,4 +1,3 @@
-// Package trace — the span an unsampled trace gets.
 package trace
 
 import (

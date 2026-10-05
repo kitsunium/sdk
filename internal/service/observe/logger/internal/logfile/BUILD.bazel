@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "logfile",
     srcs = [
+        "doc.go",
         "logfile.go",
         "open_flags_other.go",
         "open_flags_unix.go",

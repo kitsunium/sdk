@@ -1,5 +1,3 @@
-// Package kit — the warnings for fields whose name suggests personal data left
-// unclassified.
 package kit
 
 import (

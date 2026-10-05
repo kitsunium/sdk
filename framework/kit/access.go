@@ -1,5 +1,3 @@
-// Package kit — who may call an operation: the principal, the rules and their
-// checks.
 package kit
 
 import (

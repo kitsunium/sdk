@@ -7,8 +7,8 @@ go_library(
     srcs = [
         "codes_gen.go",
         "decision.go",
+        "doc.go",
         "errors.go",
-        "gate.go",
         "policy.go",
         "update_action.go",
     ],

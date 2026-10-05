@@ -1,6 +1,3 @@
-// Package docstore — hosts the compile-time interface assertions, keeping them
-// out of the production source so the runtime binary carries no
-// diagnostic-only declarations.
 package docstore
 
 import coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"

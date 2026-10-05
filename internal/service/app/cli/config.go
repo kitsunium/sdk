@@ -1,5 +1,3 @@
-// Package cli — the engine's configuration: two writers, and deliberately
-// nothing else.
 package cli
 
 import (

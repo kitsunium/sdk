@@ -1,4 +1,3 @@
-// Package stdhash — SHA-512 scheme registration (see package doc in stdhash.go).
 package stdhash
 
 import (

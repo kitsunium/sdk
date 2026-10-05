@@ -1,4 +1,3 @@
-// Package view — the bounded, all-or-nothing render.
 package view
 
 import (

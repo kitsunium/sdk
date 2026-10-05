@@ -1,5 +1,3 @@
-// Package toml — the streaming codec.Decoder: the reader is one TOML
-// document, read whole on the first Decode, within maxDocumentBytes.
 package toml
 
 import (

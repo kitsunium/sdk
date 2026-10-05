@@ -1,6 +1,5 @@
 //go:build linux
 
-// Package notify — the supervisor (listener) side on Linux: SO_PASSCRED.
 package notify
 
 import (

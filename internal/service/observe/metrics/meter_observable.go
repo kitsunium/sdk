@@ -1,5 +1,3 @@
-// Package metrics — the asynchronous instruments: registration, and the read
-// that happens once per Collect.
 package metrics
 
 import (

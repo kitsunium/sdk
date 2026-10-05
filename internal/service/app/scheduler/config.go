@@ -1,4 +1,3 @@
-// Package scheduler — hosts Config, the engine's construction parameters.
 package scheduler
 
 import (

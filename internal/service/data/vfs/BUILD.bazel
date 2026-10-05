@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "vfs",
     srcs = [
+        "doc.go",
         "mem.go",
         "mem_dir.go",
         "mem_file.go",

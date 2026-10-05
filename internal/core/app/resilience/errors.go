@@ -1,7 +1,3 @@
-// Package resilience — range 0.2.8.* (ADR 0026 core/app/resilience block).
-//
-// Package resilience — declares the sentinel *errs.Error policy outcomes. Each
-// var's name equals its errs.Define Reason in SCREAMING_SNAKE form.
 package resilience
 
 // exitUnavailable matches sysexits EX_TEMPFAIL (75) — a resilience rejection is a

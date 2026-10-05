@@ -1,10 +1,5 @@
 //go:build openbsd
 
-// Package exec — OpenBSD has no address-space rlimit (RLIMIT_AS is absent from
-// its kernel ABI), so it adds no resources beyond the common Unix set. ResourceAS
-// therefore stays unmapped on OpenBSD and a Spec requesting it surfaces the typed
-// UnknownResource — the honest "this platform cannot set that limit" answer,
-// rather than a build failure on the missing constant.
 package exec
 
 import coreproc "github.com/kitsunium/sdk/internal/core/proc"

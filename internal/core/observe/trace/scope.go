@@ -1,4 +1,3 @@
-// Package trace — the instrumentation scope this domain publishes.
 package trace
 
 import coreotel "github.com/kitsunium/sdk/internal/core/observe/otel"

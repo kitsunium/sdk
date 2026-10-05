@@ -6,6 +6,7 @@ go_library(
     name = "cgroup",
     srcs = [
         "cgroup.go",
+        "doc.go",
         "facade_gen.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/proc/cgroup",

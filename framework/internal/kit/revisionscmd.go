@@ -1,4 +1,3 @@
-// Package kit — the revisions command: a version of a record written back.
 package kit
 
 import (

@@ -1,6 +1,3 @@
-// Package transform — holds the process-wide Compressor registry. Service-level
-// scheme packages register themselves via package-level var initialisers when
-// imported (no init()), mirroring core/data/codec and core/crypto.
 package transform
 
 import (

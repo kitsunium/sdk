@@ -1,7 +1,3 @@
-// Package health — hosts the wire shape of a probe response: the body, and the
-// one check inside it. The two live together because the pair IS the document,
-// and because keeping them in one file keeps the list of what may leave this
-// process on one screen.
 package health
 
 // bodyValue is the wire shape of a probe response.

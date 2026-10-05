@@ -1,11 +1,3 @@
-// Package rlimit — applies per-process setrlimit(2) resource ceilings.
-//
-// This file holds the platform-neutral surface: the exported Apply and
-// PrepareSysProcAttr entry points delegate to the build-tagged applyLimits /
-// prepareLimits implementations (rlimit_linux.go on Linux, rlimit_other.go
-// everywhere else). Core declares the Resource enum and LimitValue pair; this
-// package maps each Resource to the platform RLIMIT_* constant and issues the
-// syscall, wrapping failures in the central proc sentinels.
 package rlimit
 
 import (

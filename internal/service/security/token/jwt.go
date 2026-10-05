@@ -1,10 +1,3 @@
-// Package token — the JWT constructor set: one per algorithm, each accepting
-// only the Go key type its algorithm can use.
-//
-// That is not documentation. NewHS256Verifier's parameter is a
-// core/crypto.Key — a struct with an unexported field — so the classic
-// confusion bug, handing it an EC or RSA public key so the attacker can sign
-// with the public half, is a call that does not compile.
 package token
 
 import (

@@ -1,6 +1,3 @@
-// Package toml — strings: basic and literal, on one line or several, the
-// escape sequences of a basic string and the backslash that ends a line of a
-// multi-line one (TOML v1.0.0 §String).
 package toml
 
 import "unicode/utf8"

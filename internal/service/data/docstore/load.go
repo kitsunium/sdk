@@ -1,6 +1,3 @@
-// Package docstore — opening a persistent store: the snapshot and the
-// versions file read, the overlay replayed on top, and the resting state
-// restored.
 package docstore
 
 import (

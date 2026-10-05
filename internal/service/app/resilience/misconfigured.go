@@ -1,4 +1,3 @@
-// Package resilience — the Runner returned when a policy cannot be honoured.
 package resilience
 
 import (

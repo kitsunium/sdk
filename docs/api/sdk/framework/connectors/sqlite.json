@@ -22,30 +22,7 @@
       "name": "sqlite",
       "dir": ".",
       "layer": "framework",
-      "doc": "Package sqlite — the driver, linked on every GOOS modernc.org/sqlite has a\nport to.\n\nPackage sqlite is kit's SQLite engine (ADR 0004): the one module a kit\nproduct imports to keep a database in a SQLite file, and the only code of\nthe product that imports a SQLite driver — modernc.org/sqlite, \"a CGo-free\nport of the C SQLite3 library\", so a kit product stays one static binary\n(CGO_ENABLED=0). The product's main declares the database with it:\n\n\timport \"github.com/kitsunium/sdk/framework/connectors/sqlite\"\n\n\tvar App = kit.NewApp(\"vigie\", intake.Service, audit.Service).With(\n\t\tkit.Database(\"archive\", sqlite.Engine(), kit.Keeps(audit.Service)),\n\t)\n\nIts URL, in the variable <APP>_<NAME>_URL, is the file's path — or a\nfile: URI, with the driver's parameters —; without one, kit keeps the\ndatabase in <data>/<name>.sqlite. The engine opens the file in WAL mode\nwith a busy timeout, and its transactions take the write lock when they\nbegin (_txlock=immediate), so two writers queue rather than fail; a\nparameter the URL writes itself wins.\n\nOn dragonfly, illumos and solaris, which modernc.org/sqlite does not port\nto, the module builds and Open refuses with proc.UnsupportedPlatform.\n\nIts migrations — kit's own, which make the tables of the stores it keeps,\nthen the product's and the modules' — run under the database file's own\nwrite lock, one transaction per run (the SDK's ADR 0140).\n\nkit.Keeps(kit.Privacy) on the file keeps kit's legal holds and privacy\njournal there, in the product's transactions, and kit's data keys in the\ndata directory: a data key is written apart from every transaction, and\nthe file's one writer may be held by the transaction of the very write\nthat needs the key.\n",
-      "platforms": [
-        "linux/amd64",
-        "linux/arm64",
-        "linux/386",
-        "linux/arm",
-        "darwin/arm64",
-        "windows/amd64",
-        "freebsd/amd64",
-        "openbsd/amd64",
-        "netbsd/amd64"
-      ]
-    },
-    {
-      "path": "github.com/kitsunium/sdk/framework/connectors/sqlite",
-      "name": "sqlite",
-      "dir": ".",
-      "layer": "framework",
-      "doc": "Package sqlite — no driver on dragonfly, illumos and solaris, which\nmodernc.org/sqlite has no port to.\n\nPackage sqlite is kit's SQLite engine (ADR 0004): the one module a kit\nproduct imports to keep a database in a SQLite file, and the only code of\nthe product that imports a SQLite driver — modernc.org/sqlite, \"a CGo-free\nport of the C SQLite3 library\", so a kit product stays one static binary\n(CGO_ENABLED=0). The product's main declares the database with it:\n\n\timport \"github.com/kitsunium/sdk/framework/connectors/sqlite\"\n\n\tvar App = kit.NewApp(\"vigie\", intake.Service, audit.Service).With(\n\t\tkit.Database(\"archive\", sqlite.Engine(), kit.Keeps(audit.Service)),\n\t)\n\nIts URL, in the variable <APP>_<NAME>_URL, is the file's path — or a\nfile: URI, with the driver's parameters —; without one, kit keeps the\ndatabase in <data>/<name>.sqlite. The engine opens the file in WAL mode\nwith a busy timeout, and its transactions take the write lock when they\nbegin (_txlock=immediate), so two writers queue rather than fail; a\nparameter the URL writes itself wins.\n\nOn dragonfly, illumos and solaris, which modernc.org/sqlite does not port\nto, the module builds and Open refuses with proc.UnsupportedPlatform.\n\nIts migrations — kit's own, which make the tables of the stores it keeps,\nthen the product's and the modules' — run under the database file's own\nwrite lock, one transaction per run (the SDK's ADR 0140).\n\nkit.Keeps(kit.Privacy) on the file keeps kit's legal holds and privacy\njournal there, in the product's transactions, and kit's data keys in the\ndata directory: a data key is written apart from every transaction, and\nthe file's one writer may be held by the transaction of the very write\nthat needs the key.\n",
-      "platforms": [
-        "dragonfly/amd64",
-        "illumos/amd64",
-        "solaris/amd64"
-      ]
+      "doc": "Package sqlite — the driver, linked on every GOOS modernc.org/sqlite has a\nport to.\n\nPackage sqlite — no driver on dragonfly, illumos and solaris, which\nmodernc.org/sqlite has no port to.\n\nPackage sqlite is kit's SQLite engine (ADR 0004): the one module a kit\nproduct imports to keep a database in a SQLite file, and the only code of\nthe product that imports a SQLite driver — modernc.org/sqlite, \"a CGo-free\nport of the C SQLite3 library\", so a kit product stays one static binary\n(CGO_ENABLED=0). The product's main declares the database with it:\n\n\timport \"github.com/kitsunium/sdk/framework/connectors/sqlite\"\n\n\tvar App = kit.NewApp(\"vigie\", intake.Service, audit.Service).With(\n\t\tkit.Database(\"archive\", sqlite.Engine(), kit.Keeps(audit.Service)),\n\t)\n\nIts URL, in the variable <APP>_<NAME>_URL, is the file's path — or a\nfile: URI, with the driver's parameters —; without one, kit keeps the\ndatabase in <data>/<name>.sqlite. The engine opens the file in WAL mode\nwith a busy timeout, and its transactions take the write lock when they\nbegin (_txlock=immediate), so two writers queue rather than fail; a\nparameter the URL writes itself wins.\n\nOn dragonfly, illumos and solaris, which modernc.org/sqlite does not port\nto, the module builds and Open refuses with proc.UnsupportedPlatform.\n\nIts migrations — kit's own, which make the tables of the stores it keeps,\nthen the product's and the modules' — run under the database file's own\nwrite lock, one transaction per run (the SDK's ADR 0140).\n\nkit.Keeps(kit.Privacy) on the file keeps kit's legal holds and privacy\njournal there, in the product's transactions, and kit's data keys in the\ndata directory: a data key is written apart from every transaction, and\nthe file's one writer may be held by the transaction of the very write\nthat needs the key.\n"
     }
   ],
   "symbols": [

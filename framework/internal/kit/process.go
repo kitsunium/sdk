@@ -1,4 +1,3 @@
-// Package kit — the process sample: what the running process uses.
 package kit
 
 import (

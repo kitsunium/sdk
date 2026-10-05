@@ -1,4 +1,3 @@
-// Package writer — S3Config value type for the "s3" writer.
 package writer
 
 import (

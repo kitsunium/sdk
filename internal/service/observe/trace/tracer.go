@@ -1,7 +1,3 @@
-// Package trace is the concrete tracing implementation behind
-// internal/core/observe/trace: a Tracer, three samplers, an in-memory recorder, the
-// OTLP/JSON encoder and the OTLP/HTTP emitter — all from the OpenTelemetry and
-// W3C specifications, importing nothing from go.opentelemetry.io. See ADR 0051.
 package trace
 
 import (

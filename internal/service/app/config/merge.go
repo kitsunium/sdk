@@ -1,4 +1,3 @@
-// Package config — recursive layer merge.
 package config
 
 import "slices"

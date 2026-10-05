@@ -1,5 +1,3 @@
-// Package nettransport — the wrap points every failure of this writer goes through,
-// so each carries its code from internal/core/observe/logger/writer/nettransport.
 package nettransport
 
 import (

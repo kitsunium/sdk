@@ -1,5 +1,3 @@
-// Package kit — the Studio's privacy pages: the journal, the holds, the
-// register.
 package kit
 
 import (

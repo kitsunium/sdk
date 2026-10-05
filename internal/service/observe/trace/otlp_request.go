@@ -1,23 +1,3 @@
-// Package trace — the OTLP payload tree: a Go mirror of
-// opentelemetry/proto/{collector/trace,trace}/v1, restricted to the fields this
-// SDK produces. The common/v1 and resource/v1 messages it embeds — KeyValue,
-// AnyValue, Resource, InstrumentationScope — and the proto3-JSON scalars are
-// the ones both signals share, in internal/service/observe/internal/otlp.
-//
-// Field ORDER inside each struct is the schema's FIELD-NUMBER order, not a
-// reading order: encoding/json emits struct fields as declared, and deriving the
-// order from the document is what makes the expected bytes in the tests
-// checkable against the .proto field by field.
-//
-// The visible evidence that the order came from the schema rather than from
-// taste is otlpSpan, which puts `flags` LAST — after `status` — because it is
-// field 16 and status is 15, even though every .proto listing shows `flags`
-// beside `parent_span_id` where it reads naturally. The same tell exists in the
-// metrics mirror, where `attributes` sits after the value because it is field 7.
-//
-// Every field this SDK does not produce is ABSENT rather than always-empty
-// (rule 5): schemaUrl, droppedAttributesCount, droppedEventsCount and
-// droppedLinksCount here, and a scope's attributes in the shared Scope.
 package trace
 
 import "github.com/kitsunium/sdk/internal/service/observe/internal/otlp"

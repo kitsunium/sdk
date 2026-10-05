@@ -1,4 +1,3 @@
-// Package net — the outbound authorisation port.
 package net
 
 // PolicyFunc adapts a plain function to the Policy interface.

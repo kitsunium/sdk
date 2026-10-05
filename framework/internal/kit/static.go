@@ -1,4 +1,3 @@
-// Package kit — frontends: static assets the product serves.
 package kit
 
 import (

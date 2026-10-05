@@ -1,7 +1,5 @@
 //go:build !windows
 
-// Package server — how a Unix kernel reports a datagram longer than the read
-// buffer: by truncating it, which is not an error at all.
 package server
 
 // datagramTruncated reports whether a read failed because the datagram did not

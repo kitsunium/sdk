@@ -1,7 +1,3 @@
-// Package nettransport — the transport seams: the ONLY file that touches net /
-// net/http. Each constructor returns a sendFunc (+ optional closer) captured by
-// netSink, so the concrete transport stays confined here and tests inject a
-// recording sendFunc with no real socket.
 package nettransport
 
 import (

@@ -1,36 +1,3 @@
-// Package ipc is a private socket between processes of one machine: a
-// listener only its own account — and the accounts it names — can reach, a
-// client that refuses to talk to a socket another account planted, and the
-// kernel's word on who is at the other end (ADR 0148).
-//
-// Two gates, and which one holds where is said rather than assumed:
-//
-//   - THE DIRECTORY, everywhere. The socket lives in a directory this
-//     process's account owns and nobody else may write to; connecting to a
-//     Unix socket needs search permission on every directory above it, so a
-//     0700 directory admits its owner and root and nobody else. It is checked
-//     at Listen and at Dial, never widened by this package — and so is the
-//     PATH to it: a component above it that anybody could have planted or
-//     created, or can replace, is refused (PATH_UNSAFE, chain_unix.go), since
-//     every lookup follows a link planted at a parent.
-//   - THE PEER'S CREDENTIALS, where the kernel gives them: SO_PEERCRED on
-//     Linux. There the listener refuses a peer whose UID is neither its own
-//     nor allowed, whatever the directory says. Elsewhere Peer.Verified is
-//     false and the directory is the only gate — stated, not papered over.
-//
-// Windows has no search permission to gate a socket by its directory: there
-// the endpoint is a named pipe (pipe_windows.go) named after Config.Path,
-// whose own DACL grants this process's account only, which refuses remote
-// clients (PIPE_REJECT_REMOTE_CLIENTS) and which nobody can join once it
-// exists (FILE_FLAG_FIRST_PIPE_INSTANCE); each end reads the other's account
-// from its process token (Peer.SID), and a client refuses a listener of
-// another account before it sends a byte.
-//
-// The contract is internal/core/proc/ipc (ADR 0160): the peer and the
-// connection that carries it, the Listener and Dialer ports this package's
-// Listener and Dialer implement, and the codes every refusal carries. This
-// package is the engine — and Config, the one configuration both ends share,
-// is the engine's (ADR 0074).
 package ipc
 
 import (

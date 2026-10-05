@@ -1,14 +1,3 @@
-// Package cbor — the decoder's walk over input the validator has accepted.
-//
-// Because the item was validated first, every length, count and offset the
-// walk reads is already known to fit the input and the bounds, so nothing is
-// allocated on the word of an unchecked count. The walk still checks every
-// read against the input: an inconsistency is an error, never a panic.
-//
-// An item the target cannot hold — a string for an int, an integer that
-// overflows its field — does not stop the walk: the first such failure is
-// kept, the item is skipped, and the rest is decoded, as fxamacker/cbor and
-// encoding/json both do.
 package cbor
 
 import (

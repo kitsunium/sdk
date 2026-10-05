@@ -1,12 +1,3 @@
-// Package selfupdate — the HTTP policy every real Service uses: bounded,
-// https-only redirects and a cap on how much of a response is read.
-// Package updater — the transport the release endpoints are reached over,
-// and the bound on what they are allowed to make this process do.
-//
-// Everything here treats the GitHub API and the release CDN as untrusted
-// input, because they are: stable releases resolve through a PUBLIC mirror
-// repository (see repoForTag), which is a second publishing origin, and a
-// redirect chain or a response body is chosen entirely by whatever answers.
 package selfupdate
 
 import (

@@ -1,4 +1,3 @@
-// Package kit — kit's own migrations on a database.
 package kit
 
 import (

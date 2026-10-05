@@ -1,7 +1,5 @@
 //go:build linux
 
-// Package ipc — the peer's credentials on Linux: SO_PEERCRED, what the peer
-// had when it connected or listened.
 package ipc
 
 import (

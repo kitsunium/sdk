@@ -1,4 +1,3 @@
-// Package kit — reading a record's former values.
 package kit
 
 import (

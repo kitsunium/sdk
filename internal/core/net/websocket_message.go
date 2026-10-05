@@ -1,6 +1,3 @@
-// Package net — the WebSocket application message (RFC 6455 §5.6). Its UTF-8
-// rule (§8.1) is checked by the engine on the bytes, as they come off and go
-// onto the wire: internal/service/net/websocket.ValidateText (ADR 0160 §4).
 package net
 
 // WSMessageValue is one complete WebSocket application message, reassembled

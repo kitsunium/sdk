@@ -1,6 +1,3 @@
-// Package pathchain — the walk's POSITION: one open directory handle per
-// component already entered, so every question is asked of a descriptor this
-// process holds rather than of a path string that could resolve elsewhere.
 package pathchain
 
 import (

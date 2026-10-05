@@ -1,7 +1,3 @@
-// Package cloudwatch — the AWS adapter. This file (with cred_adapter.go) is the
-// ONLY place that imports the AWS SDK; every other file is SDK-free and unit-
-// tested through the deliverFunc seam. The live PutLogEvents lives in an
-// anonymous closure returned by newDeliverFunc.
 package cloudwatch
 
 import (

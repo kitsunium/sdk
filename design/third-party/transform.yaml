@@ -46,29 +46,124 @@ packages:
             value: "0x00_03_3F_04"
         type: errs.Code
     constants:
-      - name: S2Algorithm
+      - doc: |-
+          S2Algorithm is the canonical registry key for the s2 scheme.
+
+          s2 is NOT registered under "snappy" and makes no Snappy-compatibility claim:
+          the block encoder here emits s2 extensions a Snappy decoder does not read, so
+          naming it "snappy" would promise interop the bytes do not honour. The same
+          mistake HTTP made with "deflate", refused here before it can be made.
+        name: S2Algorithm
         type: coretransform.Algorithm
         value: "\"s2\""
-      - name: DefaultMaxDecompressedBytes
+      - doc: |-
+          DefaultMaxDecompressedBytes is the ceiling the two registered singletons are
+          built with: 64 MiB.
+
+          It is deliberately TIGHTER than the 256 MiB backstop the stdlib schemes use
+          in internal/service/data/transform, and the reason is arithmetic rather than
+          taste. DEFLATE's maximum expansion is roughly 1032:1, so reaching 256 MiB
+          through gzip costs an attacker ~254 KiB of upload. Both schemes here expand
+          far harder — measured in this package's own tests, 13 KiB of zstd and 28
+          BYTES of s2 each declare 64 MiB — so the same ceiling would be four orders of
+          magnitude cheaper to reach. The number that matters is what an attacker
+          spends, not what the format is called.
+
+          A caller who legitimately handles larger payloads passes its own ceiling to
+          NewZstdCompressor / NewS2Compressor; the constant is only what the
+          import-time singletons use.
+        name: DefaultMaxDecompressedBytes
         type: int64
         value: 64 << 20
-      - name: ZstdAlgorithm
+      - doc: |-
+          ZstdAlgorithm is the canonical registry key for the zstd scheme. It matches
+          the IANA content coding name, so a caller that already speaks HTTP spells it
+          the same way here.
+        name: ZstdAlgorithm
         type: coretransform.Algorithm
         value: "\"zstd\""
-      - name: ZstdFastest
+      - doc: ZstdFastest is the throughput end of the scale (library level 1).
+        name: ZstdFastest
         type: ZstdLevel
         value: "1"
-      - name: ZstdDefault
+      - doc: ZstdDefault is the balanced level (library level 3) and the clamp target.
+        name: ZstdDefault
         type: ZstdLevel
         value: "3"
-      - name: ZstdBetter
+      - doc: |-
+          ZstdBetter trades roughly half the throughput for a few points of ratio
+          (library level 7).
+        name: ZstdBetter
         type: ZstdLevel
         value: "7"
-      - name: ZstdBest
+      - doc: |-
+          ZstdBest is the ratio end of the scale (library level 11). BENCH.md stops
+          at ZstdBetter, which already compresses SLOWER than stdlib gzip for a
+          sub-one-percent ratio gain; measure your own corpus before going past it.
+        name: ZstdBest
         type: ZstdLevel
         value: "11"
+    doc: |-
+      Package transform — range 0.3.63.* (ADR 0066 third-party/transform block).
+
+      Package transform — declares the sentinel *errs.Error values returned by the
+      vendor compressors. Each sentinel var's name equals its errs.Define Reason in
+      SCREAMING_SNAKE form. The zstdWrap / s2Wrap WrapParams mirror their sentinels
+      so a wrapped library cause carries the same Code/Reason/Public on the wire as
+      the bare sentinel (origin wins, root CLAUDE.md rule 6).
+
+      Package transform — the s2 scheme over github.com/klauspost/compress/s2, the
+      same module the zstd scheme uses, so it costs no second dependency.
+
+      Package transform wraps the vendor compressors zstd and s2 (both from
+      github.com/klauspost/compress) as core/data/transform.Compressor implementations,
+      beside the stdlib gzip/flate/zlib schemes in internal/service/data/transform.
+
+      # Why it lives under third-party/
+
+      Not because the library drags a dependency graph — measured, it drags none:
+      github.com/klauspost/compress requires no other module, is pure Go, needs no
+      cgo, and cross-compiles on the whole ADR 0018 matrix. The reason is the OTHER
+      criterion ADR 0034 §Decision.3 names: it imposes a dependency on consumers who
+      never use the integration. internal/service and pkg are dep-light on purpose,
+      and a consumer who only wants a logger should not resolve, download, verify
+      and link a compression library to get one. third-party/ lives in the ROOT
+      module, which nothing requires — so the cost is paid by the blank-import and
+      by nobody else.
+
+      The downgrade narrative ADR 0022 once used is not cited here; ADR 0034
+      retired it as a placement rule, and under minimal version selection it cannot
+      happen (a dependency requiring a LOWER version never lowers a higher
+      requirement that is still present).
+
+      # Opt-in
+
+      Importing this package registers "zstd" and "s2" with the core/data/transform
+      registry. Nothing in internal/* or pkg/v1/* imports it, so a consumer who
+      does not name it never compiles it. That is the same contract
+      third-party/codec/hcl has for the "hcl" Format.
+
+      # The output bound is a parameter, not an option
+
+      Every constructor here takes maxDecompressedBytes as a REQUIRED positional
+      argument. A functional option can be omitted; a positional parameter cannot,
+      and a security bound that can be omitted is not mandatory. A non-positive
+      value is refused at construction rather than defaulted — see
+      LimitMisconfigured and ADR 0066 D4.
+
+      Package transform — the zstd scheme (RFC 8878) over
+      github.com/klauspost/compress/zstd.
     functions:
-      - in:
+      - doc: |-
+          NewS2Compressor builds an s2 compressor refusing to decompress more than
+          maxDecompressedBytes of plaintext in one call. The argument is positional and
+          mandatory; a non-positive value returns LimitMisconfigured and no compressor.
+
+          s2 has no level knob here on purpose. Its reason for existing is throughput,
+          and the levels that buy ratio (s2.EncodeBetter / EncodeBest) land in zstd's
+          territory at zstd's cost — a caller who wants that trade should name zstd
+          rather than get it from a scheme chosen for speed.
+        in:
           - name: maxDecompressedBytes
             type: int64
         name: NewS2Compressor
@@ -77,7 +172,18 @@ packages:
             type: "*S2Compressor"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NewZstdCompressor builds a zstd compressor at the given level, refusing to
+          decompress more than maxDecompressedBytes of plaintext in one call.
+
+          maxDecompressedBytes is positional and mandatory: see the package doc. A
+          non-positive value returns LimitMisconfigured and no compressor. An
+          unrecognised level clamps to ZstdDefault.
+
+          The returned compressor owns a shared encoder and decoder. A caller that
+          builds one per request must Close it; the package singleton is never closed
+          because it lives as long as the process.
+        in:
           - name: level
             type: ZstdLevel
           - name: maxDecompressedBytes
@@ -132,12 +238,36 @@ packages:
             public: maxDecompressedBytes must be a positive byte count
             reason: LIMIT_MISCONFIGURED
     types:
-      - methods:
-          - name: Algorithm
+      - doc: |-
+          S2Compressor is the concrete core/data/transform.Compressor for the s2 block
+          format. Unlike the zstd scheme it holds no encoder or decoder — s2's block
+          API is a pair of free functions — so the value is stateless apart from its
+          ceiling and needs no Close.
+        methods:
+          - doc: Algorithm implements core/data/transform.Compressor and returns the registry key.
+            name: Algorithm
             out:
               - type: coretransform.Algorithm
             recv: pointer
-          - in:
+          - doc: |-
+              Compress s2-encodes src and appends the result to dst. dst and src must not
+              overlap.
+
+              s2.Encode treats its first argument as SCRATCH, not as a prefix — it
+              overwrites from index zero and returns a sub-slice of it. Handing it the
+              caller's dst directly would silently destroy the bytes already there, so the
+              encode targets the TAIL of a grown dst and the prefix is preserved by
+              construction. TestCompressPreservesDstPrefix pins that, because the bug it
+              prevents is invisible in every test that passes dst=nil.
+
+              Encoding into the tail rather than into a fresh buffer is the one thing in
+              this package chosen on a profile rather than on taste: the obvious version
+              (encode to nil, then append) spends its time in runtime.memmove copying the
+              result a second time. See BENCH.md §"Why s2 encodes into the tail".
+
+              It never fails: s2.Encode has no error return, and an input too large for the
+              block format is refused before the encode by MaxEncodedLen.
+            in:
               - name: dst
               - name: src
                 type: "[]byte"
@@ -148,7 +278,15 @@ packages:
               - name: err
                 type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Decompress s2-decodes src and appends the result to dst, refusing any payload
+              whose declared plaintext length exceeds the configured ceiling.
+
+              The refusal happens BEFORE any decode and before any allocation: the s2 block
+              format carries its decoded length in a varint header, so DecodedLen answers
+              the bomb question by reading a handful of bytes. A refused payload costs the
+              varint read and nothing else.
+            in:
               - name: dst
               - name: src
                 type: "[]byte"
@@ -162,14 +300,39 @@ packages:
         name: S2Compressor
         struct:
           unexported: true
-      - name: ZstdLevel
+      - doc: |-
+          ZstdLevel names a zstd compression level. The four values are the four the
+          library actually implements; an unrecognised value CLAMPS to ZstdDefault,
+          because every level round-trips the caller's bytes identically and so trades
+          ratio against CPU rather than carrying the caller's intent (ADR 0031 §clamp,
+          the same call internal/service/data/transform makes for the zlib level).
+        name: ZstdLevel
         underlying: int
-      - methods:
-          - name: Algorithm
+      - doc: |-
+          ZstdCompressor is the concrete core/data/transform.Compressor for the zstd wire
+          format. It holds a shared encoder and decoder because building either per
+          call would re-allocate the window buffers on every payload; both are
+          documented safe for concurrent EncodeAll / DecodeAll, so one value serves the
+          whole process.
+
+          It is a POINTER type, unlike the stateless stdlib schemes. Registry
+          re-registration therefore compares pointer identity, which keeps
+          core/data/transform.Register's idempotent-republish path working for the singleton
+          and turns a second, distinct compressor claiming "zstd" into the boot-time
+          panic it is meant to be.
+        methods:
+          - doc: Algorithm implements core/data/transform.Compressor and returns the registry key.
+            name: Algorithm
             out:
               - type: coretransform.Algorithm
             recv: pointer
-          - in:
+          - doc: |-
+              Compress zstd-encodes src and appends the result to dst.
+
+              It never fails: EncodeAll has no error return because a buffer-backed encode
+              has nothing to fault on. The error result exists to satisfy the Compressor
+              contract and is always nil.
+            in:
               - name: dst
               - name: src
                 type: "[]byte"
@@ -180,7 +343,20 @@ packages:
               - name: err
                 type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Decompress zstd-decodes src and appends the result to dst, refusing any
+              payload whose plaintext would exceed the configured ceiling.
+
+              The ceiling counts the DECODED payload only, never len(dst)+payload, so a
+              caller reusing a large dst does not silently shrink its own decompression
+              budget. That takes two paths: an empty dst is handed straight to DecodeAll
+              (where the library's own budget already means exactly the payload), and a
+              non-empty one decodes into a fresh buffer that is then appended. The split is
+              an allocation, not a semantic — both paths bound the same thing. See
+              BENCH.md §"Why decompression takes the empty-dst fast path".
+
+              A refusal returns dst at its original length — never a partial payload.
+            in:
               - name: dst
               - name: src
                 type: "[]byte"
@@ -191,7 +367,11 @@ packages:
               - name: err
                 type: error
             recv: pointer
-          - name: Close
+          - doc: |-
+              Close releases the shared encoder and decoder. It is safe to call once; the
+              compressor must not be used afterwards. The package singleton is never
+              closed — it is owned by the process, not by any caller.
+            name: Close
             out:
               - type: error
             recv: pointer
@@ -199,7 +379,17 @@ packages:
         struct:
           unexported: true
     variables:
-      - name: S2
+      - doc: S2 is the registered s2 singleton, built at DefaultMaxDecompressedBytes.
+        name: S2
         type: coretransform.Compressor
-      - name: Zstd
+      - doc: |-
+          Zstd is the registered zstd singleton, built at DefaultMaxDecompressedBytes.
+          Binding the registration result to a named var is the convention the sibling
+          stdlib schemes use and keeps this package clear of init().
+
+          Construction acquires no goroutine, no file descriptor and no socket: it is
+          measured at a few kilobytes of heap, and the window buffers are allocated
+          lazily on first use. That is what makes registering from an import legitimate
+          here where ADR 0048 refuses it for an OTLP emitter — see ADR 0066 D3.
+        name: Zstd
         type: coretransform.Compressor

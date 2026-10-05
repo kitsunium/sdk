@@ -1,5 +1,3 @@
-// Package otlp — one OTLP/JSON document, and the timestamp every message in it
-// carries.
 package otlp
 
 import (

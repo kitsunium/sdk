@@ -1,5 +1,3 @@
-// Package queue — the ADR 0039 sibling that lets a consumer sleep until there
-// may be work, and the value it answers with (ADR 0104).
 package queue
 
 import "time"

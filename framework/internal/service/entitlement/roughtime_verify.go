@@ -1,11 +1,3 @@
-// Package entitlement - verifying a Roughtime answer.
-//
-// Three signatures and a proof, in an order chosen so nothing downstream runs
-// on bytes upstream has not vouched for: the long-term key signs a delegation,
-// the delegated key signs the response, the response commits to a Merkle root,
-// and the root is shown to contain the nonce this process drew a moment ago.
-// Drop any one of the four and the answer becomes replayable, forgeable, or
-// about somebody else's request.
 package entitlement
 
 import (

@@ -1,12 +1,3 @@
-// Package cloudwatch — the batching terminal Sink. AWS-free: it talks to
-// CloudWatch Logs only through the deliverFunc seam, so the batching/flush logic
-// is unit-tested with a fake (the real AWS adapter lives in client.go). Each
-// record becomes one log event (carrying its RecordEvent.Time); events are
-// coalesced via the generic kernel batcher and delivered when the batch reaches
-// the event cap, on the FlushEvery ticker, or on Flush / Close. The
-// PutLogEvents chronological-order requirement is honoured by the deliver
-// closure (a stable sort by timestamp), so the coalescing/flush/ticker
-// machinery is the shared kernel/concur/batcher (ADR 0014), not a hand-rolled copy.
 package cloudwatch
 
 import (

@@ -1,4 +1,3 @@
-// Package token — the JWT/JOSE claim-value encoding.
 package token
 
 import (

@@ -9,6 +9,7 @@ go_library(
         "changed_set_compliance.go",
         "config.go",
         "diff_parse.go",
+        "doc.go",
         "exec.go",
         "gitdir.go",
         "head.go",

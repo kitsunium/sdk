@@ -1,4 +1,3 @@
-// Package mail — the message as a value, and the envelope derived from it.
 package mail
 
 import "time"

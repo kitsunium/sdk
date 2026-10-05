@@ -1,4 +1,3 @@
-// Package token — the JWT verification policy.
 package token
 
 import (

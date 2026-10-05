@@ -1,4 +1,3 @@
-// Package trace — the OTLP/HTTP exporter's configuration.
 package trace
 
 import "github.com/kitsunium/sdk/internal/service/observe/internal/otlp"

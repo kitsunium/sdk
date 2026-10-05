@@ -9,6 +9,7 @@ go_library(
         "body.go",
         "component.go",
         "config.go",
+        "doc.go",
         "entry.go",
         "handler.go",
         "handler_config.go",

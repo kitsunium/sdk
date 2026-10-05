@@ -1,25 +1,3 @@
-// Package multipart implements RFC 7578 multipart/form-data as a
-// codec.StreamingCodec registered under Format("multipart"). Blank-importing
-// this package is enough to make it resolvable via the core/data/codec registry.
-//
-// The format is a CONTAINER, not a value serialisation: its native Go shape is
-// [FormValue], a list of named [PartValue] sections. Any other value takes the
-// JSON-mediated shape — a single part named [JSONPartName] carrying
-// encoding/json's output — so the universal Marshal(F, v) / Unmarshal(F, b, &v)
-// contract holds without a facade-side promotion rule. baseenc is the in-tree
-// precedent for a JSON-mediated pipeline.
-//
-// Streaming is the point of the format, so [codec.StreamingCodec] is the
-// interface that matters here: NewEncoder writes one part per Encode straight
-// to the io.Writer, NewDecoder reads one part per Decode straight off the
-// io.Reader, and neither holds more than a single part body at a time. Marshal
-// and Unmarshal are the same two paths driven over a scratch buffer.
-//
-// The delimiter lives in the message's Content-Type header, which the Codec
-// contract cannot carry. See CLAUDE.md §The boundary problem for how that gap
-// is closed ([ContentType] on the write side, [Boundary] on the read side) and
-// for the one case it is NOT closed (a body with a "--"-prefixed preamble,
-// which only the real header can disambiguate — hence [BoundaryCodec]).
 package multipart
 
 import (

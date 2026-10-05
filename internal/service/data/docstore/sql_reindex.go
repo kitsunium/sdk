@@ -1,5 +1,3 @@
-// Package docstore — the SQL store's index rows rebuilt from its documents,
-// for when the declarations that filed them changed.
 package docstore
 
 import (

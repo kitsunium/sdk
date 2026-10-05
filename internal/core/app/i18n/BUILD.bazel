@@ -8,6 +8,7 @@ go_library(
         "codes_gen.go",
         "count_value.go",
         "design_gen.go",
+        "doc.go",
         "errors.go",
         "form.go",
         "i18n.go",

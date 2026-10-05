@@ -12,4 +12,12 @@
 // the fields are uint64, as int64(-1) where they are int64.
 //
 // Off Unix there is no rlimit struct, and the package holds nothing.
+//
+// Package rlim — the uint64 syscall.Rlimit constructor. On every Unix target
+// except FreeBSD and DragonFly the kernel types Rlimit.Cur/Max as uint64,
+// matching coreproc.LimitValue exactly.
+//
+// Package rlim — the int64 syscall.Rlimit constructor. FreeBSD and DragonFly
+// type Rlimit.Cur/Max as int64 (their rlim_t is __int64_t), unlike every other
+// Unix target.
 package rlim

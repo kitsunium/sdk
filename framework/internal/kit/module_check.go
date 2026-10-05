@@ -1,4 +1,3 @@
-// Package kit — the start's checks of the modules an app mounts.
 package kit
 
 import (

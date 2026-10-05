@@ -1,6 +1,5 @@
 //go:build windows
 
-// Package static — the lookup failures Windows reports for a name.
 package static
 
 import (

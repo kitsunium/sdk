@@ -1,5 +1,3 @@
-// Package redact — the members encoding/json writes for a struct, selected by
-// encoding/json's own rules rather than an approximation of them.
 package redact
 
 import (

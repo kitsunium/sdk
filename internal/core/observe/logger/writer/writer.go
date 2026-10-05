@@ -1,15 +1,3 @@
-// Package writer declares the transport-factory port: a named, config-driven
-// constructor that yields a logger Sink, plus the process-wide registry that
-// maps a writer Name to its Factory. It is the peer of internal/core/data/codec —
-// the registry resolves a Name to a Factory exactly as codec resolves a Format
-// to a Codec (ADR 0012).
-//
-// A writer is NOT a transport: it builds one. Factory.Open is called once at
-// logger-construction time and returns a core/observe/logger.Sink that owns its
-// transport for its lifetime; the hot path (Sink.Write) is untouched by this
-// package. Concrete factories live in internal/service/observe/logger/writer/<x>/ (console,
-// file) and third-party/aws/writer/<x>/ (s3, cloudwatch) and self-register via a
-// package-level var initialiser when imported — no init().
 package writer
 
 // Name is the typed key under which a Factory registers (e.g. "console",

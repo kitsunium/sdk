@@ -1,5 +1,3 @@
-// Package sql — hosts MigrateConfig, the migration runner's parameters, and
-// the validation that turns a caller's slice into an ordered plan.
 package sql
 
 import (

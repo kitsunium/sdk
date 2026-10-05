@@ -1,4 +1,3 @@
-// Package yaml — scalars: plain, single-quoted, double-quoted, and block.
 package yaml
 
 import (

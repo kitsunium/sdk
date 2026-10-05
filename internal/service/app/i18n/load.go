@@ -1,4 +1,3 @@
-// Package i18n — loading a catalogue directory through the codec domain.
 package i18n
 
 import (

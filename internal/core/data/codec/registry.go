@@ -1,6 +1,3 @@
-// Package codec — holds the process-wide Codec registry.
-// Service-level codec packages register themselves via package-level var
-// initialisers when the package is imported.
 package codec
 
 import (

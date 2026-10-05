@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "xchacha",
-    srcs = ["xchacha.go"],
+    srcs = [
+        "doc.go",
+        "xchacha.go",
+    ],
     importpath = "github.com/kitsunium/sdk/third-party/x-crypto/xchacha",
     visibility = ["//visibility:public"],
     deps = [

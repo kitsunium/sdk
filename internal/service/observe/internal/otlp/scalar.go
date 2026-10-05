@@ -1,5 +1,3 @@
-// Package otlp — the three proto3-JSON scalar encodings OTLP inherits and
-// encoding/json does not produce on its own.
 package otlp
 
 import (

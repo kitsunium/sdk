@@ -1,6 +1,3 @@
-// Package recover — declares the panicValue adapter that
-// converts a recover() return value (any) into the error interface so
-// errs.Wrap can carry it without losing the original Stringer behaviour.
 package recover
 
 import "fmt"

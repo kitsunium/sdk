@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # internal/service/data/codec/strictjson/
 
 ## Purpose
@@ -18,7 +18,8 @@ ships without an experiment flag. Not a codec: it registers no Format.
 
 | File | Role |
 |---|---|
-| `strictjson.go` | package doc, `MaxPointerBytes`, `Decode`, `CheckArguments`, `DecodeChecked`, `classify`, `located`, `boundPointer`, `PointerOf`, `Misconfigured` |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `strictjson.go` | `MaxPointerBytes`, `Decode`, `CheckArguments`, `DecodeChecked`, `classify`, `located`, `boundPointer`, `PointerOf`, `Misconfigured` |
 | `reader.go` | `boundedReader` — hands the decoder the bound plus one byte, remembers what it delivered and the first real read failure, and `verdict`; `Unreadable`, the refusal of a failed reader; `causeOf`, which names a read failure by its type |
 | `httpbody/` | `DecodeRequest` — `http.MaxBytesReader`, the empty-body peek, the media-type check (`application/json` or `+json`, RFC 6839); see `httpbody/CLAUDE.md` |
 | — | the eight `0.3.72.*` codes and their sentinels, each with its HTTP status, are declared in `internal/core/data/codec/strictjson` (ADR 0160 §2) and used here as `corestrictjson.<Var>`; the statuses are literals there, because the core does not import `net/http` for a number |

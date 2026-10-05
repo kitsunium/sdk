@@ -70,39 +70,132 @@ packages:
             value: "0x00_03_38_03"
         type: errs.Code
     constants:
-      - name: KindInvalid
+      - doc: |-
+          KindInvalid is the zero AttrKind — FIRST in the iota run for exactly
+          that reason. It belongs to the zero [AttrValue] and to nothing else:
+          [NewRequestValue] drops an attribute carrying it, so a kind-less
+          attribute is ABSENT rather than present and unusable.
+        name: KindInvalid
         type: AttrKind
         value: "0"
-      - name: KindString
+      - doc: KindString is a single text value — a department, a tenant, a region.
+        name: KindString
         type: AttrKind
         value: "1"
-      - name: KindInt64
+      - doc: KindInt64 is a whole number — an age, a level, a Unix timestamp.
+        name: KindInt64
         type: AttrKind
         value: "2"
-      - name: KindBool
+      - doc: KindBool is a flag — mfa_satisfied, account_locked, is_internal.
+        name: KindBool
         type: AttrKind
         value: "3"
-      - name: KindStrings
+      - doc: |-
+          KindStrings is an unordered set of text values — the roles a subject
+          holds, the groups it belongs to, the scopes a token carries.
+        name: KindStrings
         type: AttrKind
         value: "4"
-      - name: Abstain
+      - doc: |-
+          Abstain means this policy has no opinion about this request. It is the
+          zero value — FIRST in the iota run for exactly that reason — and it
+          grants nothing: composition preserves it, and the closure refuses it.
+        name: Abstain
         type: Decision
         value: "0"
-      - name: Allow
+      - doc: |-
+          Allow means this policy permits the request. It is the ONLY value that
+          grants, and under deny-overrides it can still be defeated by a [Deny]
+          from any other policy in the composition.
+        name: Allow
         type: Decision
         value: "1"
-      - name: Deny
+      - doc: |-
+          Deny means this policy refuses the request. It is absorbing: no [Allow]
+          anywhere in a composition can outvote it (ADR 0057 §D2).
+        name: Deny
         type: Decision
         value: "2"
+    doc: |-
+      Package authz — hosts AttrValue, one typed fact about a request.
+
+      Package authz declares the SDK's authorization port: the [Policy] that
+      answers "may this subject perform this action on this resource", the
+      three-valued [Decision] it answers with, the [RequestValue] that carries the
+      question, and the [Condition] an attribute rule is written as. A core
+      sibling admitted by ADR 0057.
+
+      The port is a FUNCTION type rather than an interface — the shape
+      internal/core/CLAUDE.md already admits for resilience.Operation,
+      scheduler.Job, lifecycle.Start and validation.Constraint. ADR 0039's rule is
+      that a published port must not grow a method, because pkg/v1 aliases publish
+      the shape and Go interfaces are structural; a func type satisfies that rule
+      structurally, since it cannot grow a method at all.
+
+      # The SDK ships the evaluation, not the vocabulary
+
+      "Who is an admin", "what a role is called", "which routes are protected" and
+      "what happens to a denied request" are questions only the application can
+      answer, and every library in this domain that tried to answer them grew a
+      policy language to do it. This package therefore ships NO policy DSL, no
+      expression parser, no role catalogue and no relationship tuple store: a
+      [Condition] is an ordinary Go func, a grant table is data the caller writes,
+      and composition is function composition. The engine evaluates; the
+      vocabulary is the caller's. See ADR 0057 §D1.
+
+      # It answers "may this", never "who is this"
+
+      Identity arrives from internal/core/security/session (a server-side session, opaque
+      and revocable) or internal/core/security/token (a self-contained signed claim set).
+      This package takes the SUBJECT those produce and nothing else — it
+      authenticates nobody, mints nothing, and reads no header. Handing it a
+      subject the caller has not authenticated produces a perfectly valid decision
+      about a principal that does not exist.
+
+      # Three states, and the default is refusal
+
+      A [Decision] is [Allow], [Deny] or [Abstain]. Abstention is a real answer —
+      "this policy has no opinion about this request" — and it is deliberately not
+      spelled as either of the other two. An evaluator that returned Deny where it
+      merely had no grant would veto every other policy composed with it; one that
+      returned Allow would authorize by silence. Both mistakes are unwritable here
+      because the third state exists.
+
+      Nothing in this package converts an abstention into a grant. The closure —
+      the single place where "nobody said Allow" becomes a refusal — lives in
+      internal/service/security/authz.Check, and it closes toward Deny. See ADR 0057 §D3.
+
+      The concrete evaluators (RBAC over a grant table, ABAC over conditions), the
+      deny-overrides combiner and the built-in conditions live in
+      internal/service/security/authz; this package owns the contract, the domain values
+      and the typed sentinels.
+
+      Package authz — ranges 0.2.26.* (the domain's verdicts) and 0.3.56.* (the
+      engine's construction refusals) — ADR 0057, declared here since ADR 0160.
+
+      Package authz — hosts Decision, the three-valued verdict a Policy returns.
+
+      Package authz — declares the sentinel *errs.Error outcomes: the four
+      verdicts of the port, and the three construction refusals of the engine in
+      internal/service/security/authz (ADR 0160). Each var's name equals its
+      errs.Define Reason in SCREAMING_SNAKE form.
+
+      Package authz — hosts RequestValue, the question a Policy answers.
     functions:
-      - in:
+      - doc: AttrString builds a text attribute.
+        in:
           - name: key
           - name: value
             type: string
         name: AttrString
         out:
           - type: AttrValue
-      - in:
+      - doc: |-
+          AttrInt64 builds a whole-number attribute. Timestamps travel here as Unix
+          seconds: the domain deliberately has no time kind, because an attribute
+          carrying a time zone would make two requests with the same instant compare
+          unequal.
+        in:
           - name: key
             type: string
           - name: value
@@ -110,7 +203,11 @@ packages:
         name: AttrInt64
         out:
           - type: AttrValue
-      - in:
+      - doc: |-
+          AttrBool builds a flag attribute. A flag that is present and false is a
+          different fact from a flag that is absent, and this is the constructor that
+          lets a caller state the first one.
+        in:
           - name: key
             type: string
           - name: value
@@ -118,7 +215,14 @@ packages:
         name: AttrBool
         out:
           - type: AttrValue
-      - in:
+      - doc: |-
+          AttrStrings builds a set attribute — roles, groups, scopes. The slice is
+          cloned, so the caller keeps ownership of the one it passed.
+
+          AttrStrings(key) with no values is a legitimate attribute: it states that
+          the subject holds NO roles, which is a different fact from the caller not
+          having said. Rules distinguish the two, and only the second is an error.
+        in:
           - name: key
             type: string
           - name: values
@@ -127,7 +231,22 @@ packages:
         out:
           - type: AttrValue
         variadic: true
-      - in:
+      - doc: |-
+          NewRequestValue builds the immutable question. Attributes are indexed by
+          their key; a later attribute with the same key replaces an earlier one, so
+          the caller can layer defaults and then override them.
+
+          An attribute with an empty key or the zero [KindInvalid] kind is DROPPED
+          rather than stored. The invariant is worth the drop: every attribute a rule
+          can find is one it can use, so "found but unusable" is not a state any rule
+          has to handle. The dropped attribute is then simply absent, and absence is
+          already a refusal in every rule that names it — the failure mode is closed.
+
+          An empty action or resource is accepted and matches no grant and no rule, so
+          such a request is refused by the closure. It is not rejected here because
+          doing so would put an error return on the constructor every request calls,
+          to catch a mistake that already fails closed.
+        in:
           - name: subject
           - name: action
           - name: resource
@@ -280,45 +399,90 @@ packages:
             public: The condition cannot be built from the given arguments
             reason: CONDITION_INVALID
     types:
-      - name: AttrKind
+      - doc: |-
+          AttrKind names the type an [AttrValue] carries. The kind is part of the
+          attribute's identity, not a hint: a rule comparing strings and an attribute
+          holding an integer do not compare — they MISMATCH, and the SDK says so
+          rather than quietly answering false (see [AttributeKindMismatch]).
+        name: AttrKind
         underlying: uint8
-      - methods:
-          - name: Key
+      - doc: |-
+          AttrValue is one typed, named fact the caller attaches to a [RequestValue]:
+          the subject's department, whether MFA was satisfied, the owner recorded on
+          the resource. It is immutable once built, and its accessors report the kind
+          mismatch rather than a zero value.
+
+          # Why it is typed
+
+          The obvious shape for an attribute bag is map[string]string, and it has two
+          defects that this domain cannot afford. It cannot express a flag that is
+          present and FALSE — "mfa_satisfied=false" and "mfa_satisfied absent" become
+          the same empty string — and it makes every numeric comparison a string
+          comparison, in which "9" is greater than "10". Both failures resolve toward
+          permission often enough to be worth four kinds and an explicit accessor.
+        methods:
+          - doc: Key returns the attribute's name.
+            name: Key
             out:
               - type: string
             recv: value
-          - name: Kind
+          - doc: Kind returns the type the attribute carries.
+            name: Kind
             out:
               - type: AttrKind
             recv: value
-          - name: StringValue
+          - doc: |-
+              StringValue returns the text payload. ok is false when the attribute is not
+              [KindString] — the caller MUST check it: the zero string is a legitimate
+              text value, so the returned value alone cannot report a mismatch.
+            name: StringValue
             out:
               - name: value
                 type: string
               - name: ok
                 type: bool
             recv: value
-          - name: Int64Value
+          - doc: |-
+              Int64Value returns the whole-number payload. ok is false when the attribute
+              is not [KindInt64].
+            name: Int64Value
             out:
               - name: value
                 type: int64
               - name: ok
                 type: bool
             recv: value
-          - name: BoolValue
+          - doc: |-
+              BoolValue returns the flag payload. ok is false when the attribute is not
+              [KindBool] — and this is the accessor where ignoring ok is most expensive,
+              since false is both "the flag is off" and "there is no flag".
+            name: BoolValue
             out:
               - name: value
               - name: ok
                 type: bool
             recv: value
-          - name: StringsValue
+          - doc: |-
+              StringsValue returns a copy of the set payload. ok is false when the
+              attribute is not [KindStrings]. The copy is what makes an AttrValue safe to
+              share across goroutines: a caller that sorts or appends to the result cannot
+              reach the attribute the next request will evaluate.
+            name: StringsValue
             out:
               - name: values
                 type: "[]string"
               - name: ok
                 type: bool
             recv: value
-          - in:
+          - doc: |-
+              Contains reports whether a [KindStrings] attribute holds want. ok is false
+              when the attribute is not [KindStrings], which the caller MUST distinguish
+              from a set that simply does not contain want.
+
+              It exists so membership does not have to allocate: [AttrValue.StringsValue]
+              clones, and membership is the single hottest attribute read in the domain —
+              every RBAC evaluation performs one per role.
+            in:
               - name: want
                 type: string
             name: Contains
@@ -330,39 +494,175 @@ packages:
         name: AttrValue
         struct:
           unexported: true
-      - name: Policy
+      - doc: |-
+          Policy answers whether request is permitted. Implementations MUST be pure
+          with respect to the decision — the same request yields the same decision —
+          and safe for concurrent use, because one compiled Policy is shared by every
+          goroutine serving a request.
+
+          A Policy returns [Abstain] when it has nothing to say about this request.
+          That is the common case for a policy that only knows about one action or one
+          resource, and it is NOT a refusal: refusing is [Deny], and a policy that
+          conflates the two silently vetoes every policy it is composed with.
+
+          # A returned error is never an authorization
+
+          The error return means "this policy could not be evaluated" — a required
+          attribute was absent, an attribute was not the kind the rule compares, a
+          backing store was unreachable. A caller MUST treat that as a refusal. The
+          SDK's own combiner and closure do exactly that: an error is folded to [Deny]
+          and the decision returned alongside it is ignored. A Policy that cannot
+          decide has not permitted anything.
+
+          Implementations SHOULD return [Deny] alongside a non-nil error rather than
+          the zero [Abstain], so that a caller who reads only the decision — a mistake
+          this contract cannot prevent — still fails closed.
+        name: Policy
         underlying: func(ctx context.Context, request RequestValue) (Decision, error)
-      - name: Condition
+      - doc: |-
+          Condition reports whether an attribute rule holds for request. It is the
+          unit an ABAC rule is written in, and it is an ordinary Go predicate rather
+          than a sentence in a policy language: the caller already has a language, and
+          a second one would have to grow comparison, negation, arithmetic and short
+          circuits before it could express what an `if` expresses today.
+
+          Implementations MUST be pure and safe for concurrent use, and MUST NOT
+          perform I/O — a Condition is evaluated on the request path, possibly several
+          times per request, with no context to cancel it. A rule that needs a lookup
+          is a [Policy], which has one.
+
+          # false and "cannot tell" are different answers
+
+          Returning (false, nil) means the condition was evaluated and does not hold;
+          the rule carrying it declines to fire, and the decision is left to the other
+          policies. Returning a non-nil error means the condition could NOT be
+          evaluated — most often because the request does not carry the attribute the
+          rule names ([AttributeMissing]), or carries it as another kind
+          ([AttributeKindMismatch]).
+
+          Those two MUST NOT be collapsed. An absent attribute compared to a wanted
+          value is not a comparison that failed: it is a comparison that never
+          happened, and reporting it as false would let a request carrying no
+          attributes at all slip past every "deny if X" rule in the system. The
+          built-in conditions in internal/service/security/authz report absence as an error,
+          and every combinator over them treats an unevaluable branch as absorbing.
+        name: Condition
         underlying: func(request RequestValue) (bool, error)
-      - methods:
-          - name: Granted
+      - doc: |-
+          Decision is what a [Policy] answers: it permits, it refuses, or it has no
+          opinion. Three states, not two.
+
+          # Why the third state exists
+
+          Most policies only know about part of the system. A policy that grants
+          "orders:write" to a role has nothing to say about a request to read a
+          profile — and it must be able to SAY that. Folding "no opinion" into either
+          of the other two breaks something:
+
+            - Folded into [Allow], a policy authorizes every request it does not
+              recognise. That is the hole.
+            - Folded into [Deny], a policy vetoes every request the OTHER policies
+              were meant to grant, because refusal is absorbing (see ADR 0057 §D2).
+              That is the outage, and the usual repair for it is to make the combiner
+              permissive — which reintroduces the hole one layer up.
+
+          [Abstain] costs one enum value and removes both.
+
+          # The zero value
+
+          The zero Decision is [Abstain], never [Allow]. A Policy that forgets to set
+          its result therefore says "I have no opinion", and the request is refused by
+          the closure in internal/service/security/authz.Check — not permitted (which would be
+          a vulnerability) and not made to veto every other policy (which would be an
+          outage from a forgotten assignment). This is ADR 0031 applied to a FUNC
+          port: a func type has no constructor to refuse in, so the safe value has to
+          be the zero one.
+
+          A Decision outside the three named constants is a defect in whoever produced
+          it. The SDK treats it as [Deny] and reports [PolicyMisconfigured]; it is
+          never treated as permission. Use [Decision.Valid] to check, and
+          [Decision.Granted] — never `!= Deny` — to read a verdict.
+        methods:
+          - doc: |-
+              Granted reports whether d permits the request. It is true for [Allow] and
+              for nothing else.
+
+              It exists so that no call site has to spell the test itself. `d != Deny` is
+              the same expression with an extra character and a security hole in it: it is
+              true for [Abstain], so it authorizes every request no policy recognised, and
+              it is true for a corrupt Decision value as well.
+            name: Granted
             out:
               - type: bool
             recv: value
-          - name: Valid
+          - doc: |-
+              Valid reports whether d is one of the three named states. A Decision that is
+              not is a defect in the policy that produced it — a numeric conversion, a
+              zeroed struct field read as a Decision, a value from a future version of a
+              caller's own code — and the SDK refuses on it rather than guessing.
+            name: Valid
             out:
               - type: bool
             recv: value
-          - name: String
+          - doc: |-
+              String renders the decision in lower case for logs and test failures:
+              "abstain", "allow", "deny". An out-of-contract value renders as "invalid",
+              which is deliberately not one of the three: a log line must not be able to
+              show a corrupt decision as if it were a real verdict.
+            name: String
             out:
               - type: string
             recv: value
         name: Decision
         underlying: uint8
-      - methods:
-          - name: Subject
+      - doc: |-
+          RequestValue is the question: may Subject perform Action on Resource, given
+          these attributes. It is immutable once built, so one request value can be
+          handed to every policy in a composition without any of them being able to
+          edit what the next one sees.
+
+          # The three strings are the caller's vocabulary
+
+          The SDK attaches no meaning to them. "orders" and "urn:acme:orders" are
+          equally valid resources, "write" and "POST" equally valid actions; nothing
+          here parses, splits or pattern-matches them, and there is no wildcard —
+          matching is byte equality, so a resource literally named "*" is a resource
+          named "*" and nothing more. A hierarchy, if the application has one, is
+          expressed by the strings it chooses and the rules it writes.
+
+          # Resource is the type, not the row
+
+          A grant table answers about a KIND of thing — "an editor may publish an
+          article" — and an instance rule answers about one of them — "…if they wrote
+          it". Put the type in Resource and the instance's facts in the attributes
+          (owner, tenant, classification), then let RBAC answer the first question and
+          an ABAC condition answer the second. That split is why this domain ships no
+          wildcard and needs none; see ADR 0057 §D5.
+        methods:
+          - doc: Subject returns the authenticated principal, or "" for anonymous.
+            name: Subject
             out:
               - type: string
             recv: value
-          - name: Action
+          - doc: Action returns the verb being attempted.
+            name: Action
             out:
               - type: string
             recv: value
-          - name: Resource
+          - doc: Resource returns the kind of thing being acted on.
+            name: Resource
             out:
               - type: string
             recv: value
-          - in:
+          - doc: |-
+              Attr resolves an attribute by name. ok is false when the request does not
+              carry it — which callers MUST NOT read as a zero-valued attribute.
+
+              This two-value shape is the whole reason the attribute bag is not exported
+              as a map. "The subject has no department" and "nobody told us the subject's
+              department" are different facts, and a rule that cannot tell them apart
+              grants access to every request that simply omitted the attribute.
+            in:
               - name: key
                 type: string
             name: Attr
@@ -372,15 +672,134 @@ packages:
               - name: ok
                 type: bool
             recv: value
-          - name: AttrCount
+          - doc: |-
+              AttrCount returns how many attributes the request carries. It exists for
+              diagnostics and tests; no rule reads it, because "how many facts" never
+              answers "which fact".
+            name: AttrCount
             out:
               - type: int
             recv: value
         name: RequestValue
         struct:
           unexported: true
-  - functions:
-      - in:
+  - doc: |-
+      Package authz — hosts the attribute-based evaluator.
+
+      Package authz implements the authorization port declared in
+      internal/core/security/authz: the deny-overrides combiner, the closure that turns a
+      three-valued [coreauthz.Decision] into one refusal, an RBAC evaluator over a
+      grant table, an ABAC evaluator over conditions, and the built-in conditions
+      those rules are written with. ADR 0057.
+
+      # There is no policy language, and that is the decision
+
+      Every general-purpose authorization library in this space eventually grows
+      one: a string grammar for conditions, a matcher syntax for resources, a file
+      format for the whole rule set. It is always justified as configurability and
+      it always ends in the same place — a second, weaker language inside a
+      program that already has one, with its own parser, its own precedence rules,
+      its own injection surface and no type checker.
+
+      This package refuses it. A condition is a Go func, a grant table is a Go
+      slice, a resource is a string compared by equality. What a DSL would buy —
+      changing a rule without recompiling — is a deployment property the caller
+      can have by loading their own rule data through internal/service/app/config and
+      building the policy from it, which keeps the parsing in their vocabulary
+      rather than the SDK's. See ADR 0057 §D1.
+
+      # No relationship model either
+
+      There is no tuple store, no "object#relation@subject" grammar, no graph to
+      walk. A Zanzibar-shaped model is a database with a consistency protocol,
+      not a library function, and half of it is the storage this SDK does not have
+      an opinion about. RBAC over the grants the caller supplies and ABAC over the
+      attributes the caller attaches cover the two questions a request-path check
+      can answer in microseconds without one.
+
+      # The pieces
+
+        - [NewRBAC] — role-based grants. It answers Allow or Abstain and NEVER
+          Deny for an ungranted request; see its doc for why that distinction is
+          the difference between a composable evaluator and one that vetoes every
+          policy it is combined with.
+        - [NewABAC] — attribute rules, each with an explicit Allow or Deny effect
+          and a [coreauthz.Condition]. This is where an explicit refusal comes
+          from.
+        - [DenyOverrides] — the one combiner. Refusal wins, always.
+        - [Check] — the closure. It is the only place in the SDK where "nobody
+          said Allow" becomes an error, and it is the only place a caller should
+          get a verdict from unless they need the raw decision.
+
+      Package authz — hosts the condition combinators.
+
+      All three share one rule: an unevaluable branch is ABSORBING. If any branch
+      reports that it could not be evaluated, the combinator reports the same and
+      evaluates no answer from the others.
+
+      That rule is what stops an absent attribute from being laundered into a
+      grant. Negation is the sharpest case — Not over a condition that could not
+      be evaluated must not become "true" — but AnyOf is the same defect one step
+      further out: returning true because a sibling branch held would mean a
+      request that omits an attribute satisfies a rule the attribute was there to
+      constrain.
+
+      Package authz — hosts DenyOverrides, the one combining algorithm.
+
+      Package authz — hosts the built-in conditions an ABAC rule is written with.
+
+      Every one of them reports an ABSENT or WRONG-KIND attribute as an error
+      rather than as false. That is the rule the whole domain turns on: a
+      comparison against an attribute the request does not carry is not a
+      comparison that failed, it is one that never happened, and the two have
+      opposite consequences the moment a rule is negated or combined.
+
+      There is deliberately no Always condition. An unconditional rule is a grant
+      with no reason, and the caller who wants one writes the predicate at the
+      call site, where it appears in the diff and in review.
+
+      Package authz — hosts GrantValue, one row of the role → permissions table.
+
+      Package authz — hosts the role-based evaluator.
+
+      Package authz — hosts RBACConfig, the arguments NewRBAC is built from.
+
+      Package authz — hosts the construction-time refusals.
+
+      Every check in this file rejects a policy that could never answer correctly,
+      at the moment it is assembled rather than on the request that trips over it.
+      A policy is built once at start-up and evaluated on every request; a fault
+      found here costs one process start, and the same fault found at evaluation
+      time costs one silent misbehaviour per request until somebody notices.
+    functions:
+      - doc: |-
+          NewABAC builds an attribute-based [coreauthz.Policy] over a fixed rule set.
+
+          Rules whose Action and Resource do not match the request are skipped. Among
+          those that match, the rule set is folded by the SAME algorithm the policy
+          set is folded by — deny-overrides — so nesting an ABAC policy inside a
+          [DenyOverrides] composition changes nothing about the answer.
+
+          # Unevaluable is absorbing, whatever the rule's effect
+
+          If a matching rule's condition returns an error, the policy returns
+          [coreauthz.Deny] carrying that error, immediately. It does not matter
+          whether the rule's effect was Allow or Deny: the rule did not run, so
+          nothing it would have decided is known, and the only safe reading of an
+          unknown is a refusal.
+
+          This is what closes the "absent attribute" hole end to end. A condition on
+          `department` cannot silently evaluate to false on a subject that has no
+          department, so an Allow rule cannot fail open into an abstention that some
+          other rule then grants, and a Deny rule cannot fail open into never firing.
+
+          # Order affects the diagnostic, never the answer
+
+          Rules are visited in declaration order and the first absorbing event — an
+          error or a firing Deny — returns. Both produce [coreauthz.Deny], so the
+          DECISION is independent of the order; only which of two simultaneous faults
+          is reported to the operator depends on it.
+        in:
           - name: rules
             type: RuleValue
         name: NewABAC
@@ -390,7 +809,29 @@ packages:
           - name: err
             type: error
         variadic: true
-      - in:
+      - doc: |-
+          Check evaluates policy against request and reports the verdict as an error:
+          nil when the request is permitted, [coreauthz.PermissionDenied] otherwise.
+
+          # This is the closure, and it closes toward refusal
+
+          Three different situations arrive here and all three leave as the same
+          refusal:
+
+            - the policy said [coreauthz.Deny];
+            - the policy said [coreauthz.Abstain] — nothing in the policy set had an
+              opinion, which is the DEFAULT for any request the caller never wrote a
+              rule about, and which must never be read as permission;
+            - the policy could not be evaluated at all.
+
+          A caller that needs to tell them apart for alerting calls the [coreauthz.Policy] and
+          reads the (decision, error) pair directly; Check deliberately flattens them,
+          because the party on the other side of the response must not be able to.
+
+          A nil policy is not "no policy" — it is a misconfigured one, and it refuses.
+          This is ADR 0031 on a FUNC port: there is no constructor to reject in, so
+          the nil case has to be handled where it is used, and it has to fail closed.
+        in:
           - name: ctx
             type: context.Context
           - name: policy
@@ -400,7 +841,15 @@ packages:
         name: Check
         out:
           - type: error
-      - in:
+      - doc: |-
+          Must unwraps a constructor pair for a package-level var, panicking on error.
+
+          It is the same shape internal/service/app/validation ships, and for the same
+          reason: a policy is built once at start-up, and a misconfiguration there is
+          a programming fault that must stop the process rather than be handled per
+          request. Never call it on data read at run time — that turns a bad
+          configuration file into a crash instead of an error.
+        in:
           - name: policy
             type: coreauthz.Policy
           - name: err
@@ -408,7 +857,10 @@ packages:
         name: Must
         out:
           - type: coreauthz.Policy
-      - in:
+      - doc: |-
+          MustCondition unwraps a condition constructor pair for a package-level var,
+          panicking on error. Same contract as [Must].
+        in:
           - name: condition
             type: coreauthz.Condition
           - name: err
@@ -416,7 +868,20 @@ packages:
         name: MustCondition
         out:
           - type: coreauthz.Condition
-      - in:
+      - doc: |-
+          Not inverts a condition's answer and propagates its failure UNCHANGED.
+
+          This is the negation trap, and it is worth stating as its own paragraph. If
+          a missing attribute were reported as false, Not would turn it into true —
+          so a rule reading "deny unless the department is finance", written as
+          Not(AttrEquals("department", "finance")), would FIRE for a subject with no
+          department under one reading and NOT fire under the other. Either way, the
+          subject that carries the fewest attributes gets the most favourable answer.
+
+          Because the inner condition reports absence as an error and Not passes that
+          error through instead of flipping it, the subject that carries no attributes
+          gets a refusal.
+        in:
           - name: inner
             type: coreauthz.Condition
         name: Not
@@ -425,7 +890,15 @@ packages:
             type: coreauthz.Condition
           - name: err
             type: error
-      - in:
+      - doc: |-
+          AllOf holds when every condition holds. It evaluates ALL of them — there is
+          no short circuit on the first false — so its answer does not depend on the
+          order they were listed in, and a failure anywhere is reported rather than
+          hidden behind an earlier false.
+
+          An empty set is refused: a conjunction of nothing is vacuously true, which
+          on an Allow rule is an unconditional grant written as if it were a condition.
+        in:
           - name: conditions
             type: coreauthz.Condition
         name: AllOf
@@ -435,7 +908,15 @@ packages:
           - name: err
             type: error
         variadic: true
-      - in:
+      - doc: |-
+          AnyOf holds when at least one condition holds. Like [AllOf] it evaluates
+          every branch, so an unevaluable branch is reported even when a sibling
+          branch would have held — the alternative lets a request satisfy a rule by
+          omitting the attribute one of its branches names.
+
+          An empty set is refused: a disjunction of nothing is vacuously false, which
+          builds a rule that can never fire.
+        in:
           - name: conditions
             type: coreauthz.Condition
         name: AnyOf
@@ -445,14 +926,68 @@ packages:
           - name: err
             type: error
         variadic: true
-      - in:
+      - doc: |-
+          DenyOverrides composes policies into one. A refusal from any member wins; an
+          [coreauthz.Allow] is returned only when at least one member permitted and no
+          member refused; otherwise the composition abstains.
+
+          # Why refusal wins, and why that is not configurable
+
+          When one rule permits and another refuses, one of them has to lose, and the
+          choice is a security property rather than a preference. Under deny-overrides
+          the failure mode of a wrong rule set is a request that should have been
+          allowed and was not — visible, reported, fixed within the hour. Under
+          permit-overrides it is a request that should have been refused and was not
+          — invisible, and discovered by whoever exploits it.
+
+          XACML's permit-overrides, first-applicable and only-one-applicable are
+          therefore REFUSED BY NAME: this package ships one combining algorithm and no
+          setting that selects another. A caller who genuinely needs a grant that
+          beats a refusal — a break-glass path — writes it as a Go `if` around the
+          composition, where the exception is visible at the call site instead of
+          hidden in the semantics of a combiner. See ADR 0057 §D2.
+
+          # It evaluates every member, and that is what makes it deny-overrides
+
+          An [coreauthz.Allow] does NOT short-circuit. A composition that returned on
+          the first grant would be first-applicable wearing this function's name, and
+          it would produce a different answer depending on the order the policies were
+          listed in — the defect being ruled out here. Only a refusal short-circuits,
+          because refusal is absorbing: once one member has said Deny, nothing any
+          other member can say changes the result.
+
+          The composition is therefore commutative and associative, which is why
+          nesting is invisible: DenyOverrides(a, DenyOverrides(b, c)) and
+          DenyOverrides(a, b, c) agree, and so does any permutation of them.
+
+          # The empty and nil cases
+
+          DenyOverrides() with no members abstains — the identity of the combiner —
+          and [Check] then refuses. An authorizer with no policy grants nothing, which
+          is the exact opposite of internal/service/app/validation, where a validator with
+          no constraint passes. Both are the safe direction for their domain, and the
+          contrast is the reason ADR 0031 is about SAFE defaults rather than permissive
+          or restrictive ones.
+
+          A nil member REFUSES rather than being skipped. Skipping it would silently
+          shrink the policy set, which is the single most valuable edit an attacker
+          could make to a wiring file.
+        in:
           - name: policies
             type: coreauthz.Policy
         name: DenyOverrides
         out:
           - type: coreauthz.Policy
         variadic: true
-      - in:
+      - doc: |-
+          AttrEquals holds when the request carries key as text equal to want.
+
+          It does NOT hold — it FAILS — when the attribute is absent or is not text.
+          The canonical example is the one this domain exists for: `department ==
+          "finance"` on a subject with no department. Answering false there would let
+          a request carrying no attributes at all satisfy every "deny unless" rule of
+          that shape by simply omitting the field.
+        in:
           - name: key
           - name: want
             type: string
@@ -462,7 +997,13 @@ packages:
             type: coreauthz.Condition
           - name: err
             type: error
-      - in:
+      - doc: |-
+          AttrIsTrue holds when the request carries key as a flag that is set.
+
+          A flag that is present and false does not hold — that is an answer. A flag
+          that is absent fails — that is not. This is the pair map[string]string
+          cannot express, and the reason [coreauthz.KindBool] exists.
+        in:
           - name: key
             type: string
         name: AttrIsTrue
@@ -471,7 +1012,11 @@ packages:
             type: coreauthz.Condition
           - name: err
             type: error
-      - in:
+      - doc: |-
+          AttrAtLeast holds when the request carries key as a number greater than or
+          equal to lo. Timestamps travel as Unix seconds, so "the credential was
+          issued after T" is this condition.
+        in:
           - name: key
             type: string
           - name: lo
@@ -482,7 +1027,11 @@ packages:
             type: coreauthz.Condition
           - name: err
             type: error
-      - in:
+      - doc: |-
+          AttrContains holds when the request carries key as a set containing want.
+          It is how a scope, a group or a second role dimension is checked from an
+          ABAC rule; the role dimension proper belongs to [NewRBAC].
+        in:
           - name: key
           - name: want
             type: string
@@ -492,7 +1041,19 @@ packages:
             type: coreauthz.Condition
           - name: err
             type: error
-      - in:
+      - doc: |-
+          AttrMatchesSubject holds when the request carries key as text equal to the
+          request's subject. It is the ownership rule — "the author may edit it" —
+          written without the SDK ever learning what ownership means.
+
+          # An anonymous request owns nothing
+
+          When the subject is empty, the condition does not hold, even against an
+          attribute that is also empty. The comparison is answerable here — the
+          request really has no subject — so this is a genuine false and not a
+          swallowed absence. It is spelled out because empty-matches-empty would make
+          every unowned resource owned by every unauthenticated caller.
+        in:
           - name: key
             type: string
         name: AttrMatchesSubject
@@ -501,7 +1062,39 @@ packages:
             type: coreauthz.Condition
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NewRBAC builds a role-based [coreauthz.Policy] over a fixed grant table.
+
+          # It returns Allow or Abstain, and almost never Deny
+
+          A request whose (action, resource) no held role confers yields
+          [coreauthz.Abstain], NOT [coreauthz.Deny]. This is the single most
+          consequential line in the package.
+
+          An evaluator that refused where it merely had no grant would be absorbing
+          under [DenyOverrides]: composed with anything else, it would veto every
+          request the other policies existed to permit, and the usual repair — making
+          the combiner permissive — reintroduces the hole one layer up. Abstaining
+          keeps the closed-world default where it belongs: in [Check], once, for the
+          whole composition.
+
+          The two cases where it does refuse are not decisions about the request. They
+          are the request being unanswerable: the roles attribute is absent
+          ([coreauthz.AttributeMissing]) or carries another kind
+          ([coreauthz.AttributeKindMismatch]).
+
+          # An absent roles attribute is not an empty role set
+
+          AttrStrings(key) with no values says "this subject holds no roles" and
+          abstains, which is right for an anonymous request. Omitting the attribute
+          says nothing at all, and is refused. The distinction costs the caller one
+          always-set attribute and closes the case where a producer bug drops the
+          roles and every "deny unless role X" rule in the system stops firing.
+
+          The attribute is checked BEFORE the grant table is consulted, so the fault
+          surfaces on every request rather than only on the ones that would have
+          matched a grant.
+        in:
           - name: cfg
             type: RBACConfig
         name: NewRBAC
@@ -514,41 +1107,193 @@ packages:
       coreauthz: github.com/kitsunium/sdk/internal/core/security/authz
     path: github.com/kitsunium/sdk/internal/service/security/authz
     types:
-      - name: RuleValue
+      - doc: |-
+          RuleValue is one attribute rule: which requests it is about, what it decides
+          when it fires, and the condition under which it fires.
+        name: RuleValue
         struct:
           fields:
-            - name: Name
+            - doc: |-
+                Name identifies the rule in diagnostics. It is required, it is written
+                into the refusal's PRIVATE side and its fields, and it never reaches the
+                wire — a public message naming the rule that refused tells the caller
+                how many rules there are and which one to work around.
+              name: Name
               type: string
-            - name: Action
+            - doc: |-
+                Action and Resource select the requests this rule is about, by byte
+                equality. A rule that does not match is not evaluated at all, so its
+                condition never runs on a request it was not written for.
+              name: Action
               type: string
-            - name: Resource
+            - doc: Resource is the KIND of thing, matching [PermissionValue.Resource].
+              name: Resource
               type: string
-            - name: Effect
+            - doc: |-
+                Effect is what the rule decides when [RuleValue.When] holds:
+                [coreauthz.Allow] or [coreauthz.Deny]. [coreauthz.Abstain] — which is
+                the zero value, so an unset Effect lands here — is refused at
+                construction, because a rule that abstains when it fires is a rule that
+                does nothing.
+              name: Effect
               type: coreauthz.Decision
-            - name: When
+            - doc: |-
+                When is the predicate. It is required: a rule with no condition fires on
+                every matching request, and the caller who wants that writes the
+                always-true predicate themselves so it shows up in the diff.
+              name: When
               type: coreauthz.Condition
-      - name: GrantValue
+      - doc: |-
+          GrantValue binds one role to the permissions it confers. The role name is
+          the application's vocabulary and the SDK attaches no meaning to it: "admin"
+          is a string like any other, and nothing here believes it is special.
+        name: GrantValue
         struct:
           fields:
-            - name: Role
+            - doc: Role is the name the subject's roles attribute will contain.
+              name: Role
               type: string
-            - name: Permissions
+            - doc: |-
+                Permissions is what holding Role confers. An empty list is refused: a
+                role that grants nothing is a wiring mistake that fails closed silently.
+              name: Permissions
               type: "[]PermissionValue"
-      - name: PermissionValue
+      - doc: |-
+          PermissionValue is one (action, resource) pair a role confers. Both halves
+          are compared by byte equality: there is no wildcard, no prefix and no
+          separator the SDK knows about.
+        name: PermissionValue
         struct:
           fields:
-            - name: Action
+            - doc: Action is the verb, spelled exactly as the request will spell it.
+              name: Action
               type: string
-            - name: Resource
+            - doc: |-
+                Resource is the KIND of thing — "article", not "article/42". Instance
+                facts belong in the request's attributes, where an ABAC rule reads them.
+              name: Resource
               type: string
-      - name: RBACConfig
+      - doc: |-
+          RBACConfig configures [NewRBAC]: which request attribute carries the
+          subject's roles, and what each role confers.
+
+          Neither member has a default and both are refused when empty, so a policy
+          this package hands back can always answer the question it was built for. A
+          grant table is data the CALLER writes — there is no file format for it and
+          no parser, because a rule set is a Go value in this domain (ADR 0057 §D1).
+        name: RBACConfig
         struct:
           fields:
-            - name: RolesAttr
+            - doc: |-
+                RolesAttr names the request attribute carrying the subject's roles, as
+                a [coreauthz.KindStrings] value.
+
+                It has NO default, and an empty one is refused. Defaulting it to "roles"
+                would be the SDK inventing the one piece of vocabulary it has no way to
+                know — the application's — and a caller who spelled it "groups" would
+                get an evaluator that silently found no roles on every request. Naming
+                it is one line; guessing it wrong is an outage or a hole depending on
+                which way the mistake falls.
+              name: RolesAttr
               type: string
-            - name: Grants
+            - doc: Grants is the role → permissions table. An empty table is refused.
+              name: Grants
               type: "[]GrantValue"
-  - facade:
+  - doc: |-
+      Package authz is the public facade for the SDK's authorization domain: it
+      answers "may this subject do this to that", and nothing else.
+
+      	editor := authz.Must(authz.NewRBAC(authz.RBACConfig{
+      	    RolesAttr: "roles", // no default — you name your own vocabulary
+      	    Grants: []authz.Grant{{
+      	        Role:        "editor",
+      	        Permissions: []authz.Permission{{Action: "publish", Resource: "article"}},
+      	    }},
+      	}))
+
+      	owner := authz.MustCondition(authz.AttrMatchesSubject("author"))
+      	rules := authz.Must(authz.NewABAC(authz.Rule{
+      	    Name: "locked-articles-are-frozen", Action: "publish", Resource: "article",
+      	    Effect: authz.Deny, When: authz.MustCondition(authz.AttrIsTrue("locked")),
+      	}, authz.Rule{
+      	    Name: "authors-publish-their-own", Action: "publish", Resource: "article",
+      	    Effect: authz.Allow, When: owner,
+      	}))
+
+      	policy := authz.DenyOverrides(editor, rules)
+
+      	req := authz.NewRequest("u-42", "publish", "article",
+      	    authz.AttrStrings("roles", "editor"),
+      	    authz.AttrString("author", "u-42"),
+      	    authz.AttrBool("locked", false))
+
+      	if err := authz.Check(ctx, policy, req); err != nil {
+      	    return err // errs.HasCode(err, authz.CodePermissionDenied)
+      	}
+
+      # Four decisions, all of them security properties
+
+      **The default is refusal.** A request no policy has an opinion about is
+      denied. [Check] is the one place that closes the world, and it closes toward
+      [Deny]; there is no setting that opens it.
+
+      **Refusal wins a conflict.** [DenyOverrides] is the only combining
+      algorithm, and it is not configurable. Permit-overrides, first-applicable
+      and only-one-applicable are refused by name: under deny-overrides a wrong
+      rule set produces a request that should have been allowed and was not, which
+      is reported within the hour; under permit-overrides it produces one that
+      should have been refused and was not, which is reported by whoever exploits
+      it.
+
+      **Abstention is a real answer.** [Decision] has three states, not two.
+      [NewRBAC] answers [Abstain] — never [Deny] — for a request it has no grant
+      for, so composing it with another policy does not veto everything that other
+      policy exists to permit. Read a verdict with [Decision].Granted, never with
+      `!= Deny`, which is true for [Abstain].
+
+      **An absent attribute is not a false one.** `department == "finance"` on a
+      subject with no department is not a comparison that failed — it is one that
+      never happened. Every built-in condition reports it as an error, every
+      combinator treats that error as absorbing (including [Not], which propagates
+      it instead of inverting it), and the rule's effect is irrelevant: the
+      request is refused.
+
+      # What this package is not
+
+      It is not an authenticator. The subject comes from pkg/v1/security/session (a
+      revocable server-side session) or pkg/v1/security/token (a self-contained signed
+      claim set); this package takes it as given and reads no header, mints
+      nothing, and verifies no credential.
+
+      It is not a policy language. A condition is a Go func, a grant table is a Go
+      slice, and a resource is a string compared by equality — no expression
+      grammar, no wildcards, no file format, no relationship tuples. What a DSL
+      would buy is a deployment property, and it is available by loading your own
+      rule data through pkg/v1/app/config and building the policy from it, in your
+      vocabulary rather than the SDK's.
+
+      It is not a framework. A firewall, voters wired onto routes, a role
+      catalogue, "what an admin is" and what a denied request looks like on the
+      wire all belong one layer up. The SDK ships the evaluation.
+
+      # The refusal tells the caller nothing
+
+      Every refusal is [PermissionDenied], with the same code, the same HTTP 403
+      and the same sentence — "Access to the requested resource is denied" —
+      whether the request was explicitly denied, matched no rule at all, or could
+      not be evaluated. A message that explained itself would be a description of
+      the policy set handed to the party the policy exists to keep out: "you are
+      not an admin" names the role model, "missing attribute department" names the
+      next value to forge.
+
+      The diagnosis is not lost, it is moved: errs.PrivateOf and errs.FieldsOf
+      carry the outcome, the subject, the action, the resource and the underlying
+      code — each field read with its Key and StringValue methods, under the keys
+      "outcome", "subject", "action", "resource" and "cause_code". Neither may go
+      on the wire — see pkg/v1/errs. A caller that must distinguish an evaluation
+      fault from a refusal for alerting calls the [Policy] itself and reads the
+      (decision, error) pair; [Check] flattens them deliberately.
+    facade:
       - const:
           - doc: |-
               Abstain means a policy has no opinion about this request. It is the

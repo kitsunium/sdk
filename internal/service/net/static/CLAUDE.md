@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-26T00:00:00Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # internal/service/net/static/
 
 ## Purpose
@@ -19,7 +19,8 @@ Stdlib only. Written against `net/http`'s own interfaces, so it works in any
 
 | File | Role |
 |---|---|
-| `static.go` | package doc, the four exported header constants, `Config`, `Handler`, `NewHandler` (the facade's `New`), `ServeHTTP`, `cleanName`, `serveName` / `serveDirectory` / `fallback` (the three ways a name is answered), the relative directory redirect, `notFound` / `failed` |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `static.go` | the four exported header constants, `Config`, `Handler`, `NewHandler` (the facade's `New`), `ServeHTTP`, `cleanName`, `serveName` / `serveDirectory` / `fallback` (the three ways a name is answered), the relative directory redirect, `notFound` / `failed` |
 | `lookup.go` | `open` — one lookup, three outcomes (`present`, `absent`, `broken`); `nameRefused`, the 404-versus-500 split |
 | `lookup_unix.go` / `lookup_windows.go` / `lookup_other.go` | `platformNameRefused` — the kernel's own refusals of a NAME: `ENOTDIR` and `ENAMETOOLONG` on Unix; `ERROR_INVALID_NAME`, `ERROR_BAD_PATHNAME`, `ERROR_FILENAME_EXCED_RANGE`, `ERROR_DIRECTORY` on Windows (as `syscall.Errno` literals — `syscall` exports none of them) |
 | `serve.go` | `serveFile` (caching, pinned type, `http.ServeContent`), `stream` (a file that cannot seek), `pinnedType` |

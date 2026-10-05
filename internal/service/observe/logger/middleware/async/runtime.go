@@ -1,6 +1,3 @@
-// Package async — gathers the small runtime helpers used by the
-// async drainer (yield primitive, channel-closed probe, error swallowers).
-// Pulled out of async_sink.go to keep that file focused on the Sink contract.
 package async
 
 import (

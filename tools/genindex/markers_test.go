@@ -27,6 +27,16 @@ func Test_parseMarker(t *testing.T) {
 			text: "// go:example.com/p.New[...] func func[K comparable](k K) *example.com/p.T[K]",
 			want: marker{id: "go:example.com/p.New[...]", kind: kindFunc, canonical: "func[K comparable](k K) *example.com/p.T[K]"},
 		},
+		{
+			name: "a doc digest after the signature",
+			text: "// go:example.com/p.F func func(s string) doc:" + strings.Repeat("ab", 32),
+			want: marker{id: "go:example.com/p.F", kind: kindFunc, canonical: "func(s string)", doc: strings.Repeat("ab", 32)},
+		},
+		{
+			name: "a doc: that is no digest stays the signature's",
+			text: "// go:example.com/p.T type struct{A int \"doc:x\"} doc:short",
+			want: marker{id: "go:example.com/p.T", kind: kindType, canonical: "struct{A int \"doc:x\"} doc:short"},
+		},
 		{name: "no kind", text: "// go:example.com/p.New", wantErr: "has no kind"},
 		{name: "no signature", text: "// go:example.com/p.New func ", wantErr: "has no signature"},
 		{name: "no id", text: "// go:example.com/p.new func func()", wantErr: "is no go: id"},
@@ -189,14 +199,14 @@ func Test_markerFindings_cells(t *testing.T) {
 		{dir: {f, w, n}},
 	}
 
-	got := markerFindings(byCell, cells, []packageDir{{dir: dir, path: "example.com/p"}}, dir)
+	got := markerFindings(byCell, nil, cells, []packageDir{{dir: dir, path: "example.com/p"}}, dir)
 
 	want := []string{".: go:example.com/p.N: undeclared"}
 	if len(got) != len(want) || !strings.HasPrefix(got[0], want[0]) || strings.Contains(got[0], "(on ") {
 		t.Fatalf("findings = %q, want one undeclared N on every cell", got)
 	}
 	byCell[1][dir] = []apiSymbol{f, n}
-	got = markerFindings(byCell, cells, []packageDir{{dir: dir, path: "example.com/p"}}, dir)
+	got = markerFindings(byCell, nil, cells, []packageDir{{dir: dir, path: "example.com/p"}}, dir)
 	if !slices.ContainsFunc(got, func(l string) bool {
 		return strings.Contains(l, "go:example.com/p.W: missing") && strings.HasSuffix(l, "(on windows/amd64)")
 	}) {
@@ -226,5 +236,47 @@ func Test_splitTypeParams(t *testing.T) {
 		if params != c.params || rest != c.rest {
 			t.Fatalf("splitTypeParams(%q) = %q, %q; want %q, %q", c.sig, params, rest, c.params, c.rest)
 		}
+	}
+}
+
+// Test_parsePackageMarker pins the package marker's grammar: a path, then a
+// digest; anything else is malformed.
+func Test_parsePackageMarker(t *testing.T) {
+	t.Parallel()
+	digest := strings.Repeat("0f", 32)
+	if got, err := parsePackageMarker("// package example.com/p doc:" + digest); err != nil || got != digest {
+		t.Fatalf("parsePackageMarker = %q, %v", got, err)
+	}
+	for _, bad := range []string{"// package example.com/p", "// package  doc:" + digest, "// package example.com/p doc:12", "// package a b doc:" + digest} {
+		if _, err := parsePackageMarker(bad); err == nil {
+			t.Errorf("parsePackageMarker(%q) accepted it", bad)
+		}
+	}
+}
+
+// Test_docDigest pins the digest's input: the doc as docs/api records it,
+// then each exported field that has a doc, as NUL, its name, NUL, its doc —
+// a field with none adds nothing.
+func Test_docDigest(t *testing.T) {
+	t.Parallel()
+	s := new(apiSymbol{Doc: "T is a type.\n", Fields: []apiField{{Name: "A", Doc: "A is a.\n"}, {Name: "B"}}})
+	if got, want := docDigest(s), textDigest("T is a type.\n\x00A\x00A is a.\n"); got != want {
+		t.Fatalf("docDigest = %s, want %s", got, want)
+	}
+	if docDigest(&apiSymbol{}) != textDigest("") {
+		t.Fatal("a symbol with no doc is not the empty text's digest")
+	}
+}
+
+// Test_comparePackageDoc pins the package marker's finding: every pin file a
+// cell compiles carries the package comment's digest, or the comment differs.
+func Test_comparePackageDoc(t *testing.T) {
+	t.Parallel()
+	if got := comparePackageDoc("example.com/p", "Package p.\n", []string{textDigest("Package p.\n")}); len(got) != 0 {
+		t.Fatalf("a matching digest: %+v", got)
+	}
+	got := comparePackageDoc("example.com/p", "Package p, edited.\n", []string{textDigest("Package p.\n")})
+	if len(got) != 1 || got[0].id != "go:example.com/p" || !strings.Contains(got[0].what, "package comment differs") {
+		t.Fatalf("an edited comment: %+v", got)
 	}
 }

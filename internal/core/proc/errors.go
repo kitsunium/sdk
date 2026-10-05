@@ -1,10 +1,3 @@
-// Package proc — range 0.2.6.* (ADR 0016 core/proc block). The whole domain
-// owns this single PP octet: every sentinel below is declared here and only
-// wrapped (never re-Defined) by the service implementations and pkg/v1 facades.
-//
-// Package proc — declares the sentinels returned across the process-supervision
-// domain. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE form;
-// service implementations and pkg/v1 facades wrap these, never re-Define them.
 package proc
 
 // sysexits exit-code mapping (see sysexits.h) — chosen so a supervisor that

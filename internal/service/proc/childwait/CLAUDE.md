@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T23:06:22Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # internal/service/proc/childwait/
 
 ## Purpose
@@ -36,7 +36,8 @@ allocation and one map insert per spawn, removed by `Release` after the wait.
 
 | File | Build tag | Role |
 |---|---|---|
-| `childwait.go` | (all) | package doc; `Claim`; the process-wide `ledger`; `Spawn`; `Claim.Collected` / `Reclaim` / `Release`; `deliver` / `handOver` / `forget` |
+| `doc.go` | (all) | the package comment — kit writes it from the design (ADR 0167) |
+| `childwait.go` | (all) | `Claim`; the process-wide `ledger`; `Spawn`; `Claim.Collected` / `Reclaim` / `Release`; `deliver` / `handOver` / `forget` |
 | `childwait_unix.go` | `unix` | `StatusValue` (`syscall.WaitStatus` + `syscall.Rusage`); `ReapAny` |
 | `waitany_unix.go` | `unix && !solaris` | `anyChildPID = -1` |
 | `waitany_solaris.go` | `solaris` (illumos too) | `anyChildPID = 0`: libc's SunOS 4 `wait4` (see below) |

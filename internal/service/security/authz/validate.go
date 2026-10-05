@@ -1,10 +1,3 @@
-// Package authz — hosts the construction-time refusals.
-//
-// Every check in this file rejects a policy that could never answer correctly,
-// at the moment it is assembled rather than on the request that trips over it.
-// A policy is built once at start-up and evaluated on every request; a fault
-// found here costs one process start, and the same fault found at evaluation
-// time costs one silent misbehaviour per request until somebody notices.
 package authz
 
 import (

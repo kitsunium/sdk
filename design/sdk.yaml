@@ -4,8 +4,10 @@
 # file per domain or package group, each with its inputs and outputs —
 # `surface: closed` makes an exported symbol no file declares a finding. An
 # API change starts here, then `kit gen` writes the pins, the ports, the
-# codes (ADR 0164) and pkg/v1's facades (ADR 0166); the SDK's CI reads this
-# directory as bytes only (ADR 0163 §3).
+# codes (ADR 0164) and pkg/v1's facades (ADR 0166); and so does a doc edit
+# (`docs: design`, ADR 0167): every doc comment and package comment is this
+# design's, kit gen writes it into the code and each pin marker carries its
+# digest. The SDK's CI reads this directory as bytes only (ADR 0163 §3).
 apiVersion: kit.kitsunium/design/v2
 project:
   name: sdk
@@ -16,8 +18,11 @@ project:
   # refuses the project under any other kit, by name, and `make regen`
   # (scripts/regen.sh) refuses to run one. No part of the design's digest.
   kit:
-    version: v0.1.0-rc.4
+    version: v0.1.0-rc.5
   surface: closed
+  # Every doc comment is the design's (ADR 0167): kit gen writes each doc
+  # slot of a designed declaration and each package's doc.go.
+  docs: design
 # The cells: bazel-ci.yml's cross-build matrix, one table, which
 # check-platforms.sh holds equal to the matrix and genindex writes docs/api on.
 platforms:

@@ -1,5 +1,3 @@
-// Package recycler — CappedPool[T] layers a reset-on-Put + cap-discard
-// policy on top of the plain Pool[T] declared in recycler.go.
 package recycler
 
 // CappedPool wraps a concrete *Pool[T] and layers a cap-discard policy

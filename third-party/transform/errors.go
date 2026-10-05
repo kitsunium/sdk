@@ -1,10 +1,3 @@
-// Package transform — range 0.3.63.* (ADR 0066 third-party/transform block).
-//
-// Package transform — declares the sentinel *errs.Error values returned by the
-// vendor compressors. Each sentinel var's name equals its errs.Define Reason in
-// SCREAMING_SNAKE form. The zstdWrap / s2Wrap WrapParams mirror their sentinels
-// so a wrapped library cause carries the same Code/Reason/Public on the wire as
-// the bare sentinel (origin wins, root CLAUDE.md rule 6).
 package transform
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

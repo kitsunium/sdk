@@ -1,4 +1,3 @@
-// Package stdhash — CRC-32C (Castagnoli) scheme registration (see stdhash.go).
 package stdhash
 
 import (

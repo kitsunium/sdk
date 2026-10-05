@@ -1,4 +1,3 @@
-// Package baseenc — Base62 (0-9A-Za-z) base-conversion codec.
 package baseenc
 
 // base62Alphabet is the conventional Base62 alphabet: digits, then uppercase,

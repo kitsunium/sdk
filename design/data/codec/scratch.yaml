@@ -2,30 +2,81 @@ apiVersion: kit.kitsunium/design/v2
 domain: data/codec/scratch
 packages:
   - constants:
-      - name: MaxRetainedBufBytes
+      - doc: |-
+          MaxRetainedBufBytes is the project-wide cap-discard threshold for pooled
+          codec buffers. A buffer whose capacity exceeds this is dropped on release
+          rather than re-pooled, so a one-off oversized payload cannot pin a large
+          allocation for the lifetime of the pool's GC window. It bounds the shared
+          *bytes.Buffer pool below, and it is also the ceiling a codec passes to a
+          recycler.CappedPool of its own when it pools a buffer shape this package
+          does not offer — so the codec domain keeps one threshold, not one per codec.
+        name: MaxRetainedBufBytes
         type: int
         value: 256 << 10
+    doc: |-
+      Package scratch provides shared, size-bounded recycling primitives for the
+      service codecs. Every codec that encodes into a transient *bytes.Buffer
+      previously declared its own sync.Pool, its own 256 KiB cap-discard constant,
+      and its own release helper. Centralising them here gives a single source of
+      truth for the cap-discard policy and a single shared pool whose reuse rate
+      is higher than nine independent pools (sync.Pool is internally per-P
+      sharded, so consolidation does not add contention).
+
+      The pooling MECHANISM lives in internal/kernel/concur/recycler (ADR 0010); scratch
+      is a codec-domain consumer that keeps the 256 KiB threshold and the concrete
+      *bytes.Buffer / *bytes.Reader types here.
+
+      Lifetime contract: a value returned by an Acquire* call is owned by the
+      caller until the matching Release* call. After Release the value — and any
+      slice aliasing it (e.g. buf.Bytes()) — MUST NOT be used; clone the encoded
+      bytes first if they need to outlive the release.
     functions:
-      - name: AcquireBuffer
+      - doc: |-
+          AcquireBuffer returns a clean, zero-length *bytes.Buffer from the shared
+          pool. The recycler reset the buffer on its previous Put, so callers append
+          directly without re-resetting. The caller owns it until ReleaseBuffer.
+        name: AcquireBuffer
         out:
           - type: "*bytes.Buffer"
-      - in:
+      - doc: |-
+          ReleaseBuffer returns buf to the shared pool unless its capacity exceeds
+          MaxRetainedBufBytes, in which case the recycler orphans it for the GC.
+          Callers MUST NOT use buf — or any slice aliasing buf.Bytes() — after this
+          call; clone first if the encoded bytes must outlive the release.
+        in:
           - name: buf
             type: "*bytes.Buffer"
         name: ReleaseBuffer
-      - in:
+      - doc: |-
+          DetachBuffer hands the caller the bytes encoded into buf and ends the
+          caller's ownership of buf, by the cheaper of two releases for its size. A
+          buffer within MaxRetainedBufBytes is cloned and repooled: the clone is small,
+          and the next encode reuses the buffer. An over-cap buffer would pay a full
+          copy of a large payload AND be dropped by the pool anyway, so it is orphaned
+          instead: the returned slice IS its storage, now the caller's, and buf is left
+          for the GC without a reset — a reset would not zero the bytes, but a later
+          write through buf would overwrite them. Either way, buf must not be used
+          after the call. A nil buf yields nil.
+        in:
           - name: buf
             type: "*bytes.Buffer"
         name: DetachBuffer
         out:
           - type: "[]byte"
-      - in:
+      - doc: |-
+          AcquireReader returns a *bytes.Reader from the shared pool, reset to read
+          from src. The caller owns it until ReleaseReader; src must stay alive and
+          unmodified for as long as the reader is used.
+        in:
           - name: src
             type: "[]byte"
         name: AcquireReader
         out:
           - type: "*bytes.Reader"
-      - in:
+      - doc: |-
+          ReleaseReader returns r to the shared pool. A bytes.Reader is fixed-size, so
+          there is no cap-discard. Callers MUST NOT use r after this call.
+        in:
           - name: r
             type: "*bytes.Reader"
         name: ReleaseReader

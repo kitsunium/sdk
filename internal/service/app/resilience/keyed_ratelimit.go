@@ -1,5 +1,3 @@
-// Package resilience — the keyed rate limiter: one token bucket per caller,
-// with the set of callers bounded and idle ones forgotten.
 package resilience
 
 import (

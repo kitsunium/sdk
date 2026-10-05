@@ -1,5 +1,3 @@
-// Package docstore — the functions told about a write or a deletion once it
-// is durable, outside every lock.
 package docstore
 
 import (

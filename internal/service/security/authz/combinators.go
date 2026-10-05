@@ -1,15 +1,3 @@
-// Package authz — hosts the condition combinators.
-//
-// All three share one rule: an unevaluable branch is ABSORBING. If any branch
-// reports that it could not be evaluated, the combinator reports the same and
-// evaluates no answer from the others.
-//
-// That rule is what stops an absent attribute from being laundered into a
-// grant. Negation is the sharpest case — Not over a condition that could not
-// be evaluated must not become "true" — but AnyOf is the same defect one step
-// further out: returning true because a sibling branch held would mean a
-// request that omits an attribute satisfies a rule the attribute was there to
-// constrain.
 package authz
 
 import (

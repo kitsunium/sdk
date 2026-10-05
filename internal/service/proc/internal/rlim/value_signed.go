@@ -1,8 +1,5 @@
 //go:build freebsd || dragonfly
 
-// Package rlim — the int64 syscall.Rlimit constructor. FreeBSD and DragonFly
-// type Rlimit.Cur/Max as int64 (their rlim_t is __int64_t), unlike every other
-// Unix target.
 package rlim
 
 import "syscall"

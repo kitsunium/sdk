@@ -1,4 +1,3 @@
-// Package git — the resolver's construction parameters.
 package git
 
 // Config is what Resolve needs to know: where the repository is, and which files

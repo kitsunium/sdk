@@ -1,4 +1,3 @@
-// Package yaml — decoding into typed targets, by reflection.
 package yaml
 
 import (

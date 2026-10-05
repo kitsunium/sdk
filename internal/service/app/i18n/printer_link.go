@@ -1,4 +1,3 @@
-// Package i18n — the resolution chain a [Printer] walks.
 package i18n
 
 import corei18n "github.com/kitsunium/sdk/internal/core/app/i18n"

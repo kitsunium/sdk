@@ -1,26 +1,3 @@
-// Package token declares the security-token domain: the [Issuer] and
-// [Verifier] ports, the immutable [ClaimsValue] every concrete format decodes
-// into, and the typed verdicts a caller matches on. Concrete formats — JWT/JWS
-// compact (RFC 7519) and PASETO v4 — live in internal/service/security/token; this
-// package owns only the contract, so a caller can hold a Verifier without
-// knowing which wire format produced it.
-//
-// # There is no registry, and that is the security decision
-//
-// Every other pluggable SDK domain resolves an implementation through a
-// process-wide registry keyed on a name. A token registry would be keyed on
-// the "alg" header — a field the ATTACKER writes. Resolving the verifying
-// algorithm from that field is algorithm confusion, the class of bug where an
-// RSA/EC public key (public by definition) is fed to HMAC-SHA-256 as a shared
-// secret and the forgery verifies. So the algorithm is bound at construction,
-// by a constructor that only accepts the ONE key type that algorithm can use,
-// and the header is only ever compared against that binding — never consulted
-// to choose it. See ADR 0042.
-//
-// [Algorithm] is a uint8 enum rather than a string for the same reason: the
-// unsecured "none" algorithm of RFC 7519 §6 has no representation in this
-// type, so no call site can request it and no configuration can enable it. A
-// token whose header says "none" is refused with [AlgorithmNone].
 package token
 
 // Algorithm is the signature algorithm a token issuer or verifier is bound to.

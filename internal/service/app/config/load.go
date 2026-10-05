@@ -1,4 +1,3 @@
-// Package config — the merge + decode + validate loader.
 package config
 
 import (

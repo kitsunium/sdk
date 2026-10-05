@@ -1,4 +1,3 @@
-// Package validation — the tag half of set membership.
 package validation
 
 import (

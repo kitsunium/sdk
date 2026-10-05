@@ -1,7 +1,3 @@
-// Package net — the Server-Sent Events frame: the value a stream sends and the
-// rules a frame must satisfy to be carried at all. Writing it — the encoder
-// that splits Data into data lines, and the comment frame — is
-// internal/service/net/sse's (ADR 0160 §4).
 package net
 
 import (

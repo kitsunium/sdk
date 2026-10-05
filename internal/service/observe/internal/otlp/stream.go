@@ -1,5 +1,3 @@
-// Package otlp — the newline-delimited stream a writer-bound OTLP/JSON
-// exporter emits.
 package otlp
 
 import (

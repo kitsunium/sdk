@@ -1,10 +1,3 @@
-// Package token — the bounded wire primitives every format here goes through:
-// segment splitting, strict base64url, JSON depth and duplicate-member checks,
-// and PASETO's pre-authentication encoding.
-//
-// Every function in this file runs on ATTACKER-CONTROLLED bytes before any key
-// is touched, so each one is O(len(input)) with a bound checked first and no
-// allocation proportional to a count the attacker chooses.
 package token
 
 import (

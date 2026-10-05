@@ -1,5 +1,3 @@
-// Package jsonshape — a struct field's json tag, read with the grammar the
-// json/v2 engine reads it with.
 package jsonshape
 
 import (

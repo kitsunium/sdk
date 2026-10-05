@@ -1,4 +1,3 @@
-// Package writer — FileConfig value type for the "file" writer.
 package writer
 
 import "github.com/kitsunium/sdk/internal/core/observe/logger/level"

@@ -1,5 +1,3 @@
-// Package telemetry — the interfaces: what a producer emits to, and what the
-// exporter needs of its listener and of a client.
 package telemetry
 
 import (

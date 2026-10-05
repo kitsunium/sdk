@@ -1,4 +1,3 @@
-// Package kit — where the secrets are kept, per environment.
 package kit
 
 import (

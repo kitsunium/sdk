@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # internal/service/observe/logger/sink/memory/
 
 ## Purpose
@@ -14,7 +14,7 @@ output. Mirrors apex/log's memory handler.
 |---|---|
 | `memory.go`            | `Memory` struct + `NewMemory` + `Write` / `Flush` / `Close` / `Records` / `Len` / `Reset` |
 | `memory_compliance.go` | compile-time `var _ core/observe/logger.Sink = (*Memory)(nil)` |
-| `doc.go`               | package doc |
+| `doc.go`               | the package comment — kit writes it from the design (ADR 0167) |
 
 ## Why this shape
 

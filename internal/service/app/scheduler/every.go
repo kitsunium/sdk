@@ -1,4 +1,3 @@
-// Package scheduler — hosts Every, the fixed-interval Schedule.
 package scheduler
 
 import (

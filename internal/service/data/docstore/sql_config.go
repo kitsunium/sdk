@@ -1,5 +1,3 @@
-// Package docstore — the SQL store's construction parameters, and the
-// refusals a configuration no SQL store could honour gets.
 package docstore
 
 import (

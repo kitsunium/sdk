@@ -4,7 +4,10 @@ package(default_visibility = ["//internal/kernel:kernel_consumers"])
 
 go_library(
     name = "backoff",
-    srcs = ["backoff.go"],
+    srcs = [
+        "backoff.go",
+        "doc.go",
+    ],
     importpath = "github.com/kitsunium/sdk/internal/kernel/backoff",
     visibility = [
         "//:__subpackages__",

@@ -1,4 +1,3 @@
-// Package net — the opaque, redacting TLS identity value.
 package net
 
 import (

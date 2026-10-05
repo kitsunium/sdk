@@ -1,4 +1,3 @@
-// Package session — the deadline policy shared by every store.
 package session
 
 import (

@@ -1,7 +1,3 @@
-// Package cbor — decoding into scalar targets: booleans, integers of every
-// width, floats, strings, time.Time and big.Int. An integer is stored where
-// it fits and refused where it would overflow; a bignum (tag 2 or 3) counts
-// as an integer; a float is never stored into an integer.
 package cbor
 
 import (

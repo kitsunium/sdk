@@ -1,6 +1,5 @@
 //go:build !windows
 
-// Package server — every served socket family is left to the kernel here.
 package server
 
 // platformLacks reports whether this platform has no socket for a family the

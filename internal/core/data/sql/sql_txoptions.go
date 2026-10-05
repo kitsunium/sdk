@@ -1,5 +1,3 @@
-// Package sql — hosts TxOptionsValue, the per-transaction options a
-// Transactor honours.
 package sql
 
 import stdsql "database/sql"

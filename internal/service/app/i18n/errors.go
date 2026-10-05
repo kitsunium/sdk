@@ -1,8 +1,3 @@
-// Package i18n — the one error this package builds rather than declares. The
-// domain's codes and sentinels — the port's verdicts and the outcomes only a
-// concrete catalogue can produce — are declared in internal/core/app/i18n
-// (ADR 0160); this file holds failLoad, which raises CATALOG_LOAD_FAILED over
-// the filesystem's or the codec's own error.
 package i18n
 
 import (

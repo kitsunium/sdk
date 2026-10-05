@@ -1,4 +1,3 @@
-// Package net — the per-group resource ceilings.
 package net
 
 // LimitsValue bounds what one listener group may consume. Every field is

@@ -1,5 +1,3 @@
-// Package git — what a working tree is at: its head commit, that commit's
-// time, and whether tracked files differ from it.
 package git
 
 import (

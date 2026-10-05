@@ -10,6 +10,7 @@ go_library(
         "codes_gen.go",
         "deriver_registry.go",
         "design_gen.go",
+        "doc.go",
         "errors.go",
         "hash_registry.go",
         "key.go",

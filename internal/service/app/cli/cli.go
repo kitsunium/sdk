@@ -1,7 +1,3 @@
-// Package cli is the command-line engine: it validates a whole command tree
-// once, resolves an argument vector against it, renders the help the tree
-// implies, and returns a typed error carrying an exit status. It never ends
-// the process.
 package cli
 
 import (

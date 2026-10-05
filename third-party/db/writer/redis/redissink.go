@@ -1,7 +1,3 @@
-// Package redis — redisSink, the thin wrapper that adds client cleanup to the
-// dbsink-composed chain. It holds a closeFn (not the *redis.Client) so the
-// driver type stays confined to client.go; Close drains the chain then releases
-// the client exactly once.
 package redis
 
 import (

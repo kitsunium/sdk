@@ -1,5 +1,3 @@
-// Package telemetry — the exporter: a bounded ring producers never wait on,
-// drained to the clients attached to a private socket, which it never reads.
 package telemetry
 
 import (

@@ -1,5 +1,3 @@
-// Package streamaead (writer.go) — the streaming-AEAD write path: lazy header
-// emit, fixed-size chunk buffering, and per-chunk seal on overflow / Close.
 package streamaead
 
 import (

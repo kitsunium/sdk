@@ -1,10 +1,3 @@
-//go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /framework/model/internal/core .
-
-// Package core is the Product Graph under the names the role rule asks for:
-// every struct carries its role (NodeEntity, GraphMessage, EndpointSpec, …).
-// framework/model is its public face — an alias per type under the graph's
-// own names (Node, Graph, EndpointInfo, …), its constants and its functions —
-// and the one package a caller imports.
 package core
 
 import "time"

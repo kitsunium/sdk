@@ -1,4 +1,3 @@
-// Package kit — the mount of a module: its prefix and its bindings.
 package kit
 
 import (

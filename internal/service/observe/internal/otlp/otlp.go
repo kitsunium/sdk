@@ -1,27 +1,3 @@
-// Package otlp is the OTLP machinery the metrics and trace signals share: the
-// proto3-JSON scalar encodings and the common/resource messages every OTLP
-// payload carries, the single-document marshal, the newline-terminated stream
-// a writer-bound exporter emits, and the OTLP/HTTP sender — endpoint
-// refusal, the default client and its own connection pool, the bounded body
-// reads, and the classification of a collector's answer into three verdicts.
-//
-// It was written twice, once per signal (ADR 0048 for metrics, ADR 0051 for
-// trace), and the two copies differed in nothing but the error codes, the
-// wording of their refusals and the name of the field a partial success counts.
-// Those three are exactly what this package does NOT own: a signal hands it a
-// SignalSpec value carrying its sentinels, its wrap parameters and its field names,
-// so every error leaves here under the calling signal's dotted-quad code and in
-// its words, byte for byte what that signal returned before the transport was
-// shared. This package declares no code.
-//
-// What stays in each signal is what is genuinely its own: the payload tree
-// (ResourceMetrics or ResourceSpans and everything below them), the encoder
-// that builds it and the refusals only that encoder can raise, the signal's
-// path constant, and the exported names a caller types — OTLPHTTPConfig,
-// NewOTLPHTTPExporter, OTLPRetryable.
-//
-// It is internal to internal/service on purpose: nothing above the service
-// layer may reach it, and nothing but the two signals needs to.
 package otlp
 
 import "time"

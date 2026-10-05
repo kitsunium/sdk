@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T03:30:00Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # framework/entitlement/
 
 ## Purpose
@@ -162,9 +162,8 @@ depends on it.
 
 ## README is generated
 
-`README.md` comes from `gomarkdoc` (ADR 0008). Regenerate with
-`make docs-readme` — which runs `cd framework && go generate ./...`, not `gomarkdoc`
-from the repository root. Do **not** hand-edit it.
+`README.md` is written by `tools/genindex` from the committed `docs/api`
+(`make docs-readme`, ADR 0167). Do **not** hand-edit it.
 
 ## Verification
 

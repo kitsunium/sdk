@@ -1,5 +1,3 @@
-// Package queue — the SQL broker: the queue in one table of the caller's own
-// database, every call on the transaction its context carries (ADR 0151).
 package queue
 
 import (

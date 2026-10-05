@@ -1,6 +1,3 @@
-// Package route — declares the Params struct that pairs a predicate with a
-// downstream sink. Sibling of router_sink.go so the router file stays
-// focused on the Sink contract.
 package route
 
 import (

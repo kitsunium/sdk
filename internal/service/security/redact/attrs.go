@@ -1,4 +1,3 @@
-// Package redact — log attributes rendered as display text.
 package redact
 
 import (

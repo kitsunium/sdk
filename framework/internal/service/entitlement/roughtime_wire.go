@@ -1,10 +1,3 @@
-// Package entitlement - the Roughtime tagged-message encoding.
-//
-// Split from roughtime.go because it is pure parsing of untrusted bytes and
-// nothing else: every function here reads a length or an offset that a hostile
-// server chose, so every one of them bounds-checks before it indexes. Keeping
-// that apart from the signature checks makes it possible to read either half
-// without holding the other in your head.
 package entitlement
 
 import (

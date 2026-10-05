@@ -1,8 +1,3 @@
-// Package s3 — range 0.3.35.* (ADR 0015 service slot 0x23).
-//
-// Package s3 — bridges the SDK's writer.CredentialProvider onto the AWS SDK's
-// aws.CredentialsProvider so credentials refresh on each Retrieve. Split from
-// client.go to keep one struct per file.
 package s3
 
 import (

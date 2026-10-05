@@ -1,4 +1,3 @@
-// Package mail — the mailbox value.
 package mail
 
 // AddressValue is one RFC 5322 mailbox: an addr-spec and an optional display

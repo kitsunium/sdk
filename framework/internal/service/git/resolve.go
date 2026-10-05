@@ -1,5 +1,3 @@
-// Package git — resolving what a branch changed versus its merge-base with the
-// default branch.
 package git
 
 import (

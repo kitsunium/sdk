@@ -1,15 +1,5 @@
 //go:build linux || darwin || freebsd || openbsd || netbsd || dragonfly
 
-// Package flock — flock(2), on the kernels that have it.
-//
-// flock(2) is not POSIX. It exists on Linux and on every BSD (macOS included)
-// with the same shape, and the tag set above is exactly where Go's syscall
-// package declares it — android and ios reach this file through the linux and
-// darwin tags. The lock belongs to the open file DESCRIPTION: a dup(2)'d
-// descriptor shares it, a second open(2) of the same path does not, and the
-// kernel drops it when the last descriptor on the description closes — which a
-// process's death does. It is ADVISORY: it binds every process that takes it,
-// and nothing else.
 package flock
 
 import (

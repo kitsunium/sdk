@@ -1,7 +1,3 @@
-// Package validation — the kind-bound halves of the tag dialect. Each builder
-// resolves the field's kind ONCE, at compile time, and returns a closure that
-// reads the value through the one accessor that kind supports. A validation
-// therefore performs no type dispatch at all.
 package validation
 
 import (

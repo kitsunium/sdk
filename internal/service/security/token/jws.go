@@ -1,5 +1,3 @@
-// Package token — JWS Compact Serialization (RFC 7515): the header, and the
-// algorithm gate every verifier runs before a key reaches a primitive.
 package token
 
 import (

@@ -1,4 +1,3 @@
-// Package slogbridge — converts slog levels and attributes to their SDK peers.
 package slogbridge
 
 import (

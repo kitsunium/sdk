@@ -1,21 +1,3 @@
-// Package rotfile registers the "rotfile" writer factory (ADR 0014): a
-// size-capped, on-disk file sink that rotates when a write would exceed
-// MaxBytes and optionally gzips each rotated file. Importing the package
-// (typically a blank import via pkg/v1/observe/logger/writer) self-registers the
-// factory so writer.Open("rotfile", Config{…}) resolves.
-//
-// Unlike service/observe/logger/writer/file, this sink owns its descriptor directly because it
-// must close + rename + reopen Path across a rotation; it cannot delegate to
-// the append-only sink/file. The security-critical hardening of sink/file is
-// preserved and, crucially, RE-RUN on every reopen: the symlink refusal +
-// O_NOFOLLOW + 0600 checks fire each time Path is recreated after a rename/gzip
-// cycle, not only at first New (CWE-59). Rotated .N and .N.gz siblings are
-// forced to 0600 so a gzip never leaks default permissions.
-//
-// Durability note: the rename is not followed by a directory fsync, so a crash
-// between rename and reopen can leave Path missing until the next write — an
-// accepted crash window for logs, documented rather than paid for on every
-// rotation.
 package rotfile
 
 import (

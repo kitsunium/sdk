@@ -55,7 +55,8 @@ with go/types on the twelve platforms (`make api`, held byte for byte by
   re-exports — and **an alias carries the declaration, the fields and the
   methods of the type it names**, anchored under the alias's name
   (`/local/v1/app/lock/#Locker.TryAcquire`). go/doc does not follow an alias, so
-  gomarkdoc, the READMEs and the go/doc index this replaced never showed them.
+  gomarkdoc and the go/doc index this replaced never showed them; the READMEs
+  have since ADR 0167, written by genindex from the same docs/api.
 - **The ⌘K symbol index is the same records**: every exported symbol of the
   package's page, and every method an alias reaches at its owner, each linking
   to the record its page renders.

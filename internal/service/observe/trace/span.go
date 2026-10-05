@@ -1,4 +1,3 @@
-// Package trace — the live, recording span.
 package trace
 
 import (

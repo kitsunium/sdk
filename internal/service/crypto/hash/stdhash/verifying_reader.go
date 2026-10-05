@@ -1,5 +1,3 @@
-// Package stdhash — VerifyingReader streaming content-address ergonomics (see
-// the package doc in stdhash.go).
 package stdhash
 
 import (

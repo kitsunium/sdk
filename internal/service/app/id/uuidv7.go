@@ -1,4 +1,3 @@
-// Package id — UUIDv7 (time-ordered) generator (RFC 9562 §5.7).
 package id
 
 import (

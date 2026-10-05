@@ -7,9 +7,10 @@ The public facade for the SDK's filesystem domain (**ADR 0056**): reading stays
 `io/fs`, writing gets a contract, and publishing a file becomes one call that
 either replaces it completely or changes nothing at all.
 
-`README.md` is **generated** from the package doc comment in `vfs.go` by
-`gomarkdoc` (rule 10 / ADR 0008). Edit the doc comment, then run
-`make docs-readme`. Never hand-edit `README.md`.
+`README.md` is **written** by `tools/genindex` from the committed `docs/api`
+(`make docs-readme`, ADR 0167). The package comment is in `doc.go`, which kit
+writes from `design/data/vfs.yaml`: edit the design, run `kit gen`, then
+`make api` and `make docs-readme`. Never hand-edit `README.md`.
 
 ## Surface
 
@@ -47,8 +48,8 @@ filesystem directly. `TestTheFacadePublishesAliasesAndNotCopies` pins it.
 
 - **Do NOT hand-edit `README.md`.** It is generated; the README drift gate
   (`scripts/pre-commit/check-readme-drift.sh`, a step of CI's `bazel` job)
-  fails a change whose file on disk differs from what `gomarkdoc` would
-  produce.
+  fails a change whose file on disk differs from what `tools/genindex` would
+  write from `docs/api`.
 - **Do NOT declare a new interface here.** The port lives in
   `internal/core/data/vfs`; this package re-exports it. A second declaration would
   break the alias property that makes stdlib walkers apply.
@@ -60,12 +61,12 @@ filesystem directly. `TestTheFacadePublishesAliasesAndNotCopies` pins it.
 
 ## Generated
 
-`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/data/vfs.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the package comment and the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
+`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/data/vfs.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: `doc.go` holds the package comment, which kit writes from the design (ADR 0167), and the hand-written files the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
 
 ## Verification
 
 ```bash
 cd pkg && GOWORK=off go test -race ./v1/data/vfs/...
 # coverage: 100%
-make docs-readme   # regenerates README.md from the package doc comment
+make docs-readme   # rewrites README.md from docs/api
 ```

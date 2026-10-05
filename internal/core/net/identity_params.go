@@ -1,4 +1,3 @@
-// Package net — the TLS identity construction parameters.
 package net
 
 // IdentityParams carries in-memory TLS material. Every field is optional on its

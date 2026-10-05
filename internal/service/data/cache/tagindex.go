@@ -1,4 +1,3 @@
-// Package cache — the two-way tag index behind InvalidateTag.
 package cache
 
 import (

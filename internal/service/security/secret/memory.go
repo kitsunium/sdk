@@ -1,4 +1,3 @@
-// Package secret — the in-process store.
 package secret
 
 import (

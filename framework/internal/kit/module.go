@@ -1,4 +1,3 @@
-// Package kit — modules: a set of services a product mounts as one.
 package kit
 
 import (

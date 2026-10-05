@@ -1,4 +1,3 @@
-// Package session — constant-time comparison of the values that name a session.
 package session
 
 import "crypto/subtle"

@@ -1,4 +1,3 @@
-// Package metrics — atomic float64 gauge.
 package metrics
 
 import (

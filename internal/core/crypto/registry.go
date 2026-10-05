@@ -1,6 +1,3 @@
-// Package crypto — holds the process-wide AEAD registry. Service- and
-// third-party-level scheme packages register themselves via package-level var
-// initialisers when imported (no init()), mirroring core/data/codec.
 package crypto
 
 import (

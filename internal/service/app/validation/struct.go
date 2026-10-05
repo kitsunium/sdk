@@ -1,4 +1,3 @@
-// Package validation — the struct-tag front end.
 package validation
 
 import (

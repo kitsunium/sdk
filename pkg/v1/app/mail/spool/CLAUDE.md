@@ -13,8 +13,9 @@ stands on `data/queue`, and a durable one on `data/vfs` and `data/sql`
 beneath it. A program that wants it imports both packages — `mail` for the
 message and the transport, this one for the outbox.
 
-Consumer-facing prose lives in the package doc comment in `spool.go` and is
-rendered into `README.md` by `gomarkdoc` (rule 10 / ADR 0008). This file is the
+Consumer-facing prose lives in the package doc comment in `doc.go`, which kit
+writes from `design/app/mail/spool.yaml`, and reaches `README.md` through
+`docs/api` and `tools/genindex` (rule 10 / ADR 0167). This file is the
 maintainer's half.
 
 ## Surface
@@ -53,16 +54,16 @@ The sentinels drop the `Spool` prefix their core names carry (`SpoolClosed` is
   core types by alias already; a facade import would only couple them.
 - **Do NOT re-export the spool from `pkg/v1/app/mail`.** That is the link it
   was split out to remove.
-- **Do NOT hand-edit `README.md`.** Edit the package doc comment in `spool.go`
-  and run `go generate ./v1/app/mail/spool/` (rule 10).
+- **Do NOT hand-edit `README.md`.** Edit the package doc comment in the design,
+  run `kit gen`, then `make api` and `make docs-readme` (rule 10, ADR 0167).
 
 ## Generated
 
-`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/app/mail/spool.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the package comment and the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
+`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/app/mail/spool.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the declarations of their own, and `doc.go` — kit's too (ADR 0167) — the package comment. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
 
 ## Verification
 
 ```bash
 cd pkg && GOWORK=off go test -race ./v1/app/mail/spool/
-cd pkg && go generate ./v1/app/mail/spool/   # regenerates README.md from the doc comment
+make docs-readme   # rewrites README.md from docs/api
 ```

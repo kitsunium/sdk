@@ -1,5 +1,3 @@
-// Package validation — hosts elementPlan, the rule set one element of a dived
-// slice or array is checked against.
 package validation
 
 import (

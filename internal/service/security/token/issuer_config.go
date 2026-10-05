@@ -1,4 +1,3 @@
-// Package token — the JWT issuing policy.
 package token
 
 import (

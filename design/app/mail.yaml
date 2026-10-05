@@ -162,48 +162,219 @@ packages:
             value: "0x00_03_3D_0A"
         type: errs.Code
     constants:
-      - name: DefaultAttachmentType
+      - doc: |-
+          DefaultAttachmentType is the media type used when an attachment names none.
+          RFC 2046 §4.5.1 makes application/octet-stream the type for "arbitrary
+          binary data", and guessing a narrower one from the bytes would be a sniffer
+          — the class of code that decides an uploaded .txt is really HTML.
+        name: DefaultAttachmentType
         type: string
         value: "\"application/octet-stream\""
-      - name: HeaderFrom
+      - blockDoc: |-
+          Header field names the composer owns. A guard compares them
+          case-insensitively, because RFC 5322 makes a field name case-insensitive
+          (the field-name production) and an attacker who could smuggle "bCc" past a
+          case-sensitive check would have smuggled Bcc. The guards — the reserved set
+          and the injection gate every writer runs — are internal/service/app/mail's:
+          the names are vocabulary, checking a field is a mechanism (ADR 0160).
+        doc: HeaderFrom is RFC 5322 §3.6.2's originator field.
+        name: HeaderFrom
         type: string
         value: "\"From\""
-      - name: HeaderTo
+      - blockDoc: |-
+          Header field names the composer owns. A guard compares them
+          case-insensitively, because RFC 5322 makes a field name case-insensitive
+          (the field-name production) and an attacker who could smuggle "bCc" past a
+          case-sensitive check would have smuggled Bcc. The guards — the reserved set
+          and the injection gate every writer runs — are internal/service/app/mail's:
+          the names are vocabulary, checking a field is a mechanism (ADR 0160).
+        doc: HeaderTo is the primary recipient field, RFC 5322 §3.6.3.
+        name: HeaderTo
         type: string
         value: "\"To\""
-      - name: HeaderCc
+      - blockDoc: |-
+          Header field names the composer owns. A guard compares them
+          case-insensitively, because RFC 5322 makes a field name case-insensitive
+          (the field-name production) and an attacker who could smuggle "bCc" past a
+          case-sensitive check would have smuggled Bcc. The guards — the reserved set
+          and the injection gate every writer runs — are internal/service/app/mail's:
+          the names are vocabulary, checking a field is a mechanism (ADR 0160).
+        doc: HeaderCc is the carbon-copy field, RFC 5322 §3.6.3.
+        name: HeaderCc
         type: string
         value: "\"Cc\""
-      - name: HeaderBcc
+      - blockDoc: |-
+          Header field names the composer owns. A guard compares them
+          case-insensitively, because RFC 5322 makes a field name case-insensitive
+          (the field-name production) and an attacker who could smuggle "bCc" past a
+          case-sensitive check would have smuggled Bcc. The guards — the reserved set
+          and the injection gate every writer runs — are internal/service/app/mail's:
+          the names are vocabulary, checking a field is a mechanism (ADR 0160).
+        doc: |-
+          HeaderBcc is the blind carbon-copy field. This domain never emits it:
+          a Bcc recipient reaches the [EnvelopeValue] and no header.
+        name: HeaderBcc
         type: string
         value: "\"Bcc\""
-      - name: HeaderReplyTo
+      - blockDoc: |-
+          Header field names the composer owns. A guard compares them
+          case-insensitively, because RFC 5322 makes a field name case-insensitive
+          (the field-name production) and an attacker who could smuggle "bCc" past a
+          case-sensitive check would have smuggled Bcc. The guards — the reserved set
+          and the injection gate every writer runs — are internal/service/app/mail's:
+          the names are vocabulary, checking a field is a mechanism (ADR 0160).
+        doc: HeaderReplyTo is RFC 5322 §3.6.2's Reply-To field.
+        name: HeaderReplyTo
         type: string
         value: "\"Reply-To\""
-      - name: HeaderSubject
+      - blockDoc: |-
+          Header field names the composer owns. A guard compares them
+          case-insensitively, because RFC 5322 makes a field name case-insensitive
+          (the field-name production) and an attacker who could smuggle "bCc" past a
+          case-sensitive check would have smuggled Bcc. The guards — the reserved set
+          and the injection gate every writer runs — are internal/service/app/mail's:
+          the names are vocabulary, checking a field is a mechanism (ADR 0160).
+        doc: HeaderSubject is RFC 5322 §3.6.5's subject field.
+        name: HeaderSubject
         type: string
         value: "\"Subject\""
-      - name: HeaderDate
+      - blockDoc: |-
+          Header field names the composer owns. A guard compares them
+          case-insensitively, because RFC 5322 makes a field name case-insensitive
+          (the field-name production) and an attacker who could smuggle "bCc" past a
+          case-sensitive check would have smuggled Bcc. The guards — the reserved set
+          and the injection gate every writer runs — are internal/service/app/mail's:
+          the names are vocabulary, checking a field is a mechanism (ADR 0160).
+        doc: HeaderDate is RFC 5322 §3.6.1's origination date field.
+        name: HeaderDate
         type: string
         value: "\"Date\""
-      - name: HeaderMessageID
+      - blockDoc: |-
+          Header field names the composer owns. A guard compares them
+          case-insensitively, because RFC 5322 makes a field name case-insensitive
+          (the field-name production) and an attacker who could smuggle "bCc" past a
+          case-sensitive check would have smuggled Bcc. The guards — the reserved set
+          and the injection gate every writer runs — are internal/service/app/mail's:
+          the names are vocabulary, checking a field is a mechanism (ADR 0160).
+        doc: HeaderMessageID is RFC 5322 §3.6.4's identification field.
+        name: HeaderMessageID
         type: string
         value: "\"Message-ID\""
-      - name: HeaderMIMEVersion
+      - blockDoc: |-
+          Header field names the composer owns. A guard compares them
+          case-insensitively, because RFC 5322 makes a field name case-insensitive
+          (the field-name production) and an attacker who could smuggle "bCc" past a
+          case-sensitive check would have smuggled Bcc. The guards — the reserved set
+          and the injection gate every writer runs — are internal/service/app/mail's:
+          the names are vocabulary, checking a field is a mechanism (ADR 0160).
+        doc: HeaderMIMEVersion is RFC 2045 §4's version field.
+        name: HeaderMIMEVersion
         type: string
         value: "\"MIME-Version\""
-      - name: HeaderContentType
+      - blockDoc: |-
+          Header field names the composer owns. A guard compares them
+          case-insensitively, because RFC 5322 makes a field name case-insensitive
+          (the field-name production) and an attacker who could smuggle "bCc" past a
+          case-sensitive check would have smuggled Bcc. The guards — the reserved set
+          and the injection gate every writer runs — are internal/service/app/mail's:
+          the names are vocabulary, checking a field is a mechanism (ADR 0160).
+        doc: HeaderContentType is RFC 2045 §5's media type field.
+        name: HeaderContentType
         type: string
         value: "\"Content-Type\""
-      - name: HeaderContentTransferEncoding
+      - blockDoc: |-
+          Header field names the composer owns. A guard compares them
+          case-insensitively, because RFC 5322 makes a field name case-insensitive
+          (the field-name production) and an attacker who could smuggle "bCc" past a
+          case-sensitive check would have smuggled Bcc. The guards — the reserved set
+          and the injection gate every writer runs — are internal/service/app/mail's:
+          the names are vocabulary, checking a field is a mechanism (ADR 0160).
+        doc: HeaderContentTransferEncoding is RFC 2045 §6's encoding field.
+        name: HeaderContentTransferEncoding
         type: string
         value: "\"Content-Transfer-Encoding\""
-      - name: HeaderContentDisposition
+      - blockDoc: |-
+          Header field names the composer owns. A guard compares them
+          case-insensitively, because RFC 5322 makes a field name case-insensitive
+          (the field-name production) and an attacker who could smuggle "bCc" past a
+          case-sensitive check would have smuggled Bcc. The guards — the reserved set
+          and the injection gate every writer runs — are internal/service/app/mail's:
+          the names are vocabulary, checking a field is a mechanism (ADR 0160).
+        doc: HeaderContentDisposition is RFC 2183's disposition field.
+        name: HeaderContentDisposition
         type: string
         value: "\"Content-Disposition\""
-      - name: HeaderContentID
+      - blockDoc: |-
+          Header field names the composer owns. A guard compares them
+          case-insensitively, because RFC 5322 makes a field name case-insensitive
+          (the field-name production) and an attacker who could smuggle "bCc" past a
+          case-sensitive check would have smuggled Bcc. The guards — the reserved set
+          and the injection gate every writer runs — are internal/service/app/mail's:
+          the names are vocabulary, checking a field is a mechanism (ADR 0160).
+        doc: |-
+          HeaderContentID is RFC 2045 §7's part identifier, referenced by cid:
+          URLs per RFC 2392 §2.
+        name: HeaderContentID
         type: string
         value: "\"Content-ID\""
+    doc: |-
+      Package mail — the mailbox value.
+
+      Package mail — one file or inline part, as a value.
+
+      Package mail — ranges 0.2.31.* (ADR 0064 core/app/mail block) and 0.3.61.*
+      (ADR 0064 service/app/mail block, declared here since ADR 0160).
+
+      Package mail — declares the sentinel *errs.Error outcomes of the domain: the
+      refusals of a message, and the outcomes of composition and of the SMTP
+      session. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE
+      form.
+
+      No Public string here carries a header VALUE, an address, a subject, an
+      attachment's bytes, a credential or a server reply. A Public is read by third parties — it lands in an HTTP
+      body, a queue's dead-letter record, a support ticket — and the values this
+      domain refuses are, by construction, exactly the ones an attacker chose. The
+      field NAME travels in Public where it helps; the value travels only as a
+      log-only field, reachable through errs.FieldsOf.
+
+      Package mail — the names of the header fields the composer owns, and one
+      additional header as a value.
+
+      Package mail declares the electronic-mail port: the message as a VALUE, the
+      envelope derived from it, and the [Transport] that carries one.
+
+      The domain's whole security posture is one sentence: a header that contains
+      a carriage return or a line feed is REFUSED, never repaired. RFC 5322 §2.2
+      makes a header field a name, a colon and a value terminated by CRLF, so a
+      CRLF inside the value does not corrupt the field — it ENDS it and starts
+      another one the caller never wrote. "Bcc: attacker@example.com" is then a
+      perfectly well-formed header, and the mail is delivered to a party the sender
+      cannot see in what it composed.
+
+      Sanitising is the tempting answer and it is the wrong one. The standard
+      library will do it silently for you — mime.QEncoding.Encode turns a CRLF into
+      "=0D=0A", mime.FormatMediaType percent-escapes it — and in both cases the
+      message that goes out is not the message the caller wrote, while the caller
+      is told everything succeeded. This domain refuses instead, with a typed error
+      that names the FIELD and never the value.
+
+      The guards that enforce it — Validate and the per-field checks it runs —
+      live in internal/service/app/mail with the composition of the MIME body and
+      the SMTP transport that delivers it: checking a header, an address or an
+      attachment against its grammar is a mechanism (ADR 0160). This package holds
+      the values, the port, the header names and the refusals. Nothing here
+      writes a byte to a socket.
+
+      Code range: 0.2.31.* (ADR 0064).
+
+      Package mail — the message as a value, and the envelope derived from it.
+
+      Package mail — the transport port and its ADR 0039 capability siblings.
+
+      They live apart from the value types because a port and a value change for
+      different reasons: the port is FROZEN and the values are not.
+
+      Package mail — one record of what a transport put on the wire.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/app/mail
@@ -591,100 +762,370 @@ packages:
             public: The SMTP URL is not usable as written
             reason: INVALID_URL
     types:
-      - methods:
-          - name: IsZero
+      - doc: |-
+          AddressValue is one RFC 5322 mailbox: an addr-spec and an optional display
+          name.
+
+          It is deliberately NOT net/mail.Address, and the reason is measurable rather
+          than aesthetic. net/mail.Address.String() emits its Address field verbatim:
+
+          	mail.Address{Name: "ok", Address: "u@exa\r\nmple.com"}.String()
+          	  == "\"ok\" <u@exa\r\nmple.com>"
+
+          The CRLF survives into the header, which is the injection this whole domain
+          exists to refuse. The display name is protected there (it is RFC 2047
+          encoded, so a CRLF becomes "=0D=0A") and the address is not — so a caller who
+          reached for the obvious stdlib helper would be protected on the field an
+          attacker rarely controls and exposed on the one they usually do.
+        methods:
+          - doc: |-
+              IsZero reports whether the address carries no addr-spec at all, which is the
+              zero value a caller gets from an unfilled struct field.
+            name: IsZero
             out:
               - type: bool
             recv: value
         name: AddressValue
         struct:
           fields:
-            - name: Name
+            - doc: |-
+                Name is the optional display name. It may hold any printable text,
+                including non-ASCII, which is RFC 2047 encoded at composition. CR, LF and
+                NUL are refused.
+              name: Name
               type: string
-            - name: Addr
+            - doc: |-
+                Addr is the addr-spec: "local@domain", ASCII, in the dot-atom form of
+                RFC 5322 §3.4.1. Angle brackets are added by the composer and must not
+                appear here.
+              name: Addr
               type: string
-      - methods:
-          - name: Inline
+      - doc: |-
+          AttachmentValue is one MIME body part carrying a file.
+
+          The distinction between an attachment and an inline image is ONE field.
+          A non-empty ContentID makes the part inline: it is placed in a
+          multipart/related alongside the body (RFC 2387) and referenced from the HTML
+          as cid:<ContentID> (RFC 2392 §2). An empty one makes it a regular attachment
+          in a multipart/mixed (RFC 2046 §5.1.3).
+
+          That is why there is no Disposition field to set wrongly. The disposition and
+          the enclosing multipart subtype are two halves of one decision, and letting a
+          caller spell them separately is letting them disagree — which is exactly the
+          message that renders as a broken image in one client and a stray attachment
+          in another.
+        methods:
+          - doc: |-
+              Inline reports whether this part is referenced from the body rather than
+              listed as a file.
+            name: Inline
             out:
               - type: bool
             recv: pointer
         name: AttachmentValue
         struct:
           fields:
-            - name: Filename
+            - doc: |-
+                Filename is the name presented to the recipient. It is required: an
+                attachment with no name is a part a client shows as "noname", and the
+                SDK will not invent one.
+              name: Filename
               type: string
-            - name: ContentType
+            - doc: |-
+                ContentType is the media type. Empty selects the type implied by the
+                filename's extension, and [DefaultAttachmentType] when there is none.
+              name: ContentType
               type: string
-            - name: ContentID
+            - doc: |-
+                ContentID, when non-empty, makes this part INLINE and referenceable as
+                cid:<ContentID>. It is an addr-spec-shaped token (RFC 2045 §7), written
+                without angle brackets — the composer adds them.
+              name: ContentID
               type: string
-            - name: Content
+            - doc: |-
+                Content is the part's bytes, base64 encoded at composition (RFC 2045
+                §6.8). An empty slice is a legal zero-length attachment.
+              name: Content
               type: "[]byte"
-      - name: HeaderFieldValue
+      - doc: |-
+          HeaderFieldValue is one additional header: a name and a value.
+
+          It is a slice element rather than a map entry for two reasons that both
+          matter: a map iterates in a random order, so the same message would compose
+          to different bytes on different runs and no golden test could exist; and
+          some fields legitimately repeat (Received, References), which a map cannot
+          express at all.
+        name: HeaderFieldValue
         struct:
           fields:
-            - name: Name
+            - doc: |-
+                Name is the field name — printable US-ASCII without a colon
+                (RFC 5322 §3.6.8).
+              name: Name
               type: string
-            - name: Value
+            - doc: |-
+                Value is the unstructured field value. It is encoded per RFC 2047 when it
+                carries non-ASCII, folded to the RFC 5322 §2.1.1 line limits, and refused
+                outright when it carries CR, LF or NUL.
+              name: Value
               type: string
-      - name: MessageValue
+      - doc: |-
+          MessageValue is one mail, as a value. It is deliberately a struct and not an
+          interface: a message has no behaviour worth abstracting, it is data, and a
+          value can be built in a literal, compared field by field in a test, and
+          carried across a goroutine without a lock.
+
+          Nothing here is a wire format. The MIME structure the fields imply is chosen
+          by the composer in internal/service/app/mail, and which parts appear is a pure
+          function of which fields are populated — see that package's CLAUDE.md for
+          the table.
+
+          Every string field that reaches a header is validated by the guards in
+          internal/service/app/mail, which every transport runs before composing. The
+          slices are never mutated by this package.
+        name: MessageValue
         struct:
           fields:
-            - name: Date
+            - doc: |-
+                Date is the origination date (RFC 5322 §3.6.1), which is REQUIRED in a
+                message. A zero Date is stamped by the composer from its clock rather
+                than refused: unlike a file mode, there is exactly one defensible value
+                and it is "now" (ADR 0031's clamping half).
+              name: Date
               type: time.Time
-            - name: From
+            - doc: |-
+                From is the author mailbox (RFC 5322 §3.6.2). Exactly one is supported;
+                the multi-author form requires a Sender header to disambiguate and no
+                caller has ever wanted it by accident.
+              name: From
               type: AddressValue
-            - name: Subject
+            - doc: |-
+                Subject is the unstructured subject field (RFC 5322 §3.6.5). Non-ASCII
+                content is encoded per RFC 2047 at composition; a CR or LF here is
+                [HeaderInjection].
+              name: Subject
               type: string
-            - name: MessageID
+            - doc: |-
+                MessageID is the optional Message-ID (RFC 5322 §3.6.4), angle brackets
+                included or omitted at the caller's choice — the composer adds them.
+
+                An empty MessageID emits NO header. RFC 6409 §8.2 makes adding one the
+                submission server's job when it is absent, and generating one here would
+                mean inventing both entropy and a domain the SDK does not own.
+              name: MessageID
               type: string
-            - name: ReplyTo
+            - doc: ReplyTo is the optional Reply-To mailbox list (RFC 5322 §3.6.2).
+              name: ReplyTo
               type: "[]AddressValue"
-            - name: To
+            - doc: To is the primary recipient list (RFC 5322 §3.6.3).
+              name: To
               type: "[]AddressValue"
-            - name: Cc
+            - doc: Cc is the carbon-copy recipient list (RFC 5322 §3.6.3).
+              name: Cc
               type: "[]AddressValue"
-            - name: Bcc
+            - doc: |-
+                Bcc is the blind carbon-copy list. It reaches the ENVELOPE — the
+                [EnvelopeValue] internal/service/app/mail derives — and never a header.
+              name: Bcc
               type: "[]AddressValue"
-            - name: Headers
+            - doc: |-
+                Headers are additional fields, emitted in slice order so a composed
+                message is byte-deterministic. A name the composer owns is
+                [ReservedHeader].
+              name: Headers
               type: "[]HeaderFieldValue"
-            - name: Text
+            - doc: Text is the text/plain body.
+              name: Text
               type: string
-            - name: HTML
+            - doc: |-
+                HTML is the text/html body. With Text it becomes a multipart/alternative
+                in which the plain part comes FIRST — RFC 2046 §5.1.4 orders alternatives
+                by increasing preference, so the last one is the one a client shows.
+              name: HTML
               type: string
-            - name: Attachments
+            - doc: |-
+                Attachments are the file parts. One carrying a ContentID is INLINE and is
+                referenced from the HTML body as cid:<ContentID> (RFC 2392 §2).
+              name: Attachments
               type: "[]AttachmentValue"
-      - name: DeliveryValue
+      - doc: |-
+          DeliveryValue is one record of what a transport actually put on the wire.
+
+          It carries the composed BYTES and not the message, because those are two
+          different assertions. A test that checks the message checks what it itself
+          built a moment earlier; a test that checks Raw checks what the composer
+          produced — the encoded subject, the multipart structure, the absence of a
+          Bcc header — which is the only half that can be wrong.
+        name: DeliveryValue
         struct:
           fields:
-            - name: Envelope
+            - doc: Envelope is the MAIL FROM and the RCPT TO list the session would issue.
+              name: Envelope
               type: EnvelopeValue
-            - name: Raw
+            - doc: |-
+                Raw is the RFC 5322 message: headers, blank line, MIME body, CRLF line
+                endings throughout.
+              name: Raw
               type: "[]byte"
-      - name: EnvelopeValue
+      - doc: |-
+          EnvelopeValue is what an SMTP session actually carries: one MAIL FROM and one
+          or more RCPT TO (RFC 5321 §3.3). It is NOT the header block, and the
+          difference is the whole reason this type exists.
+
+          A receiving MTA routes on the envelope and never on the headers. To, Cc and
+          Bcc are text a client renders; the envelope is the delivery instruction. They
+          agree by convention and not by protocol, which is how a Bcc can exist at all
+          — and how a forwarding rule can deliver a message to somebody who appears in
+          no header.
+        name: EnvelopeValue
         struct:
           fields:
-            - name: From
+            - doc: |-
+                From is the return path (RFC 5321 §4.1.1.2): where a bounce goes. It is
+                the message's From addr-spec.
+              name: From
               type: string
-            - name: To
+            - doc: |-
+                To is every RCPT TO the session will issue, in To, Cc, Bcc order. Bcc
+                recipients appear HERE and in no header.
+              name: To
               type: "[]string"
   - constants:
-      - name: DefaultCaptureKeep
+      - doc: |-
+          DefaultCaptureKeep is how many deliveries [NewCapture] keeps when it is
+          given a non-positive number: enough for a person to scroll a mailbox, and a
+          bound on the memory a development server holds for mail nobody will read.
+        name: DefaultCaptureKeep
         type: int
         value: "200"
-      - name: TLSUnset
+      - doc: TLSUnset is the zero value and is refused at construction.
+        name: TLSUnset
         type: TLSMode
         value: "0"
-      - name: TLSStartTLS
+      - doc: |-
+          TLSStartTLS connects in the clear, sends EHLO, and REQUIRES the server
+          to advertise STARTTLS (RFC 3207). A server that does not is refused with
+          [coremail.TLSRequired] — the session is never continued unencrypted. This is the
+          submission port 587 shape.
+        name: TLSStartTLS
         type: TLSMode
         value: "1"
-      - name: TLSImplicit
+      - doc: |-
+          TLSImplicit negotiates TLS before the SMTP greeting, which RFC 8314 §3.3
+          recommends over STARTTLS because there is no plaintext phase for an
+          attacker to interfere with. This is the submissions port 465 shape.
+        name: TLSImplicit
         type: TLSMode
         value: "2"
-      - name: TLSDisabled
+      - doc: |-
+          TLSDisabled sends everything in the clear, and must be spelled out loud.
+          It exists for a relay on a loopback or a private segment where TLS is
+          somebody else's layer. Credentials are REFUSED with it at construction:
+          there is no combination of settings in this package that sends a
+          password over an unencrypted socket.
+        name: TLSDisabled
         type: TLSMode
         value: "3"
+    doc: |-
+      Package mail — the addr-spec subset this domain accepts, and the display-name
+      rule the composer depends on.
+
+      Package mail — the attachment guards.
+
+      Package mail — the composition helpers: media types, part construction, and
+      the size estimate that keeps the output buffer to one allocation.
+
+      Package mail — the composer: a message value in, RFC 5322 wire bytes out.
+
+      Package mail — the composer's optional wiring.
+
+      Package mail — the per-message build state, and the MIME structure it
+      assembles.
+
+      Package mail — the MIME entity tree and the writer that renders it.
+
+      The renderer emits the multipart delimiters itself rather than using
+      mime/multipart.Writer, and the reason is one measured line of that package:
+      Writer.CreatePart formats header values VERBATIM, so a Content-Disposition
+      carrying "a\r\nBcc: x@y" is emitted with the injected header intact. Every
+      header written here goes through writeHeader, which runs the injection gate
+      at the point of writing.
+
+      The parser is the standard library's and always will be — mime/multipart's
+      Reader is what the tests reparse composed messages with, because a test that
+      decodes with the same code that encoded preserves exactly the bug it exists
+      to catch.
+
+      Package mail — the SMTP envelope, derived from a message after validating it.
+
+      Package mail — the one helper through which this package raises a sentinel
+      over a cause. The domain's codes and sentinels — the message refusals, and
+      the outcomes of composition and of the SMTP session — are declared in
+      internal/core/app/mail (ADR 0160).
+
+      Package mail — the header grammar, and the injection gate every writer in
+      this domain runs before a byte reaches a buffer.
+
+      Package mail — RFC 2047 encoding and RFC 5322 folding for header lines.
+
+      Package mail — the fixed-width line breaker every base64 body streams
+      through.
+
+      Package mail — the in-memory transport, which is a DOUBLE and not a stub.
+
+      Package mail — one open SMTP conversation.
+
+      Package mail — the SMTP transport.
+
+      It is built ON net/smtp and does not reimplement RFC 5321. The package is
+      FROZEN upstream — its own documentation says "The smtp package is frozen and
+      is not accepting new features" — which is a statement about features and not
+      about maintenance: it still receives security fixes, and the protocol it
+      implements has not gained a feature this domain wants since RFC 3207.
+
+      What this package therefore commits to maintaining is the POLICY above it,
+      which is where every decision that matters lives: that a required STARTTLS
+      is refused rather than downgraded, that credentials never travel over an
+      unencrypted session, that the verified TLS name is set (net/smtp does not set
+      it), and that a context actually stops a send (net/smtp has no context at
+      all). If net/smtp is ever deprecated rather than frozen, the client is
+      replaced here and [coremail.Transport] does not change — which is the reason
+      the port has one method and no session on it.
+
+      Package mail — compile-time port conformance for the two transports.
+
+      These assertions live apart from the implementations because a failure here
+      is a statement about the PORT, not about a function.
+
+      Package mail — the SMTP transport's configuration, and its zero value.
+
+      Package mail — how an SMTPConfig renders: every rendering the password could
+      leak through writes the placeholder instead.
+
+      Package mail — reading an SMTP URL into an SMTPConfig.
+
+      Package mail — the one whole-message guard both transports run.
     functions:
-      - in:
+      - doc: |-
+          ValidateAddress reports whether a is a mailbox this domain will carry, and
+          returns a typed refusal naming field — "From", "To[1]", "Cc[0]" — when it is
+          not.
+
+          The accepted grammar is a deliberate SUBSET of RFC 5322 §3.4.1: an ASCII
+          dot-atom local part, one "@", and an ASCII dot-atom domain, inside the
+          RFC 5321 §4.5.3.1 length limits. Two legal forms are refused BY NAME rather
+          than mangled:
+
+            - A quoted local part (`"john doe"@example.com`) is legal RFC 5322 and is
+              refused, because quoting and unquoting it correctly through a display
+              name, an envelope and a log line is four chances to get it wrong for a
+              form essentially nobody uses.
+            - A non-ASCII addr-spec (RFC 6531 SMTPUTF8) is refused because SMTPUTF8
+              must be negotiated with the server and net/smtp does not negotiate it.
+              The alternatives are worse than a refusal: punycoding the domain or
+              stripping accents from the local part both produce an address that
+              delivers, to somebody else.
+        in:
           - name: field
             type: string
           - name: a
@@ -692,19 +1133,47 @@ packages:
         name: ValidateAddress
         out:
           - type: error
-      - in:
+      - doc: |-
+          IsDotAtom reports whether s is an RFC 5322 §3.2.3 dot-atom-text: one or more
+          atoms of atext separated by single dots, with no leading, trailing or
+          doubled dot. atext is printable ASCII that is neither a special nor a space,
+          so a CR, an LF, a NUL, a non-ASCII byte and an invalid UTF-8 sequence all
+          fall outside it.
+
+          It is exported because the grammar is not the address's alone: the left
+          half of a Message-ID (RFC 5322 §3.6.4, id-left) is written in it too, and the
+          spool, which builds one from an identifier, checks the identifier here — the
+          grammar's one home (ADR 0141, ADR 0160).
+        in:
           - name: s
             type: string
         name: IsDotAtom
         out:
           - type: bool
-      - in:
+      - doc: |-
+          NeedsQuotedDisplayName reports whether name must be emitted as an RFC 5322
+          §3.2.4 quoted-string rather than as a bare sequence of atoms.
+
+          It is a property of the GRAMMAR, not of the writer, so it sits with the
+          address guards rather than inside the composer. Getting it wrong is the
+          classic address bug: an unquoted "Doe, John" makes the comma a list
+          separator, so a message to one person is parsed as a message to two, one of
+          which is not an address at all.
+        in:
           - name: name
             type: string
         name: NeedsQuotedDisplayName
         out:
           - type: bool
-      - in:
+      - doc: |-
+          ValidateAttachment reports whether a can be composed into a body part, and
+          returns [coremail.InvalidAttachment] naming the position when it cannot.
+
+          The filename faces the injection gate like any other header value, because
+          it lands in Content-Disposition. mime.FormatMediaType would silently
+          percent-escape a CRLF there — the same "repair the caller never hears about"
+          this domain refuses everywhere else.
+        in:
           - name: field
             type: string
           - name: a
@@ -712,13 +1181,30 @@ packages:
         name: ValidateAttachment
         out:
           - type: error
-      - in:
+      - doc: NewComposer returns a composer wired from cfg.
+        in:
           - name: cfg
             type: ComposerConfig
         name: NewComposer
         out:
           - type: "*Composer"
-      - in:
+      - doc: |-
+          Envelope derives the SMTP envelope from the message, after validating it.
+
+          Bcc is the point. RFC 5322 §3.6.3 describes three permissible treatments of
+          a Bcc field, and this domain takes the one that cannot leak: the addresses
+          reach RCPT TO and the header is never written. The other two — sending each
+          Bcc recipient their own copy carrying only their own Bcc line, or sending the
+          header intact to everyone — are either N messages the caller did not ask for
+          or a disclosure RFC 5321 §7.2 warns about explicitly.
+
+          The recipient order is To, then Cc, then Bcc, and it is deterministic so a
+          test can assert on it. Duplicates are NOT removed: an address listed in both
+          To and Cc is two RCPT TO commands, which every MTA collapses into one
+          delivery, and removing them here would mean deciding that two addresses that
+          differ only in case are the same mailbox — a judgement only the receiving
+          domain is entitled to make.
+        in:
           - name: m
             type: coremail.MessageValue
         name: Envelope
@@ -727,41 +1213,116 @@ packages:
             type: coremail.EnvelopeValue
           - name: err
             type: error
-      - in:
+      - doc: |-
+          IsReservedHeader reports whether name is a field the composer emits itself,
+          comparing case-insensitively, as RFC 5322 requires of a field name.
+        in:
           - name: name
             type: string
         name: IsReservedHeader
         out:
           - type: bool
-      - in:
+      - doc: |-
+          ValidateHeaderName reports whether name is a usable field name and returns a
+          typed refusal when it is not.
+
+          RFC 5322 §3.6.8 defines a field name as one or more printable US-ASCII
+          characters other than the colon. Anything else — a space, a control byte, a
+          non-ASCII rune, an embedded colon — would produce a line no receiver parses
+          as the caller intended, and an embedded CRLF would produce two fields.
+        in:
           - name: name
             type: string
         name: ValidateHeaderName
         out:
           - type: error
-      - in:
+      - doc: |-
+          ValidateHeaderValue reports whether value may be emitted under the field
+          called name, and returns [coremail.HeaderInjection] when it may not.
+
+          This is the gate the whole domain rests on. A header field ends at CRLF
+          (RFC 5322 §2.2), so a CR or an LF inside a value does not corrupt the field
+          — it TERMINATES it, and every octet after it becomes new header lines. A
+          subject of "Hi\r\nBcc: attacker@example.com" is not a malformed subject; it
+          is a well-formed subject followed by a well-formed blind-copy field, and the
+          message is delivered to a party the sender never saw.
+
+          A bare CR and a bare LF are refused as well as the pair, because receivers
+          disagree about them — some normalise a lone LF to CRLF, which reconstructs
+          the attack downstream from an input that looked survivable here.
+
+          The refusal names the FIELD and never the value. The value is, by
+          construction, the string an attacker chose, and a Public message travels
+          places the SDK does not control.
+        in:
           - name: name
           - name: value
             type: string
         name: ValidateHeaderValue
         out:
           - type: error
-      - in:
+      - doc: |-
+          ValidateHeader runs [ValidateHeaderName] and [ValidateHeaderValue] over one
+          caller-supplied field and refuses a name the composer owns.
+        in:
           - name: field
             type: coremail.HeaderFieldValue
         name: ValidateHeader
         out:
           - type: error
-      - name: NewMemory
+      - doc: |-
+          NewMemory returns a transport that composes every message and keeps the
+          result instead of dialling anything.
+
+          It COMPOSES, and that is the whole design. A stub that recorded the Message
+          value would accept a subject carrying a CRLF, an inline attachment with no
+          body, a Bcc the caller expected in a header — every refusal the SMTP
+          transport makes, made nowhere — and a consumer's test suite would pass right
+          up until production. Because this transport runs the same composer, a message
+          refused in production is refused in the test that was supposed to catch it,
+          with the same typed error.
+
+          It takes no arguments for the same reason core/data/vfs.NewMem does: every knob it
+          could offer is one a consumer's test must set before it can assert anything,
+          and the value of a double is that it costs one line.
+
+          Safe for concurrent use.
+        name: NewMemory
         out:
           - type: coremail.FullTransport
-      - in:
+      - doc: |-
+          NewCapture returns the transport a development server and a test deliver
+          through: NewMemory's double — it composes every message, refuses what SMTP
+          refuses, dials nothing — keeping only the last keep deliveries, the oldest
+          dropped first. Sent reads them, raw bytes included, for a mailbox to show or
+          a test to read a link from; Reset empties it.
+
+          NewMemory keeps everything, which is what a test that sends three messages
+          wants; a server that runs for days and captures every mail it would have
+          sent needs a bound. A non-positive keep is [DefaultCaptureKeep]: its zero
+          has one reading, "I did not think about it", and a mailbox of the last two
+          hundred is the answer that needs no explanation (ADR 0031).
+        in:
           - name: keep
             type: int
         name: NewCapture
         out:
           - type: coremail.FullTransport
-      - in:
+      - doc: |-
+          NewSMTP returns a transport that delivers over SMTP, refusing at
+          CONSTRUCTION any configuration it could not honour.
+
+          Construction-time refusal is the point. A transport whose TLS mode is unset,
+          or that carries a password it may not send, is a misconfiguration whose
+          symptom would otherwise be a failed send at three in the morning — while the
+          fix is one line in the wiring, where this error is raised.
+
+          It deliberately holds NO pooled connection. An SMTP session is stateful, a
+          pooled one must be revalidated with a NOOP before every reuse (a server may
+          have closed it minutes ago and the socket will not say so until a write
+          fails), and the caller that wants one session for many messages already has
+          a supported way to ask: [coremail.BatchSender].
+        in:
           - name: cfg
             type: SMTPConfig
         name: NewSMTP
@@ -770,7 +1331,30 @@ packages:
             type: coremail.Transport
           - name: err
             type: error
-      - in:
+      - doc: |-
+          ParseURL reads an SMTP URL into an SMTPConfig that [NewSMTP] accepts:
+
+          	smtp://user:password@host:587?tls=starttls|implicit|none
+          	smtps://user:password@host:465
+
+          The scheme sets the default mode — smtp:// is STARTTLS, the direction that
+          fails loudly (TLS_REQUIRED) against a server that cannot encrypt rather than
+          sending in the clear; smtps:// is implicit TLS — and the tls parameter
+          overrides it, except that smtps:// may only repeat "implicit": a URL that
+          says both is a contradiction, refused rather than resolved. A plaintext
+          session must be spelled tls=none. The port defaults by mode (587, 465, 25)
+          and must be 1–65535. The userinfo is optional and percent-decoded, so a
+          password with reserved characters is written %40 for "@".
+
+          The result is checked exactly as NewSMTP checks a configuration, so a URL
+          with credentials and tls=none fails here with [coremail.AuthInsecure] rather than at
+          construction. On any failure it returns the zero SMTPConfig.
+
+          A refusal is [coremail.InvalidURL] with a clause, and it NEVER quotes the URL or any
+          part of it — the userinfo is the password, and a URL that failed to parse is
+          the one whose parts are not where they should be. url.Parse's own message
+          quotes its input and is therefore dropped.
+        in:
           - name: raw
             type: string
         name: ParseURL
@@ -779,7 +1363,22 @@ packages:
             type: SMTPConfig
           - name: err
             type: error
-      - in:
+      - doc: |-
+          Validate reports whether m can be composed and sent, and returns the first
+          typed refusal it finds.
+
+          It is the one guard BOTH transports run, and that is what makes the
+          in-memory one a faithful double: a message the SMTP transport would refuse is
+          refused identically by the memory transport, in a test, before anybody
+          deploys. It is exported because the spool runs it at Send, and the facade
+          publishes it for a caller that refuses a message at the edge.
+
+          It stops at the FIRST problem rather than collecting every one. That is the
+          opposite of what the validation domain does (ADR 0046) and it is deliberate:
+          a validation report describes a form a human will fix field by field, while
+          this is a security gate, and a gate that keeps evaluating a message it has
+          already decided to refuse is a gate doing work an attacker chose for it.
+        in:
           - name: m
             type: coremail.MessageValue
         name: Validate
@@ -791,8 +1390,35 @@ packages:
       corenet: github.com/kitsunium/sdk/internal/core/net
     path: github.com/kitsunium/sdk/internal/service/app/mail
     types:
-      - methods:
-          - in:
+      - doc: |-
+          Composer turns a [coremail.MessageValue] into the wire bytes a transport
+          sends. It is safe for concurrent use and holds no state between messages.
+        methods:
+          - doc: |-
+              Compose validates msg and renders it as one RFC 5322 message: the header
+              block, an empty line, and the MIME body.
+
+              The MIME structure is a pure function of which fields are populated, and
+              picking it wrongly is how a message renders as raw HTML in one client and as
+              an empty body in another:
+
+              	text only                      → text/plain
+              	HTML only                      → text/html
+              	text + HTML                    → multipart/alternative(plain, html)
+              	body + inline parts            → multipart/related(body, inline…)
+              	body + attachments             → multipart/mixed(body, attachment…)
+              	body + inline + attachments    → multipart/mixed(multipart/related(…), attachment…)
+
+              No container is emitted for a single child. A multipart/alternative with one
+              alternative and a multipart/mixed with one part are both legal and both are
+              noise, and the second one makes some clients show a paperclip on a message
+              with no attachment.
+
+              Inside multipart/alternative the PLAIN part comes first. RFC 2046 §5.1.4
+              orders alternatives "in increasing order of preference" and tells a receiver
+              to display the last one it understands — so a composer that writes HTML
+              first has just asked every client to show the plain text.
+            in:
               - name: msg
                 type: coremail.MessageValue
             name: Compose
@@ -805,37 +1431,90 @@ packages:
         name: Composer
         struct:
           unexported: true
-      - name: ComposerConfig
+      - doc: |-
+          ComposerConfig configures a [Composer].
+
+          Both fields are optional and both CLAMP rather than refuse, because unlike a
+          TLS mode there is exactly one defensible value for each (ADR 0031's clamping
+          half): the system clock, and crypto/rand.
+        name: ComposerConfig
         struct:
           fields:
-            - name: Clock
+            - doc: |-
+                Clock supplies the Date header for a message that carries no explicit
+                one. Nil selects the system clock; a ManualClock makes composition
+                byte-deterministic, which is what the golden tests use.
+              name: Clock
               type: clock.Clock
-            - name: Rand
+            - doc: |-
+                Rand supplies the randomness behind multipart boundaries. Nil selects
+                crypto/rand.
+              name: Rand
               type: io.Reader
-      - methods:
-          - name: String
+      - doc: |-
+          TLSMode selects how the session is encrypted. Its ZERO VALUE IS REFUSED.
+
+          That refusal is the security decision of this package. Every other choice
+          would be wrong for somebody: defaulting to encryption breaks the caller
+          pointing at a plaintext relay inside a private network, and defaulting to
+          none ships every other caller's credentials in the clear. ADR 0031 admits a
+          clamp where one value needs no explanation and demands a refusal where any
+          SDK-chosen value would be arbitrary; this is unambiguously the second.
+
+          There is deliberately NO opportunistic mode — "encrypt if the server offers
+          it, continue in the clear if it does not". It is the shape most mail
+          libraries ship and it means an active attacker who strips one line from the
+          EHLO response reads the whole session, credentials included, while the
+          sender's logs show a successful delivery. It cannot be configured here
+          because it is not implemented, not because it is off by default.
+        methods:
+          - doc: String renders the mode for a log or an error field.
+            name: String
             out:
               - type: string
             recv: value
         name: TLSMode
         underlying: uint8
-      - methods:
-          - name: String
+      - doc: |-
+          SMTPConfig configures the SMTP transport.
+
+          Everything refusable about it is refused by [NewSMTP] at CONSTRUCTION rather
+          than at send time: an unset TLS mode, a port outside the protocol's range, or
+          credentials the transport would have to send in the clear. The fix for each
+          is one line in the wiring, which is where the error is raised.
+        methods:
+          - doc: |-
+              String renders the configuration with field names and the password
+              redacted — the %+v form.
+            name: String
             out:
               - type: string
             recv: value
-          - name: GoString
+          - doc: |-
+              GoString renders the configuration in Go syntax with the password redacted,
+              named as the type it is.
+            name: GoString
             out:
               - type: string
             recv: value
-          - in:
+          - doc: |-
+              Format implements fmt.Formatter, so EVERY verb — %v, %+v, %#v, %s, %q, %x —
+              formats the redacted view with the flags and width it was given. Without it,
+              %+v of an SMTPConfig printed the password: String and GoString are consulted
+              by only some verbs, and a struct with neither prints every field.
+            in:
               - name: state
                 type: fmt.State
               - name: verb
                 type: rune
             name: Format
             recv: value
-          - name: MarshalJSON
+          - doc: |-
+              MarshalJSON implements json.Marshaler with the password redacted, so a
+              configuration dumped as JSON — a --show-config flag, a diagnostics page —
+              does not carry it. The shape is otherwise the one encoding/json produced
+              before this method existed: the same field names, the same types.
+            name: MarshalJSON
             out:
               - name: encoded
                 type: "[]byte"
@@ -845,23 +1524,197 @@ packages:
         name: SMTPConfig
         struct:
           fields:
-            - name: Host
+            - doc: |-
+                Host is the server's name. It is also the name TLS verifies the
+                certificate against, and the name EHLO is answered by — so it is not
+                interchangeable with an IP address.
+              name: Host
               type: string
-            - name: Port
+            - doc: |-
+                Port is the TCP port: 587 for submission with STARTTLS, 465 for
+                submissions with implicit TLS (RFC 8314 §3.1), 25 for a relay.
+              name: Port
               type: int
-            - name: TLS
+            - doc: TLS selects the encryption mode. The zero value is refused.
+              name: TLS
               type: TLSMode
-            - name: Identity
+            - doc: |-
+                Identity carries the trust anchors, the client certificate for mutual
+                TLS, and the minimum protocol version. It is core/net's opaque identity,
+                reused rather than twinned: a mail server's TLS is the same TLS every
+                other outbound connection in this SDK uses, and a second configuration
+                type would be a second place for a minimum version to be wrong.
+
+                Its zero value is usable and means "the platform trust store, TLS 1.3
+                minimum". [SMTPConfig.Host] is used as the verified name when the
+                identity names none.
+              name: Identity
               type: corenet.IdentityValue
-            - name: Username
+            - doc: |-
+                Username is the SASL authentication identity. Empty means no AUTH
+                command is issued at all.
+              name: Username
               type: string
-            - name: Password
+            - doc: |-
+                Password is the secret for Username. It never appears in an error, a
+                field or a log line emitted by this package.
+              name: Password
               type: string
-            - name: LocalName
+            - doc: |-
+                LocalName is the domain given in EHLO. Empty selects "localhost", which
+                is what net/smtp uses and what a submission server ignores.
+              name: LocalName
               type: string
-            - name: DialTimeout
+            - doc: |-
+                DialTimeout bounds the TCP connection. Non-positive clamps to
+                [defaultDialTimeout]; a shorter context deadline still wins.
+              name: DialTimeout
               type: time.Duration
-  - facade:
+  - doc: |-
+      Package mail is the public facade for the SDK's electronic-mail domain:
+      build a message as a value, and hand it to a transport that refuses to lie
+      about what it sent.
+
+      	transport, err := mail.NewSMTP(mail.SMTPConfig{
+      		Host: "smtp.example.com",
+      		Port: 587,
+      		TLS:  mail.TLSStartTLS, // the zero value is refused, on purpose
+      		Username: "postmaster@example.com",
+      		Password: secret,
+      	})
+      	if err != nil {
+      		return err
+      	}
+
+      	err = transport.Send(ctx, mail.Message{
+      		From:    mail.Address{Name: "Ops", Addr: "ops@example.com"},
+      		To:      []mail.Address{{Addr: "user@example.net"}},
+      		Bcc:     []mail.Address{{Addr: "audit@example.com"}}, // envelope only
+      		Subject: "Réunion à 9h",                              // encoded per RFC 2047
+      		Text:    "Bonjour,",
+      		HTML:    "<p>Bonjour,</p>",                           // → multipart/alternative
+      	})
+
+      # Header injection is refused, never repaired
+
+      A header field ends at CRLF (RFC 5322 §2.2). So a carriage return inside a
+      subject, a display name or a filename does not corrupt that field — it ENDS
+      it, and everything after it becomes headers the caller never wrote. "Bcc:
+      attacker@example.com" is one of them, and the message is then delivered to
+      somebody the sender cannot see in what it composed.
+
+      This package REFUSES such a value with [HeaderInjection]. It does not clean
+      it up, and the reason is that the standard library will: mime.QEncoding
+      turns the CRLF into "=0D=0A", mime.FormatMediaType percent-escapes it, and
+      net/mail.Address.String() passes it through untouched inside the address. Two
+      of those produce a message that is not the one the caller wrote while
+      reporting success, and the third produces the injection itself.
+
+      The error names the FIELD and never the value — the value is by construction
+      the string an attacker chose, and a Public message travels to strangers. The
+      diagnosis lives in the log-only fields.
+
+      # Bcc reaches the envelope and never a header
+
+      RFC 5322 §3.6.3 permits three treatments of a Bcc field. This package takes
+      the only one that cannot leak: the addresses become RCPT TO commands and no
+      header names them. [EnvelopeOf] is where that happens, and the composed
+      bytes are asserted not to contain a blind recipient.
+
+      # The MIME structure follows from the fields
+
+      	text only                    → text/plain
+      	HTML only                    → text/html
+      	text + HTML                  → multipart/alternative(plain, html)
+      	body + inline parts          → multipart/related(body, inline…)
+      	body + attachments           → multipart/mixed(body, attachment…)
+      	body + inline + attachments  → multipart/mixed(multipart/related(…), attachment…)
+
+      An [Attachment] carrying a ContentID is inline and referenceable from the
+      HTML as cid:<ContentID> (RFC 2392 §2); one without is a file. Inside
+      multipart/alternative the plain part comes FIRST, because RFC 2046 §5.1.4
+      orders alternatives by increasing preference — writing HTML first asks every
+      client to display the plain text.
+
+      # TLS is a decision, and its zero value is refused
+
+      [SMTPConfig].TLS has no default. Choosing encryption silently would break
+      every caller pointing at a plaintext relay on a private segment; choosing
+      none silently would ship everyone else's credentials in the clear. So the
+      zero value returns [InvalidConfig] at construction and the caller writes
+      [TLSStartTLS], [TLSImplicit] or [TLSDisabled].
+
+      There is deliberately no opportunistic mode. A transport that encrypts when
+      the server offers it and continues in the clear when it does not is one
+      stripped EHLO line away from handing an attacker the whole session — so a
+      server that does not advertise STARTTLS gets [TLSRequired] and no message.
+
+      Credentials never travel unencrypted. [TLSDisabled] with a Username is
+      refused at construction, and an unencrypted session is refused again before
+      the AUTH command — which is not redundant, because net/smtp's own PlainAuth
+      sends the password in the clear whenever the server is called localhost, and
+      in a container that is every relay one hop away.
+
+      # A configuration from one URL, and a password nothing prints
+
+      [ParseURL] reads the form a deployment hands over in one variable:
+
+      	cfg, err := mail.ParseURL(os.Getenv("SMTP_URL"))
+      	// smtp://user:pass@relay.example:587?tls=starttls|implicit|none
+      	// smtps://user:pass@relay.example        (implicit TLS, port 465)
+
+      smtp:// is STARTTLS unless the tls parameter says otherwise, smtps:// is
+      implicit TLS and may only say so again, and a plaintext session is spelled
+      tls=none. The port defaults by mode (587, 465, 25). The result is checked as
+      [NewSMTP] checks it, so credentials with tls=none fail here with
+      [AuthInsecure]. A refusal is [InvalidURL] with a clause, and it never quotes
+      the URL — its userinfo is the password.
+
+      An [SMTPConfig] never renders its password: every fmt verb (it implements
+      Format), String, GoString and its JSON write "<redacted>" where the password
+      is, and the empty string where none is set.
+
+      # What this package does NOT promise
+
+      A nil error from [Transport].Send means the next hop ACCEPTED the message.
+      It is not delivery: SMTP accepts responsibility hop by hop (RFC 5321 §6.1),
+      and the hop that eventually refuses says so in a bounce, hours later, to the
+      envelope's return path.
+
+      It is not deliverability either. Whether a message reaches an inbox rather
+      than a spam folder depends on SPF, DKIM and DMARC — records in DNS and a
+      signing key — which are infrastructure decisions with an operational
+      lifetime, not a library call. This package signs nothing and will not
+      pretend the absence of a signature is a detail.
+
+      And it is not rendering. Whether a client displays the HTML, the plain text,
+      or an inline image at all is that client's decision; what this package
+      guarantees is that the structure is the one the RFCs prescribe for the
+      content supplied.
+
+      # A durable outbox
+
+      A transport sends once, synchronously, and a relay that is down makes that
+      the caller's problem. The outbox that retries on a backoff, dead-letters
+      with the last failure and keeps a Message-ID stable across retries is
+      package [github.com/kitsunium/sdk/pkg/v1/app/mail/spool]: it stands on the
+      queue domain, so a program that only composes and sends links none of it.
+
+      # Testing
+
+      [NewMemory] returns a transport that COMPOSES every message and records the
+      bytes instead of dialling. It is a double rather than a stub: it runs the
+      same composer and the same guards, so a message production would refuse is
+      refused in the test that exists to catch it.
+
+      	box := mail.NewMemory()
+      	_ = service.Notify(ctx, box)      // the code under test
+      	sent := box.Sent()                // envelope + composed the RFC 5322 wire form
+
+      [NewCapture] is the same double keeping only the last N deliveries — the
+      transport a development server delivers through, where NewMemory would keep
+      every mail for as long as the server runs.
+    facade:
       - const:
           - doc: |-
               TLSUnset is the zero value and is refused at construction — neither
@@ -1213,7 +2066,10 @@ packages:
             - name: err
               type: error
     functions:
-      - in:
+      - doc: |-
+          Compose renders msg to the RFC 5322 wire form using the system clock and
+          crypto/rand. It is the one-line form of [NewComposer].
+        in:
           - name: msg
             type: Message
         name: Compose

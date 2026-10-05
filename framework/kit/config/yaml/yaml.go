@@ -1,5 +1,3 @@
-//go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /framework/kit/config/yaml .
-
 // Package yaml lets a kit product read YAML configuration files —
 // config/config.yaml, config/<env>.yaml, and .yml — as it reads JSON ones.
 // kit reads JSON itself; importing this package is the whole of what a

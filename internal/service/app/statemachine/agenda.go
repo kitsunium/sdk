@@ -1,6 +1,3 @@
-// Package statemachine — hosts the agenda: when each entity's next automatic
-// transition falls due, the entities written since the loop last looked, and
-// the backoff of those whose transition failed.
 package statemachine
 
 import (

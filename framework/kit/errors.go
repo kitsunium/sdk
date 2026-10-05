@@ -1,5 +1,3 @@
-// Package kit — the errors a product returns to its callers, and their wire
-// mapping.
 package kit
 
 import (

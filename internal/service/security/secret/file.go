@@ -1,6 +1,3 @@
-// Package secret — the file store: a directory the store owns, one record per
-// secret published atomically through vfs, writers serialised across
-// processes through the lock domain, and optional sealing at rest.
 package secret
 
 import (

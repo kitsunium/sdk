@@ -1,15 +1,3 @@
-// Package view — the one helper through which every core/app/view sentinel is
-// raised. The domain's codes and sentinels — the port's, and this engine's
-// construction failures — are declared in internal/core/app/view (ADR 0160).
-//
-// No Public string the engine raises names a template, a path, a line or a
-// fragment of template source. html/template's diagnostics are unusually rich
-// — a parse failure carries the file path and the offending function name, an
-// escaping failure carries the escaper's internal state machine, and an
-// execution failure carries the path, the line, the column, a fragment of the
-// template's own source and a Go type name. Every one of those is useful to an
-// operator and every one of them is reconnaissance to a stranger, so all of it
-// travels as Fields and Private and none of it reaches a Public.
 package view
 
 import (

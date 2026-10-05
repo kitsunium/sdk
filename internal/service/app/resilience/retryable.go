@@ -1,4 +1,3 @@
-// Package resilience — shared retryable-error classification helper.
 package resilience
 
 // isRetryable reports whether err is a transient failure the policy may act on

@@ -1,5 +1,3 @@
-//go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /framework/kit/studio .
-
 // Package studio serves, in dev, the read-only API the kit tool's Studio
 // reads: the graph and its event stream, traces, instances and items, the
 // source, the dev tools — the process, the databases, goroutines, the heap

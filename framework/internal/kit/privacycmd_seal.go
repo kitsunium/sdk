@@ -1,4 +1,3 @@
-// Package kit — `privacy seal`: a whole store sealed now.
 package kit
 
 import (

@@ -1,5 +1,3 @@
-// Package kit — commands: an operation that changes something, with one
-// handler.
 package kit
 
 import (

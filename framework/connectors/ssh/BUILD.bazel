@@ -13,6 +13,7 @@ go_library(
     srcs = [
         "codes_gen.go",
         "discover.go",
+        "doc.go",
         "enroll.go",
         "errors.go",
         "key.go",

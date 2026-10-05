@@ -1,8 +1,3 @@
-// Package crypto — the registrar every scheme registry shares (AEAD, Hasher,
-// Signer, MAC, Deriver, Agreement, PasswordHasher, StreamSealer). The table
-// under each one is the kernel's (kernel/plugin.Registry, ADR 0159); what this
-// file adds is the crypto domain's refusal — the code, the reason and the
-// fields a conflict panics with — written once instead of once per capability.
 package crypto
 
 import (

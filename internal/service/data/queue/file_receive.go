@@ -1,5 +1,3 @@
-// Package queue — the durable broker's read path: reclaiming the leases of
-// consumers that died, and leasing what is visible.
 package queue
 
 import (

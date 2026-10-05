@@ -1,7 +1,3 @@
-// Package crypto — declares the sentinels returned by the AEAD facade. Each
-// var's name equals its errs.Define Reason in SCREAMING_SNAKE form.
-// DuplicateRegistration is never returned: every registrar panics at boot with
-// conflictText of it (see registry_generic.go and registry.go).
 package crypto
 
 import (

@@ -1,4 +1,3 @@
-// Package i18n — a message compiled from the text a translator wrote.
 package i18n
 
 import (

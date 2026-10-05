@@ -1,4 +1,3 @@
-// Package net — shared sentinel-wrapping helper.
 package net
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

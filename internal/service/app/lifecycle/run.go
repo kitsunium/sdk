@@ -1,5 +1,3 @@
-// Package lifecycle — hosts Run, the opt-in wiring between a Lifecycle and
-// the process supervision the SDK already implements.
 package lifecycle
 
 import (

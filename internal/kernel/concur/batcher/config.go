@@ -1,10 +1,3 @@
-// Package batcher — range 0.1.5.* (ADR 0014 kernel/concur/batcher block).
-//
-// Package batcher — the Config value type, in its own file per the
-// one-exported-struct-per-file convention.
-//
-// Package batcher — declares the sentinels returned by the Batcher operations.
-// Each var's name equals its errs.Define Reason in SCREAMING_SNAKE form.
 package batcher
 
 import (

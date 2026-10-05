@@ -1,5 +1,3 @@
-// Package jsonshape — which methods make encoding/json hand a type's encoding
-// over to the type itself.
 package jsonshape
 
 import (

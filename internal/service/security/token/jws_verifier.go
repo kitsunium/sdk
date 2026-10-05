@@ -1,4 +1,3 @@
-// Package token — the single-key JWS compact verifier.
 package token
 
 import coretoken "github.com/kitsunium/sdk/internal/core/security/token"

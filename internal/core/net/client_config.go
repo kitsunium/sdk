@@ -1,4 +1,3 @@
-// Package net — the outbound client configuration.
 package net
 
 // ClientConfig describes an outbound client. Durations use DurationValue so a

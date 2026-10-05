@@ -1,5 +1,3 @@
-// Package strictjson — the reader that bounds a document and remembers why
-// it stopped.
 package strictjson
 
 import (

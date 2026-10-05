@@ -1,4 +1,3 @@
-// Package vfs — one entry in the in-memory tree.
 package vfs
 
 import "io/fs"

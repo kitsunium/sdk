@@ -6,6 +6,7 @@ go_library(
     name = "id",
     srcs = [
         "common.go",
+        "doc.go",
         "ksuid.go",
         "nanoid.go",
         "snowflake.go",

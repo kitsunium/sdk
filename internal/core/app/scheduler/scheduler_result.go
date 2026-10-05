@@ -1,4 +1,3 @@
-// Package scheduler — hosts ResultValue, the record of one scheduling decision.
 package scheduler
 
 import "time"

@@ -1,4 +1,3 @@
-// Package trace — the sampling port.
 package trace
 
 // Sampler decides whether a span is recorded and exported. It reports true to

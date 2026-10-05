@@ -11,6 +11,7 @@ go_library(
         "consent.go",
         "consent_product.go",
         "diagnose.go",
+        "doc.go",
         "elevation.go",
         "errors.go",
         "interfaces.go",

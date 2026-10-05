@@ -1,5 +1,3 @@
-// Package redact — copying a JSON document with its secrets replaced, within
-// an exact byte bound.
 package redact
 
 import (

@@ -1,8 +1,3 @@
-// Package mysql — mysqlSink, the thin wrapper that adds database-handle cleanup
-// to the dbsink-composed chain. dbsink.Compose returns the
-// levelgate(async(dbSink)) chain whose Close flushes + joins the drainer, but it
-// does not own the *sql.DB; this wrapper closes the handle after the chain drains
-// so the connection pool is released exactly once.
 package mysql
 
 import (

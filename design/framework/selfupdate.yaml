@@ -116,6 +116,38 @@ packages:
             name: CodeElevationNotAuthorised
             value: "0x00_02_22_12"
         type: errs.Code
+    doc: |-
+      Package selfupdate — the error-code range owned by this domain (ADR 0005 §Registry).
+
+      Package selfupdate — the sentinels every implementation of this domain returns.
+
+      The first five are the trust chain, and their ORDER is the contract: a build
+      with no vendor key cannot install at all; a manifest with no signature is not
+      authenticated; a signature that does not verify ends it; only then is the
+      archive's digest compared against a manifest that is now trusted. A digest
+      checked against an unauthenticated manifest proves nothing, which is why
+      CodeChecksumMismatch can only be reached after CodeSignatureInvalid was not.
+
+      Package selfupdate is the contract for a binary that replaces itself: the
+      ports it needs from its environment, and the values it reports.
+
+      The domain exists because the hard part of a self-update is not the download.
+      It is the ORDER in which a candidate becomes trusted — a detached signature
+      over a checksum manifest, then the archive's digest against that
+      now-authenticated manifest, and only then anything touching the disk — and the
+      fact that a process replacing its own executable has no second chance if it
+      gets it wrong.
+
+      Three ports, and each is a seam a test drives rather than an abstraction for
+      its own sake: Getter is the network, FileSystem is the disk, Copier is the
+      stream between them. There is **no registry**: a registry's key would name a
+      release host, and the whole trust chain is anchored to a key pinned at build
+      time for exactly one host.
+
+      Package selfupdate — the three ports a self-update needs from its
+      environment: the network, the disk, and the stream between them.
+
+      Package selfupdate — the values a self-update reports.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       http: net/http
@@ -267,9 +299,17 @@ packages:
             public: replacing this binary needs privilege that was not authorised
             reason: ELEVATION_NOT_AUTHORISED
     types:
-      - interface:
+      - doc: |-
+          Getter performs the HTTP GETs a self-update needs: the release metadata, the
+          archive, the checksum manifest and its signature.
+
+          It is one method because that is all the domain needs, and a caller supplying
+          a policy-carrying client (timeouts, redirect rules, proxies) is supplying it
+          once for all four.
+        interface:
           methods:
-            - in:
+            - doc: Get performs an HTTP GET request.
+              in:
                 - name: url
                   type: string
               name: Get
@@ -279,15 +319,23 @@ packages:
                 - name: err
                   type: error
         name: Getter
-      - interface:
+      - doc: |-
+          FileSystem is the disk half of replacing a running binary.
+
+          EvalSymlinks is not optional decoration: an executable reached through a
+          symlink must be replaced at its REAL path, or the update writes over the link
+          and the next run still executes the old binary.
+        interface:
           methods:
-            - name: Executable
+            - doc: Executable returns the path of the current executable.
+              name: Executable
               out:
                 - name: path
                   type: string
                 - name: err
                   type: error
-            - in:
+            - doc: EvalSymlinks resolves symlinks in the given path.
+              in:
                 - name: path
                   type: string
               name: EvalSymlinks
@@ -296,7 +344,8 @@ packages:
                   type: string
                 - name: err
                   type: error
-            - in:
+            - doc: CreateTemp creates a temporary file.
+              in:
                 - name: dir
                 - name: pattern
                   type: string
@@ -306,7 +355,8 @@ packages:
                   type: "*os.File"
                 - name: err
                   type: error
-            - in:
+            - doc: Chmod changes file permissions.
+              in:
                 - name: name
                   type: string
                 - name: mode
@@ -314,23 +364,32 @@ packages:
               name: Chmod
               out:
                 - type: error
-            - in:
+            - doc: |-
+                Rename renames a file. It is the atomic half of the replacement and must
+                happen on the same filesystem as the target.
+              in:
                 - name: oldpath
                 - name: newpath
                   type: string
               name: Rename
               out:
                 - type: error
-            - in:
+            - doc: Remove removes a file.
+              in:
                 - name: name
                   type: string
               name: Remove
               out:
                 - type: error
         name: FileSystem
-      - interface:
+      - doc: |-
+          Copier streams the verified archive to its temporary destination. It is a port
+          so a test can fail the copy midway — the case where a partially written binary
+          must never be renamed into place.
+        interface:
           methods:
-            - in:
+            - doc: Copy copies from src to dst, returning the number of bytes written.
+              in:
                 - name: dst
                   type: io.Writer
                 - name: src
@@ -342,34 +401,70 @@ packages:
                 - name: err
                   type: error
         name: Copier
-      - name: UpdateValue
+      - doc: |-
+          UpdateValue is the outcome of a version check or an install: whether a newer
+          release exists, and the two versions that were compared.
+
+          Available is reported separately from a version comparison the caller could
+          redo, because the comparison is semver-aware and a string compare of the two
+          fields would disagree with it on a prerelease.
+        name: UpdateValue
         struct:
           fields:
-            - name: CurrentVersion
+            - doc: CurrentVersion is the version of the running binary.
+              name: CurrentVersion
               type: string
-            - name: LatestVersion
+            - doc: |-
+                LatestVersion is the version that was found, or the empty string when
+                none was.
+              name: LatestVersion
               type: string
-            - name: Available
+            - doc: Available reports whether LatestVersion is newer than CurrentVersion.
+              name: Available
               type: bool
-      - name: CandidateValue
+      - doc: |-
+          CandidateValue is one release candidate: a developer channel entry that is
+          never what a stable check returns.
+
+          All three fields are carried VERBATIM as the release host reported them. They
+          are displayed to an operator choosing a candidate, never parsed and never
+          compared — the ordering decision is made on Tag by semver, elsewhere.
+        name: CandidateValue
         struct:
           fields:
-            - name: Tag
+            - doc: Tag is the release tag, e.g. "v1.9.0-rc.3".
+              name: Tag
               type: string
-            - name: Name
+            - doc: Name is the release's human title, which a host may leave empty.
+              name: Name
               type: string
-            - name: CreatedAt
+            - doc: CreatedAt is the RFC 3339 publication timestamp, as text.
+              name: CreatedAt
               type: string
   - aliases:
-      - name: CandidateValue
+      - doc: |-
+          CandidateValue is one release candidate. It ALIASES the core value rather
+          than redeclaring it, for the same reason UpdateValue does.
+        name: CandidateValue
         target: coreupd.CandidateValue
-      - name: Getter
+      - doc: Getter performs the HTTP GETs a self-update needs. It aliases the core port.
+        name: Getter
         target: coreupd.Getter
-      - name: FileSystem
+      - doc: |-
+          FileSystem is the disk half of replacing a running binary. It aliases the
+          core port.
+        name: FileSystem
         target: coreupd.FileSystem
-      - name: Copier
+      - doc: |-
+          Copier streams the verified archive to its destination. It aliases the core
+          port.
+        name: Copier
         target: coreupd.Copier
-      - name: UpdateValue
+      - doc: |-
+          UpdateValue is the outcome of a version check or an install. It ALIASES the
+          core value rather than redeclaring it: a service-local copy of a value core
+          owns compiles fine and drifts silently.
+        name: UpdateValue
         target: coreupd.UpdateValue
     codes:
       - const:
@@ -445,14 +540,238 @@ packages:
             value: "0x00_03_42_08"
         type: errs.Code
     constants:
-      - name: CandidateListSentinel
+      - blockDoc: Service constants for GitHub API, versioning, and file operations.
+        doc: CandidateListSentinel is the sentinel value for --candidate without a tag.
+        name: CandidateListSentinel
         type: string
         value: "\"__list__\""
+    doc: |-
+      Package selfupdate replaces the running binary with a newer signed release.
+
+      Package selfupdate replaces the running binary with a newer signed release.
+      This file implements SHA-256 integrity verification of downloaded release
+      archives against the checksums.txt manifest published by the release
+      workflow (CWE-494 mitigation: download of code without integrity check).
+
+      INTEGRITY ONLY. Nothing here establishes who published the manifest; that
+      is signature.go's job, and matchArchiveDigest must never be reached with a
+      manifest verifyArchive has not authenticated first.
+
+      Package selfupdate — range 0.3.66.* (ADR 0005 §Registry, allocated in
+      codeRangeOwners per ADR 0035).
+
+      The domain's own range is 0.2.34.* and it holds every refusal the CONTRACT
+      names: an unsigned release, a digest that does not match, a redirect this
+      build will not follow. Those are the outcomes a caller of framework/selfupdate
+      branches on, and none of them is redeclared here.
+
+      What lives in this range is the other half — the failures an IMPLEMENTATION
+      has and a contract does not: a JSON body that will not decode, a tar that
+      will not open, a temp file that cannot be created next to the running
+      binary. The core has no vocabulary for them because a different
+      implementation of the same port would fail in different places.
+
+      Package selfupdate — consent: whether a caller that did not ask to upgrade
+      may nonetheless replace this binary, and the advice printed when it may not.
+      Package updater — CONSENT for an upgrade nobody typed.
+
+      An explicit `upgrade` command is a deliberate act and needs no permission: a
+      it IS the permission. The licence gate is the opposite case. It fires from
+      the root command's PersistentPreRun on every invocation, so a plain
+      routine command that could reach a code path downloading an archive,
+      chmods it 0755, moves it over the running executable and, where sudoers
+      allows it, does that last step as root — none of which the person who
+      typed `run` asked for. The gate's own comment already conceded the point:
+      "this is the one moment a user is staring at a pause they did not ask for".
+
+      A mandatory update that simply refuses is useless, so refusing is not what
+      this does. It asks when someone is there to answer, takes an explicit
+      out-of-band authorisation when nobody is (CI, devcontainers, hooks), and
+      when it does decline it prints every way forward rather than leaving a
+      dead end.
+
+      Package selfupdate — The consent a product declares, and the escalation it forbids (ADR 0150).
+      Both are properties of the Service a product builds rather than fields of
+      SourceValue: a source says where releases come from, a Service how this
+      binary treats them.
+
+      Package selfupdate — the half of an error that never goes on a wire, made
+      available to the one reader who is entitled to all of it.
+
+      errs.Error.Error() renders "[<code> <REASON>] <public>" and deliberately
+      nothing else: no private detail, no fields, and not one word from the cause.
+      That is right for anything crossing a boundary, and it is exactly wrong for
+      the person who just typed `upgrade` and is owed "no space left on device".
+
+      So the split is not "throw the detail away", it is "send it somewhere else".
+      This file is that somewhere else.
+
+      Package selfupdate — privilege escalation: the second, separate opt-in that a
+      replacement into a directory this user cannot write requires.
+      Package updater — privilege escalation, and the explicit consent it now
+      requires.
+
+      finalizeReplacement falls back to `sudo -n mv` when the plain rename over
+      the running executable is refused for permissions. That fallback used to
+      fire unconditionally, which meant an ordinary gated command — a
+      command nobody asked to install anything — could end up executing a
+      privileged move of a file it had just downloaded. Where sudoers grants
+      NOPASSWD (devcontainers, CI images, plenty of laptops) that completes
+      silently and writes an attacker-chosen file into a root-owned directory.
+
+      Escalation is now opt-in. Not asking is the default, and the refusal names
+      the two ways forward so it is never a dead end.
+
+      Package selfupdate — the sentinels this IMPLEMENTATION emits, as opposed to
+      the ones the domain contract names.
+
+      Each var's name equals its errs.Define Reason in SCREAMING_SNAKE form.
+
+      Every Public here is wire-safe, so none of them names a path, a URL, a host,
+      a tag or an asset. That is not squeamishness: the public half is the one
+      documented safe to put in a response body, and this package's inputs are a
+      release host and a filesystem — every particular it could name came from one
+      of the two. What it says instead is the one thing an operator has to take
+      away, which is whether the binary they are running was replaced.
+
+      Where it happened and what the filesystem said live in Private and Fields.
+      They are not lost to the operator: diagnose renders them and
+      ExplainUpgradeFailure prints them under the sentence, because a terminal the
+      operator owns is not a wire.
+
+      Package selfupdate — the ports, aliased from core.
+
+      They are ALIASES rather than a second declaration: a service-local copy of a
+      contract the core layer owns compiles fine and drifts silently, and a caller
+      holding one of each would find them interchangeable right up until a method
+      is added to one of them.
+
+      Package selfupdate — the vendor key list and the signature domain of ADR
+      0150: several keys any of which verifies, and a manifest that names its tag
+      and its expiry.
+
+      Package selfupdate replaces the running binary with a newer signed release.
+
+      Package selfupdate — the compile-time proof that osFileSystem still satisfies
+      the core FileSystem port.
+      Package updater — compile-time assertion for osFileSystem.
+
+      Hoisted from osfilesystem.go per KTN-IFACE-ASSERT-PLACEMENT so the
+      production source carries no purely verificational declarations.
+
+      Package selfupdate — the probe of ADR 0150: the previous binary kept as
+      <binary>.prev, the new one asked to answer, and put back when it does not.
+
+      Package selfupdate replaces the running binary with a newer signed release.
+
+      Package selfupdate — the one platform the replacement step refuses, and why
+      the refusal comes before anything is downloaded.
+
+      Package selfupdate — authenticity: the detached ed25519 signature over the
+      checksum manifest, and the vendor key it is verified against.
+      Package updater — release AUTHENTICITY, which is a different property from
+      the integrity checksum.go already proves.
+
+      checksums.txt establishes that the archive arrived intact. It cannot
+      establish who published it: the manifest is fetched from the SAME release,
+      on the SAME origin, with the same write credentials as the archive beside
+      it (see fetchChecksums — it reuses `downloadURL` verbatim). Stable releases
+      are additionally served from a public MIRROR repository, a second
+      publishing origin entirely. Anyone able to write assets to that release
+      replaces the archive and regenerates the manifest in the same breath, and
+      every SHA-256 still matches. The digest defends against a corrupted
+      download, never against a hostile publisher.
+
+      This file supplies the missing half: a DETACHED ed25519 signature over
+      checksums.txt, verified against the vendor public key linked into the
+      binary at build time. It is deliberately the same primitive, the same
+      algorithm and the same key that pkg/license already uses to authenticate
+      the roster (pkg/license/bundle.go ParseBundle, anchored on
+      linked in at build time by the consuming binary) — a second scheme would be a second thing
+      to get wrong. Once the manifest is authenticated the origin stops
+      mattering: a substituted mirror can serve any bytes it likes and cannot
+      produce a signature over them.
+
+      ABSENT SIGNATURE: FAIL CLOSED, NO TRANSITION WINDOW.
+
+      A client that installs an unsigned release when the .sig asset is missing
+      has no authenticity check at all — an attacker who can publish assets can
+      also decline to publish one, so "accept it when it is absent" is exactly
+      equivalent to "never require it". There is no grandfathering window and no
+      environment variable that reopens one. The cost is bounded and known: an
+      upgrade always moves FORWARD to a release published by the workflow that
+      ships with this code, so the only refusals are `upgrade --candidate <tag>`
+      against a pre-signing release candidate, which is a developer channel with
+      a source checkout one command away.
+
+      Package selfupdate — the release source: which project's releases this binary
+      updates itself from, and what its artefacts are called.
+
+      Package selfupdate replaces the running binary with a newer signed release.
+
+      Package selfupdate — the compile-time proof that stdIOCopier still satisfies
+      the core Copier port.
+      Package updater — compile-time assertion for stdIOCopier.
+
+      Hoisted from stdiocopier.go per KTN-IFACE-ASSERT-PLACEMENT so the
+      production source carries no purely verificational declarations.
+
+      Package selfupdate — the HTTP policy every real Service uses: bounded,
+      https-only redirects and a cap on how much of a response is read.
+      Package updater — the transport the release endpoints are reached over,
+      and the bound on what they are allowed to make this process do.
+
+      Everything here treats the GitHub API and the release CDN as untrusted
+      input, because they are: stable releases resolve through a PUBLIC mirror
+      repository (see repoForTag), which is a second publishing origin, and a
+      redirect chain or a response body is chosen entirely by whatever answers.
+
+      Package selfupdate replaces the running binary with a newer signed release.
+
+      Package selfupdate replaces the running binary with a newer signed release.
+      It checks GitHub releases for newer versions and downloads/replaces the binary.
+
+      Package selfupdate — the two shapes every error in this package is built
+      with, so the choice at a call site is which sentinel rather than which
+      spelling.
+
+      The split between them is whether this package DECIDED the failure or was
+      TOLD about one. A decision has no cause to carry — nothing failed, a rule
+      was applied — and the sentinel itself is the whole of it. A report from
+      outside has a cause that must survive, because `errors.Is(err, os.ErrPermission)`
+      and the text the operating system wrote are the two things a wrapper most
+      often destroys.
     functions:
-      - name: StdinIsTerminal
+      - doc: |-
+          StdinIsTerminal reports whether a human could answer a prompt on this
+          process's standard input.
+
+          Callers pass the result to AuthoriseUnattendedUpgrade rather than letting it
+          detect its own terminal, so the decision stays testable without a pty.
+
+          # What this can and cannot tell apart
+
+          A pipe, a regular file and a closed descriptor are excluded by the mode: none
+          is a character device. The null device IS one, and is excluded by identity —
+          os.SameFile against /dev/null, which is stdlib and portable, rather than a
+          path comparison a redirect would defeat.
+
+          What remains indistinguishable, without a cgo or x/sys ioctl this module
+          cannot take (x/sys is banned SDK-wide), is one character device from another:
+          stdin redirected from /dev/zero or /dev/random reads as a terminal here. Both
+          answer a prompt with bytes nobody typed, so a caller in that position should
+          set the unattended opt-in rather than rely on detection. Said out loud because
+          the alternative is a comment claiming a precision this does not have.
+        name: StdinIsTerminal
         out:
           - type: bool
-      - in:
+      - doc: |-
+          NewService creates a new updater instance.
+
+          The returned Service carries NO vendor key and therefore installs nothing:
+          callers chain `.WithVendorKey(...)` with the build's linked-in anchor. That
+          is deliberate — see WithVendorKey in signature.go.
+        in:
           - name: version
             type: string
           - name: src
@@ -460,7 +779,18 @@ packages:
         name: NewService
         out:
           - type: "*Service"
-      - in:
+      - doc: |-
+          NewUpdaterWithDeps creates an updater with custom dependencies for testing.
+
+          A nil fs or copier is LEGAL and several callers rely on it: a test that only
+          exercises the network path has nothing to inject for the filesystem, and the
+          Service never reaches those fields on that path.
+
+          This used to call validateDeps and discard its result — a validation whose
+          answer nobody read, which is worse than none because the call site reads as a
+          guarantee. The function is deleted rather than promoted to a panic or an
+          error return: the nil callers are correct, so there is nothing to reject.
+        in:
           - name: version
             type: string
           - name: src
@@ -590,8 +920,31 @@ packages:
             public: the new binary did not answer its probe and was not kept
             reason: PROBE_FAILED
     types:
-      - methods:
-          - in:
+      - doc: |-
+          SourceValue says where releases come from and what they are called.
+
+          It is the whole of what the source implementation hard-coded. Every field is a
+          property of one product's distribution, not of the update mechanism, so
+          keeping them as constants is what made that implementation un-reusable.
+
+          StableRepo and DevRepo can differ, and the reason is worth stating: a project
+          whose source repository goes private still has to serve already-installed
+          binaries their update path, which means a public mirror for stable releases
+          while candidates stay in the source repository behind credentials the public
+          binary does not carry. When DevRepo is empty, StableRepo serves both.
+        methods:
+          - doc: |-
+              AuthoriseUnattendedUpgrade reports whether a caller that did not ask to
+              upgrade may nonetheless replace this binary.
+
+              out receives the prompt; in supplies the answer; interactive says whether
+              there is a human on the other end (the caller decides — see
+              StdinIsTerminal — so a test does not need a pty). The environment is read
+              here rather than passed so every call site honours the same variable.
+
+              The order is: an explicit authorisation decides, in EITHER direction;
+              otherwise a human is asked; otherwise the answer is no.
+            in:
               - name: out
                 type: io.Writer
               - name: in
@@ -602,12 +955,39 @@ packages:
             out:
               - type: bool
             recv: value
-          - in:
+          - doc: |-
+              ExplainUpgradeRefusal prints every way to get the required update
+              installed after consent was declined or could not be obtained.
+
+              It is deliberately exhaustive, including the sudo opt-in: the two
+              authorisations are separate on purpose (one permits replacing the binary,
+              the other permits doing it as root) and discovering the second one only
+              after acting on the first is a bad afternoon.
+            in:
               - name: out
                 type: io.Writer
             name: ExplainUpgradeRefusal
             recv: value
-          - in:
+          - doc: |-
+              ExplainUpgradeFailure prints what a refused upgrade means and what, if
+              anything, resolves it. `action` names the operation that failed, so the
+              same advice serves the gate ("cannot apply the required update") and the
+              deliberate command ("upgrade failed").
+
+              It exists because exit.Code's message parameter only reaches the structured
+              --debug log (pkg/exit's logEvent is a no-op unless --debug is set): without
+              this, an upgrade against a forged or unsigned release printed
+              "Checking for updates..." and then nothing, exiting non-zero with no reason
+              given. For a network blip that is merely poor; for an authenticity refusal
+              it hides the one signal that must not be missed, and invites the user to
+              go and install the bad release by hand.
+
+              It prints THREE things, in descending order of how far they may travel: the
+              error's public sentence, which is wire-safe and says what happened; its
+              diagnostic half — fields and the cause's own words — which says where and
+              why and is for this terminal and the log, never for a response body; and the
+              advice, which is what to do about it.
+            in:
               - name: out
                 type: io.Writer
               - name: action
@@ -616,34 +996,60 @@ packages:
                 type: error
             name: ExplainUpgradeFailure
             recv: value
-          - name: AutoUpgradeEnv
+          - doc: |-
+              AutoUpgradeEnv is the variable authorising an upgrade the user did not ask
+              for, e.g. MY_TOOL_AUTO_UPGRADE.
+            name: AutoUpgradeEnv
             out:
               - type: string
             recv: value
-          - name: SudoOptInEnv
+          - doc: |-
+              SudoOptInEnv is the variable authorising privilege escalation when the install
+              directory is not writable, e.g. MY_TOOL_ALLOW_SUDO.
+            name: SudoOptInEnv
             out:
               - type: string
             recv: value
         name: SourceValue
         struct:
           fields:
-            - name: Owner
+            - doc: Owner is the release host account, e.g. "kodflow".
+              name: Owner
               type: string
-            - name: StableRepo
+            - doc: StableRepo is the repository serving stable releases.
+              name: StableRepo
               type: string
-            - name: DevRepo
+            - doc: |-
+                DevRepo is the repository serving release candidates. Empty means
+                candidates come from StableRepo too.
+              name: DevRepo
               type: string
-            - name: Product
+            - doc: |-
+                Product is the binary's name. It is both the archive-asset stem
+                ("<product>_<goos>_<goarch>.tar.gz") and, uppercased, the environment
+                variable prefix for the two opt-ins.
+              name: Product
               type: string
-      - methods:
-          - name: ListCandidates
+      - doc: |-
+          Service replaces the running binary with a newer signed release of the
+          product its SourceValue names.
+          It manages version checking via GitHub API and binary replacement.
+          goos/goarch are captured at construction time so the per-platform asset
+          resolution (`getBinaryName`, `getArchiveSuffix`, `innerBinaryName`) is
+          stable per-instance — tests can construct a literal with explicit values
+          instead of mutating package-level `runtimeGOOS`/`runtimeGOARCH` (which
+          would race under t.Parallel).
+        methods:
+          - doc: ListCandidates returns all available release candidates.
+            name: ListCandidates
             out:
               - name: candidates
                 type: "[]CandidateValue"
               - name: listErr
                 type: error
             recv: pointer
-          - in:
+          - doc: DownloadCandidate downloads and installs a specific release candidate.
+            in:
               - name: tag
                 type: string
             name: DownloadCandidate
@@ -653,15 +1059,29 @@ packages:
               - name: downloadErr
                 type: error
             recv: pointer
-          - name: WithAutomaticConsent
+          - doc: |-
+              WithAutomaticConsent declares that the PRODUCT consents to unrequested
+              upgrades — a status line that updates itself silently, its decision D11 —,
+              so no environment variable has to grant it. An operator still refuses with
+              <PREFIX>_AUTO_UPGRADE=0: an explicit answer always wins. It grants nothing
+              else: escalation keeps its own, separate opt-in.
+            name: WithAutomaticConsent
             out:
               - type: "*Service"
             recv: pointer
-          - name: WithoutElevation
+          - doc: |-
+              WithoutElevation forbids the privileged replacement outright, whatever
+              <PREFIX>_ALLOW_SUDO says: a binary installed where its user cannot write is
+              reported (ElevationNotAuthorised), never replaced through sudo.
+            name: WithoutElevation
             out:
               - type: "*Service"
             recv: pointer
-          - in:
+          - doc: |-
+              AuthoriseUnattendedUpgrade decides whether an upgrade nobody asked for may
+              proceed for this Service: an explicit environment answer first, then the
+              product's own consent (WithAutomaticConsent), then the source's prompt rule.
+            in:
               - name: out
                 type: io.Writer
               - name: in
@@ -672,7 +1092,15 @@ packages:
             out:
               - type: bool
             recv: pointer
-          - in:
+          - doc: |-
+              WithVendorKeys links the keys a release may be signed with, in order: a
+              release verifies when ANY of them verifies its manifest (ADR 0150). A key
+              rotation publishes under the new key while builds carrying both accept it
+              and builds carrying only the old one keep reading the old — neither side has
+              to be updated first. Several keys are still ONE signer: no quorum is taken.
+              A key of the wrong length is kept as it is and refused at verification,
+              naming its length, exactly as a single wrong key always was.
+            in:
               - name: keys
                 type: "[]byte"
             name: WithVendorKeys
@@ -680,14 +1108,36 @@ packages:
               - type: "*Service"
             recv: pointer
             variadic: true
-          - in:
+          - doc: |-
+              WithSignatureDomain makes every signature cover domain, a NUL byte and the
+              manifest — never the manifest alone — so a key the vendor also signs other
+              documents with (a roster, another product's releases) cannot have one of
+              those signatures read as a release of this product. It also requires the
+              manifest to say which release it is and until when it may be installed, in
+              two header lines the signature therefore covers:
+
+              	# tag v1.4.0
+              	# expires 2026-12-31T00:00:00Z
+
+              A manifest naming another tag is refused — the replay of an older, signed
+              release under a newer name —, and so is one past its expiry — the freeze an
+              attacker who can only replay can otherwise hold an installation in. Without
+              a domain the historical form is verified unchanged.
+            in:
               - name: domain
                 type: string
             name: WithSignatureDomain
             out:
               - type: "*Service"
             recv: pointer
-          - in:
+          - doc: |-
+              WithProbe makes a replacement stand only once the NEW binary, run with args,
+              exits 0 within timeout (zero: five seconds). Before the rename the previous
+              binary is kept as <binary>.prev — a hard link, so the binary's own name is
+              never absent —, and a probe that fails puts it back and reports ProbeFailed.
+              A daemon that updates itself declares the argument its binary answers
+              cheaply ("version", "--probe").
+            in:
               - name: args
                 type: "[]string"
               - name: timeout
@@ -696,21 +1146,35 @@ packages:
             out:
               - type: "*Service"
             recv: pointer
-          - in:
+          - doc: |-
+              WithVendorKey pins the ed25519 public half every release must be signed
+              with, and returns the Service so construction reads as one expression —
+              the same chaining shape license.NewService(...).WithVersion(...) uses.
+
+              A Service built WITHOUT this call authenticates nothing and therefore
+              installs nothing: verifyArchive refuses with coreupd.NoVendorKey before a single
+              byte is fetched. That default is deliberate. The alternative — treat an
+              absent key as "verification not required" — would mean any construction
+              site that forgot the call silently reverted to the unauthenticated
+              behaviour this file exists to end, and nothing would ever fail to point it
+              out.
+            in:
               - name: key
                 type: "[]byte"
             name: WithVendorKey
             out:
               - type: "*Service"
             recv: pointer
-          - name: CheckForUpdate
+          - doc: CheckForUpdate checks if an update is available.
+            name: CheckForUpdate
             out:
               - name: info
                 type: UpdateValue
               - name: checkErr
                 type: error
             recv: pointer
-          - name: Upgrade
+          - doc: Upgrade downloads and applies the latest version.
+            name: Upgrade
             out:
               - name: info
                 type: UpdateValue
@@ -721,104 +1185,300 @@ packages:
         struct:
           unexported: true
   - aliases:
-      - name: Getter
+      - doc: Getter performs the HTTP GETs a self-update needs. It aliases the core port.
+        name: Getter
         target: coreupd.Getter
-      - name: FileSystem
+      - doc: |-
+          FileSystem is the disk half of replacing a running binary. It aliases the core
+          port.
+        name: FileSystem
         target: coreupd.FileSystem
-      - name: Copier
+      - doc: |-
+          Copier streams the verified archive to its destination. It aliases the core
+          port.
+        name: Copier
         target: coreupd.Copier
-      - name: Update
+      - doc: |-
+          Update is the outcome of a version check or an install. It aliases the core
+          value type.
+        name: Update
         target: svcupd.UpdateValue
-      - name: Candidate
+      - doc: Candidate is one release candidate. It aliases the core value type.
+        name: Candidate
         target: svcupd.CandidateValue
-      - name: Source
+      - doc: |-
+          Source says where releases come from and what they are called. It aliases the
+          service type: these are one engine's construction parameters, which ADR 0074
+          places with the engine rather than in the contract layer.
+        name: Source
         target: svcupd.SourceValue
-      - name: Service
+      - doc: |-
+          Service replaces the running binary with a newer signed release. It aliases
+          the service type — the engine handle, per ADR 0074.
+        name: Service
         target: svcupd.Service
     constants:
-      - name: CodeNoVendorKey
+      - doc: |-
+          CodeNoVendorKey identifies an install attempted by a build carrying no vendor
+          key. Match it with errs.HasCode: it is the one refusal a retry never fixes.
+        name: CodeNoVendorKey
         type: errs.Code
         value: "0x00_02_22_01"
-      - name: CodeSignatureMissing
+      - doc: CodeSignatureMissing identifies a release whose manifest signature was absent.
+        name: CodeSignatureMissing
         type: errs.Code
         value: "0x00_02_22_02"
-      - name: CodeSignatureInvalid
+      - doc: |-
+          CodeSignatureInvalid identifies a manifest signature that did not verify. With
+          CodeSignatureMissing it is the supply-chain pair: no retry helps, and no manual
+          install is safe.
+        name: CodeSignatureInvalid
         type: errs.Code
         value: "0x00_02_22_03"
-      - name: CodeChecksumMissing
+      - doc: |-
+          CodeChecksumMissing identifies an archive with no entry in the authenticated
+          manifest.
+        name: CodeChecksumMissing
         type: errs.Code
         value: "0x00_02_22_04"
-      - name: CodeChecksumMismatch
+      - doc: |-
+          CodeChecksumMismatch identifies an archive whose digest did not match its
+          authenticated manifest entry.
+        name: CodeChecksumMismatch
         type: errs.Code
         value: "0x00_02_22_05"
-      - name: CodeArchiveTooLarge
+      - doc: CodeArchiveTooLarge identifies a release archive over the in-memory cap.
+        name: CodeArchiveTooLarge
         type: errs.Code
         value: "0x00_02_22_06"
-      - name: CodeAPIBodyTooLarge
+      - doc: CodeAPIBodyTooLarge identifies release metadata over its read cap.
+        name: CodeAPIBodyTooLarge
         type: errs.Code
         value: "0x00_02_22_07"
-      - name: CodeInsecureRedirect
+      - doc: CodeInsecureRedirect identifies a redirect leaving HTTPS or over the hop bound.
+        name: CodeInsecureRedirect
         type: errs.Code
         value: "0x00_02_22_08"
-      - name: CodeUnexpectedStatus
+      - doc: CodeUnexpectedStatus identifies an unusable status from the release host.
+        name: CodeUnexpectedStatus
         type: errs.Code
         value: "0x00_02_22_09"
-      - name: CodeDownloadFailed
+      - doc: |-
+          CodeDownloadFailed identifies a download that did not complete. It is the
+          transient one: a retry is reasonable.
+        name: CodeDownloadFailed
         type: errs.Code
         value: "0x00_02_22_0A"
-      - name: CodeDevBuild
+      - doc: CodeDevBuild identifies a check on a build with no release version.
+        name: CodeDevBuild
         type: errs.Code
         value: "0x00_02_22_0B"
-      - name: CodeCandidateNotFound
+      - doc: CodeCandidateNotFound identifies a requested candidate that does not exist.
+        name: CodeCandidateNotFound
         type: errs.Code
         value: "0x00_02_22_0C"
-      - name: CodeNotPrerelease
+      - doc: CodeNotPrerelease identifies a tag requested as a candidate that is stable.
+        name: CodeNotPrerelease
         type: errs.Code
         value: "0x00_02_22_0D"
-      - name: CodeDraftRelease
+      - doc: CodeDraftRelease identifies a draft release, which exposes no asset.
+        name: CodeDraftRelease
         type: errs.Code
         value: "0x00_02_22_0E"
-      - name: CodeInvalidTag
+      - doc: CodeInvalidTag identifies a tag that is not a valid semantic version.
+        name: CodeInvalidTag
         type: errs.Code
         value: "0x00_02_22_0F"
-      - name: CodeBinaryNotInArchive
+      - doc: CodeBinaryNotInArchive identifies a verified archive missing the binary.
+        name: CodeBinaryNotInArchive
         type: errs.Code
         value: "0x00_02_22_10"
-      - name: CodeUnknownArchive
+      - doc: CodeUnknownArchive identifies an asset in an unhandled container format.
+        name: CodeUnknownArchive
         type: errs.Code
         value: "0x00_02_22_11"
-      - name: CodeElevationNotAuthorised
+      - doc: |-
+          CodeElevationNotAuthorised identifies a replacement needing privilege the
+          operator did not opt into. Recoverable, but only through the opt-in.
+        name: CodeElevationNotAuthorised
         type: errs.Code
         value: "0x00_02_22_12"
-      - name: CodeCandidateTagRequired
+      - doc: |-
+          CodeCandidateTagRequired identifies a candidate install asked for without
+          naming which candidate. It wraps errors.ErrUnsupported, so a caller matching
+          that instead still matches.
+        name: CodeCandidateTagRequired
         type: errs.Code
         value: "0x00_03_42_01"
-      - name: CodeReleaseMetadataUnreadable
+      - doc: |-
+          CodeReleaseMetadataUnreadable identifies a release-API answer that arrived
+          whole and did not decode. The bytes came, so no transport retry applies.
+        name: CodeReleaseMetadataUnreadable
         type: errs.Code
         value: "0x00_03_42_02"
-      - name: CodeArchiveUnreadable
+      - doc: |-
+          CodeArchiveUnreadable identifies a release archive that would not unpack. It
+          is raised only AFTER the signature and digest have both verified, so it is a
+          packaging or transfer fault and never a supply-chain signal.
+        name: CodeArchiveUnreadable
         type: errs.Code
         value: "0x00_03_42_03"
-      - name: CodeExecutablePathUnresolved
+      - doc: |-
+          CodeExecutablePathUnresolved identifies an update that cannot name the file
+          it would replace. Nothing is attempted after it.
+        name: CodeExecutablePathUnresolved
         type: errs.Code
         value: "0x00_03_42_04"
-      - name: CodeStagingFailed
+      - doc: |-
+          CodeStagingFailed identifies a replacement that failed BEFORE the rename, so
+          the running binary is byte-for-byte as it was. That is the whole difference
+          between this and CodeReplacementFailed, and it is the fact an operator needs.
+        name: CodeStagingFailed
         type: errs.Code
         value: "0x00_03_42_05"
-      - name: CodeReplacementFailed
+      - doc: |-
+          CodeReplacementFailed identifies a rename over the running executable that did
+          not land.
+        name: CodeReplacementFailed
         type: errs.Code
         value: "0x00_03_42_06"
-      - name: CodeElevationFailed
+      - doc: |-
+          CodeElevationFailed identifies an escalation the operator DID authorise and
+          that the system refused anyway. Unlike CodeElevationNotAuthorised, no
+          environment variable repairs it.
+        name: CodeElevationFailed
         type: errs.Code
         value: "0x00_03_42_07"
-      - name: CodeProbeFailed
+      - doc: |-
+          CodeProbeFailed identifies a replacement whose new binary did not answer the
+          probe the product declared with Service.WithProbe; the previous binary is put
+          back from <binary>.prev when it was kept (ADR 0150).
+        name: CodeProbeFailed
         type: errs.Code
         value: "0x00_03_42_08"
-      - name: CandidateListSentinel
+      - doc: |-
+          CandidateListSentinel is the tag value meaning "list the candidates rather
+          than install one".
+
+          It exists because a CLI flag taking an optional value has to spell "the flag
+          was given without a value" AS a value. A caller wires it into its own flag
+          definition, so the sentinel has to be reachable from outside the package that
+          consumes it.
+        name: CandidateListSentinel
         type: string
         value: "\"__list__\""
+    doc: |-
+      Package selfupdate replaces the running binary with a newer signed release.
+
+      It is the framework's public package over framework/internal/service/selfupdate
+      (ADR 0158): the value types and ports are aliases of the core selfupdate types
+      and the functions delegate straight to the service implementation, which is
+      built on pkg/v1 and nothing below it.
+
+      # The order is the security property
+
+      The hard part of a self-update is not the download. It is the order in which a
+      candidate becomes trusted, and this package fixes it:
+
+       1. a detached ed25519 signature over the checksum manifest, verified against
+          the vendor key linked into the build;
+       2. the archive's SHA-256 against that now-authenticated manifest;
+       3. only then does anything touch the disk.
+
+      A digest checked against an unauthenticated manifest proves nothing — an
+      attacker who can substitute the archive can substitute the manifest beside it.
+      Reversing steps 1 and 2 therefore turns the whole chain into decoration, which
+      is why the order is asserted by the suite rather than left to a comment.
+
+      A build with no vendor key installs NOTHING. That direction is deliberate: the
+      alternative, skipping verification when no key is present, makes the security
+      property depend on a build flag nobody checks.
+
+      # Usage
+
+      	src := selfupdate.Source{
+      		Owner:      "acme",
+      		StableRepo: "widget",
+      		Product:    "widget",
+      	}
+      	svc := selfupdate.New(version, src).WithVendorKey(vendorKey)
+
+      	info, err := svc.CheckForUpdate()
+      	if err != nil { /* errs.HasCode(err, selfupdate.CodeDevBuild) … */ }
+      	if info.Available {
+      		_, err = svc.Upgrade()
+      	}
+
+      # Consent is separate from the upgrade, and escalation is separate again
+
+      An explicit upgrade command is a deliberate act and needs no permission. An
+      upgrade a caller did NOT ask for — a version floor enforced mid-run — does,
+      and Source.AuthoriseUnattendedUpgrade is where that is decided: an explicit
+      environment value settles it in either direction, otherwise a human is asked,
+      otherwise the answer is no. Silence is not permission.
+
+      Replacing a binary in a directory the user cannot write needs a SECOND opt-in.
+      The two are deliberately different variables: opting into unattended upgrades
+      must not silently grant privilege escalation.
+
+      Both variable names are derived from Source.Product — `widget` yields
+      WIDGET_AUTO_UPGRADE and WIDGET_ALLOW_SUDO — by uppercasing and folding
+      punctuation to underscore.
+
+      A product whose updates are silent by design builds its Service
+      WithAutomaticConsent — its own consent, given at build, which
+      Service.AuthoriseUnattendedUpgrade reads and an operator still overrules
+      with <PREFIX>_AUTO_UPGRADE=0. It grants no escalation, and WithoutElevation
+      forbids escalation outright, whatever <PREFIX>_ALLOW_SUDO says (ADR 0150).
+
+      # Keys that rotate, a signature that names its release, a probe that rolls back
+
+      Service.WithVendorKeys links several keys, in order, and a release verifies
+      against any of them: a rotation publishes under the new key while builds that
+      carry both accept it, and neither side has to be updated first (ADR 0150).
+      Service.WithSignatureDomain makes each signature cover a domain — so a key
+      that also signs other documents cannot have one read as a release — and makes
+      the signed manifest say which tag it is and until when it may be installed
+      ("# tag v1.4.0", "# expires 2026-12-31T00:00:00Z"): an older release replayed
+      under a newer name, or a stale one, is refused. Service.WithProbe keeps the
+      previous binary as <binary>.prev and runs the new one with the product's
+      probe arguments; a probe that fails puts the previous one back
+      (CodeProbeFailed).
+
+      # Two limits a caller must know before relying on this
+
+      **Without a signature domain, a compromised release host can serve an OLDER
+      signed release.** The historical manifest is signed but carries no release
+      tag, so a host that answers a request for v2 with v1's manifest, signature
+      and archive passes every check and installs v1. WithSignatureDomain closes it
+      by putting the tag and an expiry INSIDE the signed document; a product that
+      has not adopted the format keeps the gap.
+
+      **Windows is not supported for the replacement step.** Windows will not let
+      a running executable be renamed over, so on a Windows build Upgrade refuses
+      with the SDK's UNSUPPORTED_PLATFORM — errors.Is(err, proc.UnsupportedPlatform)
+      — before it downloads anything. CheckForUpdate works there: a product can
+      still tell its user that a newer release exists. A build with no vendor key
+      is told about the key first, on every platform.
+
+      Both are recorded in ADR 0077 §Deferred rather than left to be discovered,
+      and the Windows refusal in ADR 0095.
+
+      # What this package does not do
+
+      It does not roll back on its own. The replacement is atomic (temp file,
+      chmod, rename) so there is no window where the binary is half-written, and
+      without WithProbe the previous version is gone once the rename lands; with a
+      probe it is kept as <binary>.prev and put back when the probe fails.
     functions:
-      - in:
+      - doc: |-
+          New returns a Service for the given running version and release source.
+
+          The returned Service carries NO vendor key and therefore installs nothing:
+          chain WithVendorKey with the build's linked-in anchor. That is the safe
+          direction — a Service that verified only when a key happened to be present
+          would make the security property depend on a build flag.
+        in:
           - name: version
             type: string
           - name: src
@@ -826,7 +1486,11 @@ packages:
         name: New
         out:
           - type: "*Service"
-      - in:
+      - doc: |-
+          NewWithDeps returns a Service with its three ports injected, for a caller that
+          supplies its own HTTP policy or a test that supplies doubles. A nil fs or
+          copier is legal on paths that never reach the disk.
+        in:
           - name: version
             type: string
           - name: src
@@ -840,7 +1504,15 @@ packages:
         name: NewWithDeps
         out:
           - type: "*Service"
-      - name: StdinIsTerminal
+      - doc: |-
+          StdinIsTerminal reports whether a human could answer a prompt on this
+          process's standard input.
+
+          It is a free function rather than something AuthoriseUnattendedUpgrade works
+          out for itself, and that is the point: the consent decision stays testable
+          without a pty, because the CALLER supplies the answer. Pass the result as the
+          interactive argument.
+        name: StdinIsTerminal
         out:
           - type: bool
     imports:
@@ -849,55 +1521,589 @@ packages:
       svcupd: github.com/kitsunium/sdk/framework/internal/service/selfupdate
     path: github.com/kitsunium/sdk/framework/selfupdate
     variables:
-      - name: NoVendorKey
+      - blockDoc: |-
+          The sentinels a caller matches with errors.Is, one for each of the codes
+          above.
+
+          A facade that publishes a code and withholds the value it identifies is half
+          a surface: a caller can ask errs.HasCode "is this that failure?" and cannot
+          write errors.Is(err, selfupdate.SignatureInvalid), which is the spelling Go
+          programs actually use and the only one that composes with errors.Join. PR
+          #184 fixed exactly this shape in the entitlement facade; lock, cache and
+          authz already publish theirs. This package was the outlier.
+
+          They are values rather than type aliases because a sentinel IS a value —
+          there is nothing to alias. The declared type is left off so each keeps its
+          *errs.Error, which is what lock and cache do, and what lets a caller reach
+          Code(), Public() and ExitCode() without a second lookup. Matching works
+          either way: errs.Error.Is compares (Code, Reason), so a sentinel matches a
+          freshly wrapped error of the same identity and not merely the same pointer.
+        doc: |-
+          NoVendorKey is returned when the running build carries no vendor key,
+          so nothing could have authenticated the release. A REFUSAL, not a
+          degradation: there is no weaker check to fall back to.
+        name: NoVendorKey
         type: "*errs.Error"
-      - name: SignatureMissing
+      - blockDoc: |-
+          The sentinels a caller matches with errors.Is, one for each of the codes
+          above.
+
+          A facade that publishes a code and withholds the value it identifies is half
+          a surface: a caller can ask errs.HasCode "is this that failure?" and cannot
+          write errors.Is(err, selfupdate.SignatureInvalid), which is the spelling Go
+          programs actually use and the only one that composes with errors.Join. PR
+          #184 fixed exactly this shape in the entitlement facade; lock, cache and
+          authz already publish theirs. This package was the outlier.
+
+          They are values rather than type aliases because a sentinel IS a value —
+          there is nothing to alias. The declared type is left off so each keeps its
+          *errs.Error, which is what lock and cache do, and what lets a caller reach
+          Code(), Public() and ExitCode() without a second lookup. Matching works
+          either way: errs.Error.Is compares (Code, Reason), so a sentinel matches a
+          freshly wrapped error of the same identity and not merely the same pointer.
+        doc: |-
+          SignatureMissing is returned when the detached signature over the
+          checksum manifest could not be fetched. An unsigned release is never
+          installed and no environment variable reopens that.
+        name: SignatureMissing
         type: "*errs.Error"
-      - name: SignatureInvalid
+      - blockDoc: |-
+          The sentinels a caller matches with errors.Is, one for each of the codes
+          above.
+
+          A facade that publishes a code and withholds the value it identifies is half
+          a surface: a caller can ask errs.HasCode "is this that failure?" and cannot
+          write errors.Is(err, selfupdate.SignatureInvalid), which is the spelling Go
+          programs actually use and the only one that composes with errors.Join. PR
+          #184 fixed exactly this shape in the entitlement facade; lock, cache and
+          authz already publish theirs. This package was the outlier.
+
+          They are values rather than type aliases because a sentinel IS a value —
+          there is nothing to alias. The declared type is left off so each keeps its
+          *errs.Error, which is what lock and cache do, and what lets a caller reach
+          Code(), Public() and ExitCode() without a second lookup. Matching works
+          either way: errs.Error.Is compares (Code, Reason), so a sentinel matches a
+          freshly wrapped error of the same identity and not merely the same pointer.
+        doc: |-
+          SignatureInvalid is returned when the manifest's signature does not
+          verify against the vendor key. With SignatureMissing it is the
+          supply-chain pair: no retry helps and no manual install is safe.
+        name: SignatureInvalid
         type: "*errs.Error"
-      - name: ChecksumMissing
+      - blockDoc: |-
+          The sentinels a caller matches with errors.Is, one for each of the codes
+          above.
+
+          A facade that publishes a code and withholds the value it identifies is half
+          a surface: a caller can ask errs.HasCode "is this that failure?" and cannot
+          write errors.Is(err, selfupdate.SignatureInvalid), which is the spelling Go
+          programs actually use and the only one that composes with errors.Join. PR
+          #184 fixed exactly this shape in the entitlement facade; lock, cache and
+          authz already publish theirs. This package was the outlier.
+
+          They are values rather than type aliases because a sentinel IS a value —
+          there is nothing to alias. The declared type is left off so each keeps its
+          *errs.Error, which is what lock and cache do, and what lets a caller reach
+          Code(), Public() and ExitCode() without a second lookup. Matching works
+          either way: errs.Error.Is compares (Code, Reason), so a sentinel matches a
+          freshly wrapped error of the same identity and not merely the same pointer.
+        doc: |-
+          ChecksumMissing is returned when the authenticated manifest has no entry
+          for the archive being installed.
+        name: ChecksumMissing
         type: "*errs.Error"
-      - name: ChecksumMismatch
+      - blockDoc: |-
+          The sentinels a caller matches with errors.Is, one for each of the codes
+          above.
+
+          A facade that publishes a code and withholds the value it identifies is half
+          a surface: a caller can ask errs.HasCode "is this that failure?" and cannot
+          write errors.Is(err, selfupdate.SignatureInvalid), which is the spelling Go
+          programs actually use and the only one that composes with errors.Join. PR
+          #184 fixed exactly this shape in the entitlement facade; lock, cache and
+          authz already publish theirs. This package was the outlier.
+
+          They are values rather than type aliases because a sentinel IS a value —
+          there is nothing to alias. The declared type is left off so each keeps its
+          *errs.Error, which is what lock and cache do, and what lets a caller reach
+          Code(), Public() and ExitCode() without a second lookup. Matching works
+          either way: errs.Error.Is compares (Code, Reason), so a sentinel matches a
+          freshly wrapped error of the same identity and not merely the same pointer.
+        doc: |-
+          ChecksumMismatch is returned when the archive's digest does not match
+          its authenticated manifest entry — a corrupted download, or a release
+          whose assets changed after it was signed.
+        name: ChecksumMismatch
         type: "*errs.Error"
-      - name: ArchiveTooLarge
+      - blockDoc: |-
+          The sentinels a caller matches with errors.Is, one for each of the codes
+          above.
+
+          A facade that publishes a code and withholds the value it identifies is half
+          a surface: a caller can ask errs.HasCode "is this that failure?" and cannot
+          write errors.Is(err, selfupdate.SignatureInvalid), which is the spelling Go
+          programs actually use and the only one that composes with errors.Join. PR
+          #184 fixed exactly this shape in the entitlement facade; lock, cache and
+          authz already publish theirs. This package was the outlier.
+
+          They are values rather than type aliases because a sentinel IS a value —
+          there is nothing to alias. The declared type is left off so each keeps its
+          *errs.Error, which is what lock and cache do, and what lets a caller reach
+          Code(), Public() and ExitCode() without a second lookup. Matching works
+          either way: errs.Error.Is compares (Code, Reason), so a sentinel matches a
+          freshly wrapped error of the same identity and not merely the same pointer.
+        doc: |-
+          ArchiveTooLarge is returned when a release archive exceeds the size cap,
+          which exists because the bytes are buffered before anything has vouched
+          for them. It is also what an oversized checksums.txt raises, deliberately
+          — a truncated manifest fails signature verification, and reporting a size
+          problem as a supply-chain one is the worst advice this package can give.
+        name: ArchiveTooLarge
         type: "*errs.Error"
-      - name: APIBodyTooLarge
+      - blockDoc: |-
+          The sentinels a caller matches with errors.Is, one for each of the codes
+          above.
+
+          A facade that publishes a code and withholds the value it identifies is half
+          a surface: a caller can ask errs.HasCode "is this that failure?" and cannot
+          write errors.Is(err, selfupdate.SignatureInvalid), which is the spelling Go
+          programs actually use and the only one that composes with errors.Join. PR
+          #184 fixed exactly this shape in the entitlement facade; lock, cache and
+          authz already publish theirs. This package was the outlier.
+
+          They are values rather than type aliases because a sentinel IS a value —
+          there is nothing to alias. The declared type is left off so each keeps its
+          *errs.Error, which is what lock and cache do, and what lets a caller reach
+          Code(), Public() and ExitCode() without a second lookup. Matching works
+          either way: errs.Error.Is compares (Code, Reason), so a sentinel matches a
+          freshly wrapped error of the same identity and not merely the same pointer.
+        doc: |-
+          APIBodyTooLarge is returned when a release-metadata response exceeds its
+          read cap.
+        name: APIBodyTooLarge
         type: "*errs.Error"
-      - name: InsecureRedirect
+      - blockDoc: |-
+          The sentinels a caller matches with errors.Is, one for each of the codes
+          above.
+
+          A facade that publishes a code and withholds the value it identifies is half
+          a surface: a caller can ask errs.HasCode "is this that failure?" and cannot
+          write errors.Is(err, selfupdate.SignatureInvalid), which is the spelling Go
+          programs actually use and the only one that composes with errors.Join. PR
+          #184 fixed exactly this shape in the entitlement facade; lock, cache and
+          authz already publish theirs. This package was the outlier.
+
+          They are values rather than type aliases because a sentinel IS a value —
+          there is nothing to alias. The declared type is left off so each keeps its
+          *errs.Error, which is what lock and cache do, and what lets a caller reach
+          Code(), Public() and ExitCode() without a second lookup. Matching works
+          either way: errs.Error.Is compares (Code, Reason), so a sentinel matches a
+          freshly wrapped error of the same identity and not merely the same pointer.
+        doc: |-
+          InsecureRedirect is returned when a redirect leaves HTTPS or exceeds the
+          hop bound. Following it would hand the archive fetch to a plaintext hop.
+        name: InsecureRedirect
         type: "*errs.Error"
-      - name: UnexpectedStatus
+      - blockDoc: |-
+          The sentinels a caller matches with errors.Is, one for each of the codes
+          above.
+
+          A facade that publishes a code and withholds the value it identifies is half
+          a surface: a caller can ask errs.HasCode "is this that failure?" and cannot
+          write errors.Is(err, selfupdate.SignatureInvalid), which is the spelling Go
+          programs actually use and the only one that composes with errors.Join. PR
+          #184 fixed exactly this shape in the entitlement facade; lock, cache and
+          authz already publish theirs. This package was the outlier.
+
+          They are values rather than type aliases because a sentinel IS a value —
+          there is nothing to alias. The declared type is left off so each keeps its
+          *errs.Error, which is what lock and cache do, and what lets a caller reach
+          Code(), Public() and ExitCode() without a second lookup. Matching works
+          either way: errs.Error.Is compares (Code, Reason), so a sentinel matches a
+          freshly wrapped error of the same identity and not merely the same pointer.
+        doc: |-
+          UnexpectedStatus is returned when the release host answers with a status
+          the update path does not accept. Retryable.
+        name: UnexpectedStatus
         type: "*errs.Error"
-      - name: DownloadFailed
+      - blockDoc: |-
+          The sentinels a caller matches with errors.Is, one for each of the codes
+          above.
+
+          A facade that publishes a code and withholds the value it identifies is half
+          a surface: a caller can ask errs.HasCode "is this that failure?" and cannot
+          write errors.Is(err, selfupdate.SignatureInvalid), which is the spelling Go
+          programs actually use and the only one that composes with errors.Join. PR
+          #184 fixed exactly this shape in the entitlement facade; lock, cache and
+          authz already publish theirs. This package was the outlier.
+
+          They are values rather than type aliases because a sentinel IS a value —
+          there is nothing to alias. The declared type is left off so each keeps its
+          *errs.Error, which is what lock and cache do, and what lets a caller reach
+          Code(), Public() and ExitCode() without a second lookup. Matching works
+          either way: errs.Error.Is compares (Code, Reason), so a sentinel matches a
+          freshly wrapped error of the same identity and not merely the same pointer.
+        doc: |-
+          DownloadFailed is returned when a download does not complete, including
+          a transport failure with no HTTP status at all. It is the sentinel a
+          retry policy keys on.
+        name: DownloadFailed
         type: "*errs.Error"
-      - name: DevBuild
+      - blockDoc: |-
+          The sentinels a caller matches with errors.Is, one for each of the codes
+          above.
+
+          A facade that publishes a code and withholds the value it identifies is half
+          a surface: a caller can ask errs.HasCode "is this that failure?" and cannot
+          write errors.Is(err, selfupdate.SignatureInvalid), which is the spelling Go
+          programs actually use and the only one that composes with errors.Join. PR
+          #184 fixed exactly this shape in the entitlement facade; lock, cache and
+          authz already publish theirs. This package was the outlier.
+
+          They are values rather than type aliases because a sentinel IS a value —
+          there is nothing to alias. The declared type is left off so each keeps its
+          *errs.Error, which is what lock and cache do, and what lets a caller reach
+          Code(), Public() and ExitCode() without a second lookup. Matching works
+          either way: errs.Error.Is compares (Code, Reason), so a sentinel matches a
+          freshly wrapped error of the same identity and not merely the same pointer.
+        doc: |-
+          DevBuild is returned when a version check runs on a build carrying no
+          release version, so there is nothing to compare a release against. It is
+          an ANSWER rather than a fault — CheckForUpdate on a `go build` binary
+          reaches it every time — which is why ExplainUpgradeFailure has no case
+          for it: "rebuild from source" is NoVendorKey's advice, not this one's.
+        name: DevBuild
         type: "*errs.Error"
-      - name: CandidateNotFound
+      - blockDoc: |-
+          The sentinels a caller matches with errors.Is, one for each of the codes
+          above.
+
+          A facade that publishes a code and withholds the value it identifies is half
+          a surface: a caller can ask errs.HasCode "is this that failure?" and cannot
+          write errors.Is(err, selfupdate.SignatureInvalid), which is the spelling Go
+          programs actually use and the only one that composes with errors.Join. PR
+          #184 fixed exactly this shape in the entitlement facade; lock, cache and
+          authz already publish theirs. This package was the outlier.
+
+          They are values rather than type aliases because a sentinel IS a value —
+          there is nothing to alias. The declared type is left off so each keeps its
+          *errs.Error, which is what lock and cache do, and what lets a caller reach
+          Code(), Public() and ExitCode() without a second lookup. Matching works
+          either way: errs.Error.Is compares (Code, Reason), so a sentinel matches a
+          freshly wrapped error of the same identity and not merely the same pointer.
+        doc: |-
+          CandidateNotFound is returned when a requested release candidate does
+          not exist.
+        name: CandidateNotFound
         type: "*errs.Error"
-      - name: NotPrerelease
+      - blockDoc: |-
+          The sentinels a caller matches with errors.Is, one for each of the codes
+          above.
+
+          A facade that publishes a code and withholds the value it identifies is half
+          a surface: a caller can ask errs.HasCode "is this that failure?" and cannot
+          write errors.Is(err, selfupdate.SignatureInvalid), which is the spelling Go
+          programs actually use and the only one that composes with errors.Join. PR
+          #184 fixed exactly this shape in the entitlement facade; lock, cache and
+          authz already publish theirs. This package was the outlier.
+
+          They are values rather than type aliases because a sentinel IS a value —
+          there is nothing to alias. The declared type is left off so each keeps its
+          *errs.Error, which is what lock and cache do, and what lets a caller reach
+          Code(), Public() and ExitCode() without a second lookup. Matching works
+          either way: errs.Error.Is compares (Code, Reason), so a sentinel matches a
+          freshly wrapped error of the same identity and not merely the same pointer.
+        doc: |-
+          NotPrerelease is returned when a tag requested as a candidate is
+          reported as a stable release.
+        name: NotPrerelease
         type: "*errs.Error"
-      - name: DraftRelease
+      - blockDoc: |-
+          The sentinels a caller matches with errors.Is, one for each of the codes
+          above.
+
+          A facade that publishes a code and withholds the value it identifies is half
+          a surface: a caller can ask errs.HasCode "is this that failure?" and cannot
+          write errors.Is(err, selfupdate.SignatureInvalid), which is the spelling Go
+          programs actually use and the only one that composes with errors.Join. PR
+          #184 fixed exactly this shape in the entitlement facade; lock, cache and
+          authz already publish theirs. This package was the outlier.
+
+          They are values rather than type aliases because a sentinel IS a value —
+          there is nothing to alias. The declared type is left off so each keeps its
+          *errs.Error, which is what lock and cache do, and what lets a caller reach
+          Code(), Public() and ExitCode() without a second lookup. Matching works
+          either way: errs.Error.Is compares (Code, Reason), so a sentinel matches a
+          freshly wrapped error of the same identity and not merely the same pointer.
+        doc: DraftRelease is returned for a draft release, which exposes no asset.
+        name: DraftRelease
         type: "*errs.Error"
-      - name: InvalidTag
+      - blockDoc: |-
+          The sentinels a caller matches with errors.Is, one for each of the codes
+          above.
+
+          A facade that publishes a code and withholds the value it identifies is half
+          a surface: a caller can ask errs.HasCode "is this that failure?" and cannot
+          write errors.Is(err, selfupdate.SignatureInvalid), which is the spelling Go
+          programs actually use and the only one that composes with errors.Join. PR
+          #184 fixed exactly this shape in the entitlement facade; lock, cache and
+          authz already publish theirs. This package was the outlier.
+
+          They are values rather than type aliases because a sentinel IS a value —
+          there is nothing to alias. The declared type is left off so each keeps its
+          *errs.Error, which is what lock and cache do, and what lets a caller reach
+          Code(), Public() and ExitCode() without a second lookup. Matching works
+          either way: errs.Error.Is compares (Code, Reason), so a sentinel matches a
+          freshly wrapped error of the same identity and not merely the same pointer.
+        doc: InvalidTag is returned for a tag that is not a valid semantic version.
+        name: InvalidTag
         type: "*errs.Error"
-      - name: BinaryNotInArchive
+      - blockDoc: |-
+          The sentinels a caller matches with errors.Is, one for each of the codes
+          above.
+
+          A facade that publishes a code and withholds the value it identifies is half
+          a surface: a caller can ask errs.HasCode "is this that failure?" and cannot
+          write errors.Is(err, selfupdate.SignatureInvalid), which is the spelling Go
+          programs actually use and the only one that composes with errors.Join. PR
+          #184 fixed exactly this shape in the entitlement facade; lock, cache and
+          authz already publish theirs. This package was the outlier.
+
+          They are values rather than type aliases because a sentinel IS a value —
+          there is nothing to alias. The declared type is left off so each keeps its
+          *errs.Error, which is what lock and cache do, and what lets a caller reach
+          Code(), Public() and ExitCode() without a second lookup. Matching works
+          either way: errs.Error.Is compares (Code, Reason), so a sentinel matches a
+          freshly wrapped error of the same identity and not merely the same pointer.
+        doc: |-
+          BinaryNotInArchive is returned when a verified archive does not contain
+          the expected binary. The archive is authentic; it is a packaging fault
+          rather than an attack.
+        name: BinaryNotInArchive
         type: "*errs.Error"
-      - name: UnknownArchive
+      - blockDoc: |-
+          The sentinels a caller matches with errors.Is, one for each of the codes
+          above.
+
+          A facade that publishes a code and withholds the value it identifies is half
+          a surface: a caller can ask errs.HasCode "is this that failure?" and cannot
+          write errors.Is(err, selfupdate.SignatureInvalid), which is the spelling Go
+          programs actually use and the only one that composes with errors.Join. PR
+          #184 fixed exactly this shape in the entitlement facade; lock, cache and
+          authz already publish theirs. This package was the outlier.
+
+          They are values rather than type aliases because a sentinel IS a value —
+          there is nothing to alias. The declared type is left off so each keeps its
+          *errs.Error, which is what lock and cache do, and what lets a caller reach
+          Code(), Public() and ExitCode() without a second lookup. Matching works
+          either way: errs.Error.Is compares (Code, Reason), so a sentinel matches a
+          freshly wrapped error of the same identity and not merely the same pointer.
+        doc: |-
+          UnknownArchive is returned for an asset whose container format is not
+          handled.
+        name: UnknownArchive
         type: "*errs.Error"
-      - name: ElevationNotAuthorised
+      - blockDoc: |-
+          The sentinels a caller matches with errors.Is, one for each of the codes
+          above.
+
+          A facade that publishes a code and withholds the value it identifies is half
+          a surface: a caller can ask errs.HasCode "is this that failure?" and cannot
+          write errors.Is(err, selfupdate.SignatureInvalid), which is the spelling Go
+          programs actually use and the only one that composes with errors.Join. PR
+          #184 fixed exactly this shape in the entitlement facade; lock, cache and
+          authz already publish theirs. This package was the outlier.
+
+          They are values rather than type aliases because a sentinel IS a value —
+          there is nothing to alias. The declared type is left off so each keeps its
+          *errs.Error, which is what lock and cache do, and what lets a caller reach
+          Code(), Public() and ExitCode() without a second lookup. Matching works
+          either way: errs.Error.Is compares (Code, Reason), so a sentinel matches a
+          freshly wrapped error of the same identity and not merely the same pointer.
+        doc: |-
+          ElevationNotAuthorised is returned when replacing the binary needs
+          privilege the operator did not opt into. Recoverable — but only through
+          the opt-in, which ExplainUpgradeFailure names.
+        name: ElevationNotAuthorised
         type: "*errs.Error"
-      - name: CandidateTagRequired
+      - blockDoc: |-
+          The sentinels a caller matches with errors.Is, one for each of the codes
+          above.
+
+          A facade that publishes a code and withholds the value it identifies is half
+          a surface: a caller can ask errs.HasCode "is this that failure?" and cannot
+          write errors.Is(err, selfupdate.SignatureInvalid), which is the spelling Go
+          programs actually use and the only one that composes with errors.Join. PR
+          #184 fixed exactly this shape in the entitlement facade; lock, cache and
+          authz already publish theirs. This package was the outlier.
+
+          They are values rather than type aliases because a sentinel IS a value —
+          there is nothing to alias. The declared type is left off so each keeps its
+          *errs.Error, which is what lock and cache do, and what lets a caller reach
+          Code(), Public() and ExitCode() without a second lookup. Matching works
+          either way: errs.Error.Is compares (Code, Reason), so a sentinel matches a
+          freshly wrapped error of the same identity and not merely the same pointer.
+        doc: |-
+          CandidateTagRequired is returned by DownloadCandidate for an empty tag.
+          It wraps errors.ErrUnsupported, so a caller matching that instead still
+          matches.
+        name: CandidateTagRequired
         type: "*errs.Error"
-      - name: ReleaseMetadataUnreadable
+      - blockDoc: |-
+          The sentinels a caller matches with errors.Is, one for each of the codes
+          above.
+
+          A facade that publishes a code and withholds the value it identifies is half
+          a surface: a caller can ask errs.HasCode "is this that failure?" and cannot
+          write errors.Is(err, selfupdate.SignatureInvalid), which is the spelling Go
+          programs actually use and the only one that composes with errors.Join. PR
+          #184 fixed exactly this shape in the entitlement facade; lock, cache and
+          authz already publish theirs. This package was the outlier.
+
+          They are values rather than type aliases because a sentinel IS a value —
+          there is nothing to alias. The declared type is left off so each keeps its
+          *errs.Error, which is what lock and cache do, and what lets a caller reach
+          Code(), Public() and ExitCode() without a second lookup. Matching works
+          either way: errs.Error.Is compares (Code, Reason), so a sentinel matches a
+          freshly wrapped error of the same identity and not merely the same pointer.
+        doc: |-
+          ReleaseMetadataUnreadable is returned when the release API answers
+          within its cap and the body does not decode. The bytes arrived, so no
+          transport retry applies.
+        name: ReleaseMetadataUnreadable
         type: "*errs.Error"
-      - name: ArchiveUnreadable
+      - blockDoc: |-
+          The sentinels a caller matches with errors.Is, one for each of the codes
+          above.
+
+          A facade that publishes a code and withholds the value it identifies is half
+          a surface: a caller can ask errs.HasCode "is this that failure?" and cannot
+          write errors.Is(err, selfupdate.SignatureInvalid), which is the spelling Go
+          programs actually use and the only one that composes with errors.Join. PR
+          #184 fixed exactly this shape in the entitlement facade; lock, cache and
+          authz already publish theirs. This package was the outlier.
+
+          They are values rather than type aliases because a sentinel IS a value —
+          there is nothing to alias. The declared type is left off so each keeps its
+          *errs.Error, which is what lock and cache do, and what lets a caller reach
+          Code(), Public() and ExitCode() without a second lookup. Matching works
+          either way: errs.Error.Is compares (Code, Reason), so a sentinel matches a
+          freshly wrapped error of the same identity and not merely the same pointer.
+        doc: |-
+          ArchiveUnreadable is returned when a release archive will not unpack. It
+          is raised only AFTER the signature and digest have both verified, so it
+          is a packaging or transfer fault and never a supply-chain signal.
+        name: ArchiveUnreadable
         type: "*errs.Error"
-      - name: ExecutablePathUnresolved
+      - blockDoc: |-
+          The sentinels a caller matches with errors.Is, one for each of the codes
+          above.
+
+          A facade that publishes a code and withholds the value it identifies is half
+          a surface: a caller can ask errs.HasCode "is this that failure?" and cannot
+          write errors.Is(err, selfupdate.SignatureInvalid), which is the spelling Go
+          programs actually use and the only one that composes with errors.Join. PR
+          #184 fixed exactly this shape in the entitlement facade; lock, cache and
+          authz already publish theirs. This package was the outlier.
+
+          They are values rather than type aliases because a sentinel IS a value —
+          there is nothing to alias. The declared type is left off so each keeps its
+          *errs.Error, which is what lock and cache do, and what lets a caller reach
+          Code(), Public() and ExitCode() without a second lookup. Matching works
+          either way: errs.Error.Is compares (Code, Reason), so a sentinel matches a
+          freshly wrapped error of the same identity and not merely the same pointer.
+        doc: |-
+          ExecutablePathUnresolved is returned when the process cannot work out
+          which file on disk it runs from. Nothing is attempted after it.
+        name: ExecutablePathUnresolved
         type: "*errs.Error"
-      - name: StagingFailed
+      - blockDoc: |-
+          The sentinels a caller matches with errors.Is, one for each of the codes
+          above.
+
+          A facade that publishes a code and withholds the value it identifies is half
+          a surface: a caller can ask errs.HasCode "is this that failure?" and cannot
+          write errors.Is(err, selfupdate.SignatureInvalid), which is the spelling Go
+          programs actually use and the only one that composes with errors.Join. PR
+          #184 fixed exactly this shape in the entitlement facade; lock, cache and
+          authz already publish theirs. This package was the outlier.
+
+          They are values rather than type aliases because a sentinel IS a value —
+          there is nothing to alias. The declared type is left off so each keeps its
+          *errs.Error, which is what lock and cache do, and what lets a caller reach
+          Code(), Public() and ExitCode() without a second lookup. Matching works
+          either way: errs.Error.Is compares (Code, Reason), so a sentinel matches a
+          freshly wrapped error of the same identity and not merely the same pointer.
+        doc: |-
+          StagingFailed is returned when the replacement failed BEFORE the rename,
+          so the running binary is byte-for-byte as it was. That is the whole
+          difference between this and ReplacementFailed.
+        name: StagingFailed
         type: "*errs.Error"
-      - name: ReplacementFailed
+      - blockDoc: |-
+          The sentinels a caller matches with errors.Is, one for each of the codes
+          above.
+
+          A facade that publishes a code and withholds the value it identifies is half
+          a surface: a caller can ask errs.HasCode "is this that failure?" and cannot
+          write errors.Is(err, selfupdate.SignatureInvalid), which is the spelling Go
+          programs actually use and the only one that composes with errors.Join. PR
+          #184 fixed exactly this shape in the entitlement facade; lock, cache and
+          authz already publish theirs. This package was the outlier.
+
+          They are values rather than type aliases because a sentinel IS a value —
+          there is nothing to alias. The declared type is left off so each keeps its
+          *errs.Error, which is what lock and cache do, and what lets a caller reach
+          Code(), Public() and ExitCode() without a second lookup. Matching works
+          either way: errs.Error.Is compares (Code, Reason), so a sentinel matches a
+          freshly wrapped error of the same identity and not merely the same pointer.
+        doc: |-
+          ReplacementFailed is returned when the rename over the running
+          executable did not land.
+        name: ReplacementFailed
         type: "*errs.Error"
-      - name: ElevationFailed
+      - blockDoc: |-
+          The sentinels a caller matches with errors.Is, one for each of the codes
+          above.
+
+          A facade that publishes a code and withholds the value it identifies is half
+          a surface: a caller can ask errs.HasCode "is this that failure?" and cannot
+          write errors.Is(err, selfupdate.SignatureInvalid), which is the spelling Go
+          programs actually use and the only one that composes with errors.Join. PR
+          #184 fixed exactly this shape in the entitlement facade; lock, cache and
+          authz already publish theirs. This package was the outlier.
+
+          They are values rather than type aliases because a sentinel IS a value —
+          there is nothing to alias. The declared type is left off so each keeps its
+          *errs.Error, which is what lock and cache do, and what lets a caller reach
+          Code(), Public() and ExitCode() without a second lookup. Matching works
+          either way: errs.Error.Is compares (Code, Reason), so a sentinel matches a
+          freshly wrapped error of the same identity and not merely the same pointer.
+        doc: |-
+          ElevationFailed is returned when an escalation the operator DID
+          authorise was refused by the system. Unlike ElevationNotAuthorised, no
+          environment variable repairs it.
+        name: ElevationFailed
         type: "*errs.Error"
-      - name: ProbeFailed
+      - blockDoc: |-
+          The sentinels a caller matches with errors.Is, one for each of the codes
+          above.
+
+          A facade that publishes a code and withholds the value it identifies is half
+          a surface: a caller can ask errs.HasCode "is this that failure?" and cannot
+          write errors.Is(err, selfupdate.SignatureInvalid), which is the spelling Go
+          programs actually use and the only one that composes with errors.Join. PR
+          #184 fixed exactly this shape in the entitlement facade; lock, cache and
+          authz already publish theirs. This package was the outlier.
+
+          They are values rather than type aliases because a sentinel IS a value —
+          there is nothing to alias. The declared type is left off so each keeps its
+          *errs.Error, which is what lock and cache do, and what lets a caller reach
+          Code(), Public() and ExitCode() without a second lookup. Matching works
+          either way: errs.Error.Is compares (Code, Reason), so a sentinel matches a
+          freshly wrapped error of the same identity and not merely the same pointer.
+        doc: |-
+          ProbeFailed is returned when the replaced binary did not answer its
+          probe; rolled_back says whether <binary>.prev was put back.
+        name: ProbeFailed
         type: "*errs.Error"

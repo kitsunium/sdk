@@ -1,4 +1,3 @@
-// Package baseenc — IO adapters used by the streaming pipeline.
 package baseenc
 
 import (

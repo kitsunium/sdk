@@ -1,5 +1,3 @@
-// Package kit — erasure: a record's personal data removed as its retention
-// would.
 package kit
 
 import (

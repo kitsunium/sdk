@@ -1,5 +1,3 @@
-// Package metrics — per-instrument-name bookkeeping: kind binding and the
-// cardinality tally.
 package metrics
 
 import (

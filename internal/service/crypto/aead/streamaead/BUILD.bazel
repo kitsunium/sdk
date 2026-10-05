@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "streamaead",
     srcs = [
+        "doc.go",
         "reader.go",
         "streamaead.go",
         "writer.go",

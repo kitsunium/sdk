@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "strictjson",
     srcs = [
+        "doc.go",
         "reader.go",
         "strictjson.go",
     ],

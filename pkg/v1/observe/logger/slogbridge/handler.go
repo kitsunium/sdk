@@ -1,4 +1,3 @@
-// Package slogbridge — the slog.Handler that forwards records to an SDK Logger.
 package slogbridge
 
 import (

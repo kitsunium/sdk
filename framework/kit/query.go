@@ -1,4 +1,3 @@
-// Package kit — queries: an operation that reads and changes nothing.
 package kit
 
 import (

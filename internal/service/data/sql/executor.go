@@ -1,5 +1,3 @@
-// Package sql — hosts the scope-bound Executor handed to a TxFunc, and the
-// two guards that stand between a stale handle and a live transaction.
 package sql
 
 import (

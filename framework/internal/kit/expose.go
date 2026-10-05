@@ -1,4 +1,3 @@
-// Package kit — exposures: an operation an endpoint serves over HTTP.
 package kit
 
 import (

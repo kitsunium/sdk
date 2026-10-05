@@ -1,4 +1,3 @@
-// Package writer — RedisStreamConfig value type for the "redis" writer.
 package writer
 
 import (

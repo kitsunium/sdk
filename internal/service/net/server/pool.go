@@ -1,4 +1,3 @@
-// Package server — per-connection state recycling.
 package server
 
 import (

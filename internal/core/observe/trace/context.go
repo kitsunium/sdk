@@ -1,7 +1,3 @@
-// Package trace — range 0.2.20.* (ADR 0051 core/observe/trace block), and
-// range 0.3.50.*, the tracing engine's, declared here since ADR 0160.
-//
-// Package trace — carrying a span context on a context.Context.
 package trace
 
 import "context"

@@ -1,28 +1,3 @@
-// Package msgpack — how a Go struct maps onto a MessagePack map. The rules are
-// the ones the vendor-backed codec applied, so existing tags keep their
-// meaning:
-//
-//   - The key is the `msgpack:"name"` tag, else the Go field name — case and
-//     all; there is no fallback to the json tag. `msgpack:"-"` leaves the
-//     field out, and so does being unexported.
-//   - `omitempty` leaves an empty field out of the map: a zero number, false,
-//     an empty string, slice, map or array, a nil pointer or interface, a
-//     value whose IsZero() reports true (time.Time), a struct all of whose
-//     fields would be left out.
-//   - A field named `_msgpack` carries struct-wide options: `as_array` (or
-//     `asArray`) encodes the struct as an array of every field in order, and
-//     `omitempty` applies to every field declared after it.
-//   - An embedded struct, or pointer to one, has its fields INLINED unless one
-//     of their names is already taken, `noinline` is set, or the type encodes
-//     itself (a marshaler, time.Time); `inline` forces it and drops only the
-//     colliding names. A struct that cannot inline is one field named after
-//     it — and an inlined one's name still decodes, as a nested map.
-//   - `alias:other` lets the field also be DECODED from the key "other".
-//
-// Decoding matches keys exactly and steps over keys no field claims; a struct
-// accepts both the map and the array form whatever its own options. Two fields
-// claiming one key are refused when the type is first used, instead of writing
-// a map that repeats a key.
 package msgpack
 
 import (

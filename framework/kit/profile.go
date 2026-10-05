@@ -1,4 +1,3 @@
-// Package kit — CPU profiles of the running process, for the Studio.
 package kit
 
 import (

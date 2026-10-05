@@ -1,4 +1,3 @@
-// Package yaml — decoding: the source checked, the document parsed, values built.
 package yaml
 
 import (

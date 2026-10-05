@@ -1,6 +1,3 @@
-// Package ssh - local key material and the possession proof. The public
-// halves are published by design, so reading one proves nothing; only a
-// fresh signature over a per-call nonce establishes ownership.
 package ssh
 
 import (

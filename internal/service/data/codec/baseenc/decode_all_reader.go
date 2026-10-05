@@ -1,6 +1,3 @@
-// Package baseenc — buffered decode reader for variants whose stdlib has
-// no streaming decoder (Base45). Held in its own file so KTN-STRUCT-ONEFILE
-// sees exactly one struct per file.
 package baseenc
 
 import (

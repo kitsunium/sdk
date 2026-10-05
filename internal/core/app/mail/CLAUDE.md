@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-04T11:15:00Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # internal/core/app/mail/
 
 ## Purpose
@@ -32,9 +32,8 @@ into `design_gen.go`. A port or its doc comment changes in the design, then
 `kit gen`, then `make api` — never in `design_gen.go`, whose header digests
 `make api-check` verifies. They moved there from `transport_interface.go`,
 content moved and never deleted; the file, left with nothing but its package
-comment, is gone (rule 5), its paragraphs now opening `value.go`'s — go/doc
-joins every file's package comment in file-name order, so `go doc` reads it as
-before.
+comment, is gone (rule 5), and so is `mail.go`, which held the package doc
+alone; the package comment is `doc.go`'s alone, written by kit from the design (ADR 0167).
 
 ## Contents
 
@@ -49,7 +48,7 @@ short names a consumer writes (`mail.Message`, `mail.Address`), exactly as
 
 | File | What lives there |
 |---|---|
-| `mail.go` | the package doc |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
 | `message_value.go` | `MessageValue` — one mail, as a value |
 | `address_value.go` | `AddressValue` and `IsZero` |
 | `attachment_value.go` | `AttachmentValue`, `Inline`, `DefaultAttachmentType` |

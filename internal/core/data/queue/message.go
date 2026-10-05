@@ -1,6 +1,3 @@
-// Package queue — hosts the three values that travel between a producer, a
-// broker and a consumer: the message, the lease, and the delivery that pairs
-// them.
 package queue
 
 import "time"

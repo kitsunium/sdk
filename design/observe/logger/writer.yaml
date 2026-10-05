@@ -2,7 +2,12 @@ apiVersion: kit.kitsunium/design/v2
 domain: observe/logger/writer
 packages:
   - aliases:
-      - name: Config
+      - doc: |-
+          Config is the opaque per-writer configuration payload. Each Factory
+          type-asserts it to its concrete config (e.g. logger.FileConfig); a wrong
+          concrete type MUST be rejected with the shared WriterConfigInvalid sentinel
+          rather than panic.
+        name: Config
         target: any
     codes:
       - const:
@@ -42,14 +47,82 @@ packages:
             value: "0x00_02_03_05"
         type: errs.Code
     constants:
-      - name: ConsoleStderr
+      - doc: |-
+          ConsoleStderr writes to os.Stderr. It is the zero value, so a
+          ConsoleConfig{} targets stderr by default: a caller who has not named a
+          stream has not made a choice, and stdout may be the process's protocol
+          channel (ADR 0030). The order of this block is load-bearing — the zero
+          value is the contract, not the name that happens to come first.
+        name: ConsoleStderr
         type: ConsoleStream
         value: "0"
-      - name: ConsoleStdout
+      - doc: ConsoleStdout writes to os.Stdout. Reachable only by naming it.
+        name: ConsoleStdout
         type: ConsoleStream
         value: "1"
+    doc: |-
+      Package writer — range 0.2.3.* (ADR 0012 core/observe/logger/writer block).
+
+      Package writer — ClickHouseConfig value type for the "clickhouse" writer.
+
+      Package writer — CloudWatchConfig value type for the "cloudwatch" writer.
+
+      Package writer — ConsoleConfig value type for the "console" writer.
+
+      Package writer — declares the optional config Decoder extension that a
+      Factory MAY implement to translate a raw, parsed config map into its typed
+      Config. It mirrors codec's Appender optional-extension convention: consumers
+      detect support with a runtime type assertion and fall back to a default
+      mapping that passes the raw map straight through when the extension is absent.
+
+      A Factory that parses credentials or other sensitive material out of the raw
+      map MUST NOT echo any option value into an error it returns; callers that
+      surface a Decoder failure name only the writer and the failure kind.
+
+      Package writer — FileConfig value type for the "file" writer.
+
+      Package writer — MySQLConfig value type for the "mysql" writer.
+
+      Package writer — RedisStreamConfig value type for the "redis" writer.
+
+      Package writer — RotFileConfig value type for the "rotfile" writer.
+
+      Package writer — S3Config value type for the "s3" writer.
+
+      Package writer — credential value + provider port shared by the network
+      writers (s3, cloudwatch). Carries no AWS types; the redacting CredentialValue
+      keeps secrets out of any accidental log emission (rule 4 Public/Private).
+
+      Package writer — declares the sentinels returned by the registry and shared
+      across factories. Each var's name equals its errs.Define Reason in
+      SCREAMING_SNAKE form. DuplicateRegistration is never returned: Register
+      panics at boot with conflictText of it. CodeWriterNil and CodeWriterNameEmpty
+      label boot panics too, spelled in the message (see registry.go).
+
+      Package writer — holds the process-wide Factory registry. Service- and
+      public-level writer packages register themselves via package-level var
+      initialisers when imported (no init()), mirroring core/data/codec.
+
+      Package writer declares the transport-factory port: a named, config-driven
+      constructor that yields a logger Sink, plus the process-wide registry that
+      maps a writer Name to its Factory. It is the peer of internal/core/data/codec —
+      the registry resolves a Name to a Factory exactly as codec resolves a Format
+      to a Codec (ADR 0012).
+
+      A writer is NOT a transport: it builds one. Factory.Open is called once at
+      logger-construction time and returns a core/observe/logger.Sink that owns its
+      transport for its lifetime; the hot path (Sink.Write) is untouched by this
+      package. Concrete factories live in internal/service/observe/logger/writer/<x>/ (console,
+      file) and third-party/aws/writer/<x>/ (s3, cloudwatch) and self-register via a
+      package-level var initialiser when imported — no init().
+
+      Package writer — Spec value type, in its own file per the
+      one-exported-struct-per-file convention.
     functions:
-      - in:
+      - doc: |-
+          NewCredentialValue builds a CredentialValue from SigV4 material. An empty
+          sessionToken is valid for long-lived keys; supply it for STS / assumed roles.
+        in:
           - name: accessKeyID
           - name: secretAccessKey
           - name: sessionToken
@@ -57,13 +130,31 @@ packages:
         name: NewCredentialValue
         out:
           - type: CredentialValue
-      - in:
+      - doc: |-
+          Register inserts f into the registry under f.Name() and returns it so callers
+          can bind the singleton to a typed package-level variable like
+          `var Writer = writer.Register(&fileFactory{})`. Panics on a nil factory or
+          when a distinct factory already claims the same Name.
+
+          IFACE-PLUGIN: the registry hands plug-in factory instances back to callers
+          so each writer keeps its concrete type unexported; the stable contract is
+          the Factory interface itself.
+
+          "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
+          plug-in whose type is not comparable both satisfy the port and neither can
+          serve one call (see internal/kernel/plugin).
+        in:
           - name: f
             type: Factory
         name: Register
         out:
           - type: Factory
-      - in:
+      - doc: |-
+          Lookup returns the factory registered under n.
+
+          IFACE-PLUGIN: the registry stores plug-in factory instances behind the
+          Factory interface — concrete types are intentionally unexported per writer.
+        in:
           - name: "n"
             type: Name
         name: Lookup
@@ -72,7 +163,11 @@ packages:
             type: Factory
           - name: ok
             type: bool
-      - in:
+      - doc: |-
+          Open resolves n to its factory and builds a Sink from cfg. It is the
+          one-call convenience over Lookup + Factory.Open; a missing Name returns the
+          WriterUnknownName sentinel so callers can HasCode it.
+        in:
           - name: "n"
             type: Name
           - name: cfg
@@ -83,7 +178,10 @@ packages:
             type: corelogger.Sink
           - name: err
             type: error
-      - name: Available
+      - doc: |-
+          Available returns the sorted list of registered Names, or nil before any
+          Register.
+        name: Available
         out:
           - type: "[]Name"
     imports:
@@ -201,206 +299,560 @@ packages:
             public: A writer is already registered under that name
             reason: DUPLICATE_REGISTRATION
     types:
-      - name: ClickHouseConfig
+      - doc: |-
+          ClickHouseConfig configures the "clickhouse" writer (registered by
+          third-party/db/writer/clickhouse). It carries no driver types — only plain
+          data — so it lives in the dep-light core layer; the concrete low-level driver
+          (ClickHouse/ch-go) is confined to the third-party adapter. A batch maps to one
+          native-protocol block insert, so the sink batches by row count.
+        name: ClickHouseConfig
         struct:
           fields:
-            - name: Address
+            - doc: |-
+                Address is the ClickHouse native-protocol endpoint (host:port, default
+                port 9000); required.
+              name: Address
               type: string
-            - name: Database
+            - doc: Database is the target database (required).
+              name: Database
               type: string
-            - name: Table
+            - doc: Table is the destination table for log rows (required).
+              name: Table
               type: string
-            - name: Credentials
+            - doc: |-
+                Credentials yields the DB login on demand and is REQUIRED: a nil provider
+                is rejected with the adapter's ClientInitFailed. AccessKeyID() is the
+                ClickHouse username and SecretAccessKey() is the password (the redacting
+                CredentialValue is reused so the password never leaks into %v/%#v).
+              name: Credentials
               type: CredentialProvider
-            - name: MaxRows
+            - doc: |-
+                MaxRows forces a flush once the pending block reaches this many rows; a
+                non-positive value applies the dbsink shell's default.
+              name: MaxRows
               type: int
-            - name: FlushEvery
+            - doc: |-
+                FlushEvery bounds how long a partial block waits before the insert; the
+                zero value flushes only on an explicit Flush / Close.
+              name: FlushEvery
               type: time.Duration
-            - name: BufferSize
+            - doc: |-
+                BufferSize is the async ring capacity; a non-positive value applies
+                async's default. The producer never blocks on the database.
+              name: BufferSize
               type: int
-            - name: MinLevel
+            - doc: |-
+                MinLevel is the optional per-writer severity floor; the zero value
+                inherits the handler-global level.
+              name: MinLevel
               type: level.Level
-            - name: OnDrop
+            - doc: |-
+                OnDrop, when non-nil, is invoked with the count of records discarded
+                because the non-blocking ring saturated.
+              name: OnDrop
               type: func(dropped int)
-            - name: OnError
+            - doc: |-
+                OnError, when non-nil, is invoked for every failed block insert seen by
+                the background drainer.
+              name: OnError
               type: func(err error)
-      - name: CloudWatchConfig
+      - doc: |-
+          CloudWatchConfig configures the "cloudwatch" writer (registered by
+          third-party/aws/writer/cloudwatch). Like S3Config it carries no AWS types and lives
+          in core, re-exported as logger.CloudWatchConfig. Group, Stream and Region are
+          required; the factory rejects empties with WriterConfigInvalid.
+        name: CloudWatchConfig
         struct:
           fields:
-            - name: Group
+            - doc: Group is the CloudWatch Logs log-group name (required).
+              name: Group
               type: string
-            - name: Stream
+            - doc: Stream is the log-stream name within the group (required).
+              name: Stream
               type: string
-            - name: Region
+            - doc: Region is the AWS region of the log group (required).
+              name: Region
               type: string
-            - name: Endpoint
+            - doc: |-
+                Endpoint optionally overrides the CloudWatch Logs endpoint URL. Empty uses
+                the default AWS endpoint; set it for a LocalStack integration test.
+              name: Endpoint
               type: string
-            - name: Credentials
+            - doc: |-
+                Credentials yields short-lived AWS credentials on demand and is REQUIRED:
+                a nil provider is rejected with ClientInitFailed. The AWS default
+                credential chain is intentionally not wired (it would pull the heavyweight
+                aws config module into every consumer).
+              name: Credentials
               type: CredentialProvider
-            - name: FlushEvery
+            - doc: |-
+                FlushEvery bounds how long a batch waits before the PutLogEvents call;
+                the zero value flushes only on an explicit Flush / Close.
+              name: FlushEvery
               type: time.Duration
-            - name: MinLevel
+            - doc: |-
+                MinLevel is the optional per-writer severity floor; the zero value
+                inherits the handler-global level.
+              name: MinLevel
               type: level.Level
-            - name: OnDrop
+            - doc: |-
+                OnDrop, when non-nil, is invoked with the count of records discarded
+                because the non-blocking buffer saturated. Wire it to a metric counter.
+              name: OnDrop
               type: func(dropped int)
-            - name: OnError
+            - doc: |-
+                OnError, when non-nil, is invoked for every failed PutLogEvents call seen
+                by the background drainer.
+              name: OnError
               type: func(err error)
-      - name: ConsoleStream
+      - doc: ConsoleStream selects which standard stream the console writer targets.
+        name: ConsoleStream
         underlying: uint8
-      - name: ConsoleConfig
+      - doc: |-
+          ConsoleConfig configures the "console" writer. The zero value is valid and
+          targets os.Stderr at the handler-global level.
+        name: ConsoleConfig
         struct:
           fields:
-            - name: Stream
+            - doc: Stream selects stderr (default) or stdout.
+              name: Stream
               type: ConsoleStream
-            - name: MinLevel
+            - doc: |-
+                MinLevel is the optional per-writer severity floor; the zero value
+                inherits the handler-global level.
+              name: MinLevel
               type: level.Level
-      - name: FileConfig
+      - doc: |-
+          FileConfig configures the "file" writer — an append-only, symlink-hardened
+          on-disk file. Path is required; an empty Path is rejected by the factory with
+          the shared WriterConfigInvalid sentinel.
+        name: FileConfig
         struct:
           fields:
-            - name: Path
+            - doc: |-
+                Path is the destination file; it is opened O_APPEND|O_CREATE|O_WRONLY
+                (+ O_NOFOLLOW on Linux) with mode 0600.
+              name: Path
               type: string
-            - name: MinLevel
+            - doc: |-
+                MinLevel is the optional per-writer severity floor; the zero value
+                inherits the handler-global level.
+              name: MinLevel
               type: level.Level
-      - name: MySQLConfig
+      - doc: |-
+          MySQLConfig configures the "mysql" writer (registered by
+          third-party/db/writer/mysql). It carries no driver types — only plain data —
+          so it lives in the dep-light core layer; the concrete driver
+          (go-sql-driver/mysql) is confined to the third-party adapter. A batch is
+          delivered as a single multi-row INSERT, so the sink batches by row count.
+
+          Local-protocol by design: SocketPath points at a Unix domain socket
+          (net=unix in the DSN the adapter builds), keeping log traffic off TCP.
+        name: MySQLConfig
         struct:
           fields:
-            - name: SocketPath
+            - doc: |-
+                SocketPath is the MySQL Unix domain socket (e.g.
+                /var/run/mysqld/mysqld.sock); required — the adapter builds a net=unix DSN
+                from it. TCP is intentionally not exposed here (local-protocol policy).
+              name: SocketPath
               type: string
-            - name: Database
+            - doc: Database is the target schema (required).
+              name: Database
               type: string
-            - name: Table
+            - doc: Table is the destination table for log rows (required).
+              name: Table
               type: string
-            - name: Credentials
+            - doc: |-
+                Credentials yields the DB login on demand and is REQUIRED: a nil provider
+                is rejected with the adapter's ClientInitFailed. The redacting
+                CredentialValue is reused as-is — AccessKeyID() is the MySQL username and
+                SecretAccessKey() is the password (SessionToken is unused). Reusing the
+                existing redacting type avoids a second secret abstraction; the password
+                never appears in %v/%#v or an error.
+              name: Credentials
               type: CredentialProvider
-            - name: MaxRows
+            - doc: |-
+                MaxRows forces a flush once the pending batch reaches this many rows; a
+                non-positive value applies the dbsink shell's default.
+              name: MaxRows
               type: int
-            - name: FlushEvery
+            - doc: |-
+                FlushEvery bounds how long a partial batch waits before the INSERT; the
+                zero value flushes only on an explicit Flush / Close.
+              name: FlushEvery
               type: time.Duration
-            - name: BufferSize
+            - doc: |-
+                BufferSize is the async ring capacity; a non-positive value applies
+                async's default. The producer never blocks on the database.
+              name: BufferSize
               type: int
-            - name: MinLevel
+            - doc: |-
+                MinLevel is the optional per-writer severity floor; the zero value
+                inherits the handler-global level.
+              name: MinLevel
               type: level.Level
-            - name: OnDrop
+            - doc: |-
+                OnDrop, when non-nil, is invoked with the count of records discarded
+                because the non-blocking ring saturated (database slower than producers).
+              name: OnDrop
               type: func(dropped int)
-            - name: OnError
+            - doc: |-
+                OnError, when non-nil, is invoked for every failed batch INSERT seen by
+                the background drainer. Without it those errors are lost.
+              name: OnError
               type: func(err error)
-      - name: RedisStreamConfig
+      - doc: |-
+          RedisStreamConfig configures the "redis" writer (registered by
+          third-party/db/writer/redis). It carries no driver types — only plain data —
+          so it lives in the dep-light core layer; the concrete driver (redis/go-redis)
+          is confined to the third-party adapter. A batch is delivered as a pipelined
+          run of XADD commands, so the sink batches by entry count.
+
+          Local-protocol by design: SocketPath points at a Unix domain socket, keeping
+          log traffic off TCP.
+        name: RedisStreamConfig
         struct:
           fields:
-            - name: SocketPath
+            - doc: |-
+                SocketPath is the Redis Unix domain socket (e.g. /var/run/redis/redis.sock);
+                required — the adapter dials net=unix from it.
+              name: SocketPath
               type: string
-            - name: Stream
+            - doc: Stream is the Redis stream key entries are XADDed to (required).
+              name: Stream
               type: string
-            - name: MaxLen
+            - doc: |-
+                MaxLen, when positive, caps the stream length via XADD MAXLEN ~ (the
+                approximate trim that lets Redis evict in whole macro-nodes). Zero leaves
+                the stream untrimmed (the operator manages retention).
+              name: MaxLen
               type: int
-            - name: Credentials
+            - doc: |-
+                Credentials yields the DB login on demand. A nil provider means no AUTH
+                (a socket-local Redis with no password); when set, AccessKeyID() is the
+                ACL username (empty for the default user) and SecretAccessKey() is the
+                password (reused redacting CredentialValue keeps it out of %v/%#v).
+              name: Credentials
               type: CredentialProvider
-            - name: MaxRows
+            - doc: |-
+                MaxRows forces a flush once the pending batch reaches this many entries; a
+                non-positive value applies the dbsink shell's default.
+              name: MaxRows
               type: int
-            - name: FlushEvery
+            - doc: |-
+                FlushEvery bounds how long a partial batch waits before the pipelined
+                XADD run; the zero value flushes only on an explicit Flush / Close.
+              name: FlushEvery
               type: time.Duration
-            - name: BufferSize
+            - doc: |-
+                BufferSize is the async ring capacity; a non-positive value applies
+                async's default. The producer never blocks on Redis.
+              name: BufferSize
               type: int
-            - name: MinLevel
+            - doc: |-
+                MinLevel is the optional per-writer severity floor; the zero value
+                inherits the handler-global level.
+              name: MinLevel
               type: level.Level
-            - name: OnDrop
+            - doc: |-
+                OnDrop, when non-nil, is invoked with the count of records discarded
+                because the non-blocking ring saturated.
+              name: OnDrop
               type: func(dropped int)
-            - name: OnError
+            - doc: |-
+                OnError, when non-nil, is invoked for every failed XADD batch seen by the
+                background drainer.
+              name: OnError
               type: func(err error)
-      - name: RotFileConfig
+      - doc: |-
+          RotFileConfig configures the "rotfile" writer — a size-capped, on-disk file
+          that rotates when a write would exceed MaxBytes. It is the concrete config a
+          caller passes as writer.Config to writer.Open("rotfile", …); Path is required,
+          an empty Path is rejected with the rotfile open sentinel. It lives in core
+          alongside FileConfig / ConsoleConfig so the public facade can re-export it.
+
+          On rotation the active file is renamed Path -> Path.1 (shifting Path.1 ->
+          Path.2 … up to MaxBackups, dropping the oldest; MaxBackups == 0 keeps all),
+          optionally gzip'd when Compress is set, then Path is reopened fresh. Every
+          reopen re-applies the O_NOFOLLOW + 0600 hardening (CWE-59), and every rotated
+          .N / .N.gz sibling is forced to 0600 so a gzip never leaks default perms.
+
+          MaxAgeDays additionally prunes rotated siblings whose modification time is
+          older than the cutoff, evaluated against Clock after every rotation. It
+          composes with MaxBackups (count cap) — a backup is dropped when it exceeds
+          either policy. The numeric .N backup naming is unchanged; calendar pruning
+          reads each sibling's on-disk mtime rather than a name-embedded stamp, so the
+          retention knobs are purely additive over the existing on-disk format.
+
+          RotateEvery additionally drives a TIME-triggered rotation independent of
+          MaxBytes: when positive, a background ticker forces a rotation on each
+          interval (the "archive every 24h" policy), composing with the size threshold
+          and the MaxBackups / MaxAgeDays retention caps. It is opt-in — the zero value
+          keeps the prior size/manual-only behaviour, so plain file logging never spins
+          a goroutine it did not ask for.
+        name: RotFileConfig
         struct:
           fields:
-            - name: Path
+            - doc: |-
+                Path is the active destination file; it is opened
+                O_APPEND|O_CREATE|O_WRONLY (+ O_NOFOLLOW on Linux) with mode 0600.
+              name: Path
               type: string
-            - name: MaxBytes
+            - doc: |-
+                MaxBytes is the size threshold: a Write that would push the active file
+                past MaxBytes triggers a rotation first. A non-positive MaxBytes disables
+                size-based rotation (the file grows unbounded).
+              name: MaxBytes
               type: int64
-            - name: MaxBackups
+            - doc: |-
+                MaxBackups caps how many rotated siblings (Path.1 … Path.N) are kept; the
+                oldest is dropped once the cap is reached. MaxBackups == 0 keeps all.
+              name: MaxBackups
               type: int
-            - name: Compress
+            - doc: Compress gzips each rotated file (Path.1 -> Path.1.gz) with mode 0600.
+              name: Compress
               type: bool
-            - name: MaxAgeDays
+            - doc: |-
+                MaxAgeDays prunes rotated siblings whose on-disk modification time is
+                older than this many days, evaluated after every rotation (manual or
+                size-triggered) against the injected Clock. A non-positive MaxAgeDays
+                disables calendar pruning, preserving the prior count-only behavior.
+              name: MaxAgeDays
               type: int
-            - name: Clock
+            - doc: |-
+                Clock is the time source used for MaxAgeDays calendar pruning; the zero
+                value (nil) falls back to clock.System. Injectable so tests prune
+                deterministically without sleeping.
+              name: Clock
               type: clock.Clock
-            - name: RotateEvery
+            - doc: |-
+                RotateEvery, when strictly positive, starts a background ticker that
+                forces a rotation on each interval regardless of size — the "archive
+                every 24h" policy. A non-positive value (the zero default) disables the
+                ticker entirely: no goroutine is spawned and rotation stays size- and
+                manual-triggered. The ticker is joined on Close.
+              name: RotateEvery
               type: time.Duration
-            - name: OnError
+            - doc: |-
+                OnError is invoked once for an interval-rotation (tick) failure, surfaced
+                on the next Write under the mutex. A failing tick happens on the daemon
+                goroutine where no caller can see it, so without this hook the operator
+                has no signal an "archive every 24h" policy is broken; the callback gives
+                a path to emit a counter or log to a fallback sink. nil disables the
+                callback. The triggering record is still written either way — the hook
+                reports the failure, it does not gate the write.
+              name: OnError
               type: func(err error)
-            - name: MinLevel
+            - doc: |-
+                MinLevel is the optional per-writer severity floor; the zero value
+                inherits the handler-global level.
+              name: MinLevel
               type: level.Level
-      - name: S3Config
+      - doc: |-
+          S3Config configures the "s3" writer (registered by third-party/aws/writer/s3). It
+          carries no AWS types — only plain data — so it lives in the dep-light core
+          layer and is re-exported as logger.S3Config. Bucket and Region are required;
+          the factory rejects an empty Bucket/Region with WriterConfigInvalid.
+        name: S3Config
         struct:
           fields:
-            - name: Bucket
+            - doc: Bucket is the destination S3 bucket name (required).
+              name: Bucket
               type: string
-            - name: Region
+            - doc: Region is the AWS region of the bucket (required).
+              name: Region
               type: string
-            - name: Prefix
+            - doc: Prefix is an optional key prefix prepended to every uploaded object.
+              name: Prefix
               type: string
-            - name: Endpoint
+            - doc: |-
+                Endpoint optionally overrides the S3 endpoint URL (path-style). Empty uses
+                the default AWS endpoint; set it for S3-compatible backends (MinIO,
+                GovCloud) or a LocalStack integration test.
+              name: Endpoint
               type: string
-            - name: Credentials
+            - doc: |-
+                Credentials yields short-lived AWS credentials on demand and is REQUIRED:
+                a nil provider is rejected with ClientInitFailed. The AWS default
+                credential chain is intentionally not wired (it would pull the heavyweight
+                aws config module into every consumer).
+              name: Credentials
               type: CredentialProvider
-            - name: FlushEvery
+            - doc: |-
+                FlushEvery bounds how long a batch waits before upload; the zero value
+                uploads only on an explicit Flush / Close.
+              name: FlushEvery
               type: time.Duration
-            - name: MaxBatchBytes
+            - doc: |-
+                MaxBatchBytes caps the in-memory batch before a forced upload; the zero
+                value applies the factory's default.
+              name: MaxBatchBytes
               type: int
-            - name: MinLevel
+            - doc: |-
+                MinLevel is the optional per-writer severity floor; the zero value
+                inherits the handler-global level.
+              name: MinLevel
               type: level.Level
-            - name: OnDrop
+            - doc: |-
+                OnDrop, when non-nil, is invoked with the count of records discarded
+                because the non-blocking buffer saturated. Wire it to a metric counter;
+                the hot path never blocks on a slow upload, so drops are how
+                back-pressure surfaces.
+              name: OnDrop
               type: func(dropped int)
-            - name: OnError
+            - doc: |-
+                OnError, when non-nil, is invoked for every failed batch upload seen by
+                the background drainer. Without it those errors are lost (the producer
+                cannot be blocked on a network failure).
+              name: OnError
               type: func(err error)
-      - methods:
-          - name: AccessKeyID
+      - doc: |-
+          CredentialValue is an opaque, redacting AWS SigV4 credential set. Its String
+          output is always "<redacted>" so an accidental %v / %s never leaks the
+          secret; the typed accessors expose the material only to the transport factory
+          that explicitly asks for it.
+        methods:
+          - doc: AccessKeyID returns the AWS access key ID (may be empty).
+            name: AccessKeyID
             out:
               - type: string
             recv: value
-          - name: SecretAccessKey
+          - doc: |-
+              SecretAccessKey returns the AWS secret access key (may be empty). Callers
+              MUST NOT log the result.
+            name: SecretAccessKey
             out:
               - type: string
             recv: value
-          - name: SessionToken
+          - doc: SessionToken returns the AWS session token (empty for long-lived keys).
+            name: SessionToken
             out:
               - type: string
             recv: value
-          - name: String
+          - doc: |-
+              String implements fmt.Stringer and always redacts so the secret never reaches
+              a log line through %v / %s.
+            name: String
             out:
               - type: string
             recv: value
-          - name: GoString
+          - doc: |-
+              GoString implements fmt.GoStringer so %#v stays redacted too. fmt bypasses
+              String for %#v (Go-syntax formatting) and would otherwise dump the unexported
+              credential fields; GoString closes that leak.
+            name: GoString
             out:
               - type: string
             recv: value
         name: CredentialValue
         struct:
           unexported: true
-      - methods:
-          - name: String
+      - doc: |-
+          Name is the typed key under which a Factory registers (e.g. "console",
+          "file", "s3"). The zero value Name("") is reserved invalid, mirroring
+          codec.Format.
+        methods:
+          - doc: String implements fmt.Stringer and returns the raw identifier.
+            name: String
             out:
               - type: string
             recv: value
-          - name: Known
+          - doc: Known reports whether n has been registered in the writer registry.
+            name: Known
             out:
               - type: bool
             recv: value
         name: Name
         underlying: string
-      - name: Spec
+      - doc: |-
+          Spec names a writer and carries its concrete config. It is the unit
+          pkg/v1/observe/logger.NewMulti fans out over; read at call sites as
+          Spec{Name: "file", Config: FileConfig{Path: …}}. pkg/v1/observe/logger re-exports it
+          as logger.WriterSpec (a type alias, zero runtime cost) so the public surface
+          stays identity-equal to this internal model. Named Spec (not WriterSpec) to
+          avoid the writer.WriterSpec package stutter.
+        name: Spec
         struct:
           fields:
-            - name: Name
+            - doc: Name is the registered writer key resolved against the registry.
+              name: Name
               type: Name
-            - name: Config
+            - doc: |-
+                Config is the writer's concrete config value (ConsoleConfig, FileConfig,
+                S3Config, CloudWatchConfig); the resolved factory type-asserts it.
+              name: Config
               type: Config
-  - imports:
+  - doc: |-
+      Package console registers the "console" writer factory. Importing the package
+      (typically a blank import via pkg/v1/observe/logger/writer) self-registers the factory
+      so writer.Open("console", logger.ConsoleConfig{…}) resolves. The factory
+      delegates to the existing terminal sink in service/observe/logger/sink/console and
+      applies the optional per-writer MinLevel via levelgate.
+
+      The factory also satisfies core/observe/logger/writer.Decoder so the default-active console
+      writer is YAML/JSON/TOML-reachable through FromConfig. Recognised option keys:
+
+      	target     "stderr" (default) | "stdout"
+      	min_level  "debug" | "info" | "warn" | "error" (default info)
+
+      A malformed shape (wrong scalar type, unknown target, unknown level) returns
+      the shared core/observe/logger/writer.WriterConfigInvalid sentinel. Per the Decoder
+      secret-gate contract the error names only the writer and the failure kind —
+      never a decoded option value.
+    imports:
       writer: github.com/kitsunium/sdk/internal/core/observe/logger/writer
     path: github.com/kitsunium/sdk/internal/service/observe/logger/writer/console
     variables:
-      - name: Writer
+      - doc: |-
+          Writer is the registered console factory singleton. The blank assignment runs
+          writer.Register at package load (no init()), mirroring the codec convention.
+        name: Writer
         type: writer.Factory
-  - functions:
-      - in:
+  - doc: |-
+      Package dbsink is the driver-AGNOSTIC database sink shell (ADR 0015, gated).
+      It is the DB analogue of the S3 batching sink (third-party/aws/writer/s3):
+      records are coalesced into batches by the generic kernel batcher and handed
+      to a single deliver seam — execBatch — when the item-count cap is reached, on
+      the optional flush ticker, or on Flush / Close. The seam is the only thing a
+      concrete driver supplies; this package imports NO database driver, NO vendor
+      SDK, and NO new core sibling, so it stays stdlib-only and dep-light. The real
+      driver adapters (third-party/db/writer/{mysql,clickhouse,redis}) wrap New
+      with their own execBatch closure and self-register as writer factories.
+
+      Composition: a concrete driver wires levelgate(async(dbSink)) — the gate
+      drops below-floor records before the ring, async gives a non-blocking ring +
+      OnDrop back-pressure, and the dbSink batches the rest. Compose builds that
+      chain for them so the ordering lives in one place (mirroring the s3 factory).
+
+      Ownership / allocation: dbSink.Write runs on the async drainer goroutine (the
+      producer call already returned at async.Write), and RecordEvent is an
+      immutable snapshot by contract, so no defensive per-record clone is needed —
+      the batcher's appended value safely outlives async's recycled entry. This
+      package therefore makes NO zero-alloc claim on Write: the only Write-side cost
+      is the amortised growth of the batcher's pending slice, and the zero-alloc
+      invariant belongs to the producer's Build().Send() hot path (ADR 0014), not to
+      a deferring sink. CPU/RAM stay minimal by coalescing many records into one
+      execBatch round-trip — the DB analogue of the s3 sink's batched object upload.
+
+      Package dbsink — the Config value type plus Compose, the single entry point a
+      concrete driver adapter uses to build the levelgate(async(dbSink)) chain.
+      Keeping the composition order here (not in each driver) means every DB writer
+      inherits the same back-pressure + level-floor wiring as the s3 factory, with
+      only the execBatch seam and the plain-data Config varying per driver.
+    functions:
+      - doc: |-
+          Compose builds the driver-agnostic DB writer chain: the terminal batching
+          dbSink wrapped by async (non-blocking ring + OnDrop back-pressure) and then by
+          levelgate (the per-writer MinLevel floor). It returns the chain behind the
+          core/observe/logger.Sink interface so a concrete driver adapter only supplies its
+          execBatch closure and a plain-data Config — the composition order lives here,
+          mirroring the s3 factory. A nil exec is a programming error: the returned sink
+          would deliver nothing, so callers MUST pass a real seam.
+
+          Compose is the package's only exported constructor (IFACE-PLUGIN): the dbSink
+          concrete type stays unexported and concrete drivers compose, never embed, it.
+        in:
           - name: exec
             type: execBatch
           - name: cfg
@@ -414,31 +866,111 @@ packages:
       level: github.com/kitsunium/sdk/internal/core/observe/logger/level
     path: github.com/kitsunium/sdk/internal/service/observe/logger/writer/dbsink
     types:
-      - name: Config
+      - doc: |-
+          Config tunes the database sink shell. Every field is optional: the zero Config
+          batches by the default row cap, flushes only on Flush / Close, drops on a
+          saturated ring with no observer, and inherits the handler-global level. It
+          carries NO driver type — only plain data — so a concrete adapter's own config
+          (e.g. a future logger.MySQLConfig) can map onto it without leaking a driver
+          into the dep-light layers.
+        name: Config
         struct:
           fields:
-            - name: MaxRows
+            - doc: |-
+                MaxRows forces a flush once the pending batch reaches this many records;
+                a non-positive value applies the shell's default (defaultMaxRows). A DB
+                insert is bounded by statement / pipeline row count, so the shell batches
+                by count rather than by byte size.
+              name: MaxRows
               type: int
-            - name: FlushEvery
+            - doc: |-
+                FlushEvery bounds how long a partial batch waits before it is delivered;
+                the zero value delivers only on an explicit Flush / Close.
+              name: FlushEvery
               type: time.Duration
-            - name: MinLevel
+            - doc: |-
+                MinLevel is the optional per-writer severity floor; the zero value
+                (level.Info) inherits the handler-global level and adds no per-record gate.
+              name: MinLevel
               type: level.Level
-            - name: BufferSize
+            - doc: |-
+                BufferSize is the async ring capacity handed to the async middleware; a
+                non-positive value applies async's own default (1024 slots).
+              name: BufferSize
               type: int
-            - name: OnDrop
+            - doc: |-
+                OnDrop, when non-nil, is invoked with the count of records discarded
+                because the non-blocking ring saturated. Wire it to a metric counter: the
+                hot path never blocks on a slow database, so drops are how back-pressure
+                surfaces.
+              name: OnDrop
               type: func(dropped int)
-            - name: OnError
+            - doc: |-
+                OnError, when non-nil, is invoked for every failed batch delivery seen by
+                the background drainer / ticker. Without it those errors are lost (the
+                producer cannot be blocked on a database failure). The cap-flush (drainer
+                goroutine) and the FlushEvery ticker both route here from distinct
+                goroutines, so the shell serializes the two paths behind an internal mutex
+                before invoking this hook: the callback is therefore never entered
+                concurrently with itself, yet it MUST NOT block for long — the mutex is
+                held across the call, so a slow OnError stalls the next routed failure.
+              name: OnError
               type: func(err error)
-            - name: Clock
+            - doc: |-
+                Clock sources the timestamp the sink stamps onto a record whose Time is the
+                zero value (the "fill at handle time" sentinel) before batching it for the
+                driver. The zero value (nil) defaults to clock.System; tests inject a fake
+                Clock for deterministic timestamps.
+              name: Clock
               type: clock.Clock
-  - imports:
+  - doc: |-
+      Package file registers the "file" writer factory. Importing the package
+      (typically a blank import via pkg/v1/observe/logger/writer) self-registers the factory
+      so writer.Open("file", logger.FileConfig{…}) resolves. The factory delegates
+      to the existing append-only, symlink-hardened sink in
+      service/observe/logger/sink/file and applies the optional per-writer MinLevel via
+      levelgate.
+
+      The factory also satisfies core/observe/logger/writer.Decoder so the default-active file
+      writer is YAML/JSON/TOML-reachable through FromConfig. Recognised option keys:
+
+      	path       destination file (required, non-empty string)
+      	min_level  "debug" | "info" | "warn" | "error" (default info)
+
+      A malformed shape (missing/empty/non-string path, wrong-type or unknown
+      level) returns the shared core/observe/logger/writer.WriterConfigInvalid sentinel. Per the
+      Decoder secret-gate contract the error names only the writer and the failure
+      kind — never a decoded path or option value.
+    imports:
       writer: github.com/kitsunium/sdk/internal/core/observe/logger/writer
     path: github.com/kitsunium/sdk/internal/service/observe/logger/writer/file
     variables:
-      - name: Writer
+      - doc: |-
+          Writer is the registered file factory singleton. The blank assignment runs
+          writer.Register at package load (no init()), mirroring the codec convention.
+        name: Writer
         type: writer.Factory
-  - functions:
-      - in:
+  - doc: |-
+      Package levelgate provides a Sink decorator that forwards records at or above
+      a minimum severity and silently drops the rest. It implements the per-writer
+      MinLevel floor for the writer factories (console, file, s3, cloudwatch)
+      without the route middleware's NoMatch error — a below-threshold record is a
+      successful no-op, not a failure, so it never pollutes a multi fan-out.
+
+      Two constructors share the one gate. New is the writer configuration's: its
+      Info is the zero value of MinLevel and means "inherit the handler's level",
+      so New returns the sink unwrapped there. Floor is everyone else's: the floor
+      it is given is the floor it applies, Info included (ADR 0132).
+    functions:
+      - doc: |-
+          New wraps inner so only records with Level >= min reach it. When min equals
+          level.Info — the zero value of a writer config's MinLevel — New returns inner
+          unwrapped: the writer then inherits the handler-global level with no extra
+          gate and no per-record overhead.
+
+          IFACE-PLUGIN: the gate is returned behind the Sink interface; the concrete
+          gateSink type stays unexported.
+        in:
           - name: inner
             type: corelogger.Sink
           - name: min
@@ -446,7 +978,17 @@ packages:
         name: New
         out:
           - type: corelogger.Sink
-      - in:
+      - doc: |-
+          Floor wraps inner so only records with Level >= min reach it, for every min —
+          Info included. It is the gate without New's reading of Info as "inherit":
+          that reading belongs to a writer configuration, whose zero MinLevel must not
+          narrow anything, and a caller who names a floor outside one means the floor
+          it named. A nil inner yields nil, which a fan-out skips and NewWithSink
+          refuses, rather than a gate that fails on its first record.
+
+          IFACE-PLUGIN: the gate is returned behind the Sink interface; the concrete
+          gateSink type stays unexported.
+        in:
           - name: inner
             type: corelogger.Sink
           - name: min

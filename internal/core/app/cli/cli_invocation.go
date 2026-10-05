@@ -1,5 +1,3 @@
-// Package cli — what a resolved command line looks like by the time an
-// [Action] sees it.
 package cli
 
 import (

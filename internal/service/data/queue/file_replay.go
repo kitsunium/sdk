@@ -1,5 +1,3 @@
-// Package queue — the durable broker's dead-letter decisions: putting a dead
-// letter back into the queue, or deleting it.
 package queue
 
 import (

@@ -1,6 +1,5 @@
 //go:build unix && !solaris
 
-// Package reaper — no timer sweep where every child's exit posts SIGCHLD.
 package reaper
 
 import "time"

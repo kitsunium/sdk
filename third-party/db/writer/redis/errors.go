@@ -1,10 +1,3 @@
-// Package redis — range 0.3.34.* (ADR 0015 service slot 0x22).
-//
-// Package redis — declares the sentinels returned by the Redis writer's
-// constructor and XADD path. Each var's name equals its errs.Define Reason in
-// SCREAMING_SNAKE form (short names per the AWS-writer convention; the package
-// qualifier gives context). No socket path, credential, or record value is ever
-// echoed into these errors (secret gate).
 package redis
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

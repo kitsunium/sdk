@@ -1,6 +1,5 @@
 //go:build linux
 
-// Package cgroup — Linux cgroup v2 control-group implementation.
 package cgroup
 
 import (

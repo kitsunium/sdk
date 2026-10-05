@@ -1,4 +1,3 @@
-// Package trace — the SpanExporter contract + process-wide exporter registry.
 package trace
 
 import (

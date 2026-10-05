@@ -1,6 +1,3 @@
-// Package health — hosts Ask, the client half of a readiness probe: the
-// question a container's HEALTHCHECK asks a running process, from an image
-// that has no shell and no curl to ask it with (ADR 0131).
 package health
 
 import (

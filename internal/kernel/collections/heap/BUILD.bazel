@@ -4,7 +4,10 @@ package(default_visibility = ["//internal/kernel:kernel_consumers"])
 
 go_library(
     name = "heap",
-    srcs = ["heap.go"],
+    srcs = [
+        "doc.go",
+        "heap.go",
+    ],
     importpath = "github.com/kitsunium/sdk/internal/kernel/collections/heap",
     visibility = [
         "//:__subpackages__",

@@ -138,8 +138,74 @@ packages:
             name: CodeVersionsRewriteRefused
             value: "0x00_03_50_14"
         type: errs.Code
+    doc: |-
+      Package docstore — range 0.3.80.* (ADR 0110 service/data/docstore block;
+      ADR 0139 added 16 and 17, ADR 0143 18 to 20). Both engines answer every one
+      of them alike, and the range keeps the LL = 3 its engine allocated it under
+      now that it is declared here (ADR 0160).
+
+      Package docstore declares the document-store domain: typed, keyed JSON
+      documents with unique and multi-valued secondary indexes, kept by two
+      engines under one contract — the file engine in memory or through
+      core/data/vfs (ADR 0110), the SQL engine in a database the caller owns
+      (ADR 0139), both keeping a document's versions in its own write when asked
+      (ADR 0143).
+
+      It holds what the two engines share and nothing only one of them has:
+
+        - the ports. [Collection] is a store whose calls take no context, which
+          the file engine is; [CollectionContext] is the same calls, each taking
+          a context first, which the SQL engine is. [Versioned] and
+          [VersionedContext] are their siblings for a document's versions, and
+          [Announcer] is the pair of hooks both engines answer exactly as they
+          are;
+        - the values both engines read and return — [EntryValue], [VersionValue],
+          [StampValue] — and [IndexSpec], the declaration both take, with its two
+          constructors [Unique] and [Index];
+        - the codes of the 0.3.80.* range and their sentinels: both engines answer
+          the same refusals under the same codes (ADR 0160).
+
+      There are two ports and not one because the engines differ on the one
+      thing a single interface would have to fix: the file engine waits on
+      nothing a caller could abandon and takes no context (ADR 0110 §D6), while
+      every call of the SQL engine waits on a database and takes one. A single
+      port would give the file engine a context it cannot honour, or take the SQL
+      engine's away (ADR 0139 §D2). So each port is the contract of one shape of
+      call, with the same methods, the same documents and the same refusals.
+
+      The engines, their configurations, the file engine's statistics and every
+      statement live in internal/service/data/docstore.
+
+      Package docstore — the siblings of Collection (ADR 0039): a document's
+      versions, and the same two ports with a context on every call, which the SQL
+      engine implements.
+
+      Package docstore — declares the sentinel *errs.Error outcomes both engines
+      answer. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE
+      form.
+
+      No Public and no Private below carries a key or a document. A store key is
+      routinely an e-mail address or the hash of a token, and an index key is
+      usually exactly the value a caller must not learn back from a refusal: the
+      fields name the index and the operation, never what was looked up.
+
+      The HTTP statuses are spelled as the integers errs.WithHTTPStatus takes,
+      each named after its status: the core imports no net/http to read five
+      numbers (ADR 0160).
+
+      Package docstore — the declaration of a secondary index, which both engines
+      take at construction and file by the same rule.
+
+      Package docstore — the values both engines read and return: a stored
+      document as JSON, one version of a document, and what a write says about the
+      version it makes.
     functions:
-      - in:
+      - doc: |-
+          Unique declares a unique index over the one key key returns: no two
+          documents may share it, and a write that would is refused with
+          [UniqueKeyTaken]. An empty key is not indexed, so any number of documents
+          may have none.
+        in:
           - name: name
             type: string
           - name: key
@@ -150,7 +216,10 @@ packages:
         typeParams:
           - constraint: any
             name: T
-      - in:
+      - doc: |-
+          Index declares an index where a document may have several keys and a key
+          several documents — the members a task is shared with. Find reads it.
+        in:
           - name: name
             type: string
           - name: keys
@@ -858,58 +927,278 @@ packages:
             public: A rewrite of versions may only drop or rewrite the versions it was given
             reason: VERSIONS_REWRITE_REFUSED
     types:
-      - name: IndexSpec
+      - doc: |-
+          IndexSpec declares one secondary index: a name to read it by, whether it is
+          unique, and the function that gives a document its keys in it. Build one
+          with [Unique] or [Index], and give it to an engine's constructor — Open or
+          OpenSQL in internal/service/data/docstore, which refuse the same
+          declarations alike. The file engine rebuilds its indexes when the store
+          opens; both keep them in step with every write.
+        name: IndexSpec
         struct:
           fields:
-            - name: Keys
+            - doc: |-
+                Keys returns a document's keys in the index. Empty keys are not
+                indexed, and a key listed twice is filed once.
+              name: Keys
               type: func(T) []string
-            - name: Name
+            - doc: Name reads the index in Lookup and Find, and names it in a refusal.
+              name: Name
               type: string
-            - name: Unique
+            - doc: Unique refuses a write that would file two documents under one key.
+              name: Unique
               type: bool
         typeParams:
           - constraint: any
             name: T
-      - name: EntryValue
+      - doc: |-
+          EntryValue is one stored document as the store holds it: its key and its
+          JSON, for a caller that shows documents rather than decoding them.
+        name: EntryValue
         struct:
           fields:
-            - name: Key
+            - doc: Key is the document's key.
+              name: Key
               type: string
-            - name: JSON
+            - doc: JSON is the document, a copy the caller owns.
+              name: JSON
               type: json.RawMessage
-      - name: VersionValue
+      - doc: |-
+          VersionValue is one version of a document: its number, when the write that
+          made it ran, what that write's caller said about it, and the document as the
+          version holds it.
+        name: VersionValue
         struct:
           fields:
-            - name: At
+            - doc: |-
+                At is when the write that made the version ran, in UTC, read from the
+                store's clock and kept to the nanosecond — by the file engine for the
+                years 0 to 9999, which RFC 3339 writes, and by the SQL engine for any
+                instant. It is zero for the first version of a document the store held
+                before it kept versions: when that one was written is not known.
+              name: At
               type: time.Time
-            - name: Meta
+            - doc: |-
+                Meta is what the write's caller said about it — who made it, which
+                command — as its [StampValue] gave it; nil when it said nothing. The
+                store keeps it and never reads it.
+              name: Meta
               type: map[string]string
-            - name: JSON
+            - doc: |-
+                JSON is the document as the version holds it, compact, a copy the
+                caller owns. The newest version's is the document itself.
+              name: JSON
               type: json.RawMessage
-            - name: Number
+            - doc: |-
+                Number counts a document's versions from 1. No number is given twice
+                while the document exists, pruning included; a document deleted and
+                written again is a new document, and starts again at 1.
+              name: Number
               type: uint64
-      - name: StampValue
+      - doc: |-
+          StampValue is what a write says about the version it makes, for the
+          Stamped writes. Its zero value is what Put, Insert, Replace and Update say:
+          nothing, and a new version.
+        name: StampValue
         struct:
           fields:
-            - name: Meta
+            - doc: |-
+                Meta is kept with the version the write makes — who made it, which
+                command — and read back with it. The store copies it and never reads
+                it.
+              name: Meta
               type: map[string]string
-            - name: InPlace
+            - doc: |-
+                InPlace makes the write change the document without making a version:
+                the current version keeps its number, its instant and its Meta, and
+                holds the new document. A framework stamps so a workflow's transition,
+                which its journal already records. A creation is version 1 all the
+                same.
+              name: InPlace
               type: bool
   - constants:
-      - name: DefaultFoldAt
+      - doc: |-
+          DefaultFoldAt is the least number of overlay entries that folds the overlay
+          into the snapshot, when [Config].FoldAt is zero.
+
+          A fold rewrites the whole snapshot, so how often it runs decides what a
+          write costs on average. Folding once the overlay holds as many entries as
+          the store holds documents keeps that average a constant — one fold of N
+          documents per N writes — and the floor keeps a small store from rewriting
+          its snapshot every few writes for nothing: a thousand small files in one
+          directory is not a cost worth avoiding.
+        name: DefaultFoldAt
         type: int
         value: "1024"
-      - name: MaxSQLTableLen
+      - doc: |-
+          MaxSQLTableLen is the longest table name a SQL store accepts, in bytes:
+          PostgreSQL's identifier limit of 63, less the five bytes of the longest names
+          the store derives from it — its index table, the name followed by "___ix",
+          and its versions table, followed by "___vs".
+          A caller whose names can be longer shortens them, with a digest, before
+          they reach the store.
+        name: MaxSQLTableLen
         type: int
         value: "58"
-      - name: MaxSQLKeyLen
+      - doc: |-
+          MaxSQLKeyLen is the longest store key, and the longest index key as it
+          reaches the table, in bytes. An index row carries an index key and a store
+          key in one primary key, and MySQL's InnoDB caps an index entry at 3072
+          bytes: two keys of this length and an index name fit in it, with room left.
+        name: MaxSQLKeyLen
         type: int
         value: "1024"
-      - name: MaxSQLIndexNameLen
+      - doc: |-
+          MaxSQLIndexNameLen is the longest index name a SQL store accepts, in bytes.
+          An index's name is stored in every one of its rows, beside its keys.
+        name: MaxSQLIndexNameLen
         type: int
         value: "64"
+    doc: |-
+      Package docstore — the store's construction parameters, and the refusals a
+      configuration no store could honour gets, the index declarations' included:
+      an IndexSpec is core/data/docstore's, which both engines take (ADR 0160).
+
+      Package docstore is a typed, keyed store of JSON documents with secondary
+      indexes, kept in memory and, when given a filesystem, persisted to it —
+      every write durable before it returns. ADR 0110.
+
+      # What it is
+
+      A Store[T] holds documents of one Go type, each under the key a function of
+      the document returns. Every read returns a copy and every write stores one:
+      a document is kept as its JSON encoding, so what a caller holds can never
+      alias what the store holds, and the memory and file backends behave alike.
+      Writes come in three modes — Put creates or replaces, Insert refuses an
+      existing key, Replace refuses a missing one and never resurrects a deleted
+      document — plus Update, a read-modify-write, and Delete.
+
+      Secondary indexes are declared at Open: Unique files at most one document
+      per key and refuses a write that would file a second, Index files any
+      number. Lookup reads a unique index, Find reads any index, Filter reads
+      every document. The indexes are rebuilt when the store opens, and a load
+      whose documents break a unique index is refused rather than served. So is
+      a load holding a document the type no longer decodes, or one stored under
+      another key than its own Key gives: a store opens only over documents it
+      can serve.
+
+      # How it persists, and what that costs
+
+      The resting state is ONE file, the snapshot: a JSON object mapping each key
+      to its document. A write does not rewrite it. It publishes one small file —
+      an overlay entry, named by the SHA-256 of the key, holding the key and its
+      document or its deletion — atomically, through vfs.AtomicWriter, before it
+      returns. A write therefore costs what one document costs, whatever the
+      store holds. When the overlay holds as many entries as the store holds
+      documents (at least DefaultFoldAt), the write that reaches that count folds
+      it: the snapshot is rewritten once and the entries it now contains are
+      removed. Folding N documents once per N writes keeps the average write a
+      constant. Close folds, so a store that was closed rests as a single
+      snapshot a person can read.
+
+      Loading reads the snapshot and replays the overlay on top of it. Replay
+      order does not matter — one entry per key, each holding that key's whole
+      latest state — and an entry the last fold already folded holds exactly what
+      the snapshot holds, so a crash anywhere in a fold, or between a fold and
+      the removals that follow it, loads the same documents.
+
+      # Concurrency
+
+      Readers never wait for a disk. Writers are serialised by one lock and do
+      their filesystem work under it alone; the documents and the indexes are
+      changed only once the write is durable, under a second lock readers share.
+      A reader sees the state before the write or after it, never a document and
+      an index that disagree.
+
+      # What it is not
+
+      One process. The store detects no second process opening the same files,
+      and two would each believe their own memory. It keeps every document in
+      memory and sorts the keys for every List. It has no transaction across
+      documents. It is a store for the documents a service owns, not a database.
+
+      # The same store over SQL
+
+      OpenSQL builds the second engine, SQLStore, for when a store must outgrow
+      that: the same documents, keys, index declarations, write modes, hooks and
+      refusals, kept in two tables of a PostgreSQL, MySQL or SQLite database the
+      caller owns and hands over as a core/data/sql Transactor. Every call takes a
+      context and runs on the transaction it carries — a write in a savepoint of
+      it, its hooks after its commit — and nothing is held in memory. ADR 0139.
+
+      Package docstore — hosts the compile-time interface assertions, keeping them
+      out of the production source so the runtime binary carries no
+      diagnostic-only declarations.
+
+      Package docstore — the functions told about a write or a deletion once it
+      is durable, outside every lock.
+
+      Package docstore — the secondary indexes, kept beside the documents under
+      the store's own locks.
+
+      An index is rebuilt from the documents when the store opens, and every
+      write — Put, Insert, Replace, Update, Delete — maintains it in the same
+      critical section that changes the document. A reader therefore never sees a
+      document and an index that disagree, and a write a unique index refuses
+      leaves both exactly as they were.
+
+      Package docstore — opening a persistent store: the snapshot and the
+      versions file read, the overlay replayed on top, and the resting state
+      restored.
+
+      Package docstore — opening a store: the configuration checked, the indexes
+      declared, and a persistent store loaded.
+
+      Package docstore — the files: one snapshot at rest, and an overlay of one
+      entry per key written since, folded back into the snapshot.
+
+      Package docstore — the SQL store's construction parameters, and the
+      refusals a configuration no SQL store could honour gets.
+
+      Package docstore — the only place the SQL store renders SQL. Every statement
+      it sends is built here, once, at OpenSQL, for its dialect and its tables,
+      spelled with the vocabulary core/data/sql's Dialect owns: the bind markers, the
+      quoting and the row lock.
+
+      Package docstore — the SQL store's tables, as a migration the caller runs
+      under its own version table.
+
+      Package docstore — the SQL store's index rows rebuilt from its documents,
+      for when the declarations that filed them changed.
+
+      Package docstore — the SQL store: the same documents, keys, indexes and
+      refusals as Store, kept in a database the caller owns, each call on the
+      transaction its context carries (ADR 0139).
+
+      Package docstore — the SQL store's versions: a third table, written by the
+      statements of the write that stores the document, in its transaction
+      (ADR 0143).
+
+      Package docstore — the SQL store's writes: each one atomic on its own, in a
+      transaction of the store's or a savepoint of the caller's, and announced
+      once the transaction that holds it has committed.
+
+      Package docstore — a document's versions: the current one, which is the
+      document itself, and the former ones kept beside it, recorded and pruned in
+      the write that stores the document (ADR 0143).
+
+      Package docstore — the writes: prepared outside every lock, checked and
+      persisted under the writers' lock, applied under both.
     functions:
-      - in:
+      - doc: |-
+          Open builds a store from cfg, with the secondary indexes given: in memory
+          without a filesystem, otherwise loaded from it — the snapshot, the overlay
+          replayed on top, the indexes rebuilt, and the overlay folded when it holds
+          anything. It creates the directories the store lives in, 0700, and writes
+          its files 0600. An open it refuses writes no data: the fold comes after
+          every check, so the files an operator must repair are left as they were.
+
+          	accounts, err := docstore.Open(
+          	    docstore.Config[Account]{Key: Account.ID, FS: data, Path: "members/accounts.json"},
+          	    coredocstore.Unique("email", func(a Account) string { return a.Email }),
+          	    coredocstore.Index("team", func(a Account) []string { return a.Teams }),
+          	)
+        in:
           - name: cfg
             type: Config[T]
           - name: indexes
@@ -922,7 +1211,22 @@ packages:
           - constraint: any
             name: T
         variadic: true
-      - in:
+      - doc: |-
+          SQLMigration returns the migration that creates the two tables a SQL store
+          named table keeps on dialect — its documents' and its index rows' — as a
+          core/data/sql MigrationValue numbered version, for the caller's Migrator to run
+          under the caller's version table. Its Down drops both tables, and every
+          document in them.
+
+          The SDK numbers nothing: a migration is a value its consumer constructs
+          (ADR 0055 §D12), and only the consumer knows where the store's tables sit
+          in its own history.
+
+          Every statement does nothing when its table already exists — or is already
+          gone — so a run MySQL's implicit commit stopped halfway completes when it
+          runs again, and applying the migration over tables a previous deployment
+          made changes nothing (ADR 0139).
+        in:
           - name: dialect
             type: coresql.Dialect
           - name: table
@@ -933,7 +1237,17 @@ packages:
         out:
           - type: coresql.MigrationValue
           - type: error
-      - in:
+      - doc: |-
+          SQLVersionsMigration returns the migration that creates the table a SQL
+          store named table keeps its versions in on dialect — <table>___vs, one row
+          per version — as a core/data/sql MigrationValue numbered version, beside the one
+          [SQLMigration] returns. A store opened with SQLConfig.Versions needs it; one
+          without never touches it. Its Down drops the table, and every version in it:
+          run it to turn versions off for good (ADR 0143).
+
+          Its one statement does nothing when the table already exists, or is already
+          gone, as SQLMigration's do.
+        in:
           - name: dialect
             type: coresql.Dialect
           - name: table
@@ -944,7 +1258,16 @@ packages:
         out:
           - type: coresql.MigrationValue
           - type: error
-      - in:
+      - doc: |-
+          OpenSQL builds a SQL store from cfg, with the secondary indexes given. It
+          sends no statement: its tables are [SQLMigration]'s, run before the store
+          is used.
+
+          	cases, err := docstore.OpenSQL(
+          	    docstore.SQLConfig[Case]{Key: Case.Key, Transactor: tm, Dialect: sql.DialectPostgres, Table: "moderation_intake__cases"},
+          	    coredocstore.Unique("reference", func(c Case) string { return c.Reference }),
+          	)
+        in:
           - name: cfg
             type: SQLConfig[T]
           - name: indexes
@@ -964,28 +1287,74 @@ packages:
       corevfs: github.com/kitsunium/sdk/internal/core/data/vfs
     path: github.com/kitsunium/sdk/internal/service/data/docstore
     types:
-      - name: Config
+      - doc: |-
+          Config configures [Open]. Key is required; every other field is optional,
+          and leaving all of them empty opens a working store kept in memory. The
+          secondary indexes are Open's other arguments.
+        name: Config
         struct:
           fields:
-            - name: Key
+            - doc: |-
+                Key returns the key a document is stored under. It must be a pure
+                function of the document: the store calls it to file every write and
+                compares its answers to refuse an update that would rename a document.
+              name: Key
               type: func(T) string
-            - name: FS
+            - doc: |-
+                FS is where the store persists, and Path is the snapshot's name inside
+                it — an io/fs name such as "shop/items.json". The overlay lives beside
+                the snapshot, in the directory Path + ".d". A nil FS keeps the store in
+                memory: nothing survives the process, and nothing is written anywhere.
+              name: FS
               type: corevfs.FullFS
-            - name: Clock
+            - doc: |-
+                Clock stamps each version with the instant of the write that made it.
+                Nil is the system clock.
+              name: Clock
               type: clock.Clock
-            - name: Held
+            - doc: |-
+                Held reports whether the document stored under key is held — a legal
+                hold — so that no write prunes its versions: they pile up beyond
+                Versions until a write finds the document released, and that write
+                prunes them. It is called with the document's key by a write that would
+                prune, under the writers' lock, so it may read this store and must not
+                write to it; a panic in it reaches the writer, and nothing is written.
+                Nil holds nothing. It is refused without Versions.
+              name: Held
               type: func(key string) bool
-            - name: Path
+            - doc: |-
+                Path is the snapshot's name inside FS. It is required with FS and
+                refused without it, because a path with nowhere to be written is a
+                store that would silently keep nothing.
+              name: Path
               type: string
-            - name: FoldAt
+            - doc: |-
+                FoldAt is how many overlay entries fold the overlay into the snapshot
+                on the write that reaches it. Zero is the default rule: as many entries
+                as the store holds documents, and at least [DefaultFoldAt]. A negative
+                value never folds on a write; Fold, Open and Close still do.
+              name: FoldAt
               type: int
-            - name: Versions
+            - doc: |-
+                Versions is how many former versions each document keeps beside its
+                current one, the newest: a write that changes a document makes a new
+                version, and prunes the oldest beyond Versions in the same durable
+                write. Zero keeps no versions — the store writes exactly the files it
+                wrote before versions existed — and a negative value is refused. A
+                persistent store keeps them in the file Path + ".versions" once a fold
+                ran, and a store opened with zero over files that keep versions is
+                refused rather than left to drop or corrupt them (ADR 0143).
+              name: Versions
               type: int
         typeParams:
           - constraint: any
             name: T
-      - methods:
-          - in:
+      - doc: |-
+          Store is a typed, keyed collection of JSON documents with secondary
+          indexes. Build one with [Open]. It is safe for concurrent use.
+        methods:
+          - doc: Get returns the document stored under key, or DocumentNotFound.
+            in:
               - name: key
                 type: string
             name: Get
@@ -993,12 +1362,16 @@ packages:
               - type: T
               - type: error
             recv: pointer
-          - name: List
+          - doc: List returns every document, in key order.
+            name: List
             out:
               - type: "[]T"
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Filter returns the documents keep accepts, in key order. It decodes every
+              document; an index is the way not to.
+            in:
               - name: keep
                 type: func(T) bool
             name: Filter
@@ -1006,7 +1379,11 @@ packages:
               - type: "[]T"
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Entries returns up to limit stored documents as JSON, in key order — every
+              one when limit is not positive — for a caller that shows documents rather
+              than decoding them. Each JSON is the caller's own copy.
+            in:
               - name: limit
                 type: int
             name: Entries
@@ -1014,7 +1391,11 @@ packages:
               - type: "[]coredocstore.EntryValue"
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Lookup returns the document holding key in the unique index named index,
+              DocumentNotFound when none does, IndexUnknown for an undeclared index and
+              IndexNotUnique for an index that may hold several: read that one with Find.
+            in:
               - name: index
               - name: key
                 type: string
@@ -1023,7 +1404,11 @@ packages:
               - type: T
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Find returns the documents filed under key in the index named index, in
+              store-key order. It reads any index, unique or not, and no document is an
+              empty slice, not an error.
+            in:
               - name: index
               - name: key
                 type: string
@@ -1032,11 +1417,19 @@ packages:
               - type: "[]T"
               - type: error
             recv: pointer
-          - name: Stats
+          - doc: |-
+              Stats reports what the store holds and where its overlay stands. It answers
+              after Close too, with the state the store closed in.
+            name: Stats
             out:
               - type: StatsValue
             recv: pointer
-          - in:
+          - doc: |-
+              OnWrite registers fn to be told the key of every document Put, Insert,
+              Replace or Update stored, once the write is durable, on the writer's
+              goroutine and outside every lock. It returns the function that removes the
+              registration. A panic in fn reaches the writer after its write stood.
+            in:
               - name: fn
                 type: func(key string)
             name: OnWrite
@@ -1044,7 +1437,10 @@ packages:
               - name: remove
                 type: func()
             recv: pointer
-          - in:
+          - doc: |-
+              OnDelete registers fn to be told the key of every document Delete removed,
+              on the same terms as OnWrite.
+            in:
               - name: fn
                 type: func(key string)
             name: OnDelete
@@ -1052,15 +1448,27 @@ packages:
               - name: remove
                 type: func()
             recv: pointer
-          - name: Fold
+          - doc: |-
+              Fold rewrites the snapshot with every document and removes the overlay
+              entries it now contains. A write folds by itself when the overlay has grown
+              enough, and Open and Close fold; Fold is for a caller that wants the
+              resting state now — before a backup, say. A memory store has nothing to
+              fold.
+            name: Fold
             out:
               - type: error
             recv: pointer
-          - name: Close
+          - doc: |-
+              Close folds the overlay and closes the store: every later call is
+              StoreClosed, except Stats and Close, which returns nil. A fold that fails
+              leaves its entries where they are — the next Open replays them — and is
+              returned; the store closes either way.
+            name: Close
             out:
               - type: error
             recv: pointer
-          - in:
+          - doc: PutStamped is Put, with what the write says about the version it makes.
+            in:
               - name: v
                 type: T
               - name: stamp
@@ -1069,7 +1477,10 @@ packages:
             out:
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              InsertStamped is Insert, with what the write says about the version it
+              makes: version 1, whatever stamp.InPlace says.
+            in:
               - name: v
                 type: T
               - name: stamp
@@ -1078,7 +1489,10 @@ packages:
             out:
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              ReplaceStamped is Replace, with what the write says about the version it
+              makes.
+            in:
               - name: v
                 type: T
               - name: stamp
@@ -1087,7 +1501,10 @@ packages:
             out:
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              UpdateStamped is Update, with what the write says about the version it
+              makes.
+            in:
               - name: key
                 type: string
               - name: stamp
@@ -1099,7 +1516,12 @@ packages:
               - type: T
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Versions returns the versions the store keeps of the document stored under
+              key, newest first: the current one — the document as it is now — then the
+              former ones. It returns DocumentNotFound when no document is stored under
+              key, and VersionsNotKept when the store keeps no versions.
+            in:
               - name: key
                 type: string
             name: Versions
@@ -1107,7 +1529,11 @@ packages:
               - type: "[]coredocstore.VersionValue"
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Version returns the version numbered number of the document stored under
+              key, VersionNotFound when the document keeps none of that number — never
+              made, or pruned — and what Versions returns otherwise.
+            in:
               - name: key
                 type: string
               - name: number
@@ -1117,7 +1543,20 @@ packages:
               - type: coredocstore.VersionValue
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              RewriteVersions rewrites the former versions of the document stored under
+              key — every version but the current one, which is the document and which
+              only a write changes — in one durable write, under the writers' lock. fn
+              receives copies of them, newest first, and returns those to keep, in the
+              same order: it may drop a version, and change the document one holds and
+              what its writer said, and nothing else — VersionsRewriteRefused for a
+              version it was not given, out of order, made at another instant or that is
+              not JSON. An error from fn is returned as it is and changes nothing. It
+              calls no hook: the document did not change.
+
+              It is what an erasure needs: the former versions cleared as the document
+              is, or dropped. fn runs under the writers' lock, like Update's.
+            in:
               - name: key
                 type: string
               - name: fn
@@ -1126,28 +1565,43 @@ packages:
             out:
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Put stores v under its key, creating it or replacing whatever was there.
+              On a store that keeps versions, it makes one, stamped with nothing.
+            in:
               - name: v
                 type: T
             name: Put
             out:
               - type: error
             recv: pointer
-          - in:
+          - doc: "Insert stores v, which must be new: DocumentExists when its key is taken."
+            in:
               - name: v
                 type: T
             name: Insert
             out:
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Replace stores v over the document already under its key: DocumentNotFound
+              when there is none, so a document deleted meanwhile is never brought back.
+            in:
               - name: v
                 type: T
             name: Replace
             out:
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Update applies fn to a copy of the document stored under key and stores the
+              result, atomically with respect to every other write. An error from fn is
+              returned as it is and changes nothing, and so does a result whose key is not
+              key (DocumentKeyChanged). It returns the stored result.
+
+              fn runs under the writers' lock: it may read this store, and must not write
+              to it — the write would wait for the lock fn holds, forever.
+            in:
               - name: key
                 type: string
               - name: fn
@@ -1157,7 +1611,10 @@ packages:
               - type: T
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Delete removes the document stored under key, or returns DocumentNotFound.
+              Its versions go with it.
+            in:
               - name: key
                 type: string
             name: Delete
@@ -1170,48 +1627,136 @@ packages:
         typeParams:
           - constraint: any
             name: T
-      - name: StatsValue
+      - doc: |-
+          StatsValue is what a store can say about itself: how many documents it
+          holds, how far its overlay has grown, and how its folds have gone.
+        name: StatsValue
         struct:
           fields:
-            - name: FoldError
+            - doc: |-
+                FoldError is the last automatic fold's failure, nil once a fold
+                succeeds. The write that triggered the fold succeeded either way — its
+                own entry was already durable — and the entries stay until a fold works.
+              name: FoldError
               type: error
-            - name: Documents
+            - doc: Documents is how many documents the store holds.
+              name: Documents
               type: int
-            - name: Pending
+            - doc: |-
+                Pending is how many overlay entries the snapshot does not contain yet:
+                zero in memory, and after a fold.
+              name: Pending
               type: int
-            - name: Folds
+            - doc: Folds is how many folds ran since the store opened, Open's own included.
+              name: Folds
               type: int
-      - name: SQLConfig
+      - doc: |-
+          SQLConfig configures [OpenSQL]. Key, Transactor, Dialect and Table are
+          required. The secondary indexes are OpenSQL's other arguments, declared
+          with [coredocstore.Unique] and [coredocstore.Index] exactly as for [Open].
+        name: SQLConfig
         struct:
           fields:
-            - name: Key
+            - doc: |-
+                Key returns the key a document is stored under, as for [Open]: a pure
+                function of the document, compared byte for byte.
+              name: Key
               type: func(T) string
-            - name: Clock
+            - doc: |-
+                Clock stamps each version with the instant of the write that made it.
+                Nil is the system clock.
+              name: Clock
               type: clock.Clock
-            - name: Held
+            - doc: |-
+                Held reports whether the document stored under key is held — a legal
+                hold — so that no write prunes its versions, as for [Open]. It is
+                called by a write that would prune, inside that write's transaction
+                and with its context, so a read it makes through the same transactor
+                joins it. Nil holds nothing. It is refused without Versions.
+              name: Held
               type: func(ctx context.Context, key string) bool
-            - name: Transactor
+            - doc: |-
+                Transactor is the transaction manager of the database the store lives
+                in — the one the caller's own transactions are opened with, so a call
+                made under one of them joins it. It must also be a core/data/sql Joiner and
+                Deferrer, which the SDK's own transactor is.
+              name: Transactor
               type: coresql.Transactor
-            - name: IndexKey
+            - doc: |-
+                IndexKey, when set, transforms every index key before it reaches the
+                database — on a write, and on every Lookup and Find — so a table holds
+                what it returns and never the key itself. An index is an equality
+                lookup, which a keyed hash keeps: a framework passes an HMAC under a key
+                of its own, and an e-mail address never reaches a table. It is called
+                with the index's name and a non-empty key; an empty answer files
+                nothing, as an empty key does. Nil stores index keys as they are.
+              name: IndexKey
               type: func(index, key string) []byte
-            - name: Table
+            - doc: |-
+                Table names the documents' table. The store derives its index table's
+                name from it by appending "___ix". It is a lower-case SQL identifier of
+                at most [MaxSQLTableLen] bytes, holds no three underscores in a row,
+                and does not start with "sqlite_". [SQLMigration] creates both tables.
+              name: Table
               type: string
-            - name: Dialect
+            - doc: |-
+                Dialect is the engine's: the SQL the store speaks to it. It must be the
+                Transactor's own.
+              name: Dialect
               type: coresql.Dialect
-            - name: Versions
+            - doc: |-
+                Versions is how many former versions each document keeps beside its
+                current one, as for [Open]: a write that changes a document makes a
+                new version and prunes the oldest beyond Versions, in its own
+                transaction. They live in a third table, <Table>___vs, which
+                [SQLVersionsMigration] creates. Zero keeps no versions and sends
+                exactly the statements the store sent before versions existed; a
+                negative value is refused. The store cannot see a versions table it was
+                told nothing about: turned off, it leaves the table as it is, and a
+                document deleted and written again meanwhile would find the rows of the
+                one it replaced — so drop the table with the migration's Down (ADR 0143).
+              name: Versions
               type: int
         typeParams:
           - constraint: any
             name: T
-      - methods:
-          - in:
+      - doc: |-
+          SQLStore is a typed, keyed collection of JSON documents with secondary
+          indexes, kept in two tables of a SQL database. Build one with [OpenSQL]. It
+          is safe for concurrent use, and holds nothing but its configuration: the
+          database is the source of truth, and every call is a round trip.
+
+          Every call takes a context, and runs on the transaction that context
+          carries for the store's transactor, else on the pool. A write runs in a
+          transaction of its own — a savepoint inside the caller's — so it is atomic
+          on its own either way, and its hooks run once the transaction that holds it
+          has committed.
+        methods:
+          - doc: |-
+              Reindex rebuilds every index row from the stored documents, in one
+              transaction — a savepoint of the caller's when ctx carries one.
+
+              The SQL store keeps its index rows, where the memory and file store rebuild
+              theirs at every Open. So a change to the declarations — an index added, a
+              key function or IndexKey changed, an index made unique — files nothing for
+              the documents already stored until Reindex runs. It drops every row,
+              including those of an index no longer declared, reads the documents in key
+              order a page at a time, and files each one's keys again.
+
+              Documents that break a unique index refuse the rebuild with INDEX_BROKEN,
+              naming the index and never the key, and so does a key function that panics;
+              a document the type no longer fits is DOCUMENT_UNDECODABLE. Nothing changes
+              then. Run it when no write to the store runs beside it: a write in flight
+              files its keys under whichever rows it finds.
+            in:
               - name: ctx
                 type: context.Context
             name: Reindex
             out:
               - type: error
             recv: pointer
-          - in:
+          - doc: Get returns the document stored under key, or DocumentNotFound.
+            in:
               - name: ctx
                 type: context.Context
               - name: key
@@ -1221,7 +1766,10 @@ packages:
               - type: T
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              List returns every document, in key order — byte order, as Go compares
+              strings.
+            in:
               - name: ctx
                 type: context.Context
             name: List
@@ -1229,7 +1777,10 @@ packages:
               - type: "[]T"
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Filter returns the documents keep accepts, in key order. It reads every
+              document; an index is the way not to.
+            in:
               - name: ctx
                 type: context.Context
               - name: keep
@@ -1239,7 +1790,11 @@ packages:
               - type: "[]T"
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Entries returns up to limit stored documents as JSON, in key order — every
+              one when limit is not positive — for a caller that shows documents rather
+              than decoding them. Each JSON is the bytes the store wrote.
+            in:
               - name: ctx
                 type: context.Context
               - name: limit
@@ -1251,7 +1806,8 @@ packages:
               - name: err
                 type: error
             recv: pointer
-          - in:
+          - doc: Count returns how many documents the store holds.
+            in:
               - name: ctx
                 type: context.Context
             name: Count
@@ -1259,7 +1815,11 @@ packages:
               - type: int
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Lookup returns the document holding key in the unique index named index,
+              DocumentNotFound when none does, IndexUnknown for an undeclared index and
+              IndexNotUnique for an index that may hold several: read that one with Find.
+            in:
               - name: ctx
                 type: context.Context
               - name: index
@@ -1270,7 +1830,11 @@ packages:
               - type: T
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Find returns the documents filed under key in the index named index, in
+              store-key order. It reads any index, unique or not, and no document is an
+              empty slice, not an error.
+            in:
               - name: ctx
                 type: context.Context
               - name: index
@@ -1281,7 +1845,13 @@ packages:
               - type: "[]T"
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              OnWrite registers fn to be told the key of every document Put, Insert,
+              Replace or Update stored, once the transaction that holds the write has
+              committed — never for a write that is rolled back — on the goroutine that
+              committed it, outside every lock. It returns the function that removes the
+              registration.
+            in:
               - name: fn
                 type: func(key string)
             name: OnWrite
@@ -1289,7 +1859,10 @@ packages:
               - name: remove
                 type: func()
             recv: pointer
-          - in:
+          - doc: |-
+              OnDelete registers fn to be told the key of every document Delete removed,
+              on the same terms as OnWrite.
+            in:
               - name: fn
                 type: func(key string)
             name: OnDelete
@@ -1297,7 +1870,8 @@ packages:
               - name: remove
                 type: func()
             recv: pointer
-          - in:
+          - doc: PutStamped is Put, with what the write says about the version it makes.
+            in:
               - name: ctx
                 type: context.Context
               - name: v
@@ -1308,7 +1882,10 @@ packages:
             out:
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              InsertStamped is Insert, with what the write says about the version it
+              makes: version 1, whatever stamp.InPlace says.
+            in:
               - name: ctx
                 type: context.Context
               - name: v
@@ -1319,7 +1896,10 @@ packages:
             out:
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              ReplaceStamped is Replace, with what the write says about the version it
+              makes.
+            in:
               - name: ctx
                 type: context.Context
               - name: v
@@ -1330,7 +1910,13 @@ packages:
             out:
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Versions returns the versions the store keeps of the document stored under
+              key, newest first: the current one — the document as it is now — then the
+              former ones, read in one statement on the transaction ctx carries.
+              DocumentNotFound when no document is stored under key, VersionsNotKept when
+              the store keeps no versions.
+            in:
               - name: ctx
                 type: context.Context
               - name: key
@@ -1342,7 +1928,11 @@ packages:
               - name: err
                 type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Version returns the version numbered number of the document stored under
+              key, VersionNotFound when the document keeps none of that number — never
+              made, or pruned — and what Versions returns otherwise.
+            in:
               - name: ctx
                 type: context.Context
               - name: key
@@ -1354,7 +1944,16 @@ packages:
               - type: coredocstore.VersionValue
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              RewriteVersions rewrites the former versions of the document stored under
+              key — every version but the current one, which is the document and which
+              only a write changes — in one transaction, a savepoint of the caller's when
+              ctx carries one, the document locked as a write locks it. fn receives copies
+              of them, newest first, and returns those to keep, in the same order, under
+              the rules of [Store].RewriteVersions: VersionsRewriteRefused otherwise, and
+              fn's own error returned as it is, nothing changed either way. It calls no
+              hook: the document did not change.
+            in:
               - name: ctx
                 type: context.Context
               - name: key
@@ -1365,7 +1964,10 @@ packages:
             out:
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Put stores v under its key, creating it or replacing whatever was there.
+              On a store that keeps versions, it makes one, stamped with nothing.
+            in:
               - name: ctx
                 type: context.Context
               - name: v
@@ -1374,7 +1976,8 @@ packages:
             out:
               - type: error
             recv: pointer
-          - in:
+          - doc: "Insert stores v, which must be new: DocumentExists when its key is taken."
+            in:
               - name: ctx
                 type: context.Context
               - name: v
@@ -1383,7 +1986,10 @@ packages:
             out:
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Replace stores v over the document already under its key: DocumentNotFound
+              when there is none, so a document deleted meanwhile is never brought back.
+            in:
               - name: ctx
                 type: context.Context
               - name: v
@@ -1392,7 +1998,19 @@ packages:
             out:
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Update applies fn to a copy of the document stored under key and stores the
+              result, atomically: the document is locked from the read to the write — its
+              row on PostgreSQL and MySQL, the database's write lock on SQLite — so no
+              other write lands between them. An error from fn changes nothing and is
+              returned for errors.Is to find, and a result whose key is not key is
+              DocumentKeyChanged. It returns the stored result.
+
+              fn runs inside the write's transaction. It may read the store; a read under
+              a context carrying no transaction runs on the pool, and so needs a second
+              connection. It must not write the document it updates, which is locked by
+              the very write that is waiting for fn.
+            in:
               - name: ctx
                 type: context.Context
               - name: key
@@ -1404,7 +2022,10 @@ packages:
               - type: T
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              UpdateStamped is Update, with what the write says about the version it
+              makes.
+            in:
               - name: ctx
                 type: context.Context
               - name: key
@@ -1418,7 +2039,10 @@ packages:
               - type: T
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Delete removes the document stored under key, or returns DocumentNotFound.
+              Its versions go with it, in the same transaction.
+            in:
               - name: ctx
                 type: context.Context
               - name: key
@@ -1433,7 +2057,173 @@ packages:
         typeParams:
           - constraint: any
             name: T
-  - facade:
+  - doc: |-
+      Package docstore is the public facade for the SDK's document store: typed,
+      keyed JSON documents with unique and multi-valued secondary indexes, kept in
+      memory or persisted to a filesystem, every write durable before it returns.
+
+      	type Account struct {
+      	    ID    string   `json:"id"`
+      	    Email string   `json:"email"`
+      	    Teams []string `json:"teams"`
+      	}
+
+      	data, err := vfs.NewOS("/var/lib/app") // or vfs.NewMem(), or nil FS for memory
+      	accounts, err := docstore.Open(
+      	    docstore.Config[Account]{
+      	        Key:  func(a Account) string { return a.ID },
+      	        FS:   data,
+      	        Path: "members/accounts.json",
+      	    },
+      	    docstore.Unique("email", func(a Account) string { return a.Email }),
+      	    docstore.Index("team", func(a Account) []string { return a.Teams }),
+      	)
+      	defer accounts.Close()
+
+      	err = accounts.Insert(Account{ID: "acc_1", Email: "ada@example.com"})
+      	ada, err := accounts.Lookup("email", "ada@example.com")
+      	red, err := accounts.Find("team", "red")
+
+      # Documents, keys and the write modes
+
+      A document is kept as its JSON encoding, so every read returns a copy and a
+      caller can never alias what the store holds. Its key is what [Config].Key
+      returns; an empty key is refused. Put creates or replaces; Insert refuses a
+      key that is taken (DocumentExists); Replace refuses a key that is not
+      (DocumentNotFound), so a document deleted meanwhile is never brought back.
+      Update applies a function to a copy and stores the result atomically with
+      respect to every other write — its function may read the store, and must not
+      write to it. Delete removes.
+
+      # Indexes
+
+      [Unique] files at most one document per key: a write that would file a
+      second is refused with UniqueKeyTaken and changes nothing. [Index] files any
+      number. Empty keys are not indexed. Lookup reads a unique index; Find reads
+      any index, in store-key order, and answers an empty slice rather than an
+      error; Filter reads every document. The indexes are rebuilt when the store
+      opens, and documents that break a unique index refuse the open
+      (IndexBroken) rather than answer lies.
+
+      No refusal ever quotes a key: a store key is routinely an e-mail address, an
+      index key the hash of a token.
+
+      # How it persists, and what a write costs
+
+      At rest the store is ONE file, the snapshot — a JSON object from key to
+      document, the file a person can open. A write publishes one small file
+      beside it, in the directory Path + ".d", atomically, before it returns — so
+      a write costs one document, whatever the store holds. When that overlay
+      holds as many entries as the store holds documents (at least
+      [DefaultFoldAt]), the write that got it there folds it back into the
+      snapshot: one rewrite per N writes, a constant on average. Close folds too.
+      Opening replays the overlay over the snapshot, and a crash at any point of a
+      fold loads the same documents. BENCH.md in internal/service/data/docstore has the
+      numbers: a write at 100 000 documents costs what it costs at 100, where
+      rewriting the whole file costs 70 ms.
+
+      A publication that fails is PersistFailed and changes nothing. One whose
+      rename happened but whose directory flush failed is WriteUnconfirmed: the
+      write stands — the file shows it, and so does the store — and only its
+      survival across a power loss is in doubt.
+
+      # Concurrency, and what it is not
+
+      A Store is safe for concurrent use, and a reader never waits for a disk:
+      writers are serialised among themselves and do their filesystem work alone,
+      and the documents change only once a write is durable. OnWrite and OnDelete
+      tell a caller about each write once it is durable, outside every lock.
+
+      It is one process's store: a second process opening the same files is not
+      detected. It keeps every document in memory. It has no transaction across
+      documents. It is a store for the documents a service owns, not a database.
+
+      # The same store over SQL
+
+      [OpenSQL] keeps the same documents — the same keys, indexes, write modes,
+      hooks and refusals, the same codes — in two tables of a PostgreSQL, MySQL or
+      SQLite database the caller opened and hands over as a [sql.Transactor].
+      Nothing is held in memory: the database is the source of truth, and every
+      call is a round trip that takes a context (ADR 0139).
+
+      	tm, err := sql.NewTransactor(sql.Config{DB: pool, Dialect: sql.DialectPostgres, Pool: sql.PoolConfig{MaxOpen: 10}})
+      	create, err := docstore.SQLMigration(sql.DialectPostgres, "members__accounts", 20260927120000) // run by your Migrator
+      	accounts, err := docstore.OpenSQL(
+      	    docstore.SQLConfig[Account]{Key: func(a Account) string { return a.ID },
+      	        Transactor: tm, Dialect: sql.DialectPostgres, Table: "members__accounts"},
+      	    docstore.Unique("email", func(a Account) string { return a.Email }),
+      	)
+      	err = sql.Transact(ctx, tm, func(ctx context.Context, _ sql.Executor) error {
+      	    return accounts.Insert(ctx, Account{ID: "acc_1", Email: "ada@example.com"}) // joins this transaction
+      	})
+
+      A call runs on the transaction its context carries for that transactor, and
+      on the pool otherwise. A write runs in a savepoint of the caller's
+      transaction — or a transaction of its own — so it is atomic on its own, and
+      a refused or failed one leaves the caller's transaction usable. Its hooks run
+      once the transaction that holds it has committed, and never for one rolled
+      back.
+
+      The document is kept as the bytes the store encoded, never as the engine's
+      JSON type, which reorders members and respells numbers, so it reads back
+      byte for byte. Keys are compared as bytes — binary key columns, no
+      collation — so "a", "A" and "a " are three keys, as they are in Go. A key
+      longer than [MaxSQLKeyLen] bytes is refused with KeyTooLong. Index keys may
+      reach the table hashed: [SQLConfig].IndexKey transforms every one at a write
+      and at every Lookup and Find, and an index is an equality lookup, which a
+      keyed hash keeps. Index rows are kept, not rebuilt at every open: after a
+      declaration changes, [SQLStore].Reindex files the stored documents again.
+
+      A failure of the database is StatementFailed, which a caller answers with a
+      503: the driver's error is joined beside it for errors.Is and errors.As,
+      and withheld from its text, because a driver quotes the row a constraint
+      refused and that row holds a key.
+
+      # The ports, for a double
+
+      [Store] and [SQLStore] are engines. A caller that must stand a double in for
+      one depends instead on the port it implements: [Collection] and [Versioned]
+      for a [Store], whose calls take no context, [CollectionContext] and
+      [VersionedContext] for a [SQLStore], whose every call takes one, and
+      [Announcer] — OnWrite and OnDelete — for either. Each pair carries the same
+      methods, the same documents and the same refusals; there is no single port
+      over both, because the file engine waits on nothing a context could abandon
+      while the SQL engine waits on a database (ADR 0160).
+
+      # Versions
+
+      A store opened with [Config].Versions — or [SQLConfig].Versions — keeps the
+      last versions of each document, as a content system keeps a page's
+      revisions (ADR 0143):
+
+      	pages, err := docstore.Open(docstore.Config[Page]{Key: Page.Key, FS: data, Path: "cms/pages.json", Versions: 20})
+      	err = pages.PutStamped(page, docstore.Stamp{Meta: map[string]string{"by": userID, "command": "pages.Edit"}})
+      	revisions, err := pages.Versions(page.ID) // newest first: the page as it is, then the 20 before it
+      	third, err := pages.Version(page.ID, revisions[3].Number)
+
+      A creation is version 1, and every write that changes the document makes
+      the next one, stamped with the instant of [Config].Clock and the metadata
+      the Stamped writes carry — who, which command; the plain writes carry none.
+      A number is never given twice while the document exists. A write storing
+      the JSON already stored makes no version, and neither does one stamped
+      InPlace: the document changes and its current version keeps its number. The
+      former versions beyond Versions are pruned by the write that makes a newer
+      one, in the same durable write as the document — the same overlay entry, the
+      same transaction — so no crash ever leaves the versions ahead of or behind
+      their document. [Config].Held keeps a document's versions from pruning, for
+      a legal hold, until a write finds it released. RewriteVersions rewrites a
+      document's former versions under the writers' lock, for an erasure: it may
+      clear or drop them, never renumber or add one. A deletion takes every
+      version with it. Versions are never indexed: Lookup and Find read the
+      current version.
+
+      The file store keeps them in memory, in each write's overlay entry and, at
+      rest, in the file Path + ".versions"; a store opened without versions over
+      files that keep them is refused, rather than left to drop them. The SQL
+      store keeps them in a third table, which [SQLVersionsMigration] creates.
+      [Version].JSON is compact JSON; a version predating a change of the type
+      may no longer decode into it, which is why it is JSON and not a T.
+    facade:
       - const:
           - doc: |-
               DefaultFoldAt is the least number of overlay entries that folds the overlay

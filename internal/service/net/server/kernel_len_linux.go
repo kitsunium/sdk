@@ -1,6 +1,5 @@
 //go:build linux
 
-// Package server — the width-correct kernel length assignment.
 package server
 
 // setKernelLen assigns n to a kernel length field.

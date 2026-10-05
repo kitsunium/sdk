@@ -1,4 +1,3 @@
-// Package kit — the engines a store runs on: memory, files or a database.
 package kit
 
 import (

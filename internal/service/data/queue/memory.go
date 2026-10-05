@@ -1,5 +1,3 @@
-// Package queue — the in-memory broker: the double a consumer's own tests run
-// against, and the control the durability measurements are read against.
 package queue
 
 import (

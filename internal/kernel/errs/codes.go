@@ -1,13 +1,3 @@
-// Package errs — meta-codes (Layer=0 reserved for this file).
-// Used in Define panic messages and in internal bootstrap errors
-// (newValidationError). These codes are documentary: they are NOT
-// returned from emitter APIs as sentinel *Error values.
-//
-// Layer=0 is ENFORCED reserved for this package by validateDefineArgs —
-// any Define call with Layer==0 AND code not in this whitelist will panic.
-//
-// Constants are typed as Code so Define call sites accept them directly
-// and downstream comparisons with Error.Code() are type-safe.
 package errs
 
 const (

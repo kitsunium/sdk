@@ -1,4 +1,3 @@
-// Package metrics — Prometheus text exposition connector (format 0.0.4).
 package metrics
 
 import (

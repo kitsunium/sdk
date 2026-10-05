@@ -1,5 +1,3 @@
-// Package git — parsing git's unified-diff and name-status output into a
-// changed set.
 package git
 
 import (

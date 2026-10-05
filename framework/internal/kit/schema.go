@@ -1,4 +1,3 @@
-// Package kit — schemas: the JSON Schema of an operation's types.
 package kit
 
 import (

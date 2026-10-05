@@ -1,15 +1,3 @@
-// Package lifecycle — the supervisor: a function run until it is stopped,
-// restarted after every early end with a backoff, observed run by run.
-//
-// A Lifecycle orders components that START and STOP; many of those components
-// own a loop that must keep running in between — a consumer, a sweeper, a
-// watcher. That loop is where a component usually dies unnoticed: it returns
-// an error nobody reads, or panics and takes the process with it. The
-// supervisor is the other half of the component: it runs the loop on its own
-// goroutine, recovers a panic, restarts after an early end on a backoff
-// (kernel/backoff.Value, the one curve the SDK computes), tells an
-// observer about every run, and on Stop cancels the loop's context and waits
-// for it — which a Lifecycle then budgets like any other Stop.
 package lifecycle
 
 import (

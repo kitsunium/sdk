@@ -38,114 +38,258 @@ packages:
             value: "0x00_03_01_14"
         type: errs.Code
     constants:
-      - name: KindAny
+      - doc: |-
+          KindAny tags a Value whose payload is an unconstrained interface; handlers
+          SHOULD render it via fmt.Sprintf or a "?" placeholder when the concrete
+          type is not in their format table. It is also the zero-value of Kind.
+        name: KindAny
         type: Kind
         value: "0"
-      - name: KindBool
+      - doc: KindBool tags a Value carrying a boolean payload.
+        name: KindBool
         type: Kind
         value: "1"
-      - name: KindDuration
+      - doc: KindDuration tags a Value carrying a time.Duration payload.
+        name: KindDuration
         type: Kind
         value: "2"
-      - name: KindFloat64
+      - doc: KindFloat64 tags a Value carrying a float64 payload.
+        name: KindFloat64
         type: Kind
         value: "3"
-      - name: KindInt64
+      - doc: KindInt64 tags a Value carrying an int64 payload (also covers int / int32).
+        name: KindInt64
         type: Kind
         value: "4"
-      - name: KindString
+      - doc: KindString tags a Value carrying a string payload.
+        name: KindString
         type: Kind
         value: "5"
-      - name: KindTime
+      - doc: KindTime tags a Value carrying a time.Time payload.
+        name: KindTime
         type: Kind
         value: "6"
-      - name: KindUint64
+      - doc: KindUint64 tags a Value carrying an unsigned 64-bit integer payload.
+        name: KindUint64
         type: Kind
         value: "7"
-      - name: KindGroup
+      - doc: |-
+          KindGroup tags a Value whose payload is a slice of AttrValue, used to model
+          nested groups (slog.Group) without flattening into the parent record.
+        name: KindGroup
         type: Kind
         value: "8"
-      - name: TraceIDLen
+      - blockDoc: |-
+          TraceIDLen and SpanIDLen are the byte lengths W3C Trace Context fixes for
+          the two identifiers: 16 bytes of trace-id, 8 of span-id. They are not
+          tunable — they are the format, not a default.
+        doc: TraceIDLen is the trace identifier's length in bytes.
+        name: TraceIDLen
         type: int
         value: "16"
-      - name: SpanIDLen
+      - blockDoc: |-
+          TraceIDLen and SpanIDLen are the byte lengths W3C Trace Context fixes for
+          the two identifiers: 16 bytes of trace-id, 8 of span-id. They are not
+          tunable — they are the format, not a default.
+        doc: SpanIDLen is the span identifier's length in bytes.
+        name: SpanIDLen
         type: int
         value: "8"
-      - name: TraceIDHexLen
+      - blockDoc: |-
+          TraceIDLen and SpanIDLen are the byte lengths W3C Trace Context fixes for
+          the two identifiers: 16 bytes of trace-id, 8 of span-id. They are not
+          tunable — they are the format, not a default.
+        doc: TraceIDHexLen is the trace identifier's length in lowercase hex.
+        name: TraceIDHexLen
         type: int
         value: "32"
-      - name: SpanIDHexLen
+      - blockDoc: |-
+          TraceIDLen and SpanIDLen are the byte lengths W3C Trace Context fixes for
+          the two identifiers: 16 bytes of trace-id, 8 of span-id. They are not
+          tunable — they are the format, not a default.
+        doc: SpanIDHexLen is the span identifier's length in lowercase hex.
+        name: SpanIDHexLen
         type: int
         value: "16"
-      - name: TraceIDKey
+      - blockDoc: |-
+          TraceIDKey and SpanIDKey are the field names OpenTelemetry prescribes for
+          trace context in NON-OTLP log formats — "use the field names trace_id for
+          the TraceId, span_id for the SpanId"
+          (specification/compatibility/logging_trace_context.md). They are top-level
+          keys of the record, not attributes, which is why they are rendered by the
+          encoders rather than appended to RecordEvent.Attrs.
+        doc: TraceIDKey is the top-level field name carrying the trace identifier.
+        name: TraceIDKey
         type: string
         value: "\"trace_id\""
-      - name: SpanIDKey
+      - blockDoc: |-
+          TraceIDKey and SpanIDKey are the field names OpenTelemetry prescribes for
+          trace context in NON-OTLP log formats — "use the field names trace_id for
+          the TraceId, span_id for the SpanId"
+          (specification/compatibility/logging_trace_context.md). They are top-level
+          keys of the record, not attributes, which is why they are rendered by the
+          encoders rather than appended to RecordEvent.Attrs.
+        doc: SpanIDKey is the top-level field name carrying the span identifier.
+        name: SpanIDKey
         type: string
         value: "\"span_id\""
+    doc: |-
+      Package logger — range 0.3.1.*, the logger engine's (ADR 0005
+      service/observe/logger block), declared here since ADR 0160: the engine,
+      internal/service/observe/logger, returns these and declares none.
+
+      Package logger — declares the Encoder port — the format-side
+      boundary that mirrors Sink (transport-side). Both ports live in core/
+      per hexagonal architecture conventions; concrete adapters live under
+      internal/service/observe/logger/encoder/. See ADR 0005.
+
+      Package logger — declares the sentinels the logger engine
+      (internal/service/observe/logger) returns from its constructors and Handle
+      methods. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE
+      form.
+
+      Package logger — declares the Handler interface that concrete
+      implementations in sdk/internal/service satisfy. Handlers format
+      RecordEvent values and write them to the backing sink.
+
+      Package logger — declares the Kind enum that discriminates the union
+      payload carried by Value. Handlers switch on Kind to select the matching
+      accessor (String, Int64, Float64, …) instead of paying the cost of an
+      `any` type assertion at every render call.
+
+      Package logger — declares the Logger interface — the primary entry
+      point consumers interact with. A Logger binds a Handler and exposes
+      ergonomic Log / With / Enabled operations over it.
+
+      Package logger — defines the RecordEvent value carried between
+      Logger and Handler. It is an immutable snapshot of a single log event at
+      the core boundary.
+
+      Package logger — declares the Sink port — the transport-side
+      boundary of the logger architecture. A Sink receives a fully formatted
+      byte payload (typically produced by an Encoder) plus the originating
+      RecordEvent for sinks that need structured access (CloudWatch metadata,
+      S3 object tags, syslog severity mapping).
+
+      Concrete Sink implementations live in internal/service/observe/logger/sink/<x>/
+      (console, file, multi, async, route, failover, sample, recover, syslog,
+      …). Encoders live in internal/service/observe/logger/encoder/. The Handler
+      composes one Encoder with one Sink — see commit 7 for the genericHandler
+      that wires them together.
+
+      Package logger — declares the trace-correlation half of a log record: the
+      TraceContextValue a RecordEvent carries, and the TraceContextSource port
+      that reads one off a context.Context.
+
+      The pair lives here rather than in internal/core/observe/trace because a log record
+      is not a span: it borrows two identifiers from one. Keeping the value local
+      keeps this package stdlib-only — importing the trace domain would put its
+      whole model (and the shared core/observe/otel model behind it) in front of every
+      consumer that only wants a line on stderr. The binding between the two lives at the top
+      layer, in pkg/v1/observe/logger, which is allowed to know both domains. See
+      ADR 0062.
+
+      Package logger — declares the Value type — a discriminated union
+      carrying the payload of an AttrValue without forcing every concrete type
+      through `any`. Handlers switch on Value.Kind() to select a typed accessor
+      (Int64, Float64, String, …) and skip the cost of reflection at format time.
+
+      Storage layout: bool / int64 / uint64 / float64 / time.Duration share the
+      `num` field via bit-packing (math.Float64bits for floats, two's complement
+      for ints). Strings live in `str`. Time, Group and Any payloads live in
+      `any`. The zero Value carries Kind == KindAny with a nil `any` payload.
     functions:
-      - in:
+      - doc: |-
+          NewValue is a generic alias of AnyValue, exposed for tooling that expects a
+          New-prefixed constructor on every exported type. Prefer the typed
+          constructors (StringValue, Int64Value, …) at call sites.
+        in:
           - name: v
             type: any
         name: NewValue
         out:
           - type: Value
-      - in:
+      - doc: StringValue builds a Value of kind string.
+        in:
           - name: v
             type: string
         name: StringValue
         out:
           - type: Value
-      - in:
+      - doc: |-
+          Int64Value builds a Value of kind int64. int and int32 callers should widen
+          to int64 at the call site.
+        in:
           - name: v
             type: int64
         name: Int64Value
         out:
           - type: Value
-      - in:
+      - doc: |-
+          IntValue builds a Value of kind int64 from a plain int. Provided for caller
+          ergonomy so the most common integer type does not need an explicit cast.
+        in:
           - name: v
             type: int
         name: IntValue
         out:
           - type: Value
-      - in:
+      - doc: Uint64Value builds a Value of kind uint64.
+        in:
           - name: v
             type: uint64
         name: Uint64Value
         out:
           - type: Value
-      - in:
+      - doc: Float64Value builds a Value of kind float64.
+        in:
           - name: v
             type: float64
         name: Float64Value
         out:
           - type: Value
-      - in:
+      - doc: BoolValue builds a Value of kind bool.
+        in:
           - name: v
             type: bool
         name: BoolValue
         out:
           - type: Value
-      - in:
+      - doc: |-
+          DurationValue builds a Value of kind duration. Storing the int64 nanosecond
+          count in bits keeps the hot path allocation-free.
+        in:
           - name: v
             type: time.Duration
         name: DurationValue
         out:
           - type: Value
-      - in:
+      - doc: |-
+          TimeValue builds a Value of kind time. The time.Time payload lives in the
+          any field because its locale + monotonic representation does not fit into
+          num without additional storage.
+        in:
           - name: v
             type: time.Time
         name: TimeValue
         out:
           - type: Value
-      - in:
+      - doc: |-
+          GroupValue builds a Value whose payload is a slice of AttrValue, modelling
+          a nested attribute group. The slice is stored verbatim — callers MUST NOT
+          mutate it after the Value is constructed.
+        in:
           - name: attrs
             type: AttrValue
         name: GroupValue
         out:
           - type: Value
         variadic: true
-      - in:
+      - doc: |-
+          AnyValue builds a Value of KindAny carrying an arbitrary payload. Handlers
+          inspect the concrete type via type assertion and fall back to "?" when the
+          type is not in their format table.
+        in:
           - name: v
             type: any
         name: AnyValue
@@ -372,48 +516,121 @@ packages:
             public: Log write failed
             reason: WRITE_FAILED
     types:
-      - methods:
-          - name: String
+      - doc: |-
+          Kind discriminates the payload variant carried by a Value. Kind values are
+          stable across the public API; new variants are appended at the end so old
+          handlers default to KindAny rather than panic on an unknown discriminant.
+        methods:
+          - doc: |-
+              String returns the lowercase textual label associated with the Kind
+              receiver, suitable for diagnostic dumps and golden test fixtures.
+              "string", "time", "uint64", "group" — or "unknown" for future variants.
+            name: String
             out:
               - type: string
             recv: value
         name: Kind
         underlying: int8
-      - name: RecordEvent
+      - doc: |-
+          RecordEvent captures a single log event; handlers are responsible for writing
+          or forwarding it. Instances are intended to be used read-only after
+          construction by the Logger implementation.
+        name: RecordEvent
         struct:
           fields:
-            - name: Time
+            - doc: Time is the instant the event occurred; zero means "fill in at handle time".
+              name: Time
               type: time.Time
-            - name: Level
+            - doc: Level is the severity of the event.
+              name: Level
               type: level.Level
-            - name: Message
+            - doc: Message is the human-readable description of the event.
+              name: Message
               type: string
-            - name: PC
+            - doc: |-
+                PC is the program counter captured at the Log call site (via
+                runtime.Callers). Zero means "no caller information available";
+                handlers SHOULD resolve PC into a frame lazily at format time.
+              name: PC
               type: uintptr
-            - name: Attrs
+            - doc: Attrs carries the structured key/value pairs attached to this event.
+              name: Attrs
               type: "[]AttrValue"
-            - name: TraceContext
+            - doc: |-
+                TraceContext is the identity of the span this event was emitted
+                inside; the zero value means "no trace here" and MUST render nothing.
+                It is a FIELD rather than two entries in Attrs because the Encoder
+                port receives no context.Context — the identity has to travel on the
+                record to reach the formatter at all — and because OpenTelemetry
+                prescribes trace_id / span_id as TOP-LEVEL keys of the log object,
+                which an attribute cannot be: WithGroup would prefix it. See ADR 0062.
+              name: TraceContext
               type: TraceContextValue
-      - name: AttrValue
+      - doc: |-
+          AttrValue is an immutable key/value pair carried by a RecordEvent. Use the
+          typed Value constructors (StringValue, Int64Value, …) to build the Value
+          field — the zero Value is a valid KindAny carrying nil.
+        name: AttrValue
         struct:
           fields:
-            - name: Key
+            - doc: Key identifies the attribute in the output line.
+              name: Key
               type: string
-            - name: Value
+            - doc: Value carries the typed payload; handlers dispatch on Value.Kind().
+              name: Value
               type: Value
-      - methods:
-          - name: IsValid
+      - doc: |-
+          TraceContextValue is the trace correlation a single log record carries: the
+          identity of the span the record was emitted inside.
+
+          It is a VALUE and carries no flags and no tracestate, because a log line
+          answers exactly one question — "which span produced this?" — and the
+          sampling decision that governs the trace is not a property of the line.
+
+          The zero value is the INVALID context, deliberately: an all-zero trace-id is
+          what W3C Trace Context §3.2.2.3 declares invalid, and an all-zero span-id is
+          §3.2.2.4's. So "no trace here" and "a trace nobody may join" are one value
+          with one spelling, and every consumer has exactly one check to make.
+        methods:
+          - doc: |-
+              IsValid reports whether the pair names a span a backend can join: both
+              identifiers present and non-zero.
+
+              Both are required rather than either, and that follows the data model rather
+              than convenience: "if a SpanId is provided, the corresponding TraceId should
+              also be included" (specification/logs/data-model.md, Trace Context Fields).
+              The only producer in this SDK is a W3C span context, which is itself invalid
+              unless both identifiers are set, so a half-populated pair never reaches an
+              encoder through a supported path — and if one is forged by hand, emitting
+              half of it would produce a field no query can join on.
+            name: IsValid
             out:
               - type: bool
             recv: value
-          - in:
+          - doc: |-
+              AppendTraceIDHex appends the trace identifier to dst as 32 LOWERCASE hex
+              digits and returns the extended buffer.
+
+              The spelling is normative — "Trace IDs and span IDs must be lowercase and
+              hex-encoded" (specification/compatibility/logging_trace_context.md) — and
+              three formatters (the text encoder, the JSON encoder and the legacy text
+              handler) have to agree on it byte for byte, which is why it lives beside the
+              value rather than three times over in internal/service/observe/logger.
+
+              It appends and never returns a string: a string would be one heap allocation
+              per emitted record, and the logger's one-allocation-per-emit contract has no
+              room for a second. See ADR 0062 and pkg/v1/observe/logger/BENCH.md.
+            in:
               - name: dst
                 type: "[]byte"
             name: AppendTraceIDHex
             out:
               - type: "[]byte"
             recv: value
-          - in:
+          - doc: |-
+              AppendSpanIDHex appends the span identifier to dst as 16 lowercase hex
+              digits and returns the extended buffer. Same contract as AppendTraceIDHex.
+            in:
               - name: dst
                 type: "[]byte"
             name: AppendSpanIDHex
@@ -423,54 +640,110 @@ packages:
         name: TraceContextValue
         struct:
           fields:
-            - name: TraceID
+            - doc: TraceID identifies the whole trace; rendered as 32 lowercase hex digits.
+              name: TraceID
               type: "[TraceIDLen]byte"
-            - name: SpanID
+            - doc: SpanID identifies the span within the trace; 16 lowercase hex digits.
+              name: SpanID
               type: "[SpanIDLen]byte"
-      - name: TraceContextSource
+      - doc: |-
+          TraceContextSource reads the trace context carried by ctx.
+
+          It is a FUNC port, so ADR 0039 is satisfied structurally: a func type cannot
+          grow a method, so publishing it can never break a downstream implementation.
+          It returns the zero (invalid) value rather than an error or an ok flag —
+          running outside a trace is the normal state of most code, not a fault, and
+          IsValid is the single question every caller already has to ask.
+
+          Implementations MUST NOT allocate: they run once per emitted record.
+        name: TraceContextSource
         underlying: func(ctx context.Context) (trace TraceContextValue)
-      - methods:
-          - name: Kind
+      - doc: |-
+          Value is an immutable discriminated payload attached to an AttrValue. Use
+          the documented constructors (StringValue / Int64Value / …) to obtain a
+          well-formed instance — the zero value is a valid KindAny carrying nil.
+        methods:
+          - doc: |-
+              Kind returns the discriminator for this Value, indicating which typed
+              accessor (String / Int64 / Float64 / …) handlers should call.
+            name: Kind
             out:
               - type: Kind
             recv: value
-          - name: String
+          - doc: |-
+              String returns the textual payload when the Value carries KindString; for
+              any other Kind it returns an empty string. Handlers that need a stringified
+              rendering of non-string Kinds MUST format from the typed accessor instead.
+            name: String
             out:
               - type: string
             recv: value
-          - name: Int64
+          - doc: |-
+              Int64 returns the int64 payload. The result is undefined when Kind is not
+              KindInt64; callers MUST guard with Kind() before calling this accessor.
+            name: Int64
             out:
               - type: int64
             recv: value
-          - name: Bits
+          - doc: |-
+              Bits returns the raw uint64 storage that backs all bit-packed Kinds
+              (KindBool / KindInt64 / KindUint64 / KindFloat64 / KindDuration). Callers
+              SHOULD prefer the typed accessors; Bits exists for tooling and tests that
+              need direct access to the packed storage.
+            name: Bits
             out:
               - type: packedBits
             recv: value
-          - name: Uint64
+          - doc: |-
+              Uint64 returns the uint64 payload. The result is undefined when Kind is not
+              KindUint64; callers MUST guard with Kind() before calling this accessor.
+            name: Uint64
             out:
               - type: uint64
             recv: value
-          - name: Float64
+          - doc: |-
+              Float64 returns the float64 payload. The result is undefined when Kind is
+              not KindFloat64; callers MUST guard with Kind() before calling this
+              accessor.
+            name: Float64
             out:
               - type: float64
             recv: value
-          - name: Bool
+          - doc: |-
+              Bool returns the boolean payload. The result is undefined when Kind is not
+              KindBool; callers MUST guard with Kind() before calling this accessor.
+            name: Bool
             out:
               - type: bool
             recv: value
-          - name: Duration
+          - doc: |-
+              Duration returns the time.Duration payload. The result is undefined when
+              Kind is not KindDuration; callers MUST guard with Kind() before calling
+              this accessor.
+            name: Duration
             out:
               - type: time.Duration
             recv: value
-          - name: Time
+          - doc: |-
+              Time returns the time.Time payload. The result is undefined when Kind is
+              not KindTime; callers MUST guard with Kind() before calling this accessor.
+              A nil any field decodes as the zero time.Time.
+            name: Time
             out:
               - type: time.Time
             recv: value
-          - name: Group
+          - doc: |-
+              Group returns the nested AttrValue slice. The result is undefined when
+              Kind is not KindGroup; callers MUST guard with Kind() before calling this
+              accessor. A nil any field decodes as a nil slice.
+            name: Group
             out:
               - type: "[]AttrValue"
             recv: value
-          - name: Any
+          - doc: |-
+              Any returns the opaque payload for KindAny. For typed Kinds the return is
+              nil — callers should call the typed accessor instead.
+            name: Any
             out:
               - type: any
             recv: value
@@ -478,11 +751,60 @@ packages:
         struct:
           unexported: true
   - constants:
-      - name: SourceFieldKey
+      - doc: |-
+          SourceFieldKey is the attribute key under which the resolved caller location
+          is emitted. Encoders render it like any other string attribute, so both the
+          text and JSON encoders honour it without modification.
+        name: SourceFieldKey
         type: string
         value: "\"source\""
+    doc: |-
+      Package logger — declares the chainable Builder API — the low-allocation
+      hot path for callers that care about per-call cost. Pulled from a
+      recycler.Pool[*chainBuilder], the builder accumulates attrs without
+      allocating beyond the pre-sized scratchpad and returns to the pool on
+      Send. It is NOT allocation-free end to end: the handler clones the
+      accumulated attrs on every Send, so exactly one slice escapes per emit
+      (see pkg/v1/observe/logger/BENCH.md).
+
+      Package logger — declares genericHandler — the corelogger.Handler
+      implementation that composes an Encoder (format) with a Sink (transport).
+      It replaces the legacy TextHandler that fused both responsibilities into
+      one struct, and ships as the single Handler the service layer offers.
+
+      Package logger — wires a core.Handler into a core.Logger. It
+      provides the thin loggerImpl that routes Log calls through the Handler's
+      Enabled fast-path and honours With-derived attrs via copy-on-write.
+
+      Package logger — a Logger that owns the writers it was built over, and the
+      one call that releases them.
+
+      Package logger — declares the recycled event-record bucket consumed
+      by the Builder API. Pulling RecordEvent values from a recycler.Pool
+      removes the builder and scratchpad allocations from the hot path; the
+      handler still clones the accumulated attrs on every Send, so the
+      steady-state cost is ONE heap allocation per emit, not zero. Combined
+      with the kind-discriminated Value union the remaining per-call cost is
+      dominated by the encoder + sink rather than GC pressure.
+
+      Package logger — declares the sourceHandler decorator — a Handler
+      middleware that resolves the RecordEvent.PC captured by the front-end into a
+      structured "source" attribute (file:line:function) before delegating to the
+      wrapped Handler. It is additive and opt-in: the record shape is unchanged
+      until a caller wraps a Logger via WithCaller, and resolution is stdlib-only
+      (runtime.CallersFrames).
+
+      Package logger — implements the TextHandler — a concrete
+      core.Handler that renders RecordEvent values as
+      "TIME LEVEL msg key=val..." and writes the bytes to an io.Writer under a
+      mutex. It composes the kernel/concur/buffer pool and kernel/clock abstraction so
+      that tests can drive it deterministically.
     functions:
-      - in:
+      - doc: |-
+          NewHandler composes enc with sink and gates emission on the supplied
+          minimum level. A nil enc OR sink is rejected so callers cannot
+          accidentally construct a dead handler.
+        in:
           - name: enc
             type: encoder.Encoder
           - name: sink
@@ -495,7 +817,8 @@ packages:
             type: corelogger.Handler
           - name: err
             type: error
-      - in:
+      - doc: New wraps a core.Handler inside a core.Logger with no trace correlation.
+        in:
           - name: h
             type: corelogger.Handler
         name: New
@@ -504,7 +827,16 @@ packages:
             type: corelogger.Logger
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NewWithTraceContext wraps a core.Handler inside a core.Logger that stamps
+          every emitted record with the trace context src reads off the caller's
+          context.
+
+          src is a port, not an import: this package never learns which propagation
+          carries the span, so internal/service/observe/logger keeps zero edges to any other
+          service-layer domain. pkg/v1/observe/logger binds it to the trace domain. A nil src
+          is the documented "no correlation" wiring and costs nothing per emit.
+        in:
           - name: h
             type: corelogger.Handler
           - name: src
@@ -515,7 +847,14 @@ packages:
             type: corelogger.Logger
           - name: err
             type: error
-      - in:
+      - doc: |-
+          Build is the package-level entry point that returns a chainable Builder
+          bound to lg at the supplied level. It type-asserts lg to the concrete
+          loggerImpl created by New; foreign Logger implementations get nil so
+          callers detect the misconfiguration immediately.
+          IFACE-PLUGIN: returns the chainable Builder contract so callers depend on
+          the fluent API surface rather than the recycled concrete type.
+        in:
           - name: lg
             type: corelogger.Logger
           - name: lv
@@ -523,7 +862,10 @@ packages:
         name: Build
         out:
           - type: Builder
-      - in:
+      - doc: |-
+          LogAttrs is the package-level entry point for the slice-overload of Log.
+          It mirrors Build by routing through the concrete loggerImpl.
+        in:
           - name: ctx
             type: context.Context
           - name: lg
@@ -535,7 +877,22 @@ packages:
           - name: attrs
             type: "[]corelogger.AttrValue"
         name: LogAttrs
-      - in:
+      - doc: |-
+          Owning returns lg carrying owned as the resources it owns, so that Close
+          releases them.
+
+          It exists for a constructor that OPENS writers on its caller's behalf —
+          pkg/v1/observe/logger.NewMulti resolves each spec through the writer registry, so the
+          caller never holds a Sink it could close — and hands back a Logger that was
+          otherwise the only thing referring to them. Without it those files were held
+          until a collection ran their finalizers: a descriptor leak for a program that
+          rebuilds its logger, and on Windows a log file nothing could delete or rotate
+          while the process lived (ADR 0095).
+
+          The result is still this package's concrete Logger, so Build and LogAttrs
+          keep their fast path. A Logger this package did not build is returned
+          unchanged — it has no Close to carry the resources to.
+        in:
           - name: lg
             type: corelogger.Logger
           - name: owned
@@ -543,7 +900,14 @@ packages:
         name: Owning
         out:
           - type: corelogger.Logger
-      - in:
+      - doc: |-
+          WithCaller returns a derived Logger whose emitted records carry a "source"
+          attribute resolving the captured call-site program counter into
+          file:line:function. The skip argument is the extra stack-frame offset
+          reserved for wrapper layers; pass 0 for direct callers. Foreign Logger
+          implementations (not produced by New) are returned unchanged so callers fail
+          safe rather than losing their logger. A nil Logger is returned as-is.
+        in:
           - name: lg
             type: corelogger.Logger
           - name: skip
@@ -551,7 +915,10 @@ packages:
         name: WithCaller
         out:
           - type: corelogger.Logger
-      - in:
+      - doc: |-
+          NewTextHandler constructs a TextHandler that writes to w and filters records
+          strictly below min. The returned handler uses the real system clock.
+        in:
           - name: w
             type: io.Writer
           - name: min
@@ -568,16 +935,24 @@ packages:
       level: github.com/kitsunium/sdk/internal/core/observe/logger/level
     path: github.com/kitsunium/sdk/internal/service/observe/logger
     types:
-      - interface:
+      - doc: |-
+          Builder is the chainable interface returned by Logger.Build. Every typed
+          accessor (Str / Int / Bool / …) returns the receiver so callers compose
+          the chain in a single expression. Send terminates the chain by emitting
+          the accumulated record through the underlying handler and returns the
+          builder to the recycler — callers MUST NOT use the builder after Send.
+        interface:
           methods:
-            - in:
+            - doc: Str appends a string attribute.
+              in:
                 - name: key
                 - name: val
                   type: string
               name: Str
               out:
                 - type: Builder
-            - in:
+            - doc: Int appends an int attribute (widened to int64 internally).
+              in:
                 - name: key
                   type: string
                 - name: val
@@ -585,7 +960,8 @@ packages:
               name: Int
               out:
                 - type: Builder
-            - in:
+            - doc: Int64 appends an int64 attribute.
+              in:
                 - name: key
                   type: string
                 - name: val
@@ -593,7 +969,8 @@ packages:
               name: Int64
               out:
                 - type: Builder
-            - in:
+            - doc: Uint64 appends a uint64 attribute.
+              in:
                 - name: key
                   type: string
                 - name: val
@@ -601,7 +978,8 @@ packages:
               name: Uint64
               out:
                 - type: Builder
-            - in:
+            - doc: Bool appends a boolean attribute.
+              in:
                 - name: key
                   type: string
                 - name: val
@@ -609,7 +987,8 @@ packages:
               name: Bool
               out:
                 - type: Builder
-            - in:
+            - doc: Float64 appends a float64 attribute.
+              in:
                 - name: key
                   type: string
                 - name: val
@@ -617,7 +996,8 @@ packages:
               name: Float64
               out:
                 - type: Builder
-            - in:
+            - doc: Duration appends a time.Duration attribute.
+              in:
                 - name: key
                   type: string
                 - name: val
@@ -625,7 +1005,8 @@ packages:
               name: Duration
               out:
                 - type: Builder
-            - in:
+            - doc: Time appends a time.Time attribute.
+              in:
                 - name: key
                   type: string
                 - name: val
@@ -633,7 +1014,8 @@ packages:
               name: Time
               out:
                 - type: Builder
-            - in:
+            - doc: Any appends an opaque attribute; handlers degrade unrecognised types to "?".
+              in:
                 - name: key
                   type: string
                 - name: val
@@ -641,15 +1023,22 @@ packages:
               name: Any
               out:
                 - type: Builder
-            - in:
+            - doc: Send terminates the chain by emitting the accumulated record.
+              in:
                 - name: ctx
                   type: context.Context
                 - name: msg
                   type: string
               name: Send
         name: Builder
-      - methods:
-          - in:
+      - doc: |-
+          TextHandler is a core.Handler that renders records as a single plain-text
+          line per event. It is safe for concurrent use via an internal mutex.
+        methods:
+          - doc: |-
+              Enabled reports whether the handler would emit a record at r.Level, taking
+              context cancellation into account.
+            in:
               - name: ctx
                 type: context.Context
               - name: r
@@ -658,21 +1047,28 @@ packages:
             out:
               - type: bool
             recv: pointer
-          - in:
+          - doc: |-
+              WithAttrs returns a derived TextHandler sharing the writer but owning a new
+              attrs slice that prepends the given attributes to every record.
+            in:
               - name: attrs
                 type: "[]corelogger.AttrValue"
             name: WithAttrs
             out:
               - type: corelogger.Handler
             recv: pointer
-          - in:
+          - doc: |-
+              WithGroup returns a derived TextHandler that namespaces every subsequent
+              attribute key under the given group name (rendered as "name.key").
+            in:
               - name: name
                 type: string
             name: WithGroup
             out:
               - type: corelogger.Handler
             recv: pointer
-          - in:
+          - doc: Handle formats and writes a RecordEvent to the underlying io.Writer.
+            in:
               - name: ctx
                 type: context.Context
               - name: r
@@ -685,32 +1081,131 @@ packages:
         struct:
           unexported: true
   - aliases:
-      - name: Encoder
+      - doc: |-
+          Encoder is the format-side port now rooted in internal/core/observe/logger.
+          Kept as an alias here so consumers that import service/observe/logger/encoder
+          for the interface type keep compiling. New code should import the
+          canonical type from core/observe/logger directly.
+        name: Encoder
         target: corelogger.Encoder
     constants:
-      - name: ReservedPrefix
+      - doc: |-
+          ReservedPrefix is what a TOP-LEVEL attribute whose key the SDK reserves is
+          rendered under, so the two never collide on one line. The whole namespace
+          under it is reserved with it — see [ReservesKey].
+        name: ReservedPrefix
         type: string
         value: "\"attr.\""
+    doc: |-
+      Package encoder provides concrete Encoder implementations (Text today;
+      NDJSON and JSON to land in follow-up commits). The Encoder interface
+      itself lives in internal/core/observe/logger — this package is implementation-
+      only, exposing the interface via a type alias so existing call sites
+      that import "service/observe/logger/encoder".Encoder keep compiling.
+
+      Per ADR 0005 hexagonal layering: core/ holds ports, service/ holds
+      adapters. Previously Encoder lived here, creating an asymmetry where
+      Sink lived in core/ and Encoder lived in service/ even though both are
+      ports of the Handler.
+
+      Package encoder — implements jsonEncoder, the structured single-line JSON
+      encoder that renders a record as one encoding/json-compatible object per
+      line: {"ts":…,"level":…,"msg":…,<flat attrs>}\n. Lives beside the text
+      encoder so the format and the transport (Sink) evolve independently. The
+      byte writer is hand-rolled (append-based, no reflection, no json.Marshal)
+      so the hot path stays allocation-free.
+
+      Package encoder — implements TextEncoder, the default human-readable
+      encoder that renders a record as "TIME LEVEL msg key=val key=val …\n".
+      Lives in its own package so the format and the transport (Sink) can
+      evolve independently.
+
+      Package encoder — renders the record timestamp, the one field every encoded
+      line carries and the single most expensive thing either encoder does.
+
+      A CPU profile of a bare emit attributed 34.6 % of the WHOLE call —
+      builder, handler, encoder and sink together — to time.Time.AppendFormat,
+      with time.nextStdChunk and time.appendInt the two largest flat entries under
+      it. That is the generic formatter re-parsing the layout string, chunk by
+      chunk, on every single log record, to reach a result that never varies in
+      shape. appendTimestamp writes the same bytes with fixed offsets instead, and
+      is measured at 6.0× the stdlib call on a UTC instant and 5.0× on an offset
+      zone — `BenchmarkAppendTimestamp{,Zoned}` against their `…Stdlib` controls,
+      reported in internal/service/observe/logger/encoder/BENCH.md §5.2.
+
+      It is a REPLACEMENT for one exact layout, not a general formatter: anything
+      it cannot render identically falls back to AppendFormat rather than
+      approximating. TestAppendTimestampMatchesAppendFormat pins the equivalence
+      across four zones and a hundred thousand instants each.
     functions:
-      - in:
+      - doc: |-
+          ReservesKey reports whether a TOP-LEVEL attribute key must be renamed under
+          [ReservedPrefix]: the two the SDK emits as fields of its own — trace_id and
+          span_id, the correlation OpenTelemetry prescribes and ADR 0062 writes on
+          every record emitted inside a span — and anything already in the reserved
+          namespace.
+
+          Two members of one JSON object cannot both be "trace_id" — a decoder keeps
+          one of them, and which one is the decoder's business — so an attribute
+          carrying that key beside the SDK's field could replace the correlation on the
+          way in, and could carry a value from anywhere. It is renamed rather than
+          dropped: nothing a caller logged is lost, and nothing it logged can be
+          mistaken for the span this line came from.
+
+          The namespace is reserved WITH the two keys because the rename has to be
+          injective, and prefixing alone is not: a caller logging both trace_id and a
+          literal attr.trace_id would otherwise land both on "attr.trace_id" and the
+          ambiguity would survive one name over. Prefixing anything already inside the
+          namespace makes the mapping one-to-one — attr.trace_id becomes
+          attr.attr.trace_id — so two distinct keys always render distinct.
+
+          Inside a group the key is already prefixed ("http.trace_id"), so it cannot
+          collide and is left alone.
+        in:
           - name: key
             type: string
         name: ReservesKey
         out:
           - type: bool
-      - in:
+      - doc: |-
+          NewJSON builds an Encoder that renders records as single-line JSON. Pass
+          clock.System for production use; tests inject a fake clock. A nil clock
+          falls back to the real wall clock so callers can pass clock.System or nil
+          interchangeably.
+          IFACE-PLUGIN: returns the Encoder contract so callers depend on the
+          public surface; the concrete jsonEncoder is intentionally hidden.
+        in:
           - name: clk
             type: clock.Clock
         name: NewJSON
         out:
           - type: Encoder
-      - in:
+      - doc: |-
+          NewText builds an Encoder bound to the supplied clock. Pass clock.System
+          for production use; tests inject a fake clock. A nil clock falls back to
+          the real wall clock so callers can pass clock.System or nil interchangeably.
+          IFACE-PLUGIN: returns the Encoder contract so callers depend on the
+          public surface; the concrete textEncoder is intentionally hidden.
+        in:
           - name: clk
             type: clock.Clock
         name: NewText
         out:
           - type: Encoder
-      - in:
+      - doc: |-
+          AppendSanitized copies text onto dst replacing '\n', '\r', and NUL
+          with a single space so the content can never inject a new frame in a
+          line-framed downstream sink. Other control characters are preserved to
+          keep the rendering faithful; only framing-sensitive bytes are stripped.
+          It scrubs every attacker-influenceable textual field — the Message, group
+          names, and attribute keys — not just the Message (V110).
+
+          It is exported for one caller outside this package: the legacy
+          service/observe/logger.TextHandler, which renders the same line shape without going
+          through an Encoder. That handler once appended all three fields verbatim —
+          the scrub existed, but only here — so a line break in any of them forged a
+          log line. One function shared by both renderers cannot drift from itself.
+        in:
           - name: dst
             type: "[]byte"
           - name: text
@@ -723,11 +1218,107 @@ packages:
       corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
     path: github.com/kitsunium/sdk/internal/service/observe/logger/encoder
   - constants:
-      - name: KindSymlink
+      - doc: |-
+          KindSymlink is the value of the "kind" field both symlink refusals carry —
+          the policy one in RefuseSymlink and the kernel one ExplainOpenFailure
+          diagnoses. One sentinel per sink serves every open failure, so the field is
+          what lets a consumer tell "someone put a link at my log path" apart from a
+          full disk, at whichever of the two points caught it.
+        name: KindSymlink
         type: string
         value: "\"symlink\""
+    doc: |-
+      Package logfile is the hardened open both file sinks share: the append-only
+      sink in internal/service/observe/logger/sink/file and the rotating one in
+      internal/service/observe/logger/writer/rotfile, which re-runs it on every reopen after a
+      rotation. A path whose final component is a symbolic link is refused twice —
+      by an os.Lstat BEFORE the open (policy) and by O_NOFOLLOW AT the open where
+      the kernel has it (the TOCTOU window the check leaves) — and both refusals
+      name the indirection the same way, so an operator reading one line can tell
+      a planted link from a full disk (CWE-59).
+
+      Both sinks carried a copy of all of it; the copies differed in nothing but
+      their error code and their wording (OPEN_FAILED 0.3.14.* for the sink,
+      ROT_FILE_OPEN_FAILED for rotfile). Those are what this package does not own:
+      a sink hands it a RefusalSpec carrying its two wraps, and every refusal leaves
+      under that sink's code, in its words. It declares no code.
+
+      Package logfile — the fallback openFlags for the platforms whose syscall
+      package has no O_NOFOLLOW at all: windows, plan9, js/wasm — and wasip1, which
+      has the constant but not a kernel behind it (see open_flags_unix.go for why
+      it is here rather than there).
+
+      On these platforms the symlink refusal is RefuseSymlink's os.Lstat and
+      NOTHING ELSE, so the window between that check and the os.OpenFile that
+      follows it is open. That is a real difference in protection and it is
+      written down in the CLAUDE.md platform tables (this package's and each
+      sink's) rather than smoothed over: a table claiming uniform protection would
+      be worse than no table.
+
+      Closing it here needs a different primitive, not a different flag — Windows
+      has FILE_FLAG_OPEN_REPARSE_POINT, which OPENS the link and requires the
+      handle to be rejected afterwards, the opposite shape from a failing open
+      (ADR 0082 §D2 measured both for internal/service/app/lock). That is a separate
+      piece of work and is named as one; this file does not pretend to be it.
+
+      Package logfile — the Unix half of openFlags: the kernel is asked not to
+      traverse an indirection at the log path, so a symbolic link planted in the
+      window between RefuseSymlink's os.Lstat and the os.OpenFile that follows it
+      fails the open instead of silently redirecting the sink (CWE-59) — at
+      construction of either file sink, and on every reopen after a rotation.
+
+      # Why the tag is `unix` and not a list of six GOOS
+
+      The capability class is "the pinned toolchain's syscall package defines
+      O_NOFOLLOW", and `unix` is the class the toolchain itself declares. Measured
+      on go1.27.1 — the toolchain this repo resolves — by compiling
+      `const _ = syscall.O_NOFOLLOW` as a LIBRARY package (never linked, so cgo and
+      PIE link rules cannot mask the only question being asked) for all 47
+      GOOS/GOARCH pairs of `go tool dist list`. All 39 pairs the `unix` tag selects
+      compile it:
+
+      	aix/ppc64, android/{386,amd64,arm,arm64}, darwin/{amd64,arm64},
+      	dragonfly/amd64, freebsd/{386,amd64,arm,arm64}, illumos/amd64,
+      	ios/{amd64,arm64}, linux/{386,amd64,arm,arm64,loong64,mips,mips64,
+      	mips64le,mipsle,ppc64,ppc64le,riscv64,s390x}, netbsd/{386,amd64,arm,arm64},
+      	openbsd/{386,amd64,arm,arm64,ppc64,riscv64}, solaris/amd64
+
+      The other 8 pairs are js/wasm, plan9/{386,amd64,arm},
+      windows/{386,amd64,arm64} and wasip1/wasm. Seven of them genuinely lack the
+      constant; wasip1 has it and is excluded anyway, for the reason at the end of
+      this comment. All eight take open_flags_other.go.
+
+      A list of six GOOS would have been a second place to maintain the same fact,
+      and its failure mode is the wrong way round: a Unix port Go adds later would
+      silently land in the weaker fallback. With `unix`, a Unix port WITHOUT
+      O_NOFOLLOW breaks the build instead — loud, which is what a security control
+      should be when its premise stops holding. That is ADR 0018 §(c)'s rule
+      applied (a missing kernel ABI constant is split by build tag, never guarded
+      at runtime) and ADR 0018 §(a)'s `_unix.go` suffix, "the shared Unix mechanic".
+
+      wasip1 is deliberately NOT here although it defines O_NOFOLLOW = 0400: there
+      it is not a kernel flag but a lookupflag, `path_open` called without
+      LOOKUP_SYMLINK_FOLLOW (go1.27.1 src/syscall/fs_wasip1.go:574), so the refusal
+      belongs to whichever WASI host runs the module. No lane in this repository
+      runs one, so claiming the protection there would be a claim nothing here can
+      check. It takes the fallback and the CLAUDE.md table says so by name.
     functions:
-      - in:
+      - doc: |-
+          Open refuses a pre-existing symlink at path, then opens it for appending —
+          O_APPEND|O_CREATE|O_WRONLY, plus O_NOFOLLOW on every Unix — creating it with
+          perm. It is the single hardening entry point, so the checks run identically
+          at a sink's construction AND on every reopen after a rotation: no path into
+          a log file is weaker than another.
+
+          The two refusals are not redundant. RefuseSymlink is a check and therefore
+          has a window after it; openFlags carries O_NOFOLLOW on every Unix so the
+          kernel refuses inside that window (open_flags_unix.go, and
+          open_flags_other.go for the platforms where the check is all there is).
+          Neither covers a symbolic link at a PARENT component; each sink's "do NOT
+          place the log file under an attacker-writable directory" pre-condition does.
+
+          The caller owns the returned descriptor.
+        in:
           - name: path
             type: string
           - name: perm
@@ -740,7 +1331,13 @@ packages:
             type: "*os.File"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          RefuseSymlink returns the sink's policy refusal when path's final component
+          is a symbolic link, and nil otherwise. os.Lstat does NOT traverse the final
+          component, so a link that is already there is caught before OpenFile can
+          follow it; an absent path or a stat error passes through, so the OpenFile
+          that follows surfaces the real diagnostic uniformly.
+        in:
           - name: path
             type: string
           - name: refusal
@@ -748,7 +1345,24 @@ packages:
         name: RefuseSymlink
         out:
           - type: error
-      - in:
+      - doc: |-
+          ExplainOpenFailure wraps a failed open under the sink's open refusal and
+          adds what an os.Lstat can still say about path.
+
+          That Lstat is DIAGNOSIS and never the decision. The refusal was already taken
+          one line earlier, by the kernel, so a planter who removes the link between
+          the two calls changes which field this error carries and cannot change
+          whether the open was refused. It is the opposite situation from
+          RefuseSymlink, which runs BEFORE the open and is a check the flag exists to
+          back up — the same distinction internal/service/app/lock draws in
+          classifyOpenFailure (ADR 0082 §D4).
+
+          The errno is deliberately not consulted. O_NOFOLLOW reports a planted link as
+          ELOOP on linux, openbsd and darwin, EMLINK on freebsd and dragonfly, and
+          EFTYPE on netbsd; a three-value table across six kernels is the shape of
+          thing that is wrong on the seventh, and there is nothing to branch on anyway
+          since both refusals share one sentinel per sink.
+        in:
           - name: path
             type: string
           - name: openErr
@@ -762,23 +1376,58 @@ packages:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/service/observe/logger/internal/logfile
     types:
-      - name: RefusalSpec
+      - doc: |-
+          RefusalSpec is one sink's error vocabulary for the hardened open: the wrap a
+          policy refusal leaves under, and the wrap a failed os.OpenFile does. Each
+          carries the sink's own code, reason and wording, and a sink declares its
+          RefusalSpec once, as a package-level value.
+        name: RefusalSpec
         struct:
           fields:
-            - name: Symlink
+            - doc: |-
+                Symlink wraps the policy refusal: the final component is already a
+                symbolic link, so the open is never attempted.
+              name: Symlink
               type: errs.WrapParams
-            - name: Open
+            - doc: |-
+                Open wraps a failed os.OpenFile — the kernel refusing a link planted
+                after the check among the causes, and a full disk among the others.
+              name: Open
               type: errs.WrapParams
-  - functions:
-      - name: NewMemory
+  - doc: |-
+      Package memory implements a Sink that retains a defensive snapshot of every
+      RecordEvent it receives in a mutex-guarded slice. It is intended for tests
+      that need to assert on what was logged — level, message, and attrs — without
+      parsing an encoder's byte output. Records returns an independent copy of the
+      buffer and Reset clears it; both are safe for concurrent use alongside Write.
+
+      Package memory — defines the Memory sink, an in-memory Sink that buffers a
+      defensive snapshot of every received RecordEvent for test assertions.
+
+      Package memory — compile-time proof that *Memory satisfies the core Sink port.
+    functions:
+      - doc: NewMemory returns an empty Memory sink ready to record received records.
+        name: NewMemory
         out:
           - type: "*Memory"
     imports:
       corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
     path: github.com/kitsunium/sdk/internal/service/observe/logger/sink/memory
     types:
-      - methods:
-          - in:
+      - doc: |-
+          Memory is a terminal Sink that retains a defensive snapshot of every
+          RecordEvent it receives in a slice guarded by an RWMutex. It exists for tests
+          that assert on what was logged without parsing an encoder's byte output.
+          Write records; Records returns an independent copy of the buffer; Reset
+          clears it. All methods are safe for concurrent use.
+        methods:
+          - doc: |-
+              Write appends a defensive snapshot of r to the buffer and reports len(p) as
+              written. The encoder's bytes p are intentionally ignored — the sink retains
+              the structured record, not its serialised form. The Attrs slice is
+              deep-cloned, including any nested KindGroup payloads, so later caller
+              mutation cannot corrupt recorded history.
+            in:
               - name: ctx
                 type: context.Context
               - name: r
@@ -792,26 +1441,41 @@ packages:
               - name: err
                 type: error
             recv: pointer
-          - in:
+          - doc: Flush is a no-op for the memory sink — nothing is buffered downstream.
+            in:
               - name: ctx
                 type: context.Context
             name: Flush
             out:
               - type: error
             recv: pointer
-          - name: Close
+          - doc: |-
+              Close is a no-op for the memory sink — it holds no OS resources. Buffered
+              records remain readable via Records after Close so tests can assert on a
+              closed sink.
+            name: Close
             out:
               - type: error
             recv: pointer
-          - name: Records
+          - doc: |-
+              Records returns a snapshot copy of the buffered records. The returned slice
+              is independent of the sink's internal buffer, so callers may iterate it while
+              other goroutines continue writing.
+            name: Records
             out:
               - type: "[]corelogger.RecordEvent"
             recv: pointer
-          - name: Len
+          - doc: |-
+              Len reports the number of accepted Write calls. It is cheaper than len of
+              Records for callers that only need a count, and reads under the read lock.
+            name: Len
             out:
               - type: int
             recv: pointer
-          - name: Reset
+          - doc: |-
+              Reset discards all buffered records and the write counter, returning the
+              sink to its empty state.
+            name: Reset
             recv: pointer
         name: Memory
         struct:
@@ -851,6 +1515,290 @@ packages:
             name: CodeTopologyInvalid
             value: "0x01_01_00_04"
         type: errs.Code
+    doc: |-
+      Package logger — re-exports the chainable Builder API and the
+      slice-overload LogAttrs entry point. Both are routed through the
+      internal service implementation, which owns the recycler that holds
+      the steady-state hot-path at one allocation per emit.
+
+      Package logger — adds the opt-in caller annotation surface. WithCaller
+      derives a Logger whose records carry a structured "source" attribute
+      (file:line:function) resolved from the program counter the front-end already
+      captures. It is additive: an unwrapped Logger emits no source field, so the
+      frozen record shape is unchanged until a caller opts in.
+
+      Package logger — range 1.1.0.* (ADR 0005 pkg/v1/observe/logger block).
+
+      Package logger — adds ergonomic Encoder constructors to the public facade.
+      The Encoder type alias itself lives in sink.go; this file contributes the
+      named constructors (NewTextEncoder / NewJSONEncoder) so consumers can build
+      an encoder directly and pass it to NewWithSink without importing internal/*.
+
+      Package logger — declares pkg/v1/observe/logger's sentinels. Each var's
+      name equals its errs.Define Reason in SCREAMING_SNAKE form.
+
+      Package logger — exposes FromConfig, the capstone of the config-driven writer
+      subsystem (ADR 0014 §D5): it builds a fully wired Logger from a config blob
+      with zero Go glue. The blob is decoded by a codec the CONSUMER already
+      registered (FromConfig imports only the core/data/codec dispatch surface, never
+      pkg/v1/data/codec or any service codec, so a pkg/v1/observe/logger consumer inherits no
+      vendor modules). Each decoded WriterEntry is resolved against the writer
+      registry; a Factory that implements ConfigDecoder translates its own option
+      map, otherwise a default mapping passes the raw map straight to the factory.
+
+      Package logger — re-exports the Value payload discriminant so consumers can
+      name what Value.Kind() returns.
+
+      Without these aliases MemorySink is only half usable: it hands back
+      RecordSnapshot values whose Attrs carry a Kind, but the Kind type itself
+      lived behind the internal/ firewall, so a consumer test could read the
+      discriminant and still not write it down. The core doc already calls these
+      values "stable across the public API"; this file makes that true.
+
+      Package logger — exposes the runtime-tunable level surface: ParseLevel (the
+      strict inverse of a lowercased Level.String), the Leveler one-method port, and
+      LevelVar, an atomically mutable threshold holder a custom sink or gate consults
+      on each record to retune a live logger's floor without rebuilding the pipeline.
+
+      Package logger is the stable v1 public API for SDK logging.
+
+      Consumers import this package; internal/* paths are compile-blocked
+      outside the SDK repo. Type signatures exported here are frozen after
+      the first v1.0.0 release; breaking changes land in pkg/v2. Security
+      fixes in internal/* propagate via a minor bump without touching this
+      façade.
+
+      # Goals
+
+        - One-allocation hot path. The chainable Build(lg, lv).Str(...).
+          Send(...) builder is backed by a sync.Pool that recycles the
+          builder and its attrs scratchpad, but the handler clones that
+          scratchpad on every Send — so steady-state cost is exactly 1
+          heap allocation per emit, not 0. The variadic Info/Warn/... path
+          costs the same 1 (its variadic slice). Prefer Build for
+          ergonomics; it is not an allocation-free guarantee. Measured in
+          BENCH.md and pinned by its design contract (allocsMin: 1 on
+          Build, ADR 0165).
+        - Composable transport. A Logger is wired from a Sink (where bytes
+          go) + an Encoder (how bytes are formatted). Fan-out, async, route,
+          failover, sample, recover middleware compose around a Sink —
+          bring your own topology.
+        - Typed Attrs at the call site. 9 typed constructors (String, Int,
+          Bool, Float64, Int64, Uint64, Duration, Time, Any) — no
+          any-untyped key/value pairs that error at runtime.
+        - Build-time version stamping. Version is the single ldflags
+          injection point. FrameworkVersion() is added as
+          "framework_version" to every emitted record — set under
+          go build -ldflags "-X .../logger.Version=…" or Bazel --stamp.
+        - Trace correlation, on by default and free. A record emitted
+          inside a span carries that span's trace_id and span_id as
+          top-level fields; a record emitted outside one carries neither
+          key. No call site changes — Logger.Log has always taken a
+          context.Context. Costs no extra allocation. See ADR 0062 and
+          the "Trace correlation" section below.
+        - Two failure modes only. Construction returns WriterRequired
+          (1.1.0.1) on a nil writer or SinkConfigRequired (1.1.0.2) on a
+          nil sink — both introspectable via errs.HasCode.
+
+      # What's shipped
+
+      Three construction paths, three native sinks, six middleware kinds,
+      nine Attr ctors, four Level constants, three emission paths.
+
+      	| Group               | Symbols                                                                     | Role |
+      	|---------------------|------------------------------------------------------------------------------|------|
+      	| Construction        | Default, DefaultMulti(path), NewText(Config), NewWithSink(SinkConfig)        | Wire a Logger from explicit knobs OR a one-liner. Config has Writer (single) + Writers ([]io.Writer fan-out) — pick one. DefaultMulti fans console+file from one call (blank-import the writer pkg). |
+      	| Sinks (native)      | ConsoleStderr, ConsoleStdout, NewWriterSink(w), Multi(branches…), LevelGate  | Native + io.Writer adapter + fan-out + a per-branch floor; bring custom Sink for DB/etc. |
+      	| Middleware          | multi, async, route, failover, sample, recover                               | Compose around a base Sink; same Sink interface chainable |
+      	| Encoders            | TextEncoder                                                                  | key=value lines on system clock (JSON/structured: internal today) |
+      	| Emission            | Info / Warn / Error / Debug (variadic), Build(lg,lv) → chain → Send, LogAttrs| 1 alloc on variadic, 1 alloc steady-state on Build |
+      	| Attr constructors   | String, Int, Bool, Float64, Int64, Uint64, Duration, Time, Any               | Typed at the call site |
+      	| Levels              | LevelDebug, LevelInfo, LevelWarn, LevelError                                 | MinLevel on SinkConfig filters at the source |
+      	| Versioning          | Version (ldflags), FrameworkVersion()                                        | Stamp every record with the SDK build version |
+      	| Error sentinels     | WriterRequired (1.1.0.1), SinkConfigRequired (1.1.0.2)                       | Construction-time, introspectable via errs.HasCode |
+
+      # Quick start (text on stderr)
+
+      	import "github.com/kitsunium/sdk/pkg/v1/observe/logger"
+
+      	func main() {
+      	    lg, err := logger.NewText(logger.Config{Writer: os.Stderr, Level: logger.LevelInfo})
+      	    if err != nil { panic(err) }
+      	    lg.Info(context.Background(), "service ready",
+      	        logger.String("addr", ":8080"))
+      	}
+
+      [Default] returns the stderr one-liner equivalent in tests + scripts.
+      [DefaultMulti] is the batteries-included service default: it fans
+      INFO-and-above records to BOTH the console AND a plain (non-rotating)
+      file from a single call — the caller blank-imports
+      github.com/kitsunium/sdk/pkg/v1/observe/logger/writer to activate the two
+      named writers. Pass [Config]{Writer: nil} and [NewText] returns the
+      typed sentinel [WriterRequired] — the pre-errors API silently
+      defaulted to os.Stderr; that was a breaking change recorded in
+      ADR 0002.
+
+      # Custom sink topology
+
+      For multi-sink fan-out, async / failover / sample / route middleware,
+      drive [NewWithSink] with a [SinkConfig]:
+
+      	sink := logger.Multi(
+      	    logger.ConsoleStderr(logger.TextEncoder),
+      	    fileSink, // *yourSink implementing logger.Sink
+      	)
+      	lg, err := logger.NewWithSink(logger.SinkConfig{Sink: sink, Level: logger.LevelDebug})
+
+      A nil Sink returns [SinkConfigRequired]. Both [NewText] and
+      [NewWithSink] decorate every emitted record with the
+      "framework_version" attribute (see [FrameworkVersion]).
+
+      # One logger, two floors
+
+      [SinkConfig].MinLevel is the floor of the whole pipeline. When one
+      branch of a fan-out should see less than another — the terminal at
+      the application's level, an in-process viewer at every level — set
+      the pipeline's floor to the lowest and gate the narrower branch with
+      [LevelGate]:
+
+      	sink := logger.Multi(
+      	    logger.LevelGate(logger.ConsoleStderr(), logger.LevelInfo), // Info and above
+      	    viewer, // everything, Debug included
+      	)
+      	lg, err := logger.NewWithSink(logger.SinkConfig{Sink: sink, MinLevel: logger.LevelDebug})
+
+      The gate applies the floor it is given, Info included; a dropped
+      record is a successful no-op, so it never surfaces as a fan-out
+      failure.
+
+      # Builder hot path
+
+      [Build] returns a chainable, sync.Pool-backed [Builder] whose
+      steady-state per-call cost is one heap allocation per emit: the pool
+      recycles the Builder and its attrs scratchpad, but the handler clones
+      that scratchpad on every [Builder].Send, so one slice escapes.
+      Callers MUST NOT use a Builder after [Builder].Send — it returns to
+      the recycler.
+
+      	logger.Build(lg, logger.LevelInfo).
+      	    Str("user", u.Name).
+      	    Int("age", u.Age).
+      	    Send(ctx, "user logged in")
+
+      [LogAttrs] is the slice overload that avoids the variadic-slice
+      allocation in [Logger].Log.
+
+      # Trace correlation
+
+      Every Logger this package builds stamps the span in scope onto
+      every record it emits, as the two TOP-LEVEL fields OpenTelemetry
+      prescribes for non-OTLP log formats: "trace_id" (32 lowercase hex
+      digits) and "span_id" (16). Populating
+      the context is the trace domain's job — the inbound HTTP middleware
+      in github.com/kitsunium/sdk/pkg/v1/observe/trace, or an explicit
+      trace.ContextWithSpanContext:
+
+      	ctx = trace.ContextWithSpanContext(ctx, spanContext)
+      	logger.Info(ctx, lg, "served") // → … trace_id=4bf9… span_id=00f0…
+
+      Three properties are worth knowing:
+
+        - They are record FIELDS ([Record].TraceContext), not attributes,
+          so [Logger].WithGroup never renames them to "http.trace_id" and
+          a Sink can read the identity off the record instead of parsing
+          it back out of a formatted line.
+        - Both names are RESERVED at the top level. An attribute called
+          "trace_id" or "span_id" renders as "attr.trace_id" /
+          "attr.span_id", because two fields of one name let a decoder
+          keep the caller's value as the line's correlation. It is
+          renamed and never dropped, and a key under [Logger].WithGroup
+          already carries its prefix and is untouched. The whole "attr."
+          namespace is reserved with them, so a key already inside it is
+          prefixed again — otherwise the rename would not be one-to-one
+          and two of your own keys could collide. To log somebody else's
+          identifier, name it for what it is:
+          logger.String("upstream_trace_id", id).
+        - When no span is in scope NOTHING is emitted — not an empty
+          value and not the all-zero identifier, both of which W3C Trace
+          Context declares invalid. Most lines a service logs are outside
+          a request, and an unjoinable trace_id on all of them would make
+          the field useless as a filter.
+        - It costs no extra allocation: the hot path stays at exactly one
+          heap allocation per emit, with a span and without. The
+          identifiers are hex-encoded straight into the encoder's buffer
+          and never become a Go string. Measured in BENCH.md.
+
+      [TraceContextFromContext] is the adapter, exported so a caller
+      wiring a Logger by hand can reuse it.
+
+      # Version stamping
+
+      [Version] is the single ldflags injection point for the SDK.
+      Recipes:
+
+        - Raw go build: `go build -ldflags "-X github.com/kitsunium/sdk/pkg/v1/observe/logger.Version=v0.1.0" ./...`
+        - Bazel: --stamp + x_defs + tools/workspace_status.sh (STABLE_VERSION).
+
+      [FrameworkVersion] returns the link-time value or the literal "dev"
+      sentinel when unset. Every emitted record carries this value under
+      the "framework_version" attribute key.
+
+      # Errors
+
+      Construction failures carry typed dotted-quad codes under range
+      1.1.0.* per ADR 0005:
+
+        - 1.1.0.1 [CodeWriterRequired] / [WriterRequired]: NewText with Writer == nil.
+        - 1.1.0.2 [CodeSinkConfigRequired] / [SinkConfigRequired]: NewWithSink with Sink == nil.
+
+      Inspect via the accessors in github.com/kitsunium/sdk/pkg/v1/errs.
+
+      Package logger — exposes the in-memory test sink (NewMemorySink) and its
+      RecordSnapshot element type so consumers can assert on what was logged.
+
+      Package logger — exposes the Sink port, the multi-sink helper and the
+      per-branch level gate alongside the encoder-aware constructor NewWithSink.
+      Together they let consumers replace the default text-on-stderr wiring
+      (NewText / Default) with arbitrary fan-out / async / file / syslog
+      topologies — without reaching into internal/* packages.
+
+      Package logger — declares the TopologyConfig DTO consumed by FromConfig.
+      A TopologyConfig is the decoded shape of a logger config file: a global level
+      plus an ordered list of named writer entries. It is a plain data carrier with
+      no behaviour — the construction logic lives in FromConfig.
+
+      Package logger — bridges the trace domain to the logging domain, so a log
+      line emitted inside a span carries that span's identity and an operator
+      holding a trace_id can find the logs that belong to it.
+
+      This file is the ONLY place in the SDK where logging and tracing meet, and
+      that placement is the design (ADR 0062). internal/service/observe/logger and
+      internal/service/observe/trace are siblings, and neither imports the other because
+      the two domains meet only here, at the top layer; internal/core/observe/logger is
+      kept stdlib-only so a consumer who only wants a line on stderr does not
+      compile the trace model. pkg/v1 is the layer that knows both domains
+      already, so the binding lives here and nowhere else.
+
+      Package logger — exposes the SDK version to the rest of the
+      logger package. The ldflags pipeline injects the real value at build
+      time; local development runs fall back to the "dev" sentinel.
+
+      Package logger — WithError decomposes an SDK typed error into structured log
+      Attrs (error.code / error.reason / error.public + wrap-trail codes), making
+      the SDK's dotted-quad errors first-class structured data rather than a flat
+      string. It lives beside the Attr constructors it produces.
+
+      Package logger — exposes the named, config-driven writer surface (ADR 0012):
+      the WriterName / *Config aliases, the WriterSpec pair, and NewMulti, which
+      resolves each named writer to a Sink and fans records out to all of them via
+      Multi. Built-in console + file writers activate with a blank import of
+      pkg/v1/observe/logger/writer; s3 / cloudwatch activate with a blank import of the
+      matching third-party/aws/writer package (which alone pulls the AWS SDK).
+
+      Package logger — declares the WriterEntryConfig DTO consumed by FromConfig.
+      A WriterEntryConfig names a registered writer and carries its raw, codec-
+      decoded option map; FromConfig hands that map to the writer's Decoder (or a
+      default mapping) to obtain a typed writer.Config.
     facade:
       - alias:
           - doc: |-
@@ -1297,13 +2245,39 @@ packages:
             name: WriterSpec
             target: corewriter.Spec
     functions:
-      - name: NewTextEncoder
+      - doc: |-
+          NewTextEncoder returns the default human-readable encoder, rendering each
+          record as "TIME LEVEL msg key=val …\n" with RFC3339-millisecond timestamps.
+          It is a named peer of TextEncoder bound to the real system clock.
+        name: NewTextEncoder
         out:
           - type: Encoder
-      - name: NewJSONEncoder
+      - doc: |-
+          NewJSONEncoder returns a structured single-line JSON encoder, rendering each
+          record as one encoding/json-compatible object per line:
+          {"ts":…,"level":…,"msg":…,<flat attrs>}. Grouped attributes flatten to
+          dotted keys ("g1.g2.key") to match the text encoder's convention. Pass it to
+          NewWithSink via SinkConfig.Encoder for machine-readable output.
+        name: NewJSONEncoder
         out:
           - type: Encoder
-      - in:
+      - doc: |-
+          FromConfig builds a Logger from raw, a config blob in the wire format named by
+          format, decoded by a codec the consumer has already registered (blank-import
+          github.com/kitsunium/sdk/pkg/v1/data/codec or a single service codec to activate
+          one). It unmarshals raw into a Topology, resolves each WriterEntry against the
+          writer registry — calling the Factory's ConfigDecoder when it implements one,
+          else a default mapping — composes the sinks via Multi, and returns a Logger
+          filtered at the topology's Level.
+
+          FromConfig returns TopologyInvalid (1.1.0.4) when format is unregistered, the
+          blob is undecodable, the topology has no writers, a writer Name is unknown, or
+          a writer rejects its options. The error is redacted: it names only the writer
+          and the failure kind, never a decoded credential or option value.
+
+          Like NewMulti's, the returned Logger owns the writers it opened — the caller
+          never held them — and implements io.Closer to release them, once.
+        in:
           - name: format
             type: Format
           - name: raw
@@ -1314,7 +2288,22 @@ packages:
             type: Logger
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NewText builds a text-format Logger writing to cfg.Writer (single) OR
+          cfg.Writers (fan-out) filtered at cfg.MinLevel. NewText intentionally
+          does NOT default a nil destination: callers that want stderr use
+          Default(), which supplies it explicitly. Every record emitted through
+          the returned Logger carries a "framework_version" attr.
+
+          Multi-writer example — stream identical text records to stderr AND a
+          log file:
+
+          	f, _ := os.OpenFile("/var/log/myapp.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+          	lg, err := logger.NewText(logger.Config{
+          	    Writers:  []io.Writer{os.Stderr, f},
+          	    MinLevel: logger.LevelInfo,
+          	})
+        in:
           - name: cfg
             type: Config
         name: NewText
@@ -1323,13 +2312,42 @@ packages:
             type: Logger
           - name: err
             type: error
-      - name: Default
+      - doc: |-
+          Default returns a Logger writing INFO-and-above records to os.Stderr.
+          The stderr Writer is supplied explicitly here; NewText itself no longer
+          silently defaults a nil Writer.
+        name: Default
         out:
           - name: lg
             type: Logger
           - name: err
             type: error
-      - in:
+      - doc: |-
+          DefaultMulti returns a Logger that fans INFO-and-above records out to BOTH
+          the console (stderr, the ConsoleConfig zero value — ADR 0030) AND a plain
+          file at path.
+          It is the batteries-included "perfect default" the SDK recommends for a
+          service: two destinations from one call, with NO rotation surface — the
+          plain "file" writer never rotates, so rotation stays opt-in (a caller wanting
+          size/age rotation reaches for the rotating writer explicitly).
+
+          Unlike Default (stderr-only, no extra import), DefaultMulti resolves the
+          "console" and "file" writers through the registry, so the CALLER MUST
+          blank-import the writer package to activate them:
+
+          	import (
+          	    "github.com/kitsunium/sdk/pkg/v1/observe/logger"
+          	    _ "github.com/kitsunium/sdk/pkg/v1/observe/logger/writer" // console + file
+          	)
+
+          	lg, err := logger.DefaultMulti("/var/log/app.log")
+
+          Without that import the file/console Names do not resolve and DefaultMulti
+          returns the registry's WriterUnknownName, surfaced through NewMulti.
+
+          Like every Logger NewMulti returns, it owns the writers it opened and
+          implements io.Closer: Close releases the console writer and the file.
+        in:
           - name: path
             type: string
         name: DefaultMulti
@@ -1338,7 +2356,8 @@ packages:
             type: Logger
           - name: err
             type: error
-      - in:
+      - doc: Debug emits a RecordEvent at LevelDebug through lg.
+        in:
           - name: ctx
             type: context.Context
           - name: lg
@@ -1349,7 +2368,8 @@ packages:
             type: Attr
         name: Debug
         variadic: true
-      - in:
+      - doc: Info emits a RecordEvent at LevelInfo through lg.
+        in:
           - name: ctx
             type: context.Context
           - name: lg
@@ -1360,7 +2380,8 @@ packages:
             type: Attr
         name: Info
         variadic: true
-      - in:
+      - doc: Warn emits a RecordEvent at LevelWarn through lg.
+        in:
           - name: ctx
             type: context.Context
           - name: lg
@@ -1371,7 +2392,8 @@ packages:
             type: Attr
         name: Warn
         variadic: true
-      - in:
+      - doc: Error emits a RecordEvent at LevelError through lg.
+        in:
           - name: ctx
             type: context.Context
           - name: lg
@@ -1382,14 +2404,16 @@ packages:
             type: Attr
         name: Error
         variadic: true
-      - in:
+      - doc: String builds an Attr carrying a string value.
+        in:
           - name: key
           - name: val
             type: string
         name: String
         out:
           - type: Attr
-      - in:
+      - doc: Int builds an Attr carrying an int value.
+        in:
           - name: key
             type: string
           - name: val
@@ -1397,7 +2421,8 @@ packages:
         name: Int
         out:
           - type: Attr
-      - in:
+      - doc: Bool builds an Attr carrying a boolean value.
+        in:
           - name: key
             type: string
           - name: val
@@ -1405,7 +2430,8 @@ packages:
         name: Bool
         out:
           - type: Attr
-      - in:
+      - doc: Float64 builds an Attr carrying a float64 value.
+        in:
           - name: key
             type: string
           - name: val
@@ -1413,7 +2439,8 @@ packages:
         name: Float64
         out:
           - type: Attr
-      - in:
+      - doc: Int64 builds an Attr carrying an int64 value.
+        in:
           - name: key
             type: string
           - name: val
@@ -1421,7 +2448,8 @@ packages:
         name: Int64
         out:
           - type: Attr
-      - in:
+      - doc: Uint64 builds an Attr carrying a uint64 value.
+        in:
           - name: key
             type: string
           - name: val
@@ -1429,7 +2457,8 @@ packages:
         name: Uint64
         out:
           - type: Attr
-      - in:
+      - doc: Duration builds an Attr carrying a time.Duration value.
+        in:
           - name: key
             type: string
           - name: val
@@ -1437,7 +2466,8 @@ packages:
         name: Duration
         out:
           - type: Attr
-      - in:
+      - doc: Time builds an Attr carrying a time.Time value.
+        in:
           - name: key
             type: string
           - name: val
@@ -1445,7 +2475,10 @@ packages:
         name: Time
         out:
           - type: Attr
-      - in:
+      - doc: |-
+          Any builds an Attr carrying an opaque payload. Use the typed helpers when
+          possible — Any disables type-aware rendering.
+        in:
           - name: key
             type: string
           - name: val
@@ -1453,7 +2486,12 @@ packages:
         name: Any
         out:
           - type: Attr
-      - in:
+      - doc: |-
+          NewWithSink builds a Logger forwarding records through cfg.Sink and
+          formatting them with cfg.Encoder. It is the port-and-adapter entry point
+          for callers that want full control over both the format (Encoder) and
+          the transport (Sink); use NewText for the default text-on-stderr wiring.
+        in:
           - name: cfg
             type: SinkConfig
         name: NewWithSink
@@ -1462,7 +2500,20 @@ packages:
             type: Logger
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NewWriterSink wraps an arbitrary [io.Writer] in a [Sink] so callers can
+          compose plain file / network / bytes.Buffer writers with [Multi] for
+          fan-out. The returned Sink serialises Write calls through an internal
+          mutex (identical contract to [ConsoleStderr] / [ConsoleStdout]).
+
+          Returns [WriterRequired] when w is nil.
+
+          	f, _ := os.OpenFile("/var/log/app.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+          	fileSink, _ := logger.NewWriterSink(f)
+          	lg, _ := logger.NewWithSink(logger.SinkConfig{
+          	    Sink: logger.Multi(logger.ConsoleStderr(), fileSink),
+          	})
+        in:
           - name: w
             type: io.Writer
         name: NewWriterSink
@@ -1471,25 +2522,89 @@ packages:
             type: Sink
           - name: err
             type: error
-      - name: TextEncoder
+      - doc: |-
+          TextEncoder returns a fresh text Encoder bound to the real system clock.
+          Callers passing a custom Encoder to NewWithSink usually want this as a
+          starting point — it is the same encoder NewText / Default rely on.
+        name: TextEncoder
         out:
           - type: Encoder
-      - in:
+      - doc: |-
+          TraceContextFromContext reads the span identity carried by ctx and returns
+          it in the shape a log record carries.
+
+          It is the adapter between [github.com/kitsunium/sdk/pkg/v1/observe/trace]'s
+          SpanContext and the logger's TraceContext: the two identifiers, without the
+          flags and the tracestate, because a log line answers "which span produced
+          this?" and nothing else.
+
+          An absent, unsampled-and-absent or malformed span context yields the zero
+          value, and the encoders then emit no trace_id and no span_id at all — never
+          an empty string and never the all-zero identifier, both of which W3C Trace
+          Context §3.2.2.3/§3.2.2.4 declare invalid.
+
+          It allocates nothing: the context walk returns a value type, and the two
+          identifiers are fixed-size arrays copied by assignment.
+        in:
           - name: ctx
             type: context.Context
         name: TraceContextFromContext
         out:
           - type: TraceContext
-      - name: FrameworkVersion
+      - doc: FrameworkVersion returns the linked-in SDK version, or "dev" if unset.
+        name: FrameworkVersion
         out:
           - type: string
-      - in:
+      - doc: |-
+          WithError decomposes err into structured log Attrs so the SDK's dotted-quad
+          typed errors become first-class structured data rather than a flat string.
+
+          For an SDK error it emits error.code, error.reason and error.public, then one
+          error.trail.<n> Attr per wrap-trail code (newest wrap last). Empty metadata
+          fields are skipped. For a plain stdlib error it falls back to a single
+          error.message Attr. A nil err yields no Attrs.
+
+          The result is meant to be spread into an emission call, e.g.
+          logger.Error(ctx, lg, "op failed", logger.WithError(err)...).
+        in:
           - name: err
             type: error
         name: WithError
         out:
           - type: "[]Attr"
-      - in:
+      - doc: |-
+          NewMulti builds a Logger that fans every record out to all specs, each
+          resolved to a Sink by its registered factory and composed through Multi.
+          Records are filtered at min (the handler-global level); a spec's own MinLevel
+          can restrict an individual writer further.
+
+          Each writer's package MUST be imported for its Name to resolve: blank-import
+          pkg/v1/observe/logger/writer for console + file, and third-party/aws/writer/{s3,cloudwatch}
+          for the AWS writers. An unresolved Name returns the registry's
+          WriterUnknownName; an empty specs list returns WriterSpecInvalid.
+
+          The returned Logger OWNS the writers NewMulti opened — the caller never held
+          them — and implements io.Closer to release them: Close drains what an
+          asynchronous writer still holds and closes every writer, once, whatever the
+          number of calls. Loggers derived with With or WithGroup share the writers and
+          own none of them; closing one releases nothing. Until Close, the writers live
+          as long as the Logger does, and a file one opened cannot be deleted or
+          rotated by another program on Windows:
+
+          	lg, err := logger.NewMulti(logger.LevelInfo, specs...)
+          	if err != nil { … }
+          	defer lg.(io.Closer).Close()
+
+          	import (
+          	    "github.com/kitsunium/sdk/pkg/v1/observe/logger"
+          	    _ "github.com/kitsunium/sdk/pkg/v1/observe/logger/writer" // console + file
+          	)
+
+          	lg, err := logger.NewMulti(logger.LevelInfo,
+          	    logger.WriterSpec{Name: "console", Config: logger.ConsoleConfig{Stream: logger.StreamStderr}},
+          	    logger.WriterSpec{Name: "file",    Config: logger.FileConfig{Path: "/var/log/app.log"}},
+          	)
+        in:
           - name: min
             type: Level
           - name: specs
@@ -1555,44 +2670,97 @@ packages:
             public: Logger topology config is invalid
             reason: TOPOLOGY_INVALID
     types:
-      - name: Config
+      - doc: |-
+          Config carries the construction parameters accepted by NewText.
+          Two destination forms are supported — pick the one that fits:
+
+            - Writer single — Writer: w. Records go to that one writer.
+            - Writers fan-out — Writers: []io.Writer{a, b, c}. Records broadcast
+              to every writer in order; per-branch failures are joined under
+              FANOUT_WRITE_FAILED. Use this when you want stderr AND a log file
+              in one go (a common ops pattern) without dropping to NewWithSink.
+
+          When BOTH are set, Writers wins and Writer is ignored. Use whichever
+          reads more naturally at the call site. Construction returns
+          WriterRequired (1.1.0.1) when neither field carries any writer.
+        name: Config
         struct:
           fields:
-            - name: Writer
+            - doc: |-
+                Writer is the single-destination convenience field; nil triggers
+                WriterRequired unless Writers carries at least one entry.
+              name: Writer
               type: io.Writer
-            - name: Writers
+            - doc: |-
+                Writers is the multi-destination fan-out field; non-empty wires
+                the records through logger.Multi over per-writer console sinks.
+                Nil/empty falls back to Writer.
+              name: Writers
               type: "[]io.Writer"
-            - name: MinLevel
+            - doc: MinLevel is the minimum severity emitted; zero value is LevelInfo.
+              name: MinLevel
               type: Level
-      - name: SinkConfig
+      - doc: |-
+          SinkConfig carries the construction parameters accepted by NewWithSink.
+          A zero-valued SinkConfig{Sink: s} is enough to ship records through s at
+          LevelInfo using the default text encoder bound to the real wall clock.
+        name: SinkConfig
         struct:
           fields:
-            - name: Sink
+            - doc: Sink is the destination transport; nil yields SinkConfigRequired.
+              name: Sink
               type: Sink
-            - name: Encoder
+            - doc: Encoder formats records into bytes; nil falls back to the text encoder.
+              name: Encoder
               type: Encoder
-            - name: MinLevel
+            - doc: MinLevel is the minimum severity emitted; zero value is LevelInfo.
+              name: MinLevel
               type: Level
-      - name: TopologyConfig
+      - doc: |-
+          TopologyConfig is the decoded logger configuration: a global Level (parsed by
+          the same names the level package prints — "debug" / "info" / "warn" /
+          "error", case-insensitive, empty defaults to info) and the ordered Writers
+          fanned out to. FromConfig unmarshals a config blob into a TopologyConfig via a
+          consumer-registered codec, then resolves each entry against the writer
+          registry. The Config role suffix marks it a config DTO (KTN-STRUCT-ROLE).
+        name: TopologyConfig
         struct:
           fields:
-            - name: Level
+            - doc: Level is the minimum severity emitted, by name; empty defaults to info.
+              name: Level
               tag: json:"level" yaml:"level" toml:"level"
               type: string
-            - name: Writers
+            - doc: Writers is the ordered set of named writer entries to fan records out to.
+              name: Writers
               tag: json:"writers" yaml:"writers" toml:"writers"
               type: "[]WriterEntryConfig"
-      - name: WriterEntryConfig
+      - doc: |-
+          WriterEntryConfig names one writer in a TopologyConfig and carries its raw
+          option map as decoded from the config blob. Name MUST match a writer
+          registered via a blank-import; Options is the per-writer option bag handed to
+          the writer's Decoder (when it implements one) or passed straight to the
+          factory's Open otherwise. Option values are never echoed into an error — the
+          SECRET GATE redacts them. The Config role suffix marks it a config DTO
+          (KTN-STRUCT-ROLE).
+        name: WriterEntryConfig
         struct:
           fields:
-            - name: Name
+            - doc: Name is the registered writer key ("console" / "file" / "s3" / …).
+              name: Name
               tag: json:"name" yaml:"name" toml:"name"
               type: string
-            - name: Options
+            - doc: Options is the raw, codec-decoded per-writer option map.
+              name: Options
               tag: json:"config" yaml:"config" toml:"config"
               type: map[string]any
     variables:
-      - name: Version
+      - doc: |-
+          Version is overridden at build time via
+
+          	go build -ldflags "-X github.com/kitsunium/sdk/pkg/v1/observe/logger.Version=v0.1.0"
+
+          Leave it as the zero value in local dev; FrameworkVersion returns "dev".
+        name: Version
         type: string
   - codes:
       - const:
@@ -1605,8 +2773,101 @@ packages:
             note: "range: 1.1.1.0 - 1.1.1.255"
             value: "0x01_01_01_01"
         type: errs.Code
+    doc: |-
+      Package slogbridge — converts slog levels and attributes to their SDK peers.
+
+      Package slogbridge — the slog.Handler that forwards records to an SDK Logger.
+
+      Package slogbridge — range 1.1.1.* (ADR 0005 pkg/v1/observe/logger/slogbridge block).
+
+      Package slogbridge adapts an SDK [logger.Logger] to log/slog so a foreign
+      API that accepts only a *slog.Logger emits through the SDK pipeline.
+
+      # Why this package exists
+
+      The SDK logger deliberately does not depend on log/slog: internal/core is
+      stdlib-only and its level sub-package states the rule outright ("specifically
+      never log/slog"). That keeps the domain free of a foreign vocabulary — but it
+      leaves consumers stranded whenever a library types its logging knob as the
+      *concrete* *slog.Logger rather than an interface. The MCP Go SDK's
+      mcp.ServerOptions.Logger is the canonical example.
+
+      Without a bridge the only way out is a SECOND logger writing to the same
+      stream, and that second pipeline is where the damage lives: two level
+      thresholds parsed by two different rules, two line formats on one file, and
+      "framework_version" stamped on only half the records. This package removes
+      the second pipeline. slog becomes a façade over the SDK Logger — one
+      threshold, one encoder, one set of sinks, one version stamp.
+
+      slog is confined to this package on purpose. It is an adapter to a foreign
+      ecosystem, so it lives at the public edge (ADR 0032); kernel, core and
+      service never learn the word.
+
+      # Quick start
+
+      	lg, err := logger.NewText(logger.Config{Writer: os.Stderr, MinLevel: logger.LevelInfo})
+      	if err != nil { return err }
+
+      	sl, err := slogbridge.New(lg)
+      	if err != nil { return err }
+
+      	srv := mcp.NewServer(impl, &mcp.ServerOptions{Logger: sl})
+
+      Every record the foreign library emits through sl now travels the SDK
+      pipeline: filtered at the SDK Logger's threshold, rendered by the SDK
+      encoder, decorated with "framework_version".
+
+      # Level mapping is exact
+
+      The two scales coincide by construction — SDK Debug/Info/Warn/Error are
+      -4/0/4/8, the same integers slog uses — so the conversion is lossless and
+      intermediate values (slog.Level(2)) survive. Only levels outside the int8
+      range saturate, since the SDK Level is an int8.
+
+      A single consequence worth stating: the SDK Logger's threshold is now the
+      ONLY threshold. A caller who used to build the slog view with its own
+      slog.HandlerOptions.Level must move that decision to the SDK Logger's
+      MinLevel; the bridge deliberately offers no second knob to disagree with.
+
+      # Faithfulness and its one limit
+
+      Attributes convert by Kind: String, Int64, Uint64, Float64, Bool, Duration
+      and Time map onto their SDK peers, keeping the encoders' type-aware
+      rendering. slog.KindAny is the deliberate exception — both bundled encoders
+      print "?" for an Any payload, so an slog.Any("err", err) routed through it
+      would arrive with its value erased. The bridge converts such a value with
+      [log/slog.Value.String], which formats it exactly as slog's own handlers do:
+      the Go type is lost, where a "?" would lose the type and the value both.
+
+      Groups flatten to dotted keys ("g1.g2.key"), matching what the SDK text and
+      JSON encoders already produce for nested attributes. slog's elision rules
+      are honoured — an empty Attr is dropped, an empty group NAME inlines its
+      members, and a group with no members is dropped. An empty KEY is a different
+      thing and keeps its separator ("g."), which is what slog itself prints.
+      [log/slog.LogValuer] values are resolved before conversion.
+
+      Two things do NOT cross, both because the SDK's Logger.Log contract carries
+      neither. slog.Record.PC is the first: the bridge calls the ordinary Log,
+      which captures a program counter at the bridge, so a destination built with
+      [logger.WithCaller] reports this package as the source rather than the
+      foreign library's own logging call. Do not enable WithCaller on a
+      bridged destination — a wrong source is worse than none.
+
+      The second is slog.Record.Time. The SDK's Logger.Log
+      contract takes no timestamp, so the record is stamped by the SDK handler's
+      clock at emit time instead. For live logging the difference is sub-
+      microsecond; for a REPLAYED record (one built now and handled later) the
+      original time is lost. Callers replaying records should carry the original
+      instant as an explicit attribute.
     functions:
-      - in:
+      - doc: |-
+          NewHandler returns an slog.Handler that forwards every record to lg.
+
+          A nil lg returns [LoggerRequired] (1.1.1.1) rather than a handler that
+          silently discards: this package exists to guarantee one pipeline, and a
+          bridge to nowhere would defeat the guarantee at the exact moment a caller
+          believed it held.
+        in:
           - name: lg
             type: logger.Logger
         name: NewHandler
@@ -1615,7 +2876,12 @@ packages:
             type: slog.Handler
           - name: err
             type: error
-      - in:
+      - doc: |-
+          New returns a *slog.Logger writing through lg — the one-liner a caller hands
+          to a library whose logging knob is typed as the concrete *slog.Logger.
+
+          A nil lg returns [LoggerRequired] (1.1.1.1).
+        in:
           - name: lg
             type: logger.Logger
         name: New

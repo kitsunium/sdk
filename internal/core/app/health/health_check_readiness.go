@@ -1,6 +1,3 @@
-// Package health — hosts ReadinessCheckValue, the only registration that can
-// express a dependency. See health_check.go for the table of what each of the
-// three may say.
 package health
 
 import "time"

@@ -1,5 +1,3 @@
-// Package trace — the Tracer's configuration: producing Resource,
-// instrumentation Scope, sampling policy, span destination and clock.
 package trace
 
 import (

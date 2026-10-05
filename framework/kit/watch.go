@@ -1,5 +1,3 @@
-// Package kit — watches: how a module hears the writes of a product's marked
-// fields.
 package kit
 
 import (

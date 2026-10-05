@@ -1,10 +1,3 @@
-// Package msgpack — the encode primitives. Each one appends one MessagePack
-// item to a byte slice and chooses the SHORTEST form the value fits, the
-// choice the vendor-backed codec made with UseCompactInts: a non-negative
-// integer of any Go type is a positive fixint or a uint 8/16/32/64, a negative
-// one a negative fixint or an int 8/16/32/64, so the Go width of a number is
-// not on the wire and two programs that disagree about it still interoperate.
-// Floats keep their width: float32 is float 32 and float64 is float 64.
 package msgpack
 
 import (

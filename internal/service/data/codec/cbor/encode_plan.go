@@ -1,8 +1,3 @@
-// Package cbor — encode plans: how the values of one Go type are encoded,
-// resolved once per type and cached. A plan holds the kind encoder that
-// writes a value and answers omitempty, the omitzero question, and the plans
-// of the types it is made of — so walking a value is a chain of direct calls
-// with no lookup.
 package cbor
 
 import (

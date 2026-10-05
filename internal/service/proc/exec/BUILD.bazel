@@ -10,6 +10,7 @@ go_library(
         "cgroup_placement_other.go",
         "cgroup_placement_windows.go",
         "creds_unix.go",
+        "doc.go",
         "exec.go",
         "exec_other.go",
         "exec_unix.go",

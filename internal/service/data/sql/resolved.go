@@ -1,4 +1,3 @@
-// Package sql — hosts the validated, clamped form of a Config.
 package sql
 
 import (

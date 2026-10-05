@@ -87,14 +87,58 @@ packages:
             name: CodeZlibFailed
             value: "0x00_03_1A_03"
         type: errs.Code
+    doc: |-
+      Package transform — range 0.2.5.* (ADR 0014 core/data/transform block), and
+      the stdlib schemes' 0.3.26.* (ADR 0014 service/data/transform block, declared
+      here since ADR 0160).
+
+      Package transform — declares the sentinels returned by the Compressor
+      facade, and the three the stdlib schemes in internal/service/data/transform
+      wrap a compress/* failure in (ADR 0160: every code is declared in the core,
+      at the service's path). Each var's name equals its errs.Define Reason in
+      SCREAMING_SNAKE form. CodeUnknownCompressor is also surfaced via panic at
+      boot on a duplicate registration (see registry.go), not only as an *Error
+      sentinel.
+
+      Package transform — holds the process-wide Compressor registry. Service-level
+      scheme packages register themselves via package-level var initialisers when
+      imported (no init()), mirroring core/data/codec and core/crypto.
+
+      Package transform declares the byte-transform port of the SDK: the
+      Compressor contract and the typed Algorithm string under which a compressor
+      registers. It is the fifth core sibling beside codec, writer, crypto, and
+      logger (ADR 0014 D1) and mirrors codec exactly — the registry resolves an
+      Algorithm to a Compressor the way codec resolves a Format to a Codec.
+
+      No algorithm bodies and no vendor types live here; concrete compressors live
+      under internal/service/data/transform/ (stdlib gzip/flate/zlib today) and
+      self-register via a package-level var initialiser when imported — no init().
     functions:
-      - in:
+      - doc: |-
+          Register inserts c into the registry under c.Algorithm() and returns it so
+          callers can bind the singleton to a typed package-level variable like
+          `var GzipCompressor = transform.Register(gzipCompressor{})`. Panics on a nil
+          scheme or when a distinct scheme already claims the same Algorithm.
+
+          IFACE-PLUGIN: the registry hands plug-in Compressor instances back to callers
+          so each scheme keeps its concrete type unexported; the stable contract is the
+          Compressor interface itself.
+
+          "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
+          plug-in whose type is not comparable both satisfy the port and neither can
+          serve one call (see internal/kernel/plugin).
+        in:
           - name: c
             type: Compressor
         name: Register
         out:
           - type: Compressor
-      - in:
+      - doc: |-
+          Lookup returns the Compressor registered under name.
+
+          IFACE-PLUGIN: the registry stores plug-in scheme instances behind the
+          Compressor interface — concrete types are intentionally unexported per scheme.
+        in:
           - name: name
             type: Algorithm
         name: Lookup
@@ -103,7 +147,10 @@ packages:
             type: Compressor
           - name: ok
             type: bool
-      - name: Available
+      - doc: |-
+          Available returns the sorted list of registered Algorithms, or nil before
+          any Register.
+        name: Available
         out:
           - type: "[]Algorithm"
     imports:
@@ -279,19 +326,100 @@ packages:
             public: zlib transform failed
             reason: ZLIB_FAILED
     types:
-      - methods:
-          - name: String
+      - doc: |-
+          Algorithm is the typed key under which a Compressor registers (e.g. "gzip",
+          "flate", "zlib"). The zero value Algorithm("") is reserved invalid, mirroring
+          codec.Format and crypto.Algorithm. Note that "flate" is the raw DEFLATE
+          stream of RFC 1951 and "zlib" is the RFC 1950 envelope HTTP misnames
+          "deflate" — distinct Algorithms, not aliases.
+        methods:
+          - doc: String implements fmt.Stringer and returns the raw identifier.
+            name: String
             out:
               - type: string
             recv: value
-          - name: Known
+          - doc: Known reports whether a has been registered in the Compressor registry.
+            name: Known
             out:
               - type: bool
             recv: value
         name: Algorithm
         underlying: string
-  - functions:
-      - in:
+  - doc: |-
+      Package transform — shared decompression bound for the stdlib gzip, flate and
+      zlib schemes. Each Decompress reads through an io.LimitReader so a malformed or
+      hostile stream cannot drive an unbounded allocation at this layer. The full
+      self-describing decompression-bomb guard (max output size + max expansion
+      ratio keyed to the frame header) lives in the pkg/v1/data/codec frame layer (a
+      later commit, CodeCompressedFrameInvalid); this is the conservative
+      layer-local backstop ADR 0014 D1 asks for.
+
+      Package transform — the flate (raw DEFLATE) Compressor over compress/flate.
+      Shares the package with the gzip scheme; both self-register at import.
+
+      Package transform wraps the stdlib compress/gzip and compress/flate codecs as
+      core/data/transform.Compressor implementations. Blank-importing this package is
+      enough to make "gzip" and "flate" resolvable via the core/data/transform registry.
+
+      Package transform — the recycled stdlib codecs behind Compress and
+      Decompress. Neither direction's stdlib object is small: at the default level
+      an encoder carries two hash tables and a 320 KiB history window, and a
+      decoder carries a 32 KiB dictionary window. Constructing one per call put
+      compress/flate at 99 % of the bytes a 256-byte gzip allocated and
+      runtime.memclrNoHeapPointers at 18.7 % of its CPU — zeroing tables the call
+      was about to overwrite. Recycling moves that off the per-call path; the
+      before/after medians are in BENCH.md.
+
+      A pooled object is reachable until the next take on the same P or the next
+      GC, whichever comes first, and it is large. That is why the two directions
+      unbind differently, and the line is what the SDK created versus what the
+      caller lent us: an encoder is rebound to io.Discard before it goes back,
+      because it would otherwise pin the output buffer this package built and
+      handed to the caller as exclusively theirs; a decoder is not rebound,
+      because what it holds is the caller's own compressed input, which the caller
+      passed in and still has — and because every decoder Reset re-reads a header
+      and so returns an error that an unbind would have to discard, while every
+      encoder Reset returns nothing at all.
+
+      Every take checks the pooled decoder rather than trusting it, and the check
+      is in two parts because one of them cannot do the job alone: a type assertion
+      establishes the Reset CAPABILITY, and a tag on the box establishes the
+      SCHEME. readerScheme carries the measurement that forces the split — the
+      flate and zlib Resetter interfaces declare the identical method, so each
+      pool's assertion accepts the other pool's decoder and detects nothing.
+
+      A box holding another scheme's decoder is a corrupted pool, which is this
+      package's own defect and not the caller's stream: nobody who called
+      Decompress could have caused it and nobody could act on being told. So it is
+      never an error. It fails the same condition an empty box fails, takes the
+      same constructor path, and the fresh decoder overwrites the foreign one — so
+      the fault costs exactly the allocation the pool exists to avoid, once, and
+      does not outlive the take that found it.
+
+      Package transform — the WrapParams the three schemes attach to a stdlib
+      cause. Each mirrors its sentinel — GzipFailed, FlateFailed, ZlibFailed,
+      declared with their codes in internal/core/data/transform (ADR 0160) — so a
+      wrapped compress/* failure carries the same Code/Reason/Public on the wire as
+      the bare sentinel.
+
+      Package transform — the zlib Compressor over compress/zlib (RFC 1950): a
+      two-byte header, a raw DEFLATE body, and an Adler-32 trailer. This is NOT the
+      `flate` scheme: `flate` is the bare DEFLATE stream of RFC 1951, with no header
+      and no checksum, so the two are not wire-compatible in either direction.
+      HTTP's `Content-Encoding: deflate` (RFC 9110 §8.4.1) names the zlib envelope,
+      so this scheme — not `flate` — is the one that interoperates with it. Shares
+      the package with the gzip and flate schemes; all three self-register at
+      import.
+    functions:
+      - doc: |-
+          NewZlibCompressor returns a zlib Compressor encoding at level, which may be
+          zlib.DefaultCompression, zlib.HuffmanOnly, or any value from zlib.BestSpeed to
+          zlib.BestCompression. Anything else — including zlib.NoCompression, which the
+          stdlib accepts but which stores the payload verbatim — is clamped to
+          zlib.DefaultCompression, so no configuration can hand back a compressor that
+          silently does not compress (ADR 0031). The result is NOT registered; the
+          registry entry is the default-level ZlibCompressor singleton.
+        in:
           - name: level
             type: int
         name: NewZlibCompressor
@@ -301,22 +429,90 @@ packages:
       coretransform: github.com/kitsunium/sdk/internal/core/data/transform
     path: github.com/kitsunium/sdk/internal/service/data/transform
     variables:
-      - name: FlateCompressor
+      - doc: |-
+          FlateCompressor is the flate (raw DEFLATE) singleton, registered with
+          core/data/transform at package load. Binding the registration result to a named
+          var keeps us clear of init().
+        name: FlateCompressor
         type: coretransform.Compressor
-      - name: GzipCompressor
+      - doc: |-
+          GzipCompressor is the gzip singleton, registered with core/data/transform at
+          package load. Binding the registration result to a named var is idiomatic and
+          keeps us clear of init().
+        name: GzipCompressor
         type: coretransform.Compressor
-      - name: ZlibCompressor
+      - doc: |-
+          ZlibCompressor is the zlib singleton, registered with core/data/transform at
+          package load at the stdlib default level. Binding the registration result to a
+          named var is idiomatic and keeps us clear of init().
+        name: ZlibCompressor
         type: coretransform.Compressor
   - constants:
-      - name: Gzip
+      - blockDoc: The Algorithms registered by importing this package.
+        doc: "Gzip is RFC 1952: a DEFLATE stream in a gzip envelope with a CRC-32."
+        name: Gzip
         type: Algorithm
         value: "\"gzip\""
-      - name: Flate
+      - blockDoc: The Algorithms registered by importing this package.
+        doc: Flate is the raw DEFLATE stream of RFC 1951, with no envelope.
+        name: Flate
         type: Algorithm
         value: "\"flate\""
-      - name: Zlib
+      - blockDoc: The Algorithms registered by importing this package.
+        doc: |-
+          Zlib is the RFC 1950 envelope with an Adler-32 — what HTTP calls
+          "deflate".
+        name: Zlib
         type: Algorithm
         value: "\"zlib\""
+    doc: |-
+      Package transform compresses and decompresses bytes with the SDK's
+      compressors, without the codec package (ADR 0014). Importing it registers
+      three, which the standard library implements:
+
+      	box, err := transform.Compress(transform.Gzip, nil, payload)
+      	plain, err := transform.DecompressBounded(transform.Gzip, nil, box, 1<<20)
+
+      # Algorithms
+
+      An [Algorithm] names a [Compressor] in a registry of its own — compression
+      is a transform of bytes, never a codec Format. [Gzip] is RFC 1952, [Flate]
+      the raw DEFLATE stream of RFC 1951, and [Zlib] the RFC 1950 envelope HTTP
+      misnames "deflate": three wire formats, not aliases of one another. A
+      compressor another package registers — the module
+      github.com/kitsunium/sdk/third-party/transform adds zstd and s2 — is reached
+      by its Algorithm the same way once that package is imported; [Available]
+      lists what is registered.
+
+      Every function appends to dst, which may be nil, and src must not overlap
+      dst's spare capacity: a scheme writes there while it still reads src.
+
+      # Bounds
+
+      [Decompress] is bounded by the scheme's own backstop — 256 MiB for the three
+      registered here — so a bomb cannot exhaust memory, but it is the scheme's
+      number, not the caller's. [DecompressBounded] takes the caller's ceiling: a
+      scheme implementing [BoundedDecompressor] stops at it, so the ceiling bounds
+      the work and not only the verdict; a scheme that does not is decompressed
+      under its own backstop and judged afterwards. Either way no more than limit
+      bytes are returned, and a stream that would exceed it is refused with
+      [DecompressedTooLarge] rather than cut short — a truncated success would
+      turn a bomb into a parsing bug further up.
+
+      # Errors
+
+      Match them with errs.HasCode, or the sentinels with errors.Is:
+
+      	CodeUnknownCompressor       0.2.5.1   no compressor is registered under the Algorithm
+      	CodeCompressedFrameInvalid  0.2.5.4   the codec package's compressed frame is malformed, or its bomb guard tripped
+      	CodeDecompressedTooLarge    0.2.5.6   the plaintext would exceed DecompressBounded's ceiling
+      	CodeGzipFailed              0.3.26.1  compress/gzip refused the stream, compressing or decompressing
+      	CodeFlateFailed             0.3.26.2  compress/flate refused the stream
+      	CodeZlibFailed              0.3.26.3  compress/zlib refused the stream
+
+      A malformed stream is the scheme's own refusal, with the scheme's code:
+      [GzipFailed], [FlateFailed] or [ZlibFailed] for the three registered here,
+      the stdlib's own error kept in the chain beneath it.
     facade:
       - const:
           - doc: |-
@@ -437,7 +633,11 @@ packages:
           out:
             - type: "[]Algorithm"
     functions:
-      - in:
+      - doc: |-
+          Compress compresses src with the scheme registered under algo and appends
+          the result to dst. An unregistered algo is refused with UnknownCompressor
+          and dst comes back as it was.
+        in:
           - name: algo
             type: Algorithm
           - name: dst
@@ -449,7 +649,12 @@ packages:
             type: "[]byte"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          Decompress decompresses src with the scheme registered under algo and
+          appends the result to dst, bounded by the scheme's own backstop. To bound
+          it by a number of your own, call DecompressBounded. An unregistered algo is
+          refused with UnknownCompressor and dst comes back as it was.
+        in:
           - name: algo
             type: Algorithm
           - name: dst
@@ -461,7 +666,20 @@ packages:
             type: "[]byte"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          DecompressBounded decompresses src with the scheme registered under algo
+          and appends the result to dst, producing at most limit bytes of plaintext:
+          a stream that would produce more is refused with DecompressedTooLarge and
+          dst comes back as it was. A limit of zero admits an empty stream and nothing
+          else, and a negative limit is read as zero rather than given a meaning of
+          its own.
+
+          A scheme implementing BoundedDecompressor stops at limit, so the work is
+          bounded too. A scheme that does not — a consumer's own, or one of the
+          third-party module's — is decompressed under its own backstop and judged
+          afterwards: declining to tighten the work can never change the verdict,
+          only the bytes touched reaching it.
+        in:
           - name: algo
             type: Algorithm
           - name: dst

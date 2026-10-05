@@ -1,5 +1,3 @@
-// Package singleflight — the in-flight call record shared by every caller of
-// one key.
 package singleflight
 
 import (

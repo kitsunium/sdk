@@ -1,4 +1,3 @@
-// Package session — the file store's writing half.
 package session
 
 import (

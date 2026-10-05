@@ -1,6 +1,3 @@
-// Package toml — scalars into Go values: strings, integers, floats, booleans
-// and the four date and time kinds, each into the types that can hold it
-// without losing it, or a refusal.
 package toml
 
 import (

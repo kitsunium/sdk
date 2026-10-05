@@ -1,4 +1,3 @@
-// Package kit — what kit's own writes mean to the history.
 package kit
 
 import (

@@ -1,7 +1,5 @@
 //go:build solaris
 
-// Package reaper — the timer sweep illumos and Solaris need beside SIGCHLD (the
-// solaris build tag selects both).
 package reaper
 
 import "time"

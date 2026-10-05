@@ -7,6 +7,7 @@ go_library(
     srcs = [
         "backups.go",
         "decode.go",
+        "doc.go",
         "prune.go",
         "rotate.go",
         "rotate_interval.go",

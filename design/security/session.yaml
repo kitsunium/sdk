@@ -131,11 +131,93 @@ packages:
             value: "0x00_03_2E_06"
         type: errs.Code
     constants:
-      - name: IDLen
+      - doc: |-
+          IDLen is the required identifier length in bytes. 32 bytes is 256 bits of
+          entropy from crypto/rand: guessing one is not a threat model, it is a
+          rounding error. The length is fixed rather than configurable because every
+          value a caller could choose below it is a weaker session and every value
+          above it only lengthens the cookie.
+        name: IDLen
         type: int
         value: "32"
+    doc: |-
+      Package session — ranges 0.2.14.* (the port's verdicts) and 0.3.46.* (the
+      engines' own refusals) — ADR 0045, declared here since ADR 0160.
+
+      Package session — declares the sentinel *errs.Error outcomes: the verdicts
+      of the port, and the refusals specific to the engines in
+      internal/service/security/session (ADR 0160). Each var's name equals its
+      errs.Define Reason in SCREAMING_SNAKE form.
+
+      Every Public string here is written on the assumption that a third party
+      reads it: none of them contains an identifier, a subject, a data key, a
+      directory path, or a count. The identifier in particular is a bearer secret,
+      so it never appears in a Public, in a Private, or in a Field.
+
+      Package session — the opaque, redacting session identifier.
+
+      Package session — the port that renders an identifier as a cookie value.
+
+      Package session declares the server-side session domain: the [Store] port
+      that owns a session's lifetime, the opaque [ID] that names it, the immutable
+      [SessionValue] a store hands back, and the [Sealer] that renders an [ID] as
+      a tamper-evident string. Concrete stores — in memory and on disk — live in
+      internal/service/security/session; this package owns only the contract.
+
+      # A session is not a token
+
+      The two are routinely confused and the choice has consequences, so this
+      domain states the difference rather than leaving it to the reader.
+
+      A TOKEN (internal/service/security/token — JWT, PASETO) is SELF-CONTAINED: the claims
+      travel inside it, signed. Verification needs a key and nothing else — no
+      lookup, no shared state, no round trip. That is why a token scales across
+      processes that share nothing. It is also why a token CANNOT BE REVOKED: the
+      only thing that stops an issued token is its own expiry, so "log out
+      everywhere" means "wait".
+
+      A SESSION is an OPAQUE HANDLE: the identifier carries no information at all,
+      and every fact about the session — who it belongs to, when it was created,
+      what the application stored on it — lives on the server, in a [Store].
+      Because the server owns the record, [Store.Destroy] revokes IMMEDIATELY and
+      the next request fails. The price is state: a store, its availability, and a
+      lookup on the request path.
+
+      Pick a token when verification must be stateless and a few minutes of
+      residual validity are acceptable. Pick a session when "log out now" has to
+      mean now, when the data is too large or too private to hand to the client,
+      or when the identifier must reveal nothing.
+
+      # What this domain does NOT do
+
+      The SDK ships the STORE and the SEALING. It does not ship a firewall, access
+      voters, a login convention, or anything that writes an HTTP header. [Sealer]
+      produces the cookie's VALUE; deciding the cookie's name, Path, SameSite,
+      Secure and HttpOnly attributes — and calling http.SetCookie — belongs to the
+      framework, which is the layer that knows what a request is. See the package
+      CLAUDE.md, §The frontier.
+
+      # There is no registry
+
+      Like proc (ADR 0016), resilience (ADR 0026), net (ADR 0029), scheduler
+      (ADR 0041) and token (ADR 0042), this domain has no name->implementation
+      registry. A registry earns its place when an open set of interchangeable
+      schemes is selected by data. Here the set is closed and the choice is a
+      deployment decision made in code: a memory store is per-process and dies with
+      it, a file store survives a restart and is confined to one host. Resolving
+      that from a configuration string would let a typo silently downgrade a
+      persistent store to an ephemeral one.
+
+      Package session — the immutable session a Store hands back.
+
+      Package session — the description a Store fills in to build a SessionValue.
     functions:
-      - in:
+      - doc: |-
+          NewID builds an ID from raw, which MUST be exactly [IDLen] bytes. A wrong
+          length returns [InvalidID] rather than padding or truncating — a truncated
+          identifier is a weaker secret that would still work. The bytes are copied so
+          a later mutation of raw cannot reach the ID.
+        in:
           - name: raw
             type: "[]byte"
         name: NewID
@@ -144,7 +226,13 @@ packages:
             type: ID
           - name: err
             type: error
-      - in:
+      - doc: |-
+          ParseID decodes the canonical form produced by [ID.Reveal] — unpadded
+          base64url over exactly [IDLen] bytes. It is the inbound path: what arrives
+          from a cookie, a header or a query string reaches the domain through here,
+          and anything that is not exactly that shape is refused with [InvalidID]
+          before it can be used as a lookup key.
+        in:
           - name: encoded
             type: string
         name: ParseID
@@ -153,7 +241,16 @@ packages:
             type: ID
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NewSessionValue builds an immutable [SessionValue] from state. It is the only
+          producer of the value type outside this package's own accessors.
+
+          It refuses a zero [StateValue.ID] with [InvalidID] — a session that names
+          nothing could be Loaded by nobody and Saved over anything — and it clamps
+          [StateValue.IdleExpiry] to [StateValue.AbsoluteExpiry] so the "earlier
+          deadline wins" rule holds for every value in existence, not only for the ones
+          this SDK's own stores built.
+        in:
           - name: state
             type: StateValue
         name: NewSessionValue
@@ -559,70 +656,157 @@ packages:
             public: The session store location is reached through a link
             reason: PATH_REDIRECTED
     types:
-      - methods:
-          - name: Reveal
+      - doc: |-
+          ID is an opaque session identifier. It IS a bearer secret — whoever holds it
+          is the session — so this type is built to make leaking it hard:
+
+            - String and GoString render "<redacted>", so an accidental %v, %s or %#v
+              in a log line, an error message or a struct dump prints nothing usable.
+              The public/private split of errs is the same idea applied to errors: a
+              Public string is read by third parties, so no sentinel in this domain
+              ever carries an identifier in one.
+            - [ID.Reveal] is the only way to the canonical string, and it is spelled
+              to read like a mistake at a call site that is not building a cookie.
+            - [ID.Equal] compares in constant time. Comparing identifiers with == on
+              the byte slice would not compile; comparing their Reveal strings would,
+              and would leak the length of the shared prefix.
+            - [ID.Digest] is the value a store indexes and names files by, so the
+              secret itself is never a map key, never a filename, and never at rest.
+        methods:
+          - doc: |-
+              Reveal returns the canonical unpadded base64url form — 43 characters, all of
+              them in the RFC 6265 cookie-octet set, so the result needs no further
+              escaping to be a cookie value.
+
+              This is the ONLY way the secret leaves the type. Hand it to a Set-Cookie
+              value or to [Sealer.Seal]; never to a logger, a metric label, a URL, or an
+              error's Public string. A zero-value ID reveals "".
+            name: Reveal
             out:
               - type: string
             recv: value
-          - name: Digest
+          - doc: |-
+              Digest returns the lowercase hex SHA-256 of the identifier: 64 characters,
+              deterministic, and safe to write down.
+
+              It is what a [Store] uses as its lookup key and what the file store uses as a
+              filename, so the identifier itself is never a map key, never a directory
+              entry, and never on disk. A stolen backup therefore yields digests, not
+              usable cookies. The digest is a LOOKUP KEY, not an authenticator: it is
+              unkeyed, so anyone holding an identifier can compute it — which is exactly
+              the point, and exactly why it is not treated as a secret. A zero-value ID
+              digests to "".
+            name: Digest
             out:
               - type: string
             recv: value
-          - in:
+          - doc: |-
+              Equal reports whether i and other are the same identifier, in time that does
+              not depend on how many leading bytes they share. Every comparison of a
+              session identifier in this SDK goes through here or through crypto/subtle
+              directly; none of them uses == or string equality.
+            in:
               - name: other
                 type: ID
             name: Equal
             out:
               - type: bool
             recv: value
-          - name: IsZero
+          - doc: |-
+              IsZero reports whether the ID names nothing — the zero value, which no
+              constructor produces. A store refuses it with [InvalidID].
+            name: IsZero
             out:
               - type: bool
             recv: value
-          - name: String
+          - doc: |-
+              String implements fmt.Stringer and always redacts, so an identifier never
+              reaches a log line through %v or %s. Use [ID.Reveal] when the destination is
+              a cookie, and [ID.Digest] when it is a log line that needs correlation.
+            name: String
             out:
               - type: string
             recv: value
-          - name: GoString
+          - doc: |-
+              GoString implements fmt.GoStringer so %#v stays redacted: fmt bypasses String
+              for Go-syntax formatting and would otherwise dump the backing slice.
+            name: GoString
             out:
               - type: string
             recv: value
         name: ID
         struct:
           unexported: true
-      - methods:
-          - name: ID
+      - doc: |-
+          SessionValue is one session as a [Store] sees it: an identifier, the subject
+          it is bound to, its two deadlines, and the caller's data. Every field is
+          unexported and every mutator returns a COPY, so a value handed to two
+          goroutines cannot be changed under either of them.
+
+          The absence here is load-bearing. There is no WithSubject, no SetSubject and
+          no Elevate: the subject is written exactly once, by [Store.Regenerate], and
+          that call always mints a new identifier. A caller therefore cannot express
+          "keep this identifier and log this user in" — the sentence has no method.
+        methods:
+          - doc: "ID reports the session's identifier. It is a bearer secret: see [ID]."
+            name: ID
             out:
               - type: ID
             recv: value
-          - name: Subject
+          - doc: |-
+              Subject reports the authenticated principal, or "" when the session is
+              anonymous. It changes only through [Store.Regenerate].
+            name: Subject
             out:
               - type: string
             recv: value
-          - name: CreatedAt
+          - doc: |-
+              CreatedAt reports when this identifier was minted. Regeneration mints a new
+              identifier, so it also restarts this clock — and with it the absolute
+              deadline. That is intended: a session that just changed principal is a new
+              session in every sense that matters.
+            name: CreatedAt
             out:
               - type: time.Time
             recv: value
-          - name: LastSeen
+          - doc: |-
+              LastSeen reports the instant the idle window last slid, i.e. the most recent
+              successful [Store.Load].
+            name: LastSeen
             out:
               - type: time.Time
             recv: value
-          - name: ExpiresAt
+          - doc: |-
+              ExpiresAt reports the EFFECTIVE deadline: the earlier of the absolute
+              ceiling and the sliding idle window. The two are never reconciled by
+              averaging or by preferring the later one — the earlier deadline always wins,
+              which is what makes the absolute timeout a ceiling rather than a suggestion.
+            name: ExpiresAt
             out:
               - type: time.Time
             recv: value
-          - in:
+          - doc: |-
+              LiveAt reports whether the session is still usable at now. The boundary is
+              exclusive: a session is dead AT its deadline, not one tick after it.
+            in:
               - name: now
                 type: time.Time
             name: LiveAt
             out:
               - type: bool
             recv: value
-          - name: IsZero
+          - doc: |-
+              IsZero reports whether this is the zero SessionValue — what every failing
+              [Store] method returns alongside its error. There is no "invalid, but here
+              are the claims anyway" path.
+            name: IsZero
             out:
               - type: bool
             recv: value
-          - in:
+          - doc: |-
+              Get reads one datum. The second return distinguishes "absent" from "present
+              and empty", which a bare "" cannot.
+            in:
               - name: key
                 type: string
             name: Get
@@ -632,7 +816,13 @@ packages:
               - name: ok
                 type: bool
             recv: value
-          - in:
+          - doc: |-
+              Set returns a copy carrying key=value. The receiver is untouched, so
+              threading the result is mandatory:
+
+              	session = session.Set("locale", "fr")
+              	err = store.Save(ctx, session)
+            in:
               - name: key
               - name: value
                 type: string
@@ -640,55 +830,328 @@ packages:
             out:
               - type: SessionValue
             recv: value
-          - in:
+          - doc: |-
+              Delete returns a copy without key. Deleting an absent key is not an error —
+              the caller asked for the key to be gone and it is.
+            in:
               - name: key
                 type: string
             name: Delete
             out:
               - type: SessionValue
             recv: value
-          - name: Keys
+          - doc: |-
+              Keys reports the data keys in sorted order, so a caller iterating them gets
+              the same order on every run and in every process.
+            name: Keys
             out:
               - type: "[]string"
             recv: value
-          - name: Data
+          - doc: |-
+              Data returns a copy of the whole payload. It is a copy so a caller cannot
+              reach behind the value type and mutate a session another goroutine holds.
+            name: Data
             out:
               - type: map[string]string
             recv: value
-          - name: String
+          - doc: |-
+              String implements fmt.Stringer and renders the session's SHAPE, never its
+              contents: no identifier, no subject, no data keys, no values.
+
+              A session's data is whatever the application decided to keep about a logged-in
+              user, and its subject names that user. Rendering either would put both into
+              whichever log line happened to use %v — which is how identifying data ends up
+              in an aggregator that was never scoped to hold it. The counts are enough to
+              tell "the session was empty" from "the session had five keys", which is what
+              a %v is usually reaching for.
+            name: String
             out:
               - type: string
             recv: value
-          - name: GoString
+          - doc: |-
+              GoString implements fmt.GoStringer so %#v stays redacted too — fmt bypasses
+              String for Go-syntax formatting and would otherwise dump every field.
+            name: GoString
             out:
               - type: string
             recv: value
         name: SessionValue
         struct:
           unexported: true
-      - name: StateValue
+      - doc: |-
+          StateValue is the full description of a session, with exported fields, from
+          which [NewSessionValue] builds an immutable [SessionValue]. It exists because
+          [Store] is a PUBLISHED port: a framework writing its own store — Redis,
+          Postgres, whatever the deployment already runs — has to be able to construct
+          the value type it is contracted to return, and every field of [SessionValue]
+          is unexported.
+
+          It is not a back door around the fixation rule. A caller can certainly build
+          a StateValue naming any subject; what they cannot do is persist it, because
+          [Store.Save] compares the subject against the stored record and refuses a
+          mismatch with [FixationRefused]. The forgery is possible and useless, which
+          is the property worth having: the refusal is a runtime verdict a test can
+          reach, not a comment asking people to behave.
+        name: StateValue
         struct:
           fields:
-            - name: ID
+            - doc: ID names the session. NewSessionValue refuses a zero one.
+              name: ID
               type: ID
-            - name: Subject
+            - doc: Subject is the authenticated principal, or "" for anonymous.
+              name: Subject
               type: string
-            - name: CreatedAt
+            - doc: CreatedAt anchors the absolute deadline.
+              name: CreatedAt
               type: time.Time
-            - name: LastSeen
+            - doc: LastSeen anchors the idle deadline.
+              name: LastSeen
               type: time.Time
-            - name: AbsoluteExpiry
+            - doc: |-
+                AbsoluteExpiry is the ceiling — CreatedAt + the store's absolute
+                timeout. Nothing extends it.
+              name: AbsoluteExpiry
               type: time.Time
-            - name: IdleExpiry
+            - doc: |-
+                IdleExpiry is LastSeen + the store's idle timeout. NewSessionValue clamps
+                to AbsoluteExpiry, so a store cannot accidentally publish a sliding
+                window that outlives the ceiling.
+              name: IdleExpiry
               type: time.Time
-            - name: Data
+            - doc: |-
+                Data is the caller's payload; it is copied, so the caller keeps
+                ownership of the map it passed.
+              name: Data
               type: map[string]string
   - constants:
-      - name: DefaultPoll
+      - doc: |-
+          DefaultPoll is the interval between store-wide lock attempts when
+          [FileConfig.Poll] is unset.
+
+          25 ms is internal/service/app/lock's own default, for the same syscall and the
+          same contention, and the two are deliberately the same number: a caller
+          reading both should not have to wonder which lock they are looking at. It is
+          short enough that an uncontended handler never notices it and long enough
+          that a contended one is not a spin.
+        name: DefaultPoll
         type: time.Duration
         value: "25000000"
+    doc: |-
+      Package session — the components ABOVE the store directory, which no flag on
+      an open can reach.
+
+      # What this closes
+
+      FileConfig.Dir is a path, and every component of it is a name somebody else
+      may have created. Measured against the store as it shipped, on darwin/arm64:
+      a symbolic link planted at a parent component inside a world-writable sticky
+      directory — the shape /tmp has — was followed by os.MkdirAll, the directory
+      check then judged the TARGET, and the store was built and filed every record
+      under the planter's tree:
+
+      	Dir demandé    = …/pub/app/sessions     (pub is 1777, app -> …/elsewhere)
+      	NewFileStore   : err=<nil>
+      	New            : err=<nil>
+      	record landed under the planted target = true
+
+      The owner-only rule on Dir could not see it, because the directory it judged
+      was a perfectly private 0700 one: the planter's, or one the store created
+      inside the planter's tree.
+
+      # The rule is the lock domain's, and so is the reason for it
+
+      internal/service/app/lock closed the same gap for its lock directory (ADR 0083),
+      on internal/kernel/fs/pathchain, and this is the same rule over the same walk:
+      an indirection is refused when the directory HOLDING it is world-writable —
+      when anybody could have planted it — and the sticky bit exempts nothing,
+      because planting a component CREATES an entry rather than unlinking one.
+
+      It is not "refuse a link". /tmp is a symbolic link on macOS, /var/run is one
+      on most Linux distributions, and every t.TempDir() on macOS resolves through
+      /var -> /private/var. What separates those from an attack is not the link,
+      it is the directory the link lives in: one only root can write was set up by
+      root.
+
+      # What it does not see, and what does
+
+      The audit runs once, at construction, BEFORE os.MkdirAll — auditing after it
+      would mean refusing the directory only after creating it inside the
+      planter's tree. A component replaced AFTER it returns is not seen by it; that
+      half is closed by a different mechanism: the store holds its directory as an
+      os.Root from construction on and resolves every name against that handle, so
+      a parent swapped later moves nothing (see file_store.go).
+
+      Package session — constant-time comparison of the values that name a session.
+
+      Package session — the in-memory store's construction parameters.
+
+      Package session — the at-rest framing of a record.
+
+      Package session — the file store's construction parameters.
+
+      Package session — one name in the store's held directory: what is there, and
+      an open that never reads or locks through an indirection planted at it.
+
+      # What this closes
+
+      Measured against the store as it shipped, on darwin/arm64:
+
+      	symbolic link at <digest>.session -> a copy kept outside the directory
+      	Load : err=<nil> where="outside"      (served from the link's target)
+
+      	symbolic link at .lock -> a path that does not exist yet
+      	NewFileStore : err=<nil>, and the link's target now exists
+
+      os.ReadFile and os.OpenFile follow a link at the final component, so the
+      first served a session from a file the planter chose and the second created
+      a file wherever the link pointed and took the store-wide lock on it. Writes
+      were never redirected — rename(2) replaces a link rather than following it —
+      which is why this file is about the two OPENS.
+
+      # Why not O_NOFOLLOW, which is what internal/service/app/lock uses
+
+      Because the store no longer opens anything by path. Every name resolves
+      against the os.Root held since construction (file_store.go), which is what
+      keeps a parent swapped after construction from moving the store — and
+      os.Root has no O_NOFOLLOW: it ORs the flag in itself and then resolves the
+      link on the caller's behalf, confined to the root (go1.27,
+      src/os/root_unix.go, rootOpenFileNolog). syscall.Openat, which would take
+      the flag relative to a held directory, exists in go1.27 for linux, aix and
+      wasip1 only (ADR 0083), so it cannot serve darwin or the BSDs.
+
+      So the refusal is spelled with what os.Root does offer, in two halves:
+
+        - LOOK FIRST. Lstat through the held directory, which does not follow, and
+          refuse a name that is a link — or anything but a regular file — before
+          anything opens it. A dangling link is never followed into creating its
+          target, and a FIFO is never opened, so it cannot park the reader while
+          it holds the store-wide lock.
+        - THEN PROVE THE HANDLE. A name swapped between the look and the open is
+          followed by os.Root — inside the store directory only, since os.Root
+          refuses a link that leaves it — and is caught by comparing the opened
+          handle with what the name was: os.SameFile on the fstat of the handle.
+          Nothing is read from, or locked on, a handle that fails it.
+
+      The two together are what O_NOFOLLOW gives on a path: the open never USES a
+      file the name did not lead to. They do not prevent the follow inside the
+      store directory during that race, and the only account that can race it
+      there is one that can already write a 0700 directory it does not own.
+
+      Package session — the file store's reading half, and the lock around it.
+
+      Package session — the small filesystem helpers behind atomic publication.
+
+      Package session — the on-disk store.
+
+      Package session — the file store's writing half.
+
+      Package session — the honest refusal on platforms without the mechanics the
+      file store requires (ADR 0018 §(a): a uniform typed sentinel where a
+      platform has no native mechanic, never a silent drop and never a build
+      break).
+
+      # Why Windows is refused rather than approximated
+
+      The file store's first guarantee is that a session record is unreadable by
+      any account but the one that wrote it. On Windows, Go's os.Chmod maps a
+      FileMode to the read-only attribute and nothing else: 0600 does not describe
+      an ACL, and a file created in a directory with an inheritable permissive DACL
+      is readable by whoever that DACL admits.
+
+      # The reason this file used to give is no longer the reason
+
+      It said the right DACL needs CreateFileW with a security descriptor "which
+      stdlib syscall does not expose". That stopped being the obstacle with ADR
+      0081 and ADR 0084: the kernel binds LockFileEx from kernel32
+      (internal/kernel/fs/flock) and GetNamedSecurityInfoW and GetAce from
+      advapi32 (internal/kernel/fs/winacl) through syscall.NewLazyDLL, with no new
+      dependency, and the same mechanism reaches every advapi32 export. What is
+      still missing is two things, and neither of them is a reuse of that code:
+
+        - An owner-only DACL, BUILT and then VERIFIED. The kernel's reader
+          (winacl.GrantsAnyone, ADR 0084/0086/0095) builds nothing, and the one
+          question it answers — does an identifier meaning ANYBODY, Everyone,
+          Authenticated Users or BUILTIN\Users, hold a right — is weaker than this
+          store's rule: 0700 and 0600 exclude every other account, a named
+          colleague included. A directory granting read to one named principal
+          passes the reader and fails the Unix rule, so reusing it would ship a
+          weaker guarantee under the same name. Applying a protected owner-only
+          DACL at creation is new ABI (SetNamedSecurityInfoW, or a
+          SECURITY_ATTRIBUTES on the create), with its own tests.
+        - A directory flush. Every rename and unlink here is followed by an fsync
+          of the directory, which is what makes Destroy a revocation a power cut
+          cannot undo. Windows has no equivalent — FlushFileBuffers on a directory
+          handle returns ERROR_ACCESS_DENIED (ADR 0056 D10) — which is why
+          internal/service/data/vfs refuses Windows as well.
+
+      The lane that would hold a Windows store to ADR 0018's runtime bar is not
+      missing: e2e-cross's Windows job runs this package, where the store's suites
+      skip today because the store is refused — a green cross-compile alone would
+      not clear that bar.
+
+      The lock half is the one piece that exists: the kernel's LockFileEx (ADR
+      0081) could serialise this store's read-modify-write, and it is what
+      [fileStore.takeFlock] would call there. It is not enough on its own.
+
+      Approximating the rest — calling os.Chmod(0600), observing no error, skipping
+      the directory flush, and reporting success — would produce exactly the store
+      this domain refuses to be: one that makes a security claim it cannot keep,
+      on the platform where nobody would think to check. So the constructor
+      returns the typed proc.UnsupportedPlatform and the caller chooses a memory
+      store, an external store, or another host. Nothing past that refusal is
+      reachable here, the lock calls included.
+
+      Package session — the platform gate the file store reads, and the one
+      question a mode can answer here and cannot on Windows.
+
+      The file store rests on three guarantees, and only two of them are portable.
+      Atomic publication is rename(2), which POSIX requires to be atomic and which
+      Go's os.Rename also provides on Windows through MoveFileEx. Restrictive
+      permissions and advisory locking are not: they are the reason this file has a
+      build tag and a sibling that refuses. The lock itself is the kernel's
+      (internal/kernel/fs/flock, polled by [fileStore.takeFlock]); what stays here
+      is the gate that says both mechanics exist, and [plantable], which a mode
+      can answer here and cannot on Windows.
+
+      Package session — the in-process store.
+
+      Package session — the in-process store's writing half.
+
+      Package session — minting a session identifier from a random source.
+
+      Package session — the stored form of a session.
+
+      Package session — the AEAD sealer that renders an identifier as a cookie
+      value.
+
+      Package session implements the server-side session domain declared in
+      internal/core/security/session (ADR 0045): two concrete stores — one in memory, one on
+      disk — and the AEAD sealer that renders a session identifier as a cookie
+      value.
+
+      Both stores answer the same contract and differ only in where the record
+      lives and how long it survives. The memory store dies with the process; the
+      file store survives a restart, is confined to one host, and makes real
+      operating-system guarantees that this package refuses to fake where the
+      mechanism does not exist (see file_store.go and fsguard_unix.go).
+
+      Nothing here waits on the wall clock. Every deadline is read from an injected
+      kernel/clock.Clock, so an expiry test advances a ManualClock instead of
+      sleeping. The narrow half of the port is deliberate: a session store READS
+      time, it never waits on it, so it takes Clock rather than Timed.
+
+      Package session — the deadline policy shared by every store.
     functions:
-      - in:
+      - doc: |-
+          NewFileStore returns a Store that keeps every session in cfg.Dir.
+
+          It refuses, at construction rather than at first use: a configuration it
+          cannot honour ([coresession.InvalidConfig]), a platform without the two
+          mechanics the guarantees rest on ([coreproc.UnsupportedPlatform]), a
+          directory whose permissions expose its contents ([coresession.DirectoryUnsafe]), and a
+          location reached through a link anybody could have planted
+          ([coresession.PathRedirected]).
+        in:
           - name: cfg
             type: FileConfig
         name: NewFileStore
@@ -697,7 +1160,11 @@ packages:
             type: coresession.Store
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NewMemoryStore returns a Store that keeps every session in this process's
+          memory. It refuses a Config it cannot honour (ADR 0031) and never returns an
+          inert store.
+        in:
           - name: cfg
             type: Config
         name: NewMemoryStore
@@ -706,7 +1173,15 @@ packages:
             type: coresession.Store
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NewSealer returns a [coresession.Sealer] binding key and purpose.
+
+          purpose is REQUIRED. It is what keeps two things sealed under one key apart —
+          a session cookie and a CSRF token, say, or the same application's staging and
+          production cookies — and an empty one is refused rather than read as "no
+          separation", which is ADR 0031's inert-policy failure applied to a security
+          boundary.
+        in:
           - name: key
             type: corecrypto.Key
           - name: purpose
@@ -723,31 +1198,258 @@ packages:
       coresession: github.com/kitsunium/sdk/internal/core/security/session
     path: github.com/kitsunium/sdk/internal/service/security/session
     types:
-      - name: Config
+      - doc: |-
+          Config configures a store's two deadlines and its clock.
+
+          # Both timeouts are required, and 0 is refused
+
+          ADR 0031: a policy constructor never returns an inert policy. A zero timeout
+          read as "expires immediately" would produce a store in which every session is
+          already dead — a login loop with no error message anywhere, which is the
+          worst possible way to present a misconfiguration. There is also no default
+          the SDK could supply without inventing the caller's security requirement: how
+          long a session may idle, and how long it may live at all, are the whole
+          content of a session policy. So both are refused when non-positive, with
+          InvalidConfig naming the field.
+
+          # The idle window must be SHORTER than the absolute ceiling
+
+          The effective deadline is always the earlier of the two. An idle window equal
+          to or longer than the absolute ceiling can therefore never be the earlier
+          one: it would never bite, and the caller would believe they had configured a
+          sliding expiry they do not have. That is the same inert-policy failure ADR
+          0031 describes, so it is refused at construction rather than accepted and
+          ignored.
+        name: Config
         struct:
           fields:
-            - name: IdleTimeout
+            - doc: |-
+                IdleTimeout is how long a session may go untouched before it dies. Every
+                successful Load slides it forward from "now".
+              name: IdleTimeout
               type: time.Duration
-            - name: AbsoluteTimeout
+            - doc: |-
+                AbsoluteTimeout is how long a session may live at all, measured from the
+                instant its identifier was minted. Nothing extends it — not a Load, not
+                a Save. It is the ceiling the sliding window is clamped to.
+              name: AbsoluteTimeout
               type: time.Duration
-            - name: Clock
+            - doc: |-
+                Clock is the time source. A nil Clock falls back to clock.System; a
+                clock.ManualClock makes every expiry assertion deterministic and
+                instant, which is why no test in this package sleeps.
+              name: Clock
               type: clock.Clock
-      - name: FileConfig
+      - doc: |-
+          FileConfig configures the on-disk store. The two timeouts and the clock mean
+          exactly what they mean in [Config] — the fields are repeated rather than
+          embedded so a call site reads as one flat literal — and Dir and Key are the
+          two things only a persistent store needs.
+
+          Key is REQUIRED and has no default. Every record is sealed with it before it
+          touches the disk, so a store built without one would write session contents
+          in plain text next to a filename an operator can list. There is no value the
+          SDK could invent here: a key it generated would be lost on restart, taking
+          every session with it, and a key derived from the directory name would not be
+          a key at all.
+        name: FileConfig
         struct:
           fields:
-            - name: IdleTimeout
+            - doc: |-
+                IdleTimeout is how long a session may go untouched. Refused when
+                non-positive, and when it is not strictly shorter than AbsoluteTimeout.
+              name: IdleTimeout
               type: time.Duration
-            - name: AbsoluteTimeout
+            - doc: AbsoluteTimeout is the ceiling from the identifier's minting instant.
+              name: AbsoluteTimeout
               type: time.Duration
-            - name: Clock
+            - doc: |-
+                Clock is the time source; nil falls back to clock.System.
+
+                It is [clock.Timed] rather than [clock.Clock] because this store both
+                STAMPS and WAITS: the poll between lock attempts is armed on it, so a
+                ManualClock makes contention deterministic and nothing here sleeps. The
+                published shape changed while the module is v0, out loud, per ADR 0040 —
+                clock.System and clock.ManualClock both satisfy it, so only a
+                hand-written Clock-only double is affected.
+              name: Clock
               type: clock.Timed
-            - name: Dir
+            - doc: |-
+                Dir is the directory records live in. It is created with mode 0700 if
+                absent, and REFUSED if it exists with any group or world bit set — a
+                session directory another user can read is the whole compromise.
+              name: Dir
               type: string
-            - name: Poll
+            - doc: |-
+                Poll is the interval between attempts while ANOTHER PROCESS holds the
+                store-wide lock. Zero means [DefaultPoll]; negative is refused.
+
+                It exists because the lock is polled rather than waited on: a blocking
+                flock(2) parks the thread inside a syscall no cancellation reaches, so a
+                request whose caller has hung up could not stop waiting (ADR 0073). The
+                interval is the clamp half of ADR 0031 — any value works, and the SDK
+                picking one surprises nobody — while a negative one is refused, since it
+                spells a caller who meant something the field cannot express.
+              name: Poll
               type: time.Duration
-            - name: Key
+            - doc: |-
+                Key is the 256-bit AEAD key every record is sealed under. The seal binds
+                the record to its own filename, so an attacker with write access to the
+                directory cannot make one session's ciphertext answer for another's
+                identifier.
+              name: Key
               type: corecrypto.Key
-  - facade:
+  - doc: |-
+      Package session is the public facade for the SDK's server-side session
+      domain: an opaque identifier, a store that owns its lifetime, and a sealer
+      that renders it as a cookie value.
+
+      	store, err := session.NewMemoryStore(session.Config{
+      	    IdleTimeout:     30 * time.Minute,
+      	    AbsoluteTimeout: 12 * time.Hour,
+      	})
+      	if err != nil {
+      	    return err // a zero timeout is refused HERE, not at the first login
+      	}
+
+      	anon, err := store.New(ctx)                       // a visitor arrives
+      	live, err := store.Load(ctx, id)                  // …and comes back
+      	live, err = store.Regenerate(ctx, id, "user-42")  // …and logs in
+      	err = store.Destroy(ctx, live.ID())               // …and logs out, now
+
+      # A session is not a token
+
+      The two are constantly confused and the choice has consequences.
+
+      A TOKEN (see pkg/v1/security/token — JWT, PASETO) is self-contained: the claims travel
+      inside it, signed, and verifying one needs a key and nothing else. That is
+      what lets it scale across processes that share no state. It is also why a
+      token CANNOT BE REVOKED — nothing stops an issued token but its own expiry,
+      so "log out everywhere" means "wait".
+
+      A SESSION is an opaque handle. The identifier says nothing; every fact about
+      the session lives on the server, in a [Store]. Because the server owns the
+      record, [Store].Destroy revokes IMMEDIATELY and the next request fails. The
+      price is state: a store, its availability, and a lookup on the request path.
+
+      Reach for a token when verification must be stateless and a few minutes of
+      residual validity are acceptable. Reach for a session when "log out now" has
+      to mean now, when the data is too large or too private to hand to the client,
+      or when the identifier must reveal nothing.
+
+      # Logging in is Regenerate, and there is no other way to spell it
+
+      Session fixation is the attack where somebody plants an identifier, waits for
+      the victim to authenticate, and finds that the identifier they planted now
+      belongs to an authenticated user. The defence is to rotate the identifier at
+      the privilege boundary — and the reason the bug is common is that rotating is
+      usually a separate step somebody has to remember.
+
+      Here it is not a step. [Store].Regenerate is the ONLY call that binds a
+      subject to a session, and it mints a new identifier every time. There is no
+      SetSubject, no Session.WithSubject, and no Save that writes a subject:
+      [Store].Save compares the subject against the stored record and refuses a
+      mismatch with [FixationRefused]. "Keep this identifier and log this user in"
+      is a sentence with no method.
+
+      After a Regenerate the returned [Session] carries a NEW identifier. Re-issue
+      the cookie, or the caller is holding one that no longer resolves.
+
+      # Two deadlines, and what happens when they disagree
+
+      [Config] takes both an IdleTimeout — how long a session may go untouched,
+      refreshed by every [Store].Load — and an AbsoluteTimeout — how long it may
+      live at all, measured from the instant its identifier was minted.
+
+      The effective deadline is always the EARLIER of the two. The absolute
+      timeout is therefore a ceiling: sliding can move the deadline earlier, never
+      past it, so a session that is used continuously still dies. Both are
+      required, both are refused when non-positive, and IdleTimeout must be
+      strictly shorter than AbsoluteTimeout — an idle window the ceiling makes
+      unreachable is a sliding expiry the caller believes they configured and does
+      not have (ADR 0031).
+
+      Rotating does not buy time. [Store].Regenerate keeps the original ceiling
+      when the subject is unchanged, so rotating on a timer cannot produce an
+      immortal session. A rotation that CHANGES the subject restarts both clocks,
+      because a privilege boundary produces a genuinely new session and handing it
+      the remaining seconds of the anonymous browsing before it would log a user
+      out moments after they signed in.
+
+      # The identifier is a secret
+
+      [ID] is 256 bits from crypto/rand. It redacts itself in %v, %s and %#v;
+      [ID].Reveal is the only way to its canonical string and is spelled to read
+      like a mistake anywhere that is not building a cookie; [ID].Equal compares in
+      constant time; and [ID].Digest is what a store indexes and names files by, so
+      the secret is never a map key, never a filename and never at rest.
+
+      # Where the SDK stops
+
+      This package ships the STORE and the SEALING. It does not ship a firewall,
+      access voters, a login convention, or anything that writes an HTTP header.
+      [Sealer].Seal produces the cookie's VALUE; choosing the cookie's name, Path,
+      Domain, Max-Age, Secure, HttpOnly and SameSite — and calling http.SetCookie —
+      belongs to the framework, which is the layer that knows what a request is.
+
+      	sealed, err := sealer.Seal(live.ID())
+      	if err != nil {
+      	    return err
+      	}
+      	http.SetCookie(w, &http.Cookie{ // your line, not the SDK's
+      	    Name: "sid", Value: sealed,
+      	    HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode,
+      	})
+
+      # Two stores
+
+      [NewMemoryStore] keeps everything in this process and dies with it: the right
+      store for a single-process service, a test, or a development run.
+
+      [NewFileStore] keeps one sealed file per session in one directory. It seals
+      every record under an AEAD key, binds each record to its own filename, names
+      files by [ID].Digest so no identifier is ever on disk, requires an owner-only
+      directory and ASSERTS the mode it gets rather than assuming it, publishes
+      every write through a temporary file and rename(2), and serialises every
+      read-modify-write under one exclusive lock.
+
+      The directory is a path, and other accounts may write parts of it, so the
+      store refuses to be led anywhere through it. Before creating anything it
+      walks every component of FileConfig.Dir and refuses, with [PathRedirected],
+      a symbolic link planted in a directory any account can write — the shape
+      /tmp has — while honouring one only a trusted account could have planted,
+      as /tmp is on macOS. It then holds the directory open for its lifetime and
+      resolves every name against that handle, so a parent renamed or replaced
+      afterwards moves nothing. And it never reads a record, nor takes its lock,
+      through a link planted at a file's own name: a link at the lock file is
+      [PathRedirected], a link at a record is [RecordCorrupt] like any other
+      tampering, and nothing is created through either.
+
+      Waiting for that lock is ABANDONABLE, in both halves: the flock is taken
+      without blocking and retried every FileConfig.Poll on the injected clock,
+      and the in-process gate is a channel rather than a mutex. A blocking flock(2)
+      parks the thread inside a syscall no cancellation can reach, so a request
+      whose client had hung up kept waiting for a lock nobody would read the
+      result of. A caller whose context ends gets StoreUnavailable, carrying its
+      own context error.
+
+      Those guarantees rest on flock(2), on a filesystem that enforces Unix
+      permissions, and on a directory that can be flushed so a rename or an unlink
+      survives a power cut. Where they do not exist — Windows, which has no
+      directory flush and on which the SDK builds no owner-only access control
+      list, wasip1, and any other GOOS without flock(2) — [NewFileStore] returns
+      the SDK's [UnsupportedPlatform] sentinel AT CONSTRUCTION rather than
+      building a store that would report success while providing none of it (ADR
+      0018). Use [NewMemoryStore], an external store, or another host.
+
+      # Sweeping is yours to schedule
+
+      Both stores implement [Sweeper], reached by type assertion rather than
+      through a wider [Store] (ADR 0039). Neither runs a background goroutine the
+      caller never asked for; driving Sweep on a cadence is what pkg/v1/app/scheduler
+      is for. The file store additionally implements io.Closer, which releases its
+      lock descriptor and the directory it holds.
+    facade:
       - const:
           - doc: IDLen is the identifier length in bytes — 256 bits from crypto/rand.
             name: IDLen

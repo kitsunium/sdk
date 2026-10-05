@@ -1,11 +1,3 @@
-// Package metrics provides the in-memory Meter + lock-free instruments
-// (Counter, UpDownCounter, Gauge, Histogram and their observable counterparts)
-// implementing core/observe/metrics, plus two stdlib Exporters. Instruments are atomic
-// and lock-free on the hot path; the Meter takes only a read lock to resolve an
-// existing series and serialises creation alone. A series is one instrument
-// name plus one TYPED attribute set, with a per-name cardinality bound that
-// folds the excess into one aggregated overflow series. ADR 0027 / ADR 0044.
-// Cross-OS: 100% portable.
 package metrics
 
 import "sync/atomic"

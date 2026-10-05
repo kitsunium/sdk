@@ -1,4 +1,3 @@
-// Package yaml — what a struct's yaml tags say, read once per type.
 package yaml
 
 import (

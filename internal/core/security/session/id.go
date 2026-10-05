@@ -1,6 +1,3 @@
-// Package session — the opaque, redacting session identifier.
-//
-// Package session — the port that renders an identifier as a cookie value.
 package session
 
 import (

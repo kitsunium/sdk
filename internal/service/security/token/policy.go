@@ -1,5 +1,3 @@
-// Package token — the validated, defaults-applied form of a verification
-// config, so the checks run once at construction rather than once per token.
 package token
 
 import (

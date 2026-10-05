@@ -1,4 +1,3 @@
-// Package kit — transactions: kit.Transact and its levels.
 package kit
 
 import (

@@ -1,4 +1,3 @@
-// Package server — the functional options.
 package server
 
 import (

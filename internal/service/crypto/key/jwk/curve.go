@@ -1,11 +1,3 @@
-// Package jwk — curve arithmetic and the two validity checks a JWK parser is
-// most often missing: that the declared point is actually ON the declared
-// curve, and that a declared private scalar actually derives that point.
-//
-// Both go through crypto/ecdh rather than crypto/elliptic: ecdh.Curve's
-// NewPublicKey / NewPrivateKey validate their input (on-curve, not the identity,
-// scalar in [1, n-1]) whereas the elliptic.Curve point methods are deprecated
-// precisely because they do not.
 package jwk
 
 import (

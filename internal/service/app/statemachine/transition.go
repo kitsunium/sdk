@@ -1,6 +1,3 @@
-// Package statemachine — hosts the transitions a caller asks for (Start,
-// Fire) and the part every transition shares: the hooks, the write, the step
-// recorded, and the lock released before the OnTransition hooks.
 package statemachine
 
 import (

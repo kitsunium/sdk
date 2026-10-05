@@ -1,5 +1,3 @@
-// Package mail — how an SMTPConfig renders: every rendering the password could
-// leak through writes the placeholder instead.
 package mail
 
 import (

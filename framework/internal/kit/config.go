@@ -1,4 +1,3 @@
-// Package kit — the app's options and environments.
 package kit
 
 import (

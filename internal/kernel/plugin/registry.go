@@ -1,5 +1,3 @@
-// Package plugin — Registry: the read-mostly, name-keyed table a process-wide
-// registry stores its plug-ins in, once Unusable has said they can be stored.
 package plugin
 
 import (

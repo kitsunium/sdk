@@ -6,6 +6,7 @@ go_library(
     name = "journald",
     srcs = [
         "decode.go",
+        "doc.go",
         "journald.go",
         "journald_config.go",
         "journald_sink.go",

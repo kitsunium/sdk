@@ -1,5 +1,3 @@
-// Package secret — the subject grammar, and the port that keeps the wrapped
-// data key of each subject (ADR 0142).
 package secret
 
 import (

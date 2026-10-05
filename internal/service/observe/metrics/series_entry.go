@@ -1,4 +1,3 @@
-// Package metrics — one live series.
 package metrics
 
 import coreotel "github.com/kitsunium/sdk/internal/core/observe/otel"

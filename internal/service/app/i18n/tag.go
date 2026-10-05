@@ -1,5 +1,3 @@
-// Package i18n — the parser of a written language tag: the BCP 47 subset this
-// domain admits, and everything outside it refused BY NAME.
 package i18n
 
 import (

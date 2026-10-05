@@ -1,8 +1,3 @@
-// Package errs — defines the closed FieldValue union used to
-// attach structured metadata to an Error without opening an `any` back
-// door. FieldValue is a transport + textual-restitution contract, NOT a
-// vehicle for strongly-typed reconstruction on the consumer side —
-// StringValue is the only value accessor exposed in this MR.
 package errs
 
 import "strconv"

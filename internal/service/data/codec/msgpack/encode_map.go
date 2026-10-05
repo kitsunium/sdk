@@ -1,11 +1,3 @@
-// Package msgpack — map encoders. Pairs are written in Go's map iteration
-// order, which is not deterministic, exactly as the vendor-backed codec wrote
-// them: a caller who needs stable bytes encodes a struct, or a slice of pairs.
-//
-// The string-keyed maps a program builds most — map[string]any,
-// map[string]string, map[string]int, map[string]int64, map[string]float64 and
-// map[string]bool — are ranged over directly instead of through reflection,
-// which is what makes Marshal of such a map cost one allocation (the result).
 package msgpack
 
 import (

@@ -1,7 +1,3 @@
-// Package docstore — the only place the SQL store renders SQL. Every statement
-// it sends is built here, once, at OpenSQL, for its dialect and its tables,
-// spelled with the vocabulary core/data/sql's Dialect owns: the bind markers, the
-// quoting and the row lock.
 package docstore
 
 import (

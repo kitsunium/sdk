@@ -1,4 +1,3 @@
-// Package validation — the presence constraint.
 package validation
 
 import corevalidation "github.com/kitsunium/sdk/internal/core/app/validation"

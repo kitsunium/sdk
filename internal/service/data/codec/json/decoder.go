@@ -1,4 +1,3 @@
-// Package json — adapts *encoding/json.Decoder to codec.Decoder.
 package json
 
 import (

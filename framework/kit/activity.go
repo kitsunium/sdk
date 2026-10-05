@@ -1,6 +1,3 @@
-// Package kit — activities: what a daemon's idle stop waits for besides its
-// connections, a notion of the product's own — sessions still open, work
-// still queued.
 package kit
 
 import (

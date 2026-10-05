@@ -1,6 +1,3 @@
-// Package json wraps encoding/json as a codec.Codec implementation
-// registered under Format("json"). Blank-importing this package is enough
-// to make JSON resolvable via the core/data/codec registry.
 package json
 
 import (

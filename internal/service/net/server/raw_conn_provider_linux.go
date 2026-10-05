@@ -1,6 +1,5 @@
 //go:build linux
 
-// Package server — the descriptor-bearing socket contract.
 package server
 
 import "syscall"

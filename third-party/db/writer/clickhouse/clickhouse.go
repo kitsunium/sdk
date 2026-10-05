@@ -1,19 +1,3 @@
-// Package clickhouse registers the "clickhouse" writer factory (ADR 0015): a
-// database log sink that batches records into multi-row INSERTs over the
-// ClickHouse native protocol. Importing the package self-registers the factory
-// (no init()), so writer.Open("clickhouse", writer.ClickHouseConfig{…}) resolves.
-// It is a dep-light third-party integration: the clickhouse-go/v2 import is
-// confined to client.go, in a module of its own (ADR 0157), so pkg/v1 consumers
-// never pull the driver into their graph and a consumer of this writer pulls no
-// other vendor.
-//
-// Credentials: ClickHouseConfig.Credentials is OPTIONAL (empty falls back to the
-// default user) and supplied programmatically; like the AWS writers, there is no
-// config-file Decoder because a live credential cannot be expressed in YAML.
-//
-// Table schema: the destination table must have columns (ts DateTime, level
-// String, message String). The table name is validated as a plain identifier and
-// interpolated into the INSERT; every value is bound via placeholders.
 package clickhouse
 
 import (

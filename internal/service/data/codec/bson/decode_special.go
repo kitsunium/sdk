@@ -1,6 +1,3 @@
-// Package bson — decoding into the codec's own value types and into the
-// stdlib types it knows: time.Time, url.URL and json.Number. A null or an
-// undefined is the zero value of every one of them.
 package bson
 
 import (

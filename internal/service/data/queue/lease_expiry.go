@@ -1,4 +1,3 @@
-// Package queue — one entry in the in-memory broker's lease-deadline heap.
 package queue
 
 import (

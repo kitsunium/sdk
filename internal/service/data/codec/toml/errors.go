@@ -1,10 +1,3 @@
-// Package toml — the private messages of the refusals that wrap a cause.
-//
-// Every refusal is one of the two sentinels internal/core/data/codec/toml
-// declares for this package (ADR 0160). What went wrong travels in fields —
-// problem, a fixed sentence; line and column; the dotted key and the Go type
-// for a decode that does not fit its target — and never as a byte of the
-// document or of the value, which may be a secret.
 package toml
 
 // The private messages of a refusal that wraps a cause — a writer, a reader,

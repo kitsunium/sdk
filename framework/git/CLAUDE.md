@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T03:30:00Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # framework/git/
 
 ## Purpose
@@ -72,11 +72,8 @@ produces `FullFallback` and a `Reason`, never a partial or empty set. The zero
 
 ## README is generated
 
-`README.md` is produced by `gomarkdoc` from the package doc comment in `git.go`
-(ADR 0008). Regenerate with `make docs-readme`, which runs `cd framework && go
-generate ./...` — **not** `gomarkdoc` from the repository root, which resolves
-`--repository.path` relative to the working directory and emits every symbol
-link with the path segment twice. Do **not** hand-edit `README.md`.
+`README.md` is written by `tools/genindex` from the committed `docs/api`
+(`make docs-readme`, ADR 0167). Do **not** hand-edit it.
 
 ## Verification
 

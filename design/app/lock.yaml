@@ -150,6 +150,99 @@ packages:
             name: CodeLockFileReplaced
             value: "0x00_03_33_05"
         type: errs.Code
+    doc: |-
+      Package lock — ranges 0.2.21.* (ADR 0052 core/app/lock block) and 0.3.51.*
+      (ADR 0052 service/app/lock block, declared here since ADR 0160).
+
+      Package lock — declares the sentinel *errs.Error outcomes of the domain: the
+      port's, and those the concrete lockers emit. Each var's name equals its
+      errs.Define Reason in SCREAMING_SNAKE form.
+
+      Package lock declares the SDK's mutual-exclusion DOMAIN: the [Locker] port
+      that hands out named exclusive leases, the [Lease] a holder gets back, and
+      the sibling interface through which a lease says whether it can expire at
+      all. A core sibling admitted by ADR 0052.
+
+      # A lock that lies is worse than no lock
+
+      Every decision in this package follows from one observation: a caller who
+      believes they hold a critical section behaves differently from a caller who
+      knows they do not. A lock that reports success it cannot back removes the
+      second behaviour and leaves nothing in its place, so the failure is silent,
+      unreproducible, and discovered as data corruption rather than as an error.
+      ADR 0031's refuse-rather-than-default rule is therefore not a style choice
+      here: a lease TTL of zero is refused AT CONSTRUCTION rather than read as
+      "expires immediately", because a lock that expires the instant it is granted
+      is exactly the shape of a lock that lies.
+
+      # Expiring a lease does not stop its old holder
+
+      This is the trap the domain is built around, and it is worth stating in
+      full. Suppose A holds a lease with a five-second TTL, and A's goroutine
+      stalls — a long GC pause, a blocked syscall, a descheduled thread. Five
+      seconds pass. B acquires the same lock, correctly, because the lease has
+      expired. A resumes. A has no idea anything happened: nothing interrupted it,
+      nothing told it, and its next write lands inside a section B believes it
+      owns alone.
+
+      No lock service anywhere fixes this by itself, because the lock is not
+      holding A — A's own belief is. Three things follow, and this domain decides
+      all three rather than leaving them emergent:
+
+       1. OWNERSHIP IS TOKEN-CHECKED. A [Lease] identifies its holder, and
+          [Lease.Release] releases only a lock this holder still holds. A lease
+          that was taken over releases NOTHING and reports [LockNotHeld] — because
+          the alternative, "release whatever is under that name", is A politely
+          unlocking B's critical section.
+       2. A LEASE CAN BE RENEWED. [Lease.Extend] pushes the deadline out for work
+          that outlives its TTL. Without it, a TTL is a bet that the work finishes
+          in time, and the losing side of that bet is silent. A FAILED Extend is
+          not a warning: it is the holder being told it has already lost the lock,
+          and the only correct response is to stop.
+       3. A FENCING TOKEN IS ISSUED. [Lease.Fence] returns a uint64 that strictly
+          increases with every acquisition of that name. Handed to the protected
+          resource and compared there, it turns the scenario above from silent
+          corruption into a rejected write: A carries fence 7, B carries 8, the
+          resource has seen 8, so A's write is refused.
+
+      # What this domain does NOT guarantee
+
+      Issuing a fencing token is not the same as enforcing one. The SDK can only
+      hand the number to the caller; the RESOURCE has to compare it and refuse the
+      lower one, and most resources — a file, an HTTP endpoint, a table without a
+      version column — cannot. Where the fence is not checked, mutual exclusion is
+      not guaranteed against a stalled holder: a long GC pause, a SIGSTOP, or a
+      descheduled thread can put two holders inside one section, and neither will
+      observe it.
+
+      That is a limitation, stated here rather than buried, because a reader who
+      assumes otherwise will build on a guarantee that does not exist. If the
+      protected resource cannot check a fence, do not rely on a lease TTL for
+      correctness — use a backend whose lock does not expire at all
+      (internal/service/app/lock's file store is one; see its CLAUDE.md) and accept a
+      hung holder blocking its waiters, which is a liveness failure you can see
+      instead of a safety failure you cannot.
+
+      # There is no registry
+
+      Like proc (ADR 0016), resilience (ADR 0026), net (ADR 0029), scheduler
+      (ADR 0041), token (ADR 0042), session (ADR 0045), validation (ADR 0046) and
+      cache (ADR 0049), this domain has no name-to-implementation registry.
+
+      The reason is specific to locking and it is not taste. The two backends
+      differ in the one property a caller must know — whether a lease can be
+      taken away from a live holder — and resolving one of them from a
+      configuration string would let a typo swap a lock that never expires for a
+      lock that does, silently, with no failure at the moment of the swap. Every
+      call would still succeed. The difference would surface only as the rarest
+      class of production bug there is.
+
+      # Distributed locks are out of scope
+
+      A lock over Redis, etcd, ZooKeeper or Consul is a connector to a third-party
+      system and belongs under third-party/, not here. This domain covers exactly
+      two scopes: one process (goroutines) and one machine (processes sharing a
+      filesystem). It never implies a third.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/app/lock
@@ -461,8 +554,339 @@ packages:
             private: "service/app/lock: the lock file this lease holds was unlinked or replaced while it was held, so the next acquisition locks a different inode and a fresh fencing ledger; the fields name the path, the lock, the fencing token and which of the two conditions was observed"
             public: The lock file is no longer the file its name leads to
             reason: LOCK_FILE_REPLACED
-  - functions:
-      - in:
+  - doc: |-
+      Package lock — the kernel lock the file locker stands on, and what each
+      kernel's version of it means for THIS domain.
+
+      The lock itself is internal/kernel/fs/flock: flock(2) on the Unix kernels,
+      LockFileEx over every byte of the file on Windows (ADR 0081), and never a
+      blocking call — Acquire polls it on the locker's own clock, so its context
+      means something. That package states how the two kernels differ. What
+      follows is what each difference costs or buys the file locker, which no
+      primitive can say on its behalf.
+
+      # The gate: load-bearing on Unix, kept on Windows for other reasons
+
+      A second lock through the same descriptor is a CONVERSION under flock(2) and
+      a REFUSAL under LockFileEx (ADR 0052 §D7 is about the first). So on Windows
+      the in-process gate ([nameGate]) is not load-bearing for exclusion — the
+      kernel already refuses a second goroutine — and it stays for everything
+      else: it keeps one process's goroutines QUEUED on a channel rather than
+      polling a range their own process holds; it makes the package behave the
+      same on both kernels, so a suite that passes on Linux means something there;
+      and it keeps the natural "one handle for the locker's lifetime" refactor
+      from turning a silent no-op on Unix into a hard failure on Windows.
+
+      # The fencing ledger is inside the locked range
+
+      The Windows lock is a byte range, and the kernel primitive takes the whole
+      file. That is the choice this domain needs: the ledger lives at offset 0 of
+      the very file carrying the lock, and a range that skipped it — one byte at
+      an offset nothing will ever occupy — would leave the counter writable by
+      every non-holder; TestAHighOffsetRangeLeavesTheLedgerUnprotected measures
+      what that alternative gives up. Because the lock is MANDATORY there, the
+      ledger is strictly better protected than under flock(2), where nothing stops
+      a non-holder from rewriting it, and the holder is exempt per HANDLE, so
+      [readFence] and [writeFence] work through the descriptor that placed the
+      lock (TestTheLedgerSurfaceWorksThroughTheLockingHandle). The price: a
+      foreign `type` of a HELD lock file fails with ERROR_LOCK_VIOLATION, so the
+      decimal ledger fence.go writes is readable during an incident only while
+      nobody holds the lock — which is the incident it is wanted in, since a
+      holder that crashed is a holder whose lock the kernel already released.
+
+      # A platform gains the lock and its hardening together, or neither
+
+      The lock path is a file, never a link to one (ADR 0082), and that is
+      nofollow_*.go's to enforce. A platform with the kernel lock and without the
+      hardened open would build a locker any planted link could redirect, so the
+      gate below needs both halves, and TestTheLockAndItsHardeningShareAPlatform
+      fails the day the kernel's tag set and nofollow_*.go's stop agreeing.
+
+      Where neither exists — js, wasip1, plan9, aix, solaris, illumos — the
+      constructor returns the typed proc.UnsupportedPlatform and the caller picks
+      the in-process locker, an external coordinator, or another host (ADR 0018
+      §(a)). The gap is listed in this package's CLAUDE.md §Platform matrix
+      rather than left to be discovered.
+
+      Package lock — the other half of "the lock path is a file, never a link to
+      one": the components ABOVE the lock file.
+
+      # O_NOFOLLOW stops at the last component, and that is a kernel limit
+
+      [openLockFile] refuses an indirection planted at the lock file's own name.
+      It cannot refuse one planted at a PARENT component, because O_NOFOLLOW
+      governs the final component only — measured, and recorded in ADR 0082
+      §Deferred as the half that stayed open. The whole lock directory moves:
+
+      	Dir demandé  = …/pub/myapp/locks
+      	composant planté = …/pub/myapp -> …/elsewhere
+      	construction ACCEPTÉE
+      	acquisition sur parent planté : err=<nil>
+      	SUIVI : le verrou a atterri sur …/elsewhere/locks/a4d268….lock
+
+      # A link at a parent is not evidence of anything on its own
+
+      The obvious remedy — refuse a link anywhere in the path — is wrong, and it
+      is wrong on a platform this repository tests on. That is measured rather
+      than recited: on the macos-arm64 job of e2e-cross every t.TempDir() resolves
+      through /var -> /private/var, which Apple ships. /var/run is one to /run on
+      most Linux distributions; C:\Users\All Users is a junction to
+      C:\ProgramData. A blanket refusal would turn every lock directory under any
+      of them into LOCK_PATH_REDIRECTED, which is ADR 0018 §(a)'s failure mode
+      wearing an error that blames the deployment for the operating system's own
+      layout.
+
+      What separates those from an attack is not the link, it is the directory the
+      link LIVES IN. A link in a directory only root can write was put there by
+      root. A link in a world-writable directory was put there by anybody at all.
+      So the rule is the one ADR 0082 already argued for the final component,
+      applied to every component: an indirection is refused when anyone could have
+      created it, and the STICKY BIT DOES NOT EXEMPT IT — sticky governs unlinking
+      an entry that exists, and planting a component creates one at a name nobody
+      has taken.
+
+      That is deliberately a different rule from [checkDir]'s, which accepts
+      0777|sticky, and the difference is the same one ADR 0082 turns on:
+      checkDir asks who can REPLACE the lock file, this asks who can CREATE a
+      component of its path.
+
+      Package lock provides the concrete lockers implementing internal/core/app/lock:
+      an in-process locker whose leases really expire, and a file locker whose
+      leases really do not. Stdlib-only. ADR 0052.
+
+      Package lock — the lock directory's safety verdict where a directory's mode
+      bits say who may replace its entries (ADR 0081).
+
+      Package lock — the lock directory's safety verdict on Windows, where the
+      question the POSIX rule asks has no answer and the attack it prevents has no
+      mechanism (ADR 0081).
+
+      # Two questions, three masks, one reader
+
+      Both rules here ask the kernel's DACL reader (internal/kernel/fs/winacl, the
+      reader this package wrote for ADR 0084 and that the queue now shares from
+      there), and they ask it different things — exactly as the POSIX pair differ
+      over the sticky bit, and drawn finer, because Windows spells create and
+      delete as separate bits rather than one sticky flag (ADR 0086):
+
+        - [checkDir] asks winacl.ReplaceRights of the lock directory — can a
+          stranger take away the entry a holder created? — and
+          winacl.ContentRights of what the lock FILES created there inherit;
+        - [plantable] asks winacl.CreateRights of the directory holding a path
+          component — can a stranger put a directory at a name nobody has taken?
+
+      The reader measures and never decides. What this domain decides on an
+      inspection that could not run is to ACCEPT, and to log that it did (see
+      [checkDir], [noteUninspected]) — where the queue, asking the same reader,
+      refuses (ADR 0095).
+
+      Package lock — the on-disk fencing ledger: the one piece of state the file
+      locker keeps, and the reason its tokens survive a restart.
+
+      Package lock — the file locker: exclusion between PROCESSES on one machine,
+      composed with the in-process gate because flock(2) alone provides none
+      between goroutines.
+
+      Package lock — the file locker's configuration and the two ADR 0031 halves
+      it contains: one clamp and one refusal, in one struct, for contrast.
+
+      Package lock — the lease handed out by the file locker. It carries no
+      deadline, deliberately: see [fileLocker] for why its locks do not expire.
+
+      Package lock — the in-process gate the file locker takes BEFORE flock(2),
+      because flock alone excludes nothing between goroutines.
+
+      Package lock — one live acquisition of one name, in the in-process locker.
+
+      Package lock — the lock file's IDENTITY, and the exposure that is detectable
+      rather than preventable.
+
+      # What was reproduced
+
+      In a 0777|sticky directory — /tmp's mode, and a row [checkDir] accepts by
+      name — the account that created the lock file OWNS that entry, so the sticky
+      bit permits them to unlink it. Not when the lock is free: WHILE THE VICTIM
+      HOLDS IT.
+
+      	victime détient le verrou : fence=1 inode=69831
+      	2e verrou AVANT l'échange : held=false err=<nil> (attendu false)
+      	entrée désliée pendant que la victime la détient
+      	2e verrou APRÈS l'échange : held=true err=<nil> inode=69832
+      	SPLIT : deux détenteurs, fences 1 et 1, inodes 69831 et 69832
+      	Extend de la victime : <nil>
+
+      Two holders, two inodes, and the fence RESET rather than advanced — both
+      report 1. The last line is the one that matters: the victim asked whether it
+      still held the lock and was told yes.
+
+      # It is detectable, NOT preventable, and the difference is the point
+
+      No flag on the open prevents this. The entry is unlinked after the open, by
+      an account the directory's permissions genuinely allow to unlink it, and the
+      victim's descriptor keeps working because a descriptor outlives its name.
+      Three remedies were considered and two of them prevent nothing:
+
+        - An OWNER check on the lock file was rejected in ADR 0082 §Deferred and
+          is still rejected, for the reason given there: it breaks the shared-group
+          arrangement [checkDir] deliberately accepts, where the entry belongs to
+          the OTHER account by design.
+        - O_EXCL on creation plus a recorded identity prevents nothing either, and
+          that was checked rather than assumed. O_EXCL says whether THIS process
+          created the file. It says nothing about who unlinks it afterwards, which
+          is the entire attack — the unlink happens minutes later, on a descriptor
+          that has already been opened and locked.
+        - Comparing the descriptor's identity against the path DETECTS it, which
+          is what ships. The victim finds out at its next [fileLease.Extend], and
+          a Keepalive turns that into a cancelled context for the work inside the
+          section.
+
+      So the guarantee is stated as exactly what it is: the lock is not kept, the
+      split is not prevented, and the holder is TOLD. A holder that learns it no
+      longer holds the lock can stop; a holder that is told it still does cannot.
+      The only prevention is a lock directory no other account can write, which is
+      what NewFileLocker creates (0700) when the directory is absent.
+
+      # Where the check runs, and why not everywhere
+
+      At acquisition, between the flock and the fence, because the window between
+      the open and the flock is real and closing it is two syscalls. And at
+      Extend, because that is the only call a holder makes DURING the section.
+
+      Not at Release: releasing is closing a descriptor this lease owns, it
+      succeeds whatever the name now points at, and a Release that returned an
+      error would break `defer lease.Release(ctx)` at the one moment a caller is
+      unwinding.
+
+      Package lock — the background renewal, and the only channel through which a
+      lost lease can reach work that has already started.
+
+      Package lock — hosts the compile-time interface assertions, keeping them out
+      of the production source so the runtime binary carries no diagnostic-only
+      declarations.
+
+      Package lock — the in-process locker: real leases, real expiry, real
+      takeover, and therefore the backend where fencing actually matters.
+
+      Package lock — the lease handed out by the in-process locker. It is the
+      only backend whose leases satisfy corelock.Deadliner, because it is the only
+      one whose leases can be taken from a live holder.
+
+      Package lock — the lock path must name a FILE, never an indirection to one.
+
+      # What this closes
+
+      [fileLocker.pathFor] derives the lock file's name from the SHA-256 of the
+      lock name, so an attacker cannot choose it — but it is derived, which means
+      it is PREDICTABLE, and predictable is all the attacker needs. Create the
+      directory first, compute the digest of a lock name the victim will use, and
+      plant a symbolic link there. The victim's open follows it, the flock and the
+      fencing ledger land on a file of the attacker's choosing, and every layer
+      above reports success.
+
+      Two locks then become one, or one becomes two, with no error anywhere:
+
+        - The victim's lock lands on the attacker's target while the attacker's own
+          lock lands on the real path. Both processes are inside the section, both
+          hold a lease, neither is blocked, and nothing logs.
+        - The redirected ledger is the attacker's file, so the fencing token the
+          victim hands to the protected resource is a number the attacker CHOSE.
+          Measured: a symlink to a file containing "48213\n" — a pidfile is exactly
+          that shape — made Acquire return fence 48214 and rewrite the pidfile with
+          it.
+
+      [checkDir] exists to prevent precisely this substitution, and it does not
+      reach it: its rule is about UNLINKING an entry that already exists, while
+      this attack creates one at a name nobody has taken yet. The sticky bit is no
+      help for the same reason — it stops you removing someone else's entry, and
+      the attacker owns the symlink they created. `0777|sticky` is a mode the rule
+      explicitly ACCEPTS, and it is what /tmp is.
+
+      # It is one gap with two spellings, so it closes on both kernels
+
+      The refusal is the same sentinel everywhere, [corelock.LockPathRedirected], but the
+      mechanism is not, because the two kernels refuse in opposite places:
+
+        - Unix asks the kernel not to traverse, and the OPEN fails —
+          see nofollow_unix.go.
+        - Windows asks the kernel to open the LINK ITSELF, the open SUCCEEDS, and
+          the handle is then rejected — see nofollow_windows.go.
+
+      Closing it on one platform only was the previous answer and it was the wrong
+      one: the same deployment would succeed on Linux and fail on Windows for a
+      reason the error could not explain (ADR 0081 §Deferred, now closed).
+
+      Package lock — the plain open on the platforms that have no file lock at all
+      (ADR 0018 §(a)).
+
+      js, wasip1, plan9, aix, solaris and illumos reach this file. [NewFileLocker]
+      refuses them at CONSTRUCTION through platformNative, so nothing here is
+      reachable; it exists because the package must COMPILE on every GOOS, which
+      is ADR 0018's build bar, and because the build-tag set is the one the
+      kernel's file lock uses for its own refusal (internal/kernel/fs/flock's
+      flock_other.go) rather than a fourth shape invented here.
+
+      Solaris does have O_NOFOLLOW and is nevertheless served by this file. That
+      is deliberate: giving it the Unix open would mean the kernel lock's tag sets
+      and nofollow_*.go's disagree, which is how a platform ends up with one half
+      of a pair. A platform gains both or neither, and it gains them by acquiring
+      a working file lock first — TestTheLockAndItsHardeningShareAPlatform fails
+      the day the two sets part.
+
+      Package lock — the Unix half of "do not follow an indirection at the lock
+      path": O_NOFOLLOW, and a refusal that does not depend on which errno the
+      kernel chose to spell it with.
+
+      Package lock — the Windows half of "do not follow an indirection at the lock
+      path".
+
+      # CreateFileW followed reparse points, and that was read rather than assumed
+
+      os.OpenFile reaches CreateFileW through syscall.Open, and syscall.Open sets
+      FILE_FLAG_OPEN_REPARSE_POINT for exactly ONE createmode: CREATE_NEW, which
+      is O_CREAT|O_EXCL. This locker opens O_CREATE|O_RDWR, which is OPEN_ALWAYS,
+      which does not get the flag — so before this change the open followed a
+      symbolic link or a junction planted at the lock path, the same defect the
+      Unix side was measured to have. Read in the toolchain this repository pins
+      (go1.27.0, src/syscall/syscall_windows.go), not inferred from behaviour.
+
+      # The flag OPENS the link, it does not refuse it — so the check is the pair
+
+      FILE_FLAG_OPEN_REPARSE_POINT means "give me a handle to the reparse point
+      itself" rather than "fail if there is one". Used alone it fixes the
+      redirection — the flock and the ledger stop landing on the attacker's file —
+      and leaves the lock sitting on a link the attacker still owns and can
+      retarget. So the flag is paired with GetFileInformationByHandle: any handle
+      whose attributes carry FILE_ATTRIBUTE_REPARSE_POINT is closed and refused.
+      The flag is what makes the check possible (without it the handle is the
+      TARGET, which has no reparse attribute and nothing to notice); the check is
+      what turns a redirect into a refusal.
+
+      # No new dependency, and no hand-rolled CreateFile
+
+      golang.org/x/sys is banned SDK-wide, and ADR 0081 bound LockFileEx from
+      kernel32 with syscall.NewLazyDLL rather than importing it. Nothing of the
+      kind is needed here: go1.27's syscall.Open passes the high 12 bits of its
+      flag word through to CreateFileW's dwFlagsAndAttributes, and
+      FILE_FLAG_OPEN_REPARSE_POINT is in its validFileFlagsMask — so the flag
+      rides the ordinary os.OpenFile call.
+
+      That matters beyond tidiness. ADR 0081 §D5 accepts every directory on
+      Windows on the strength of one sentence: "os.OpenFile reaches CreateFileW
+      WITHOUT FILE_SHARE_DELETE, so a held lock file can be neither deleted nor
+      renamed whatever the ACL says". A hand-rolled CreateFile would have had to
+      restate that share mode — and a hand-rolled share mode that drifts is how
+      the Windows directory rule silently stops being justified. The open stays
+      os.OpenFile, so the sentence stays literally true.
+    functions:
+      - doc: |-
+          NewFileLocker returns a [corelock.Locker] whose locks exclude every process
+          using the same directory on the same machine.
+
+          It refuses, at construction rather than at first use: a configuration it
+          cannot honour ([corelock.LockMisconfigured]), a platform without flock(2)
+          ([coreproc.UnsupportedPlatform]), and a directory whose lock files any
+          account could replace ([corelock.LockDirectoryUnsafe]).
+        in:
           - name: cfg
             type: FileConfig
         name: NewFileLocker
@@ -471,7 +895,40 @@ packages:
             type: corelock.Locker
           - name: err
             type: error
-      - in:
+      - doc: |-
+          Keepalive renews lease in the background and returns a context that is
+          CANCELLED the instant the lease stops being held.
+
+          # Why the loss arrives as a cancellation
+
+          [corelock.Lease.Extend] returning an error is only useful to a caller that
+          is currently calling it. The caller that needs the news is the one already
+          running inside the critical section — and the only channel that reaches
+          work in progress is its context. So a failed renewal cancels the derived
+          context with [corelock.LockKeepaliveLost] as its cause, and the protected operation
+          finds out through the mechanism it is already selecting on.
+
+          This is the opposite of the drain signal in ADR 0043, and deliberately so.
+          A drain is an invitation to finish, so cancelling would be wrong. Losing a
+          lock is not an invitation: continuing means writing into a section another
+          holder believes it owns, and the correct response is to stop.
+
+          	ctx, stop, err := lock.Keepalive(ctx, lease, lock.KeepaliveConfig{Every: ttl / 3})
+          	if err != nil { return err }
+          	defer stop()
+          	// ctx is now cancelled if the lease is lost; context.Cause(ctx) says so.
+
+          The returned stop function releases the renewal goroutine and cancels the
+          derived context. It does NOT release the lease — that stays the caller's
+          job, because a helper that released on the way out would make the lifetime
+          of the lock depend on the lifetime of a convenience.
+
+          Goroutine lifecycle: exactly one goroutine is started, and it ends when the
+          derived context ends — which happens on stop(), on the parent context
+          ending, or on the first failed renewal. There is no path on which it
+          outlives the returned stop function, so a caller that defers stop() leaks
+          nothing.
+        in:
           - name: ctx
             type: context.Context
           - name: lease
@@ -486,7 +943,16 @@ packages:
             type: context.CancelFunc
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NewMemory returns a [corelock.Locker] whose leases live in this process.
+
+          It refuses a non-positive cfg.TTL at CONSTRUCTION rather than picking a
+          default. Both readings of a zero TTL are defensible and they are opposites:
+          "already expired" makes every Acquire succeed while excluding nobody, and
+          "never expires" turns a leaked goroutine into a permanent deadlock. An SDK
+          that guessed would be silently wrong for half its callers, so it does not
+          guess (ADR 0031).
+        in:
           - name: cfg
             type: MemoryConfig
         name: NewMemory
@@ -500,30 +966,233 @@ packages:
       corelock: github.com/kitsunium/sdk/internal/core/app/lock
     path: github.com/kitsunium/sdk/internal/service/app/lock
     types:
-      - name: MemoryConfig
+      - doc: |-
+          MemoryConfig parameterises [NewMemory].
+
+          Its zero value is deliberately NOT a working locker: TTL must be stated.
+          See [NewMemory] for why refusing, rather than defaulting, is the only
+          defensible ADR 0031 half for a lease lifetime.
+        name: MemoryConfig
         struct:
           fields:
-            - name: TTL
+            - doc: |-
+                TTL is how long a lease is held before it can be taken by another
+                caller. It MUST be positive; zero and negative are refused at
+                construction, never reinterpreted.
+              name: TTL
               type: time.Duration
-            - name: Clock
+            - doc: |-
+                Clock is the time source, injectable so expiry and waiting are testable
+                without sleeping. nil means clock.System.
+
+                The whole port is needed, not just the reading half: this locker WAITS
+                for a holder's deadline rather than polling for it, so it needs
+                clock.Waiter as well as clock.Clock — which is what clock.Timed is
+                (ADR 0039).
+              name: Clock
               type: clock.Timed
-      - name: FileConfig
+      - doc: |-
+          FileConfig parameterises [NewFileLocker].
+
+          Its zero value is deliberately NOT a working locker: Dir must be stated,
+          because the directory IS the lock's scope. Poll, by contrast, has a
+          defensible default and is clamped — the two ADR 0031 halves, side by side.
+        name: FileConfig
         struct:
           fields:
-            - name: Dir
+            - doc: |-
+                Dir holds one lock file per name. It is created 0700 if absent, and
+                CHECKED if it already exists: a world-writable directory without the
+                sticky bit is refused, because anyone able to unlink a lock file can
+                replace its inode and split one lock into two.
+
+                It MUST be set. There is no default: a temporary directory would make
+                the lock's SCOPE — which processes it excludes — depend on a value
+                nobody chose.
+              name: Dir
               type: string
-            - name: Poll
+            - doc: |-
+                Poll is the interval between attempts while another process holds the
+                lock. Zero means [defaultPoll]; negative is refused.
+              name: Poll
               type: time.Duration
-            - name: Clock
+            - doc: |-
+                Clock is the time source the poll waits on, injectable so contention is
+                testable without sleeping. nil means clock.System.
+              name: Clock
               type: clock.Timed
-      - name: KeepaliveConfig
+      - doc: |-
+          KeepaliveConfig parameterises [Keepalive].
+
+          Its zero value is deliberately NOT a working keepalive: Every must be
+          stated, because a renewal cadence the SDK invented would be right only by
+          accident against a lease lifetime it cannot see.
+        name: KeepaliveConfig
         struct:
           fields:
-            - name: Every
+            - doc: |-
+                Every is the renewal period. It MUST be positive, and it MUST be
+                comfortably shorter than the lease TTL — a renewal that lands at the
+                deadline has already lost every race it could lose. A third of the TTL
+                leaves room for two consecutive failures.
+
+                It is refused at zero rather than derived from the lease, because a
+                Lease deliberately does not expose its TTL: the port's job is to say
+                whether it can expire at all ([corelock.Deadliner]), not to let a helper
+                reconstruct a schedule the caller never chose.
+              name: Every
               type: time.Duration
-            - name: Clock
+            - doc: |-
+                Clock is the time source the renewal ticks on. nil means clock.System.
+
+                A caller testing expiry MUST pass the SAME clock the locker was built
+                with, or the renewals and the deadline will run on two different
+                timelines.
+              name: Clock
               type: clock.Timed
-  - facade:
+  - doc: |-
+      Package lock is the public facade for the SDK's mutual exclusion: named,
+      exclusive, fenced leases over one process or over one machine.
+
+      	locker, err := lock.NewMemory(lock.MemoryConfig{TTL: 30 * time.Second})
+      	if err != nil { return err }
+
+      	lease, err := locker.Acquire(ctx, "rebuild:index")
+      	if err != nil { return err }
+      	defer lease.Release(ctx)
+
+      # Read this before relying on a lease
+
+      A lock that reports success it cannot back is worse than no lock at all: a
+      caller who believes they hold a critical section behaves differently from
+      one who knows they do not, and a lie removes the second behaviour without
+      putting anything in its place. Three consequences shape this whole package.
+
+      FIRST — a zero TTL is REFUSED at construction. It is not read as "expires
+      immediately" and not as "never expires". Both are defensible, they are
+      opposites, and a locker built on the first grants every Acquire while
+      excluding nobody — indistinguishable, from outside, from a lock nobody
+      contends (ADR 0031).
+
+      SECOND — expiring a lease does not stop its old holder. If A's goroutine
+      stalls for longer than the TTL and B acquires the lock, A resumes with no
+      idea anything happened. So [Lease].Release releases only a lock this holder
+      STILL holds — a lease that was taken over releases nothing and reports
+      [LockNotHeld] — and [Lease].Extend renews a lease for work that outlives its
+      TTL. A failed Extend is not a warning to log past: it is the SDK telling a
+      caller it is already inside someone else's section.
+
+      THIRD — every acquisition carries a FENCING TOKEN. [Lease].Fence returns a
+      uint64 that strictly increases with every acquisition of that name. Pass it
+      to the protected resource and have the resource refuse the lower one, and
+      the scenario above turns from silent corruption into a rejected write.
+
+      # What this package does not guarantee
+
+      Issuing a fencing token is not enforcing one. The SDK can hand you the
+      number; only the RESOURCE can compare it, and many cannot — a plain file, an
+      HTTP endpoint, a table with no version column. Where the fence is not
+      checked, mutual exclusion is NOT guaranteed against a stalled holder: a long
+      GC pause, a SIGSTOP or a descheduled thread can put two holders inside one
+      section, and neither will notice.
+
+      If the protected resource cannot check a fence, do not rely on a TTL for
+      correctness. Use [NewFileLocker], whose leases never expire, and accept that
+      a hung holder blocks its waiters — a liveness failure you can see, instead
+      of a safety failure you cannot.
+
+      # Two backends, and the difference is not performance
+
+        - [NewMemory] excludes the GOROUTINES of one process. Its leases expire,
+          because nothing notices a goroutine that stopped, so without a TTL one
+          leak deadlocks a name for the life of the process. Its leases implement
+          [Deadliner].
+
+        - [NewFileLocker] excludes the PROCESSES sharing one directory on one
+          machine, through flock(2) on Unix and LockFileEx on Windows. Its leases
+          do NOT expire: a lock is held until it is released or until the holder's
+          process dies, at which point the kernel releases it. Nothing can take it
+          from a live holder, so its leases do NOT implement [Deadliner] — and
+          that absence is how you find out, from the API rather than from this
+          paragraph.
+
+      Which world you are in is one type assertion away:
+
+      	if d, ok := lease.(lock.Deadliner); ok {
+      	    // this lease CAN be taken from you; renew it or carry the fence
+      	}
+
+      The file locker takes an in-process gate before its kernel lock, because
+      flock(2) is per open file description: re-locking a description that already
+      holds it is a no-op, so a shared descriptor gives ZERO exclusion between
+      goroutines while working perfectly between processes. That was measured, not
+      assumed — see internal/service/app/lock's CLAUDE.md.
+
+      # What differs on Windows, and what does not
+
+      The contract does not differ: same Locker, same Lease, same sentinels, and a
+      file lease still does not implement [Deadliner]. The primitive underneath
+      does. LockFileEx locks a byte RANGE rather than a file — this backend takes
+      the whole file, because the fencing counter lives in it — and its locks are
+      MANDATORY rather than advisory, so one thing a caller can observe changes:
+      while a lock is HELD, a process that does not hold it cannot read the lock
+      file. On Unix it can. Every other difference is absorbed below the port and
+      measured on a real Windows kernel; ADR 0081 lists them.
+
+      One more is worth knowing before you rely on a directory's permissions. The
+      lock directory is checked for being one any account can REPLACE an entry in,
+      and the two platforms answer that in their own vocabulary: a
+      world-writable-and-not-sticky mode on Unix, and on Windows a discretionary
+      entry letting Everyone, Authenticated Users or BUILTIN\Users unlink somebody
+      else's entry — or write the lock files created there, which is a question
+      Unix never has to ask, because a lock file there is created 0600 whatever
+      the directory's mode says (ADR 0084, ADR 0086).
+
+      Windows does have the sticky directory's shape; it spells it in two bits
+      rather than one, as "may add an entry" without "may delete a child".
+      %ProgramData% is one, which is why a lock directory under it is accepted and
+      a junction planted beside it is not.
+
+      # A lock path is a file, never a link to one
+
+      [NewFileLocker] names its lock files hex(sha256(lockName)) + ".lock" inside
+      the directory you gave it. That keeps every caller-supplied string off the
+      filesystem and, in the same stroke, makes the name PREDICTABLE — and an indirection planted at a predictable name is
+      enough to move your lock somewhere you did not choose.
+
+      So a symbolic link (Unix) or a reparse point (Windows) at the lock path is
+      REFUSED with [LockPathRedirected]. It is not followed, and it is not read as
+      a backend failure, because nothing failed: the substitution worked, and a
+      retry is the one response that would make it worse.
+
+      This is a REFUSAL WHERE THERE USED TO BE SUCCESS. If your deployment
+      deliberately symlinks a lock file — onto a tmpfs, say — it now fails at
+      Acquire. There is no flag to restore the old behaviour: it would be a flag
+      to restore a lock that lands somewhere the locker did not report (ADR 0082).
+
+      The PARENT components are governed too, and by a different rule, because a
+      symbolic link at a parent is not evidence of anything on its own: /tmp is
+      one on macOS and /var/run is one on most Linux distributions. An
+      indirection above the lock file is refused only when the directory holding
+      it is world-writable — when anybody could have planted it. On Windows the
+      same rule runs over the same question, answered by the directory's DACL
+      rather than by a synthesised mode (ADR 0083, ADR 0084) — and it asks for a
+      different right from the lock directory's own rule, because a component is
+      a DIRECTORY, so what plants one is "may add a subdirectory" (ADR 0086).
+
+      # A held lock can lose its file, and you are told
+
+      [LockFileReplaced] is the one exposure this package DETECTS rather than
+      prevents. See its own documentation; the short version is that Extend is
+      where you find out, and finding out is the whole of what is offered.
+
+      # Scope
+
+      One process, or one machine. There is deliberately no distributed backend
+      here: a lock over Redis, etcd, ZooKeeper or Consul is a connector to a
+      third-party system and belongs under third-party/. Nothing in this package
+      implies coordination beyond the filesystem it was given.
+    facade:
       - alias:
           - doc: |-
               Locker hands out named, exclusive leases: Acquire and TryAcquire.

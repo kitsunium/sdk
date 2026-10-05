@@ -1,9 +1,3 @@
-// Package cli — ranges 0.2.32.* (ADR 0065 core/app/cli block) and 0.3.62.*
-// (ADR 0065 service/app/cli block, declared here since ADR 0160).
-//
-// Package cli — declares the sentinel *errs.Error outcomes of the domain: the
-// refused declarations, and the engine's verdicts on a command line. Each
-// var's name equals its errs.Define Reason in SCREAMING_SNAKE form.
 package cli
 
 // exitConfig matches sysexits EX_CONFIG (78). Every declaration sentinel

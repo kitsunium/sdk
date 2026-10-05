@@ -1,4 +1,3 @@
-// Package baseenc — per-variant identity table.
 package baseenc
 
 // variantSpec is the per-variant table row that drives Name / MIMETypes /

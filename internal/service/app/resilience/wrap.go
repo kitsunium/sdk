@@ -1,4 +1,3 @@
-// Package resilience — shared sentinel-wrapping helper.
 package resilience
 
 import kerrs "github.com/kitsunium/sdk/internal/kernel/errs"

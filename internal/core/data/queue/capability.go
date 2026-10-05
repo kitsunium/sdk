@@ -1,5 +1,3 @@
-// Package queue — the ADR 0039 capability siblings of the frozen [Broker]
-// port, and the dead-letter record one of them returns.
 package queue
 
 import (

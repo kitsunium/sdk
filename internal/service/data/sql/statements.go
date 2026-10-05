@@ -1,5 +1,3 @@
-// Package sql — hosts Statements, the one helper that turns SQL text into a
-// migration step.
 package sql
 
 import (

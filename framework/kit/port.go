@@ -1,4 +1,3 @@
-// Package kit — ports: an operation a service needs and does not implement.
 package kit
 
 import (

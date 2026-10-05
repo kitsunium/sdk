@@ -1,4 +1,3 @@
-// Package kit — stores: a typed, keyed collection of entities.
 package kit
 
 import (

@@ -1,5 +1,3 @@
-// Package spool — what a spool tells its observer, what an attempt knows
-// about itself, and what a dead letter keeps.
 package spool
 
 import (

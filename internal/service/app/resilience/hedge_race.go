@@ -1,4 +1,3 @@
-// Package resilience — the per-call bookkeeping of a hedged race.
 package resilience
 
 // hedgeRace is the bookkeeping of one hedged call: how many copies are in the

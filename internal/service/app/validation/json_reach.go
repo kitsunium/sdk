@@ -1,4 +1,3 @@
-// Package validation — which field a JSON key actually decodes into.
 package validation
 
 import (

@@ -1,4 +1,3 @@
-// Package lock — one live acquisition of one name, in the in-process locker.
 package lock
 
 import (

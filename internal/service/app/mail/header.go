@@ -1,5 +1,3 @@
-// Package mail — the header grammar, and the injection gate every writer in
-// this domain runs before a byte reaches a buffer.
 package mail
 
 import (

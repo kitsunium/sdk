@@ -1,7 +1,3 @@
-// Package bson — encoding of the containers: arrays, ordered documents,
-// structs and maps. A map's entries are written in the map's own order and
-// then put in ascending key order, so the same map always encodes to the same
-// bytes.
 package bson
 
 import (

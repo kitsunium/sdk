@@ -1,8 +1,3 @@
-// Package trace — the OTLP/HTTP emitter: the exporter that POSTs an encoded
-// batch to a collector. The transport itself — endpoint refusal, the default
-// client and its own pool, the bounded reads, the classification — is the one
-// both signals share (internal/service/observe/internal/otlp); what is this signal's is
-// the path, the vocabulary every verdict is named in, and the encoder.
 package trace
 
 import (

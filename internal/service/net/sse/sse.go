@@ -1,11 +1,3 @@
-// Package sse is the server side of Server-Sent Events (ADR 0029): a
-// unidirectional server→client stream over an ordinary HTTP response, carrying
-// text/event-stream frames until either end decides it is over.
-//
-// It is written against net/http's own interfaces, not against this SDK's
-// listener engine, so it works on any http.Handler. Mounted on the SDK engine
-// it additionally observes the server's drain signal, which is what stops an
-// endless stream from holding a graceful shutdown open for its whole budget.
 package sse
 
 import (

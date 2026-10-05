@@ -1,4 +1,3 @@
-// Package validation — the set-membership constraint.
 package validation
 
 import (

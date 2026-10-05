@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "route",
     srcs = [
+        "doc.go",
         "router_sink.go",
         "router_sink_params.go",
     ],

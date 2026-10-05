@@ -1,4 +1,3 @@
-// Package sql — hosts the validated, sorted, clamped form of a MigrateConfig.
 package sql
 
 import (

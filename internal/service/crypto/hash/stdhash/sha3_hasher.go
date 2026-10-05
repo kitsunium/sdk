@@ -1,4 +1,3 @@
-// Package stdhash — SHA3-256 scheme registration (see package doc in stdhash.go).
 package stdhash
 
 import (

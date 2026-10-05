@@ -12,6 +12,7 @@ go_library(
     srcs = [
         "codes_gen.go",
         "credentials.go",
+        "doc.go",
         "postgres.go",
     ],
     importpath = "github.com/kitsunium/sdk/framework/connectors/postgres",

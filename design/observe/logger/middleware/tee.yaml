@@ -17,6 +17,15 @@ packages:
             name: CodeSpillFailed
             value: "0x00_03_1D_02"
         type: errs.Code
+    doc: |-
+      Package tee declares the codes and sentinels of the logger's dead-letter
+      tee middleware, internal/service/observe/logger/middleware/tee: range
+      0.3.29.*, allocated to that engine (ADR 0014 service slot 0x1d) and
+      declared here since ADR 0160, so the engine declares none.
+
+      Package tee — declares the sentinels the dead-letter tee Sink returns.
+      Each var's Reason equals its own name, or its code's, in SCREAMING_SNAKE
+      form (ADR 0020).
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/observe/logger/middleware/tee
@@ -38,8 +47,44 @@ packages:
             private: "service/observe/logger/middleware/tee: the dead-letter spill sink rejected the record"
             public: failed to spill record to the dead-letter sink
             reason: SPILL_FAILED
-  - functions:
-      - in:
+  - doc: |-
+      Package tee — declares the Config value type consumed by New. Kept in its
+      own file per the one-exported-struct rule.
+
+      Package tee provides a logger middleware that fans each record out to
+      every primary sink and, only when all primaries reject it, spills the
+      record to a dead-letter sink.
+
+      # Scope
+
+      This middleware owns exactly one seam: the dead-letter (spill) path. It
+      delivers a record to every primary core/observe/logger.Sink, aggregates their
+      errors, and — when every primary failed — routes the record to an
+      optional spill sink so it is not silently lost.
+
+      # Non-goals
+
+      Plain fan-out to N sinks belongs to the multi middleware; ordered
+      fallback across sinks belongs to the failover middleware. This package
+      does not duplicate either — it adds only the spill/dead-letter seam.
+
+      Durable retry and backoff are also out of scope: the spill sink is a
+      dead-letter seam, not a retry queue. A consumer that needs durable retry
+      composes that behind the spill sink.
+
+      # Concurrency
+
+      A TeeSink is safe for concurrent producers when its primary and spill
+      sinks are. It holds no mutable per-record state.
+
+      Package tee — the TeeSink decorator that fans each record out to every
+      primary sink and spills to a dead-letter sink only when all primaries fail.
+    functions:
+      - doc: |-
+          NewTeeSink builds a TeeSink from cfg. The primaries slice is copied so
+          later caller mutation cannot affect the sink. A nil cfg.Spill disables the
+          dead-letter seam.
+        in:
           - name: cfg
             type: Config
         name: NewTeeSink
@@ -49,15 +94,34 @@ packages:
       corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
     path: github.com/kitsunium/sdk/internal/service/observe/logger/middleware/tee
     types:
-      - name: Config
+      - doc: |-
+          Config configures a TeeSink: the primary sinks every record is fanned out
+          to, plus an optional spill sink that receives a record only when every
+          primary rejected it.
+        name: Config
         struct:
           fields:
-            - name: Primaries
+            - doc: Primaries receive every record; their errors are aggregated.
+              name: Primaries
               type: "[]corelogger.Sink"
-            - name: Spill
+            - doc: |-
+                Spill is the optional dead-letter sink. It receives a record only when
+                all primaries failed. A nil Spill disables the dead-letter seam.
+              name: Spill
               type: corelogger.Sink
-      - methods:
-          - in:
+      - doc: |-
+          TeeSink fans every record out to all primary sinks. When — and only when —
+          every primary rejects the record, it routes that record to the optional
+          spill (dead-letter) sink. A record accepted by at least one primary is
+          never spilled.
+        methods:
+          - doc: |-
+              Write fans r out to every primary sink. It returns the byte count of the
+              first primary that accepted the record. When all primaries fail, the record
+              is routed to the spill sink and a CodeTeeAllBranchesFailed error wrapping
+              the joined causes is returned; if the spill also fails, CodeSpillFailed is
+              returned instead.
+            in:
               - name: ctx
                 type: context.Context
               - name: r
@@ -71,14 +135,20 @@ packages:
               - name: err
                 type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Flush forwards the flush to every primary and the spill sink, aggregating
+              any errors with errors.Join.
+            in:
               - name: ctx
                 type: context.Context
             name: Flush
             out:
               - type: error
             recv: pointer
-          - name: Close
+          - doc: |-
+              Close closes every primary and the spill sink, aggregating any errors with
+              errors.Join.
+            name: Close
             out:
               - type: error
             recv: pointer

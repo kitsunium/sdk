@@ -1,5 +1,3 @@
-// Package docstore — the files: one snapshot at rest, and an overlay of one
-// entry per key written since, folded back into the snapshot.
 package docstore
 
 import (

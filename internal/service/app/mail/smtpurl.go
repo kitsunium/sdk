@@ -1,4 +1,3 @@
-// Package mail — reading an SMTP URL into an SMTPConfig.
 package mail
 
 import (

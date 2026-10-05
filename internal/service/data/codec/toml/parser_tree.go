@@ -1,6 +1,3 @@
-// Package toml — the document tree a parse builds: every table, array and
-// scalar of one document in a single arena, linked by index, and the lookup
-// that finds a key in a table in constant time however wide the table is.
 package toml
 
 import (

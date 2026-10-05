@@ -1,5 +1,3 @@
-// Package spool — a mail's identifier: the one rule it keeps, whoever minted
-// it, because it becomes the left half of the mail's Message-ID.
 package spool
 
 import svcmail "github.com/kitsunium/sdk/internal/service/app/mail"

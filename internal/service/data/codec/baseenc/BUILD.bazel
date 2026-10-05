@@ -13,6 +13,7 @@ go_library(
         "codec.go",
         "decode_all_reader.go",
         "decoder.go",
+        "doc.go",
         "encoder.go",
         "helpers.go",
         "spec.go",

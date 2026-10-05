@@ -1,6 +1,3 @@
-// Package errs — provides package-level introspection helpers
-// that walk a cause chain and read fields from the deepest *Error
-// encountered. Consumers of pkg/v1/errs use re-exports of these.
 package errs
 
 import "errors"

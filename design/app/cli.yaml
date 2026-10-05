@@ -88,6 +88,58 @@ packages:
             name: CodeHelpWriteFailed
             value: "0x00_03_3E_05"
         type: errs.Code
+    doc: |-
+      Package cli declares the command-line port of the SDK: the [Action] one
+      command runs, the [Binder] that declares its flags, and the [Executor] that
+      resolves an argument vector against a tree of [CommandValue] and dispatches
+      it. A core sibling admitted by ADR 0065.
+
+      # What this domain adds to package flag, and what it does not touch
+
+      The stdlib's flag package parses flags. It does that well and this domain
+      does not reimplement one byte of it: the flag SYNTAX, the [flag.Value]
+      interface, the -x=v / -x v / --x forms, the "stop at the first non-flag
+      argument" rule and the rendering of the defaults table all stay flag's. A
+      [Binder] receives the stdlib's own *[flag.FlagSet], unchanged and
+      unwrapped — the same shape internal/core/data/vfs takes for io/fs, and for the
+      same reason: a wrapper around a stdlib contract is a second contract to
+      learn, to keep in sync, and to get subtly wrong.
+
+      What flag does NOT have is exactly what this domain adds, and nothing else:
+
+        - sub-commands, to arbitrary depth;
+        - one help text GENERATED from the declarations, so it cannot lie;
+        - a typed exit status, carried by the SDK's own errs codes;
+        - a seam to the rest of the SDK — the flags an operator actually typed can
+          become the top layer of a config load.
+
+      # Nothing here can end the process
+
+      flag's own answer to a bad argument is [flag.ExitOnError], which calls
+      os.Exit from inside a library. That is refused by name: it makes the parse
+      untestable, it skips every deferred function in the program, and it takes a
+      decision — whether this process should still be alive — that belongs to
+      main and to nobody else. Every failure in this domain is a returned
+      *errs.Error carrying an exit status; main is the only place that may act on
+      it. TestPackageNeverEndsTheProcess in internal/service/app/cli is the executable
+      form of that claim.
+
+      The engine that walks the tree, the help renderer and the config adapter
+      live in internal/service/app/cli; this package owns the contract, the two domain
+      values, and the sentinels a malformed declaration is refused with.
+
+      Package cli — the declared command: a name, what it says about itself, its
+      flags, and EITHER what it does OR what it contains.
+
+      Package cli — what a resolved command line looks like by the time an
+      [Action] sees it.
+
+      Package cli — ranges 0.2.32.* (ADR 0065 core/app/cli block) and 0.3.62.*
+      (ADR 0065 service/app/cli block, declared here since ADR 0160).
+
+      Package cli — declares the sentinel *errs.Error outcomes of the domain: the
+      refused declarations, and the engine's verdicts on a command line. Each
+      var's name equals its errs.Define Reason in SCREAMING_SNAKE form.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/app/cli
@@ -259,48 +311,215 @@ packages:
             public: The help could not be written
             reason: HELP_WRITE_FAILED
     types:
-      - name: Action
+      - doc: |-
+          Action is what one command DOES. It receives the context [Executor.Execute]
+          was called with — a cancelled context is how a caller aborts a running
+          command — and the resolved [InvocationValue].
+
+          Returning a non-nil error is how a command fails. If it is an *errs.Error
+          the SDK's origin-wins rule (CLAUDE.md rule 6) preserves its Code and its
+          exit status all the way out of Execute, so a command's own exit status is
+          never overwritten by the framework that called it.
+        name: Action
         underlying: func(ctx context.Context, invocation InvocationValue) error
-      - name: Binder
+      - doc: |-
+          Binder declares one command's flags onto the set that will parse them.
+
+          It is handed the stdlib's *[flag.FlagSet] deliberately: every flag type the
+          stdlib ships, and every [flag.Value] a caller has already written, works
+          here with no adapter. The set is fresh, its name is the command path, and
+          its error handling is always [flag.ContinueOnError].
+
+          A Binder MUST only touch the set it is given, and MUST be safe to call more
+          than once: the engine runs it once at construction to validate the
+          declaration and to render help, and once per invocation to parse.
+
+          # What concurrency the SDK cannot give you
+
+          The engine keeps no per-invocation state, so two concurrent
+          [Executor.Execute] calls do not interfere. A Binder, however, usually writes
+          into a variable the CALLER closed over — fs.IntVar(&port, …) — and that
+          variable is the caller's, invisible to the SDK and written by every
+          concurrent invocation. Concurrent execution is therefore safe only when the
+          Binder allocates its destination per call (fs.Int, fs.String, …) and the
+          [Action] reads it back through [InvocationValue.Flags]. That is what those
+          sets are for. The alternative would be the SDK taking a lock around memory
+          it does not own, for a duration it cannot know.
+        name: Binder
         underlying: func(flags *flag.FlagSet)
-      - methods:
-          - name: IsGroup
+      - doc: |-
+          CommandValue declares one command. The tree it forms is the whole
+          declaration: the engine walks it to resolve an argument vector, and the help
+          renderer walks the SAME tree to render the text, so a command that exists
+          and a command that is documented are one fact rather than two.
+
+          A command is a LEAF or a GROUP, never both:
+
+            - a leaf has [CommandValue.Run] and no [CommandValue.Commands];
+            - a group has [CommandValue.Commands] and no Run.
+
+          Both other combinations are refused at construction. Neither Run nor
+          Commands is an inert command — a name an operator can type that does
+          nothing, which is exactly the zero value ADR 0031 refuses. Both is worse: it
+          makes `tool db migrate` mean "run db with the argument migrate" until
+          somebody adds a child named migrate, at which point the same command line
+          silently means something else. A declaration whose meaning changes when a
+          SIBLING is added is not a declaration.
+
+          CommandValue is a published concrete shape (pkg/v1/app/cli.Command aliases it),
+          so ADR 0040 applies: it may still change while the module is v0, said out
+          loud, and not after v1.
+        methods:
+          - doc: |-
+              IsGroup reports whether this command dispatches to children rather than
+              running an [Action]. It reads the declaration rather than a flag set at
+              construction, so it answers the same on a CommandValue the caller has just
+              written and on one the engine has already validated.
+            name: IsGroup
             out:
               - type: bool
             recv: value
         name: CommandValue
         struct:
           fields:
-            - name: Name
+            - doc: |-
+                Name is the single token an operator types to reach this command. It is
+                compared by exact byte equality — there is deliberately no abbreviation
+                matching and no case folding, because both make the meaning of an
+                existing command line depend on which siblings exist today.
+
+                It must be non-empty, must contain no space, and must not begin with
+                "-": a name beginning with "-" could never be typed, since the parent's
+                flag parse would consume it as a flag and stop before it.
+              name: Name
               type: string
-            - name: Summary
+            - doc: |-
+                Summary is the one-line description listed beside this command in its
+                parent's help. It is required for a child, because a command listed with
+                no summary is a name an operator has to guess at.
+              name: Summary
               type: string
-            - name: Description
+            - doc: |-
+                Description is the optional long form shown in this command's OWN help,
+                under the usage line. It may span several lines; it is written verbatim.
+              name: Description
               type: string
-            - name: Flags
+            - doc: |-
+                Flags declares this command's flags. A nil Binder is a working
+                declaration and means "this command takes no flags" — unlike a nil Run,
+                which is a real absence, a command with no flags is an ordinary command.
+              name: Flags
               type: Binder
-            - name: Run
+            - doc: Run is what a LEAF does. Exactly one of Run and Commands is set.
+              name: Run
               type: Action
-            - name: Commands
+            - doc: |-
+                Commands are a GROUP's children, in the order the help lists them. Two
+                children may not share a Name.
+              name: Commands
               type: "[]CommandValue"
-      - methods:
-          - name: Leaf
+      - doc: |-
+          InvocationValue is one resolved command line: which command was reached,
+          what was left over after its flags were parsed, the sets that parsed them,
+          and the writer the command may print to.
+
+          InvocationValue is a published concrete shape (pkg/v1/app/cli.Invocation aliases
+          it), so ADR 0040 applies: it may still change while the module is v0, said
+          out loud, and not after v1.
+        methods:
+          - doc: |-
+              Leaf returns the flag set of the command that is actually running — the last
+              element of [InvocationValue.Flags] — or nil when the command declared no
+              flags anywhere on its path.
+
+              It exists so a caller reading its own flags does not index a slice whose
+              length is a property of how deep the command happens to sit in the tree.
+            name: Leaf
             out:
               - type: "*flag.FlagSet"
             recv: value
         name: InvocationValue
         struct:
           fields:
-            - name: Path
+            - doc: |-
+                Path is the resolved command path, root first — {"tool", "db",
+                "migrate"}. It is what the help and every error message name the command
+                by, so a message and a shell prompt spell the same thing.
+              name: Path
               type: "[]string"
-            - name: Args
+            - doc: |-
+                Args are the positional arguments left after the LEAF's flags were
+                parsed: flag.FlagSet.Args of the last set in Flags.
+
+                It is nil when there were none, which is Go's ordinary spelling — len
+                and range answer identically for a nil and an empty slice, and manufacturing
+                an empty one would only hide that distinction from a caller who does not
+                need it.
+              name: Args
               type: "[]string"
-            - name: Flags
+            - doc: |-
+                Flags are the flag sets that parsed this invocation, root first, one per
+                element of Path; the leaf's own set is the last. A group's flags are
+                parsed by the group's set before its child's name is even read, which is
+                why they are separate sets and not one merged one.
+
+                The stdlib's set is handed over unchanged rather than wrapped, so
+                Lookup, Visit, VisitAll, NFlag and Arg all work exactly as their
+                documentation says. Calling Parse on one again is not defended against:
+                the engine has already parsed it, and re-parsing it is a caller's bug
+                the SDK cannot distinguish from a caller's intent.
+              name: Flags
               type: "[]*flag.FlagSet"
-            - name: Output
+            - doc: |-
+                Output is the writer this command may print to. It is never nil.
+
+                It is NOT os.Stdout unless the caller said so: ADR 0030 makes stdout a
+                protocol channel that no SDK default may claim, so the zero
+                configuration resolves this to os.Stderr and a tool whose output IS a
+                protocol sets it explicitly, in main, on one visible line. An Action is
+                handed the writer precisely so it never has to reach for a stream
+                itself.
+              name: Output
               type: io.Writer
-  - functions:
-      - in:
+  - doc: |-
+      Package cli is the command-line engine: it validates a whole command tree
+      once, resolves an argument vector against it, renders the help the tree
+      implies, and returns a typed error carrying an exit status. It never ends
+      the process.
+
+      Package cli — the engine's configuration: two writers, and deliberately
+      nothing else.
+
+      Package cli — the one error the engine builds rather than declares. The
+      domain's codes and sentinels are declared in internal/core/app/cli
+      (ADR 0160); this file holds only the WrapParams that raise
+      HELP_WRITE_FAILED over the writer's own error.
+
+      Package cli — resolution and dispatch: the loop that turns an argument
+      vector into one [corecli.InvocationValue] and one [corecli.Action] call.
+
+      Package cli — the one seam between this domain and internal/core/app/config.
+
+      Package cli — the help, generated from the declarations and from nowhere
+      else.
+    functions:
+      - doc: |-
+          New validates a command tree and returns the [corecli.Executor] that runs it.
+
+          The WHOLE tree is validated here, not the branch an invocation happens to
+          take. A declaration is a wiring fact, and a wiring fault discovered by the
+          operator who typed the one command nobody had tried is a fault discovered in
+          production: `tool db migrate` being unreachable must fail on the first run
+          of the binary, not on the first run of the migration.
+
+          Every refusal is one of internal/core/app/cli's sentinels and carries EX_CONFIG
+          (78). A [corecli.Binder] is CALLED here, once, on a throwaway set — that is
+          what proves it binds no reserved name — so a Binder must be safe to call
+          more than once. A Binder that panics is deliberately not recovered: it runs
+          inside the caller's own main, on the line that wrote it, and a recovered
+          panic there would replace a stack pointing at the bug with a sentence about
+          a tree.
+        in:
           - name: cfg
             type: Config
           - name: root
@@ -311,7 +530,49 @@ packages:
             type: corecli.Executor
           - name: err
             type: error
-      - in:
+      - doc: |-
+          FlagSource snapshots the flags an operator ACTUALLY TYPED on one invocation
+          and returns them as a configuration layer.
+
+          # Only what was set
+
+          It walks flag.FlagSet.Visit and never VisitAll. That one word is the whole
+          value of this adapter: VisitAll yields every DECLARED flag, including the
+          ones nobody passed, carrying their Go defaults — so a flag with a zero
+          default would override the file and the environment on every single run, and
+          a configuration file would appear to be ignored for reasons nothing reports.
+          Visit yields only what the command line actually carried, which is exactly
+          what "the flags are the highest-precedence layer" is supposed to mean.
+
+          # The flag name IS the config key
+
+          No transformation: no camelCase to snake_case, no "-" to "_", no automatic
+          prefixing. Every such rule is a second grammar a reader has to learn and a
+          generator has to reproduce, and its failure mode is a key nobody typed
+          silently not matching a field. A flag that feeds `database.max_conns`
+          declares itself as "database.max_conns" — package flag accepts a dot in a
+          name and parses -database.max_conns=5 without help. And when the name is
+          wrong, the config schema (ADR 0061) REFUSES an unaddressed key rather than
+          ignoring it, so the mistake is loud at startup.
+
+          # What this is not
+
+          It is not a configuration loader. It reads no file, no environment variable
+          and no default; it does no layering, no decoding and no validation. Those
+          are the config domain, they already exist, and a CLI carrying its own copy
+          would be a second one to disagree with. The intended shape is one line:
+
+          	err := config.LoadSchema(&cfg, schema,
+          		config.FileSource("toml", "/etc/tool.toml"),
+          		config.EnvSource("TOOL_"),
+          		cli.FlagSource(invocation)) // last wins
+
+          # Precedence inside one invocation
+
+          The sets are visited root first, so a leaf flag overrides an ancestor flag
+          of the same name — the same "later wins" direction config.Load already uses
+          between sources, rather than a second rule to remember.
+        in:
           - name: invocation
             type: corecli.InvocationValue
         name: FlagSource
@@ -321,15 +582,61 @@ packages:
       corecli: github.com/kitsunium/sdk/internal/core/app/cli
     path: github.com/kitsunium/sdk/internal/service/app/cli
     types:
-      - name: Config
+      - doc: |-
+          Config configures one [New]. Its zero value is a working configuration.
+
+          It carries two writers and nothing else. There is no Signals field, no
+          shutdown budget, no logger, no config source and no env prefix: every one of
+          those is a domain the SDK already ships, and a CLI that grew its own copy
+          would be a second, weaker one that the first would eventually disagree with.
+          ADR 0065 §D6 lists what this domain composes and what it refuses to redo.
+
+          Config is a published concrete shape (pkg/v1/app/cli.Config aliases it), so ADR
+          0040 applies: it may still change while the module is v0, said out loud, and
+          not after v1.
+        name: Config
         struct:
           fields:
-            - name: Output
+            - doc: |-
+                Output is where a command's OWN output goes. It reaches a [corecli.Action] as
+                InvocationValue.Output, so a command never has to reach for a process
+                stream itself.
+
+                The zero value resolves to os.Stderr, NOT os.Stdout. ADR 0030 makes
+                stdout a protocol channel that no SDK default may claim: a tool whose
+                output is a JSON document on a pipe sets Output: os.Stdout in main,
+                which is one visible line at the one place that can honestly make the
+                choice. A zero value is what somebody who has not yet learned the
+                question exists chose, so it must not be the dangerous one.
+              name: Output
               type: io.Writer
-            - name: ErrOutput
+            - doc: |-
+                ErrOutput is where the generated help, and the usage that follows a bad
+                command line, are written. The zero value resolves to os.Stderr.
+
+                It is a SECOND writer rather than the same one so that setting Output to
+                os.Stdout for a machine-readable tool does not put a help page in the
+                middle of the document a consumer is parsing.
+
+                What is deliberately NOT written here is the error itself. The engine
+                owns the help — it is generated from the declarations and only the SDK
+                can render it — and the caller owns how an error is presented, because a
+                caller may want it as a line on stderr, as a log record, or as JSON. Two
+                voices printing one failure is how a CLI ends up saying it twice.
+              name: ErrOutput
               type: io.Writer
-      - methods:
-          - name: Load
+      - doc: |-
+          FlagSourceValue is one invocation's flags, shaped as the flat key→value
+          layer internal/core/app/config.Source yields. It is the whole of what this
+          domain contributes to configuration, and everything it deliberately is not
+          is listed in [FlagSource].
+
+          FlagSourceValue is a published concrete shape (pkg/v1/app/cli.FlagSource returns
+          it), so ADR 0040 applies: it may still change while the module is v0, said
+          out loud, and not after v1.
+        methods:
+          - doc: Load returns the layer. It satisfies internal/core/app/config.Source.
+            name: Load
             out:
               - name: values
                 type: map[string]any
@@ -340,9 +647,133 @@ packages:
         struct:
           unexported: true
   - constants:
-      - name: Success
+      - doc: Success is the process exit status of a command that did what it was asked.
+        name: Success
         type: int
         value: "0"
+    doc: |-
+      Package cli is the public facade for the SDK's command-line domain: the
+      sub-commands, the generated help and the typed exit status that the stdlib's
+      flag package deliberately does not have.
+
+      	root := cli.Command{
+      		Name:    "tool",
+      		Summary: "does the thing",
+      		Commands: []cli.Command{{
+      			Name:    "serve",
+      			Summary: "run the HTTP server",
+      			Flags:   func(fs *flag.FlagSet) { fs.IntVar(&port, "port", 8080, "listen `port`") },
+      			Run: func(ctx context.Context, in cli.Invocation) error {
+      				return serve(ctx, port)
+      			},
+      		}},
+      	}
+
+      	func main() {
+      		app, err := cli.New(cli.Config{}, root)
+      		if err != nil {
+      			fmt.Fprintln(os.Stderr, err)
+      			os.Exit(cli.Status(err))
+      		}
+      		err = app.Execute(context.Background(), os.Args[1:])
+      		if err != nil {
+      			fmt.Fprintln(os.Stderr, err)
+      		}
+      		os.Exit(cli.Status(err))
+      	}
+
+      # What it adds to package flag, and what it leaves alone
+
+      It adds four things and nothing else: sub-commands to arbitrary depth, one
+      help text generated from the declarations, a typed exit status, and a seam
+      to the rest of the SDK.
+
+      It leaves the whole of flag alone. A [Binder] receives the stdlib's own
+      *[flag.FlagSet]: the flag syntax, the [flag.Value] interface, every
+      FooVar helper you already use, the "-x=v / -x v" forms and the rendering of
+      the defaults table are flag's, unchanged and unwrapped. There is no
+      cobra, no pflag, no third-party dependency of any kind — an argument parser
+      is a mechanism, not a connector to somebody else's system, and this SDK
+      writes its mechanisms.
+
+      # Nothing here can end your process
+
+      flag's own answer to a bad argument is [flag.ExitOnError], which calls
+      os.Exit from inside a library: it makes the parse untestable, it skips every
+      deferred function in the program, and it decides on your behalf whether the
+      process should still be alive. This domain uses [flag.ContinueOnError] and
+      returns an error. There is no os.Exit, no log.Fatal and no panic in the
+      path — pinned by an AST audit over the production sources AND the suite, not
+      by a comment.
+
+      # The exit status
+
+      The status is carried by the SDK's existing error model and NOT by a second
+      convention: a sentinel declares it with errs.WithExitCode and a caller reads
+      it with errs.ExitCodeOf. [Status] is the single guard on top of that, and it
+      exists for one sharp reason: errs.ExitCodeOf(nil) is 70, because it answers
+      "what status does this error map to" and nil is not an error. Passing a
+      successful Execute straight into it would exit 70 on every success.
+
+      	| outcome                          | status | who chose it              |
+      	|----------------------------------|--------|---------------------------|
+      	| the command succeeded            | 0      | Status                    |
+      	| -h / -help was asked for         | 0      | Execute returns nil       |
+      	| the command line was wrong       | 64     | service/app/cli (EX_USAGE)    |
+      	| the tree is wired wrong          | 78     | core/app/cli (EX_CONFIG)      |
+      	| the command failed               | its own errs code, or 70   | the command   |
+
+      The last row is the one worth stating: an [Action] returning an *errs.Error
+      keeps its own code AND its own exit status all the way out, because the
+      error is returned VERBATIM and never relabelled by the framework that called
+      it.
+
+      # Help
+
+      The help is generated from the same declarations the resolver walks — the
+      summaries, the sub-command list, and flag's own PrintDefaults over the set
+      the Binder filled. It is never written by hand, because a help maintained
+      beside the declarations eventually describes a flag that was renamed, and an
+      operator acts on what the help says.
+
+      Asking for it is not a failure: -h writes the help and Execute returns nil.
+      A bad command line writes the SAME help and returns an EX_USAGE error, so
+      the exit status is what distinguishes them and the text does not have to.
+
+      # Where the output goes
+
+      [Config].Output (a command's own output) and [Config].ErrOutput (help and
+      usage) both default to os.Stderr, and neither defaults to os.Stdout. ADR
+      0030 makes stdout a protocol channel that no SDK default may claim; a tool
+      that emits a document sets Output: os.Stdout in main, on one visible line,
+      and its help still stays on stderr where it cannot corrupt the document.
+
+      # What it composes rather than reimplements
+
+        - config — [FlagSource] turns the flags an operator ACTUALLY TYPED into
+          the top layer of a config load. It uses flag.FlagSet.Visit and never
+          VisitAll, so an unset flag's Go default never overrides a file. There is
+          no env reading, no file reading, no layering and no validation here:
+          that is the config domain, and it already exists.
+        - lifecycle — nothing. There is no Signals field and no shutdown budget:
+          signals are a process-wide side effect and lifecycle.Run already makes
+          them opt-in for that reason. A long-running command composes it inside
+          its own Action, where the context it needs already is.
+        - errs — the whole error model, including the exit status. This domain
+          defines no status convention of its own.
+
+      # Deliberately absent
+
+      No "did you mean …?": the help that has just been written already lists
+      every name that would have worked, which is the complete answer and cannot
+      be wrong. No prefix or abbreviation matching, and no case folding: both make
+      what an existing command line MEANS depend on which siblings exist in
+      today's release. No shell-completion generator, no colour, no interactive
+      prompting, no environment-variable fallback per flag.
+
+      Package cli — hosts the compile-time interface assertions, keeping them out
+      of the production source so the runtime binary carries no diagnostic-only
+      declarations.
     facade:
       - alias:
           - doc: Action is what one command does — see [Command].
@@ -479,13 +910,30 @@ packages:
           out:
             - type: "*FlagSourceValue"
     functions:
-      - in:
+      - doc: |-
+          Status is the process exit status for what [Executor].Execute returned: 0
+          when err is nil, and errs.ExitCodeOf(err) otherwise.
+
+          It is a guard on the SDK's existing convention and not a second one.
+          errs.ExitCodeOf answers "what status does THIS ERROR map to", so it returns
+          the EX_SOFTWARE default (70) for a nil it was never meant to be handed —
+          which is correct for an accessor and catastrophic at a CLI boundary, where
+          success is the common case. This is the one place in the SDK where nil has
+          to mean 0, so this is where the guard lives.
+
+          	os.Exit(cli.Status(app.Execute(ctx, os.Args[1:])))
+        in:
           - name: err
             type: error
         name: Status
         out:
           - type: int
-      - in:
+      - doc: |-
+          Execute is the one-line form of [New] followed by [Executor].Execute. It
+          returns the same errors both would: a construction refusal carries EX_CONFIG
+          (78), so a caller that only wants a status can pass the result straight to
+          [Status].
+        in:
           - name: ctx
             type: context.Context
           - name: cfg

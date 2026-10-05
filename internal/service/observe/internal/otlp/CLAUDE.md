@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T05:20:00Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # internal/service/observe/internal/otlp/
 
 ## Purpose
@@ -45,7 +45,8 @@ public names a caller types — `OTLPHTTPConfig`, `NewOTLPHTTPExporter`,
 
 | File | Surface |
 |---|---|
-| `otlp.go` | package doc + `DefaultTimeout` / `DefaultMaxResponseBytes` / `DocumentTerminator` |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `otlp.go` | `DefaultTimeout` / `DefaultMaxResponseBytes` / `DocumentTerminator` |
 | `scalar.go` | `Int64` / `Uint64` (decimal strings) and `Double` (a number, or `"NaN"` / `"Infinity"` / `"-Infinity"`) with their `MarshalJSON` |
 | `key_value.go` | `KeyValue` + `Attrs` + `KeyValueOf` — the shared attribute model (`internal/core/observe/otel`) as `common.v1.KeyValue` |
 | `any_value.go` | `AnyValue` — the four scalar cases of the oneof, presence kept at the zero |

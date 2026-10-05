@@ -1,4 +1,3 @@
-// Package secret — the secret-name grammar, the one every store shares.
 package secret
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

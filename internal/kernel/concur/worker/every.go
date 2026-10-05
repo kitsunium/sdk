@@ -1,6 +1,3 @@
-// Package worker — Every layers a ticker loop on top of the LoopDaemon
-// lifecycle. Held in its own file so worker.go stays focused on the LoopDaemon
-// surface.
 package worker
 
 import (

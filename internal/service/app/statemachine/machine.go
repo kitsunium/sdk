@@ -1,29 +1,3 @@
-// Package statemachine is the state-machine engine over stored entities (ADR
-// 0120): a [MachineSpec] declares the states an entity goes through and the
-// transitions between them — events a caller fires, timers after a duration in
-// a state, deadlines the entity carries, guards on the entity — with hooks on
-// the way; a [StateMachine] runs it over the caller's store, keeps a record of each
-// entity beside it, and fires the timers and guards from its own loop, which
-// sleeps until the next transition due and wakes on a write. The ports it is
-// given — the Store, the Journal — are internal/core/app/statemachine's.
-//
-// # One entity, one transition at a time
-//
-// A transition takes its entity's lock, reads it again, runs the OnEnter hooks
-// of the state entered, writes it — an insert for a creation, a replace
-// otherwise, and a replace never brings back an entity deleted meanwhile —
-// records the step, releases the lock, and only then runs the OnTransition
-// hooks. A hook that panics fails what it was part of and never leaves an
-// entity locked. Transitions of different entities run concurrently.
-//
-// # The agenda
-//
-// Each entity in a state that a timer or a guard leaves has ONE entry on a
-// heap: the instant its earliest automatic transition falls due. The loop
-// pops what is due, evaluates only those entities and the ones written since
-// it last looked, and sleeps until the heap's top — so finding the next
-// transition due costs O(log N), where re-reading the whole store on every
-// wake costs O(N). BENCH.md measures both.
 package statemachine
 
 import (

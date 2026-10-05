@@ -52,9 +52,48 @@ packages:
             value: "0x00_03_59_07"
         type: errs.Code
     constants:
-      - name: FlameRoot
+      - doc: |-
+          FlameRoot is the name of a flame graph's root frame, which stands for the
+          whole profile.
+        name: FlameRoot
         type: string
         value: "\"root\""
+    doc: |-
+      Package profiling — range 0.3.89.*, allocated to the engine (ADR 0121
+      service/observe/profiling block) and declared here since ADR 0160: the
+      engine returns these and declares none.
+
+      Package profiling — declares the sentinel *errs.Error outcomes. Each var's
+      name equals its errs.Define Reason in SCREAMING_SNAKE form.
+
+      No refusal quotes the profile or the dump it refused: both describe the
+      process's code, its files and what its goroutines were doing.
+
+      Package profiling — a profile folded onto owners: what each owner and each
+      function cost, and the flame graph, in the sample type's own unit. Folding
+      is the engine's, internal/service/observe/profiling.Fold.
+
+      Package profiling — the goroutine view: one goroutine as the runtime's dump
+      describes it, and goroutines grouped. Reading the dump and grouping are the
+      engine's, internal/service/observe/profiling.
+
+      Package profiling — the values a decoded profile is made of: the profile,
+      its samples, their stacks' frames and the sample types. Decoding them from
+      the pprof format is the engine's, internal/service/observe/profiling.
+
+      Package profiling declares the values of the profiling domain (ADR 0121)
+      and its codes: a decoded profile — ProfileValue, its samples, their frames
+      and the sample types —, a profile folded onto owners — FoldedValue and its
+      parts —, and a goroutine as the runtime's dump describes it, alone or
+      grouped.
+
+      The engine — capturing the CPU and the heap, decoding the pprof format,
+      folding, reading a goroutine dump — is internal/service/observe/profiling,
+      and its bounds and defaults are its own. There is no port here: there is
+      one engine, the runtime's profilers, and the attribution a fold applies is a
+      function the caller passes, not a contract (ADR 0121 §D1). ADR 0160 §1 gave
+      the domain this package for its values and codes, and a port only where a
+      second implementation or a test double needs one — nothing does.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/observe/profiling
@@ -130,164 +169,413 @@ packages:
             public: The profile does not measure that
             reason: SAMPLE_TYPE_MISSING
     types:
-      - name: FoldedValue
+      - doc: |-
+          FoldedValue is a profile folded: in the sample type's own unit —
+          nanoseconds of CPU, bytes of heap — never rounded.
+        name: FoldedValue
         struct:
           fields:
-            - name: Flame
+            - doc: |-
+                Flame is the flame graph, rooted at [FlameRoot], its children the
+                outermost frames; nil when Total is zero.
+              name: Flame
               type: "*FlameNodeValue"
-            - name: Owners
+            - doc: Owners holds each owner's cost, the costliest first.
+              name: Owners
               type: "[]OwnerCostValue"
-            - name: Top
+            - doc: |-
+                Top holds the costliest functions: by flat cost, then cumulative, then
+                name.
+              name: Top
               type: "[]FunctionCostValue"
-            - name: SampleType
+            - doc: SampleType is what was folded.
+              name: SampleType
               type: SampleTypeValue
-            - name: Total
+            - doc: Total is the sum of every sample's value.
+              name: Total
               type: int64
-            - name: Unattributed
+            - doc: |-
+                Unattributed is the part of Total charged to nobody. Total is exactly
+                Unattributed plus every owner's Value.
+              name: Unattributed
               type: int64
-      - name: OwnerCostValue
+      - doc: |-
+          OwnerCostValue is what one owner cost: the sum of the samples charged to
+          it, and its own costliest functions.
+        name: OwnerCostValue
         struct:
           fields:
-            - name: Owner
+            - doc: Owner is the name Attribute returned.
+              name: Owner
               type: string
-            - name: Top
+            - doc: Top holds the owner's costliest functions.
+              name: Top
               type: "[]FunctionCostValue"
-            - name: Value
+            - doc: Value is the sum of the samples charged to the owner.
+              name: Value
               type: int64
-      - name: FunctionCostValue
+      - doc: |-
+          FunctionCostValue is what one function cost, flat and cumulative, and where
+          it is defined.
+        name: FunctionCostValue
         struct:
           fields:
-            - name: Function
+            - doc: Function is the function's name, as the runtime spells it.
+              name: Function
               type: string
-            - name: File
+            - doc: File and StartLine say where it is defined, when the profile knows.
+              name: File
               type: string
-            - name: Flat
+            - doc: Flat is the cost of samples whose innermost frame is the function.
+              name: Flat
               type: int64
-            - name: Cum
+            - doc: |-
+                Cum is the cost of samples with the function anywhere on the stack,
+                each sample counted once however many times the function recurses.
+              name: Cum
               type: int64
-            - name: StartLine
+            - doc: StartLine is the function's first line; zero when unknown.
+              name: StartLine
               type: int
-      - name: FlameNodeValue
+      - doc: |-
+          FlameNodeValue is one frame of a flame graph: a function reached along one
+          path, and what the samples through it cost.
+        name: FlameNodeValue
         struct:
           fields:
-            - name: Name
+            - doc: Name is the function's name; [FlameRoot] for the root.
+              name: Name
               type: string
-            - name: Children
+            - doc: Children are the functions it called, costliest first.
+              name: Children
               type: "[]*FlameNodeValue"
-            - name: Value
+            - doc: Value is the cost of every sample through this path.
+              name: Value
               type: int64
-      - name: GoroutineValue
+      - doc: |-
+          GoroutineValue is one goroutine of the process, as the runtime's dump
+          describes it.
+        name: GoroutineValue
         struct:
           fields:
-            - name: Labels
+            - doc: Labels are the goroutine's pprof labels.
+              name: Labels
               type: map[string]string
-            - name: CreatedBy
+            - doc: |-
+                CreatedBy is the frame of the go statement that started the goroutine;
+                zero for the main goroutine and for those the runtime starts itself.
+              name: CreatedBy
               type: FrameValue
-            - name: State
+            - doc: |-
+                State is the runtime's word for what the goroutine does: "running",
+                "runnable", "syscall", or what it waits on — "select", "chan receive",
+                "IO wait", "sleep", "sync.Mutex.Lock".
+              name: State
               type: string
-            - name: Stack
+            - doc: Stack is the goroutine's stack, innermost frame first.
+              name: Stack
               type: "[]FrameValue"
-            - name: Waiting
+            - doc: |-
+                Waiting is how long the goroutine has been blocked, to the minute the
+                runtime reports; zero under a minute or when it is not blocked.
+              name: Waiting
               type: time.Duration
-            - name: ID
+            - doc: ID is the goroutine's number.
+              name: ID
               type: int64
-            - name: Creator
+            - doc: |-
+                Creator is the number of the goroutine that ran the go statement; zero
+                when the dump does not say.
+              name: Creator
               type: int64
-            - name: LockedToThread
+            - doc: LockedToThread says the goroutine is locked to its OS thread.
+              name: LockedToThread
               type: bool
-      - name: GoroutineGroupValue
+      - doc: |-
+          GoroutineGroupValue is goroutines sharing their labels, their state and
+          their top frame.
+        name: GoroutineGroupValue
         struct:
           fields:
-            - name: Labels
+            - doc: |-
+                Labels holds the grouping labels the goroutines carry, by key; a key
+                they do not carry is absent.
+              name: Labels
               type: map[string]string
-            - name: State
+            - doc: State is the goroutines' state.
+              name: State
               type: string
-            - name: Top
+            - doc: |-
+                Top is the innermost frame that is not the runtime's own machinery —
+                the code that asked to wait — or the innermost frame when every frame
+                is the runtime's.
+              name: Top
               type: string
-            - name: Stack
+            - doc: Stack is one member's stack, innermost first.
+              name: Stack
               type: "[]FrameValue"
-            - name: Count
+            - doc: Count is how many goroutines share the group.
+              name: Count
               type: int
-      - name: ProfileValue
+      - doc: |-
+          ProfileValue is a decoded pprof profile: what was measured, and every
+          sample with its stack, its values and its labels. It is plain data — the
+          profile.proto message with its tables resolved — and safe to share once
+          built.
+        name: ProfileValue
         struct:
           fields:
-            - name: Time
+            - doc: |-
+                Time is when the collection started; zero when the profile does not
+                say.
+              name: Time
               type: time.Time
-            - name: SampleTypes
+            - doc: |-
+                SampleTypes names what each of a sample's values measures, in order:
+                {cpu nanoseconds}, {inuse_space bytes}.
+              name: SampleTypes
               type: "[]SampleTypeValue"
-            - name: Samples
+            - doc: Samples are the measured stacks.
+              name: Samples
               type: "[]SampleValue"
-            - name: Comments
+            - doc: Comments are the profile's free-text comments.
+              name: Comments
               type: "[]string"
-            - name: PeriodType
+            - doc: |-
+                PeriodType and Period say how often a sample is taken: every Period
+                PeriodType — 10 000 000 nanoseconds of CPU, 524 288 bytes allocated.
+              name: PeriodType
               type: SampleTypeValue
-            - name: DefaultSampleType
+            - doc: |-
+                DefaultSampleType is the sample type a viewer shows first; empty when
+                the profile does not say, and the last sample type is the convention.
+              name: DefaultSampleType
               type: string
-            - name: Duration
+            - doc: Duration is how long the collection lasted; zero when not recorded.
+              name: Duration
               type: time.Duration
-            - name: Period
+            - doc: Period is the sampling period, in PeriodType's unit.
+              name: Period
               type: int64
-      - name: SampleTypeValue
+      - doc: |-
+          SampleTypeValue names what a value measures and its unit — {cpu
+          nanoseconds}, {inuse_space bytes}.
+        name: SampleTypeValue
         struct:
           fields:
-            - name: Type
+            - doc: "Type is what is measured: \"cpu\", \"samples\", \"inuse_space\"."
+              name: Type
               type: string
-            - name: Unit
+            - doc: "Unit is its unit: \"nanoseconds\", \"count\", \"bytes\"."
+              name: Unit
               type: string
-      - name: SampleValue
+      - doc: |-
+          SampleValue is one sample: a stack, a value per sample type, and the labels
+          the goroutine carried when it was taken.
+        name: SampleValue
         struct:
           fields:
-            - name: Labels
+            - doc: |-
+                Labels are the pprof labels of the goroutine, by key: set with
+                pprof.Do or pprof.SetGoroutineLabels. A CPU profile carries them; a
+                heap profile does not.
+              name: Labels
               type: map[string][]string
-            - name: NumLabels
+            - doc: |-
+                NumLabels are the numeric labels, by key — a heap sample's "bytes",
+                the size of each object it counts.
+              name: NumLabels
               type: map[string][]int64
-            - name: Stack
+            - doc: |-
+                Stack is the sample's call stack, innermost frame first. A call the
+                compiler inlined is a frame of its own, before the frame it was
+                inlined into.
+              name: Stack
               type: "[]FrameValue"
-            - name: Values
+            - doc: Values holds one value per ProfileValue.SampleTypes entry.
+              name: Values
               type: "[]int64"
-      - name: FrameValue
+      - doc: |-
+          FrameValue is one frame of a stack: a function, where it is defined, and
+          the line executing in it.
+        name: FrameValue
         struct:
           fields:
-            - name: Function
+            - doc: |-
+                Function is the function's name as the runtime spells it —
+                "pkg.(*T).Method", "pkg.F.func1", "pkg.G[...]" — or empty for a frame
+                no symbol was found for.
+              name: Function
               type: string
-            - name: File
+            - doc: File is the function's source file, as recorded when it was compiled.
+              name: File
               type: string
-            - name: Line
+            - doc: Line is the line executing in this frame; zero when unknown.
+              name: Line
               type: int
-            - name: StartLine
+            - doc: |-
+                StartLine is the line the function starts at; zero when unknown, and
+                always zero in a goroutine dump, which does not print it.
+              name: StartLine
               type: int
-            - name: Address
+            - doc: |-
+                Address is the program counter of an unsymbolized frame; zero
+                otherwise.
+              name: Address
               type: uint64
   - constants:
-      - name: DefaultTopFunctions
+      - blockDoc: Fold's defaults, taken when a FoldConfig field is not positive.
+        doc: DefaultTopFunctions is how many functions FoldedValue.Top lists.
+        name: DefaultTopFunctions
         type: int
         value: "25"
-      - name: DefaultTopPerOwner
+      - blockDoc: Fold's defaults, taken when a FoldConfig field is not positive.
+        doc: DefaultTopPerOwner is how many functions each owner's Top lists.
+        name: DefaultTopPerOwner
         type: int
         value: "8"
-      - name: DefaultFlameMinShare
+      - blockDoc: Fold's defaults, taken when a FoldConfig field is not positive.
+        doc: |-
+          DefaultFlameMinShare prunes a flame frame costing less than this share
+          of the total: half a percent.
+        name: DefaultFlameMinShare
         type: float64
         value: "0.005"
-      - name: DefaultFlameMaxDepth
+      - blockDoc: Fold's defaults, taken when a FoldConfig field is not positive.
+        doc: DefaultFlameMaxDepth is how many frames deep the flame graph goes.
+        name: DefaultFlameMaxDepth
         type: int
         value: "64"
-      - name: MaxCPUWindow
+      - doc: |-
+          MaxCPUWindow is the longest window CaptureCPU samples. A longer profile is
+          not more precise, only larger and longer to hold the process's one CPU
+          profiler: take several.
+        name: MaxCPUWindow
         type: time.Duration
         value: "300000000000"
-      - name: MaxProfileBytes
+      - doc: |-
+          MaxProfileBytes bounds what Parse reads: the input, and the input once
+          decompressed. A CPU profile of the longest window CaptureCPU allows weighs a
+          few megabytes; a gzip stream inflating past this is not a profile anyone
+          should hold in memory.
+        name: MaxProfileBytes
         type: int
         value: 64 << 20
-      - name: MaxFrames
+      - doc: |-
+          MaxFrames bounds the frames Parse builds: each location's, once, and every
+          sample's stack, which copies them. The bytes a profile weighs do not bound
+          them: a sample names each location by its id, and a location stands for as
+          many frames as it has inlined lines, so a few megabytes naming one deep
+          location again and again would expand into gigabytes of frames. Four
+          million frames — some 230 MB of them — hold a profile of tens of thousands
+          of distinct stacks, as deep as the runtime records them.
+        name: MaxFrames
         type: int
         value: 1 << 22
+    doc: |-
+      Package profiling — hosts CanonicalName: one spelling for a function,
+      whoever named it.
+
+      Package profiling — hosts the captures: the process's CPU over a bounded
+      window, and its live heap.
+
+      Package profiling — hosts Fold: a profile's samples charged to owners, the
+      costliest functions, and the flame graph, in the profile's own unit.
+
+      Package profiling — hosts the goroutine view: the process's goroutines, each
+      with its state, how long it has waited, its labels and its stack, parsed
+      from the runtime's own dump.
+
+      Package profiling — hosts GroupGoroutines: goroutines counted by what they
+      work for, what they wait on and where.
+
+      Package profiling — hosts the reading of goroutine labels in their two
+      printed forms, and their matching onto a dump whose headers lack them.
+
+      Package profiling — hosts Parse: a pprof profile's bytes, gzipped or not,
+      decoded into a ProfileValue with its string, function and location tables
+      resolved.
+
+      Package profiling captures and reads the running process's own profiles
+      (ADR 0121): its CPU over a bounded window and its live heap through
+      runtime/pprof, decoded from the pprof wire format with the standard library
+      alone; a fold that charges each sample to an owner the caller names and adds
+      up per-owner costs, the costliest functions and a pruned flame graph; and
+      its goroutines, parsed from the runtime's dump into their state, how long
+      they have waited, their labels and their stacks, and grouped.
+
+      # The attribution is the caller's
+
+      A profile says which functions ran; what they ran FOR is the caller's
+      knowledge. [Fold] takes an Attribute function: a framework reads the pprof
+      label it put on the goroutine — a CPU sample carries its goroutine's labels
+      — or, for the heap, whose samples carry none, looks for a function it owns on
+      the stack. [CanonicalName] makes a frame's spelling meet the one a static
+      analysis produced.
+
+      # What is estimated
+
+      A heap profile is SAMPLED — about one allocation per 512 KiB is recorded and
+      scaled back up — and a CPU profile counts 100 samples a second: both say
+      where the cost is with confidence and how much only approximately. A test,
+      or a dashboard, should ask where the bytes are, not how many exactly.
+
+      # One CPU profiler per process
+
+      The runtime has one. [CaptureCPU] refuses a second capture with
+      ProfilerBusy rather than queueing it, whoever started the first.
+
+      # Values and codes are the core's
+
+      What a capture returns — the profile, a fold, a goroutine — and every
+      sentinel are declared in internal/core/observe/profiling (ADR 0160); this
+      package is the engine and declares none of them.
+
+      Package profiling — hosts the resolver: string indexes into strings,
+      location ids into frames — each location's frames built once and shared by
+      every sample that passes through it, and counted against MaxFrames when they
+      are built and each time a stack copies them — and labels into maps.
+
+      Package profiling — hosts the decoding of a profile's samples, locations and
+      functions, and their resolution into frames once the string table is known.
+
+      Package profiling — hosts the protocol-buffer wire reader the profile
+      decoder stands on: varints, length-delimited fields, and the skip of a field
+      the decoder does not read. Written from the encoding's specification so the
+      SDK carries no protobuf dependency (the same choice as OTLP/JSON, ADR 0048).
     functions:
-      - in:
+      - doc: |-
+          CanonicalName spells a function the same way whoever named it, so a frame
+          of a profile or a dump meets the function a static analysis found:
+
+            - the runtime's "pkg.(*T).M" and go/types' "(*pkg.T).M" are both
+              "pkg.(*T).M"; "(pkg.T).M" is "pkg.T.M";
+            - an instantiation is dropped: "pkg.F[...]" is "pkg.F";
+            - a function literal, a go or defer wrapper and a method value are their
+              enclosing function: "pkg.F.func1.2", "pkg.F.gowrap1" and "pkg.T.M-fm"
+              are "pkg.F", "pkg.F" and "pkg.T.M".
+        in:
           - name: name
             type: string
         name: CanonicalName
         out:
           - type: string
-      - in:
+      - doc: |-
+          CaptureCPU samples the process's CPU for window and returns the profile,
+          decoded. The runtime has ONE CPU profiler per process: while a capture — this
+          one, or anyone's pprof.StartCPUProfile, net/http/pprof's included — is going,
+          another is refused with [coreprofiling.ProfilerBusy] rather than queued.
+
+          A window that is not positive or exceeds [MaxCPUWindow] is refused with
+          [coreprofiling.WindowInvalid]. A context that ends before the window stops
+          the profiler and returns [coreprofiling.CaptureCanceled], joined with the
+          context's error, and no profile: a partial window would read as the whole
+          one.
+
+          Each sample carries the pprof labels its goroutine had — set with pprof.Do or
+          pprof.SetGoroutineLabels — which is how [Fold] can charge CPU to whoever was
+          doing the work.
+        in:
           - name: ctx
             type: context.Context
           - name: window
@@ -296,11 +584,31 @@ packages:
         out:
           - type: "*coreprofiling.ProfileValue"
           - type: error
-      - name: CaptureHeap
+      - doc: |-
+          CaptureHeap returns the live heap as the runtime's memory profiler last saw
+          it, after a garbage collection, so the in-use figures describe what is
+          reachable now rather than as of the previous cycle.
+
+          A heap profile is SAMPLED: the runtime records about one allocation per
+          runtime.MemProfileRate bytes (512 KiB by default) and scales each record
+          back up, so a figure is an estimate — eight megabytes held may read as six
+          or ten. Ask where the bytes are, not how many exactly. Heap samples carry
+          no pprof labels; a caller charges them to an owner by their stack.
+        name: CaptureHeap
         out:
           - type: "*coreprofiling.ProfileValue"
           - type: error
-      - in:
+      - doc: |-
+          Fold charges every sample of p to an owner and adds it all up: each owner's
+          cost and costliest functions, the costliest functions overall, and a flame
+          graph pruned of what costs less than the configured share. A frame with no
+          function name — an unsymbolized one — is left out of the stacks it is in.
+
+          It refuses a sample type the profile does not measure with
+          [coreprofiling.SampleTypeMissing], and a nil profile or a sample with fewer
+          values than the profile has sample types — which a profile Parse returned
+          never has, a hand-built one may — with [coreprofiling.ProfileMalformed].
+        in:
           - name: p
             type: "*coreprofiling.ProfileValue"
           - name: cfg
@@ -309,17 +617,44 @@ packages:
         out:
           - type: coreprofiling.FoldedValue
           - type: error
-      - name: Goroutines
+      - doc: |-
+          Goroutines returns every goroutine of the process, from the runtime's
+          traceback dump. Labels come from the dump's headers (GODEBUG
+          tracebacklabels=1, the default since Go 1.27); when the headers carry none,
+          they are matched from the labelled goroutine profile by stack — best
+          effort, since the two are taken one after the other.
+
+          Only the traceback dump can fail it; when the labelled profile cannot be
+          written, the goroutines are returned without their labels.
+        name: Goroutines
         out:
           - type: "[]coreprofiling.GoroutineValue"
           - type: error
-      - in:
+      - doc: |-
+          ParseGoroutines reads a goroutine dump — runtime/pprof's goroutine profile
+          at debug 2, runtime.Stack of all goroutines, or the dump a crash or SIGQUIT
+          prints — into goroutines, in the dump's order:
+
+          	goroutine 7 [chan receive, 2 minutes] {kit_node: shop/endpoint/Get}:
+          	pkg.f(0x1)
+          		/path/file.go:12 +0x1d
+          	created by pkg.g in goroutine 1
+          		/path/file.go:30 +0x55
+
+          It never fails: a block whose header does not parse is skipped, and a line
+          it does not recognise is ignored, so a dump from a newer runtime still
+          yields what this parser understands.
+        in:
           - name: dump
             type: "[]byte"
         name: ParseGoroutines
         out:
           - type: "[]coreprofiling.GoroutineValue"
-      - in:
+      - doc: |-
+          GroupGoroutines groups gs by the configured labels, the state and the top
+          frame, and returns the groups largest first — ties by labels in the
+          configured order, then state, then top frame. Nothing in gs is mutated.
+        in:
           - name: gs
             type: "[]coreprofiling.GoroutineValue"
           - name: cfg
@@ -327,7 +662,18 @@ packages:
         name: GroupGoroutines
         out:
           - type: "[]coreprofiling.GoroutineGroupValue"
-      - in:
+      - doc: |-
+          Parse decodes a pprof profile — the gzipped protocol-buffer stream
+          runtime/pprof writes, or the same stream uncompressed. It is written from
+          profile.proto with the standard library alone.
+
+          It refuses input over [MaxProfileBytes], compressed or not, and stacks that
+          add up to more than [MaxFrames] frames, with [coreprofiling.ProfileTooLarge];
+          and anything that is not a well-formed profile — a truncated field, a varint
+          past 64 bits, a string, function or location index that points nowhere, a
+          sample with the wrong number of values — with
+          [coreprofiling.ProfileMalformed]. No refusal quotes the input.
+        in:
           - name: data
             type: "[]byte"
         name: Parse
@@ -338,31 +684,137 @@ packages:
       coreprofiling: github.com/kitsunium/sdk/internal/core/observe/profiling
     path: github.com/kitsunium/sdk/internal/service/observe/profiling
     types:
-      - name: FoldConfig
+      - doc: |-
+          FoldConfig says how Fold reads a profile: which sample type, whose each
+          sample is, how many functions to rank and how much of the flame to keep.
+          Every zero field has a default.
+        name: FoldConfig
         struct:
           fields:
-            - name: Attribute
+            - doc: |-
+                Attribute returns the owner a sample is charged to — a pprof label's
+                value, the component whose code is on the stack — or "" when the
+                sample belongs to nobody in particular. The attribution is the
+                caller's: Fold only adds up. Nil charges every sample to nobody.
+              name: Attribute
               type: func(sample coreprofiling.SampleValue) string
-            - name: SampleType
+            - doc: |-
+                SampleType names the value folded — "cpu", "inuse_space". Empty is
+                the profile's default sample type, else its last one.
+              name: SampleType
               type: string
-            - name: TopFunctions
+            - doc: |-
+                TopFunctions is how many functions FoldedValue.Top lists; not
+                positive means DefaultTopFunctions.
+              name: TopFunctions
               type: int
-            - name: TopPerOwner
+            - doc: |-
+                TopPerOwner is how many functions each owner's Top lists; not positive
+                means DefaultTopPerOwner.
+              name: TopPerOwner
               type: int
-            - name: FlameMinShare
+            - doc: |-
+                FlameMinShare prunes a flame frame costing less than this share of
+                the total. Outside (0, 1), or NaN, means DefaultFlameMinShare.
+              name: FlameMinShare
               type: float64
-            - name: FlameMaxDepth
+            - doc: |-
+                FlameMaxDepth is how deep the flame graph goes from its root; not
+                positive means DefaultFlameMaxDepth.
+              name: FlameMaxDepth
               type: int
-      - name: GroupConfig
+      - doc: |-
+          GroupConfig says how GroupGoroutines groups: by which labels, and how many
+          groups and frames to keep.
+        name: GroupConfig
         struct:
           fields:
-            - name: Labels
+            - doc: |-
+                Labels are the label keys a group is keyed by, in order — "kit_node",
+                "kit_loop" — beside the state and the top frame. None groups by state
+                and top frame alone.
+              name: Labels
               type: "[]string"
-            - name: MaxGroups
+            - doc: MaxGroups keeps the largest groups only; not positive keeps them all.
+              name: MaxGroups
               type: int
-            - name: MaxStack
+            - doc: |-
+                MaxStack cuts each group's stack to its innermost frames; not
+                positive keeps it whole.
+              name: MaxStack
               type: int
-  - facade:
+  - doc: |-
+      Package profiling captures and reads the running process's own profiles
+      (ADR 0121): its CPU over a bounded window, its live heap, and its
+      goroutines — decoded, folded onto owners you name, and grouped.
+
+      	p, err := profiling.CaptureCPU(ctx, 10*time.Second)       // one CPU profiler per process
+      	f, err := profiling.Fold(p, profiling.FoldConfig{
+      	    Attribute: func(s profiling.Sample) string {           // whose work was it?
+      	        if v := s.Labels["component"]; len(v) > 0 {         // set with pprof.Do
+      	            return v[0]
+      	        }
+      	        return ""
+      	    },
+      	})
+      	for _, o := range f.Owners { fmt.Println(o.Owner, time.Duration(o.Value)) }
+
+      	gs, err := profiling.Goroutines()
+      	for _, g := range profiling.GroupGoroutines(gs, profiling.GroupConfig{Labels: []string{"component"}}) {
+      	    fmt.Println(g.Count, g.State, g.Top)                    // 3 select app.(*Pool).wait
+      	}
+
+      # Captures
+
+      [CaptureCPU] samples the CPU for a window of at most [MaxCPUWindow]. The
+      runtime has ONE CPU profiler: while it runs — started by another capture or
+      by anyone's pprof.StartCPUProfile, net/http/pprof's included — a capture is
+      refused with ProfilerBusy, not queued. A context that ends first returns
+      CaptureCanceled and no profile. [CaptureHeap] collects garbage, then
+      reads the live heap.
+
+      # Profiles are decoded with the standard library
+
+      [Parse] reads the pprof format — gzipped or not — written from
+      profile.proto, so the SDK carries no protobuf dependency. It is bounded by
+      [MaxProfileBytes] in what it reads and by [MaxFrames] in what it builds, and
+      refuses anything malformed with ProfileMalformed rather than guessing. A
+      gzipped profile is inflated by the SDK's own gzip transform scheme, over
+      compress/gzip: importing this package links it, which registers "gzip",
+      "flate" and "zlib" under the transform registry, as importing the codec
+      package does. A [Profile] is plain data: sample types, samples with
+      their stacks — innermost frame first, an inlined call a frame of its own —
+      their values and their labels.
+
+      # The attribution is yours
+
+      [Fold] adds up one sample type, charging each sample to the owner your
+      Attribute function names: a CPU sample carries its goroutine's pprof labels;
+      a heap sample carries none, so charge it by what is on its stack.
+      [CanonicalName] spells a function the way go/types does not, so a frame
+      meets the function a static analysis found. The result is in the sample
+      type's own unit — nanoseconds, bytes — and adds up exactly: every owner's
+      Value plus Unattributed is Total. The flame graph is pruned below
+      FlameMinShare of the total.
+
+      # What is estimated
+
+      A heap profile is SAMPLED — about one allocation per 512 KiB is recorded and
+      scaled back up — so eight megabytes held may read as six or ten; a CPU
+      profile counts about a hundred samples a second. Both say where the cost is
+      with confidence and how much only approximately: ask where the bytes are,
+      not how many exactly.
+
+      # Goroutines
+
+      [Goroutines] reads the runtime's own dump: each goroutine's state — the
+      runtime's word for what it waits on — how long it has been blocked, whether
+      it is locked to its thread, its labels, its stack and the go statement that
+      started it. [ParseGoroutines] reads a dump from anywhere — runtime.Stack, a
+      crash, a SIGQUIT — and never fails. [GroupGoroutines] counts them by labels,
+      state and top frame: the innermost frame that is not the runtime's
+      machinery.
+    facade:
       - const:
           - doc: MaxCPUWindow is the longest window CaptureCPU samples.
             name: MaxCPUWindow

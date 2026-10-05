@@ -1,6 +1,5 @@
 //go:build linux
 
-// Package server — the recvmmsg batched datagram reader.
 package server
 
 import (

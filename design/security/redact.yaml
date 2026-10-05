@@ -25,18 +25,67 @@ packages:
             value: "0x00_03_49_02"
         type: errs.Code
     constants:
-      - name: Placeholder
+      - doc: |-
+          Placeholder replaces every secret a [Redactor] recognises. A caller that
+          shows a redacted value compares against it, so every implementation writes
+          exactly this text.
+        name: Placeholder
         type: string
         value: "\"[redacted]\""
-      - name: Ellipsis
+      - doc: |-
+          Ellipsis ends a string, a text or a document cut to fit its bound. It is one
+          character, three bytes of UTF-8, and it is counted inside the bound.
+        name: Ellipsis
         type: string
         value: "\"…\""
-      - name: MinBytes
+      - doc: |-
+          MinBytes is the smallest bound a [Redactor] honours; a smaller or
+          non-positive one is raised to it. Below it a cut document could not hold
+          its own marker and the closers of the containers it cut — and a bound is the
+          display's size, so raising a nonsensical one is safer than refusing to show
+          anything (ADR 0031's clamp: the floor is obvious).
+        name: MinBytes
         type: int
         value: "16"
-      - name: Unencodable
+      - doc: |-
+          Unencodable is the text a log attribute holding a value encoding/json
+          refuses is rendered as by [Redactor.Attrs]: the marker, never the value.
+        name: Unencodable
         type: string
         value: "\"[unencodable]\""
+    doc: |-
+      Package redact — range 0.3.73.* (ADR 0101), declared here since ADR 0160.
+
+      Package redact — declares the sentinel *errs.Error outcomes. Each var's name
+      equals its errs.Define Reason in SCREAMING_SNAKE form.
+
+      Neither refusal carries a byte of what it refused: this domain exists to
+      keep secrets out of what is shown, and an error message is shown. They are
+      raised by the engine in internal/service/security/redact — their Private
+      names that package, the one that raises them — and declared here since ADR
+      0160, so every code of the domain is in one place.
+
+      Package redact declares the SDK's display-redaction port: the [Redactor]
+      that renders a Go value, a JSON document, a text or log attributes for
+      DISPLAY with every secret it recognises replaced, within a byte bound, never
+      touching what it is given — and the values every implementation shares: the
+      [Placeholder] a secret becomes, the [Ellipsis] a cut ends in, the [MinBytes]
+      floor under every bound, the [Unencodable] marker, and the [DocumentValue] a
+      JSON rendering returns. A core sibling since ADR 0160, for the domain ADR
+      0101 admitted.
+
+      It is for showing data to a person: a developer console, a trace viewer, a
+      log panel, an error page. It is not an access control and not a sanitiser
+      for data that goes back into a system: a redacted document is a different
+      document, and a secret spelled in a way no rule recognises is shown.
+
+      The engine — the three rules (a NAME carrying a configured word, a field
+      DECLARED secret, a URL's CREDENTIALS), the writer that counts every byte
+      before writing it, and the per-type plan cache — lives in
+      internal/service/security/redact, which implements [Redactor]. Its
+      construction parameters are the engine's (ADR 0074). This package owns the
+      contract, the values a caller compares results against, and the domain's
+      codes.
     imports:
       corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
       errs: github.com/kitsunium/sdk/internal/kernel/errs
@@ -139,18 +188,69 @@ packages:
             public: The value cannot be encoded as JSON and was not redacted
             reason: VALUE_UNENCODABLE
     types:
-      - name: DocumentValue
+      - doc: |-
+          DocumentValue is a JSON document with its secrets replaced, and whether it
+          had to be cut to fit its bound. It is what [Redactor.JSON] and
+          [Redactor.Value] return.
+        name: DocumentValue
         struct:
           fields:
-            - name: JSON
+            - doc: JSON is always one well-formed JSON value, never longer than the bound.
+              name: JSON
               type: json.RawMessage
-            - name: Truncated
+            - doc: |-
+                Truncated reports that members, elements or the tail of a string were
+                left out to fit the bound. The containers that were cut are still
+                closed, so JSON stays well-formed.
+              name: Truncated
               type: bool
-  - functions:
-      - name: DefaultWords
+  - doc: |-
+      Package redact — log attributes rendered as display text.
+
+      Package redact — the members encoding/json writes for a struct, selected by
+      encoding/json's own rules rather than an approximation of them.
+
+      Package redact — copying a JSON document with its secrets replaced, within
+      an exact byte bound.
+
+      Package redact — which members of a Go type's JSON form are secret by
+      declaration, worked out once per type.
+
+      Package redact renders values, JSON documents, text and log attributes for
+      DISPLAY with their secrets replaced — a member whose name says it is one, a
+      struct field declared secret, the credentials of a URL — and within a byte
+      bound. It never mutates what it is given.
+
+      It is for showing data to a person: a developer console, a trace viewer, a
+      log panel, an error page. It is not an access control and it is not a
+      sanitiser for data that goes back into a system: a redacted document is a
+      different document, and a secret spelled in a way no rule recognises — a
+      password in a member called "p", a key pasted into free text — is shown.
+      What IS recognised is stated in each rule's own comment, so nobody has to
+      guess.
+
+      It implements the internal/core/security/redact port: the Redactor
+      interface, the values a caller compares results against — Placeholder,
+      Ellipsis, MinBytes, Unencodable, DocumentValue — and the domain's two codes
+      are declared there (ADR 0160). What is here is the engine and its
+      construction parameters (ADR 0074).
+
+      Package redact — hosts the compile-time interface assertion, keeping it out
+      of the production source so the runtime binary carries no diagnostic-only
+      declaration.
+
+      Package redact — text: the credentials of a URL, and a cut that respects
+      runes.
+    functions:
+      - doc: |-
+          DefaultWords returns the name fragments a Redactor treats as secret when
+          its Config gives none. It returns a fresh slice, so a caller extending it —
+          append(redact.DefaultWords(), "pin") — changes nothing shared.
+        name: DefaultWords
         out:
           - type: "[]string"
-      - in:
+      - doc: NewRedactor returns a Redactor applying cfg.
+        in:
           - name: cfg
             type: Config
         name: NewRedactor
@@ -161,19 +261,64 @@ packages:
       coreredact: github.com/kitsunium/sdk/internal/core/security/redact
     path: github.com/kitsunium/sdk/internal/service/security/redact
     types:
-      - name: Config
+      - doc: |-
+          Config says what a Redactor treats as secret. Its zero value is usable:
+          the default words, the "redact" tag, no extra field rule, errors rendered
+          by their own text.
+        name: Config
         struct:
           fields:
-            - name: Field
+            - doc: |-
+                Field is an extra rule: it reports whether a struct field is secret
+                by declaration, beyond the tag — a field bound to a cookie, a field
+                bound to a header whose name is a secret's. Nil adds nothing. It is
+                called once per field per type, when the type is first seen.
+              name: Field
               type: func(field reflect.StructField) bool
-            - name: Error
+            - doc: |-
+                Error renders an error found in a log attribute. Nil uses the error's
+                own text, scrubbed and cut like any other text. A framework that
+                shows only an error's wire-safe half passes its own.
+              name: Error
               type: func(err error) string
-            - name: Tag
+            - doc: |-
+                Tag is the struct tag key whose comma-separated options, when one of
+                them is "secret", declare a field secret: Tag "kit" reads
+                `kit:"secret"` and `kit:"other,secret"`. Empty means "redact".
+              name: Tag
               type: string
-            - name: Words
+            - doc: |-
+                Words are the fragments of a member or attribute name that make it a
+                secret, matched case-insensitively anywhere in the name. Nil or empty
+                means DefaultWords — there is no way to recognise NO name, because a
+                redactor that recognises nothing by name is a formatter.
+              name: Words
               type: "[]string"
-      - methods:
-          - in:
+      - doc: |-
+          Redactor applies one Config. It is safe for concurrent use, and it caches
+          what it learns about each Go type — which of its fields are secret — for
+          its own lifetime, so build one per configuration and keep it.
+        methods:
+          - doc: |-
+              Attrs renders log attributes as display text, one (key, text) pair at a
+              time, in order: a group is flattened into dotted keys ("db.user"), and each
+              text is cut to maxBytes (raised to MinBytes).
+
+                - An attribute — or a group — whose DOTTED key the Redactor recognises is
+                  yielded once, as Placeholder: a group named "session" is one redacted
+                  pair, not one per member.
+                - A string has the credentials of its URLs replaced; a number, a bool, a
+                  duration and a time (UTC, RFC 3339 with nanoseconds) are written as Go
+                  writes them.
+                - Anything else — what logger.Any carried — is an error rendered by
+                  Config.Error, a fmt.Stringer by its String, or otherwise the value's
+                  JSON through Value, so its declared secrets are replaced too;
+                  Unencodable when encoding/json refuses it.
+
+              It is an iterator so the caller bounds the COUNT: a record carrying a group
+              of ten thousand attributes costs the caller exactly as many pairs as it
+              ranges over before it breaks.
+            in:
               - name: attrs
                 type: "[]corelogger.AttrValue"
               - name: maxBytes
@@ -182,7 +327,19 @@ packages:
             out:
               - type: iter.Seq2[string, string]
             recv: pointer
-          - in:
+          - doc: |-
+              JSON returns document with its secrets replaced, at most maxBytes long
+              (raised to MinBytes): every member whose name the Redactor recognises has
+              its value, whatever it is, replaced by Placeholder, and every string has
+              the credentials of the URLs in it replaced.
+
+              document is read, never modified. One that is not exactly one JSON value is
+              refused with DocumentInvalid and nothing is returned for it: a partial copy
+              of a document that does not parse cannot be trusted to have had its secrets
+              recognised. Duplicate member names and invalid UTF-8 are tolerated — this
+              is for showing a document, not for accepting one — and invalid UTF-8 is
+              shown as U+FFFD.
+            in:
               - name: document
                 type: "[]byte"
               - name: maxBytes
@@ -194,7 +351,18 @@ packages:
               - name: err
                 type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Value returns v encoded as encoding/json would put it on the wire, with its
+              secrets replaced, at most maxBytes long (raised to MinBytes). Beyond what
+              JSON recognises by name, a struct field the Redactor's tag or field rule
+              declares secret is replaced too — found by walking v's type the way
+              encoding/json lays it out, once per type. A type that writes its own JSON
+              (json.Marshaler, encoding.TextMarshaler) is opaque to that walk, and only
+              the names in its output are judged.
+
+              v is encoded, never modified. A value encoding/json refuses — a channel, a
+              function, a cycle — is refused with ValueUnencodable.
+            in:
               - name: v
                 type: any
               - name: maxBytes
@@ -206,14 +374,24 @@ packages:
               - name: err
                 type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Name reports whether a member, header or attribute name names a secret: it
+              contains one of the Redactor's words, whatever its case.
+            in:
               - name: name
                 type: string
             name: Name
             out:
               - type: bool
             recv: pointer
-          - in:
+          - doc: |-
+              Text returns s with the credentials of every URL in it replaced by
+              Placeholder, then cut to at most maxBytes bytes (raised to MinBytes) at a
+              rune boundary, ending in Ellipsis when cut.
+
+              The credentials are replaced BEFORE the cut, so a cut can never land
+              between a password and the "@" that marks it as one.
+            in:
               - name: s
                 type: string
               - name: maxBytes
@@ -225,7 +403,63 @@ packages:
         name: Redactor
         struct:
           unexported: true
-  - facade:
+  - doc: |-
+      Package redact renders values, JSON documents, text and log attributes for
+      DISPLAY with their secrets replaced, within a byte bound, never touching
+      what it is given.
+
+      	r := redact.New(redact.Config{})
+      	shown, err := r.Value(request, 8<<10)   // a Document: shown.JSON, shown.Truncated
+      	line := r.Text(message, 2<<10)          // URL credentials replaced, cut
+      	for key, text := range r.Attrs(record.Attrs, 2<<10) { … }
+
+      [Redactor] is a port frozen at five methods — Name, Text, JSON, Value and
+      Attrs: [New] returns the SDK's implementation, and code that accepts a
+      Redactor can be handed a test double in its place.
+
+      # What counts as a secret
+
+      Three rules, each stated so nobody has to guess:
+
+        - A NAME. A member, header or attribute whose name contains one of the
+          Redactor's words, case-insensitively — DefaultWords is password, passwd,
+          secret, token, authorization, cookie, session, apikey, api_key, api-key —
+          has its value replaced by Placeholder, whatever the value is: an object
+          under "session" is replaced whole. Log attributes are judged by their
+          DOTTED key, so "db.password" is a secret.
+        - A DECLARATION. A struct field tagged `redact:"secret"` — or
+          `yourtag:"secret"` with Config.Tag, and `yourtag:"other,secret"` too —
+          or one Config.Field says is secret. Found by walking the value's type
+          the way encoding/json lays it out, through pointers, slices, maps and
+          embedded structs, once per type. A type that writes its own JSON is
+          opaque to the walk; only the names in its output are judged.
+        - A URL's CREDENTIALS. In every string: scheme://user:password@host keeps
+          its scheme and host and loses the rest of the userinfo, up to the last
+          "@" before the path, so an "@" inside the password does not leak what
+          follows it.
+
+      What is NOT recognised is shown: a password in a member called "p", a key
+      pasted into free text, a secret in a map keyed by something innocent. This
+      is a display filter, not an access control.
+
+      # The bound is exact
+
+      Every call takes a byte bound (raised to MinBytes). A JSON result is never
+      longer than it and is always one well-formed value: a container that does
+      not fit is closed early, a string that does not fit is cut at a rune and
+      ends in Ellipsis, and a number that does not fit becomes the Ellipsis as a
+      string. Document.Truncated says whether anything was left out. Text is cut
+      AFTER its URL credentials are replaced, so a cut can never land between a
+      password and the "@" that marks it.
+
+      # Refusals
+
+      JSON refuses a document that is not exactly one JSON value
+      (CodeDocumentInvalid) and returns nothing for it: a partial copy of a
+      document that does not parse cannot be trusted to have had its secrets
+      recognised. Value refuses what encoding/json will not encode
+      (CodeValueUnencodable). Neither refusal repeats a byte of what it refused.
+    facade:
       - const:
           - doc: Placeholder replaces every secret.
             name: Placeholder
@@ -308,7 +542,8 @@ packages:
           out:
             - type: "[]string"
     functions:
-      - in:
+      - doc: New returns a Redactor applying cfg.
+        in:
           - name: cfg
             type: Config
         name: New

@@ -1,6 +1,3 @@
-// Package bson — ObjectID, BSON's twelve-byte identifier, and its textual
-// forms: 24 lowercase hexadecimal digits in text and in JSON, the form MongoDB
-// tooling prints.
 package bson
 
 import (

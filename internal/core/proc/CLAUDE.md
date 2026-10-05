@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-04T11:15:00Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # internal/core/proc/
 
 ## Purpose
@@ -33,16 +33,15 @@ its doc comment changes in the design, then `kit gen`, then `make api` — never
 in `design_gen.go`, whose header digests `make api-check` verifies. They moved
 there from `process.go`, `reaper.go`, `group.go` and `listener.go`, content
 moved and never deleted. The four files, left with nothing but their package
-comment, are gone (rule 5): `process.go`'s and `reaper.go`'s comments now close
-`proc.go`'s, and `group.go`'s and `listener.go`'s open and close `limit.go`'s —
-go/doc joins every file's package comment in file-name order, so `go doc` reads
-it as before.
+comment, are gone (rule 5);
+the package comment is `doc.go`'s alone, written by kit from the design (ADR 0167).
 
 ## Contents
 
 | File | Surface |
 |---|---|
-| `proc.go` | package doc + `Resource` enum (`ResourceNoFile`/`ResourceNProc`/`ResourceCore`/`ResourceAS`/`ResourceCPU`/`ResourceFSize`/`ResourceData`/`ResourceStack`/`ResourceMemLock`; the zero is `ResourceUnknown`) + `String`/`Known` |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `proc.go` | `Resource` enum (`ResourceNoFile`/`ResourceNProc`/`ResourceCore`/`ResourceAS`/`ResourceCPU`/`ResourceFSize`/`ResourceData`/`ResourceStack`/`ResourceMemLock`; the zero is `ResourceUnknown`) + `String`/`Known` |
 | `signal.go` (+ `signal_unix.go` / `signal_other.go`) | `Signal` value type: `Parse` / `String` / `OS` / `Int` / `Known`; platform name table |
 | `spec.go` | `Spec` — process spawn spec (path/args/dir/env, creds, pgroup/session, rlimit/nice/umask/oom, **CgroupPath** for pre-exec cgroup v2 placement, **stdio**, **ExtraFiles** for socket activation). `Path` is a file path as written, or a bare name the service searches in the CHILD's PATH (`Env`'s, else the parent's) with os/exec's rules |
 | `stdio.go` | `StdioMode` — how a child's stdin/stdout/stderr are wired (`StdioInherit`/`StdioNull`/`StdioCapture`) + `String`/`Known` |

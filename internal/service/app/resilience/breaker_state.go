@@ -1,4 +1,3 @@
-// Package resilience — circuit-breaker state machine values.
 package resilience
 
 // breakerState is the circuit-breaker state machine value.

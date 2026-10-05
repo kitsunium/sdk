@@ -1,4 +1,3 @@
-// Package baseenc — Base58 (Bitcoin alphabet) base-conversion codec.
 package baseenc
 
 // base58Alphabet is the Bitcoin Base58 alphabet (the ASCII alphanumerics

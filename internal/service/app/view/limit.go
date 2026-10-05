@@ -1,5 +1,3 @@
-// Package view — the writer that stops a render AT its ceiling rather than
-// after it.
 package view
 
 import (

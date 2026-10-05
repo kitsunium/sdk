@@ -1,4 +1,3 @@
-// Package vfs — the fs.FileInfo the in-memory filesystem reports.
 package vfs
 
 import (

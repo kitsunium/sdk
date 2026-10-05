@@ -1,5 +1,3 @@
-// Package validation — a field the plan puts rules on, located for the reach
-// check.
 package validation
 
 // reachMember is a field the plan puts rules on at one object's level: its

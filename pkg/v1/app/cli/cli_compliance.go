@@ -1,6 +1,3 @@
-// Package cli — hosts the compile-time interface assertions, keeping them out
-// of the production source so the runtime binary carries no diagnostic-only
-// declarations.
 package cli
 
 import coreconfig "github.com/kitsunium/sdk/internal/core/app/config"

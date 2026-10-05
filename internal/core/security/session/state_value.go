@@ -1,4 +1,3 @@
-// Package session — the description a Store fills in to build a SessionValue.
 package session
 
 import "time"

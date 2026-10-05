@@ -1,4 +1,3 @@
-// Package cache — the intrusive doubly-linked LRU node.
 package cache
 
 import "time"

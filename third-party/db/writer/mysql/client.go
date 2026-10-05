@@ -1,8 +1,3 @@
-// Package mysql — the client seam: the ONLY file that imports the database
-// driver. newClient resolves credentials once, opens a lazy database/sql handle
-// over a Unix-socket DSN, and returns it plus the execBatch closure that
-// delivers a coalesced batch as one multi-row INSERT. Keeping the driver import
-// here confines go-sql-driver/mysql to a single file.
 package mysql
 
 import (

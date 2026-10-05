@@ -1,7 +1,3 @@
-// Package rotfile — the interval-rotation tick body driven by the worker.Every
-// daemon wired in newRotatingSink when Config.RotateEvery is positive. Split
-// from rotating_sink.go so the daemon's tick logic and its tests sit in their
-// own source/test pair.
 package rotfile
 
 // tickRotate is the interval-rotation tick body run on the daemon goroutine. It

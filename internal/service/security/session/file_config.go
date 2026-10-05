@@ -1,4 +1,3 @@
-// Package session — the file store's construction parameters.
 package session
 
 import (

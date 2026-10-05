@@ -1,9 +1,5 @@
 //go:build windows
 
-// Package exec — Windows cgroup-placement guard. A Spec.CgroupPath names a
-// cgroup v2 directory, a Linux-only concept; Windows confines via Job Object
-// assignment through the cgroup port (a handle, not a path), so a non-empty path
-// at spawn has no meaning here and is rejected with the uniform sentinel.
 package exec
 
 import coreproc "github.com/kitsunium/sdk/internal/core/proc"

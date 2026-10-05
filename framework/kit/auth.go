@@ -1,5 +1,3 @@
-// Package kit — authentication: the handler that says who calls, and the user
-// it names.
 package kit
 
 import (

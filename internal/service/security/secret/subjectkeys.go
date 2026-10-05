@@ -1,5 +1,3 @@
-// Package secret — subject keys: one data key per subject, wrapped by a root
-// keyring that rotates, and destroyed to erase everything it sealed (ADR 0142).
 package secret
 
 import (

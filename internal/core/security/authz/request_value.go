@@ -1,4 +1,3 @@
-// Package authz — hosts RequestValue, the question a Policy answers.
 package authz
 
 // RequestValue is the question: may Subject perform Action on Resource, given

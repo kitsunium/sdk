@@ -1,4 +1,3 @@
-// Package resilience — circuit-breaker configuration.
 package resilience
 
 import (

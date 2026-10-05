@@ -1,7 +1,3 @@
-// Package cbor — the validator: one pass over the bytes, before anything is
-// decoded, that accepts exactly one well-formed and valid data item within
-// the bounds. A document it refuses never touches the caller's value, and no
-// length, count or depth read from the input is acted on until it has passed.
 package cbor
 
 import (

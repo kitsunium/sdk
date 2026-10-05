@@ -1,14 +1,3 @@
-// Package msgpack — the struct encoder and the omitempty rule. A struct is a
-// map of its layout's keys in declaration order, each key appended as bytes
-// encoded once per type. omitempty is decided by the vendor-backed codec's
-// rule: an IsZero() method when the value has one (a nil pointer to such a
-// type is empty), else the kind's zero — no elements, false, 0, nil — and a
-// struct is empty when every one of its fields would be left out.
-//
-// One quirk is kept on purpose because the wire shows it: a field inlined
-// from an embedded struct POINTER that is nil is written as nil — unless the
-// struct has an omitempty field anywhere, in which case such fields are left
-// out. testdata/vendor-golden.txt pins the first case.
 package msgpack
 
 import (

@@ -1,6 +1,3 @@
-// Package clock — hosts compile-time interface assertions
-// — keeping them out of the production
-// source so the runtime binary carries no diagnostic-only declarations.
 package clock
 
 // Compile-time assertions that every implementation satisfies the contract it

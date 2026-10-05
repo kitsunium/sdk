@@ -1,4 +1,3 @@
-// Package validation — hosts planKey, the identity of a compiled plan.
 package validation
 
 import "reflect"

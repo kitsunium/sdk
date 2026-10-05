@@ -1,5 +1,3 @@
-// Package statemachine — hosts MachineSpec, the declaration of a machine: its
-// states, its transitions and its hooks, and what a caller reads back from it.
 package statemachine
 
 import (

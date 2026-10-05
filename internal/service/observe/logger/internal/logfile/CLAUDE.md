@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T05:20:00Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # internal/service/observe/logger/internal/logfile/
 
 ## Purpose
@@ -31,7 +31,8 @@ exactly the logger's engines rather than every package of the service layer.
 
 | File | Surface |
 |---|---|
-| `logfile.go` | package doc + `KindSymlink` + `RefusalSpec` + `Open` + `RefuseSymlink` + `ExplainOpenFailure` |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `logfile.go` | `KindSymlink` + `RefusalSpec` + `Open` + `RefuseSymlink` + `ExplainOpenFailure` |
 | `open_flags_unix.go` | `openFlags = O_APPEND \| O_CREATE \| O_WRONLY \| O_NOFOLLOW` — every `unix` GOOS, and why the tag is `unix` |
 | `open_flags_other.go` | `!unix` fallback (no `O_NOFOLLOW`): windows, plan9, js/wasm, wasip1 |
 | `open_flags_unix_internal_test.go` | the proof that the OPEN refuses a link planted after the check — the one copy both sinks used to carry |

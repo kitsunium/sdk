@@ -1,6 +1,5 @@
 //go:build linux
 
-// Package server — SO_REUSEPORT support on Linux.
 package server
 
 import "syscall"

@@ -1,4 +1,3 @@
-// Package id — KSUID generator (32-bit second prefix + 128-bit payload, base62).
 package id
 
 import (

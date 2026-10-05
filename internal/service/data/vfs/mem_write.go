@@ -1,4 +1,3 @@
-// Package vfs — the in-memory filesystem's write half.
 package vfs
 
 import (

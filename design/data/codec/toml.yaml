@@ -15,6 +15,22 @@ packages:
             name: CodeTOMLUnmarshalFailed
             value: "0x00_03_05_02"
         type: errs.Code
+    doc: |-
+      Package toml declares the error codes and the sentinels of the TOML codec,
+      internal/service/data/codec/toml — range 0.3.5.* (ADR 0005
+      service/data/codec/toml block).
+
+      The codes live in the core at the path that mirrors the package emitting
+      them (ADR 0160 §2) and keep the values they were allocated with: the LL
+      byte 3 records the layer that allocated the range, not the directory that
+      declares it today (ADR 0160 §3). Nothing here encodes or decodes — the
+      mechanism, and the constructors that attach a failure's detail, stay in
+      the service package.
+
+      Package toml — the sentinel *errs.Error values, one per code. Each
+      Reason derives from its var name or from its Code constant (ADR 0020);
+      the Public and Private texts are the ones the service package always
+      emitted, so moving the declaration changed no rendering.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/data/codec/toml
@@ -38,32 +54,140 @@ packages:
             private: "service/data/codec/toml: the document is not valid TOML, or a value does not fit the target; the problem, line and column fields locate it"
             public: TOML decoding failed
             reason: UNMARSHAL_FAILED
-  - functions:
-      - name: New
+  - doc: |-
+      Package toml is the TOML codec, written against TOML v1.0.0
+      (https://toml.io/en/v1.0.0) with the standard library alone. It implements
+      codec.Codec, codec.StreamingCodec and codec.Appender.
+
+      Decoding refuses what the specification refuses: a key or a table defined
+      twice, a table extended from a place the specification does not allow, an
+      integer outside int64, a control character in a string or a comment, bytes
+      that are not UTF-8. It also accepts the four TOML v1.1.0 relaxations the
+      library it replaced accepted — newlines, comments and a trailing comma in an
+      inline table, the \e and \xHH escapes, and a time without seconds — so that
+      no document that decoded before decodes no longer. Encoding writes TOML
+      v1.0.0 only.
+
+      A document decodes into a map or a struct; an untyped target receives
+      map[string]any, []any, string, int64, float64, bool, time.Time for an offset
+      date-time, and LocalDateTime, LocalDate and LocalTime for the three local
+      kinds. A struct field is keyed by its toml tag, or by its name, matched
+      exactly first and then without regard to case.
+
+      Package toml — the decode: a parsed tree written into a Go value. Untyped
+      targets (map[string]any, any, []any) are built natively; typed ones through
+      reflection, guided by the cached typeInfo of each type.
+
+      Package toml — scalars into Go values: strings, integers, floats, booleans
+      and the four date and time kinds, each into the types that can hold it
+      without losing it, or a refusal.
+
+      Package toml — the typed half of the decode: tables into structs and maps,
+      arrays into slices and arrays, through reflection.
+
+      Package toml — the streaming codec.Decoder: the reader is one TOML
+      document, read whole on the first Decode, within maxDocumentBytes.
+
+      Package toml — the encode: a Go map or struct written as a TOML document.
+      The layout is the one the previous library wrote, byte for byte on the
+      values it accepted: a table's plain keys first, then its sub-tables and
+      arrays of tables, each under its header; struct fields in declaration order
+      and map keys sorted; strings literal when they can be, basic otherwise.
+
+      Package toml — values written after a key: scalars, strings in the spelling
+      that needs no escape when there is one, arrays and inline tables.
+
+      Package toml — the streaming codec.Encoder: one TOML document per Encode
+      call, written to the writer in one Write.
+
+      Package toml — the private messages of the refusals that wrap a cause.
+
+      Every refusal is one of the two sentinels internal/core/data/codec/toml
+      declares for this package (ADR 0160). What went wrong travels in fields —
+      problem, a fixed sentence; line and column; the dotted key and the Go type
+      for a decode that does not fit its target — and never as a byte of the
+      document or of the value, which may be a secret.
+
+      Package toml — the three TOML values that have no Go type of their own: a
+      date, a time of day and a date-time, each in no time zone. A decode into an
+      untyped target (map[string]any, any) returns them; a decode into time.Time
+      places them in time.Local, the only zone a local value can be read in.
+
+      The three types keep the field layout and the methods of the
+      github.com/pelletier/go-toml/v2 types this codec returned before it was
+      written natively, so a type switch moves from one to the other by changing
+      its import and nothing else.
+
+      Package toml — dates and times: offset date-time, local date-time, local
+      date and local time, read as RFC 3339 spells them with the two liberties
+      TOML adds — a space for the T, and a fraction of any length, truncated past
+      the nanosecond (§Offset Date-Time).
+
+      Package toml — integers and floats: the token is checked against the
+      grammar (§Integer, §Float) before any conversion, because strconv accepts
+      spellings TOML refuses — a leading zero, a hexadecimal float, "Inf".
+
+      Package toml — strings: basic and literal, on one line or several, the
+      escape sequences of a basic string and the backslash that ends a line of a
+      multi-line one (TOML v1.0.0 §String).
+
+      Package toml — table headers, key-value pairs and keys: the half of the
+      parser that decides where a value goes and whether TOML allows it there.
+
+      Package toml — values: the dispatch on a value's first byte, arrays, inline
+      tables and booleans.
+
+      Package toml — the parser: one pass over a TOML v1.0.0 document that
+      builds its tree and refuses, as the specification requires, a key or a
+      table defined twice, a table extended from a place the specification does
+      not allow, and every byte the grammar has no place for.
+
+      Package toml — the document tree a parse builds: every table, array and
+      scalar of one document in a single arena, linked by index, and the lookup
+      that finds a key in a table in constant time however wide the table is.
+
+      Package toml — what the codec knows about a Go type, computed once per type
+      and cached: how a struct's fields map to keys under the toml struct tag,
+      and which special roles a type plays.
+
+      Package toml — the lexical tables the parser reads bytes through, and the
+      fixed sentences a refusal is made of.
+    functions:
+      - doc: New returns a TOML codec instance.
+        name: New
         out:
           - type: codec.Codec
     imports:
       codec: github.com/kitsunium/sdk/internal/core/data/codec
     path: github.com/kitsunium/sdk/internal/service/data/codec/toml
     types:
-      - methods:
-          - in:
+      - doc: |-
+          LocalDate is a calendar day in no time zone: a TOML local date. It reads and
+          writes itself as RFC 3339 spells a full date, YYYY-MM-DD.
+        methods:
+          - doc: AsTime returns the day at midnight in zone.
+            in:
               - name: zone
                 type: "*time.Location"
             name: AsTime
             out:
               - type: time.Time
             recv: value
-          - name: String
+          - doc: String returns the day as RFC 3339 writes it, YYYY-MM-DD.
+            name: String
             out:
               - type: string
             recv: value
-          - name: MarshalText
+          - doc: MarshalText returns the day as String writes it.
+            name: MarshalText
             out:
               - type: "[]byte"
               - type: error
             recv: value
-          - in:
+          - doc: |-
+              UnmarshalText reads a day written YYYY-MM-DD, refusing a day the month does
+              not have.
+            in:
               - name: text
                 type: "[]byte"
             name: UnmarshalText
@@ -73,23 +197,35 @@ packages:
         name: LocalDate
         struct:
           fields:
-            - name: Year
+            - doc: Year is the calendar year.
+              name: Year
               type: int
-            - name: Month
+            - doc: Month is 1 to 12.
+              name: Month
               type: int
-            - name: Day
+            - doc: Day is 1 to 31.
+              name: Day
               type: int
-      - methods:
-          - name: String
+      - doc: |-
+          LocalTime is a time of day in no time zone: a TOML local time. It reads and
+          writes itself as RFC 3339 spells a partial time, HH:MM:SS with an optional
+          fraction.
+        methods:
+          - doc: |-
+              String returns the time as RFC 3339 writes it, HH:MM:SS, with Precision
+              fractional digits, or the fewest that keep Nanosecond when Precision is 0.
+            name: String
             out:
               - type: string
             recv: value
-          - name: MarshalText
+          - doc: MarshalText returns the time as String writes it.
+            name: MarshalText
             out:
               - type: "[]byte"
               - type: error
             recv: value
-          - in:
+          - doc: UnmarshalText reads a time written HH:MM:SS with an optional fraction.
+            in:
               - name: text
                 type: "[]byte"
             name: UnmarshalText
@@ -99,34 +235,54 @@ packages:
         name: LocalTime
         struct:
           fields:
-            - name: Hour
+            - doc: Hour is 0 to 23.
+              name: Hour
               type: int
-            - name: Minute
+            - doc: Minute is 0 to 59.
+              name: Minute
               type: int
-            - name: Second
+            - doc: Second is 0 to 59.
+              name: Second
               type: int
-            - name: Nanosecond
+            - doc: Nanosecond is 0 to 999 999 999.
+              name: Nanosecond
               type: int
-            - name: Precision
+            - doc: |-
+                Precision is how many fractional digits String writes: as many as the
+                document had, up to nine. Zero writes the fewest that keep
+                Nanosecond.
+              name: Precision
               type: int
-      - methods:
-          - in:
+      - doc: |-
+          LocalDateTime is a date and a time of day in no time zone: a TOML local
+          date-time. It reads and writes itself as the date and the time joined by a
+          T.
+        methods:
+          - doc: AsTime returns the date-time in zone.
+            in:
               - name: zone
                 type: "*time.Location"
             name: AsTime
             out:
               - type: time.Time
             recv: value
-          - name: String
+          - doc: |-
+              String returns the date-time as RFC 3339 writes it, with a T between the
+              date and the time.
+            name: String
             out:
               - type: string
             recv: value
-          - name: MarshalText
+          - doc: MarshalText returns the date-time as String writes it.
+            name: MarshalText
             out:
               - type: "[]byte"
               - type: error
             recv: value
-          - in:
+          - doc: |-
+              UnmarshalText reads a date-time written YYYY-MM-DDTHH:MM:SS with an optional
+              fraction; a space or a t may stand for the T.
+            in:
               - name: text
                 type: "[]byte"
             name: UnmarshalText
@@ -141,11 +297,59 @@ packages:
             - embedded: true
               type: LocalTime
     variables:
-      - name: Codec
+      - blockDoc: |-
+          Package-level state: the codec singleton plus the hoisted MIME /
+          extension tables.
+        doc: ": register the singleton and expose it as a typed package var."
+        name: Codec
         type: codec.Codec
   - constants:
-      - name: Format
+      - doc: |-
+          Format is the name TOML is registered under. It is an untyped constant, so
+          it goes wherever a format name is taken — config.FSSource's string,
+          i18n.LoadFS's codec.Format — without a conversion.
+        name: Format
         value: "\"toml\""
+    doc: |-
+      Package toml registers the TOML codec with the SDK's codec registry — and
+      no other codec — when it is imported (ADR 0134):
+
+      	import _ "github.com/kitsunium/sdk/pkg/v1/data/codec/toml"
+
+      Everything that dispatches through the registry by format name then reads
+      and writes TOML: config.FileSource and config.FSSource, i18n.LoadFS, and
+      the codec package's Marshal and Unmarshal. Importing
+      github.com/kitsunium/sdk/pkg/v1/data/codec instead registers every format the SDK
+      ships — BSON, CBOR, MessagePack and the rest — which
+      a program that only reads TOML does not need to link. This package links
+      the TOML codec, which the SDK implements with the standard library alone,
+      and no module outside the SDK.
+
+      The codec reads TOML v1.0.0 (https://toml.io/en/v1.0.0), refusing what the
+      specification refuses — a key or a table defined twice, an integer outside
+      int64, bytes that are not UTF-8 — and accepts the four TOML v1.1.0
+      relaxations: newlines, comments and a trailing comma in an inline table, the
+      \e and \xHH escapes, and a time without seconds. It writes TOML v1.0.0.
+      A refusal never quotes the document; it names the problem, the line and the
+      column.
+
+      A document decoded into map[string]any or any holds map[string]any, []any,
+      string, int64, float64, bool, time.Time for an offset date-time, and
+      [LocalDateTime], [LocalDate] and [LocalTime] for the three kinds of TOML
+      value that carry no time zone. Decoded into a time.Time instead, a local
+      value is placed in time.Local.
+
+      Importing both packages is harmless: a format is registered by the package
+      that implements it, which Go initialises once however many packages import
+      it.
+
+      # Errors
+
+      Failures carry the range 0.3.5.*; match them with errs.HasCode, or the
+      sentinels with errors.Is:
+
+      	CodeMarshalFailed    0.3.5.1  a Go value TOML cannot represent, or a writer that failed
+      	CodeUnmarshalFailed  0.3.5.2  a document that is not TOML, past a bound, or a value its target cannot hold
     facade:
       - const:
           - doc: CodeMarshalFailed identifies a Go value TOML cannot represent (0.3.5.1).

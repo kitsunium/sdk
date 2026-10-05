@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T07:14:15Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # internal/service/security/redact/
 
 ## Purpose
@@ -22,7 +22,8 @@ since ADR 0160, with its values unchanged; this package raises it.
 
 | File | Role |
 |---|---|
-| `redact.go` | package doc, `DefaultWords`, `Config`, `Redactor`, `NewRedactor`, `Name`, `bound` |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `redact.go` | `DefaultWords`, `Config`, `Redactor`, `NewRedactor`, `Name`, `bound` |
 | `plan.go` | the per-type plan: which members of a type's JSON form are secret by declaration, cached per `Redactor` |
 | `fields.go` | `writtenFields` — for a struct, the one field `encoding/json` writes under each member name, selected by `encoding/json`'s own rules (`jsonName`, level-by-level embedding, `dominant`) |
 | `json.go` | `JSON`, `Value` (both returning the core's `DocumentValue`), and the `copier` — a `jsontext` token stream re-emitted by hand so every byte is accounted against the bound |

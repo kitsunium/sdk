@@ -1,12 +1,3 @@
-// Package logger — declares the Value type — a discriminated union
-// carrying the payload of an AttrValue without forcing every concrete type
-// through `any`. Handlers switch on Value.Kind() to select a typed accessor
-// (Int64, Float64, String, …) and skip the cost of reflection at format time.
-//
-// Storage layout: bool / int64 / uint64 / float64 / time.Duration share the
-// `num` field via bit-packing (math.Float64bits for floats, two's complement
-// for ints). Strings live in `str`. Time, Group and Any payloads live in
-// `any`. The zero Value carries Kind == KindAny with a nil `any` payload.
 package logger
 
 import (

@@ -1,8 +1,3 @@
-// Package logger — implements the TextHandler — a concrete
-// core.Handler that renders RecordEvent values as
-// "TIME LEVEL msg key=val..." and writes the bytes to an io.Writer under a
-// mutex. It composes the kernel/concur/buffer pool and kernel/clock abstraction so
-// that tests can drive it deterministically.
 package logger
 
 import (

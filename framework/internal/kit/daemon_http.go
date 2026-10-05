@@ -1,5 +1,3 @@
-// Package kit — the daemon's HTTP server as the Studio sees it: its loop,
-// its counters, and the middleware every request goes through.
 package kit
 
 import (

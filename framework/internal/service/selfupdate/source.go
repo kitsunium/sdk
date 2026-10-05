@@ -1,5 +1,3 @@
-// Package selfupdate — the release source: which project's releases this binary
-// updates itself from, and what its artefacts are called.
 package selfupdate
 
 import "strings"

@@ -27,6 +27,27 @@ packages:
             name: CodeFormMultiValue
             value: "0x00_03_28_03"
         type: errs.Code
+    doc: |-
+      Package form declares the error codes and the sentinels of the
+      application/x-www-form-urlencoded codec, internal/service/data/codec/form —
+      range 0.3.40.* (ADR 0005 service/data/codec/form block).
+
+      The codes live in the core at the path that mirrors the package emitting
+      them (ADR 0160 §2) and keep the values they were allocated with: the LL
+      byte 3 records the layer that allocated the range, not the directory that
+      declares it today (ADR 0160 §3). Nothing here encodes or decodes — the
+      mechanism, and the constructors that attach a failure's detail, stay in
+      the service package.
+
+      Package form — the sentinel *errs.Error values, one per code. Each
+      Reason derives from its var name or from its Code constant (ADR 0020);
+      the Public and Private texts are the ones the service package always
+      emitted, so moving the declaration changed no rendering.
+
+      There is deliberately no MarshalFailed sentinel: once the codec has
+      accepted the argument shape, percent-escaping a map of strings is a total
+      function — no byte sequence can make it fail. Defining an unreachable
+      sentinel would put a code in the registry that no test can ever provoke.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/data/codec/form
@@ -57,19 +78,82 @@ packages:
             private: "service/data/codec/form: map[string]string target cannot hold a repeated key"
             public: form key carries multiple values
             reason: MULTI_VALUE
-  - functions:
-      - name: New
+  - doc: |-
+      Package form implements application/x-www-form-urlencoded as a
+      codec.Codec — the encoding every HTML form POSTs and every query string
+      carries. It is stdlib-only: net/url supplies the decode half.
+
+      The wire format is a flat, ordered list of key=value pairs joined by '&',
+      with keys and values percent-escaped and space written as '+'. It has no
+      types, no nesting, and no array syntax: the ONLY way to carry more than one
+      value under a key is to repeat the key. This codec models that literally,
+      so its native Go shape is url.Values (== map[string][]string). Marshal
+      accepts url.Values, map[string][]string and — for the common single-valued
+      form — map[string]string, plus non-nil pointers to any of the three;
+      Unmarshal writes into a pointer to any of the three.
+
+      Repeated keys: "a=1&a=2" decodes to {"a": ["1","2"]}, in wire order. No
+      bracket dialect (a[]=, a[0]=) is invented and no value is dropped — see the
+      package CLAUDE.md for the full round-trip contract and the two documented
+      places where Marshal ∘ Unmarshal is not byte-for-byte identity.
+    functions:
+      - doc: New returns the urlencoded form codec instance.
+        name: New
         out:
           - type: codec.Codec
     imports:
       codec: github.com/kitsunium/sdk/internal/core/data/codec
     path: github.com/kitsunium/sdk/internal/service/data/codec/form
     variables:
-      - name: Codec
+      - blockDoc: |-
+          Package-level state: the codec singleton plus the hoisted MIME /
+          extension tables.
+        doc: ": register the singleton and expose it as a typed package var."
+        name: Codec
         type: codec.Codec
   - constants:
-      - name: Format
+      - doc: |-
+          Format is the name the urlencoded form is registered under. It is an untyped
+          constant, so it goes wherever a format name is taken — the codec package's
+          Marshal, config.FSSource's string, i18n.LoadFS's codec.Format — without a
+          conversion.
+        name: Format
         value: "\"form\""
+    doc: |-
+      Package form registers the application/x-www-form-urlencoded codec with the
+      SDK's codec registry — and no other codec — when it is imported (ADR 0134):
+
+      	import _ "github.com/kitsunium/sdk/pkg/v1/data/codec/form"
+
+      The codec reads and writes the encoding every HTML form posts. Its native
+      value is url.Values — map[string][]string and map[string]string are
+      accepted too — because a repeated key is the only array syntax the format
+      has: a body repeating a key decoded into a map[string]string is refused
+      rather than reduced to one value. Through the codec package's Marshal any
+      other value is carried as one JSON-mediated field.
+
+      Everything that dispatches through the registry by format name then
+      reads and writes it: the codec package's Marshal and Unmarshal,
+      config.FSSource and i18n.LoadFS. Importing
+      github.com/kitsunium/sdk/pkg/v1/data/codec instead registers every
+      format the SDK ships; this package links this one codec, the core
+      package declaring its codes and the standard library, and nothing else.
+      Importing both is harmless: a format is registered by the package that
+      implements it, which Go initialises once however many packages import it.
+
+      # Errors
+
+      Failures carry the range 0.3.40.*; match them with errs.HasCode, or the
+      sentinels with errors.Is:
+
+      	CodeValueInvalid     0.3.40.1  the value or the target is not url.Values-shaped
+      	CodeUnmarshalFailed  0.3.40.2  a malformed escape, a ';' separator, or a decode bound exceeded
+      	CodeMultiValue       0.3.40.3  a repeated key decoded into a map[string]string
+
+      There is no marshal failure: past the shape check, percent-escaping a map of
+      strings cannot fail.
+
+      No error message quotes the input.
     facade:
       - const:
           - doc: |-

@@ -7,9 +7,9 @@ go_library(
     srcs = [
         "codes_gen.go",
         "design_gen.go",
+        "doc.go",
         "errors.go",
         "id.go",
-        "session.go",
         "session_value.go",
         "state_value.go",
     ],

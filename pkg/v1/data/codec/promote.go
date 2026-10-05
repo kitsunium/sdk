@@ -1,28 +1,3 @@
-// Package codec — declares the sentinel *errs.Error values the
-// facade emits when dispatch fails.
-//
-// Package codec — the multipart/form-data value types, and the one helper a
-// consumer needs to send what Marshal(Multipart, …) returns. The format is a
-// container whose delimiter lives in the Content-Type header, which the Codec
-// contract cannot carry, so the facade publishes the two shapes the codec
-// speaks natively and the function that recovers that header from the body —
-// the multipart package's own Form, Part and ContentType, under the names this
-// package has always given them.
-//
-// Package codec — JSON-bridge promotion path for codecs whose runtime
-// preconditions reject the public Marshal(F, any) / Unmarshal(F, *,
-// any) contract. Six of the twenty-four registered codecs constrain
-// their input shape: csv expects [][]string, ndjson expects []T, pem
-// expects *pem.Block, flatbuffers expects []byte or BytesProvider,
-// form expects url.Values, tlv's decoder cannot project composites
-// into typed targets. Without promotion the facade's "format-swap is
-// a single string change" promise is a lie for 6/24. Promotion
-// intercepts the VALUE_INVALID / FLATBUFFERS_BAD_* / UNMARSHAL_FAILED
-// responses, encodes the value to JSON, wraps the bytes in a
-// codec-specific container the codec will accept, and reverses the
-// pipeline on Unmarshal. The fast (native-shape) path is untouched so
-// existing callers see zero overhead. See
-// TestUniversalRoundtripAllCodecs for the contract pin.
 package codec
 
 import (

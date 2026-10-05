@@ -1,12 +1,5 @@
 //go:build unix && !linux
 
-// Package exec — cgroup placement on Unix platforms that are NOT Linux (the
-// BSDs, Darwin). cgroup v2 is a Linux mechanism with no portable equivalent, so
-// a non-empty Spec.CgroupPath is rejected up front with UnsupportedPlatform
-// rather than silently ignored — silently dropping the placement would run the
-// target unconfined, the exact failure the feature exists to prevent. The
-// trampoline never reaches applyCgroupPlacement here because validateCgroupPath
-// fails the spawn first; it is defined only to keep the unix build self-contained.
 package exec
 
 import coreproc "github.com/kitsunium/sdk/internal/core/proc"

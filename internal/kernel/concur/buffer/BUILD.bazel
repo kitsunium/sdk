@@ -4,7 +4,10 @@ package(default_visibility = ["//internal/kernel:kernel_consumers"])
 
 go_library(
     name = "buffer",
-    srcs = ["buffer.go"],
+    srcs = [
+        "buffer.go",
+        "doc.go",
+    ],
     importpath = "github.com/kitsunium/sdk/internal/kernel/concur/buffer",
     visibility = ["//internal/kernel:kernel_consumers"],
     deps = ["//internal/kernel/concur/recycler"],

@@ -1,7 +1,3 @@
-// Package rotfile — the exported on-demand Rotate method (SIGHUP / logrotate
-// integration), split out of rotating_sink.go so the receiver file stays under
-// KTN-FUNC-MAXLOC. The calendar-pruning helpers it delegates to live in
-// prune.go.
 package rotfile
 
 // Rotate forces an immediate rotation of the active file.

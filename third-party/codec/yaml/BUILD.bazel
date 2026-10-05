@@ -14,6 +14,7 @@ go_library(
         "codec.go",
         "codes_gen.go",
         "decoder.go",
+        "doc.go",
         "encoder.go",
     ],
     importpath = "github.com/kitsunium/sdk/third-party/codec/yaml",

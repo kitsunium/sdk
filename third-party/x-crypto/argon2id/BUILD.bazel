@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "argon2id",
-    srcs = ["argon2id.go"],
+    srcs = [
+        "argon2id.go",
+        "doc.go",
+    ],
     importpath = "github.com/kitsunium/sdk/third-party/x-crypto/argon2id",
     visibility = ["//visibility:public"],
     deps = [

@@ -1,5 +1,3 @@
-// Package i18n — a compiled message body, and the placeholder-name grammar it
-// holds its spans to.
 package i18n
 
 import (

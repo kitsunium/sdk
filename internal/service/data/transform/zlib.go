@@ -1,11 +1,3 @@
-// Package transform — the zlib Compressor over compress/zlib (RFC 1950): a
-// two-byte header, a raw DEFLATE body, and an Adler-32 trailer. This is NOT the
-// `flate` scheme: `flate` is the bare DEFLATE stream of RFC 1951, with no header
-// and no checksum, so the two are not wire-compatible in either direction.
-// HTTP's `Content-Encoding: deflate` (RFC 9110 §8.4.1) names the zlib envelope,
-// so this scheme — not `flate` — is the one that interoperates with it. Shares
-// the package with the gzip and flate schemes; all three self-register at
-// import.
 package transform
 
 import (

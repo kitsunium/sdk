@@ -1,4 +1,3 @@
-// Package net — the completed-call observation record.
 package net
 
 import "time"

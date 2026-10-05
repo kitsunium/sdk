@@ -1,7 +1,3 @@
-// Package queue — waking an idle consumer: the broadcast every broker closes on
-// a publication, and the table that lets two durable brokers over one queue —
-// one directory, or one database and table — in one process wake each other's
-// consumers.
 package queue
 
 import (

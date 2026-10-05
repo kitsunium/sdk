@@ -1,4 +1,3 @@
-// Package client — the path allowlist policy.
 package client
 
 import (

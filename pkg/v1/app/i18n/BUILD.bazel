@@ -5,8 +5,8 @@ package(default_visibility = ["//visibility:public"])
 go_library(
     name = "i18n",
     srcs = [
+        "doc.go",
         "facade_gen.go",
-        "i18n.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/app/i18n",
     visibility = ["//visibility:public"],

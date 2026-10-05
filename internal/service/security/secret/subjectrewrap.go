@@ -1,5 +1,3 @@
-// Package secret — what a rotation of the root costs the subject keys: one
-// re-wrap per subject, and a version kept while a key still needs it.
 package secret
 
 import (

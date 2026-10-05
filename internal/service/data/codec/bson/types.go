@@ -1,8 +1,3 @@
-// Package bson — the Go types for the BSON values Go has no type of its own
-// for. Decoding into an interface produces them, encoding writes them back as
-// the BSON type they stand for, and they carry the semantics the codec's
-// previous library gave its own equivalents, so a value that crossed a
-// map[string]any before keeps meaning the same thing.
 package bson
 
 import (

@@ -1,5 +1,3 @@
-// Package queue — how long a nacked message waits, the same way in all three
-// brokers.
 package queue
 
 import (

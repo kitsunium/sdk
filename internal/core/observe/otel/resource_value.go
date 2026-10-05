@@ -1,4 +1,3 @@
-// Package otel — Resource: who produced the telemetry.
 package otel
 
 import "slices"

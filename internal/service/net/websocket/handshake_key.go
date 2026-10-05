@@ -1,7 +1,3 @@
-// Package websocket — the opening handshake's key exchange (RFC 6455 §4.1,
-// §4.2.2): the check that a Sec-WebSocket-Key is a nonce, and the digest that
-// answers it. The protocol's constants — the GUID, the version, the header
-// names — are the domain's (corenet.WSGUID and its neighbours).
 package websocket
 
 import (

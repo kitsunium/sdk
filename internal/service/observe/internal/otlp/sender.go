@@ -1,5 +1,3 @@
-// Package otlp — the OTLP/HTTP sender: the only file of this package, and of
-// the two signals that use it, that opens an outbound socket.
 package otlp
 
 import (

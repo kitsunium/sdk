@@ -1,16 +1,5 @@
 //go:build linux || darwin || freebsd || openbsd || netbsd || dragonfly
 
-// Package session — the platform gate the file store reads, and the one
-// question a mode can answer here and cannot on Windows.
-//
-// The file store rests on three guarantees, and only two of them are portable.
-// Atomic publication is rename(2), which POSIX requires to be atomic and which
-// Go's os.Rename also provides on Windows through MoveFileEx. Restrictive
-// permissions and advisory locking are not: they are the reason this file has a
-// build tag and a sibling that refuses. The lock itself is the kernel's
-// (internal/kernel/fs/flock, polled by [fileStore.takeFlock]); what stays here
-// is the gate that says both mechanics exist, and [plantable], which a mode
-// can answer here and cannot on Windows.
 package session
 
 import "io/fs"

@@ -11,6 +11,14 @@ packages:
             note: "range: 0.3.18.0 - 0.3.18.255"
             value: "0x00_03_12_01"
         type: errs.Code
+    doc: |-
+      Package route declares the codes and sentinels of the logger's routing
+      middleware, internal/service/observe/logger/middleware/route: range
+      0.3.18.*, allocated to that engine (ADR 0005 service/observe/logger/middleware/route
+      block) and declared here since ADR 0160, so the engine declares none.
+
+      Package route — declares the sentinel the routing Sink returns. Its Reason
+      is the namespaced form of its code's name (ADR 0006).
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/observe/logger/middleware/route
@@ -25,8 +33,24 @@ packages:
             private: service/observe/logger/middleware/route.Write found no matching predicate and no default sink
             public: No route predicate matched the record
             reason: ROUTE_NO_MATCH
-  - functions:
-      - in:
+  - doc: |-
+      Package route implements a predicate-based router Sink. Records are
+      dispatched to the first downstream sink whose Predicate returns true
+      for the record. When no predicate matches, the optional fallback sink
+      receives the write; without a fallback, Write returns NoMatch.
+
+      Use case: send error-level records to a remote alerting drain while
+      keeping info-level records local.
+
+      Package route — declares the Params struct that pairs a predicate with a
+      downstream sink. Sibling of router_sink.go so the router file stays
+      focused on the Sink contract.
+    functions:
+      - doc: |-
+          New constructs a router Sink from the supplied entries and optional
+          fallback Sink. The entries slice is defensively copied so post-
+          construction mutation by the caller is harmless.
+        in:
           - name: fallback
             type: corelogger.Sink
           - name: entries
@@ -35,7 +59,8 @@ packages:
         out:
           - type: corelogger.Sink
         variadic: true
-      - in:
+      - doc: LevelAtLeast returns a Predicate matching records at or above min.
+        in:
           - name: min
             type: level.Level
         name: LevelAtLeast
@@ -46,12 +71,21 @@ packages:
       level: github.com/kitsunium/sdk/internal/core/observe/logger/level
     path: github.com/kitsunium/sdk/internal/service/observe/logger/middleware/route
     types:
-      - name: Predicate
+      - doc: |-
+          Predicate decides whether a route should accept a given record. The
+          router evaluates predicates in declaration order; the first true wins.
+        name: Predicate
         underlying: func(r corelogger.RecordEvent) (match bool)
-      - name: Params
+      - doc: |-
+          Params binds a Predicate to a downstream Sink. Held verbatim by the
+          router; callers MUST NOT mutate the Sink reference after registration.
+          Read at call sites as route.Params{When: …, Sink: …}.
+        name: Params
         struct:
           fields:
-            - name: When
+            - doc: When decides whether this entry accepts the record.
+              name: When
               type: Predicate
-            - name: Sink
+            - doc: Sink receives the matching record.
+              name: Sink
               type: corelogger.Sink

@@ -1,4 +1,3 @@
-// Package kit — the register of processing: each store's line.
 package kit
 
 import (

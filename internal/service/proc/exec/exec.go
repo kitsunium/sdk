@@ -1,11 +1,3 @@
-// Package exec — the keystone spawn primitive: turns a coreproc.Spec into a
-// running, supervised process via fork/exec with credentials, a private process
-// group/session, and best-effort scheduling attributes.
-//
-// The platform-portable surface is Start; the concrete fork/exec lives in
-// exec_unix.go (every Unix GOOS) with a degrading no-op in exec_other.go so the
-// package compiles on every target. Errors are the central coreproc sentinels,
-// wrapped (never re-Defined) with errs.Wrap.
 package exec
 
 import (

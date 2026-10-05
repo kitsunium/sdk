@@ -1,6 +1,3 @@
-// Package multipart — the two value types that model a body: one section
-// (PartValue) and the container that frames them (FormValue). They live in one
-// file because neither is meaningful without the other.
 package multipart
 
 // FormValue is a whole multipart/form-data body: its RFC 2046 delimiter and

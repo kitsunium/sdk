@@ -1,4 +1,3 @@
-// Package net — TLS material parsing helpers shared by NewIdentity.
 package net
 
 import (

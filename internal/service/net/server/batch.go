@@ -1,4 +1,3 @@
-// Package server — the datagram batch-read abstraction.
 package server
 
 import (

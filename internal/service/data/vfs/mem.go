@@ -1,4 +1,3 @@
-// Package vfs — the in-memory filesystem, and the read half of its contract.
 package vfs
 
 import (

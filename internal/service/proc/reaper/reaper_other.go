@@ -1,7 +1,5 @@
 //go:build !unix
 
-// Package reaper — non-Unix no-op reaper: degrades cleanly where SIGCHLD and
-// PR_SET_CHILD_SUBREAPER do not exist (e.g. Windows).
 package reaper
 
 import coreproc "github.com/kitsunium/sdk/internal/core/proc"

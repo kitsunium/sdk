@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T13:06:04Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # internal/service/security/session/
 
 ## Purpose
@@ -22,7 +22,8 @@ exactly as ADR 0018 §(a) prescribes.
 
 | File | Surface |
 |---|---|
-| `session.go` | package doc + `wrapAs` (origin-wins sentinel + cause as a field) + the `aesgcm` blank import |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `session.go` | `wrapAs` (origin-wins sentinel + cause as a field) + the `aesgcm` blank import |
 | `config.go` | `Config` (memory) + `validateWindow` — the shared ADR 0031 refusals |
 | `file_config.go` | `FileConfig` (+ `Dir`, `Key`) + its `validate` |
 | `window.go` | `window` — the deadline policy: `slide` / `deadline` / `live` / `mint` / `rotate` / `build` |

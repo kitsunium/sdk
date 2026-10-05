@@ -1,6 +1,5 @@
 //go:build freebsd
 
-// Package reaper — FreeBSD procctl(2) ABI constants for SetChildSubreaper.
 package reaper
 
 import "syscall"

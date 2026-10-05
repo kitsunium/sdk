@@ -21,6 +21,10 @@ const (
 	modeWriteErrorCodes string = "write-error-codes"
 	// modeCheckErrorCodes compares docs/error-codes.yaml with docs/api.
 	modeCheckErrorCodes string = "check-error-codes"
+	// modeWriteReadmes writes the package READMEs from docs/api.
+	modeWriteReadmes string = "write-readmes"
+	// modeCheckReadmes compares the package READMEs with docs/api.
+	modeCheckReadmes string = "check-readmes"
 )
 
 // cliOptions are the parsed flags.
@@ -55,6 +59,10 @@ type cliOptions struct {
 	writeErrorCodes bool
 	// checkErrorCodes selects checking docs/error-codes.yaml.
 	checkErrorCodes bool
+	// writeReadmes selects writing the package READMEs.
+	writeReadmes bool
+	// checkReadmes selects checking the package READMEs.
+	checkReadmes bool
 }
 
 // parseFlags parses the command line's arguments.
@@ -75,6 +83,8 @@ func parseFlags(args []string) (*cliOptions, error) {
 	fs.BoolVar(&o.digests, "digests", false, "with -check-api: check every generated file's header digests against the design files' bytes")
 	fs.BoolVar(&o.writeErrorCodes, "write-error-codes", false, "emit no index; write docs/error-codes.yaml from the committed docs/api: every errs.Code constant a package declares")
 	fs.BoolVar(&o.checkErrorCodes, "check-error-codes", false, "emit no index; fail when docs/error-codes.yaml is not what -write-error-codes writes from the committed docs/api")
+	fs.BoolVar(&o.writeReadmes, "write-readmes", false, "emit no index; write the README.md of every package under pkg/ and framework/ from the committed docs/api (ADR 0167)")
+	fs.BoolVar(&o.checkReadmes, "check-readmes", false, "emit no index; fail when a package README.md is not what -write-readmes writes from the committed docs/api")
 	//: a flag the set does not know; the set printed the usage already.
 	if err := fs.Parse(args); err != nil {
 		//: as the flag package said it.
@@ -105,6 +115,14 @@ func (o *cliOptions) mode() string {
 	case o.writeErrorCodes:
 		//: it.
 		return modeWriteErrorCodes
+	//: writing the READMEs.
+	case o.writeReadmes:
+		//: that mode.
+		return modeWriteReadmes
+	//: checking the READMEs.
+	case o.checkReadmes:
+		//: that mode.
+		return modeCheckReadmes
 	//: checking docs/error-codes.yaml.
 	case o.checkErrorCodes:
 		//: it.
@@ -121,7 +139,7 @@ func (o *cliOptions) mode() string {
 func (o *cliOptions) usage() (problem string, ok bool) {
 	n := 0
 	//: count the mode selectors set.
-	for _, set := range []bool{o.checkLinks, o.writeAPI, o.checkAPI, o.writeErrorCodes, o.checkErrorCodes} {
+	for _, set := range []bool{o.checkLinks, o.writeAPI, o.checkAPI, o.writeErrorCodes, o.checkErrorCodes, o.writeReadmes, o.checkReadmes} {
 		//: one more.
 		if set {
 			n++
@@ -130,7 +148,7 @@ func (o *cliOptions) usage() (problem string, ok bool) {
 	//: one mode at a time.
 	if n > 1 {
 		//: refuse.
-		return "-check-doclinks, -write-api, -check-api, -write-error-codes and -check-error-codes select one mode each: give one", false
+		return "-check-doclinks, -write-api, -check-api, -write-error-codes, -check-error-codes, -write-readmes and -check-readmes select one mode each: give one", false
 	}
 	//: the two surface checks belong to -check-api.
 	if (o.markers || o.digests) && !o.checkAPI {
@@ -150,7 +168,7 @@ func runMode(o *cliOptions) int {
 		return 1
 	}
 	//: the error codes are read from docs/api, which names its own cells.
-	if m := o.mode(); m == modeWriteErrorCodes || m == modeCheckErrorCodes {
+	if m := o.mode(); m == modeWriteErrorCodes || m == modeCheckErrorCodes || m == modeWriteReadmes || m == modeCheckReadmes {
 		//: their own exit status.
 		return runErrorCodesMode(o, os.Stderr)
 	}
@@ -198,6 +216,19 @@ func runErrorCodesMode(o *cliOptions, out io.Writer) int {
 		fmt.Fprintf(out, "genindex: cannot resolve the repository root %q\n", root)
 		//: a failed run.
 		return 1
+	}
+	//: the READMEs.
+	switch o.mode() {
+	//: written.
+	case modeWriteReadmes:
+		//: from docs/api.
+		return runWriteReadmes(root, out)
+	//: checked.
+	case modeCheckReadmes:
+		//: against docs/api.
+		return runCheckReadmes(root, out)
+	//: docs/error-codes.yaml.
+	default:
 	}
 	//: writing.
 	if o.mode() == modeWriteErrorCodes {

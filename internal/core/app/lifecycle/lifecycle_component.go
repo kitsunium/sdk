@@ -1,4 +1,3 @@
-// Package lifecycle — hosts ComponentValue, the registration a Lifecycle owns.
 package lifecycle
 
 // ComponentValue is one named unit of the application's startup order: what

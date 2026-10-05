@@ -1,34 +1,3 @@
-// Package view implements the ADR 0058 rendering port over the stdlib's
-// html/template: one [coreview.Factory], registered under [coreview.HTML], that
-// parses a whole template tree eagerly and renders each request into a bounded
-// buffer it owns.
-//
-// # Why html/template and nothing else
-//
-// html/template is not "the stdlib option". It is the only template engine in
-// the Go ecosystem that escapes ACCORDING TO CONTEXT — a value between two
-// tags, the same value inside an attribute, inside a URL and inside a <script>
-// block are four different escapings, and it tracks which one applies by
-// parsing the surrounding HTML. text/template, pongo2, quicktemplate and jet
-// all escape uniformly or not at all, which is why they are extension-point
-// candidates rather than SDK defaults.
-//
-// The package therefore never imports text/template, and does not merely
-// promise not to: TestDomainNeverReachesTextTemplate parses the source of all
-// three view packages and fails the build on the import. The two packages are
-// API-compatible, so the substitution compiles, passes every test and ships
-// stored XSS — a documented rule would not have survived the first afternoon
-// somebody needed to render an email body.
-//
-// # What lands where
-//
-//   - html.go   — the Factory, its registration, and the two constructors.
-//   - parse.go  — the FS walk, full-path naming, and the escaping probe that
-//     turns a lazily-detected escaping failure into a refused construction.
-//   - render.go — the renderer type and the bounded, all-or-nothing render.
-//   - limit.go  — the writer that stops execution AT the ceiling.
-//   - scan.go   — the trust-type scan that runs before the template does.
-//   - cycles.go — the pointer bookkeeping that stops a self-referential model.
 package view
 
 import (

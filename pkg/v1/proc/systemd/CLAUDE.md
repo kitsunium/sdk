@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T04:55:00Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # pkg/v1/proc/systemd/
 
 ## Purpose
@@ -6,8 +6,8 @@
 The proc family's two systemd facades (ADR 0155). This directory holds no Go
 code: it is a prefix, not a package, and there is no
 `github.com/kitsunium/sdk/pkg/v1/proc/systemd` to import. Each member is a
-package of the SDK module with its own `CLAUDE.md` and `README.md` (generated
-by gomarkdoc from its doc comment, ADR 0008), imported by its full path —
+package of the SDK module with its own `CLAUDE.md` and `README.md` (written
+by `tools/genindex` from `docs/api`, ADR 0167), imported by its full path —
 `github.com/kitsunium/sdk/pkg/v1/proc/systemd/notify` — and linking what it
 imports and never this directory or `pkg/v1/proc` above it.
 
@@ -39,6 +39,6 @@ they sit at: a caller writes `notify.Ready()` and `listen.Listeners(true)`.
   the path both protocols would then appear to belong to.
 - Declare an error code in a member: the sentinels are `internal/core/proc`'s
   (`0.2.6.*`), and the members expose them through that contract.
-- Hand-edit a member's `README.md`: edit its doc comment and run
-  `make docs-readme`, whose `--repository.path` names the member's full path.
+- Hand-edit a member's `README.md`: edit its doc comment in the design, run
+  `kit gen`, `make api` and `make docs-readme` (ADR 0167).
 - Leave an alias package at either old path, at the root of `pkg/v1`.

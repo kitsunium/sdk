@@ -1,5 +1,3 @@
-// Package static — opening a name of the tree, and telling a name that names
-// nothing from a tree that failed.
 package static
 
 import (

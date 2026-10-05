@@ -1,5 +1,3 @@
-// Package lock — the background renewal, and the only channel through which a
-// lost lease can reach work that has already started.
 package lock
 
 import (

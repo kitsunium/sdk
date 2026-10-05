@@ -1,37 +1,5 @@
 //go:build windows
 
-// Package queue — who else can write a queue directory, asked of Windows in the
-// only vocabulary it has for it: the directory's DACL, read by the one reader
-// this repository has (internal/kernel/fs/winacl — the lock domain's reader,
-// ADR 0084/0086, moved to the kernel so that the queue no longer reaches into
-// another service for it; ADR 0159).
-//
-// # Why the mode rule cannot run here
-//
-// os.Stat SYNTHESISES a mode from FILE_ATTRIBUTE_READONLY on Windows, so every
-// writable directory reports 0777 with no sticky bit, and the Unix rule refused
-// every queue directory a caller could name — as QUEUE_DIRECTORY_UNUSABLE, an
-// error that blames the deployment for the platform (ADR 0018 §(a)'s failure
-// mode). The first Windows run of the whole suite found it: every /file case.
-//
-// # The same two questions, asked of the DACL
-//
-// The root is refused when an identifier meaning anybody may take away an
-// entry it did not create — winacl.ReplaceRights, the Windows spelling of
-// "world-writable and not sticky". A state is refused when such an identifier
-// may put an entry there at all — a file (a planted message) or a directory
-// or junction — or take one away, or alter a file created there through what
-// that file would inherit: on Unix a message is written 0600 whatever the
-// directory allows, here it inherits the directory's list.
-//
-// # Where it does not reach
-//
-// The broker cannot yet RUN here: internal/service/data/vfs refuses Windows by
-// design (no flushable directory handle, a mode that is not an ACL), so NewFile
-// returns UNSUPPORTED_PLATFORM once these checks pass. They run anyway, so the
-// refusal a caller meets on Windows is the platform's rather than a false
-// verdict on their directory — and so the rules are right on the day vfs gains
-// a Windows backend.
 package queue
 
 import (

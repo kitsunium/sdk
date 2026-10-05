@@ -19,6 +19,17 @@ packages:
             name: CodeNetTransportWriteFailed
             value: "0x00_03_1E_02"
         type: errs.Code
+    doc: |-
+      Package nettransport declares the codes and sentinels of the network log
+      writer, internal/service/observe/logger/writer/nettransport: range 0.3.30.*,
+      allocated to that engine (ADR 0015 service slot 0x1e) and declared here since
+      ADR 0160, so the engine declares none.
+
+      Package nettransport — declares the sentinels returned by the network sink's
+      constructor and Write path. Each var's name equals its errs.Define Reason in
+      SCREAMING_SNAKE form. No value parsed from a config map or a record is ever
+      echoed into these errors (secret gate): only the network and a fixed private
+      string are attached.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/observe/logger/writer/nettransport
@@ -44,33 +55,131 @@ packages:
             private: "service/observe/logger/writer/nettransport: the underlying transport returned an error"
             public: Network transport write failed
             reason: NET_TRANSPORT_WRITE_FAILED
-  - imports:
+  - doc: |-
+      Package nettransport — the transport seams: the ONLY file that touches net /
+      net/http. Each constructor returns a sendFunc (+ optional closer) captured by
+      netSink, so the concrete transport stays confined here and tests inject a
+      recording sendFunc with no real socket.
+
+      Package nettransport — the NetConfig value type plus compose, the single
+      helper a factory uses to build the levelgate(async(netSink)) chain. Keeping
+      the composition order here (not in each factory) means tcp / udp / http all
+      inherit the same back-pressure + level-floor wiring, with only the transport
+      send/close seam varying per protocol.
+
+      Package nettransport — the config Decoder making tcp/udp/http reachable from a
+      config file via pkg/v1/observe/logger.FromConfig. Only the plain-data keys are
+      decodable (address / min_level / buffer_size); the Dialer and HTTPClient SSRF
+      seams are code-only and never come from a config blob. A malformed shape
+      yields the shared core/observe/logger/writer.WriterConfigInvalid (no per-package code), tagged
+      with the protocol only — never the offending value (secret gate).
+
+      Package nettransport — netSink, the terminal per-record network sink. It ships
+      each formatted record straight to the transport seam under a mutex, mirroring
+      the syslog sink: the send is synchronous, so the recycled payload p is fully
+      consumed before Write returns and needs no defensive clone (the Write path is
+      0 alloc — see BENCH.md). Non-blocking back-pressure is provided by the async
+      middleware composed around it, not here.
+
+      Package nettransport registers stdlib network writer factories — "tcp",
+      "udp", and "http" (ADR 0015). Importing the package self-registers all three
+      (no init()), so writer.Open("tcp", NetConfig{…}) and FromConfig topologies
+      resolve. It is the dep-light seam that community adapters (Loki, Elastic,
+      Datadog, a Kafka bridge) build on WITHOUT pulling a vendor SDK into the tree:
+      each composes levelgate(async(netSink)) over a stdlib net.Conn or http.Client.
+
+      SECURITY (CWE-918): when the destination is consumer-controlled, supply
+      NetConfig.Dialer (tcp/udp) or NetConfig.HTTPClient (http) with an SSRF
+      allowlist — the raw address is never echoed into an error.
+
+      Package nettransport — the wrap points every failure of this writer goes through,
+      so each carries its code from internal/core/observe/logger/writer/nettransport.
+    imports:
       http: net/http
       level: github.com/kitsunium/sdk/internal/core/observe/logger/level
       writer: github.com/kitsunium/sdk/internal/core/observe/logger/writer
     path: github.com/kitsunium/sdk/internal/service/observe/logger/writer/nettransport
     types:
-      - name: NetConfig
+      - doc: |-
+          NetConfig tunes a network writer. Address is required (a host:port for
+          tcp/udp, a URL for http); every other field is optional. It carries only
+          stdlib types, so the package stays dep-light.
+        name: NetConfig
         struct:
           fields:
-            - name: Address
+            - doc: "Address is the destination: \"host:port\" for tcp/udp, a full URL for http."
+              name: Address
               type: string
-            - name: Dialer
+            - doc: |-
+                Dialer, when non-nil, replaces net.Dial for tcp/udp connection setup.
+                SECURITY (CWE-918): when Address is consumer-controlled, plug an
+                allowlist dialer so an attacker cannot target internal services or the
+                cloud-metadata endpoint (169.254.169.254). Nil falls back to net.Dial.
+              name: Dialer
               type: func(network, addr string) (conn net.Conn, err error)
-            - name: HTTPClient
+            - doc: |-
+                HTTPClient, when non-nil, replaces the default client for the http
+                protocol. SECURITY: supply a client whose Transport enforces an SSRF
+                allowlist for consumer-controlled URLs. Nil falls back to a
+                timeout-bounded client that refuses redirects (CheckRedirect returns
+                http.ErrUseLastResponse), NOT http.DefaultClient — so a redirect cannot
+                bypass the validated target — on a connection pool of its own, which the
+                sink's Close releases: a clone of http.DefaultTransport while that is the
+                stdlib's *http.Transport, proxy environment included. A process that
+                replaced http.DefaultTransport with another RoundTripper gets a fresh
+                transport that keeps only the proxy environment and the idle reaping,
+                never that RoundTripper — whatever it carries reaches this writer only
+                through an HTTPClient that carries it.
+
+                A supplied client is used AS-IS, Transport included, and its pool is the
+                caller's: the sink's Close leaves it alone, so a caller that built one for
+                this writer alone releases it with CloseIdleConnections after closing the
+                writer. One whose Transport is http.DefaultTransport (a nil Transport is)
+                shares that pool with the whole process, and anything that empties it —
+                every httptest.Server.Close, every http.DefaultClient.CloseIdleConnections
+                — can make a delivered record read as a failed write, which a failover or
+                retry then duplicates. Give such a client a Transport of its own.
+              name: HTTPClient
               type: "*http.Client"
-            - name: MinLevel
+            - doc: |-
+                MinLevel is the optional per-writer severity floor; the zero value
+                (level.Info) inherits the handler-global level.
+              name: MinLevel
               type: level.Level
-            - name: BufferSize
+            - doc: |-
+                BufferSize is the async ring capacity; a non-positive value applies
+                async's own default. The producer never blocks on the network — drops
+                surface through OnDrop instead.
+              name: BufferSize
               type: int
-            - name: OnDrop
+            - doc: |-
+                OnDrop, when non-nil, is invoked with the count of records discarded
+                because the non-blocking ring saturated (network slower than producers).
+              name: OnDrop
               type: func(dropped int)
-            - name: OnError
+            - doc: |-
+                OnError, when non-nil, is invoked for every downstream send failure the
+                async drainer observes (dial/write/non-2xx). Nil discards the error — the
+                async ring is the only failure surface once the producer has handed off.
+                Code-only, like Dialer/HTTPClient — never decoded from a config blob.
+              name: OnError
               type: func(err error)
     variables:
-      - name: WriterTCP
+      - blockDoc: |-
+          WriterTCP / WriterUDP / WriterHTTP are the registered factory singletons. The
+          blank assignments run writer.Register at package load (no init()), mirroring
+          the codec convention.
+        name: WriterTCP
         type: writer.Factory
-      - name: WriterUDP
+      - blockDoc: |-
+          WriterTCP / WriterUDP / WriterHTTP are the registered factory singletons. The
+          blank assignments run writer.Register at package load (no init()), mirroring
+          the codec convention.
+        name: WriterUDP
         type: writer.Factory
-      - name: WriterHTTP
+      - blockDoc: |-
+          WriterTCP / WriterUDP / WriterHTTP are the registered factory singletons. The
+          blank assignments run writer.Register at package load (no init()), mirroring
+          the codec convention.
+        name: WriterHTTP
         type: writer.Factory

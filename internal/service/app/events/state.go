@@ -1,5 +1,3 @@
-// Package events — one published version of the bus membership, and the two
-// rewrites that produce the next one.
 package events
 
 import (

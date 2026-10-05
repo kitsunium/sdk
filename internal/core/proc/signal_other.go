@@ -1,6 +1,5 @@
 //go:build !unix
 
-// Package proc — non-Unix signal name table (Windows): the portable subset.
 package proc
 
 import "syscall"

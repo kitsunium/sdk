@@ -6,6 +6,7 @@ go_library(
     name = "view",
     srcs = [
         "cycles.go",
+        "doc.go",
         "errors.go",
         "html.go",
         "limit.go",

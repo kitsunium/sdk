@@ -1,6 +1,3 @@
-// Package health — hosts the registered check: what the registry remembers
-// about it between probes, and the three accesses that read and move that
-// memory.
 package health
 
 import (

@@ -1,5 +1,3 @@
-// Package validation — the single place a ViolationValue is minted, so every
-// built-in constraint reports the same shape.
 package validation
 
 import (

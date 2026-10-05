@@ -1,5 +1,3 @@
-// Package view — the one trust type this domain admits, and the only spelling
-// the SDK offers for it.
 package view
 
 import "html/template"

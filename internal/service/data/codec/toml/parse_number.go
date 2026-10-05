@@ -1,6 +1,3 @@
-// Package toml — integers and floats: the token is checked against the
-// grammar (§Integer, §Float) before any conversion, because strconv accepts
-// spellings TOML refuses — a leading zero, a hexadecimal float, "Inf".
 package toml
 
 import (

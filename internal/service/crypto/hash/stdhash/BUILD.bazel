@@ -7,11 +7,11 @@ go_library(
     srcs = [
         "crc32c_hasher.go",
         "digest_writer.go",
+        "doc.go",
         "fnv_hasher.go",
         "sha256_hasher.go",
         "sha3_hasher.go",
         "sha512_hasher.go",
-        "stdhash.go",
         "verifying_reader.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/crypto/hash/stdhash",

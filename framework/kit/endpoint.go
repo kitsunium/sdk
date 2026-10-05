@@ -1,4 +1,3 @@
-// Package kit — endpoints: an HTTP route and the operation it serves.
 package kit
 
 import (

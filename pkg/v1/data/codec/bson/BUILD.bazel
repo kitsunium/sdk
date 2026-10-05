@@ -6,6 +6,7 @@ go_library(
     name = "bson",
     srcs = [
         "bson.go",
+        "doc.go",
         "facade_gen.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/data/codec/bson",

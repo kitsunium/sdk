@@ -1,4 +1,3 @@
-// Package kit — hashing and verifying passwords under their policy.
 package kit
 
 import (

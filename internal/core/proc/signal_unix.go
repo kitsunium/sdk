@@ -1,6 +1,5 @@
 //go:build unix
 
-// Package proc — Unix signal name table (linux/darwin/bsd).
 package proc
 
 import "syscall"

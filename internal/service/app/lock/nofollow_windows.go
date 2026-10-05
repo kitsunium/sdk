@@ -1,46 +1,5 @@
 //go:build windows
 
-// Package lock — the Windows half of "do not follow an indirection at the lock
-// path".
-//
-// # CreateFileW followed reparse points, and that was read rather than assumed
-//
-// os.OpenFile reaches CreateFileW through syscall.Open, and syscall.Open sets
-// FILE_FLAG_OPEN_REPARSE_POINT for exactly ONE createmode: CREATE_NEW, which
-// is O_CREAT|O_EXCL. This locker opens O_CREATE|O_RDWR, which is OPEN_ALWAYS,
-// which does not get the flag — so before this change the open followed a
-// symbolic link or a junction planted at the lock path, the same defect the
-// Unix side was measured to have. Read in the toolchain this repository pins
-// (go1.27.0, src/syscall/syscall_windows.go), not inferred from behaviour.
-//
-// # The flag OPENS the link, it does not refuse it — so the check is the pair
-//
-// FILE_FLAG_OPEN_REPARSE_POINT means "give me a handle to the reparse point
-// itself" rather than "fail if there is one". Used alone it fixes the
-// redirection — the flock and the ledger stop landing on the attacker's file —
-// and leaves the lock sitting on a link the attacker still owns and can
-// retarget. So the flag is paired with GetFileInformationByHandle: any handle
-// whose attributes carry FILE_ATTRIBUTE_REPARSE_POINT is closed and refused.
-// The flag is what makes the check possible (without it the handle is the
-// TARGET, which has no reparse attribute and nothing to notice); the check is
-// what turns a redirect into a refusal.
-//
-// # No new dependency, and no hand-rolled CreateFile
-//
-// golang.org/x/sys is banned SDK-wide, and ADR 0081 bound LockFileEx from
-// kernel32 with syscall.NewLazyDLL rather than importing it. Nothing of the
-// kind is needed here: go1.27's syscall.Open passes the high 12 bits of its
-// flag word through to CreateFileW's dwFlagsAndAttributes, and
-// FILE_FLAG_OPEN_REPARSE_POINT is in its validFileFlagsMask — so the flag
-// rides the ordinary os.OpenFile call.
-//
-// That matters beyond tidiness. ADR 0081 §D5 accepts every directory on
-// Windows on the strength of one sentence: "os.OpenFile reaches CreateFileW
-// WITHOUT FILE_SHARE_DELETE, so a held lock file can be neither deleted nor
-// renamed whatever the ACL says". A hand-rolled CreateFile would have had to
-// restate that share mode — and a hand-rolled share mode that drifts is how
-// the Windows directory rule silently stops being justified. The open stays
-// os.OpenFile, so the sentence stays literally true.
 package lock
 
 import (

@@ -1,11 +1,3 @@
-// Package selfupdate replaces the running binary with a newer signed release.
-// This file implements SHA-256 integrity verification of downloaded release
-// archives against the checksums.txt manifest published by the release
-// workflow (CWE-494 mitigation: download of code without integrity check).
-//
-// INTEGRITY ONLY. Nothing here establishes who published the manifest; that
-// is signature.go's job, and matchArchiveDigest must never be reached with a
-// manifest verifyArchive has not authenticated first.
 package selfupdate
 
 import (

@@ -1,13 +1,3 @@
-// Package nettransport registers stdlib network writer factories — "tcp",
-// "udp", and "http" (ADR 0015). Importing the package self-registers all three
-// (no init()), so writer.Open("tcp", NetConfig{…}) and FromConfig topologies
-// resolve. It is the dep-light seam that community adapters (Loki, Elastic,
-// Datadog, a Kafka bridge) build on WITHOUT pulling a vendor SDK into the tree:
-// each composes levelgate(async(netSink)) over a stdlib net.Conn or http.Client.
-//
-// SECURITY (CWE-918): when the destination is consumer-controlled, supply
-// NetConfig.Dialer (tcp/udp) or NetConfig.HTTPClient (http) with an SSRF
-// allowlist — the raw address is never echoed into an error.
 package nettransport
 
 import (

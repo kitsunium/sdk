@@ -1,5 +1,3 @@
-// Package trace — the one member of a collector's answer that is this signal's
-// own: the count an ExportTraceServiceResponse reports rejected.
 package trace
 
 import "github.com/kitsunium/sdk/internal/service/observe/internal/otlp"

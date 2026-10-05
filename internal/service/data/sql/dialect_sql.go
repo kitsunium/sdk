@@ -1,7 +1,3 @@
-// Package sql — hosts the only place in this domain that renders
-// dialect-specific SQL. Every statement it sends is built here, spelled with
-// the vocabulary core/data/sql's Dialect owns: the bind markers, the quoting and the
-// row-lock clauses.
 package sql
 
 import (

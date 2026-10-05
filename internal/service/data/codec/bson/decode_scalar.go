@@ -1,7 +1,3 @@
-// Package bson — decoding into scalar targets. The conversions accepted are
-// the previous library's: a number decodes into any numeric target it fits, a
-// boolean into a number and a number into a boolean, null and undefined into
-// the zero value; anything else is refused rather than guessed.
 package bson
 
 import (

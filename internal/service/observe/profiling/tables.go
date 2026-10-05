@@ -1,5 +1,3 @@
-// Package profiling — hosts the decoding of a profile's samples, locations and
-// functions, and their resolution into frames once the string table is known.
 package profiling
 
 import (

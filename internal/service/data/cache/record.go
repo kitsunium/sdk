@@ -1,4 +1,3 @@
-// Package cache — what the underlying primitive actually stores.
 package cache
 
 import "time"

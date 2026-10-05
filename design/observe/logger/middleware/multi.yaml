@@ -12,6 +12,14 @@ packages:
             note: "range: 0.3.16.0 - 0.3.16.255"
             value: "0x00_03_10_01"
         type: errs.Code
+    doc: |-
+      Package multi declares the codes and sentinels of the logger's fan-out
+      middleware, internal/service/observe/logger/middleware/multi: range
+      0.3.16.*, allocated to that engine (ADR 0005 service/observe/logger/middleware/multi
+      block) and declared here since ADR 0160, so the engine declares none.
+
+      Package multi — declares the sentinel the fan-out Sink returns. Its name
+      equals its errs.Define Reason in SCREAMING_SNAKE form.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/observe/logger/middleware/multi
@@ -27,8 +35,20 @@ packages:
             private: service/observe/logger/middleware/multi.Write aggregated per-sink errors via errors.Join
             public: One or more fan-out sinks failed
             reason: FANOUT_WRITE_FAILED
-  - functions:
-      - in:
+  - doc: |-
+      Package multi implements a fanout Sink that broadcasts each Write to a
+      fixed list of downstream sinks. A single failure does NOT short-circuit
+      the fanout — every sink receives the payload, and the per-sink errors
+      are aggregated via errors.Join so callers see the complete failure set.
+
+      Use case: emit logs to console + file + remote drain simultaneously, with
+      independent failure modes per branch.
+    functions:
+      - doc: |-
+          New constructs a fanout Sink that broadcasts to every sink in branches.
+          A nil or empty branches slice is treated as a no-op sink — every Write
+          returns nil and Flush / Close are no-ops.
+        in:
           - name: branches
             type: corelogger.Sink
         name: New

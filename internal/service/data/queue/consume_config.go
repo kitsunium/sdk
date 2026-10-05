@@ -1,5 +1,3 @@
-// Package queue — the consumer engine's configuration, its one mandatory
-// assertion, and the clamps that make every other field safe to omit.
 package queue
 
 import (

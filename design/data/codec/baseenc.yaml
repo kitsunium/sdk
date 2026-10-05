@@ -33,6 +33,23 @@ packages:
             name: CodeBaseEncSizeExceeded
             value: "0x00_03_18_04"
         type: errs.Code
+    doc: |-
+      Package baseenc declares the error codes and the sentinels of the base-N
+      codec family (base64, base64url, base32, base16, hex, ascii85, base45,
+      base58, base62), internal/service/data/codec/baseenc — range 0.3.24.* (ADR
+      0006 service/data/codec/baseenc block).
+
+      The codes live in the core at the path that mirrors the package emitting
+      them (ADR 0160 §2) and keep the values they were allocated with: the LL
+      byte 3 records the layer that allocated the range, not the directory that
+      declares it today (ADR 0160 §3). Nothing here encodes or decodes — the
+      mechanism, and the constructors that attach a failure's detail, stay in
+      the service package.
+
+      Package baseenc — the sentinel *errs.Error values, one per code. Each
+      Reason derives from its var name or from its Code constant (ADR 0020);
+      the Public and Private texts are the ones the service package always
+      emitted, so moving the declaration changed no rendering.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/data/codec/baseenc
@@ -64,47 +81,228 @@ packages:
             private: "service/data/codec/baseenc: len(data) exceeds maxBaseEncBytes (CWE-400 defence)"
             public: base-N input exceeds size limit
             reason: BASE_ENC_SIZE_EXCEEDED
-  - imports:
+  - doc: |-
+      Package baseenc — Base45 (RFC 9285) alphabet codec. Unlike base16/32/64
+      and ascii85, the stdlib ships no base45 encoder, so the encode/decode
+      transforms live here. Base45 is a block encoding (base45PairBytes input
+      bytes → base45GroupChars output chars; a trailing byte → base45TailChars
+      chars), hence O(n) — safe to share the 10 MiB maxBaseEncBytes cap with
+      the stdlib-backed variants.
+
+      Package baseenc — Base58 (Bitcoin alphabet) base-conversion codec.
+
+      Package baseenc — Base62 (0-9A-Za-z) base-conversion codec.
+
+      Package baseenc — big-endian base-conversion arithmetic shared by the
+      Base58 and Base62 variants. Unlike the block encodings, these treat the
+      whole input as one integer and divide it down by the radix, so the
+      transforms are O(n²) — callers MUST cap input at maxConvBytes first.
+
+      Package baseenc — buffered writer used by variants whose stdlib has no
+      streaming encoder (base16 uppercase). Held in its own file so the
+      KTN-STRUCT-ONEFILE rule sees exactly one exported-shape struct per file.
+
+      Package baseenc implements a family of codec.Codec wrappers around the
+      stdlib byte encodings (base16 / base32 / base64 / ascii85). Each variant
+      registers itself with the core/data/codec registry under a distinct Name —
+      the variant discriminator is the registered Format, not a tagged enum.
+
+      Universal Marshal flow: encode v with encoding/json, then base-N encode
+      the resulting bytes. Unmarshal reverses the pipeline. The JSON layer is
+      intentional — base-N alphabets are structureless, so flattening through
+      JSON gives consumers a single Marshal/Unmarshal contract over any value.
+
+      Blank-importing this package registers all six variants at process start
+      via package-level var initialisers; no init() function involved.
+
+      Package baseenc — buffered decode reader for variants whose stdlib has
+      no streaming decoder (Base45). Held in its own file so KTN-STRUCT-ONEFILE
+      sees exactly one struct per file.
+
+      Package baseenc — adapts the base-N stream-reader pipeline to
+      codec.Decoder. Each Decode call drives a stdlib json.Decoder over the
+      base-N decoded byte stream wrapped around the caller's io.Reader.
+
+      Package baseenc — adapts the base-N stream-writer pipeline to
+      codec.Encoder. Each Encode call serialises one JSON value into the
+      underlying base-N WriteCloser, which writes the encoded bytes onto the
+      caller's io.Writer.
+
+      Package baseenc — IO adapters used by the streaming pipeline.
+
+      Package baseenc — per-variant identity table.
+    imports:
       codec: github.com/kitsunium/sdk/internal/core/data/codec
     path: github.com/kitsunium/sdk/internal/service/data/codec/baseenc
     variables:
-      - name: Base64
+      - blockDoc: |-
+          Singletons — registered with the core/data/codec registry at package load.
+          Binding each registration result to a typed package-level var keeps us
+          clear of init() and lets downstream callers refer to a specific variant.
+        doc: Base64 is the RFC 4648 standard base64 codec.
+        name: Base64
         type: codec.Codec
-      - name: Base64URL
+      - blockDoc: |-
+          Singletons — registered with the core/data/codec registry at package load.
+          Binding each registration result to a typed package-level var keeps us
+          clear of init() and lets downstream callers refer to a specific variant.
+        doc: Base64URL is the RFC 4648 URL-safe base64 codec.
+        name: Base64URL
         type: codec.Codec
-      - name: Base32
+      - blockDoc: |-
+          Singletons — registered with the core/data/codec registry at package load.
+          Binding each registration result to a typed package-level var keeps us
+          clear of init() and lets downstream callers refer to a specific variant.
+        doc: Base32 is the RFC 4648 standard base32 codec.
+        name: Base32
         type: codec.Codec
-      - name: Base16
+      - blockDoc: |-
+          Singletons — registered with the core/data/codec registry at package load.
+          Binding each registration result to a typed package-level var keeps us
+          clear of init() and lets downstream callers refer to a specific variant.
+        doc: Base16 is the uppercase hex codec.
+        name: Base16
         type: codec.Codec
-      - name: Hex
+      - blockDoc: |-
+          Singletons — registered with the core/data/codec registry at package load.
+          Binding each registration result to a typed package-level var keeps us
+          clear of init() and lets downstream callers refer to a specific variant.
+        doc: Hex is the lowercase hex codec.
+        name: Hex
         type: codec.Codec
-      - name: ASCII85
+      - blockDoc: |-
+          Singletons — registered with the core/data/codec registry at package load.
+          Binding each registration result to a typed package-level var keeps us
+          clear of init() and lets downstream callers refer to a specific variant.
+        doc: ASCII85 is the Adobe Ascii85 codec.
+        name: ASCII85
         type: codec.Codec
-      - name: Base45
+      - blockDoc: |-
+          Singletons — registered with the core/data/codec registry at package load.
+          Binding each registration result to a typed package-level var keeps us
+          clear of init() and lets downstream callers refer to a specific variant.
+        doc: Base45 is the RFC 9285 Base45 codec (QR-code alphanumeric safe).
+        name: Base45
         type: codec.Codec
-      - name: Base58
+      - blockDoc: |-
+          Singletons — registered with the core/data/codec registry at package load.
+          Binding each registration result to a typed package-level var keeps us
+          clear of init() and lets downstream callers refer to a specific variant.
+        doc: Base58 is the Bitcoin Base58 codec (base-conversion; short inputs only).
+        name: Base58
         type: codec.Codec
-      - name: Base62
+      - blockDoc: |-
+          Singletons — registered with the core/data/codec registry at package load.
+          Binding each registration result to a typed package-level var keeps us
+          clear of init() and lets downstream callers refer to a specific variant.
+        doc: Base62 is the Base62 codec (base-conversion; short inputs only).
+        name: Base62
         type: codec.Codec
   - constants:
-      - name: Base64
+      - blockDoc: |-
+          The nine Formats this package registers. Each is an untyped constant, so it
+          goes wherever a format name is taken — the codec package's Marshal,
+          config.FSSource's string, i18n.LoadFS's codec.Format — without a
+          conversion.
+        doc: Base64 is standard base64, RFC 4648 §4.
+        name: Base64
         value: "\"base64\""
-      - name: Base64URL
+      - blockDoc: |-
+          The nine Formats this package registers. Each is an untyped constant, so it
+          goes wherever a format name is taken — the codec package's Marshal,
+          config.FSSource's string, i18n.LoadFS's codec.Format — without a
+          conversion.
+        doc: Base64URL is the URL- and filename-safe base64 alphabet, RFC 4648 §5.
+        name: Base64URL
         value: "\"base64url\""
-      - name: Base32
+      - blockDoc: |-
+          The nine Formats this package registers. Each is an untyped constant, so it
+          goes wherever a format name is taken — the codec package's Marshal,
+          config.FSSource's string, i18n.LoadFS's codec.Format — without a
+          conversion.
+        doc: Base32 is standard base32, RFC 4648 §6.
+        name: Base32
         value: "\"base32\""
-      - name: Base16
+      - blockDoc: |-
+          The nine Formats this package registers. Each is an untyped constant, so it
+          goes wherever a format name is taken — the codec package's Marshal,
+          config.FSSource's string, i18n.LoadFS's codec.Format — without a
+          conversion.
+        doc: Base16 is upper-case hexadecimal, RFC 4648 §8.
+        name: Base16
         value: "\"base16\""
-      - name: Hex
+      - blockDoc: |-
+          The nine Formats this package registers. Each is an untyped constant, so it
+          goes wherever a format name is taken — the codec package's Marshal,
+          config.FSSource's string, i18n.LoadFS's codec.Format — without a
+          conversion.
+        doc: Hex is lower-case hexadecimal.
+        name: Hex
         value: "\"hex\""
-      - name: ASCII85
+      - blockDoc: |-
+          The nine Formats this package registers. Each is an untyped constant, so it
+          goes wherever a format name is taken — the codec package's Marshal,
+          config.FSSource's string, i18n.LoadFS's codec.Format — without a
+          conversion.
+        doc: ASCII85 is Adobe's Ascii85, four bytes in five characters.
+        name: ASCII85
         value: "\"ascii85\""
-      - name: Base45
+      - blockDoc: |-
+          The nine Formats this package registers. Each is an untyped constant, so it
+          goes wherever a format name is taken — the codec package's Marshal,
+          config.FSSource's string, i18n.LoadFS's codec.Format — without a
+          conversion.
+        doc: Base45 is RFC 9285's alphabet, the one a QR code's alphanumeric mode holds.
+        name: Base45
         value: "\"base45\""
-      - name: Base58
+      - blockDoc: |-
+          The nine Formats this package registers. Each is an untyped constant, so it
+          goes wherever a format name is taken — the codec package's Marshal,
+          config.FSSource's string, i18n.LoadFS's codec.Format — without a
+          conversion.
+        doc: Base58 is Bitcoin's alphabet; its base conversion is quadratic, so its input is capped at 4 KiB.
+        name: Base58
         value: "\"base58\""
-      - name: Base62
+      - blockDoc: |-
+          The nine Formats this package registers. Each is an untyped constant, so it
+          goes wherever a format name is taken — the codec package's Marshal,
+          config.FSSource's string, i18n.LoadFS's codec.Format — without a
+          conversion.
+        doc: Base62 is the alphanumeric alphabet; capped at 4 KiB like Base58.
+        name: Base62
         value: "\"base62\""
+    doc: |-
+      Package baseenc registers the base-N codec with the SDK's codec registry —
+      and no other codec — when it is imported (ADR 0134):
+
+      	import _ "github.com/kitsunium/sdk/pkg/v1/data/codec/baseenc"
+
+      It registers nine Formats, one per alphabet, all through one pipeline: a
+      value is encoded as JSON and the JSON text as base-N, and decoding runs the
+      two steps backwards — so every alphabet carries any Go value encoding/json
+      can, and swapping one alphabet for another is a change of Format name.
+      Every Format streams.
+
+      Everything that dispatches through the registry by format name then
+      reads and writes it: the codec package's Marshal and Unmarshal,
+      config.FSSource and i18n.LoadFS. Importing
+      github.com/kitsunium/sdk/pkg/v1/data/codec instead registers every
+      format the SDK ships; this package links this one codec, the core
+      package declaring its codes and the standard library, and nothing else.
+      Importing both is harmless: a format is registered by the package that
+      implements it, which Go initialises once however many packages import it.
+
+      # Errors
+
+      Failures carry the range 0.3.24.*; match them with errs.HasCode, or the
+      sentinels with errors.Is:
+
+      	CodeMarshalFailed    0.3.24.1  the value has no JSON encoding
+      	CodeUnmarshalFailed  0.3.24.2  the decoded text is not JSON the target can hold
+      	CodeDecodeFailed     0.3.24.3  the input is not text of the Format's alphabet
+      	CodeSizeExceeded     0.3.24.4  an input past its bound — 10 MiB, 4 KiB for base58 and base62
+
+      No error message quotes the input.
     facade:
       - const:
           - doc: "CodeMarshalFailed is 0.3.24.1: the value has no JSON encoding."

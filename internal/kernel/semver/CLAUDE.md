@@ -22,7 +22,8 @@ x/mod's do, so the package needs no `PP` range, no `codeRangeOwners` row and no
 
 | File | Surface |
 |---|---|
-| `semver.go` | package doc, `IsValid`, `Compare`, `Prerelease` |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `semver.go` | `IsValid`, `Compare`, `Prerelease` |
 | `pseudo.go` | `IsPseudoVersion`, `PseudoVersionRev`, `PseudoVersionTime`; the stamp and where it may sit |
 | `parse.go` | the one-pass parser (`components`, `parse`, `identifiers`) and the precedence helpers |
 

@@ -1,5 +1,3 @@
-// Package kit — the static analysis a product can be given: the platform's
-// analyzer, run in the background in dev (ADR 0147 §1).
 package kit
 
 import (

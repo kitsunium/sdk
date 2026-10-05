@@ -1,6 +1,3 @@
-// Package semver — Go pseudo-versions: the three shapes the modules reference
-// defines, recognised by where their stamp sits, and the revision and time
-// that stamp carries.
 package semver
 
 import (

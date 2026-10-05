@@ -1,4 +1,3 @@
-// Package client — the configuration defaults.
 package client
 
 import (

@@ -1,7 +1,5 @@
 //go:build !linux && !windows
 
-// Package ipc — no peer credentials outside Linux without x/sys: the peer is
-// unverified and the directory is the gate.
 package ipc
 
 import (

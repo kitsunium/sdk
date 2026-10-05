@@ -1,11 +1,3 @@
-// Package recover wraps a downstream Sink with panic recovery so a buggy
-// downstream cannot bring down the producer's goroutine. Recovered panics
-// surface as Panicked errors so the caller can react without losing the
-// stack trace context.
-//
-// Use case: defensive guard around third-party sinks (HTTP clients, AWS
-// SDKs, custom user code) where a panic in Write would otherwise unwind
-// the application's hot path.
 package recover
 
 import (

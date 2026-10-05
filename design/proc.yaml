@@ -166,62 +166,182 @@ packages:
             value: "0x00_02_06_17"
         type: errs.Code
     constants:
-      - name: LimitInfinity
+      - doc: |-
+          LimitInfinity is the soft/hard value meaning "no limit" (RLIM_INFINITY). Use
+          it in a LimitValue to lift a resource ceiling rather than setting a number.
+        name: LimitInfinity
         type: uint64
         value: "18446744073709551615"
-      - name: MemorySourceOperator
+      - doc: |-
+          MemorySourceOperator reports that GOMEMLIMIT carried a non-empty value.
+          The Go runtime has already applied it and the derivation stands aside:
+          overriding an operator's explicit decision would contradict them silently.
+
+          The run starts at iota+1 so the zero stays unminted — see the type comment.
+        name: MemorySourceOperator
         type: MemorySource
         value: "1"
-      - name: MemorySourceUnconstrained
+      - doc: |-
+          MemorySourceUnconstrained reports that no control group governing this
+          process declares a memory cap: not containerised, capped at "max", or not
+          Linux at all. There is nothing to derive a limit from.
+        name: MemorySourceUnconstrained
         type: MemorySource
         value: "2"
-      - name: MemorySourceBelowFloor
+      - doc: |-
+          MemorySourceBelowFloor reports that a cap was found but the limit derived
+          from it fell under the usable floor. Holding the runtime beneath it would
+          spin the collector continuously without averting the kill, so the
+          derivation declines rather than applying a limit it expects to hurt.
+        name: MemorySourceBelowFloor
         type: MemorySource
         value: "3"
-      - name: MemorySourceCgroup
+      - doc: |-
+          MemorySourceCgroup reports the only outcome that yields a limit: a real
+          cap was read from the control-group hierarchy and the derived value is
+          usable.
+        name: MemorySourceCgroup
         type: MemorySource
         value: "4"
-      - name: ResourceUnknown
+      - doc: "ResourceUnknown is the reserved zero value: no resource selected."
+        name: ResourceUnknown
         type: Resource
         value: "0"
-      - name: ResourceNoFile
+      - doc: |-
+          ResourceNoFile limits the highest open file descriptor (RLIMIT_NOFILE),
+          mapping systemd's LimitNOFILE=.
+        name: ResourceNoFile
         type: Resource
         value: "1"
-      - name: ResourceNProc
+      - doc: |-
+          ResourceNProc limits the number of processes for the real user id
+          (RLIMIT_NPROC), mapping systemd's LimitNPROC=.
+        name: ResourceNProc
         type: Resource
         value: "2"
-      - name: ResourceCore
+      - doc: |-
+          ResourceCore limits the size of a core dump in bytes (RLIMIT_CORE),
+          mapping systemd's LimitCORE=.
+        name: ResourceCore
         type: Resource
         value: "3"
-      - name: ResourceAS
+      - doc: |-
+          ResourceAS limits the process virtual address-space size (RLIMIT_AS),
+          mapping systemd's LimitAS=.
+        name: ResourceAS
         type: Resource
         value: "4"
-      - name: ResourceCPU
+      - doc: |-
+          ResourceCPU limits CPU time in seconds (RLIMIT_CPU), mapping systemd's
+          LimitCPU=.
+        name: ResourceCPU
         type: Resource
         value: "5"
-      - name: ResourceFSize
+      - doc: |-
+          ResourceFSize limits the largest file the process may create in bytes
+          (RLIMIT_FSIZE), mapping systemd's LimitFSIZE=.
+        name: ResourceFSize
         type: Resource
         value: "6"
-      - name: ResourceData
+      - doc: |-
+          ResourceData limits the process data-segment size (RLIMIT_DATA), mapping
+          systemd's LimitDATA=.
+        name: ResourceData
         type: Resource
         value: "7"
-      - name: ResourceStack
+      - doc: |-
+          ResourceStack limits the process stack size (RLIMIT_STACK), mapping
+          systemd's LimitSTACK=.
+        name: ResourceStack
         type: Resource
         value: "8"
-      - name: ResourceMemLock
+      - doc: |-
+          ResourceMemLock limits bytes that may be locked into RAM (RLIMIT_MEMLOCK),
+          mapping systemd's LimitMEMLOCK=.
+        name: ResourceMemLock
         type: Resource
         value: "9"
-      - name: StdioInherit
+      - doc: |-
+          StdioInherit shares the parent's stdin/stdout/stderr with the child — the
+          default, and the only behaviour that existed before per-process wiring.
+        name: StdioInherit
         type: StdioMode
         value: "0"
-      - name: StdioNull
+      - doc: |-
+          StdioNull connects every stream to the platform null device: the child's
+          output is discarded and its stdin returns EOF immediately.
+        name: StdioNull
         type: StdioMode
         value: "1"
-      - name: StdioCapture
+      - doc: |-
+          StdioCapture connects the child to the Spec's Stdout/Stderr writers and
+          Stdin reader; a nil writer or reader for a given stream falls back to the
+          null device for that one stream.
+        name: StdioCapture
         type: StdioMode
         value: "2"
+    doc: |-
+      Package proc — range 0.2.6.* (ADR 0016 core/proc block). The whole domain
+      owns this single PP octet: every sentinel below is declared here and only
+      wrapped (never re-Defined) by the service implementations and pkg/v1 facades.
+
+      Package proc — declares the sentinels returned across the process-supervision
+      domain. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE form;
+      service implementations and pkg/v1 facades wrap these, never re-Define them.
+
+      Package proc — the ExitValue value type: the outcome of a finished process.
+
+      Package proc — the Group port: a cgroup v2 control group handle.
+
+      Package proc — the LimitValue value type: a soft/hard setrlimit pair.
+
+      Package proc — the Listener port: the supervisor side of sd_notify.
+
+      Package proc — the MemoryLimitValue value type and the MemorySource enum: what
+      a derived Go soft memory limit is, and what decided it.
+
+      Package proc — the NotificationValue value type: a parsed sd_notify datagram.
+
+      Package proc declares the OS process-supervision contract of the SDK: the
+      ports (Process, Reaper, Group, Listener), the immutable value types (Spec,
+      ExitValue, LimitValue, NotificationValue, Signal, Resource), and the domain's
+      complete error-sentinel set (range 0.2.6.*). It is the sixth internal/core
+      sibling (ADR 0016), peer of codec / writer / crypto / logger / transform.
+
+      Unlike codec and crypto, proc ships no plug-in registry: each primitive has a
+      single canonical OS implementation chosen at build time by platform tag, not
+      a runtime-registered scheme. Core declares the ports and value types; concrete
+      behaviour lives in internal/service/proc/*; the pkg/v1/proc facades (process,
+      signal, reaper, rlimit, cgroup, systemd/notify) re-export this surface.
+
+      proc is stdlib-only (os, syscall, time, strconv, strings) plus
+      internal/kernel/errs — no golang.org/x/sys — preserving the SDK's dep-light
+      invariant. Every error returned by the domain is one of the sentinels in
+      errors.go; service code wraps them with errs.Wrap and never defines new codes.
+
+      Package proc — the Process port: lifetime control over a spawned process.
+
+      Package proc — the Reaper port: collection of terminated child processes.
+
+      Package proc — the Signal value type: a typed, platform-portable OS signal
+      with Parse / String / OS bridging. The name table is platform-specific and
+      lives in signal_unix.go / signal_other.go.
+
+      Package proc — non-Unix signal name table (Windows): the portable subset.
+
+      Package proc — Unix signal name table (linux/darwin/bsd).
+
+      Package proc — the Spec value type: an immutable process spawn specification.
+
+      Package proc — the StdioMode value: how a spawned child's standard streams
+      (stdin, stdout, stderr) are connected.
     functions:
-      - in:
+      - doc: |-
+          Parse resolves a signal from its name or number into sig. It accepts the
+          canonical "SIGTERM", the bare "TERM", and the numeric "15" (all
+          case-insensitive), returning UnknownSignal for anything the platform table
+          does not define.
+        in:
           - name: name
             type: string
         name: Parse
@@ -641,169 +761,428 @@ packages:
             public: Could not deliver the captured output to the writer
             reason: STDIO_CAPTURE_FAILED
     types:
-      - methods:
-          - name: Success
+      - doc: |-
+          ExitValue is the immutable outcome of a finished process: its exit status, the
+          signal that terminated it (if any), and resource-usage accounting. It is the
+          value returned by Process.Wait.
+        methods:
+          - doc: Success reports whether the process exited normally with status zero.
+            name: Success
             out:
               - type: bool
             recv: value
         name: ExitValue
         struct:
           fields:
-            - name: Code
+            - doc: |-
+                Code is the exit status (0–255) when the process exited normally; it is -1
+                when the process was terminated by a signal.
+              name: Code
               type: int
-            - name: Signal
+            - doc: |-
+                Signal is the signal that terminated the process, or the zero Signal when
+                it exited normally.
+              name: Signal
               type: Signal
-            - name: Signaled
+            - doc: |-
+                Signaled reports whether the process was terminated by a signal rather
+                than exiting on its own.
+              name: Signaled
               type: bool
-            - name: UserTime
+            - doc: UserTime is the CPU time spent in user mode.
+              name: UserTime
               type: time.Duration
-            - name: SystemTime
+            - doc: SystemTime is the CPU time spent in kernel mode on the process's behalf.
+              name: SystemTime
               type: time.Duration
-            - name: MaxRSS
+            - doc: |-
+                MaxRSS is the peak resident set size in kilobytes, as reported by wait4's
+                rusage; it is 0 when the platform does not supply it.
+              name: MaxRSS
               type: int64
-      - name: LimitValue
+      - doc: |-
+          LimitValue is an immutable soft/hard resource-limit pair for setrlimit(2). The
+          soft limit is the enforced value; the hard limit is the ceiling an
+          unprivileged process may raise the soft limit to.
+        name: LimitValue
         struct:
           fields:
-            - name: Soft
+            - doc: Soft is the enforced limit; it must not exceed Hard.
+              name: Soft
               type: uint64
-            - name: Hard
+            - doc: Hard is the ceiling for Soft; raising it typically requires privilege.
+              name: Hard
               type: uint64
-      - methods:
-          - name: String
+      - doc: |-
+          MemorySource names what decided the Go soft memory limit, so a caller that
+          sees no limit applied can tell WHY without re-deriving it.
+
+          The zero value is deliberately unclaimed. A MemorySource is produced by a
+          derivation, never chosen by a caller, so a zero reaching a log line is a value
+          this package never minted rather than one of the four real outcomes wearing a
+          default.
+        methods:
+          - doc: |-
+              String renders the source for a log line. A value this package never mints —
+              including the zero — renders as "unknown" rather than as a number, because it
+              is a defect worth reading as one.
+            name: String
             out:
               - type: string
             recv: value
         name: MemorySource
         underlying: uint8
-      - methods:
-          - name: Applied
+      - doc: |-
+          MemoryLimitValue is an immutable record of one soft-memory-limit derivation:
+          the cgroup allowance it read, the limit it derived, and what decided the
+          outcome.
+
+          Allowance and Limit are zero on every outcome except MemorySourceCgroup, with
+          one exception: MemorySourceBelowFloor carries the Allowance it read, because
+          the reason the limit was discarded is only legible next to the cap that
+          produced it.
+        methods:
+          - doc: |-
+              Applied reports whether the derivation installed a limit. It is true for
+              exactly one source, and it is the predicate a caller wants rather than a
+              comparison against Limit — a zero Limit and "no limit applied" are the same
+              state today, and tying call sites to that coincidence would be fragile.
+            name: Applied
             out:
               - type: bool
             recv: value
         name: MemoryLimitValue
         struct:
           fields:
-            - name: Allowance
+            - doc: |-
+                Allowance is the tightest cgroup memory cap governing this process, in
+                bytes, or zero when none was read.
+              name: Allowance
               type: int64
-            - name: Limit
+            - doc: |-
+                Limit is the Go soft memory limit derived from Allowance, in bytes, or
+                zero when no limit was applied.
+              name: Limit
               type: int64
-            - name: Source
+            - doc: Source names what decided the outcome.
+              name: Source
               type: MemorySource
-      - methods:
-          - name: Ready
+      - doc: |-
+          NotificationValue is a parsed sd_notify(3) datagram received by a Listener: the
+          raw newline-separated state fields plus the kernel-verified sender PID. It
+          carries no policy — a supervisor decides what READY or WATCHDOG means for
+          ordering. The lifecycle flags are read through methods so State stays the
+          single source of truth.
+        methods:
+          - doc: Ready reports whether the datagram carried READY=1.
+            name: Ready
             out:
               - type: bool
             recv: value
-          - name: Reloading
+          - doc: Reloading reports whether the datagram carried RELOADING=1.
+            name: Reloading
             out:
               - type: bool
             recv: value
-          - name: Stopping
+          - doc: Stopping reports whether the datagram carried STOPPING=1.
+            name: Stopping
             out:
               - type: bool
             recv: value
-          - name: Watchdog
+          - doc: Watchdog reports whether the datagram carried WATCHDOG=1 (a keep-alive ping).
+            name: Watchdog
             out:
               - type: bool
             recv: value
         name: NotificationValue
         struct:
           fields:
-            - name: State
+            - doc: |-
+                State is the raw NAME=value field set from the datagram (READY, STATUS,
+                MAINPID, WATCHDOG, RELOADING, STOPPING, …), preserved verbatim.
+              name: State
               type: map[string]string
-            - name: Status
+            - doc: Status is the free-text STATUS= line, empty when absent.
+              name: Status
               type: string
-            - name: MainPID
+            - doc: MainPID is the PID advertised by MAINPID=, or 0 when absent.
+              name: MainPID
               type: int
-            - name: SenderPID
+            - doc: |-
+                SenderPID is the sending process's PID as verified by the kernel via
+                SO_PASSCRED, not a value the sender can forge; 0 when credentials were
+                unavailable.
+              name: SenderPID
               type: int
-      - methods:
-          - name: String
+      - doc: |-
+          Resource identifies a per-process resource governed by setrlimit(2). It is an
+          abstract, platform-portable enum; the service layer maps each value to the
+          platform's RLIMIT_* constant. The zero value ResourceUnknown is the reserved
+          invalid sentinel.
+        methods:
+          - doc: |-
+              String reports the canonical lowercase name of r (e.g. "nofile"), or
+              "unknown" for an unrecognised value. The names match the suffix of the
+              systemd Limit* directives.
+            name: String
             out:
               - type: string
             recv: value
-          - name: Known
+          - doc: Known reports whether r is a defined resource other than the zero value.
+            name: Known
             out:
               - type: bool
             recv: value
         name: Resource
         underlying: int
-      - methods:
-          - name: OS
+      - doc: |-
+          Signal is a typed, platform-portable OS signal. Its underlying value is the
+          platform signal number, so Signal(syscall.SIGTERM) and a Signal parsed from
+          "SIGTERM" compare equal. The zero value is the reserved invalid signal.
+        methods:
+          - doc: |-
+              OS bridges s to the os.Signal expected by os/signal and Process.Signal. It is
+              a zero-cost conversion to syscall.Signal — the canonical os.Signal carrier.
+            name: OS
             out:
               - type: os.Signal
             recv: value
-          - name: Int
+          - doc: Int reports the raw platform signal number underlying s.
+            name: Int
             out:
               - type: int
             recv: value
-          - name: String
+          - doc: |-
+              String reports the canonical upper-case name of s (e.g. "SIGTERM"). An
+              unrecognised signal renders as "signal <n>" so logs stay unambiguous.
+            name: String
             out:
               - type: string
             recv: value
-          - name: Known
+          - doc: Known reports whether s names a signal in the platform table.
+            name: Known
             out:
               - type: bool
             recv: value
         name: Signal
         underlying: int
-      - name: Spec
+      - doc: |-
+          Spec is the immutable description of a process to spawn: the executable and
+          its environment, the credentials and isolation topology to apply, and the
+          resource/scheduling attributes to set between fork and exec. It carries no
+          policy — restart, health, and dependency concerns belong to the caller.
+
+          Pointer fields (Umask, Nice, OOMScoreAdj) distinguish "leave at the inherited
+          default" (nil) from "set explicitly to zero". Maps and slices are read by the
+          service layer and never mutated.
+        name: Spec
         struct:
           fields:
-            - name: Path
+            - doc: |-
+                Path is the executable to run. Required. A value containing a path
+                separator is a file path, taken as written (a relative one is resolved
+                against Dir). A bare name — "go", "sh" — is searched in the PATH the
+                CHILD will see: the PATH entry of Env whenever Env names one (an
+                explicitly empty PATH= searches nothing), the parent's only when Env
+                names none (including when Env is nil). os/exec's rules apply: the first
+                executable in PATH order wins, and a match found only through a relative
+                entry ("." or an empty one) is refused with exec.ErrDot.
+              name: Path
               type: string
-            - name: Args
+            - doc: |-
+                Args is the full argv including argv[0]; when empty the service uses
+                [Spec.Path] — the name as written, not the resolved file — as the sole
+                argument.
+              name: Args
               type: "[]string"
-            - name: Dir
+            - doc: Dir is the working directory; empty means inherit the parent's.
+              name: Dir
               type: string
-            - name: Env
+            - doc: |-
+                Env is the explicit environment; nil yields an empty environment, never
+                implicit inheritance, so a spawned service starts from a known state.
+              name: Env
               type: "[]string"
-            - name: User
+            - doc: User is the name or numeric uid to setuid to; empty leaves the parent's.
+              name: User
               type: string
-            - name: Group
+            - doc: Group is the name or numeric gid to setgid to; empty leaves the parent's.
+              name: Group
               type: string
-            - name: Groups
+            - doc: Groups are supplementary group names or gids (systemd SupplementaryGroups=).
+              name: Groups
               type: "[]string"
-            - name: Setpgid
+            - doc: |-
+                Setpgid places the child in its own process group, enabling group-kill of
+                the whole tree (systemd KillMode=control-group without cgroups).
+              name: Setpgid
               type: bool
-            - name: Setsid
+            - doc: Setsid starts the child in a new session detached from the controlling tty.
+              name: Setsid
               type: bool
-            - name: Umask
+            - doc: |-
+                Umask, when non-nil, is the file-creation mask applied to the child
+                (systemd UMask=).
+              name: Umask
               type: "*int"
-            - name: Nice
+            - doc: |-
+                Nice, when non-nil, is the scheduling-priority adjustment applied to the
+                child (systemd Nice=).
+              name: Nice
               type: "*int"
-            - name: OOMScoreAdj
+            - doc: |-
+                OOMScoreAdj, when non-nil, is the /proc/<pid>/oom_score_adj value applied
+                to the child (systemd OOMScoreAdjust=).
+              name: OOMScoreAdj
               type: "*int"
-            - name: Rlimits
+            - doc: |-
+                Rlimits are per-resource soft/hard limits applied post-fork, pre-exec
+                (systemd Limit*=); resources unsupported on the platform surface a typed
+                error rather than silently no-op.
+              name: Rlimits
               type: map[Resource]LimitValue
-            - name: CgroupPath
+            - doc: |-
+                CgroupPath, when non-empty, is an already-created cgroup v2 directory the
+                child is placed into BEFORE exec, so controller limits (MemoryMax/TasksMax/
+                …) apply from its first instruction — closing the unconfined window that a
+                post-spawn Group.Add(pid) leaves open (systemd places the unit's payload in
+                its cgroup the same way). The service writes the child's pid to
+                <CgroupPath>/cgroup.procs in the pre-exec trampoline. Linux-only: a non-empty
+                value on any other GOOS surfaces UnsupportedPlatform; a path that is missing,
+                not a cgroup v2 directory, or not delegated surfaces a typed cgroup error
+                rather than spawning unconfined.
+              name: CgroupPath
               type: string
-            - name: Stdio
+            - doc: |-
+                Stdio selects how the child's standard streams are wired: StdioInherit
+                (default — share the parent's), StdioNull (discard to the null device), or
+                StdioCapture (use the Stdout/Stderr/Stdin members below). systemd
+                StandardOutput=/StandardError=/StandardInput= is the analogue.
+              name: Stdio
               type: StdioMode
-            - name: Stdout
+            - doc: |-
+                Stdout, when Stdio is StdioCapture, receives the child's standard output;
+                a nil writer discards that stream to the null device.
+              name: Stdout
               type: io.Writer
-            - name: Stderr
+            - doc: |-
+                Stderr, when Stdio is StdioCapture, receives the child's standard error;
+                a nil writer discards that stream to the null device.
+              name: Stderr
               type: io.Writer
-            - name: Stdin
+            - doc: |-
+                Stdin, when Stdio is StdioCapture, is copied to the child's standard input;
+                a nil reader gives the child an immediate-EOF stdin. The reader should be
+                EOF-terminating (a buffer, file, or strings.Reader); the copier closes the
+                child's stdin at EOF and never blocks Wait.
+              name: Stdin
               type: io.Reader
-            - name: ExtraFiles
+            - doc: |-
+                ExtraFiles are additional open files inherited by the child, in order,
+                starting at file descriptor 3 (after stdin/stdout/stderr). This is the
+                mechanism behind socket activation (sd_listen_fds): an activator binds
+                listening sockets and passes them here, then sets LISTEN_FDS/LISTEN_PID in
+                Env so the child finds them at fd 3..3+len-1. nil means no extra fds.
+              name: ExtraFiles
               type: "[]*os.File"
-      - methods:
-          - name: String
+      - doc: |-
+          StdioMode selects how a spawned child's standard streams are wired. The zero
+          value is StdioInherit, preserving the historical behaviour where the child
+          shares the parent's stdin/stdout/stderr (systemd StandardOutput=/StandardInput=
+          is the analogue, but the choice is generic to anything that spawns processes).
+        methods:
+          - doc: |-
+              String returns the lowercase mode name ("inherit", "null", "capture"), or
+              "stdiomode(N)" for an out-of-range value.
+            name: String
             out:
               - type: string
             recv: value
-          - name: Known
+          - doc: |-
+              Known reports whether m is one of the defined StdioInherit/StdioNull/StdioCapture
+              modes (i.e. m <= StdioCapture).
+            name: Known
             out:
               - type: bool
             recv: value
         name: StdioMode
         underlying: uint8
-  - functions:
-      - name: Available
+  - doc: |-
+      Package cgroup — creates and manages cgroup v2 control groups.
+
+      This file holds the platform-neutral surface: Available and Create delegate
+      to the build-tagged available / createGroup implementations (cgroup_linux.go
+      on Linux, cgroup_other.go everywhere else). The returned Group satisfies the
+      core proc.Group port — set memory/cpu/pids/io ceilings, attach processes, and
+      remove the group — and is implemented only against the unified cgroup v2
+      hierarchy. Non-Linux builds and unprivileged/non-delegated Linux hosts degrade
+      to the typed proc sentinels rather than panicking.
+
+      Package cgroup — FreeBSD control groups via rctl(8) (RACCT/RCTL). FreeBSD has
+      no cgroup v2 hierarchy; the native resource-limit mechanic is rctl, whose
+      rules are strings of the form "subject:subject-id:resource:action=amount"
+      applied through the rctl_add_rule(2) / rctl_remove_rule(2) syscalls. We bind
+      those syscalls directly (dep-light, no golang.org/x/sys — the same discipline
+      as the Windows Job Object backend), hand-citing the syscall numbers from
+      FreeBSD sys/kern/syscalls.master.
+
+      Mapping to the core/proc.Group port (a group here is a tracked PID set; rctl
+      rules are per-process, so limits are stored and (re)applied to each member):
+        - SetMemoryMax → process:PID:vmemoryuse:deny=N
+        - SetCPUMax    → process:PID:pcpu:deny=PCT   (PCT = quota/period*100)
+        - Add          → apply every stored rule to PID
+        - Kill         → SIGKILL every member
+        - Delete       → rctl_remove_rule "process:PID" for every member
+
+      SetPidsMax (rctl maxproc is a user/loginclass/jail resource, never a
+      per-process one), SetIOMax (the spec string is cgroup-format), and
+      Freeze/Thaw (rctl has no quiesce) return the uniform UnsupportedPlatform
+      sentinel — exactly as the Windows backend degrades its non-mappable verbs.
+
+      Package cgroup — Linux cgroup v2 control-group implementation.
+
+      Package cgroup — degrade stub for platforms with no control-group facility:
+      cgroup v2 is Linux-only, Windows has its own Job Object backend
+      (cgroup_windows.go), and FreeBSD has its own rctl backend
+      (cgroup_freebsd.go), so this covers darwin and the remaining BSDs
+      (OpenBSD/NetBSD/DragonFly), where no equivalent exists.
+
+      Package cgroup — Windows control groups via Job Objects. A Win32 Job Object is
+      the native, kernel-enforced equivalent of a cgroup v2 control group: it caps a
+      set of assigned processes' memory / CPU / process-count and can terminate them
+      atomically. We bind the kernel32 entry points directly (syscall.NewLazyDLL, no
+      golang.org/x/sys per the dep-light invariant) with the ABI struct layouts
+      hand-declared and cited from the Win32 headers (winnt.h / jobapi2.h), the same
+      discipline the proc trampoline already uses.
+
+      Mapping to the core/proc.Group port:
+        - Create        → CreateJobObjectW
+        - SetMemoryMax  → JOBOBJECT_EXTENDED_LIMIT_INFORMATION.ProcessMemoryLimit
+        - SetCPUMax     → JOBOBJECT_CPU_RATE_CONTROL_INFORMATION (hard cap)
+        - SetPidsMax    → JOBOBJECT_BASIC_LIMIT_INFORMATION.ActiveProcessLimit
+        - Add           → OpenProcess + AssignProcessToJobObject
+        - Kill          → TerminateJobObject
+        - Delete        → CloseHandle
+
+      SetIOMax and Freeze/Thaw have no stable, generally-available Job Object
+      equivalent, so they return the uniform UnsupportedPlatform sentinel.
+
+      Package cgroup — the Option functional-option type and its accumulator.
+    functions:
+      - doc: |-
+          Available reports whether the unified cgroup v2 hierarchy is mounted at
+          /sys/fs/cgroup AND a sub-group can be created under it by the caller (the
+          delegation test). It returns false off Linux, on a cgroup v1 host, and on a
+          Linux host where the hierarchy is read-only to the caller.
+        name: Available
         out:
           - type: bool
-      - in:
+      - doc: |-
+          Create makes a new control group named name under the delegated cgroup v2
+          root and returns a Group handle bound to it. It returns CgroupUnavailable when
+          the hierarchy is absent or not delegated, CgroupCreateFailed when mkdir fails,
+          and UnsupportedPlatform off Linux.
+        in:
           - name: name
             type: string
           - name: opts
@@ -815,7 +1194,11 @@ packages:
           - name: err
             type: error
         variadic: true
-      - in:
+      - doc: |-
+          WithRoot overrides the parent directory under which Create makes the new
+          control group. Use it to target a delegated sub-tree (e.g. the cgroup a
+          container manager handed to the caller) instead of the top-level mount.
+        in:
           - name: root
             type: string
         name: WithRoot
@@ -825,10 +1208,64 @@ packages:
       coreproc: github.com/kitsunium/sdk/internal/core/proc
     path: github.com/kitsunium/sdk/internal/service/proc/cgroup
     types:
-      - name: Option
+      - doc: |-
+          Option customises a Create call (functional-option pattern). Construct
+          options with the WithRoot helper; the zero set yields a group directly under
+          the unified cgroup v2 mount.
+        name: Option
         underlying: func(*groupConfig)
-  - functions:
-      - in:
+  - doc: |-
+      Package childwait decides who receives a child's exit status (ADR 0093).
+
+      A process has two kinds of waiter for its children. The Process handle
+      returned by service/proc/exec waits for the one child it spawned. The reaper
+      (service/proc/reaper), switched on when the supervisor runs as pid 1 or as a
+      subreaper, answers every SIGCHLD with wait4(-1) — which collects ANY child,
+      the handle's included. The kernel hands a zombie's status to exactly one
+      wait, so before this package whichever call reached the kernel first kept it:
+      when the sweep won, the handle's own wait failed with ECHILD and an exit 0
+      was reported as WAIT_FAILED. A supervisor read that as a failure and
+      restarted a service that had stopped cleanly.
+
+      The ledger makes every status reach its owner whoever collects it:
+
+        - Spawn forks and CLAIMS the child in one step. The fork runs under a
+          shared gate and the pid is claimed before the gate is released, so no
+          sweep can decide a child is nobody's while its spawn is in flight.
+        - ReapAny is the only wait4(-1) in the SDK. A child it collects that is
+          claimed has its status stored on the claim, under a lock held from before
+          the wait4 until after the hand-off. The claim is looked up only once no
+          spawn is between fork and claim, so a child that exited before its spawn
+          registered it is found, and a claim left on a recycled pid has already
+          been replaced by the newer child's. A child nobody claims is an orphan.
+        - The owner still waits for its own child itself, so a process without a
+          reaper behaves exactly as before. When that wait fails with ECHILD, the
+          owner takes the sweep lock — any hand-off still in progress lands first —
+          and reads the status from its claim. A status stored before the owner
+          ever waited is read first, so it is never waited for at all.
+
+      A status is lost only when something outside the SDK reaps the child, and
+      the owner then learns it deterministically instead of hanging.
+
+      Package childwait — off Unix there is no wait4 and no reaper, so nothing but
+      the owner ever collects a child and the ledger only records claims.
+
+      Package childwait — the Unix half: the status wait4 reports, and the one
+      wait4 for any child in the SDK (wait4(-1); wait4(0) on illumos and Solaris,
+      see waitany_solaris.go).
+
+      Package childwait — the pid that means "any child" to wait4 on illumos and
+      Solaris (the solaris build tag selects both).
+
+      Package childwait — the pid that means "any child" to wait4 on every Unix but
+      illumos and Solaris, whose libc reads it otherwise (waitany_solaris.go).
+    functions:
+      - doc: |-
+          Spawn runs start — a fork/exec returning the started process — and claims
+          the child before any sweep can treat it as an orphan. start's error is
+          returned verbatim, with no process and no claim. The caller owns the claim
+          and must end it through Reclaim or Release once it has the exit status.
+        in:
           - name: start
             type: func() (*os.Process, error)
         name: Spawn
@@ -840,6 +1277,13 @@ packages:
           - name: err
             type: error
       - build: unix
+        doc: |-
+          ReapAny performs one non-blocking wait4 for any child — the only one in the
+          SDK, and wait4(-1) everywhere but illumos and Solaris, where libc spells it
+          wait4(0) — and, before returning, hands the status of a claimed child to its
+          claim. It returns what wait4 returned: a positive pid for a collected child,
+          0 when children exist but none has exited, or -1 and the errno (ECHILD when
+          there are no children at all). Callers loop on it to drain.
         name: ReapAny
         out:
           - name: pid
@@ -848,39 +1292,252 @@ packages:
             type: error
     path: github.com/kitsunium/sdk/internal/service/proc/childwait
     types:
-      - methods:
-          - name: Collected
+      - doc: |-
+          Claim is a spawner's hold on one child's exit status. It is created by Spawn,
+          filled by a sweep that collects the child, and ended by the owner once the
+          status is in hand. A Claim is safe for concurrent use. A nil *Claim holds
+          nothing: every method answers as for a claim no sweep ever filled.
+        methods:
+          - doc: |-
+              Collected reports the status a sweep handed over, if one has. An owner asks
+              before waiting itself: a child already collected must not be waited for by
+              pid, because the pid may by now belong to another process.
+            name: Collected
             out:
               - name: status
                 type: StatusValue
               - name: ok
                 type: bool
             recv: pointer
-          - name: Reclaim
+          - doc: |-
+              Reclaim is for an owner whose own wait failed with ECHILD — the child was
+              reaped by someone else. It waits for any sweep in progress to finish its
+              hand-off, then reports the status the ledger collected. ok false means
+              nothing in the SDK took the child: something outside it reaped the child and
+              the status is lost. Either way the claim is ended.
+            name: Reclaim
             out:
               - name: status
                 type: StatusValue
               - name: ok
                 type: bool
             recv: pointer
-          - name: Release
+          - doc: |-
+              Release ends the claim: the owner has the exit status from its own wait, or
+              has given up on it. A later sweep that collects the same pid belongs to a
+              different child and must not land on this claim.
+            name: Release
             recv: pointer
         name: Claim
         struct:
           unexported: true
       - build: "!unix"
+        doc: |-
+          StatusValue carries nothing off Unix: no sweep exists to collect a child, so
+          no claim is ever filled and an owner always has the status from its own wait.
         name: StatusValue
         struct: {}
       - build: unix
+        doc: |-
+          StatusValue is what wait4 collected for one child: the termination status
+          word and the resource usage reported with it — exactly what the owner's own
+          wait would have returned.
         name: StatusValue
         struct:
           fields:
-            - name: WaitStatus
+            - doc: WaitStatus is the child's termination status (exit code or signal).
+              name: WaitStatus
               type: syscall.WaitStatus
-            - name: Rusage
+            - doc: Rusage is the resource usage wait4 reported for the child.
+              name: Rusage
               type: syscall.Rusage
-  - functions:
+  - doc: |-
+      Package exec — Unix best-effort post-start attributes: scheduling priority
+      (Nice), OOM-killer bias (OOMScoreAdj). Each is applied after fork/exec and
+      surfaces a typed error when the host refuses, rather than silently dropping a
+      requested field.
+
+      Package exec — Linux pre-exec cgroup v2 placement. When a Spec sets
+      CgroupPath, the child must join that control group BEFORE it execs the target,
+      so the controller limits (memory.max, pids.max, …) bind from the first
+      instruction rather than after a post-spawn Group.Add(pid) race. The parent
+      validates the path up front (validateCgroupPath); the trampoline then writes
+      its own pid into <path>/cgroup.procs (applyCgroupPlacement) between the rlimit
+      step and execve. cgroups are Linux-only, so this file is the only place that
+      touches them; the !linux sibling rejects a non-empty path as UnsupportedPlatform.
+
+      Package exec — cgroup placement on Unix platforms that are NOT Linux (the
+      BSDs, Darwin). cgroup v2 is a Linux mechanism with no portable equivalent, so
+      a non-empty Spec.CgroupPath is rejected up front with UnsupportedPlatform
+      rather than silently ignored — silently dropping the placement would run the
+      target unconfined, the exact failure the feature exists to prevent. The
+      trampoline never reaches applyCgroupPlacement here because validateCgroupPath
+      fails the spawn first; it is defined only to keep the unix build self-contained.
+
+      Package exec — Windows cgroup-placement guard. A Spec.CgroupPath names a
+      cgroup v2 directory, a Linux-only concept; Windows confines via Job Object
+      assignment through the cgroup port (a handle, not a path), so a non-empty path
+      at spawn has no meaning here and is rejected with the uniform sentinel.
+
+      Package exec — Unix credential resolution: maps Spec.User/Group/Groups (names
+      or numeric ids) to a syscall.Credential via os/user, the systemd
+      User=/Group=/SupplementaryGroups= analogue.
+
+      Package exec — the keystone spawn primitive: turns a coreproc.Spec into a
+      running, supervised process via fork/exec with credentials, a private process
+      group/session, and best-effort scheduling attributes.
+
+      The platform-portable surface is Start; the concrete fork/exec lives in
+      exec_unix.go (every Unix GOOS) with a degrading no-op in exec_other.go so the
+      package compiles on every target. Errors are the central coreproc sentinels,
+      wrapped (never re-Defined) with errs.Wrap.
+
+      Package exec — the Unix spawn: validates the Spec, resolves credentials,
+      builds the SysProcAttr (Setpgid/Setsid/Credential), forks/execs via
+      os.StartProcess, then applies best-effort scheduling attributes. Returns a
+      *Handle satisfying the coreproc.Process port.
+
+      Package exec — the Windows spawn primitive. Start turns a Spec into a running,
+      supervised process via os.StartProcess (CreateProcess under the hood) and
+      returns a coreproc.Process handle. Stdio (inherit/null/capture) reuses the
+      portable stdioState; Setpgid maps to a new console process group so a later
+      CTRL_BREAK can target the child. The Unix-only Spec fields — rlimits, umask,
+      nice/oom, credentials, ExtraFiles, a cgroup path — have no Windows equivalent
+      in this layer (resource confinement is the Job Object backend's job, applied at
+      the cgroup port), so they are rejected up front with the uniform sentinel
+      rather than silently dropped.
+
+      Package exec — the process-handle value: a Unix supervision handle
+      implementing the coreproc.Process port over an *os.Process, with group-aware
+      Signal/Stop and a once-only Wait that captures exit status plus wait4 rusage.
+      The concrete type is unexported; Start returns it as the coreproc.Process
+      interface.
+
+      Package exec — the Windows process-handle value implementing the
+      coreproc.Process port over an *os.Process. Windows has no Unix process groups
+      or wait4 rusage, so SignalGroup degrades to the leader and the ExitValue
+      carries the exit code + CPU times the os layer exposes (no terminating signal,
+      no MaxRSS). The concrete type is unexported; Start returns it as the interface.
+
+      Package exec — the parent<->trampoline handshake pipe. The re-exec trampoline
+      (trampoline_unix.go) applies rlimits/umask in a forked child before exec'ing
+      the real target; if that application fails, or the execve itself fails, the
+      child exits with a distinct status — but Start could not otherwise tell that
+      apart from a legitimate target exit of the same code. This pipe closes the gap:
+      the child inherits the write end as handshakeFD and reports a one-byte status
+      through it, so Start surfaces a typed RlimitFailed / SpawnFailed instead of a
+      silent spawn. It is the same self-pipe + close-on-exec trick os/exec uses for
+      its own errpipe: a clean execve closes the fd (the parent reads EOF = success),
+      a failure writes a status byte first.
+
+      Package exec — spawn-time resource confinement via a Win32 Job Object: the
+      Windows realisation of a Spec's rlimits. A child requesting a mappable Resource
+      is assigned, right after spawn, to a Job Object carrying the limit, so the
+      rlimit "grafts onto" the spawn (the cgroup port is the standalone equivalent).
+      kernel32 is bound directly (syscall.NewLazyDLL, ABI cited, no x/sys).
+
+      Mappable: ResourceAS/ResourceData → ProcessMemoryLimit; ResourceNProc →
+      ActiveProcessLimit. Every other Resource (NoFile/Core/FSize/Stack/MemLock) has
+      no Job Object analogue and is rejected with UnknownResource before the spawn,
+      honouring the no-silent-field-loss rule.
+
+      Package exec — Unix umask / rlimit validation for the spawn. The Go runtime
+      exposes no SysProcAttr hook to run setrlimit(2)/umask(2) in the child between
+      fork and exec, so Start honours both via the re-exec trampoline
+      (trampoline_unix.go): a Spec requesting a mapped Rlimit or a Umask is spawned
+      through a self-invocation that applies the limits then execs the target. This
+      validator therefore only rejects a Resource with no platform RLIMIT_* mapping
+      (the SDK's "no silent field loss" rule) — every mappable field is honoured.
+
+      Package exec — RLIMIT_AS mapping for the platforms whose stdlib syscall exports
+      it (Linux, Darwin, FreeBSD, NetBSD, DragonFly). OpenBSD has no address-space
+      rlimit — RLIMIT_AS is absent from its kernel ABI — so it provides the no-op in
+      limittable_openbsd.go instead, leaving ResourceAS unmapped (UnknownResource).
+
+      Package exec — OpenBSD has no address-space rlimit (RLIMIT_AS is absent from
+      its kernel ABI), so it adds no resources beyond the common Unix set. ResourceAS
+      therefore stays unmapped on OpenBSD and a Spec requesting it surfaces the typed
+      UnknownResource — the honest "this platform cannot set that limit" answer,
+      rather than a build failure on the missing constant.
+
+      Package exec — Unix Resource→RLIMIT_* table. Only the constants the stdlib
+      syscall package exports are mapped; RLIMIT_NPROC and RLIMIT_MEMLOCK live in
+      golang.org/x/sys (banned here), so those resources stay unmapped and surface
+      UnknownResource rather than a wrong limit. The address-space limit (RLIMIT_AS)
+      is present on every supported target EXCEPT OpenBSD, so it is added by a
+      build-tagged addPlatformLimits (limittable_as.go / limittable_openbsd.go)
+      rather than referenced here — that keeps this file compiling on OpenBSD.
+
+      Package exec — resolving a bare executable name through the PATH the child
+      will run with.
+
+      os.StartProcess does not search PATH: it hands its path to execve (or to
+      CreateProcess) as written, so a bare "go" names a file in the current
+      directory and fails with ENOENT. The port documents Spec.Path as "absolute
+      or PATH-resolvable", which is what os/exec.Command gives a Go programmer, so
+      the resolution happens here, once, before either spawn path — the direct
+      fork/exec and the limits trampoline, which execs the target itself.
+
+      Package exec — the Unix spellings of a PATH search: one candidate per
+      directory, executable when any execute bit is set, variable names
+      case-sensitive.
+
+      Package exec — the Windows spellings of a PATH search: a name is tried with
+      each PATHEXT extension unless it already carries one, a regular file is
+      runnable by its extension, and variable names are case-insensitive ("Path"
+      is the usual spelling there).
+
+      Package exec — peak-RSS read on a 32-bit GOARCH, where Rusage.Maxrss is int32
+      and is widened to the int64 the port expects (see maxrss_rss64_unix.go for the
+      64-bit counterpart).
+
+      Package exec — peak-RSS read on a 64-bit GOARCH, where Rusage.Maxrss is
+      already int64 and needs no widening cast (see maxrss_rss32_unix.go for the
+      32-bit counterpart).
+
+      Package exec — Unix procfs writer: a tiny os.WriteFile shim used to set
+      /proc/<pid>/oom_score_adj, isolated so the platform-specific path handling
+      stays out of the attribute logic.
+
+      Package exec — per-process stdio wiring. buildStdio turns a Spec's Stdio mode
+      into the three *os.File the spawn passes as ProcAttr.Files, plus the
+      parent-side lifecycle: the child-side ends to close once the child owns its
+      dups (so EOF propagates on exit) and the copier goroutines that drain capture
+      pipes into the caller's writers. StdioInherit (default) shares the parent's
+      streams; StdioNull discards via the null device; StdioCapture connects pipes.
+
+      Package exec — the re-exec trampoline that honours Spec.Rlimits and Spec.Umask
+      pre-exec. The Go runtime exposes no SysProcAttr hook to run setrlimit(2)/
+      umask(2) in the child between fork and exec, so when a Spec requests either,
+      Start does NOT exec the target directly: it execs this very binary
+      (os.Executable()) as a tiny trampoline, passing the real target + an encoded
+      limits payload in a sentinel env var. The init() below detects that var,
+      applies the limits in the fresh process (before main), then execve()s the real
+      target — so the target starts already under its rlimits/umask, with no cgo and
+      no dependency. The limits persist across the execve.
+
+      Footgun: any binary that imports this package and is run with the sentinel env
+      var set will re-exec. Start sets it only on the trampoline child and strips it
+      before execve, so a normal run never has it; do not set it by hand.
+
+      Package exec — central wrap helpers. Every syscall/stdlib cause is wrapped
+      back onto a coreproc sentinel by restating that sentinel's exact
+      Reason/Public/Private/ExitCode here once, so call sites stay terse and the
+      magic exit-code literals live in a single named place.
+
+      Package exec — darwin's word on whether this process's unreaped child has
+      died: the probe zombieGroupRefused needs because darwin's kill(2) answers a
+      group of zombies with EPERM.
+
+      Package exec — the zombie probe where the kernel needs none.
+    functions:
       - build: unix
+        doc: |-
+          Start spawns the process described by spec and returns a live coreproc.Process
+          handle. ctx is honoured up to the fork/exec boundary: a ctx already cancelled
+          is reported before any OS work. The child runs with an explicit (possibly
+          empty) environment, the requested credentials, and — when Setpgid is set — its
+          own process group so the whole tree can be group-killed.
         in:
           - name: ctx
             type: context.Context
@@ -893,6 +1550,10 @@ packages:
           - name: err
             type: error
       - build: windows
+        doc: |-
+          Start spawns spec as a supervised Windows process and returns its handle. A
+          cancelled context, a malformed Spec, or an unsupported Spec field short-circuit
+          before any process is created.
         in:
           - name: ctx
             type: context.Context
@@ -907,8 +1568,35 @@ packages:
     imports:
       coreproc: github.com/kitsunium/sdk/internal/core/proc
     path: github.com/kitsunium/sdk/internal/service/proc/exec
-  - functions:
+  - doc: |-
+      Package rlim builds the kernel's resource-limit struct from a soft/hard pair:
+      the one place the proc family turns a coreproc.LimitValue into the
+      syscall.Rlimit that setrlimit(2) and prlimit64(2) read. exec's trampoline
+      applies a limit in the child before exec, rlimit applies one to a running
+      process, and both carried a copy of the constructor.
+
+      It exists because the struct is not one type across the Unix kernels:
+      FreeBSD and DragonFly declare Rlimit.Cur and Max as int64 (their rlim_t is
+      __int64_t), every other Unix as uint64, which is coreproc.LimitValue's own
+      width. Make is split by build tag so no caller ever names the field type,
+      and LimitInfinity (^uint64(0)) lands as RLIM_INFINITY on both: verbatim where
+      the fields are uint64, as int64(-1) where they are int64.
+
+      Off Unix there is no rlimit struct, and the package holds nothing.
+
+      Package rlim — the uint64 syscall.Rlimit constructor. On every Unix target
+      except FreeBSD and DragonFly the kernel types Rlimit.Cur/Max as uint64,
+      matching coreproc.LimitValue exactly.
+
+      Package rlim — the int64 syscall.Rlimit constructor. FreeBSD and DragonFly
+      type Rlimit.Cur/Max as int64 (their rlim_t is __int64_t), unlike every other
+      Unix target.
+    functions:
       - build: unix && !freebsd && !dragonfly
+        doc: |-
+          Make builds a syscall.Rlimit from a uint64 soft/hard pair. On these targets
+          Cur/Max are uint64, so the pair maps verbatim and LimitInfinity
+          (^uint64(0)) lands as the kernel's RLIM_INFINITY.
         in:
           - name: soft
           - name: hard
@@ -917,6 +1605,11 @@ packages:
         out:
           - type: syscall.Rlimit
       - build: freebsd || dragonfly
+        doc: |-
+          Make builds a syscall.Rlimit from a uint64 soft/hard pair. On FreeBSD and
+          DragonFly Cur/Max are int64, so the pair is converted; the conversion is
+          value-preserving for real limits, and LimitInfinity (^uint64(0)) wraps to
+          int64(-1) = RLIM_INFINITY, the kernel's "no limit" sentinel.
         in:
           - name: soft
           - name: hard
@@ -925,21 +1618,103 @@ packages:
         out:
           - type: syscall.Rlimit
     path: github.com/kitsunium/sdk/internal/service/proc/internal/rlim
-  - functions:
-      - name: Apply
+  - doc: |-
+      Package memlimit — resolving WHICH cgroup limit files govern this process:
+      where each hierarchy is mounted, which part of the filesystem that mount
+      exposes, which cgroup the process belongs to, and the ancestors whose caps
+      bound it just as effectively.
+
+      Package memlimit derives the Go runtime soft memory limit from the control
+      group allowance governing this process.
+
+      GOMAXPROCS has been cgroup-aware since Go 1.25, but the memory limit never
+      was: a process in a 512 MiB container happily grows its heap past the cap and
+      is SIGKILLed by the kernel instead of being pushed into a more aggressive GC
+      cycle. Any workload whose peak working set approaches its container's cap hits
+      exactly that failure mode.
+
+      The limit set here is SOFT and covers all memory mapped, managed and not
+      released by the Go runtime — the heap, but also goroutine stacks and runtime
+      metadata. It excludes memory the runtime does not manage: the binary's own
+      image, C allocations, syscall.Mmap mappings, and kernel memory held on the
+      process's behalf. Subprocesses are outside it entirely.
+
+      So this reduces OOM pressure rather than eliminating it. It is also the one
+      direction the cgroup sibling does not cover: cgroup WRITES a control group to
+      bound a child, memlimit READS the one already bounding this process.
+    functions:
+      - doc: |-
+          Apply derives the Go soft memory limit from the cgroup allowance and installs
+          it, reporting what it read, what it derived, and what decided the outcome.
+
+          The allowance is the tightest cap governing this process: resolved from
+          /proc/self/cgroup so a child cgroup is honoured, then minimised across its
+          ancestors and across both hierarchies on a hybrid host.
+
+          It leaves the runtime default untouched — and says which of the three reasons
+          applied — when the operator set GOMEMLIMIT to a non-empty value, when no
+          cgroup file is readable (any non-Linux host) or none declares a cap, or when
+          the derived limit is implausibly small.
+        name: Apply
         out:
           - type: coreproc.MemoryLimitValue
     imports:
       coreproc: github.com/kitsunium/sdk/internal/core/proc
     path: github.com/kitsunium/sdk/internal/service/proc/memlimit
-  - functions:
-      - in:
+  - doc: |-
+      Package reaper — the PID1 / subreaper zombie collector backing pkg/v1/proc/reaper.
+
+      New returns a coreproc.Reaper whose concrete behaviour is selected at build
+      time: a real SIGCHLD-driven waitpid loop on Unix (reaper_unix.go) and a
+      degrade-to-no-op stub elsewhere (reaper_other.go). SetChildSubreaper and
+      IsPID1 are likewise platform-split. This file holds only the cross-platform
+      Option surface so the option type is declared once.
+
+      Package reaper — non-Unix no-op reaper: degrades cleanly where SIGCHLD and
+      PR_SET_CHILD_SUBREAPER do not exist (e.g. Windows).
+
+      Package reaper — Unix SIGCHLD waitpid reaping loop (all Unix). The
+      PR_SET_CHILD_SUBREAPER arming lives in the Linux-only sibling.
+
+      Package reaper — FreeBSD / DragonFly BSD descendant-reaper arming via
+      procctl(2). procctl(P_PID, 0, PROC_REAP_ACQUIRE, NULL) makes the calling
+      process the reaper for its whole descendant tree, the BSD analogue of Linux's
+      prctl(PR_SET_CHILD_SUBREAPER): orphaned descendants reparent to this process
+      instead of PID1, so a non-init supervisor still receives their SIGCHLD.
+
+      Package reaper — DragonFly BSD procctl(2) ABI constants for SetChildSubreaper.
+
+      Package reaper — FreeBSD procctl(2) ABI constants for SetChildSubreaper.
+
+      Package reaper — Linux PR_SET_CHILD_SUBREAPER arming via prctl(2).
+
+      Package reaper — non-Linux Unix subreaper stub for platforms with no
+      reparent-here facility (darwin/openbsd/netbsd/solaris): neither Linux's
+      prctl(PR_SET_CHILD_SUBREAPER) nor BSD's procctl(PROC_REAP_ACQUIRE) exists, so
+      arming degrades to a typed error. FreeBSD and DragonFly are handled by the
+      real procctl(2) sibling (subreaper_bsd.go).
+
+      Package reaper — the timer sweep illumos and Solaris need beside SIGCHLD (the
+      solaris build tag selects both).
+
+      Package reaper — no timer sweep where every child's exit posts SIGCHLD.
+    functions:
+      - doc: |-
+          WithOnReap registers fn as a post-sweep callback receiving the count of
+          children reaped in each sweep. It is purely observational; fn must not block.
+          On illumos and Solaris the loop also sweeps once a second (their exits post
+          no SIGCHLD), so there fn hears zero once a second from an idle reaper.
+        in:
           - name: fn
             type: func(int)
         name: WithOnReap
         out:
           - type: Option
       - build: "!unix"
+        doc: |-
+          New returns a no-op reaper on platforms without SIGCHLD/waitpid semantics. The
+          WithOnReap observer is still retained so its cross-platform contract holds;
+          only the actual reaping degrades to a zero-child sweep here.
         in:
           - name: opts
             type: Option
@@ -948,14 +1723,24 @@ packages:
           - type: coreproc.Reaper
         variadic: true
       - build: "!unix"
+        doc: |-
+          SetChildSubreaper reports UnsupportedPlatform on non-Unix platforms, which
+          have no prctl(PR_SET_CHILD_SUBREAPER) equivalent.
         name: SetChildSubreaper
         out:
           - type: error
       - build: "!unix"
+        doc: |-
+          IsPID1 reports false on non-Unix platforms, where the pid-1-is-init convention
+          does not apply.
         name: IsPID1
         out:
           - type: bool
       - build: unix
+        doc: |-
+          New returns a Unix reaper configured by opts. The reaper is created idle; call
+          Start to begin background reaping. It does not arm subreaper mode — call
+          SetChildSubreaper separately when the supervisor is not PID1.
         in:
           - name: opts
             type: Option
@@ -964,18 +1749,39 @@ packages:
           - type: coreproc.Reaper
         variadic: true
       - build: unix
+        doc: |-
+          IsPID1 reports whether the current process is the init process (pid 1), the
+          canonical signal that this process is the system's ultimate reaper.
         name: IsPID1
         out:
           - type: bool
       - build: freebsd || dragonfly
+        doc: |-
+          SetChildSubreaper marks the calling process as the reaper for its descendant
+          tree via procctl(P_PID, 0, PROC_REAP_ACQUIRE, NULL) so orphaned descendants
+          reparent here rather than to PID1. It returns SubreaperFailed (wrapping the
+          errno) on failure. It is the FreeBSD / DragonFly analogue of the Linux
+          prctl(PR_SET_CHILD_SUBREAPER) path; platforms with neither facility report
+          UnsupportedPlatform.
         name: SetChildSubreaper
         out:
           - type: error
       - build: linux
+        doc: |-
+          SetChildSubreaper marks the calling process as a child subreaper via
+          prctl(PR_SET_CHILD_SUBREAPER, 1) so orphaned descendants reparent here rather
+          than to PID1. It returns SubreaperFailed (wrapping the errno) on failure. It
+          is Linux-only; other Unix platforms have no equivalent and report
+          UnsupportedPlatform.
         name: SetChildSubreaper
         out:
           - type: error
       - build: unix && !linux && !freebsd && !dragonfly
+        doc: |-
+          SetChildSubreaper reports UnsupportedPlatform on non-Linux Unix systems
+          (darwin/bsd), which have no prctl(PR_SET_CHILD_SUBREAPER) equivalent. The
+          SIGCHLD reaping loop still works there; only the subreaper attribute is
+          unavailable, so orphans reparent to PID1 rather than to this process.
         name: SetChildSubreaper
         out:
           - type: error
@@ -983,10 +1789,60 @@ packages:
       coreproc: github.com/kitsunium/sdk/internal/core/proc
     path: github.com/kitsunium/sdk/internal/service/proc/reaper
     types:
-      - name: Option
+      - doc: |-
+          Option configures a reaper returned by New. Options are applied in order; an
+          unknown or zero option is a no-op. The set is intentionally small — a reaper
+          has little to tune beyond an optional sweep callback for observability.
+        name: Option
         underlying: func(*config)
-  - functions:
-      - in:
+  - doc: |-
+      Package rlimit — applies per-process setrlimit(2) resource ceilings.
+
+      This file holds the platform-neutral surface: the exported Apply and
+      PrepareSysProcAttr entry points delegate to the build-tagged applyLimits /
+      prepareLimits implementations (rlimit_linux.go on Linux, rlimit_other.go
+      everywhere else). Core declares the Resource enum and LimitValue pair; this
+      package maps each Resource to the platform RLIMIT_* constant and issues the
+      syscall, wrapping failures in the central proc sentinels.
+
+      Package rlimit — Linux setrlimit/prlimit64 implementation.
+
+      Package rlimit — non-Unix stub returning UnsupportedPlatform. setrlimit(2) is
+      a Unix mechanic (Linux via rlimit_linux.go, Darwin and the BSDs via
+      rlimit_unix.go); the remaining targets (Windows, plan9, js/wasm) have no
+      equivalent, so every entry point degrades to the typed sentinel.
+
+      Package rlimit — RLIMIT_AS mapping for the non-Linux Unix targets whose stdlib
+      syscall exports it (Darwin, FreeBSD, NetBSD, DragonFly). OpenBSD has no
+      address-space rlimit — RLIMIT_AS is absent from its kernel ABI — so it supplies
+      the no-op in rlimit_table_openbsd.go instead, leaving ResourceAS unmapped
+      (UnknownResource) rather than failing to compile on the missing constant.
+
+      Package rlimit — OpenBSD adds no resources beyond the common Unix set:
+      RLIMIT_AS is absent from its kernel ABI, so ResourceAS stays unmapped and a
+      request for it surfaces the typed UnknownResource — the honest "this platform
+      cannot set that limit" answer — rather than a build failure on the missing
+      constant.
+
+      Package rlimit — non-Linux Unix setrlimit(2) implementation. Darwin and the
+      BSDs expose setrlimit(2) for the calling process exactly as Linux does, so a
+      Spec's resource ceilings are honoured natively (applied post-fork on self by
+      the exec trampoline). The Linux-only prlimit64(2) path for a FOREIGN pid has
+      no portable equivalent here, so an Apply targeting another process degrades to
+      the typed UnsupportedPlatform sentinel rather than silently limiting the
+      caller. The Resource→RLIMIT_* table maps only the constants stdlib syscall
+      exports on every target; RLIMIT_NPROC/RLIMIT_MEMLOCK live in golang.org/x/sys
+      (banned), and RLIMIT_AS is absent on OpenBSD — both surface UnknownResource
+      via the build-tagged table rather than a wrong limit or a build break.
+    functions:
+      - doc: |-
+          Apply sets the soft/hard ceilings in limits on the process identified by pid.
+          A pid of 0 (or the caller's own pid) targets the calling process via
+          setrlimit(2); any other pid targets that process via prlimit64(2), which
+          needs CAP_SYS_RESOURCE. An unmapped Resource yields UnknownResource and a
+          failing syscall yields RlimitFailed; off Linux every call yields
+          UnsupportedPlatform.
+        in:
           - name: pid
             type: int
           - name: limits
@@ -994,7 +1850,15 @@ packages:
         name: Apply
         out:
           - type: error
-      - in:
+      - doc: |-
+          PrepareSysProcAttr validates limits and reports whether they can be applied,
+          returning the same typed errors Apply would. It performs no syscall and
+          mutates nothing: Go's os/exec SysProcAttr carries no rlimit field, so the
+          caller applies limits post-fork from the child (see Apply with pid 0) rather
+          than declaratively through SysProcAttr. Use it to fail fast — at Spec
+          construction time — on a Resource this platform cannot honour, before a
+          process is ever spawned.
+        in:
           - name: limits
             type: map[coreproc.Resource]coreproc.LimitValue
         name: PrepareSysProcAttr
@@ -1003,28 +1867,71 @@ packages:
     imports:
       coreproc: github.com/kitsunium/sdk/internal/core/proc
     path: github.com/kitsunium/sdk/internal/service/proc/rlimit
-  - functions:
-      - name: ReadBuild
+  - doc: |-
+      Package self is what the running process can say about itself: what it was
+      built from (build.go) and what it is doing right now (stats.go).
+
+      The rest of the proc domain acts on OTHER processes — it spawns, signals,
+      reaps and limits children. This package only reads, and only the process it
+      runs in: the build information the Go toolchain embedded in the binary, the
+      Go runtime's own metrics, and the kernel's account of the CPU time used.
+      Nothing here can fail in a way a caller could act on, so nothing returns an
+      error: an absent answer is a zero field or a false, and the doc comment of
+      each field says which.
+
+      Package self — the CPU time the process used, where the kernel's count is
+      not at hand.
+
+      Package self — the CPU time the process used, as the kernel counts it.
+
+      Package self — the running process's runtime state, read from the Go
+      runtime's own metrics and the kernel's CPU accounting.
+    functions:
+      - doc: |-
+          ReadBuild describes the running binary. It reports false when the binary
+          carries no build information — one built without module support — and
+          never fails otherwise.
+        name: ReadBuild
         out:
           - name: build
             type: BuildValue
           - name: ok
             type: bool
-      - in:
+      - doc: |-
+          ParseBuild describes the build info. It is what ReadBuild uses on the
+          running binary, exported for a BuildInfo from elsewhere — one a test builds
+          by hand, or debug.ParseBuildInfo's reading of another binary's `go version
+          -m` output. A nil info describes nothing.
+        in:
           - name: info
             type: "*debug.BuildInfo"
         name: ParseBuild
         out:
           - type: BuildValue
-      - name: ReadStats
+      - doc: |-
+          ReadStats takes a snapshot of the running process. It reads the runtime's
+          metrics once, the last collection's time once and the kernel's CPU
+          accounting once, and never fails: a figure the platform cannot give is
+          zero, and CPUEstimated says when CPUTime is an estimate.
+        name: ReadStats
         out:
           - type: StatsValue
     imports:
       debug: runtime/debug
     path: github.com/kitsunium/sdk/internal/service/proc/self
     types:
-      - methods:
-          - in:
+      - doc: |-
+          BuildValue is what the running binary was built from: the toolchain, the
+          main package, the main module with its version-control stamp, and every
+          dependency with the replacement it was built through.
+
+          It is the engine's own value (ADR 0074): no port in the proc domain speaks
+          it, and it describes one mechanism's reading of runtime/debug.
+        methods:
+          - doc: |-
+              Module returns the module whose path is path — the main module or one of
+              the dependencies — and whether the build contains it.
+            in:
               - name: path
                 type: string
             name: Module
@@ -1037,78 +1944,189 @@ packages:
         name: BuildValue
         struct:
           fields:
-            - name: GoVersion
+            - doc: GoVersion is the toolchain that built the binary, e.g. "go1.27.1".
+              name: GoVersion
               type: string
-            - name: Path
+            - doc: |-
+                Path is the import path of the main package, e.g.
+                "github.com/acme/app/cmd/server".
+              name: Path
               type: string
-            - name: Main
+            - doc: Main is the main module.
+              name: Main
               type: ModuleValue
-            - name: Deps
+            - doc: |-
+                Deps are the dependencies linked into the binary, in the order the
+                toolchain recorded them.
+              name: Deps
               type: "[]ModuleValue"
-      - name: ModuleValue
+      - doc: |-
+          ModuleValue is one module of the running binary, described by the code
+          that was actually built for it.
+
+          Its fields separate the three things a recorded version conflates: a
+          RELEASE (Version), a COMMIT (Revision and Time), and a DIRECTORY on the
+          build machine (Local and Dir). A pseudo-version names a commit rather than
+          a release, so it fills Revision and Time and leaves Version empty; a module
+          built from a directory has no version to tell at all.
+        name: ModuleValue
         struct:
           fields:
-            - name: Time
+            - doc: |-
+                Time is the commit's time, when known: the main module's vcs.time
+                stamp, or the timestamp a pseudo-version carries. Zero otherwise.
+              name: Time
               type: time.Time
-            - name: Path
+            - doc: |-
+                Path is the module path the build required, e.g.
+                "github.com/kitsunium/sdk".
+              name: Path
               type: string
-            - name: Version
+            - doc: |-
+                Version is the released version the code came from, e.g. "v0.4.6", or
+                "" when there is none to tell: a pseudo-version (a commit, in Revision),
+                a module built from a local directory, or a main module built without
+                one. A "+dirty" suffix is not kept here; it is what Modified says.
+              name: Version
               type: string
-            - name: Revision
+            - doc: |-
+                Revision is the version-control commit the code came from, when known:
+                the main module's vcs.revision stamp (a full object name), or the
+                commit a pseudo-version names (its twelve-character prefix).
+              name: Revision
               type: string
-            - name: Dir
+            - doc: |-
+                Dir is the directory a replace directive pointed the module at, as the
+                toolchain recorded it — relative to the main module, or to the
+                workspace root in workspace mode — or "" when it was not replaced by a
+                directory. A workspace module is Local with no Dir: the toolchain does
+                not record where it was.
+              name: Dir
               type: string
-            - name: Replacement
+            - doc: |-
+                Replacement is the module path a replace directive substituted, when it
+                substituted another module rather than a directory; Version is then
+                that module's.
+              name: Replacement
               type: string
-            - name: Local
+            - doc: |-
+                Local reports that the code came from a directory on the build machine
+                rather than from a published version: a directory replacement, a
+                workspace module, or a main module built inside its own source tree.
+              name: Local
               type: bool
-            - name: Modified
+            - doc: |-
+                Modified reports that the build included uncommitted changes: the main
+                module's vcs.modified stamp, or the "+dirty" its version carried. The
+                toolchain records nothing of the kind for a dependency.
+              name: Modified
               type: bool
-      - name: StatsValue
+      - doc: |-
+          StatsValue is the running process at one instant, as the Go runtime and
+          the kernel account for it.
+
+          Every count is cumulative since the process started, and the two
+          distributions are too: a p99 read here is over the process's whole life,
+          not over the last minute. A caller wanting a window subtracts two
+          snapshots.
+
+          It is the engine's own value (ADR 0074): no port in the proc domain speaks
+          it.
+        name: StatsValue
         struct:
           fields:
-            - name: At
+            - doc: |-
+                At is when the snapshot was taken, on the wall clock: this describes
+                the machine, whatever clock the program's own logic runs on.
+              name: At
               type: time.Time
-            - name: Started
+            - doc: Started is when the process started, to within its initialisation.
+              name: Started
               type: time.Time
-            - name: LastGC
+            - doc: |-
+                LastGC is when the most recent garbage collection ended; zero before
+                the first one.
+              name: LastGC
               type: time.Time
-            - name: GCPauses
+            - doc: |-
+                GCPauses is the distribution of stop-the-world pauses caused by the
+                garbage collector.
+              name: GCPauses
               type: DistributionValue
-            - name: SchedLatencies
+            - doc: |-
+                SchedLatencies is the distribution of the time goroutines spent ready
+                to run before they ran — the queueing a saturated scheduler adds.
+              name: SchedLatencies
               type: DistributionValue
-            - name: PID
+            - doc: PID is the process identifier.
+              name: PID
               type: int
-            - name: MaxProcs
+            - doc: "MaxProcs is GOMAXPROCS: how many threads may run Go code at once."
+              name: MaxProcs
               type: int
-            - name: CPUs
+            - doc: CPUs is how many logical CPUs the process can use.
+              name: CPUs
               type: int
-            - name: Goroutines
+            - doc: Goroutines is how many goroutines exist.
+              name: Goroutines
               type: int
-            - name: HeapBytes
+            - doc: |-
+                HeapBytes is the memory occupied by live and not-yet-swept heap
+                objects.
+              name: HeapBytes
               type: uint64
-            - name: HeapObjects
+            - doc: HeapObjects is how many objects occupy HeapBytes.
+              name: HeapObjects
               type: uint64
-            - name: HeapGoalBytes
+            - doc: HeapGoalBytes is the heap size at which the next collection starts.
+              name: HeapGoalBytes
               type: uint64
-            - name: MemoryBytes
+            - doc: |-
+                MemoryBytes is all the memory the Go runtime has mapped from the
+                system: the heap, the stacks, the runtime's own structures. It is the
+                runtime's number, not the kernel's resident set.
+              name: MemoryBytes
               type: uint64
-            - name: TotalAllocBytes
+            - doc: TotalAllocBytes is every byte ever allocated on the heap.
+              name: TotalAllocBytes
               type: uint64
-            - name: GCCycles
+            - doc: GCCycles is how many collections have completed.
+              name: GCCycles
               type: uint64
-            - name: CPUTime
+            - doc: CPUTime is the CPU time the process has consumed, user and system.
+              name: CPUTime
               type: time.Duration
-            - name: Uptime
+            - doc: Uptime is At minus Started.
+              name: Uptime
               type: time.Duration
-            - name: CPUEstimated
+            - doc: |-
+                CPUEstimated reports that CPUTime is the Go runtime's estimate rather
+                than the kernel's count: the runtime's total CPU capacity minus its
+                idle time, which counts only threads running Go code and so misses time
+                spent in C code or blocked in the kernel — and which the runtime
+                refreshes only at a garbage collection, so it lags by up to one GC
+                cycle and reads zero before the first. It is true where getrusage(2)
+                does not exist — Windows, Plan 9, wasm — and wherever it failed.
+              name: CPUEstimated
               type: bool
-      - methods:
-          - name: Count
+      - doc: |-
+          DistributionValue is one of the Go runtime's cumulative histograms, read
+          as durations. Its buckets are the runtime's own — the shape of
+          runtime/metrics.Float64Histogram — and it is a value: reading it never
+          touches the runtime again.
+        methods:
+          - doc: Count returns how many observations the distribution holds.
+            name: Count
             out:
               - type: uint64
             recv: value
-          - in:
+          - doc: |-
+              Quantile returns the q-th quantile of the distribution, q in [0, 1]: the
+              UPPER bound of the bucket where the cumulative count reaches q of the total
+              — an upper estimate, which is the honest reading of a bucketed histogram.
+              q outside [0, 1] is clamped, NaN is read as 0, and an empty distribution is
+              zero. A bucket whose upper bound is infinite answers with its lower bound.
+            in:
               - name: q
                 type: float64
             name: Quantile
@@ -1118,12 +2136,48 @@ packages:
         name: DistributionValue
         struct:
           fields:
-            - name: Counts
+            - doc: Counts[i] is the number of observations in [Buckets[i], Buckets[i+1]).
+              name: Counts
               type: "[]uint64"
-            - name: Buckets
+            - doc: |-
+                Buckets are the boundaries, in seconds, one more than Counts. The
+                first may be -Inf and the last +Inf.
+              name: Buckets
               type: "[]float64"
-  - functions:
+  - doc: |-
+      Package signal — Unix Relay: forwards each received signal to a pid or process
+      group via kill(2), where a negative Target addresses the group whose id is its
+      absolute value.
+
+      Package signal — Windows Relay. There is no kill(2) on Windows, so signal
+      forwarding maps onto the two native delivery primitives, bound directly from
+      kernel32 (syscall.NewLazyDLL, ABI cited, no golang.org/x/sys):
+
+        - a process-group target (Target < -1) → GenerateConsoleCtrlEvent, the
+          console control event that reaches every process in the group (CTRL_C for
+          SIGINT, CTRL_BREAK otherwise — the only event that can target one group);
+        - a single-pid target (Target > 0) → OpenProcess + TerminateProcess, the
+          reliable per-process delivery (Windows has no per-pid interrupt).
+
+      The reserved targets 0 and -1 are refused before any delivery, exactly as the
+      Unix build does, so a zero-value Target never fans out.
+
+      Package signal — typed signal toolbox over os/signal: Notify subscribes to a
+      set of signals on a leak-free channel, and Relay forwards received signals to
+      a process or process group. The kill(2) path is platform-split into
+      relay_unix.go / relay_other.go; this file holds the cross-platform Notify and
+      the Target value, since os/signal itself is portable.
+    functions:
       - build: unix
+        doc: |-
+          Relay reads signals from src and forwards each to target via kill(2) until src
+          is closed. A positive target is a pid; a target below -1 addresses the process
+          group whose id is -target (the kill(2) negative-pid convention). The reserved
+          values 0 (the caller's own process group) and -1 (every process the caller may
+          signal) are refused up front with a RelayFailed error before any delivery, so a
+          zero-value or mis-computed Target cannot fan a signal out to unintended
+          recipients. The first delivery failure stops the relay and returns a
+          RelayFailed error wrapping the kill(2) cause; a clean drain of src returns nil.
         in:
           - name: src
             type: <-chan coreproc.Signal
@@ -1133,6 +2187,12 @@ packages:
         out:
           - type: error
       - build: windows
+        doc: |-
+          Relay reads signals from src and forwards each to target until src is closed.
+          A positive target is a pid; a target below -1 addresses the process group
+          whose id is -target. The reserved 0 and -1 are refused up front. The first
+          delivery failure stops the relay with a RelayFailed error; a clean drain of
+          src returns nil.
         in:
           - name: src
             type: <-chan coreproc.Signal
@@ -1141,7 +2201,20 @@ packages:
         name: Relay
         out:
           - type: error
-      - in:
+      - doc: |-
+          Notify subscribes to sigs and returns a receive-only channel of typed Signals
+          plus a stop function. Each delivery of one of sigs is translated from its
+          os.Signal carrier to a coreproc.Signal and sent on the channel. The channel is
+          buffered (one slot per subscribed signal, minimum one) so a burst is not
+          dropped while a reader is busy, matching the os/signal "never blocks the
+          sender" contract.
+
+          The returned stop function unregisters the os/signal channel (signal.Stop runs
+          in the translation goroutine via defer), ends the goroutine, and closes the
+          returned channel; it is idempotent and leak-free — after it returns no
+          goroutine or signal registration survives. Calling it more than once is a safe
+          no-op.
+        in:
           - name: sigs
             type: coreproc.Signal
         name: Notify
@@ -1153,10 +2226,27 @@ packages:
       coreproc: github.com/kitsunium/sdk/internal/core/proc
     path: github.com/kitsunium/sdk/internal/service/proc/signal
     types:
-      - name: Target
+      - doc: |-
+          Target names the recipient of a relayed signal: a positive value is a pid; a
+          value below -1 is the negation of a process-group id (kill(2) delivers to the
+          whole group whose id is its absolute value). It is a plain int so call sites
+          can pass a raw pid or -pgid without a constructor.
+        name: Target
         underlying: int
-  - functions:
+  - doc: |-
+      Package listen — non-Unix stub. Socket activation relies on file-descriptor
+      inheritance, which is a Unix mechanism, so every entry point returns the typed
+      UnsupportedPlatform sentinel and an empty result rather than acting.
+
+      Package listen — Unix socket activation (sd_listen_fds(3) family). The
+      service side recovers listening sockets an activator passed via inherited fds
+      3.. plus the LISTEN_FDS / LISTEN_PID / LISTEN_FDNAMES environment; the
+      activator side (Prepare) is the symmetric half, so the protocol is testable
+      end-to-end without systemd. Fd inheritance is POSIX, so this builds on every
+      Unix; non-Unix gets a stub returning UnsupportedPlatform.
+    functions:
       - build: "!unix"
+        doc: Files returns no sockets and UnsupportedPlatform off Unix.
         in:
           - name: _
             type: bool
@@ -1165,6 +2255,7 @@ packages:
           - type: "[]*os.File"
           - type: error
       - build: "!unix"
+        doc: Listeners returns no listeners and UnsupportedPlatform off Unix.
         in:
           - name: _
             type: bool
@@ -1173,6 +2264,7 @@ packages:
           - type: "[]net.Listener"
           - type: error
       - build: "!unix"
+        doc: WithNames returns no grouping and UnsupportedPlatform off Unix.
         in:
           - name: _
             type: bool
@@ -1181,6 +2273,7 @@ packages:
           - type: map[string][]*os.File
           - type: error
       - build: "!unix"
+        doc: Prepare cannot pass sockets off Unix and returns UnsupportedPlatform.
         in:
           - name: _
             type: "*coreproc.Spec"
@@ -1190,6 +2283,10 @@ packages:
         out:
           - type: error
       - build: unix
+        doc: |-
+          Files returns the inherited listening sockets (fd 3..3+LISTEN_FDS) as *os.File,
+          gated on LISTEN_PID. When unsetEnv is true the activation env is cleared so a
+          grandchild does not re-inherit it. An empty/foreign activation set yields nil.
         in:
           - name: unsetEnv
             type: bool
@@ -1200,6 +2297,9 @@ packages:
           - name: err
             type: error
       - build: unix
+        doc: |-
+          Listeners returns the inherited stream sockets wrapped as net.Listener. Each
+          underlying *os.File is closed after net.FileListener dups it.
         in:
           - name: unsetEnv
             type: bool
@@ -1210,6 +2310,9 @@ packages:
           - name: err
             type: error
       - build: unix
+        doc: |-
+          WithNames returns the inherited sockets grouped by their LISTEN_FDNAMES name
+          (duplicate names group multiple fds under one key).
         in:
           - name: unsetEnv
             type: bool
@@ -1220,6 +2323,12 @@ packages:
           - name: err
             type: error
       - build: unix
+        doc: |-
+          Prepare is the activator side: it appends each listener's socket to child as an
+          inherited fd and sets LISTEN_FDS / LISTEN_FDNAMES in child.Env so the spawned
+          process recovers them via Files/Listeners. LISTEN_PID is intentionally omitted
+          (a pre-fork activator cannot know the child pid; Files accepts an absent
+          LISTEN_PID from a trusted parent). Sockets are passed in sorted-name order.
         in:
           - name: child
             type: "*coreproc.Spec"
@@ -1231,8 +2340,39 @@ packages:
     imports:
       coreproc: github.com/kitsunium/sdk/internal/core/proc
     path: github.com/kitsunium/sdk/internal/service/proc/systemd/listen
-  - functions:
+  - doc: |-
+      Package notify — the supervisor (listener) side on Linux: SO_PASSCRED.
+
+      Package notify — the supervisor (listener) side off Linux: unsupported.
+
+      Package notify — the notifier (child) side: sending sd_notify datagrams.
+
+      Package notify — sd_notify(3) readiness/watchdog protocol implementation.
+
+      This package implements both sides of the systemd sd_notify protocol on top of
+      the ports declared in internal/core/proc:
+
+        - the notifier (Notify and its lifecycle shorthands) writes a single
+          newline-separated NAME=value datagram to $NOTIFY_SOCKET; when the variable
+          is unset every notifier call is a no-op returning nil, exactly as
+          libsystemd specifies, so an unsupervised binary stays silent rather than
+          erroring;
+        - the listener (Listen) is the supervisor side: it owns an AF_UNIX datagram
+          socket, enables SO_PASSCRED so the kernel stamps each datagram with the
+          sender's verified PID, and yields one parsed NotificationValue per Recv.
+
+      $NOTIFY_SOCKET is an AF_UNIX address; a leading '@' selects the abstract
+      namespace and is replaced by a NUL byte before binding/connecting. The
+      credential-passing listener is Linux-only (SO_PASSCRED / SCM_CREDENTIALS); on
+      every other platform Listen returns coreproc.UnsupportedPlatform while the
+      notifier remains fully portable.
+    functions:
       - build: linux
+        doc: |-
+          Listen creates a supervisor-side sd_notify datagram socket, enables SO_PASSCRED
+          on it, and returns the Listener together with the $NOTIFY_SOCKET value a child
+          should be given. The socket is bound under a private temp directory so its path
+          is unguessable; the caller sets NOTIFY_SOCKET=socketPath for the child.
         name: Listen
         out:
           - name: l
@@ -1242,6 +2382,11 @@ packages:
           - name: err
             type: error
       - build: "!linux"
+        doc: |-
+          Listen returns UnsupportedPlatform on non-Linux platforms: the credential
+          check the listener relies on (SO_PASSCRED / SCM_CREDENTIALS) is a Linux
+          facility. The notifier side (Notify and its shorthands) and WatchdogInterval
+          remain available on every platform.
         name: Listen
         out:
           - name: l
@@ -1250,13 +2395,36 @@ packages:
             type: string
           - name: err
             type: error
-      - in:
+      - doc: |-
+          Notify sends an sd_notify datagram carrying the given NAME=value state to
+          $NOTIFY_SOCKET. When $NOTIFY_SOCKET is unset it is a no-op returning nil, per
+          libsystemd; a send failure when the socket is set returns NotifyFailed. An
+          empty state map under a set socket still opens and closes the connection,
+          matching libsystemd's "ping" behaviour.
+
+          It waits as long as the supervisor makes it wait: a unixgram write blocks
+          once the receiving buffer is full, and this call carries no deadline. A
+          caller whose own work is bounded wants [NotifyContext].
+        in:
           - name: state
             type: map[string]string
         name: Notify
         out:
           - type: error
-      - in:
+      - doc: |-
+          NotifyContext is [Notify] bounded by ctx: the datagram's write observes ctx's
+          deadline, and its cancellation.
+
+          It exists because the write is the only unbounded step in the call. The
+          socket belongs to the supervisor, so a supervisor that stops reading — paused,
+          stopped, or simply slow — blocks the writer with nothing the process can do
+          about it. Where that write sits under a lock a health probe also takes, one
+          stuck supervisor stops every later probe from answering: the readiness the
+          datagram was meant to announce becomes unobservable because announcing it
+          hung.
+
+          ctx bounds the WRITE, not the dial: a unixgram dial takes no round trip.
+        in:
           - name: ctx
             type: context.Context
           - name: state
@@ -1265,16 +2433,19 @@ packages:
         out:
           - name: err
             type: error
-      - name: Ready
+      - doc: Ready notifies the supervisor that startup is complete (READY=1).
+        name: Ready
         out:
           - type: error
-      - in:
+      - doc: ReadyContext is [Ready] bounded by ctx — see [NotifyContext].
+        in:
           - name: ctx
             type: context.Context
         name: ReadyContext
         out:
           - type: error
-      - in:
+      - doc: StatusContext is [Status] bounded by ctx — see [NotifyContext].
+        in:
           - name: ctx
             type: context.Context
           - name: msg
@@ -1282,28 +2453,40 @@ packages:
         name: StatusContext
         out:
           - type: error
-      - name: Reloading
+      - doc: |-
+          Reloading notifies the supervisor that a configuration reload has begun
+          (RELOADING=1).
+        name: Reloading
         out:
           - type: error
-      - name: Stopping
+      - doc: Stopping notifies the supervisor that shutdown has begun (STOPPING=1).
+        name: Stopping
         out:
           - type: error
-      - in:
+      - doc: Status publishes a single-line free-text status (STATUS=msg).
+        in:
           - name: msg
             type: string
         name: Status
         out:
           - type: error
-      - name: Watchdog
+      - doc: Watchdog sends a watchdog keep-alive ping (WATCHDOG=1).
+        name: Watchdog
         out:
           - type: error
-      - in:
+      - doc: MainPID advertises the main process PID to the supervisor (MAINPID=pid).
+        in:
           - name: pid
             type: int
         name: MainPID
         out:
           - type: error
-      - name: WatchdogInterval
+      - doc: |-
+          WatchdogInterval reports the watchdog ping interval the supervisor configured
+          via $WATCHDOG_USEC. ok is false when the variable is unset or malformed,
+          matching sd_watchdog_enabled's "watchdog disabled" result. It is portable: it
+          reads only the environment and never touches a socket.
+        name: WatchdogInterval
         out:
           - name: d
             type: time.Duration
@@ -1313,45 +2496,131 @@ packages:
       coreproc: github.com/kitsunium/sdk/internal/core/proc
     path: github.com/kitsunium/sdk/internal/service/proc/systemd/notify
   - constants:
-      - name: CapProcessSpawn
+      - blockDoc: The supervisable capabilities, one per platform-sensitive proc primitive.
+        doc: CapProcessSpawn is spawning + supervising a child process (process.Start).
+        name: CapProcessSpawn
         type: Capability
         value: "0"
-      - name: CapRlimit
+      - blockDoc: The supervisable capabilities, one per platform-sensitive proc primitive.
+        doc: CapRlimit is applying per-process setrlimit-style limits (rlimit.Apply).
+        name: CapRlimit
         type: Capability
         value: "1"
-      - name: CapUmaskNiceOOM
+      - blockDoc: The supervisable capabilities, one per platform-sensitive proc primitive.
+        doc: CapUmaskNiceOOM is the spawn-time umask / nice / oom_score_adj knobs.
+        name: CapUmaskNiceOOM
         type: Capability
         value: "2"
-      - name: CapCgroup
+      - blockDoc: The supervisable capabilities, one per platform-sensitive proc primitive.
+        doc: CapCgroup is a kernel-enforced resource container (cgroup.Create).
+        name: CapCgroup
         type: Capability
         value: "3"
-      - name: CapReaper
+      - blockDoc: The supervisable capabilities, one per platform-sensitive proc primitive.
+        doc: CapReaper is zombie reaping / subreaping (reaper.New).
+        name: CapReaper
         type: Capability
         value: "4"
-      - name: CapSignalRelay
+      - blockDoc: The supervisable capabilities, one per platform-sensitive proc primitive.
+        doc: CapSignalRelay is forwarding signals to a pid / process group (signal.Relay).
+        name: CapSignalRelay
         type: Capability
         value: "5"
-      - name: CapSdNotify
+      - blockDoc: The supervisable capabilities, one per platform-sensitive proc primitive.
+        doc: CapSdNotify is the service-manager readiness/watchdog protocol (systemd/notify).
+        name: CapSdNotify
         type: Capability
         value: "6"
-      - name: CapSocketActivation
+      - blockDoc: The supervisable capabilities, one per platform-sensitive proc primitive.
+        doc: CapSocketActivation is inheriting a pre-opened listening socket (systemd/listen).
+        name: CapSocketActivation
         type: Capability
         value: "7"
+    doc: |-
+      Package proc is the capability-preflight facade for the process-supervision
+      domain. Some proc primitives have no native, secure mechanic on every OS
+      (cgroup is Linux/Windows-only, rlimit/sd_notify are Unix-only, …); the SDK
+      honours those gaps by returning the typed [UnsupportedPlatform] error and
+      NEVER panicking on its own. This package lets a CONSUMER instead choose to
+      fail fast at its own startup — the idiomatic Go MustX pattern
+      ([regexp.MustCompile] / [text/template.Must]): the library offers the panic,
+      it never imposes it.
+
+      # Why preflight instead of recover
+
+      A process supervisor (a PID1) cannot rely on a recover() in its hot path: an
+      unrecovered panic in pid 1 orphans every supervised service, and a panic that
+      crosses a CGO/FFI boundary is undefined behaviour. The safe pattern is to
+      reject an unsupported configuration up front — assert the required
+      capabilities once, at startup, then route only to capabilities that
+      [Supported] reports present.
+
+      	func main() {
+      		// crash-at-launch, clearly, if this host cannot supervise at all:
+      		proc.MustSupport(proc.CapProcessSpawn, proc.CapReaper)
+      		os.Exit(run())
+      	}
+
+      	// elsewhere, branch instead of crash for an optional capability:
+      	if proc.Supported(proc.CapCgroup) {
+      		// confine via cgroup / Job Object
+      	}
+
+      # Capability × platform matrix
+
+      	Capability           linux darwin windows freebsd openbsd netbsd dragonfly illumos solaris
+      	CapProcessSpawn        ✅     ✅     ✅      ✅      ✅      ✅      ✅        ✅      ✅
+      	CapSignalRelay         ✅     ✅     ✅      ✅      ✅      ✅      ✅        ✅      ✅
+      	CapReaper              ✅     ✅     ✅¹     ✅      ✅      ✅      ✅        ✅⁴     ✅⁴
+      	CapCgroup              ✅     ❌     ✅²     ❌      ❌      ❌      ❌        ❌      ❌
+      	CapRlimit              ✅     ✅     ❌³     ✅      ✅      ✅      ✅        ✅      ✅
+      	CapUmaskNiceOOM        ✅     ✅     ❌      ✅      ✅      ✅      ✅        ✅      ✅
+      	CapSdNotify            ✅     ✅     ❌      ✅      ✅      ✅      ✅        ✅      ✅
+      	CapSocketActivation    ✅     ✅     ❌      ✅      ✅      ✅      ✅        ✅      ✅
+
+      ¹ Windows has no zombies; the reaper is a correct no-op there. ² Windows
+      cgroup is the Job Object backend. ³ the Unix setrlimit-on-self model has no
+      Windows analogue; Windows resource limits are applied through the cgroup
+      (Job Object) container or at spawn via the process Spec, not a standalone rlimit.
+      ⁴ illumos and Solaris have no reparent-here facility, like darwin, OpenBSD
+      and NetBSD: SetChildSubreaper returns [UnsupportedPlatform]. Their reaper
+      also sweeps once a second, because the Go runtime forks every child there
+      with FORK_NOSIGCHLD and its exit posts no SIGCHLD. Both columns are proven
+      on OmniOS r151054 and Oracle Solaris 11.4 (amd64) by the SDK's
+      cross-platform runtime lane.
+
+      [Supported] consults runtime.GOOS only — it is the platform-level matrix, not
+      a runtime probe. A capability that is native on the GOOS may still be
+      unavailable at runtime (e.g. cgroup present but not delegated); use the
+      per-facade probe for that (e.g. cgroup.Available()).
     functions:
-      - in:
+      - doc: |-
+          Supported reports whether cap has a native backend on the current GOOS. It is
+          pure, allocation-free and race-clean: it consults runtime.GOOS only, never a
+          runtime delegation probe (see the package doc on cgroup.Available()).
+        in:
           - name: c
             type: Capability
         name: Supported
         out:
           - type: bool
-      - in:
+      - doc: |-
+          MissingCapabilities returns the subset of caps with no native backend on the
+          current platform; an empty (nil) result means every capability is present.
+        in:
           - name: caps
             type: Capability
         name: MissingCapabilities
         out:
           - type: "[]Capability"
         variadic: true
-      - in:
+      - doc: |-
+          MustSupport panics when any requested capability is missing on the current
+          platform, and is a no-op otherwise. It is the consumer's OPT-IN fail-fast: the
+          SDK never calls it. The panic value is the typed [errs] UnsupportedPlatform
+          error (code 0.2.6.1), so a top-level recover() can classify it via
+          errs.CodeOf / HasCode rather than a bare string.
+        in:
           - name: caps
             type: Capability
         name: MustSupport
@@ -1360,17 +2629,88 @@ packages:
       kernelerrs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/pkg/v1/proc
     types:
-      - methods:
-          - name: String
+      - doc: |-
+          Capability identifies one process-supervision capability whose native backend
+          is present on some platforms and absent on others.
+        methods:
+          - doc: |-
+              String returns the capability's stable name, or its integer form when the
+              value is out of range.
+            name: String
             out:
               - type: string
             recv: value
         name: Capability
         underlying: int
     variables:
-      - name: UnsupportedPlatform
+      - doc: |-
+          UnsupportedPlatform is the central sentinel a missing capability surfaces. A
+          recover() of a [MustSupport] panic yields an error carrying this error's code.
+        name: UnsupportedPlatform
         type: "*kernelerrs.Error"
-  - facade:
+  - doc: |-
+      Package cgroup creates and manages cgroup v2 control groups to confine a
+      process tree's memory, CPU, pids, and IO.
+
+      It is the thin public facade over internal/service/proc/cgroup: Group is an
+      alias of the core proc.Group port and the functions delegate straight to the
+      service implementation. The kernel-enforced control-group backend is the
+      unified cgroup v2 hierarchy on Linux, a Job Object on Windows and rctl(8) on
+      FreeBSD; the facade degrades gracefully — on a platform with no such backend
+      (darwin, OpenBSD, NetBSD, DragonFly, illumos, Solaris, a FreeBSD kernel
+      without RACCT), a cgroup
+      v1 host, or an unprivileged/non-delegated Linux host it returns the typed
+      UnsupportedPlatform or CgroupUnavailable error rather than panicking.
+
+      # Usage
+
+      Create a group, cap its memory, attach a process, then tear it down:
+
+      	import (
+      		"github.com/kitsunium/sdk/pkg/v1/proc/cgroup"
+      	)
+
+      	if !cgroup.Available() {
+      		// cgroup v2 not mounted or not delegated to this caller.
+      		return
+      	}
+      	g, err := cgroup.Create("myservice")
+      	if err != nil {
+      		return // CgroupUnavailable / CgroupCreateFailed / UnsupportedPlatform
+      	}
+      	defer g.Delete()
+      	_ = g.SetMemoryMax(256 << 20) // 256 MiB; a negative value means "no limit"
+      	_ = g.SetCPUMax(50000, 100000) // 50% of one CPU ("quota period" microseconds)
+      	_ = g.Add(pid)                 // move pid into the group via cgroup.procs
+
+      # Semantics
+
+      Set*Max writes the matching cgroup v2 interface file: memory.max, cpu.max
+      ("quota period"), pids.max, and one io.max line written verbatim. A negative
+      numeric value writes the literal "max" (no limit). Add writes a pid to
+      cgroup.procs. Delete rmdir's the group, which the kernel refuses (EBUSY,
+      surfaced as CgroupDeleteFailed) until every process has left it.
+
+      # Delegation
+
+      Available is honest about delegation: it confirms the cgroup.controllers
+      marker exists AND that a throwaway sub-directory can be created under the
+      mount. A read-only root (the common unprivileged-container case) reports
+      false, and Create returns CgroupUnavailable. Use WithRoot to target a
+      delegated sub-tree handed to the caller by a container manager.
+
+      # Platform notes
+
+      The backend is cgroup v2 on Linux, a Job Object on Windows and rctl(8) on
+      FreeBSD. On those, Available reports true (Linux additionally requires the
+      hierarchy delegated, FreeBSD a kernel with RACCT) and Create returns a usable
+      Group. On every other platform (darwin, OpenBSD, NetBSD, DragonFly, illumos, Solaris) Available
+      returns false and Create returns UnsupportedPlatform. The Group surface is
+      uniform; SetIOMax / Freeze / Thaw degrade to UnsupportedPlatform on the Job
+      Object backend, which has no equivalent for them. WithRoot names a directory of
+      the cgroup v2 hierarchy, so it takes effect on Linux only: the Job Object and
+      rctl backends have no hierarchy, and accept the option and ignore it.
+    facade:
       - alias:
           - doc: |-
               Group is a handle to a cgroup v2 control group: set controller ceilings,
@@ -1430,7 +2770,16 @@ packages:
               type: error
           variadic: true
     functions:
-      - in:
+      - doc: |-
+          MustCreate is like [Create] but panics with the typed error when creation
+          fails — UnsupportedPlatform on a platform with no control-group backend
+          (darwin, OpenBSD, NetBSD, DragonFly, illumos, Solaris), or CgroupUnavailable when the Linux hierarchy is not
+          delegated. It is the idiomatic Go MustX opt-in (like
+          [regexp.MustCompile]) for a consumer that chooses crash-on-unsupported at its
+          own startup; the SDK itself never panics, and [Create] is the non-panicking
+          form for normal use. The panic value is the typed error, so a top-level
+          recover() can classify it via errs.CodeOf / HasCode.
+        in:
           - name: name
             type: string
           - name: opts
@@ -1443,7 +2792,63 @@ packages:
       coreproc: github.com/kitsunium/sdk/internal/core/proc
       svccgroup: github.com/kitsunium/sdk/internal/service/proc/cgroup
     path: github.com/kitsunium/sdk/pkg/v1/proc/cgroup
-  - facade:
+  - doc: |-
+      Package memlimit derives the Go runtime soft memory limit from the control
+      group allowance governing this process, and installs it.
+
+      GOMAXPROCS has been cgroup-aware since Go 1.25; the memory limit never was. A
+      process in a 512 MiB container grows its heap past the cap and is SIGKILLed by
+      the kernel instead of being pushed into a more aggressive GC cycle. One call at
+      start-up converts that kill into collector pressure.
+
+      It is the thin public facade over internal/service/proc/memlimit: the types are
+      aliases of the core proc value types and the function delegates straight to the
+      service implementation.
+
+      # Usage
+
+      Apply it once, as early as possible, before the heap has grown:
+
+      	import (
+      		"github.com/kitsunium/sdk/pkg/v1/proc/memlimit"
+      	)
+
+      	func main() {
+      		applied := memlimit.Apply()
+      		if applied.Applied() {
+      			// applied.Limit bytes, derived from applied.Allowance.
+      		}
+      	}
+
+      Apply never fails and never panics: every outcome is a value. A caller that
+      only wants to know whether it acted reads Applied; one that wants to log WHY it
+      did not reads Source, which distinguishes an operator-set GOMEMLIMIT from an
+      uncapped host from a cap too tight to honour.
+
+      # What the limit covers
+
+      The limit is SOFT and covers all memory mapped, managed and not released by the
+      Go runtime — the heap, goroutine stacks, runtime metadata. It excludes memory
+      the runtime does not manage: the binary image, C allocations, syscall.Mmap
+      mappings, and kernel memory held on the process's behalf. Subprocesses are
+      outside it entirely. Ninety percent of the cgroup allowance is handed to the
+      runtime and the remainder covers those, so this reduces OOM pressure rather
+      than eliminating it.
+
+      # Relation to cgroup and rlimit
+
+      The three are distinct directions on one subject. cgroup WRITES a control group
+      to bound a child process. rlimit applies a setrlimit(2) ceiling the kernel
+      enforces by failing allocations. memlimit READS the cgroup cap already bounding
+      THIS process and tunes the Go collector to live inside it — nothing is enforced,
+      the collector simply works harder as the heap approaches the limit.
+
+      # Platform notes
+
+      Control groups are a Linux facility. Off Linux no limit file is readable, so
+      Apply reports MemorySourceUnconstrained and leaves the runtime default in
+      place; no call fails and no build tag is needed.
+    facade:
       - const:
           - doc: |-
               MemorySourceOperator reports that GOMEMLIMIT carried a non-empty value, which
@@ -1509,21 +2914,177 @@ packages:
       svcmemlimit: github.com/kitsunium/sdk/internal/service/proc/memlimit
     path: github.com/kitsunium/sdk/pkg/v1/proc/memlimit
   - constants:
-      - name: SIGTERM
+      - blockDoc: |-
+          The common control signals as typed process.Signal values, so callers pass
+          process.SIGTERM to Stop/Signal without a syscall import. They equal any
+          Signal parsed from the same name (the underlying value is the platform number).
+        doc: SIGTERM is the polite termination request — the default Stop signal.
+        name: SIGTERM
         type: Signal
         value: "15"
-      - name: SIGKILL
+      - blockDoc: |-
+          The common control signals as typed process.Signal values, so callers pass
+          process.SIGTERM to Stop/Signal without a syscall import. They equal any
+          Signal parsed from the same name (the underlying value is the platform number).
+        doc: SIGKILL is the unignorable kill Stop escalates to after the grace window.
+        name: SIGKILL
         type: Signal
         value: "9"
-      - name: SIGINT
+      - blockDoc: |-
+          The common control signals as typed process.Signal values, so callers pass
+          process.SIGTERM to Stop/Signal without a syscall import. They equal any
+          Signal parsed from the same name (the underlying value is the platform number).
+        doc: SIGINT is the interrupt signal (Ctrl-C analogue).
+        name: SIGINT
         type: Signal
         value: "2"
-      - name: SIGHUP
+      - blockDoc: |-
+          The common control signals as typed process.Signal values, so callers pass
+          process.SIGTERM to Stop/Signal without a syscall import. They equal any
+          Signal parsed from the same name (the underlying value is the platform number).
+        doc: SIGHUP is the hang-up / reload signal many daemons treat as "reconfigure".
+        name: SIGHUP
         type: Signal
         value: "1"
-      - name: SIGQUIT
+      - blockDoc: |-
+          The common control signals as typed process.Signal values, so callers pass
+          process.SIGTERM to Stop/Signal without a syscall import. They equal any
+          Signal parsed from the same name (the underlying value is the platform number).
+        doc: SIGQUIT is the quit-with-core signal.
+        name: SIGQUIT
         type: Signal
         value: "3"
+    doc: |-
+      Package process is the public facade for the SDK's keystone process-spawn
+      primitive: it starts a child process under explicit credentials, in its own
+      process group and session, and returns a handle that can wait for exit, signal
+      the leader or its whole group, and stop the group gracefully with a
+      SIGTERM→SIGKILL escalation.
+
+      It is a thin facade over internal/service/proc/exec. The public types are
+      aliases of the internal/core/proc port, so a value built here is the same type
+      the service layer consumes — no conversion, no parallel hierarchy.
+
+      # Spec → systemd directive mapping
+
+      	Spec.Path / Args / Dir / Env   ExecStart= / WorkingDirectory= / Environment=
+      	Spec.User / Group / Groups     User= / Group= / SupplementaryGroups=
+      	Spec.Setpgid                   KillMode=control-group (group-killable tree)
+      	Spec.Setsid                    a new session, detached from the parent tty
+      	Spec.Nice                      Nice=
+      	Spec.OOMScoreAdj               OOMScoreAdjust=
+      	Spec.Umask                     UMask=        (applied via trampoline)
+      	Spec.Rlimits                   Limit*=       (applied via trampoline)
+
+      # Environment, and finding the executable
+
+      A nil Spec.Env yields an empty environment — the child never silently inherits
+      the supervisor's, so a spawned service starts from a known state. Pass an
+      explicit slice (including os.Environ()) to inherit deliberately.
+
+      Spec.Path may be a bare name. "go" is searched in the PATH the CHILD will
+      see — the PATH entry of Spec.Env whenever it names one, even empty, the
+      parent's only when it names none —
+      with os/exec's rules: the first executable in PATH order wins, and a match
+      found only through a relative entry ("." or an empty one) is refused with
+      exec.ErrDot, which the returned SpawnFailed wraps (errors.Is answers). A path
+      with a separator is taken as written.
+
+      # Standard streams
+
+      Spec.Stdio selects how the child's stdin/stdout/stderr are wired:
+      StdioInherit (the default) shares the parent's streams; StdioNull discards the
+      child's output and gives it an immediate-EOF stdin; StdioCapture connects
+      Spec.Stdout and Spec.Stderr (any io.Writer) and Spec.Stdin (any io.Reader),
+      with a nil stream falling back to the null device for that one stream. In
+      capture mode every byte the child writes reaches the writers before Wait
+      returns, and the copier goroutines terminate at EOF (no leak). It composes
+      with Setpgid/Setsid and credential drop. Stdin should be EOF-terminating.
+
+      # Stopping a process group
+
+      Stop sends the chosen signal to the entire process group, waits up to grace
+      for exit, then escalates to SIGKILL on the group. Because the child leads its
+      own group (Spec.Setpgid), forked grandchildren are reached too — no survivor
+      is left behind.
+
+      # Example
+
+      	spec := process.Spec{
+      		Path:    "/bin/sh",
+      		Args:    []string{"sh", "-c", "sleep 1000 & wait"},
+      		Setpgid: true,
+      	}
+      	p, err := process.Start(context.Background(), spec)
+      	if err != nil {
+      		// err carries a central proc sentinel code (errs.HasCode).
+      		return err
+      	}
+      	// Graceful stop: SIGTERM to the group, escalate to SIGKILL after 5s.
+      	if err := p.Stop(context.Background(), 5*time.Second, process.SIGTERM); err != nil {
+      		return err
+      	}
+      	exit, err := p.Wait()
+      	_ = exit // exit.Code / exit.Signal / exit.UserTime / exit.MaxRSS
+
+      # Resource limits and umask
+
+      The Go runtime exposes no hook to run setrlimit(2) or umask(2) in the child
+      between fork and exec, so Start honours Spec.Rlimits and Spec.Umask via a
+      re-exec trampoline: when either is set, Start spawns this binary as a tiny
+      self-trampoline that applies the limits in the fresh child, then execs the real
+      target — so the target starts already under its limits, with no cgo and no
+      dependency. An Rlimit naming a resource with no RLIMIT_* mapping on the platform
+      (NPROC, MEMLOCK — absent from stdlib syscall) is still rejected up front with
+      UnknownResource; a limit the kernel refuses to set (e.g. raising a hard cap
+      unprivileged) fails the spawn rather than running the child unconfined. Nice and
+      OOMScoreAdj are applied post-start on the live pid and surface a typed error if
+      the host refuses.
+
+      # Platforms
+
+      Unix gets everything above. Windows spawns too, through CreateProcess: stdio
+      wiring, Setpgid (a new console process group), Spec.Rlimits (enforced by a
+      Job Object) and the PATH search (with PATHEXT) all work, while the fields
+      with no Windows meaning at this layer — User/Group/Groups, Umask, Nice,
+      OOMScoreAdj, ExtraFiles, CgroupPath — are refused with UnsupportedPlatform
+      rather than dropped. There, SignalGroup reaches the leader only and Stop's
+      escalation is TerminateProcess. Every other platform returns
+      UnsupportedPlatform from Start; the package compiles everywhere.
+
+      # The process itself
+
+      Everything above acts on a child. [Self] and [Build] read the process they
+      run in, on every platform, and never fail:
+
+      	stats := process.Self()
+      	stats.Goroutines, stats.HeapBytes, stats.GCPauses.Quantile(0.99), stats.CPUTime
+
+      	build, ok := process.Build()
+      	sdk, found := build.Module("github.com/kitsunium/sdk")
+      	// sdk.Version is a release ("v0.4.6"), or "" with sdk.Revision/sdk.Time
+      	// for a pseudo-version, or "" with sdk.Local for a directory.
+
+      CPUTime is the kernel's count (getrusage) where the platform has one and the
+      Go runtime's estimate elsewhere — refreshed only at a garbage collection;
+      Stats.CPUEstimated says which. The
+      distributions and every counter are cumulative since the process started —
+      subtract two snapshots for a window.
+
+      A module's recorded version conflates three things, and [Module] keeps them
+      apart: a RELEASE in Version, a COMMIT in Revision and Time (a pseudo-version
+      names one, and so does the main module's version-control stamp), and a
+      DIRECTORY in Local and Dir (a replace, a workspace module). What is in a
+      local directory NOW is a question for the framework's git.Head (ADR 0158).
+
+      Package process — the running process itself: what it was built from and
+      what it is doing.
+
+      Package process — ergonomic re-exports: the handful of signal constants and
+      resource sentinels callers need to drive Stop/SignalGroup and read typed
+      errors without importing internal/core/proc directly.
+
+      Package process — StdioMode re-exports for wiring a child's standard streams.
     facade:
       - alias:
           - doc: |-
@@ -1708,7 +3269,14 @@ packages:
             name: StdioMode
             target: coreproc.StdioMode
     functions:
-      - in:
+      - doc: |-
+          MustStart is like [Start] but panics with the typed error when the spawn fails
+          — UnsupportedPlatform off Unix/Windows, InvalidSpec, RlimitFailed, … It is the
+          idiomatic Go MustX opt-in (like [regexp.MustCompile]) for a consumer that
+          chooses crash-on-failure at its own startup; the SDK itself never panics, and
+          [Start] is the non-panicking form for normal use. The panic value is the typed
+          error, so a top-level recover() can classify it via errs.CodeOf / HasCode.
+        in:
           - name: ctx
             type: context.Context
           - name: spec
@@ -1722,7 +3290,64 @@ packages:
       svcexec: github.com/kitsunium/sdk/internal/service/proc/exec
       svcself: github.com/kitsunium/sdk/internal/service/proc/self
     path: github.com/kitsunium/sdk/pkg/v1/proc/process
-  - facade:
+  - doc: |-
+      Package reaper is the PID1 / subreaper zombie-collector facade.
+
+      A process that becomes the parent of orphaned descendants — an init (pid 1)
+      in a container, or any supervisor that calls [SetChildSubreaper] — must reap
+      the children that reparent to it, or they accumulate as zombies that exhaust
+      the system's pid space. This package wraps the kernel mechanics (a SIGCHLD
+      handler driving a non-blocking waitpid loop, plus prctl(PR_SET_CHILD_SUBREAPER))
+      behind a tiny, portable surface.
+
+      	r := reaper.New()
+      	r.Start()          // background: reap children as they exit
+      	defer r.Stop()     // final drain; no zombie outlives shutdown
+
+      	// A non-init supervisor opts in to collecting orphaned grandchildren:
+      	if !reaper.IsPID1() {
+      		if err := reaper.SetChildSubreaper(); err != nil {
+      			// degrade: orphans will reparent to pid 1 instead
+      		}
+      	}
+
+      # Semantics
+
+      [Reaper].Start installs an [os/signal] SIGCHLD handler and, on each signal,
+      loops syscall.Wait4 with WNOHANG until it drains every reapable child. Start is
+      idempotent. [Reaper].Stop performs one final drain and waits for the loop's
+      goroutine to exit, so a Start/Stop cycle leaks neither zombies nor goroutines
+      and may be repeated. [Reaper].ReapOnce runs a single non-blocking sweep and is
+      safe to call concurrently with the loop — each child's exit is observed
+      exactly once across whoever sweeps.
+
+      # Children spawned through pkg/v1/proc/process
+
+      A sweep collects EVERY exited child, including one a
+      [github.com/kitsunium/sdk/pkg/v1/proc/process.Process] is waiting for. Its exit
+      status is not lost: the sweep hands it to that Process, whose Wait reports
+      the child's own exit code whichever of the two collected it. A child spawned
+      any other way — os/exec, syscall.ForkExec, a C library — has no such claim, so
+      a running reaper still takes its status and its own wait fails with ECHILD.
+      Spawn what you wait for through pkg/v1/proc/process in a process that runs the
+      reaper.
+
+      ECHILD ("no children") is treated as a clean end of a sweep, not an error; any
+      other wait error surfaces as the typed sentinel [ReapFailed].
+
+      # Platform notes
+
+      The real implementation is Unix-only. On platforms without SIGCHLD/waitpid
+      (e.g. Windows), [New] returns a no-op reaper (Start/Stop do nothing, ReapOnce
+      returns 0) and [SetChildSubreaper] returns [UnsupportedPlatform]. On illumos
+      and Solaris the Go runtime forks every child with FORK_NOSIGCHLD, so the exit
+      of a child this process spawned posts no SIGCHLD there; the loop also sweeps
+      once a second on those two, which keeps "reap children as they exit" true. Code that
+      links this package therefore builds and runs everywhere; only the behaviour
+      degrades. [SetChildSubreaper] requires no privilege but is a per-process
+      Linux capability; where the prctl is unavailable it returns a typed error
+      rather than panicking.
+    facade:
       - alias:
           - doc: |-
               Reaper collects terminated child processes so they do not linger as zombies —
@@ -1806,7 +3431,53 @@ packages:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       svc: github.com/kitsunium/sdk/internal/service/proc/reaper
     path: github.com/kitsunium/sdk/pkg/v1/proc/reaper
-  - facade:
+  - doc: |-
+      Package rlimit applies per-process resource ceilings via setrlimit(2) /
+      prlimit64(2).
+
+      It is the thin public facade over internal/service/proc/rlimit: the types are
+      aliases of the core proc value types and the functions delegate straight to
+      the service implementation. Resources are named abstractly (Resource) and
+      mapped to the platform RLIMIT_* constant inside the service layer, so calling
+      code stays portable; on a non-Linux host every call returns the typed
+      UnsupportedPlatform error rather than acting.
+
+      # Usage
+
+      Lower the open-file ceiling of the current process to 1024 soft / 4096 hard:
+
+      	import (
+      		"github.com/kitsunium/sdk/pkg/v1/proc/rlimit"
+      	)
+
+      	err := rlimit.Apply(0, map[rlimit.Resource]rlimit.Limit{
+      		rlimit.ResourceNoFile: {Soft: 1024, Hard: 4096},
+      	})
+      	if err != nil {
+      		// inspect with errs.HasCode(err, ...) — RlimitFailed / UnknownResource.
+      	}
+
+      A pid of 0 targets the calling process via setrlimit(2). Any other pid targets
+      that process via prlimit64(2), which requires the CAP_SYS_RESOURCE capability;
+      without it the call returns RlimitFailed wrapping EPERM.
+
+      # Spec integration
+
+      Go's os/exec SysProcAttr carries no rlimit field. process.Start applies a
+      Spec.Rlimits set to the child it spawns via a re-exec trampoline; this package
+      is the standalone primitive for the other cases: apply limits from the child
+      after fork (a pid-0 Apply in the child) or, when supervising, apply them to the
+      spawned pid via prlimit64. PrepareSysProcAttr validates a limit set without any
+      syscall — call it at Spec-construction time to fail fast on a Resource this
+      platform cannot honour, before a process is ever spawned.
+
+      # Platform notes
+
+      Only Linux is supported. RLIMIT_NPROC and RLIMIT_MEMLOCK are absent from Go's
+      syscall package and are restated from the kernel generic ABI inside the
+      service layer. Off Linux, Apply and PrepareSysProcAttr return
+      UnsupportedPlatform.
+    facade:
       - const:
           - doc: LimitInfinity is the soft/hard value meaning "no limit" (RLIM_INFINITY).
             name: LimitInfinity
@@ -1925,7 +3596,54 @@ packages:
       coreproc: github.com/kitsunium/sdk/internal/core/proc
       svcrlimit: github.com/kitsunium/sdk/internal/service/proc/rlimit
     path: github.com/kitsunium/sdk/pkg/v1/proc/rlimit
-  - facade:
+  - doc: |-
+      Package signal is the typed signal toolbox: parse, subscribe, and forward OS
+      signals through one ergonomic surface.
+
+      It is a thin facade over the SDK process-supervision domain. Signals are typed
+      values ([Signal]) that round-trip through their canonical name, [Notify]
+      subscribes to a set of them on a leak-free channel, and [Relay] forwards a
+      stream of received signals to another process or process group.
+
+      	// Translate a graceful-shutdown request and act on it.
+      	term, _ := signal.Parse("SIGTERM")         // typed value
+      	intr, _ := signal.Parse("SIGINT")
+      	ch, stop := signal.Notify(term, intr)
+      	defer stop()                               // leak-free teardown
+      	<-ch                                       // block until a signal arrives
+
+      	// Forward every signal we receive down to a child process group.
+      	src, stop := signal.Notify(term)
+      	defer stop()
+      	go signal.Relay(src, signal.Target(-childPGID)) // negative ⇒ process group
+
+      # Notify semantics
+
+      [Notify] registers an os/signal subscription and runs a translation goroutine
+      that converts each delivery to a typed [Signal]. The returned channel is
+      buffered (one slot per subscribed signal, floor of one) so a burst is not
+      dropped while the reader is busy. The returned stop function detaches the
+      subscription, ends the goroutine, and closes the channel; it is idempotent and
+      leaves no goroutine or registration behind.
+
+      # Relay semantics
+
+      [Relay] reads from the source channel and delivers each signal to the
+      [Target] — via kill(2) on Unix. A positive [Target] is a pid; a [Target] below
+      -1 addresses the process group whose id is its absolute value. Relay returns
+      when the source channel closes (nil) or when a delivery fails (a typed
+      RELAY_FAILED error). The reserved targets 0 and -1 are refused on every
+      platform before anything is delivered.
+
+      # Platform notes
+
+      Parse, String, and Notify are portable. Relay has a native backend on Unix
+      (kill(2)) and on Windows, which has no kill(2): a pid target is terminated
+      with TerminateProcess, and a process-group target receives a console control
+      event (CTRL_C for SIGINT, CTRL_BREAK otherwise). On the remaining platforms it
+      returns the typed UNSUPPORTED_PLATFORM sentinel rather than acting, so code
+      compiles and degrades gracefully everywhere.
+    facade:
       - alias:
           - doc: |-
               Signal is a typed, platform-portable OS signal. It aliases the domain type, so
@@ -1991,7 +3709,56 @@ packages:
       coreproc: github.com/kitsunium/sdk/internal/core/proc
       svcsignal: github.com/kitsunium/sdk/internal/service/proc/signal
     path: github.com/kitsunium/sdk/pkg/v1/proc/signal
-  - facade:
+  - doc: |-
+      Package listen is the public facade for systemd-style socket activation
+      (sd_listen_fds(3)): a service recovers already-bound listening sockets handed
+      to it by an activator, and an activator hands sockets to a child it spawns.
+
+      It is the symmetric companion to pkg/v1/proc/systemd/notify (readiness) and is generic to
+      any networked program: zero-downtime restarts, on-demand start, and inetd-style
+      launching all rest on passing a bound socket to a fresh process so no
+      connection is lost and no bind races.
+
+      # Service side
+
+      A socket-activated process recovers its inherited listeners:
+
+      	lns, err := listen.Listeners(true) // unsetEnv: true so children don't re-inherit
+      	if err != nil {
+      		return err // UnsupportedPlatform off Unix; LISTEN_FAILED on a bad fd
+      	}
+      	for _, ln := range lns {
+      		go serve(ln)
+      	}
+
+      Files returns the raw *os.File sockets, Listeners wraps the stream sockets as
+      net.Listener, and WithNames groups them by their LISTEN_FDNAMES name (duplicate
+      names allowed). All honour LISTEN_PID: fds addressed to a different process are
+      ignored (an empty result, not an error).
+
+      # Activator side
+
+      Prepare is the symmetric half — it makes the protocol self-contained and
+      testable without systemd. It appends each listener's socket to the child Spec's
+      inherited files and sets LISTEN_FDS / LISTEN_FDNAMES so the child recovers them:
+
+      	ln, _ := net.Listen("tcp", ":8080")
+      	spec := process.Spec{Path: "/usr/bin/myservice"}
+      	if err := listen.Prepare(&spec, map[string]net.Listener{"http": ln}); err != nil {
+      		return err
+      	}
+      	p, err := process.Start(ctx, spec) // the child finds the socket at fd 3
+
+      LISTEN_PID is intentionally omitted by Prepare: a pre-fork activator cannot know
+      the child's pid, so the receiving side accepts an absent LISTEN_PID from a
+      trusted parent while still validating a present one (the systemd-set case).
+
+      # Platform
+
+      Socket activation relies on Unix file-descriptor inheritance. Off Unix every
+      function returns the typed UnsupportedPlatform sentinel; the package compiles
+      on every GOOS.
+    facade:
       - alias:
           - doc: |-
               Spec is the process spawn specification an activator augments via Prepare. It
@@ -2062,7 +3829,70 @@ packages:
       coreproc: github.com/kitsunium/sdk/internal/core/proc
       svclisten: github.com/kitsunium/sdk/internal/service/proc/systemd/listen
     path: github.com/kitsunium/sdk/pkg/v1/proc/systemd/listen
-  - facade:
+  - doc: |-
+      Package notify is the public facade for the systemd sd_notify(3)
+      readiness/watchdog protocol.
+
+      It has two sides. A supervised process (the notifier) tells its supervisor
+      when it is ready, reloading, stopping, or alive; a supervisor (the listener)
+      receives those datagrams with the sender's kernel-verified PID.
+
+      # Notifier
+
+      The notifier functions write a single AF_UNIX datagram to the socket named by
+      the $NOTIFY_SOCKET environment variable. Per libsystemd, when $NOTIFY_SOCKET
+      is unset every notifier call is a no-op that returns nil — an unsupervised
+      binary stays silent rather than failing:
+
+      	func main() {
+      		// ... finish startup ...
+      		if err := notify.Ready(); err != nil {
+      			log.Fatal(err)
+      		}
+      		// optionally publish progress:
+      		_ = notify.Status("accepting connections")
+      		// if a watchdog is configured, ping within the interval:
+      		if d, ok := notify.WatchdogInterval(); ok {
+      			t := time.NewTicker(d / 2)
+      			defer t.Stop()
+      			for range t.C {
+      				_ = notify.Watchdog()
+      			}
+      		}
+      	}
+
+      Notify sends an arbitrary state map; Ready, Reloading, Stopping, Status,
+      Watchdog, and MainPID are shorthands for the common single-field datagrams.
+
+      # Listener (supervisor)
+
+      Listen creates a private datagram socket, enables SO_PASSCRED so the kernel
+      stamps each datagram with the sender's verified PID, and returns the socket
+      path to hand a child via NOTIFY_SOCKET:
+
+      	l, path, err := notify.Listen()
+      	if err != nil {
+      		log.Fatal(err)
+      	}
+      	defer l.Close()
+      	// ... spawn the child with NOTIFY_SOCKET=path in its environment ...
+      	n, err := l.Recv()
+      	if err != nil {
+      		log.Fatal(err)
+      	}
+      	if n.Ready() {
+      		log.Printf("child %d is ready", n.SenderPID)
+      	}
+
+      # Platform notes
+
+      The notifier and WatchdogInterval are portable across every GOOS. The
+      listener relies on SO_PASSCRED / SCM_CREDENTIALS, a Linux facility: on every
+      other platform Listen returns the UNSUPPORTED_PLATFORM error and never panics.
+
+      A $NOTIFY_SOCKET value beginning with '@' selects the abstract socket
+      namespace; the '@' is replaced by a NUL byte before binding or connecting.
+    facade:
       - alias:
           - doc: |-
               Listener is the supervisor side of the protocol: it owns the datagram socket a

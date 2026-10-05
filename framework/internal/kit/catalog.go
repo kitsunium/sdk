@@ -1,4 +1,3 @@
-// Package kit — the catalog of the generic mechanics a node is built from.
 package kit
 
 import (

@@ -1,4 +1,3 @@
-// Package token — the PASETO claim-value encoding.
 package token
 
 import (

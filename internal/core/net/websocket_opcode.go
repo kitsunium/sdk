@@ -1,4 +1,3 @@
-// Package net — the WebSocket frame opcode (RFC 6455 §5.2).
 package net
 
 // wsControlBit is set on every control opcode (0x8..0xF) and clear on every

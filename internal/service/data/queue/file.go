@@ -1,5 +1,3 @@
-// Package queue — the durable broker: one directory, three subdirectories,
-// and rename(2) as the only thing that changes a fact.
 package queue
 
 import (

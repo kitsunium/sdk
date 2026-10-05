@@ -1,6 +1,3 @@
-// Package lock — the lease handed out by the in-process locker. It is the
-// only backend whose leases satisfy corelock.Deadliner, because it is the only
-// one whose leases can be taken from a live holder.
 package lock
 
 import (

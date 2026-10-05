@@ -1,7 +1,3 @@
-// Package baseenc — big-endian base-conversion arithmetic shared by the
-// Base58 and Base62 variants. Unlike the block encodings, these treat the
-// whole input as one integer and divide it down by the radix, so the
-// transforms are O(n²) — callers MUST cap input at maxConvBytes first.
 package baseenc
 
 import "slices"

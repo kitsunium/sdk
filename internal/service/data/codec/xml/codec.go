@@ -1,6 +1,3 @@
-// Package xml wraps encoding/xml as a codec.Codec implementation registered
-// under Format("xml"). Blank-importing this package is enough to make XML
-// resolvable via the core/data/codec registry.
 package xml
 
 import (

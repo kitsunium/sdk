@@ -6,6 +6,7 @@ go_library(
     name = "docstore",
     srcs = [
         "config.go",
+        "doc.go",
         "docstore.go",
         "docstore_compliance.go",
         "hooks.go",

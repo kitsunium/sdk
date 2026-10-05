@@ -1,4 +1,3 @@
-// Package token — the three numeric limits a verification policy resolves.
 package token
 
 // boundsValue groups the size and depth limits a policy applies, so resolving

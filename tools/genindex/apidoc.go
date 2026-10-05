@@ -44,6 +44,9 @@ type builtAPI struct {
 	// cells holds, per cell, the symbols of each package directory: what the
 	// pin markers of that directory are compared with.
 	cells []map[string][]apiSymbol
+	// pkgDocs holds, per cell, the package comment of each package
+	// directory: what a pin file's package marker is compared with.
+	pkgDocs []map[string]string
 	// dirs are the project's package directories, every one go list names on
 	// any cell — one with no file there, or with tests alone, included.
 	dirs []packageDir

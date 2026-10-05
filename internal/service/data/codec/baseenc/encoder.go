@@ -1,7 +1,3 @@
-// Package baseenc — adapts the base-N stream-writer pipeline to
-// codec.Encoder. Each Encode call serialises one JSON value into the
-// underlying base-N WriteCloser, which writes the encoded bytes onto the
-// caller's io.Writer.
 package baseenc
 
 import (

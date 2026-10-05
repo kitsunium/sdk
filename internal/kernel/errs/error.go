@@ -1,6 +1,3 @@
-// Package errs — defines the SDK-wide typed Error plus the Define
-// and Wrap constructors. Consumers never import this package directly —
-// they introspect errors through github.com/kitsunium/sdk/pkg/v1/errs.
 package errs
 
 import (

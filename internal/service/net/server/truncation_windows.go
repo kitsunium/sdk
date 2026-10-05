@@ -1,6 +1,5 @@
 //go:build windows
 
-// Package server — how Windows reports a datagram longer than the read buffer.
 package server
 
 import (

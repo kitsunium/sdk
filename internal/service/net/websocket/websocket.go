@@ -1,15 +1,3 @@
-// Package websocket is the server side of RFC 6455: an HTTP request upgraded
-// into a bidirectional, message-oriented connection over the same socket.
-//
-// It is written against net/http's own interfaces, not against this SDK's
-// listener engine, so it works inside any http.Handler. Mounted on the SDK
-// engine it additionally observes the server's drain signal, which is what
-// stops a connection that by design never ends from being severed under its
-// handler on every deployment.
-//
-// permessage-deflate and every other extension are deliberately NOT negotiated;
-// the reserved frame bits an extension would use are refused as protocol
-// errors. See the package CLAUDE.md.
 package websocket
 
 import (

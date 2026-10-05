@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # pkg/v1/crypto/sign/
 
 ## Purpose
@@ -45,8 +45,10 @@ never WHY a check failed.
   `corecrypto.Algorithm` at the call into core, so the signature registry stays
   its own keyspace. The consts are the frozen wire strings (`"ed25519"`,
   `"ecdsa-p256"`).
-- **README.md is generated** (`make docs-readme` → gomarkdoc, ADR 0008). Edit the
-  package doc comment in `sign.go`; never hand-edit `README.md`.
+- **README.md is generated** (`make docs-readme` → `tools/genindex` from the
+  committed `docs/api`, ADR 0167). The package comment is in `doc.go`, which
+  kit writes from the design (`design/crypto.yaml`): edit the design, run
+  `kit gen`, then `make api` and `make docs-readme`; never hand-edit `README.md`.
 - **Signatures freeze at v1.0.0.** New scheme consts can be added; existing ones
   cannot move.
 
@@ -55,7 +57,7 @@ never WHY a check failed.
 - Log or persist `priv` in the clear; it is the secret half of the keypair.
 - Branch on `Verify`'s error to decide validity — validity is the bool; the
   error means "scheme not registered" (blank-import it).
-- Hand-author `README.md` — it is regenerated from the `sign.go` doc comment.
+- Hand-author `README.md` — `make docs-readme` writes it from `docs/api` (ADR 0167).
 
 ## Verification
 

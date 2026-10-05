@@ -1,5 +1,3 @@
-// Package ssh — compile-time proof that the ssh implementation still
-// satisfies the port it is written against.
 package ssh
 
 import (

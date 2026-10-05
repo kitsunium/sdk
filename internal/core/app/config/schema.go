@@ -1,5 +1,3 @@
-// Package config — the schema's declared value: one key and what it holds when
-// nobody supplied it.
 package config
 
 // DeclaredValue declares the value one configuration key takes when NO Source

@@ -1,4 +1,3 @@
-// Package kit — the migrations a database runs, and their lock.
 package kit
 
 import (

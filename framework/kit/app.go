@@ -1,4 +1,3 @@
-// Package kit — the App: the services a product mounts, served by one process.
 package kit
 
 import (

@@ -147,20 +147,108 @@ packages:
             value: "0x00_02_04_14"
         type: errs.Code
     constants:
-      - name: KeyLen
+      - doc: |-
+          KeyLen is the required symmetric key length in bytes (256-bit). Both shipped
+          AEADs — AES-256-GCM and XChaCha20-Poly1305 — take a 32-byte key, so a single
+          fixed length keeps the surface tiny and the validation total.
+        name: KeyLen
         type: int
         value: "32"
-      - name: Version
+      - doc: |-
+          Version is the box wire-format version, the first byte of every sealed box
+          ([Version][id][nonce][ciphertext||tag]). It is frozen post-v1.0.0; a future
+          framing change bumps it and Open rejects an unknown version as
+          DecryptionFailed. Concrete AEADs embed it via this constant.
+        name: Version
         type: byte
         value: "0x01"
+    doc: |-
+      Package crypto — the AEAD port implemented by each concrete algorithm.
+
+      Package crypto — the Agreement port: DH-style key agreement.
+
+      Package crypto — the process-wide Agreement registry + GenerateAgreementKey / AgreementShared dispatch.
+
+      Package crypto declares the authenticated-encryption port: the AEAD
+      contract, the redacting Key value type, and the process-wide registry that
+      maps an Algorithm (and its 1-byte wire id) to a registered AEAD. It is the
+      peer of internal/core/data/codec — the registry resolves an Algorithm to an AEAD
+      exactly as codec resolves a Format to a Codec.
+
+      No algorithm bodies and no vendor types live here; concrete AEADs live under
+      internal/service/crypto/<algo>/ (stdlib AES-GCM today) and third-party/
+      x-crypto/* (XChaCha20-Poly1305 tomorrow) and self-register via a package-level
+      var initialiser when imported — no init().
+
+      Package crypto — range 0.2.4.* (ADR 0013 core/crypto block).
+
+      Package crypto — the key-derivation port implemented by each KDF scheme.
+
+      Package crypto — the process-wide Deriver registry + Subkey dispatch.
+
+      Package crypto — declares the sentinels returned by the AEAD facade. Each
+      var's name equals its errs.Define Reason in SCREAMING_SNAKE form.
+      DuplicateRegistration is never returned: every registrar panics at boot with
+      conflictText of it (see registry_generic.go and registry.go).
+
+      Package crypto — the process-wide Hasher registry + Sum / SumHex dispatch.
+
+      Package crypto — the Hasher port: fingerprint / content-addressing hashing.
+
+      Package crypto — the opaque, redacting symmetric Key value type.
+
+      Package crypto — the MAC port: keyed, detached message authentication.
+
+      Package crypto — the process-wide MAC registry + MACTag / MACVerify dispatch.
+
+      Package crypto — the password-hashing port implemented by each scheme.
+
+      Package crypto — the process-wide PasswordHasher registry + HashPassword / VerifyPassword / NeedsRehash dispatch.
+
+      Package crypto — holds the process-wide AEAD registry. Service- and
+      third-party-level scheme packages register themselves via package-level var
+      initialisers when imported (no init()), mirroring core/data/codec.
+
+      Package crypto — the registrar every scheme registry shares (AEAD, Hasher,
+      Signer, MAC, Deriver, Agreement, PasswordHasher, StreamSealer). The table
+      under each one is the kernel's (kernel/plugin.Registry, ADR 0159); what this
+      file adds is the crypto domain's refusal — the code, the reason and the
+      fields a conflict panics with — written once instead of once per capability.
+
+      Package crypto — the Seal / Open dispatch over the AEAD registry.
+
+      Package crypto — the digital-signature port implemented by each scheme.
+
+      Package crypto — the process-wide Signer registry + GenerateKey / Sign / Verify dispatch.
+
+      Package crypto — the StreamSealer port: chunked authenticated encryption.
+
+      Package crypto — the process-wide StreamSealer registry + SealStream / OpenStream dispatch.
     functions:
-      - in:
+      - doc: |-
+          RegisterAgreement inserts a under a.Algorithm() and returns it so callers can
+          bind the singleton to a typed package-level variable. Panics on a nil scheme
+          or when a distinct scheme already claims the same Algorithm.
+
+          IFACE-PLUGIN: the registry hands plug-in Agreement instances back to callers
+          so each scheme keeps its concrete type unexported; the contract is the
+          Agreement interface itself.
+
+          "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
+          plug-in whose type is not comparable both satisfy the port and neither can
+          serve one call (see internal/kernel/plugin).
+        in:
           - name: a
             type: Agreement
         name: RegisterAgreement
         out:
           - type: Agreement
-      - in:
+      - doc: |-
+          LookupAgreement returns the Agreement scheme registered under name.
+
+          IFACE-PLUGIN: the registry stores plug-in Agreement instances behind the
+          Agreement interface — concrete types are intentionally unexported per scheme.
+        in:
           - name: name
             type: Algorithm
         name: LookupAgreement
@@ -169,10 +257,16 @@ packages:
             type: Agreement
           - name: ok
             type: bool
-      - name: AvailableAgreements
+      - doc: AvailableAgreements returns the sorted list of registered agreement Algorithms.
+        name: AvailableAgreements
         out:
           - type: "[]Algorithm"
-      - in:
+      - doc: |-
+          GenerateAgreementKey draws a fresh keypair from the Agreement scheme
+          registered as name. A name with no registered scheme returns
+          UnknownAgreementAlgorithm; an entropy fault from the scheme propagates
+          unchanged so callers see the original cause.
+        in:
           - name: name
             type: Algorithm
         name: GenerateAgreementKey
@@ -182,7 +276,12 @@ packages:
             type: "[]byte"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          AgreementShared derives the raw shared secret with the Agreement scheme
+          registered as name. The result MUST be passed through a KDF before use as a
+          key. A name with no registered scheme returns UnknownAgreementAlgorithm; a
+          scheme Shared fault is wrapped into AgreementFailed, leaking no key bytes.
+        in:
           - name: name
             type: Algorithm
           - name: priv
@@ -194,13 +293,31 @@ packages:
             type: "[]byte"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          RegisterDeriver inserts d under d.Algorithm() and returns it so callers can
+          bind the singleton to a typed package-level variable like
+          `var Deriver = crypto.RegisterDeriver(hkdfSHA256{})`. Panics on a nil deriver
+          or when a distinct deriver already claims the same Algorithm.
+
+          IFACE-PLUGIN: the registry hands plug-in Deriver instances back to callers so
+          each scheme keeps its concrete type unexported; the stable contract is the
+          Deriver interface itself.
+
+          "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
+          plug-in whose type is not comparable both satisfy the port and neither can
+          serve one call (see internal/kernel/plugin).
+        in:
           - name: d
             type: Deriver
         name: RegisterDeriver
         out:
           - type: Deriver
-      - in:
+      - doc: |-
+          LookupDeriver returns the Deriver registered under name.
+
+          IFACE-PLUGIN: the registry stores plug-in Deriver instances behind the Deriver
+          interface — concrete types are intentionally unexported per scheme.
+        in:
           - name: name
             type: Algorithm
         name: LookupDeriver
@@ -209,10 +326,16 @@ packages:
             type: Deriver
           - name: ok
             type: bool
-      - name: AvailableDerivers
+      - doc: AvailableDerivers returns the sorted list of registered KDF Algorithms.
+        name: AvailableDerivers
         out:
           - type: "[]Algorithm"
-      - in:
+      - doc: |-
+          Subkey derives a length-byte subkey from secret (with optional salt and the
+          context label info) using the Deriver registered as name. A name with no
+          registered deriver returns UnknownKDFAlgorithm (blank-import the scheme's
+          package to register it); an over-long length returns DerivationFailed.
+        in:
           - name: name
             type: Algorithm
           - name: secret
@@ -228,13 +351,31 @@ packages:
             type: "[]byte"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          RegisterHasher inserts h under h.Algorithm() and returns it so callers can
+          bind the singleton to a typed package-level variable like
+          `var Hasher = crypto.RegisterHasher(sha256Hasher{})`. Panics on a nil hasher
+          or when a distinct hasher already claims the same Algorithm.
+
+          IFACE-PLUGIN: the registry hands plug-in Hasher instances back to callers so
+          each scheme keeps its concrete type unexported; the stable contract is the
+          Hasher interface itself.
+
+          "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
+          plug-in whose type is not comparable both satisfy the port and neither can
+          serve one call (see internal/kernel/plugin).
+        in:
           - name: h
             type: Hasher
         name: RegisterHasher
         out:
           - type: Hasher
-      - in:
+      - doc: |-
+          LookupHasher returns the Hasher registered under name.
+
+          IFACE-PLUGIN: the registry stores plug-in Hasher instances behind the Hasher
+          interface — concrete types are intentionally unexported per scheme.
+        in:
           - name: name
             type: Algorithm
         name: LookupHasher
@@ -243,10 +384,15 @@ packages:
             type: Hasher
           - name: ok
             type: bool
-      - name: AvailableHashers
+      - doc: AvailableHashers returns the sorted list of registered hash Algorithms.
+        name: AvailableHashers
         out:
           - type: "[]Algorithm"
-      - in:
+      - doc: |-
+          Sum returns the digest of data under the Hasher registered as name. A name
+          with no registered hasher returns UnknownHashAlgorithm (blank-import the
+          scheme's package to register it).
+        in:
           - name: name
             type: Algorithm
           - name: data
@@ -257,7 +403,11 @@ packages:
             type: "[]byte"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NewHash returns a fresh streaming hash.Hash for the Hasher registered as
+          name (for io.Copy over large inputs). A name with no registered hasher
+          returns UnknownHashAlgorithm.
+        in:
           - name: name
             type: Algorithm
         name: NewHash
@@ -266,7 +416,10 @@ packages:
             type: hash.Hash
           - name: err
             type: error
-      - in:
+      - doc: |-
+          SumHex is Sum rendered as canonical lowercase hex — the frozen string form
+          for content IDs and cache keys.
+        in:
           - name: name
             type: Algorithm
           - name: data
@@ -277,7 +430,11 @@ packages:
             type: string
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NewKey builds a Key from raw, which MUST be exactly KeyLen (32) bytes. A wrong
+          length returns InvalidKey rather than silently truncating or padding; the
+          bytes are copied so a later mutation of raw cannot affect the Key.
+        in:
           - name: raw
             type: "[]byte"
         name: NewKey
@@ -286,13 +443,29 @@ packages:
             type: Key
           - name: err
             type: error
-      - in:
+      - doc: |-
+          RegisterMAC inserts m under m.Algorithm() and returns it so callers can bind
+          the singleton to a typed package-level variable. Panics on a nil MAC or when
+          a distinct MAC already claims the same Algorithm.
+
+          IFACE-PLUGIN: the registry hands plug-in MAC instances back to callers so each
+          scheme keeps its concrete type unexported; the contract is the MAC interface.
+
+          "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
+          plug-in whose type is not comparable both satisfy the port and neither can
+          serve one call (see internal/kernel/plugin).
+        in:
           - name: m
             type: MAC
         name: RegisterMAC
         out:
           - type: MAC
-      - in:
+      - doc: |-
+          LookupMAC returns the MAC registered under name.
+
+          IFACE-PLUGIN: the registry stores plug-in MAC instances behind the MAC
+          interface — concrete types are intentionally unexported per scheme.
+        in:
           - name: name
             type: Algorithm
         name: LookupMAC
@@ -301,10 +474,16 @@ packages:
             type: MAC
           - name: ok
             type: bool
-      - name: AvailableMACs
+      - doc: AvailableMACs returns the sorted list of registered MAC Algorithms.
+        name: AvailableMACs
         out:
           - type: "[]Algorithm"
-      - in:
+      - doc: |-
+          MACTag returns the authentication tag over message under key for the MAC
+          registered as name. It is named MACTag (not Tag) so the dispatch verb never
+          collides with the signer/verifier surface. A name with no registered MAC
+          returns UnknownMACAlgorithm (blank-import the scheme's package to register it).
+        in:
           - name: name
             type: Algorithm
           - name: key
@@ -317,7 +496,12 @@ packages:
             type: "[]byte"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          MACVerify reports whether tag authenticates message under key for the MAC
+          registered as name, using the scheme's constant-time comparison. A name with
+          no registered MAC returns (false, UnknownMACAlgorithm) so a miss is never
+          mistaken for a bad-tag false.
+        in:
           - name: name
             type: Algorithm
           - name: key
@@ -331,13 +515,30 @@ packages:
             type: bool
           - name: err
             type: error
-      - in:
+      - doc: |-
+          RegisterPasswordHasher inserts p under p.Algorithm() and returns it so callers
+          can bind the singleton to a typed package-level variable. Panics on a nil
+          hasher or when a distinct hasher already claims the same Algorithm.
+
+          IFACE-PLUGIN: the registry hands plug-in PasswordHasher instances back to
+          callers so each scheme keeps its concrete type unexported; the contract is the
+          PasswordHasher interface itself.
+
+          "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
+          plug-in whose type is not comparable both satisfy the port and neither can
+          serve one call (see internal/kernel/plugin).
+        in:
           - name: p
             type: PasswordHasher
         name: RegisterPasswordHasher
         out:
           - type: PasswordHasher
-      - in:
+      - doc: |-
+          LookupPasswordHasher returns the PasswordHasher registered under name.
+
+          IFACE-PLUGIN: the registry stores plug-in PasswordHasher instances behind the
+          PasswordHasher interface — concrete types are intentionally unexported per scheme.
+        in:
           - name: name
             type: Algorithm
         name: LookupPasswordHasher
@@ -346,10 +547,17 @@ packages:
             type: PasswordHasher
           - name: ok
             type: bool
-      - name: AvailablePasswordHashers
+      - doc: |-
+          AvailablePasswordHashers returns the sorted list of registered password
+          Algorithms.
+        name: AvailablePasswordHashers
         out:
           - type: "[]Algorithm"
-      - in:
+      - doc: |-
+          HashPassword returns a PHC-string hash of password using the PasswordHasher
+          registered as name. A name with no registered hasher returns
+          UnknownPasswordAlgorithm (blank-import the scheme's package to register it).
+        in:
           - name: name
             type: Algorithm
           - name: password
@@ -360,7 +568,12 @@ packages:
             type: string
           - name: err
             type: error
-      - in:
+      - doc: |-
+          VerifyPassword reports whether password matches the stored PHC hash. The
+          scheme is read from phc's id segment — no algorithm argument is needed. A
+          malformed phc or unregistered scheme returns an error; a genuine mismatch is
+          (false, nil).
+        in:
           - name: password
             type: "[]byte"
           - name: phc
@@ -371,19 +584,41 @@ packages:
             type: bool
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NeedsRehash reports whether the stored PHC hash was produced with cost
+          parameters weaker than its scheme's current policy, so a caller can re-hash on
+          a successful login. A malformed or unknown-scheme phc reports false.
+        in:
           - name: phc
             type: string
         name: NeedsRehash
         out:
           - type: bool
-      - in:
+      - doc: |-
+          Register inserts a into the registry under a.Algorithm() + a.ID() and returns
+          it so callers can bind the singleton to a typed package-level variable like
+          `var AEAD = crypto.Register(aesGCM{})`. Panics on a nil scheme or when a
+          distinct scheme already claims the same Algorithm or wire id.
+
+          IFACE-PLUGIN: the registry hands plug-in AEAD instances back to callers so
+          each scheme keeps its concrete type unexported; the stable contract is the
+          AEAD interface itself.
+
+          "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
+          plug-in whose type is not comparable both satisfy the port and neither can
+          serve one call (see internal/kernel/plugin).
+        in:
           - name: a
             type: AEAD
         name: Register
         out:
           - type: AEAD
-      - in:
+      - doc: |-
+          Lookup returns the AEAD registered under name.
+
+          IFACE-PLUGIN: the registry stores plug-in scheme instances behind the AEAD
+          interface — concrete types are intentionally unexported per scheme.
+        in:
           - name: name
             type: Algorithm
         name: Lookup
@@ -392,10 +627,17 @@ packages:
             type: AEAD
           - name: ok
             type: bool
-      - name: Available
+      - doc: |-
+          Available returns the sorted list of registered Algorithms, or nil before
+          any Register.
+        name: Available
         out:
           - type: "[]Algorithm"
-      - in:
+      - doc: |-
+          Seal encrypts plaintext under the AEAD registered as name, binding aad, and
+          returns the self-framed box. A name with no registered scheme returns
+          UnknownAlgorithm (blank-import the scheme's package to register it).
+        in:
           - name: name
             type: Algorithm
           - name: key
@@ -409,7 +651,12 @@ packages:
             type: "[]byte"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          Open decrypts a box produced by Seal, verifying aad, and returns the
+          plaintext. The scheme is resolved from the box's 1-byte id header — the
+          caller never names it. Any failure (short box, unknown id, bad tag, wrong
+          key) returns the single non-oracle DecryptionFailed.
+        in:
           - name: key
             type: Key
           - name: box
@@ -421,13 +668,30 @@ packages:
             type: "[]byte"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          RegisterSigner inserts s under s.Algorithm() and returns it so callers can
+          bind the singleton to a typed package-level variable. Panics on a nil signer
+          or when a distinct signer already claims the same Algorithm.
+
+          IFACE-PLUGIN: the registry hands plug-in Signer instances back to callers so
+          each scheme keeps its concrete type unexported; the contract is the Signer
+          interface itself.
+
+          "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
+          plug-in whose type is not comparable both satisfy the port and neither can
+          serve one call (see internal/kernel/plugin).
+        in:
           - name: s
             type: Signer
         name: RegisterSigner
         out:
           - type: Signer
-      - in:
+      - doc: |-
+          LookupSigner returns the Signer registered under name.
+
+          IFACE-PLUGIN: the registry stores plug-in Signer instances behind the Signer
+          interface — concrete types are intentionally unexported per scheme.
+        in:
           - name: name
             type: Algorithm
         name: LookupSigner
@@ -436,10 +700,15 @@ packages:
             type: Signer
           - name: ok
             type: bool
-      - name: AvailableSigners
+      - doc: AvailableSigners returns the sorted list of registered signature Algorithms.
+        name: AvailableSigners
         out:
           - type: "[]Algorithm"
-      - in:
+      - doc: |-
+          GenerateKey draws a fresh keypair for the Signer registered as name. A name
+          with no registered signer returns UnknownSignatureAlgorithm (blank-import the
+          scheme's package to register it).
+        in:
           - name: name
             type: Algorithm
         name: GenerateKey
@@ -449,7 +718,11 @@ packages:
             type: "[]byte"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          Sign produces a detached signature over message using priv under the Signer
+          registered as name. A name with no registered signer returns
+          UnknownSignatureAlgorithm; a malformed priv returns SigningFailed.
+        in:
           - name: name
             type: Algorithm
           - name: priv
@@ -461,7 +734,12 @@ packages:
             type: "[]byte"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          Verify reports whether sig is a valid signature for message under pub for the
+          Signer registered as name. An unregistered name returns
+          (false, UnknownSignatureAlgorithm); an invalid signature is (false, nil) so
+          Verify never becomes an oracle on WHY a check failed.
+        in:
           - name: name
             type: Algorithm
           - name: pub
@@ -474,13 +752,30 @@ packages:
             type: bool
           - name: err
             type: error
-      - in:
+      - doc: |-
+          RegisterStreamSealer inserts s under s.Algorithm() and returns it so callers
+          can bind the singleton to a typed package-level variable. Panics on a nil
+          sealer or when a distinct sealer already claims the same Algorithm.
+
+          IFACE-PLUGIN: the registry hands plug-in StreamSealer instances back to
+          callers so each scheme keeps its concrete type unexported; the contract is the
+          StreamSealer interface itself.
+
+          "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
+          plug-in whose type is not comparable both satisfy the port and neither can
+          serve one call (see internal/kernel/plugin).
+        in:
           - name: s
             type: StreamSealer
         name: RegisterStreamSealer
         out:
           - type: StreamSealer
-      - in:
+      - doc: |-
+          LookupStreamSealer returns the StreamSealer registered under name.
+
+          IFACE-PLUGIN: the registry stores plug-in StreamSealer instances behind the
+          StreamSealer interface — concrete types are intentionally unexported per scheme.
+        in:
           - name: name
             type: Algorithm
         name: LookupStreamSealer
@@ -489,10 +784,18 @@ packages:
             type: StreamSealer
           - name: ok
             type: bool
-      - name: AvailableStreamSealers
+      - doc: |-
+          AvailableStreamSealers returns the sorted list of registered streaming-AEAD
+          Algorithms.
+        name: AvailableStreamSealers
         out:
           - type: "[]Algorithm"
-      - in:
+      - doc: |-
+          SealStream wraps dst so writes are sealed under key with aad by the
+          StreamSealer registered as name. Streaming extends the AEAD domain, so a name
+          with no registered sealer returns the shared UnknownAlgorithm sentinel; a
+          scheme construction fault propagates unchanged.
+        in:
           - name: name
             type: Algorithm
           - name: key
@@ -507,7 +810,12 @@ packages:
             type: io.WriteCloser
           - name: err
             type: error
-      - in:
+      - doc: |-
+          OpenStream wraps src so reads are opened under key with aad by the
+          StreamSealer registered as name. A name with no registered sealer returns the
+          shared UnknownAlgorithm sentinel; a truncated stream surfaces later as
+          StreamTruncated from the returned reader.
+        in:
           - name: name
             type: Algorithm
           - name: key
@@ -1072,55 +1380,178 @@ packages:
             public: A scheme is already registered under that algorithm or wire id
             reason: DUPLICATE_REGISTRATION
     types:
-      - methods:
-          - name: String
+      - doc: |-
+          Algorithm is the typed key under which an AEAD registers (e.g.
+          "aes-256-gcm"). The zero value Algorithm("") is reserved invalid, mirroring
+          codec.Format.
+        methods:
+          - doc: String implements fmt.Stringer and returns the raw identifier.
+            name: String
             out:
               - type: string
             recv: value
-          - name: Known
+          - doc: Known reports whether a has been registered in the AEAD registry.
+            name: Known
             out:
               - type: bool
             recv: value
         name: Algorithm
         underlying: string
-      - methods:
-          - name: Bytes
+      - doc: |-
+          Key is an opaque, redacting 256-bit symmetric key. Its String / GoString
+          output is always "<redacted>" so an accidental %v / %s / %#v never leaks the
+          secret; Bytes hands a fresh copy to the cipher and is the only way out. All
+          copies of a Key share one backing array, so Zeroize on any copy clears the
+          secret everywhere — call it when you are done with the key.
+        methods:
+          - doc: |-
+              Bytes returns a fresh copy of the raw key material for handoff to a cipher.
+              Callers MUST NOT log the result; the redaction only covers String / GoString.
+              A zero-value Key returns nil.
+            name: Bytes
             out:
               - type: "[]byte"
             recv: value
-          - name: Zeroize
+          - doc: |-
+              Zeroize overwrites the key material with zeros. Because copies share one
+              backing array, this clears the secret for every copy of the Key.
+            name: Zeroize
             recv: value
-          - name: String
+          - doc: |-
+              String implements fmt.Stringer and always redacts so the key never reaches a
+              log line through %v / %s.
+            name: String
             out:
               - type: string
             recv: value
-          - name: GoString
+          - doc: |-
+              GoString implements fmt.GoStringer so %#v stays redacted too — fmt bypasses
+              String for Go-syntax formatting and would otherwise dump the raw slice.
+            name: GoString
             out:
               - type: string
             recv: value
         name: Key
         struct:
           unexported: true
-  - imports:
+  - doc: |-
+      Package aesgcm registers the "aes-256-gcm" AEAD scheme (ADR 0013). Importing
+      the package (typically a blank import via pkg/v1/crypto) self-registers the
+      scheme so crypto.Seal / crypto.Open resolve. It is stdlib-only
+      (crypto/aes + crypto/cipher + crypto/rand), so it pulls zero non-stdlib deps
+      and keeps pkg/v1/crypto consumers dep-light.
+    imports:
       corecrypto: github.com/kitsunium/sdk/internal/core/crypto
     path: github.com/kitsunium/sdk/internal/service/crypto/aead/aesgcm
     variables:
-      - name: AEAD
+      - doc: |-
+          AEAD is the registered AES-256-GCM scheme singleton (no init(); package-level
+          var initialiser, mirroring the codec convention).
+        name: AEAD
         type: corecrypto.AEAD
-  - imports:
+  - doc: |-
+      Package streamaead (reader.go) — the streaming-AEAD read path: header verify,
+      chunk-by-chunk decrypt with hold-back, and one-byte EOF look-ahead.
+
+      Package streamaead registers the "aes-256-gcm-stream" streaming-AEAD scheme
+      (ADR 0014 §D2). Importing the package (typically a blank import via
+      pkg/v1/crypto) self-registers the scheme so crypto.SealStream /
+      crypto.OpenStream resolve. It is stdlib-only (crypto/aes + crypto/cipher +
+      crypto/hkdf + crypto/sha256 + crypto/rand), so it pulls zero non-stdlib deps
+      and keeps pkg/v1/crypto consumers dep-light.
+
+      # Frozen wire format (stream version 0x02, disjoint from the box's 0x01)
+
+      	header : [1B stream-ver=0x02][1B algID=0x01][16B random salt]
+      	key    : streamKey = HKDF-SHA256(ikm=key.Bytes(), salt=salt,
+      	                                 info="kitsunium/stream-aead/v1") -> 32B
+      	chunks : fixed 64 KiB plaintext per chunk (final chunk 0..64 KiB)
+      	         nonce_i (12B) = counter_i (11B big-endian) || flag (1B)
+      	                         flag = 0x01 on the final chunk, else 0x00
+      	         wire_i = AES-256-GCM-Seal(streamKey, nonce_i, plaintext_i, aad)
+      	                = ct_i || tag(16)
+
+      This is the STREAM construction (Hoang-Reyhanitabar-Rogaway, as used by age):
+      the random per-stream salt makes the deterministic counter nonce safe even
+      when one Key encrypts many streams, and the final-chunk flag in the nonce
+      provides truncation resistance — a truncated stream fails authentication
+      because the Reader reaches EOF without ever decrypting a flag=0x01 chunk.
+
+      This is a BESPOKE, SDK-owned frame — not age/libsodium interop. The header,
+      the info string, and the KAT vectors are all SDK-owned and frozen.
+
+      Package streamaead (writer.go) — the streaming-AEAD write path: lazy header
+      emit, fixed-size chunk buffering, and per-chunk seal on overflow / Close.
+    imports:
       corecrypto: github.com/kitsunium/sdk/internal/core/crypto
     path: github.com/kitsunium/sdk/internal/service/crypto/aead/streamaead
     variables:
-      - name: StreamSealer
+      - doc: |-
+          StreamSealer is the registered streaming AES-256-GCM scheme singleton (no
+          init(); package-level var initialiser, mirroring the codec/AEAD convention).
+        name: StreamSealer
         type: corecrypto.StreamSealer
-  - imports:
+  - doc: |-
+      Package x25519 registers the "x25519" key-agreement scheme (ADR 0014).
+      Importing the package (typically a blank import via pkg/v1/crypto/agree) self-registers
+      the scheme so crypto.GenerateAgreementKey / crypto.AgreementShared resolve. It
+      is stdlib-only (crypto/ecdh + crypto/rand), so it pulls zero non-stdlib deps
+      and keeps pkg/v1/crypto/agree consumers dep-light.
+
+      X25519 (RFC 7748) is the modern Diffie-Hellman default: a 32-byte public key,
+      a 32-byte private key, and a 32-byte shared secret. crypto/ecdh rejects
+      low-order peer points, so a malformed or attacker-chosen peer key surfaces as
+      a typed error rather than a degenerate secret.
+
+      Key-hygiene contract: the priv returned by GenerateKey and the secret returned
+      by Shared are RAW key material. The caller (the pkg/v1/crypto/agree facade) MUST run
+      the secret through a KDF before use and Zeroize both when done — this scheme
+      never logs or retains either.
+    imports:
       corecrypto: github.com/kitsunium/sdk/internal/core/crypto
     path: github.com/kitsunium/sdk/internal/service/crypto/agree/x25519
     variables:
-      - name: Agreement
+      - doc: |-
+          Agreement is the registered X25519 scheme singleton (no init(); package-level
+          var initialiser, mirroring the codec/AEAD convention).
+        name: Agreement
         type: corecrypto.Agreement
-  - functions:
-      - in:
+  - doc: |-
+      Package stdhash — CRC-32C (Castagnoli) scheme registration (see stdhash.go).
+
+      Package stdhash — DigestWriter streaming content-address ergonomics (see the
+      package doc in stdhash.go).
+
+      Package stdhash — FNV-1a 64-bit scheme registration (see package doc in stdhash.go).
+
+      Package stdhash — SHA-256 scheme registration (see package doc in stdhash.go).
+
+      Package stdhash — SHA3-256 scheme registration (see package doc in stdhash.go).
+
+      Package stdhash — SHA-512 scheme registration (see package doc in stdhash.go).
+
+      Package stdhash registers the stdlib fingerprint/content-addressing hashers
+      (ADR 0013): sha256, sha512, sha3-256, crc32c, fnv1a-64. Blank-importing the
+      package self-registers them so crypto.Sum / crypto.SumHex / crypto.NewHash
+      resolve. It is stdlib-only (crypto/sha256, crypto/sha512, crypto/sha3,
+      hash/crc32, hash/fnv), so it pulls zero non-stdlib deps and keeps
+      pkg/v1/crypto/hash consumers dep-light.
+
+      These are NOT authentication: none is keyed, and a digest is public. Keyed
+      integrity belongs to the AEAD / signature ports.
+
+      Each scheme lives in its own file (one comparable empty-struct Hasher per
+      file, per KTN-STRUCT-ONEFILE) and self-registers via a package-level var —
+      no init(), mirroring the codec/AEAD convention.
+
+      Package stdhash — VerifyingReader streaming content-address ergonomics (see
+      the package doc in stdhash.go).
+    functions:
+      - doc: |-
+          NewDigestWriter returns a DigestWriter that tees writes into dst while hashing
+          them under the Hasher registered as a. An unregistered algorithm returns
+          UnknownHashAlgorithm (blank-import the scheme's package to register it).
+        in:
           - name: a
             type: corecrypto.Algorithm
           - name: dst
@@ -1131,7 +1562,12 @@ packages:
             type: "*DigestWriter"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NewVerifyingReader returns a VerifyingReader over src that hashes the stream
+          under the Hasher registered as a and compares the result to wantHex at EOF. An
+          unregistered algorithm returns UnknownHashAlgorithm (blank-import the scheme's
+          package to register it).
+        in:
           - name: a
             type: corecrypto.Algorithm
           - name: src
@@ -1148,8 +1584,16 @@ packages:
       corecrypto: github.com/kitsunium/sdk/internal/core/crypto
     path: github.com/kitsunium/sdk/internal/service/crypto/hash/stdhash
     types:
-      - methods:
-          - in:
+      - doc: |-
+          DigestWriter tees every Write into both an underlying io.Writer and a running
+          hash, so a caller can stream bytes to a destination and read the digest of
+          everything written so far without a second pass. The digest is public (a
+          content ID / cache key) — it is NOT authentication.
+        methods:
+          - doc: |-
+              Write forwards p to the underlying writer and folds the same bytes into the
+              running hash, returning the count the destination accepted.
+            in:
               - name: p
                 type: "[]byte"
             name: Write
@@ -1159,19 +1603,36 @@ packages:
               - name: err
                 type: error
             recv: pointer
-          - name: Sum
+          - doc: |-
+              Sum returns the digest of every byte written so far. Calling it does not reset
+              the hash, so subsequent Writes keep extending the same digest.
+            name: Sum
             out:
               - type: "[]byte"
             recv: pointer
-          - name: SumHex
+          - doc: |-
+              SumHex returns Sum rendered as canonical lowercase hex — the frozen string
+              form for content IDs and cache keys.
+            name: SumHex
             out:
               - type: string
             recv: pointer
         name: DigestWriter
         struct:
           unexported: true
-      - methods:
-          - in:
+      - doc: |-
+          VerifyingReader wraps a source reader and folds every byte read into a running
+          hash. The digest is compared against the expected hex ONLY on the terminal
+          read (the one returning io.EOF): on a match it surfaces io.EOF unchanged; on a
+          mismatch it returns DigestMismatch instead. The check never fires mid-stream,
+          so a partial read can never leak the verification outcome, and the digest is
+          public so the comparison is non-oracle.
+        methods:
+          - doc: |-
+              Read proxies the wrapped reader, hashing the bytes it yields. Only when the
+              underlying read reports io.EOF does it verify the accumulated digest: a
+              mismatch becomes DigestMismatch, a match passes io.EOF through unchanged.
+            in:
               - name: p
                 type: "[]byte"
             name: Read
@@ -1184,14 +1645,39 @@ packages:
         name: VerifyingReader
         struct:
           unexported: true
-  - imports:
+  - doc: |-
+      Package hkdfsha256 registers the "hkdf-sha256" key-derivation scheme
+      (ADR 0013). Importing the package (typically a blank import via pkg/v1/crypto/kdf)
+      self-registers the scheme so crypto.Subkey resolves. It is stdlib-only
+      (crypto/hkdf + crypto/sha256), so it pulls zero non-stdlib deps and keeps
+      pkg/v1/crypto/kdf consumers dep-light.
+
+      HKDF (RFC 5869) is for KEY SEPARATION — expanding one strong secret into
+      independent, purpose-bound subkeys — NOT for stretching passwords. Feed it a
+      high-entropy secret; argon2id handles human passwords under its own port.
+    imports:
       corecrypto: github.com/kitsunium/sdk/internal/core/crypto
     path: github.com/kitsunium/sdk/internal/service/crypto/kdf/hkdfsha256
     variables:
-      - name: Deriver
+      - doc: |-
+          Deriver is the registered HKDF-SHA256 scheme singleton (no init();
+          package-level var initialiser, mirroring the codec/AEAD convention).
+        name: Deriver
         type: corecrypto.Deriver
-  - functions:
-      - in:
+  - doc: |-
+      Package keytree implements path-addressed hierarchical key derivation.
+
+      A KeyTree is an immutable node over a shared master Key. Each Child appends
+      a path segment; DeriveKey re-derives a 32-byte AEAD Key from the master with
+      the full canonical path as the HKDF info. The path encoding is injective —
+      each segment is length-prefixed — so Child("a/b").Child("c") can never
+      collide with Child("a").Child("b/c"). The root owns the master Zeroize
+      lifetime: zeroizing the master invalidates every derived node. This package
+      is a pure composition over the registered HKDF Deriver and mints no codes;
+      derivation failures forward the core DerivationFailed sentinel.
+    functions:
+      - doc: NewKeyTree returns the root KeyTree for master, deriving children under algo.
+        in:
           - name: algo
             type: corecrypto.Algorithm
           - name: master
@@ -1203,15 +1689,24 @@ packages:
       corecrypto: github.com/kitsunium/sdk/internal/core/crypto
     path: github.com/kitsunium/sdk/internal/service/crypto/kdf/keytree
     types:
-      - methods:
-          - in:
+      - doc: |-
+          KeyTree is an immutable node in a path-addressed key-derivation tree. It
+          holds the derivation algorithm, a shared master Key, and the accumulated
+          path; Child returns a new node and never mutates the receiver.
+        methods:
+          - doc: Child returns a new KeyTree one segment deeper; the receiver is unchanged.
+            in:
               - name: segment
                 type: string
             name: Child
             out:
               - type: KeyTree
             recv: value
-          - name: DeriveKey
+          - doc: |-
+              DeriveKey re-derives a 32-byte AEAD Key from the master at this node's path.
+              An unregistered algo yields UnknownKDFAlgorithm; an over-long request yields
+              DerivationFailed — both forwarded verbatim from the core dispatcher.
+            name: DeriveKey
             out:
               - name: key
                 type: corecrypto.Key
@@ -1221,8 +1716,28 @@ packages:
         name: KeyTree
         struct:
           unexported: true
-  - functions:
-      - in:
+  - doc: |-
+      Package keyenvelope wraps a symmetric DEK at rest under a passphrase.
+
+      A wrapped key is rendered in the frozen PHC-style grammar
+
+      	$kenv$v=1$kdf=<id>$<b64salt>$aead=<id>$<b64box>
+
+      where <b64salt> and <b64box> use base64.RawStdEncoding (PHC convention).
+      The KEK is derived from the passphrase with PBKDF2-SHA256 (600000
+      iterations, pinned by the kdf id — there is no iterations field) and the
+      DEK is sealed under AES-256-GCM with the envelope header as AAD, binding
+      the framing so a tampered header fails the AEAD open. The package mints no
+      error codes of its own: structural faults map to the core
+      InvalidKeyEnvelope sentinel and a wrong passphrase forwards the core
+      DecryptionFailed sentinel verbatim (no key/password oracle beyond
+      structural validity).
+    functions:
+      - doc: |-
+          WrapKey seals dek under a KEK derived from passphrase, returning the frozen
+          envelope string and an err that is non-nil on entropy or seal failure. The
+          caller-owned dek is never zeroized; the transient KEK is wiped on every path.
+        in:
           - name: passphrase
             type: "[]byte"
           - name: dek
@@ -1233,7 +1748,12 @@ packages:
             type: string
           - name: err
             type: error
-      - in:
+      - doc: |-
+          UnwrapKey parses envelope and opens the DEK using a KEK derived from
+          passphrase, returning the recovered dek and an err. A structurally invalid
+          envelope yields InvalidKeyEnvelope in err; a wrong passphrase forwards the
+          core DecryptionFailed sentinel.
+        in:
           - name: passphrase
             type: "[]byte"
           - name: envelope
@@ -1247,48 +1767,227 @@ packages:
     imports:
       corecrypto: github.com/kitsunium/sdk/internal/core/crypto
     path: github.com/kitsunium/sdk/internal/service/crypto/key/keyenvelope
-  - imports:
+  - doc: |-
+      Package hmacsha2 registers the "hmac-sha256" MAC scheme (ADR 0014).
+      Importing the package (typically a blank import via pkg/v1/crypto/mac) self-registers
+      the scheme so crypto.MACTag / crypto.MACVerify resolve. It is stdlib-only
+      (crypto/hmac + crypto/sha256), so it pulls zero non-stdlib deps and keeps
+      pkg/v1/crypto/mac consumers dep-light.
+
+      HMAC-SHA256 (RFC 2104) is the modern default for detached keyed
+      authentication. A tag IS secret-comparison-sensitive: Verify routes through
+      hmac.Equal (constant-time), never a plain ==/bytes.Equal, the exact inverse of
+      the unkeyed Hasher rule.
+    imports:
       corecrypto: github.com/kitsunium/sdk/internal/core/crypto
     path: github.com/kitsunium/sdk/internal/service/crypto/mac/hmacsha2
     variables:
-      - name: MAC
+      - doc: |-
+          MAC is the registered HMAC-SHA256 scheme singleton (no init(); package-level
+          var initialiser, mirroring the codec/AEAD convention).
+        name: MAC
         type: corecrypto.MAC
-  - functions:
-      - in:
+  - doc: |-
+      Package commonpw holds the ten thousand most common passwords, and says
+      whether a password is one of them (ADR 0143 §D10). Public facade:
+      pkg/v1/crypto/password, IsCommon.
+
+      # What the list is, and where it comes from
+
+      The list is xato-net-10-million-passwords-10000.txt from SecLists
+      (https://github.com/danielmiessler/SecLists, Passwords/Common-Credentials),
+      embedded byte for byte as it stood at commit
+      2e3e92569043d24297ca6c35070078e5cf41651e, SHA-256
+      c63d5e4ccc31344d662583cc39ca4bd5bd20517ff1d24501f0c4e0c22d9b722a: the
+      10 000 passwords that occur most often in the ten million credentials Mark
+      Burnett released into the public domain in 2015, most frequent first.
+
+      SecLists is distributed under the MIT licence, Copyright (c) 2018 Daniel
+      Miessler; its text is LICENSE.SecLists, beside the list, and travels with it
+      in the module. The SDK's own licence is MIT too.
+
+      # Why this list
+
+      NIST SP 800-63B-4 requires a verifier to compare a new password against a
+      blocklist of commonly used ones, and OWASP ASVS 5.0 (6.2.4) asks for at least
+      the top 3 000. Ten thousand covers that with room, at 76 KB in the binary.
+      Its provenance is known end to end, which a list merged from breaches of
+      unknown origin does not offer.
+
+      # How a password is compared
+
+      Case-insensitively: a password and every entry are compared lower-cased as
+      strings.ToLower lower-cases them, so PASSWORD and Password are refused with
+      password — a guessing attacker tries case variants first, and refusing them
+      costs a person nothing. Nothing else is normalised: no trimming, no
+      substitution of look-alike characters. The list is sorted once, at the first
+      question, and each question is a binary search that lower-cases the password
+      as it compares it: no copy of the password is made, as a string or
+      otherwise, and it is neither kept nor logged.
+
+      One line of the file is empty: the empty password is among the ten thousand
+      most used. It is not an entry here — refusing it is a length rule's job, and
+      IsCommon answers false for it — so the list holds 9 999 passwords, 9 916
+      once the case variants of one another are one.
+
+      A policy that requires fifteen characters, NIST's minimum for a password
+      used alone, has little left to refuse here — two entries are that long — so
+      the list matters most beside a shorter minimum, such as the eight NIST allows
+      with a second factor.
+    functions:
+      - doc: |-
+          IsCommon reports whether password, lower-cased, is one of the list's
+          entries, lower-cased. An empty password is not one of them: refusing it is
+          a length rule's job.
+        in:
           - name: password
             type: "[]byte"
         name: IsCommon
         out:
           - type: bool
-      - name: Len
+      - doc: |-
+          Len returns how many distinct passwords the list holds once lower-cased:
+          its 9 999 passwords, less the case variants of one another — 9 916.
+        name: Len
         out:
           - type: int
     path: github.com/kitsunium/sdk/internal/service/crypto/password/commonpw
-  - imports:
+  - doc: |-
+      Package pbkdf2pw registers the "pbkdf2-sha256" password-hashing scheme
+      (ADR 0013). Importing the package (typically a blank import via
+      pkg/v1/crypto/password) self-registers the scheme so crypto.HashPassword /
+      crypto.VerifyPassword resolve. It is stdlib-only (crypto/pbkdf2 + crypto/sha256
+      + crypto/rand + crypto/subtle, all Go 1.26), so it pulls zero non-stdlib deps
+      and is the default that keeps pkg/v1/crypto/password consumers dep-light.
+
+      PBKDF2 is the stdlib password stretcher. argon2id (memory-hard, the OWASP
+      first choice) lives under third-party/x-crypto as an opt-in scheme — import
+      it explicitly when you can afford the x/crypto dependency. PBKDF2-SHA256 at
+      600 000 iterations is the OWASP-recommended fallback where argon2 is absent.
+
+      Stored hashes use the PHC string format:
+
+      	$pbkdf2-sha256$i=600000$<b64-salt>$<b64-digest>
+    imports:
       corecrypto: github.com/kitsunium/sdk/internal/core/crypto
     path: github.com/kitsunium/sdk/internal/service/crypto/password/pbkdf2pw
     variables:
-      - name: PasswordHasher
+      - doc: |-
+          PasswordHasher is the registered PBKDF2-SHA256 scheme singleton (no init();
+          package-level var initialiser, mirroring the codec/AEAD convention).
+        name: PasswordHasher
         type: corecrypto.PasswordHasher
-  - imports:
+  - doc: |-
+      Package ecdsasig registers the "ecdsa-p256" signature scheme (ADR 0013).
+      Importing the package (typically a blank import via pkg/v1/crypto/sign) self-registers
+      the scheme so crypto.Sign / crypto.Verify / crypto.GenerateKey resolve. It is
+      stdlib-only (crypto/ecdsa + crypto/elliptic + crypto/sha256 + crypto/x509 +
+      crypto/rand), so it pulls zero non-stdlib deps and keeps pkg/v1/crypto/sign dep-light.
+
+      ECDSA over NIST P-256 with SHA-256 digests and ASN.1/DER signatures — the
+      interoperable choice for JWTs, X.509, and other ecosystems that expect ECDSA.
+      Ed25519 (ed25519sig) is the modern default when interop is not required.
+
+      Keys are DER-marshalled: the public key is PKIX (SubjectPublicKeyInfo) and the
+      private key is SEC1 (the x509.MarshalECPrivateKey form).
+    imports:
       corecrypto: github.com/kitsunium/sdk/internal/core/crypto
     path: github.com/kitsunium/sdk/internal/service/crypto/sign/ecdsasig
     variables:
-      - name: Signer
+      - doc: |-
+          Signer is the registered ECDSA P-256 scheme singleton (no init();
+          package-level var initialiser, mirroring the codec/AEAD convention).
+        name: Signer
         type: corecrypto.Signer
-  - imports:
+  - doc: |-
+      Package ed25519sig registers the "ed25519" signature scheme (ADR 0013).
+      Importing the package (typically a blank import via pkg/v1/crypto/sign) self-registers
+      the scheme so crypto.Sign / crypto.Verify / crypto.GenerateKey resolve. It is
+      stdlib-only (crypto/ed25519 + crypto/rand), so it pulls zero non-stdlib deps
+      and keeps pkg/v1/crypto/sign consumers dep-light.
+
+      Ed25519 is the modern default: small fixed-size keys and signatures, fast
+      verification, and no parameter choices to misconfigure. ECDSA lands later
+      under its own scheme package.
+    imports:
       corecrypto: github.com/kitsunium/sdk/internal/core/crypto
     path: github.com/kitsunium/sdk/internal/service/crypto/sign/ed25519sig
     variables:
-      - name: Signer
+      - doc: |-
+          Signer is the registered Ed25519 scheme singleton (no init(); package-level
+          var initialiser, mirroring the codec/AEAD convention).
+        name: Signer
         type: corecrypto.Signer
   - constants:
-      - name: AESGCM
+      - doc: "AESGCM is the default algorithm: AES-256-GCM. Active out of the box."
+        name: AESGCM
         type: Algorithm
         value: "\"aes-256-gcm\""
-      - name: XChaCha20Poly1305
+      - doc: |-
+          XChaCha20Poly1305 is the 192-bit-nonce AEAD, preferred for high-volume
+          random-nonce workloads. Pass it to SealAs after a blank import of
+          third-party/x-crypto/xchacha (which alone pulls golang.org/x/crypto):
+
+          	import _ "github.com/kitsunium/sdk/third-party/x-crypto/xchacha"
+          	box, _ := crypto.SealAs(crypto.XChaCha20Poly1305, k, pt, aad)
+        name: XChaCha20Poly1305
         type: Algorithm
         value: "\"xchacha20poly1305\""
+    doc: |-
+      Package crypto is the authenticated-encryption facade: Seal and Open with a
+      hidden nonce.
+
+      One key, two verbs. [Seal] encrypts a byte slice into a self-describing box;
+      [Open] turns the box back into plaintext. The nonce is generated, embedded,
+      and stripped for you — there is no nonce parameter to misuse, and the secure
+      path is the only path.
+
+      	k, _   := crypto.NewKey(key32)            // exactly 32 bytes, copied + redacting
+      	box, _ := crypto.Seal(k, []byte("hi"), nil) // nonce generated + hidden inside box
+      	pt, _  := crypto.Open(k, box, nil)          // []byte("hi")
+
+      # Hard to misuse, by design
+
+        - The nonce never appears in the API. [Seal] draws it from crypto/rand and
+          embeds it; [Open] strips it. Nonce reuse is structurally impossible.
+        - [NewKey] rejects any input that is not exactly [KeyLen] (32) bytes with
+          InvalidKey — never silent truncation — and copies the bytes defensively.
+        - [Key] redacts: its %v / %s / %#v output is always "<redacted>", and key
+          material never reaches an error's public or private message.
+        - [Open] returns one undifferentiated error for every failure (bad tag,
+          tampered framing, wrong key), so it cannot be used as an oracle.
+
+      # Associated data (aad)
+
+      The optional aad argument is authenticated but NOT encrypted: it is bound into
+      the tag so Open fails if it differs, but it is not stored in the box. Use it
+      to tie a ciphertext to its context (a record id, a table name, a format tag)
+      so a box cannot be replayed into a different context. Pass nil when unused.
+
+      # Algorithms
+
+      The default is AES-256-GCM (stdlib, hardware-accelerated, FIPS-track) and is
+      active out of the box — importing this package activates it with zero
+      non-stdlib dependencies. [SealAs] selects a specific [Algorithm]; additional
+      schemes (e.g. XChaCha20-Poly1305) activate via their own blank import.
+
+      # Wire format
+
+      A box is [1-byte version][1-byte algorithm-id][nonce][ciphertext || tag]. The
+      version and per-algorithm id are frozen post-v1.0.0, so a box sealed today
+      opens tomorrow. Open reads the id to pick the algorithm — the caller never
+      names it.
+
+      # Streaming large payloads
+
+      [Seal] is whole-buffer: it holds the full plaintext and box in memory. For
+      payloads too large to buffer, [SealStream] / [OpenStream] wrap an io.Writer /
+      io.Reader and process the data in fixed 64 KiB authenticated chunks under a
+      disjoint, frozen wire format (stream version 0x02). The chunked construction
+      (a random per-stream salt + a counter nonce + a final-chunk flag) is
+      truncation-resistant and never surfaces a chunk's plaintext before it
+      authenticates. The streaming frame is bespoke and SDK-owned (not age/libsodium
+      interop) and stays stdlib-only, so it preserves the dep-light invariant.
     facade:
       - const:
           - doc: KeyLen is the required symmetric key length in bytes (256-bit).
@@ -1371,7 +2070,11 @@ packages:
             - name: err
               type: error
     functions:
-      - in:
+      - doc: |-
+          Seal encrypts plaintext under k using the default algorithm (AES-256-GCM),
+          binding aad, and returns a self-describing box. The nonce is generated and
+          embedded for you. Pass nil aad when unused.
+        in:
           - name: k
             type: Key
           - name: plaintext
@@ -1383,7 +2086,10 @@ packages:
             type: "[]byte"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          SealAs is Seal with an explicit algorithm — e.g. a scheme activated by its own
+          blank import. An unregistered algorithm returns UnknownAlgorithm.
+        in:
           - name: a
             type: Algorithm
           - name: k
@@ -1397,7 +2103,12 @@ packages:
             type: "[]byte"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          SealStream wraps dst so writes are sealed under k with aad in fixed 64 KiB
+          authenticated chunks. The returned io.WriteCloser buffers and seals chunks as
+          they fill; Close writes the final authenticated chunk and MUST be called to
+          produce a valid stream. Pass nil aad when unused.
+        in:
           - name: dst
             type: io.Writer
           - name: k
@@ -1410,7 +2121,13 @@ packages:
             type: io.WriteCloser
           - name: err
             type: error
-      - in:
+      - doc: |-
+          OpenStream wraps src so reads are opened under k with aad, decrypting the
+          chunked stream produced by SealStream. The returned io.Reader never surfaces a
+          chunk's plaintext before it authenticates, returns EOF only after the final
+          chunk verifies, and surfaces a truncated stream as StreamTruncated. Pass nil
+          aad when unused.
+        in:
           - name: src
             type: io.Reader
           - name: k
@@ -1428,12 +2145,57 @@ packages:
       keyenvelope: github.com/kitsunium/sdk/internal/service/crypto/key/keyenvelope
     path: github.com/kitsunium/sdk/pkg/v1/crypto
     types:
-      - name: Algorithm
+      - doc: |-
+          Algorithm is the stable identifier of an AEAD scheme. Use it with SealAs. It
+          is a defined type distinct from the other crypto-family Algorithm types (hash,
+          mac, sign, …), so the compiler rejects feeding a hash or signature constant
+          into an AEAD call (V104) — the seven registries are separate keyspaces, and
+          the type system now enforces that separation the way typed Format/Level
+          discipline does elsewhere.
+        name: Algorithm
         underlying: corecrypto.Algorithm
   - constants:
-      - name: X25519
+      - doc: X25519 is Diffie-Hellman over Curve25519 (RFC 7748) — the modern default.
+        name: X25519
         type: Algorithm
         value: "\"x25519\""
+    doc: |-
+      Package agree is the key-agreement facade: establish a shared symmetric key
+      between two parties from their keypairs.
+
+      Each party generates a keypair, exchanges public keys, and derives the SAME
+      [Key] — without ever transmitting the key itself:
+
+      	pubA, privA, _ := agree.GenerateKey(agree.X25519)
+      	pubB, privB, _ := agree.GenerateKey(agree.X25519)
+      	keyA, _ := agree.SharedKey(agree.X25519, privA, pubB, "app-v1")
+      	keyB, _ := agree.SharedKey(agree.X25519, privB, pubA, "app-v1")
+      	// keyA and keyB are identical and ready for crypto.Seal.
+
+      # The raw Diffie-Hellman secret is never handed back
+
+      A raw DH secret is biased key material, unsafe to use directly. [SharedKey]
+      runs it through HKDF-SHA256 (bound to the info label) and returns a redacting
+      [Key] — the raw secret never leaves the SDK. The info label provides domain
+      separation: two applications sharing one keypair derive independent keys.
+
+      # Key hygiene
+
+      The priv from [GenerateKey] is secret material: hold it like a password, never
+      log it, and zero it when done. The returned [Key] redacts in logs; call its
+      Zeroize when finished.
+
+      # Algorithms
+
+      Importing this package activates X25519 (and the HKDF-SHA256 it derives
+      through) with zero non-stdlib deps:
+
+        - [X25519] — Diffie-Hellman over Curve25519 (RFC 7748); rejects low-order
+          peer points.
+
+      # Stable algorithm strings
+
+      The [Algorithm] constants are frozen post-v1.0.0.
     facade:
       - const:
           - doc: |-
@@ -1466,7 +2228,11 @@ packages:
             - name: err
               type: error
     functions:
-      - in:
+      - doc: |-
+          GenerateKey draws a fresh keypair for the named scheme, returning the raw
+          public and private key bytes. An unregistered algorithm returns
+          UnknownAgreementAlgorithm; treat priv as a secret and zero it when done.
+        in:
           - name: a
             type: Algorithm
         name: GenerateKey
@@ -1476,7 +2242,12 @@ packages:
             type: "[]byte"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          SharedKey derives a redacting 32-byte symmetric Key from priv and peerPub for
+          the named scheme, binding info as HKDF domain separation. The raw DH secret is
+          HKDF'd and never returned. An unregistered scheme returns
+          UnknownAgreementAlgorithm; a low-order/garbage peerPub returns AgreementFailed.
+        in:
           - name: a
             type: Algorithm
           - name: priv
@@ -1494,24 +2265,77 @@ packages:
       corecrypto: github.com/kitsunium/sdk/internal/core/crypto
     path: github.com/kitsunium/sdk/pkg/v1/crypto/agree
     types:
-      - name: Algorithm
+      - doc: |-
+          Algorithm is the stable identifier of a key-agreement scheme. It is a defined
+          type distinct from the other crypto-family Algorithm types (hash, mac, sign,
+          …), so the compiler rejects feeding a hash or signature constant into an
+          agreement call (V104) — the seven registries are separate keyspaces, and the
+          type system now enforces that separation the way typed Format/Level discipline
+          does elsewhere.
+        name: Algorithm
         underlying: corecrypto.Algorithm
   - constants:
-      - name: SHA256
+      - doc: "SHA256 is SHA-256: a 256-bit cryptographic digest for content addressing."
+        name: SHA256
         type: Algorithm
         value: "\"sha256\""
-      - name: SHA512
+      - doc: "SHA512 is SHA-512: a 512-bit cryptographic digest."
+        name: SHA512
         type: Algorithm
         value: "\"sha512\""
-      - name: SHA3256
+      - doc: "SHA3256 is SHA3-256: the Keccak-family 256-bit cryptographic digest."
+        name: SHA3256
         type: Algorithm
         value: "\"sha3-256\""
-      - name: CRC32C
+      - doc: "CRC32C is CRC-32C (Castagnoli): a fast NON-cryptographic checksum."
+        name: CRC32C
         type: Algorithm
         value: "\"crc32c\""
-      - name: FNV1a64
+      - doc: "FNV1a64 is FNV-1a 64-bit: a fast NON-cryptographic fingerprint."
+        name: FNV1a64
         type: Algorithm
         value: "\"fnv1a-64\""
+    doc: |-
+      Package hash is the fingerprint / content-addressing hashing facade.
+
+      One verb, many algorithms. [Sum] and [SumHex] hash arbitrary bytes to a
+      digest; [New] returns a streaming [hash.Hash] for io.Copy over large inputs.
+
+      	id, _ := hash.SumHex(hash.SHA256, payload)   // "9f86d0…" content id
+      	ck    := hash.SumHex(hash.CRC32C, payload)   // fast cache key
+
+      # NOT authentication
+
+      This package is for content IDs, cache keys, and dedup keys — NOT message
+      authentication, password storage, or signatures. No hasher is keyed, and a
+      digest is public. The package deliberately offers no secret-comparison
+      equality helper: never branch on a secret-dependent comparison of a digest.
+      Keyed integrity lives in the crypto AEAD and signature surfaces (constant-time
+      by construction there).
+
+      # Streaming content addressing
+
+      [NewDigestWriter] tees writes into a destination while computing the digest of
+      everything written; [NewVerifyingReader] verifies a stream against an expected
+      hex digest, failing only on the final (EOF) read with DigestMismatch. This is
+      public-digest, non-oracle verification — a content-ID check on public data, not
+      a secret-comparison oracle — so it does not contradict the NOT-authentication
+      rule above.
+
+      # Algorithms
+
+      Importing this package activates all of them with zero non-stdlib deps:
+
+        - [SHA256], [SHA512], [SHA3256] — cryptographic-strength digests for
+          content addressing and integrity (collision-resistant).
+        - [CRC32C], [FNV1a64] — fast NON-cryptographic checksums/fingerprints for
+          cache keys and in-memory dedup; do NOT use them where collision
+          resistance matters.
+
+      # Stable algorithm strings
+
+      The [Algorithm] constants are frozen post-v1.0.0 — a SumHex value computed
+      today stays reproducible.
     facade:
       - alias:
           - doc: |-
@@ -1526,7 +2350,10 @@ packages:
             name: VerifyingReader
             target: stdhash.VerifyingReader
     functions:
-      - in:
+      - doc: |-
+          Sum returns the digest of data under the named algorithm. An unregistered
+          algorithm returns UnknownHashAlgorithm.
+        in:
           - name: a
             type: Algorithm
           - name: data
@@ -1537,7 +2364,10 @@ packages:
             type: "[]byte"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          SumHex returns Sum as canonical lowercase hex — the frozen string form for
+          content IDs and cache keys.
+        in:
           - name: a
             type: Algorithm
           - name: data
@@ -1548,7 +2378,10 @@ packages:
             type: string
           - name: err
             type: error
-      - in:
+      - doc: |-
+          New returns a fresh streaming hash.Hash for the named algorithm, for io.Copy
+          over large inputs. An unregistered algorithm returns UnknownHashAlgorithm.
+        in:
           - name: a
             type: Algorithm
         name: New
@@ -1557,7 +2390,12 @@ packages:
             type: hash.Hash
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NewDigestWriter returns a DigestWriter that tees writes into dst while hashing
+          them under the named algorithm, so the content-address digest of everything
+          written is available via Sum/SumHex. An unregistered algorithm returns
+          UnknownHashAlgorithm.
+        in:
           - name: a
             type: Algorithm
           - name: dst
@@ -1568,7 +2406,13 @@ packages:
             type: "*DigestWriter"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NewVerifyingReader returns a VerifyingReader over src that hashes the stream
+          under the named algorithm and verifies it against wantHex on the final (EOF)
+          read — a public-digest, non-oracle, EOF-typed check that never fails
+          mid-stream. An unregistered algorithm returns UnknownHashAlgorithm; a digest
+          mismatch surfaces as DigestMismatch only at EOF.
+        in:
           - name: a
             type: Algorithm
           - name: src
@@ -1586,12 +2430,59 @@ packages:
       stdhash: github.com/kitsunium/sdk/internal/service/crypto/hash/stdhash
     path: github.com/kitsunium/sdk/pkg/v1/crypto/hash
     types:
-      - name: Algorithm
+      - doc: |-
+          Algorithm is the stable identifier of a hash scheme. It is a defined type
+          distinct from the other crypto-family Algorithm types (mac, sign, kdf, …), so
+          the compiler rejects feeding a MAC or signature constant into a hash call
+          (V104) — the seven registries are separate keyspaces, and the type system now
+          enforces that separation the way typed Format/Level discipline does elsewhere.
+        name: Algorithm
         underlying: corecrypto.Algorithm
   - constants:
-      - name: HKDFSHA256
+      - doc: |-
+          HKDFSHA256 is HKDF (RFC 5869) over SHA-256 — extract-and-expand for key
+          separation from a strong secret.
+        name: HKDFSHA256
         type: Algorithm
         value: "\"hkdf-sha256\""
+    doc: |-
+      Package kdf is the key-derivation facade for KEY SEPARATION.
+
+      Expand one strong secret into independent, purpose-bound subkeys:
+
+      	enc, _ := kdf.Subkey(kdf.HKDFSHA256, master, salt, "aead-key", 32)
+      	mac, _ := kdf.Subkey(kdf.HKDFSHA256, master, salt, "mac-key", 32)
+
+      The info label binds each subkey to its purpose, so the two derivations above
+      are cryptographically independent even though they share master and salt.
+
+      # Hierarchical derivation
+
+      [NewKeyTree] returns a [KeyTree] — an immutable, path-addressed node over a
+      shared master key. Child appends a path segment; DeriveKey re-derives a
+      32-byte key from the master with the full canonical path as the HKDF info.
+      The path encoding is injective, so distinct paths never collide:
+
+      	t := kdf.NewKeyTree(kdf.HKDFSHA256, master)
+      	dbKey, _ := t.Child("svc").Child("db").DeriveKey()
+
+      # NOT for passwords
+
+      HKDF assumes a HIGH-ENTROPY input — an AEAD key, a Diffie-Hellman shared
+      secret, an HKDF pseudorandom key. It does NOT stretch human passwords: it is
+      fast by design, so a weak password stays weak. Password hashing/stretching
+      (argon2id) is a separate, deliberately slow surface.
+
+      # Algorithms
+
+      Importing this package activates HKDF-SHA256 with zero non-stdlib deps:
+
+        - [HKDFSHA256] — HMAC-based extract-and-expand (RFC 5869) over SHA-256.
+
+      # Stable algorithm strings
+
+      The [Algorithm] constants are frozen post-v1.0.0 — a subkey derived today
+      stays reproducible.
     facade:
       - const:
           - doc: |-
@@ -1631,7 +2522,12 @@ packages:
             name: KeyTree
             target: keytree.KeyTree
     functions:
-      - in:
+      - doc: |-
+          Subkey derives a length-byte subkey from secret using the named scheme. salt
+          is optional domain randomness (nil is allowed); info is a context label that
+          binds the subkey to its purpose. An unregistered algorithm returns
+          UnknownKDFAlgorithm; an over-long length returns DerivationFailed.
+        in:
           - name: a
             type: Algorithm
           - name: secret
@@ -1647,7 +2543,11 @@ packages:
             type: "[]byte"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NewKeyTree returns the root KeyTree for master, deriving children under algo.
+          The master Key is shared by reference across children — the root owns its
+          Zeroize lifetime, so zeroizing master invalidates every derived node.
+        in:
           - name: algo
             type: Algorithm
           - name: master
@@ -1660,12 +2560,53 @@ packages:
       keytree: github.com/kitsunium/sdk/internal/service/crypto/kdf/keytree
     path: github.com/kitsunium/sdk/pkg/v1/crypto/kdf
     types:
-      - name: Algorithm
+      - doc: |-
+          Algorithm is the stable identifier of a key-derivation scheme. It is a defined
+          type distinct from the other crypto-family Algorithm types (hash, mac, sign,
+          …), so the compiler rejects feeding a hash or MAC constant into a KDF call
+          (V104) — the seven registries are separate keyspaces, and the type system now
+          enforces that separation the way typed Format/Level discipline does elsewhere.
+        name: Algorithm
         underlying: corecrypto.Algorithm
   - constants:
-      - name: HMACSHA256
+      - doc: HMACSHA256 is HMAC (RFC 2104) over SHA-256 — the detached-MAC default.
+        name: HMACSHA256
         type: Algorithm
         value: "\"hmac-sha256\""
+    doc: |-
+      Package mac is the detached message-authentication facade.
+
+      Tag bytes with a secret key, verify the tag with the same key. One key, two
+      verbs:
+
+      	tag    := mac.Tag(mac.HMACSHA256, key, message)
+      	ok, _  := mac.Verify(mac.HMACSHA256, key, message, tag)   // true
+
+      # A MAC tag is secret — compare with Verify, never ==
+
+      Unlike an unkeyed hash digest (a public fingerprint), a MAC tag is
+      secret-comparison-sensitive: comparing it with == or bytes.Equal leaks timing
+      about how many bytes matched. Always route equality through [Verify], which
+      uses a constant-time comparison. This is the exact inverse of the hash rule.
+
+      # MAC vs signature vs AEAD
+
+      Use a MAC for detached integrity + authenticity under a SHARED secret (both
+      parties hold the key). Use a signature
+      ([github.com/kitsunium/sdk/pkg/v1/crypto/sign]) for authenticity under a PUBLIC key
+      anyone can verify, and the AEAD surface
+      ([github.com/kitsunium/sdk/pkg/v1/crypto]) for confidentiality + integrity.
+
+      # Algorithms
+
+      Importing this package activates HMAC-SHA256 with zero non-stdlib deps:
+
+        - [HMACSHA256] — HMAC (RFC 2104) over SHA-256; a 32-byte tag.
+
+      # Stable algorithm strings
+
+      The [Algorithm] constants are frozen post-v1.0.0 — a tag produced today stays
+      verifiable.
     facade:
       - const:
           - doc: |-
@@ -1697,7 +2638,11 @@ packages:
             - name: err
               type: error
     functions:
-      - in:
+      - doc: |-
+          Tag returns the authentication tag over message under key for the named
+          scheme. An unregistered algorithm returns UnknownMACAlgorithm; a registered
+          scheme cannot fail (the redacting Key pins the length).
+        in:
           - name: a
             type: Algorithm
           - name: key
@@ -1710,7 +2655,11 @@ packages:
             type: "[]byte"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          Verify reports whether tag authenticates message under key for the named
+          scheme, using a constant-time comparison. An unregistered algorithm returns
+          (false, UnknownMACAlgorithm); a bad tag is (false, nil).
+        in:
           - name: a
             type: Algorithm
           - name: key
@@ -1728,12 +2677,73 @@ packages:
       corecrypto: github.com/kitsunium/sdk/internal/core/crypto
     path: github.com/kitsunium/sdk/pkg/v1/crypto/mac
     types:
-      - name: Algorithm
+      - doc: |-
+          Algorithm is the stable identifier of a MAC scheme. It is a defined type
+          distinct from the other crypto-family Algorithm types (hash, sign, kdf, …), so
+          the compiler rejects feeding a hash or signature constant into a MAC call
+          (V104) — the seven registries are separate keyspaces, and the type system now
+          enforces that separation the way typed Format/Level discipline does elsewhere.
+        name: Algorithm
         underlying: corecrypto.Algorithm
   - constants:
-      - name: PBKDF2SHA256
+      - doc: PBKDF2SHA256 is PBKDF2-SHA256 — the stdlib password stretcher (RFC 8018).
+        name: PBKDF2SHA256
         type: Algorithm
         value: "\"pbkdf2-sha256\""
+    doc: |-
+      Package password is the password-storage facade: slow, salted, self-describing
+      hashes with transparent upgrade-on-verify.
+
+      	phc, _   := password.Hash(password.PBKDF2SHA256, []byte(pw))   // store phc
+      	ok, _    := password.Verify([]byte(pw), phc)                   // login check
+      	if ok && password.NeedsRehash(phc) {                           // policy grew?
+      	    phc, _ = password.Hash(password.PBKDF2SHA256, []byte(pw))  // re-store
+      	}
+
+      [Verify] and [NeedsRehash] read the scheme from the stored PHC string, so no
+      algorithm argument is needed — the hash fully describes how to check it.
+
+      # This is the ONLY surface for human passwords
+
+      Password hashing is deliberately SLOW and salted. Never run a raw [hash.Sum]
+      or [kdf.Subkey] over a password — those are fast and assume high entropy. This
+      facade is the one place a low-entropy human secret belongs. [Verify] compares
+      in constant time; a mismatch is (false, nil), never an error.
+
+      # Algorithms
+
+      Importing this package activates PBKDF2-SHA256 with zero non-stdlib deps:
+
+        - [PBKDF2SHA256] — PBKDF2-SHA256 at 600 000 iterations (OWASP fallback).
+
+      argon2id (memory-hard, the OWASP first choice) is an opt-in scheme under
+      third-party/x-crypto — blank-import it when you can take the x/crypto dep, then
+      hash with its Algorithm; Verify still works on either scheme's stored hashes.
+
+      # Common passwords
+
+      [IsCommon] reports whether a password is one of the ten thousand most common
+      ones, compared case-insensitively — the blocklist NIST SP 800-63B-4 requires
+      a verifier to check a new password against, past the top 3 000 OWASP ASVS
+      5.0 (6.2.4) asks for:
+
+      	if password.IsCommon([]byte(pw)) {
+      	    return errTooCommon // before hashing anything
+      	}
+
+      The list is SecLists' xato-net-10-million-passwords-10000.txt, MIT-licensed,
+      Copyright (c) 2018 Daniel Miessler — the passwords that occur most often in
+      the ten million credentials Mark Burnett released into the public domain in
+      2015 — embedded byte for byte at a pinned commit (ADR 0143 §D10;
+      internal/service/crypto/password/commonpw names the commit, the digest and the
+      licence). The empty password is left to a length rule. Nearly every entry is
+      shorter than fifteen characters, so the check matters most beside a shorter
+      minimum.
+
+      # Stable algorithm strings
+
+      The [Algorithm] constants are frozen post-v1.0.0; the PHC id segment equals
+      the Algorithm, so stored hashes stay verifiable across releases.
     facade:
       - func:
           doc: |-
@@ -1777,7 +2787,11 @@ packages:
           out:
             - type: bool
     functions:
-      - in:
+      - doc: |-
+          Hash returns a PHC-string hash of password using the named scheme, with a
+          fresh random salt and the scheme's current cost parameters. An unregistered
+          algorithm returns UnknownPasswordAlgorithm. Store the returned string as-is.
+        in:
           - name: a
             type: Algorithm
           - name: password
@@ -1793,17 +2807,73 @@ packages:
       corecrypto: github.com/kitsunium/sdk/internal/core/crypto
     path: github.com/kitsunium/sdk/pkg/v1/crypto/password
     types:
-      - name: Algorithm
+      - doc: |-
+          Algorithm is the stable identifier of a password-hashing scheme; it is also
+          the PHC id segment of hashes that scheme produces. It is a defined type
+          distinct from the other crypto-family Algorithm types (hash, mac, kdf, …), so
+          the compiler rejects feeding a hash or KDF constant into a password call
+          (V104) — the seven registries are separate keyspaces, and the type system now
+          enforces that separation the way typed Format/Level discipline does elsewhere.
+        name: Algorithm
         underlying: corecrypto.Algorithm
   - constants:
-      - name: Ed25519
+      - doc: |-
+          Ed25519 is the EdDSA signature scheme over Curve25519 (RFC 8032): a 256-bit
+          public key, fast constant-time verification, and no parameter choices.
+        name: Ed25519
         type: Algorithm
         value: "\"ed25519\""
-      - name: ECDSAP256
+      - doc: |-
+          ECDSAP256 is ECDSA over NIST P-256 with SHA-256 and ASN.1/DER signatures — the
+          interoperable choice for JWT/X.509 ecosystems. Keys are DER-marshalled.
+        name: ECDSAP256
         type: Algorithm
         value: "\"ecdsa-p256\""
+    doc: |-
+      Package sign is the detached digital-signature facade.
+
+      Generate a keypair, sign bytes with the private key, verify with the public
+      key. One verb-set, pluggable schemes:
+
+      	pub, priv, _ := sign.GenerateKey(sign.Ed25519)
+      	sig, _       := sign.Sign(sign.Ed25519, priv, message)
+      	ok, _        := sign.Verify(sign.Ed25519, pub, message, sig)   // true
+
+      # Keys are raw bytes — the private key is secret
+
+      Keys and signatures are scheme-specific byte slices (Ed25519: 32-byte public,
+      64-byte private, 64-byte signature). The private key is secret material: hold
+      it like a password, never log it, and zero it when done. [Verify] runs in
+      constant time with respect to the signature, so a failed check never leaks
+      timing about WHERE it failed.
+
+      # Signatures vs AEAD vs hashing
+
+      Use signatures for authenticity + non-repudiation under a public key anyone
+      can verify. Use the AEAD surface ([github.com/kitsunium/sdk/pkg/v1/crypto])
+      for confidentiality with a shared secret, and the hash surface
+      ([github.com/kitsunium/sdk/pkg/v1/crypto/hash]) for unkeyed public fingerprints.
+
+      # Algorithms
+
+      Importing this package activates both schemes with zero non-stdlib deps:
+
+        - [Ed25519] — the modern default: small fixed-size keys, fast verification,
+          nothing to misconfigure.
+        - [ECDSAP256] — ECDSA over NIST P-256 with SHA-256 + ASN.1/DER signatures;
+          the interoperable choice for JWT/X.509 ecosystems. Keys are DER-marshalled
+          (PKIX public, SEC1 private).
+
+      # Stable algorithm strings
+
+      The [Algorithm] constants are frozen post-v1.0.0 — a signature produced today
+      stays verifiable.
     functions:
-      - in:
+      - doc: |-
+          GenerateKey draws a fresh keypair for the named scheme, returning the public
+          and private key bytes. An unregistered algorithm returns
+          UnknownSignatureAlgorithm; treat priv as a secret.
+        in:
           - name: a
             type: Algorithm
         name: GenerateKey
@@ -1813,7 +2883,11 @@ packages:
             type: "[]byte"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          Sign returns a detached signature over message using priv under the named
+          scheme. An unregistered algorithm returns UnknownSignatureAlgorithm; a
+          malformed priv returns SigningFailed.
+        in:
           - name: a
             type: Algorithm
           - name: priv
@@ -1825,7 +2899,11 @@ packages:
             type: "[]byte"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          Verify reports whether sig is a valid signature for message under pub for the
+          named scheme. An unregistered algorithm returns
+          (false, UnknownSignatureAlgorithm); an invalid signature is (false, nil).
+        in:
           - name: a
             type: Algorithm
           - name: pub
@@ -1842,5 +2920,11 @@ packages:
       corecrypto: github.com/kitsunium/sdk/internal/core/crypto
     path: github.com/kitsunium/sdk/pkg/v1/crypto/sign
     types:
-      - name: Algorithm
+      - doc: |-
+          Algorithm is the stable identifier of a signature scheme. It is a defined type
+          distinct from the other crypto-family Algorithm types (hash, mac, kdf, …), so
+          the compiler rejects feeding a hash or MAC constant into a signature call
+          (V104) — the seven registries are separate keyspaces, and the type system now
+          enforces that separation the way typed Format/Level discipline does elsewhere.
+        name: Algorithm
         underlying: corecrypto.Algorithm

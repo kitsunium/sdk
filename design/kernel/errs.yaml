@@ -2,38 +2,130 @@ apiVersion: kit.kitsunium/design/v2
 domain: kernel/errs
 packages:
   - constants:
-      - name: MaskByMajor
+      - blockDoc: CIDR-style mask constants for prefix matching via NewPrefixMatcher.
+        name: MaskByMajor
         type: Code
         value: "0xFF_00_00_00"
-      - name: MaskByLayer
+      - blockDoc: CIDR-style mask constants for prefix matching via NewPrefixMatcher.
+        name: MaskByLayer
         type: Code
         value: "0xFF_FF_00_00"
-      - name: MaskByPackage
+      - blockDoc: CIDR-style mask constants for prefix matching via NewPrefixMatcher.
+        name: MaskByPackage
         type: Code
         value: "0xFF_FF_FF_00"
-      - name: MaskExact
+      - blockDoc: CIDR-style mask constants for prefix matching via NewPrefixMatcher.
+        name: MaskExact
         type: Code
         value: "0xFF_FF_FF_FF"
-      - name: CodeInvalidCode
+      - doc: |-
+          CodeInvalidCode identifies a Define call whose numeric code is zero,
+          overflows int32-positive range, or violates the Layer=0 reserved rule.
+        name: CodeInvalidCode
         type: Code
         value: "1"
-      - name: CodeInvalidReason
+      - doc: |-
+          CodeInvalidReason identifies a Define call whose Reason is empty or
+          does not match the SCREAMING_SNAKE convention.
+        name: CodeInvalidReason
         type: Code
         value: "2"
-      - name: CodeInvalidPublic
+      - doc: |-
+          CodeInvalidPublic identifies a Define call whose Public message is
+          empty, exceeds 120 runes, or contains a newline.
+        name: CodeInvalidPublic
         type: Code
         value: "3"
-      - name: CodeInvalidPrivate
+      - doc: |-
+          CodeInvalidPrivate identifies a Define call whose Private message is
+          empty. Introduced by ADR 0005 to close the validate.go bug where
+          CodeInvalidPublic was erroneously cited for Private-field failures.
+        name: CodeInvalidPrivate
         type: Code
         value: "4"
-      - name: CodeInvalidCodeString
+      - doc: |-
+          CodeInvalidCodeString identifies a ParseCode failure (malformed
+          canonical dotted-quad input).
+        name: CodeInvalidCodeString
         type: Code
         value: "5"
-      - name: CodeInvalidWrapParams
+      - doc: |-
+          CodeInvalidWrapParams identifies a Wrap-time validation failure on
+          caller-supplied WrapParams. Wrap returns an *Error carrying this
+          code instead of panicking (runtime path, not init-time).
+        name: CodeInvalidWrapParams
         type: Code
         value: "6"
+    doc: |-
+      Package errs — provides package-level introspection helpers
+      that walk a cause chain and read fields from the deepest *Error
+      encountered. Consumers of pkg/v1/errs use re-exports of these.
+
+      Package errs — defines the dotted-quad Code type introduced by
+      ADR 0005. Layout: MM.LL.PP.SS over uint32 — Major.Layer.Package.Serial.
+      Codes are comparable, ordered, map-keyable, and const-expressible via
+      hex literals (Pack is a runtime constructor only).
+
+      Code is a packed uint32 (shifts/masks only), so it is fully portable across
+      32- and 64-bit GOARCH — there is no build constraint here. Validation bounds
+      every Code to uint32 ≤ 0x7FFFFFFF (validate.go), so the rare int(code) cast
+      round-trips losslessly even where int is 32-bit.
+
+      Package errs — meta-codes (Layer=0 reserved for this file).
+      Used in Define panic messages and in internal bootstrap errors
+      (newValidationError). These codes are documentary: they are NOT
+      returned from emitter APIs as sentinel *Error values.
+
+      Layer=0 is ENFORCED reserved for this package by validateDefineArgs —
+      any Define call with Layer==0 AND code not in this whitelist will panic.
+
+      Constants are typed as Code so Define call sites accept them directly
+      and downstream comparisons with Error.Code() are type-safe.
+
+      Package errs — defines the SDK-wide typed Error plus the Define
+      and Wrap constructors. Consumers never import this package directly —
+      they introspect errors through github.com/kitsunium/sdk/pkg/v1/errs.
+
+      Package errs — defines the closed FieldValue union used to
+      attach structured metadata to an Error without opening an `any` back
+      door. FieldValue is a transport + textual-restitution contract, NOT a
+      vehicle for strongly-typed reconstruction on the consumer side —
+      StringValue is the only value accessor exposed in this MR.
+
+      Package errs — provides ParseCode, the strict canonical parser
+      for dotted-quad Code strings produced by Code.String(). The parser is
+      intentionally NOT compatible with the Padded() form — that would make
+      two textual representations round-trip to the same Code, violating the
+      single-canonical-form invariant declared in ADR 0005 §3.2.
+
+      Package errs — hosts the PrefixMatcher target used by
+      errors.Is for CIDR-style Code matching. PrefixMatcher deliberately does
+      NOT implement the `error` interface so it cannot escape into error
+      chains as a return value — callers pass it only to errors.Is.
+
+      Package errs — placeholder companion to the SDK-wide AST audit
+      (registry_external_test.go). There is no runtime registry today; the
+      code allocation table lives in ADR 0002 and the audit test embeds it.
+
+      Package errs — holds the wrap-trail mechanism introduced by
+      ADR 0005. Trail carries the sites a *Error was wrapped through; origin
+      wins on Code() per ADR 0002, but Trail() / HasCode() traverse the full
+      list of wrap sites to help observability and matching.
+
+      Package errs — TrailOf exposes the wrap-trail codes of the deepest *Error in
+      a chain, the read-side companion to the Of-family accessors, enabling
+      structured log decomposition without reparsing the rendered bracket header.
+
+      Package errs — centralises the runtime structural checks
+      applied by Define. Factoring the logic out of Define lets tests cover
+      every rule as a plain function call without subprocess fixtures for
+      package-init panics.
+
+      Package errs — hosts WrapParams in its own file so error.go keeps a
+      single exported struct (one-struct-per-file convention).
     functions:
-      - in:
+      - doc: CodeOf walks the chain and returns the deepest *Error's typed Code.
+        in:
           - name: err
             type: error
         name: CodeOf
@@ -42,7 +134,8 @@ packages:
             type: Code
           - name: ok
             type: bool
-      - in:
+      - doc: ReasonOf walks the Unwrap chain and returns the deepest *Error.Reason.
+        in:
           - name: err
             type: error
         name: ReasonOf
@@ -51,37 +144,52 @@ packages:
             type: string
           - name: ok
             type: bool
-      - in:
+      - doc: |-
+          PublicOf walks the Unwrap chain and returns the deepest *Error.Public,
+          or "" when no *Error is present in the chain.
+        in:
           - name: err
             type: error
         name: PublicOf
         out:
           - type: string
-      - in:
+      - doc: |-
+          PrivateOf walks the chain and returns the deepest *Error.Private,
+          or "" when no *Error is present in the chain.
+          DIAGNOSTIC-ONLY: never expose in HTTP/gRPC responses or any user-facing
+          surface. Intended for operator tooling and log correlation.
+        in:
           - name: err
             type: error
         name: PrivateOf
         out:
           - type: string
-      - in:
+      - doc: |-
+          FieldsOf collects the FieldValues attached to every *Error along the
+          chain and returns them ordered inner-to-outer (oldest cause first,
+          newest wrapper last). The returned slice is a defensive copy.
+        in:
           - name: err
             type: error
         name: FieldsOf
         out:
           - type: "[]FieldValue"
-      - in:
+      - doc: HTTPStatusOf walks the chain and returns the deepest *Error.HTTPStatus().
+        in:
           - name: err
             type: error
         name: HTTPStatusOf
         out:
           - type: int
-      - in:
+      - doc: ExitCodeOf walks the chain and returns the deepest *Error.ExitCode().
+        in:
           - name: err
             type: error
         name: ExitCodeOf
         out:
           - type: int
-      - in:
+      - doc: HasReason walks the chain and reports whether ANY *Error carries reason.
+        in:
           - name: err
             type: error
           - name: reason
@@ -89,7 +197,10 @@ packages:
         name: HasReason
         out:
           - type: bool
-      - in:
+      - doc: |-
+          Pack constructs a Code from its four octets. RUNTIME only — sentinel
+          constants MUST use hex literals so they stay const-expressible.
+        in:
           - name: mm
             type: Major
           - name: ll
@@ -101,19 +212,25 @@ packages:
         name: Pack
         out:
           - type: Code
-      - in:
+      - doc: WithHTTPStatus overrides the default HTTP status (500) for an Error.
+        in:
           - name: status
             type: int
         name: WithHTTPStatus
         out:
           - type: DefineOption
-      - in:
+      - doc: WithExitCode overrides the default POSIX exit code (70) for an Error.
+        in:
           - name: code
             type: int
         name: WithExitCode
         out:
           - type: DefineOption
-      - in:
+      - doc: |-
+          NewError is a tooling-friendly alias for Define. Prefer Define at call
+          sites for consistency; NewError exists so code generators and lints
+          expecting a NewXxx constructor on exported types find one.
+        in:
           - name: code
             type: Code
           - name: reason
@@ -126,7 +243,19 @@ packages:
         out:
           - type: "*Error"
         variadic: true
-      - in:
+      - doc: |-
+          NewRuntime constructs an *Error at RUNTIME without panicking. It is the
+          counterpart to Define for callers that get no build-time AST audit —
+          principally external SDK consumers reaching this through pkg/v1/errs.New.
+          Where Define panics at package init on a malformed sentinel (caught by the
+          registry AST audit before the binary ships), NewRuntime mirrors Wrap's
+          runtime policy: a structural failure returns a typed validation *Error
+          (CodeInvalidCode / Reason / Public / Private) preserving the specific rule
+          that failed, so the result is always a usable, introspectable SDK error and
+          never nil. Fields are defensively copied. HTTP/exit overrides default
+          (500 / 70); use Wrap with WrapParams.ExitCode or a sibling Define sentinel
+          when an override is needed.
+        in:
           - name: code
             type: Code
           - name: reason
@@ -139,7 +268,12 @@ packages:
         out:
           - type: "*Error"
         variadic: true
-      - in:
+      - doc: |-
+          Define registers a sentinel-style *Error at package init. It panics
+          (with a message citing one of the documentary meta-codes 0.0.0.1..6)
+          when validateDefineArgs returns non-nil, so structural mistakes surface
+          at program start rather than at the first emission.
+        in:
           - name: code
             type: Code
           - name: reason
@@ -152,7 +286,19 @@ packages:
         out:
           - type: "*Error"
         variadic: true
-      - in:
+      - doc: |-
+          Wrap attaches a cause to a new *Error with origin-wins semantics.
+          Behaviour contract (see ADR 0005 §3.6):
+          1. cause == nil (interface nil) → stdlib path, source = nil
+          2. cause == (*Error)(nil) typed-nil → stdlib path, source = nil
+          3. cause == (*T)(nil) typed-nil of non-*Error → stdlib path, source preserved
+          4. cause is *Error (directly or behind a stdlib wrapper) → origin-wins,
+          params.Code is APPENDED TO THE TRAIL (trail entry 0 is the origin)
+          5. cause is other stdlib error → params.Code is origin, trail stays empty
+
+          Runtime policy (v5 HIGH fix): bad WrapParams at runtime does NOT panic;
+          the returned *Error carries CodeInvalidWrapParams and preserves cause.
+        in:
           - name: cause
             type: error
           - name: params
@@ -163,7 +309,12 @@ packages:
         out:
           - type: "*Error"
         variadic: true
-      - in:
+      - doc: |-
+          HasCode returns true if any *Error in err's chain has code == c OR any
+          trail entry matches c. The walk recurses through BOTH single-error
+          wrappers (Unwrap() error) AND multi-error wrappers (Unwrap() []error,
+          e.g. errors.Join). Time complexity: O(total_errors + total_trail_lengths).
+        in:
           - name: err
             type: error
           - name: c
@@ -171,21 +322,31 @@ packages:
         name: HasCode
         out:
           - type: bool
-      - in:
+      - doc: |-
+          NewFieldValue builds a string-typed FieldValue. Provided as a generic
+          constructor for tooling that expects a New-prefixed factory; for common
+          cases prefer the dedicated String/Int/Bool/Float helpers.
+        in:
           - name: key
           - name: val
             type: string
         name: NewFieldValue
         out:
           - type: FieldValue
-      - in:
+      - doc: String builds a FieldValue holding a string value.
+        in:
           - name: key
           - name: val
             type: string
         name: String
         out:
           - type: FieldValue
-      - in:
+      - doc: |-
+          Int builds a FieldValue from a plain int. Matches the slog / zap
+          convention (both expose Int(key, int) that widens internally) so
+          callers do not write int64(…) at every site. For pre-widened int64
+          payloads use Int64.
+        in:
           - name: key
             type: string
           - name: val
@@ -193,7 +354,12 @@ packages:
         name: Int
         out:
           - type: FieldValue
-      - in:
+      - doc: |-
+          Int64 builds a FieldValue from a 64-bit integer. Provided explicitly
+          because Go does not support function overloading — callers that hold
+          an int64 already (no upcast needed) reach for this constructor, while
+          the common int case stays on Int.
+        in:
           - name: key
             type: string
           - name: val
@@ -201,7 +367,8 @@ packages:
         name: Int64
         out:
           - type: FieldValue
-      - in:
+      - doc: Bool builds a FieldValue holding a boolean value.
+        in:
           - name: key
             type: string
           - name: val
@@ -209,7 +376,8 @@ packages:
         name: Bool
         out:
           - type: FieldValue
-      - in:
+      - doc: Float builds a FieldValue holding a float64 value.
+        in:
           - name: key
             type: string
           - name: val
@@ -217,7 +385,18 @@ packages:
         name: Float
         out:
           - type: FieldValue
-      - in:
+      - doc: |-
+          ParseCode parses the canonical "M.L.P.S" form produced by Code.String().
+
+          Rules (any violation returns an *Error with CodeInvalidCodeString):
+            - Exactly 4 dot-separated segments.
+            - Each segment is 1 to 3 ASCII digits.
+            - No leading zero in any segment ("001", "01", "0001" → REJECTED).
+              This excludes the Padded() form ("001.001.001.001") as input, so
+              the canonical form is the only textual key that maps to a Code.
+            - Each segment's numeric value is in [0, 255].
+            - No leading/trailing whitespace, no sign character, no empty segment.
+        in:
           - name: s
             type: string
         name: ParseCode
@@ -226,17 +405,33 @@ packages:
             type: Code
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NewPrefixMatcher constructs a PrefixMatcher usable with errors.Is to
+          match all Codes sharing a given bit-prefix (defined by the mask).
+          Example: all codes originating from pkg/v1/* →
+
+          	errors.Is(err, errs.NewPrefixMatcher(0x01_00_00_00, errs.MaskByMajor))
+        in:
           - name: prefix
           - name: mask
             type: Code
         name: NewPrefixMatcher
         out:
           - type: "*PrefixMatcher"
-      - name: RegistryMarker
+      - doc: |-
+          RegistryMarker returns the registry sentinel so external callers (and
+          the audit test itself) can confirm the package is the one expected to
+          own the SDK-wide code allocation audit.
+        name: RegistryMarker
         out:
           - type: string
-      - in:
+      - doc: |-
+          TrailOf returns the wrap-trail codes of the deepest *Error in err's chain,
+          newest wrap last, or nil when err carries no *Error.
+
+          The trail mirrors the wrap-site chain accumulated as the error was wrapped
+          (the origin's own Code is NOT included — it is reached via CodeOf).
+        in:
           - name: err
             type: error
         name: TrailOf
@@ -244,154 +439,513 @@ packages:
           - type: "[]Code"
     path: github.com/kitsunium/sdk/internal/kernel/errs
     types:
-      - methods:
-          - name: Major
+      - doc: |-
+          Code packs a 4-byte dotted identifier (MM.LL.PP.SS) as uint32.
+          See ADR 0005 for the registry.
+        methods:
+          - doc: Major returns the top octet (SemVer major byte).
+            name: Major
             out:
               - type: Major
             recv: value
-          - name: Layer
+          - doc: Layer returns the second-highest octet.
+            name: Layer
             out:
               - type: Layer
             recv: value
-          - name: Package
+          - doc: Package returns the third octet.
+            name: Package
             out:
               - type: PkgCode
             recv: value
-          - name: Serial
+          - doc: Serial returns the bottom octet.
+            name: Serial
             out:
               - type: Serial
             recv: value
-          - name: String
+          - doc: |-
+              String returns the CANONICAL dotted form "M.L.P.S" (unpadded).
+              This form is used for storage, logs, fixtures, and lookup keys.
+            name: String
             out:
               - type: string
             recv: value
-          - name: Padded
+          - doc: |-
+              Padded returns the zero-padded "MMM.LLL.PPP.SSS" form. DISPLAY ONLY —
+              must never be used as a lookup key; the canonical form is String().
+            name: Padded
             out:
               - type: string
             recv: value
         name: Code
         underlying: uint32
-      - name: Major
+      - blockDoc: |-
+          Named octet types prevent positional-argument footguns in Pack.
+          PkgCode is spelled out (not `Pkg`) so callers keep `pkg` as an ordinary
+          variable name without shadowing.
+        name: Major
         underlying: uint8
-      - name: Layer
+      - blockDoc: |-
+          Named octet types prevent positional-argument footguns in Pack.
+          PkgCode is spelled out (not `Pkg`) so callers keep `pkg` as an ordinary
+          variable name without shadowing.
+        name: Layer
         underlying: uint8
-      - name: PkgCode
+      - blockDoc: |-
+          Named octet types prevent positional-argument footguns in Pack.
+          PkgCode is spelled out (not `Pkg`) so callers keep `pkg` as an ordinary
+          variable name without shadowing.
+        name: PkgCode
         underlying: uint8
-      - name: Serial
+      - blockDoc: |-
+          Named octet types prevent positional-argument footguns in Pack.
+          PkgCode is spelled out (not `Pkg`) so callers keep `pkg` as an ordinary
+          variable name without shadowing.
+        name: Serial
         underlying: uint8
-      - methods:
-          - name: Code
+      - doc: |-
+          Error is the SDK-wide typed error. Fields are unexported — consumers
+          obtain values via the getter methods on *Error or via the Of-accessors
+          in github.com/kitsunium/sdk/pkg/v1/errs. Instances are immutable after
+          construction: Wrap returns a new *Error, never mutates the input.
+        methods:
+          - doc: Code returns this Error's typed dotted-quad identifier.
+            name: Code
             out:
               - type: Code
             recv: pointer
-          - name: Reason
+          - doc: Reason returns this Error's stable SCREAMING_SNAKE identifier.
+            name: Reason
             out:
               - type: string
             recv: pointer
-          - name: Public
+          - doc: Public returns this Error's wire-safe message.
+            name: Public
             out:
               - type: string
             recv: pointer
-          - name: Private
+          - doc: |-
+              Private returns this Error's log-only detailed message. Never expose
+              the return value over any user-facing surface.
+            name: Private
             out:
               - type: string
             recv: pointer
-          - name: Fields
+          - doc: |-
+              Fields returns a defensive copy of the structured metadata attached to
+              this Error. Mutating the returned slice has no effect on the Error.
+            name: Fields
             out:
               - type: "[]FieldValue"
             recv: pointer
-          - name: Trail
+          - doc: |-
+              Trail returns a defensive copy of the wrap-site chain (newest last).
+              The origin's code is NOT in the trail — it lives in Code().
+            name: Trail
             out:
               - type: "[]Code"
             recv: pointer
-          - name: TrailTruncated
+          - doc: |-
+              TrailTruncated reports whether the trail's middle links have been
+              dropped due to exceeding maxTrailLen. The flag is MONOTONIC: once set
+              by appendTrail, it propagates unchanged to every subsequent wrap.
+            name: TrailTruncated
             out:
               - type: bool
             recv: pointer
-          - in:
+          - doc: |-
+              Is implements the errors.Is protocol. Three matching modes:
+
+              1. target is *PrefixMatcher → match if origin code OR any trail entry
+              satisfies the CIDR-style mask (ADR 0005 prefix routing).
+              2. target is *Error with non-zero Code → match when the two share the
+              same (Code, Reason). This lets errors.Is(err, sentinel) succeed
+              even when err is a freshly-constructed Wrap result — the typed
+              sentinel and the wire sentinel have identical Code+Reason by
+              construction, and semantic equivalence is what callers expect.
+              The Reason check defuses a hypothetical Code-collision (the
+              registry audit is the primary guard; this is belt-and-suspenders).
+              3. anything else → pointer equality (stdlib default).
+            in:
               - name: target
                 type: error
             name: Is
             out:
               - type: bool
             recv: pointer
-          - name: Error
+          - doc: |-
+              Error returns the neutral stable form "[<code> <REASON>] <public>". It
+              never includes Private content nor Fields, so callers may safely bubble
+              err.Error() across any boundary without leaking diagnostic data.
+
+              When the trail is non-empty, wrap-site codes are rendered between the
+              origin code and the Reason with ASCII "<-" separators, e.g.:
+
+              	[0.3.2.1 <- 1.2.0.3 JSON_MARSHAL_FAILED] invalid input
+
+              Truncated trails append " (truncated)" before the Reason marker.
+            name: Error
             out:
               - type: string
             recv: pointer
-          - name: Source
+          - doc: Source returns the wrapped cause attached by Wrap.
+            name: Source
             out:
               - type: error
             recv: pointer
-          - name: Unwrap
+          - doc: |-
+              Unwrap delegates to Source so the stdlib errors.Is / errors.As machinery
+              can walk the chain. The nil-guard also makes this slightly more than a
+              pure field getter, which matters for callers storing errors by value.
+            name: Unwrap
             out:
               - type: error
             recv: pointer
-          - name: HTTPStatus
+          - doc: HTTPStatus returns the per-error override if set, otherwise 500.
+            name: HTTPStatus
             out:
               - type: int
             recv: pointer
-          - name: ExitCode
+          - doc: ExitCode returns the per-error override if set, otherwise 70 EX_SOFTWARE.
+            name: ExitCode
             out:
               - type: int
             recv: pointer
         name: Error
         struct:
           unexported: true
-      - name: DefineOption
+      - doc: DefineOption tunes an Error at Define time. Options compose left-to-right.
+        name: DefineOption
         underlying: func(e *Error)
-      - methods:
-          - name: Key
+      - doc: |-
+          FieldValue is an immutable typed key/value pair attached to an *Error.
+          Use the exported constructors (String, Int, Bool, Float, NewFieldValue)
+          to create a valid FieldValue — the zero value is invalid and must never
+          be passed across the API.
+        methods:
+          - doc: Key returns the identifier under which this FieldValue was recorded.
+            name: Key
             out:
               - type: string
             recv: value
-          - name: StringValue
+          - doc: |-
+              StringValue returns a deterministic textual rendering of the payload
+              suitable for log lines and error dumps. Not guaranteed to be machine-
+              parseable back into the original type — by design the consumer contract
+              stops at textual observation.
+            name: StringValue
             out:
               - type: string
             recv: value
         name: FieldValue
         struct:
           unexported: true
-      - methods:
-          - name: String
+      - doc: |-
+          PrefixMatcher is a NON-ERROR sentinel used ONLY as a target for errors.Is.
+          Callers build it via NewPrefixMatcher and pass it to errors.Is; the
+          matching logic lives on (*Error).Is (see error.go, added in W4).
+        methods:
+          - doc: String returns a diagnostic representation of the matcher.
+            name: String
             out:
               - type: string
             recv: pointer
-          - name: Error
+          - doc: |-
+              Error implements the `error` interface so PrefixMatcher is usable as a
+              target for `errors.Is`. Returning an error-looking string is the ONLY
+              way Go's errors.Is can accept a non-sentinel target; callers MUST never
+              return a *PrefixMatcher from a function as an error. A follow-up linter
+              rule will catch accidental escapes.
+            name: Error
             out:
               - type: string
             recv: pointer
-          - name: Prefix
+          - doc: |-
+              Prefix exposes the matcher's prefix for internal callers (e.g., the
+              (*Error).Is method) without leaking the field directly.
+            name: Prefix
             out:
               - type: Code
             recv: pointer
-          - name: Mask
+          - doc: Mask exposes the matcher's mask for internal callers.
+            name: Mask
             out:
               - type: Code
             recv: pointer
         name: PrefixMatcher
         struct:
           unexported: true
-      - name: WrapParams
+      - doc: |-
+          WrapParams groups the extra metadata Wrap needs when the cause is NOT
+          already an *Error. Keeping them in a struct stays below the SDK's
+          5-parameter ceiling for Wrap and gives call sites named fields.
+        name: WrapParams
         struct:
           fields:
-            - name: Code
+            - doc: Code is the dotted-quad identifier assigned to the wrapping Error.
+              name: Code
               type: Code
-            - name: Reason
+            - doc: Reason is the SCREAMING_SNAKE stable identifier of the wrapping Error.
+              name: Reason
               type: string
-            - name: Public
+            - doc: Public is the wire-safe message (string literal at source level).
+              name: Public
               type: string
-            - name: Private
+            - doc: Private is the log-only detailed message.
+              name: Private
               type: string
-            - name: ExitCode
+            - doc: |-
+                ExitCode optionally overrides the POSIX exit status of the wrapping
+                Error (default 70 EX_SOFTWARE); the zero value keeps the default. It
+                lets a stdlib cause be wrapped into an Error that carries the same
+                exit semantics as a sibling errs.Define sentinel — the origin-wins
+                path already inherits a cause Error's exit override, but the
+                stdlib-cause path has no Error to inherit from.
+              name: ExitCode
               type: int
   - constants:
-      - name: MinAppMajor
+      - doc: |-
+          MinAppMajor is the lowest Major octet reserved for third-party / application
+          error codes. The SDK only ever allocates Major < MinAppMajor (0 = internal,
+          1.. = the public semver major). A consumer that builds every Code with a
+          Major in [MinAppMajor, MaxMajor] is guaranteed never to collide with an SDK
+          code, now or in any future SDK release. See ADR 0019.
+        name: MinAppMajor
         type: Major
         value: "0x40"
-      - name: MaxMajor
+      - doc: |-
+          MaxMajor is the largest legal Major octet. Codes must round-trip through a
+          positive int32 (the kernel rule that keeps the deprecated int accessor from
+          wrapping negative), so the top uint32 bit stays clear and the Major octet
+          caps at 0x7F.
+        name: MaxMajor
         type: Major
         value: "0x7F"
+    doc: |-
+      Package errs is the public facade for SDK errors — both introspection
+      (the Of-family accessors and the matchers, re-exported in facade_gen.go,
+      beside HasAnyCode and HasAnyReason in accessors.go) and construction
+      ([New], [Wrap] and the application Code range in construct.go, the Field
+      helpers re-exported in facade_gen.go).
+
+      Consumers receive [error] values from the SDK and query them via the
+      Of-family accessors below, and — since ADR 0019 — mint their own typed
+      errors in the same model with [New] / [Wrap]. The concrete error type
+      stays internal (callers see [error], never *errs.Error), so it cannot be
+      forged by struct literal; construction goes through the validated
+      constructors, which return a typed validation error on malformed input
+      rather than panicking. Dashboards, retries, and structured logs branch on
+      Code / Reason / HTTPStatus / ExitCode regardless of who built the error.
+
+      # Goals
+
+        - Typed dotted-quad codes. Every SDK error carries a Code uint32
+          packed as MM.LL.PP.SS (Major / Layer / Package / Serial).
+          Composable octets — code.Layer(), code.Package() — let routers
+          branch without parsing.
+        - Public / Private split. PublicOf returns a wire-safe message
+          (≤120 runes, no newline). PrivateOf returns the diagnostic
+          envelope — never surface it to consumers.
+        - Validated construction + introspection. Consumers mint typed errors
+          through [New] / [Wrap] (runtime-validated, never panicking) and query
+          received errors through the Of-accessors; the concrete *errs.Error type
+          stays unexported, so it can be built and inspected but never forged.
+        - HTTP / exit-code mapping. Each error has an HTTPStatusOf
+          (default 500) and ExitCodeOf (default 70 / EX_SOFTWARE) so HTTP
+          handlers and CLI binaries can return an SDK error verbatim.
+        - CIDR-style matching. NewPrefixMatcher(code, mask) + errors.Is
+          route entire code-ranges (one package, one layer, one major)
+          with a single call.
+
+      # What's shipped
+
+      Seven accessors, four predicates, two code helpers, four mask presets, one
+      matcher constructor, and the two methods that read a [Field]. Each function
+      forwards to internal/kernel/errs — a function, never a variable a consumer
+      could reassign for the whole process — and HasAnyCode and HasAnyReason are
+      composed here from HasCode and HasReason. One exception: [ReasonOf] is still
+      a variable bound to the kernel accessor, because its forwarder measured
+      slower; never assign to it.
+
+      	| Symbol                                | Kind       | Returns / role                                            |
+      	|---------------------------------------|------------|------------------------------------------------------------|
+      	| errs.CodeOf(err)                      | accessor   | (Code, bool) — typed dotted-quad, 0/false if none          |
+      	| errs.ReasonOf(err)                    | accessor   | (string, bool) — SCREAMING_SNAKE reason                    |
+      	| errs.PublicOf(err)                    | accessor   | string — wire-safe message (≤120 runes)                    |
+      	| errs.PrivateOf(err)                   | accessor   | string — DIAGNOSTIC ONLY, never surface                    |
+      	| errs.HTTPStatusOf(err)                | accessor   | int — HTTP status, default 500                             |
+      	| errs.ExitCodeOf(err)                  | accessor   | int — POSIX exit code, default 70 (EX_SOFTWARE)            |
+      	| errs.FieldsOf(err)                    | accessor   | []Field — the chain's fields, oldest first; nil if none    |
+      	| field.Key()                           | field read | string — the key the emitter chose, such as "problem"      |
+      	| field.StringValue()                   | field read | string — the value as text; "" for the zero Field          |
+      	| errs.HasCode(err, c)                  | predicate  | bool — true if c appears in the Unwrap chain               |
+      	| errs.HasAnyCode(err, c1, c2, …)       | predicate  | bool — variadic OR over multiple codes (routing on a set)  |
+      	| errs.HasReason(err, r)                | predicate  | bool — same with the reason string                         |
+      	| errs.HasAnyReason(err, r1, r2, …)     | predicate  | bool — variadic OR over multiple reasons                   |
+      	| errs.NewPrefixMatcher(code, mask)     | matcher    | PrefixMatcher — use with errors.Is for range routing       |
+      	| errs.Pack(major, layer, pkg, serial)  | code ctor  | Code from four octets                                       |
+      	| errs.ParseCode(s)                     | code ctor  | Code from "M.L.P.S" string                                 |
+      	| errs.MaskByMajor / Layer / Package    | mask const | feed NewPrefixMatcher for the relevant subnet              |
+      	| errs.MaskExact                        | mask const | exact-code match (equivalent to HasCode)                   |
+
+      Type aliases: errs.Code (a uint32), errs.Major / Layer / PkgCode /
+      Serial (octet types), errs.PrefixMatcher.
+
+      # Surface
+
+      Accessors walk the Unwrap chain (both `Unwrap() error` and
+      `Unwrap() []error`) and return the deepest *errs.Error value
+      encountered. Defaults document the behaviour when no SDK error is
+      present:
+
+      	func CodeOf(err error)       (Code, bool)    // 0 / false if none — typed dotted-quad
+      	func ReasonOf(err error)     (string, bool)  // "" / false if none
+      	func PublicOf(err error)     string          // "" if none
+      	func PrivateOf(err error)    string          // "" if none — DIAGNOSTIC ONLY
+      	func HTTPStatusOf(err error) int             // 500 default
+      	func ExitCodeOf(err error)   int             // 70 (EX_SOFTWARE) default
+      	func FieldsOf(err error)     []Field         // nil if none — oldest cause first
+      	func HasCode(err error, code Code) bool
+      	func HasReason(err error, reason string) bool
+
+      Octets are reached on the typed [Code] itself: code.Major(),
+      code.Layer(), code.Package(), code.Serial(). No separate LayerOf
+      accessor exists — the kernel exports exactly one accessor per field
+      and this package forwards it unchanged.
+
+      # Quick start
+
+      	import (
+      	    "github.com/kitsunium/sdk/pkg/v1/errs"
+      	    "github.com/kitsunium/sdk/pkg/v1/observe/logger"
+      	)
+
+      	_, err := logger.NewText(logger.Config{})  // nil Writer → fails
+      	// 0x01_01_00_01 = 1.1.0.1 (pkg/v1/observe/logger WriterRequired under ADR 0005).
+      	if errs.HasCode(err, 0x01_01_00_01) {
+      	    // configuration problem on our side
+      	}
+      	fmt.Println("wire-safe message:", errs.PublicOf(err))
+      	if code, ok := errs.CodeOf(err); ok {
+      	    fmt.Println("layer:", code.Layer())
+      	}
+      	fmt.Println("HTTP status:", errs.HTTPStatusOf(err))
+
+      # The Public/Private split
+
+      [PublicOf] returns the wire-safe message (≤120 runes, literal, no
+      interpolation). Send it in HTTP/gRPC responses, error pages, and
+      user-facing surfaces.
+
+      [PrivateOf] returns the detailed log-only message. DIAGNOSTIC ONLY.
+      Never put it in a response, an error page, or anything the end user
+      can see. It exists so observability tooling can correlate a request
+      ID with a detailed server-side explanation in the log backend
+      without re-logging the entire chain.
+
+      # Reading the fields an error carries
+
+      [FieldsOf] returns the structured clauses the emitters along the chain
+      attached, oldest cause first and newest wrapper last, as a copy the caller
+      owns. Each is read with Key and StringValue — the value as text: a string
+      verbatim, a number in decimal, a bool as true or false. A key may appear at
+      more than one depth of a chain, which is why no map-shaped accessor exists:
+      the caller decides which depth it wants.
+
+      	_, err := mail.ParseURL(raw)
+      	for _, field := range errs.FieldsOf(err) {
+      	    if field.Key() == "problem" {
+      	        fmt.Println("SMTP URL", field.StringValue()) // "has a port that is not a number from 1 to 65535"
+      	    }
+      	}
+
+      A field value is a clause an emitter CHOSE to attach — a name, a position, a
+      reason — and no SDK emitter attaches a value it was given to protect:
+      mail.ParseURL says which part of a URL is wrong and never quotes the URL,
+      whose userinfo is the password; the secret domain names a secret and never
+      its value. That rule is what makes the fields safe to read, and a consumer
+      minting its own errors with [New] and [Wrap] owes its readers the same. The
+      one field whose text the SDK does not write is "cause", which carries a
+      foreign error's message as its library wrote it.
+
+      Safe to read is not safe to publish: fields are diagnostics, like
+      [PrivateOf] — authz attaches the subject, the action and the resource — so
+      they belong in a log line or an operator's report, never in an HTTP response
+      or an error page.
+
+      # HTTP status policy
+
+      [HTTPStatusOf] defaults to 500 when the error does not carry an
+      explicit override. That default is deliberate for internal failures
+      but it is a leak-by-default anti-pattern for domain errors that are
+      really 4xx (validation, not-found, conflict, authorisation). Such
+      errors MUST pass errs.WithHTTPStatus(4xx) at Define time so the
+      accessor surfaces the correct status.
+
+      # Semantics reminders
+
+        - Origin wins on wrap. An error born in service/observe/logger (code 31xx) and
+          observed through pkg/v1/observe/logger keeps its 31xx code — the Code
+          describes the origin, never the observation surface.
+        - errors.Is keeps stdlib semantics. For code / reason matching use
+          the explicit [HasCode] / [HasReason] helpers; errors.Is(err,
+          context.Canceled) still walks the chain through errs.Wrap.
+        - Default HTTP / exit codes are global (500 / 70). Per-error
+          overrides come from errs.WithHTTPStatus / WithExitCode inside the
+          emitter package.
+
+      # PrefixMatcher routing
+
+      [NewPrefixMatcher] returns a sentinel that classifies any wrapped
+      error by Code prefix when used through errors.Is. Combine with
+      [MaskByMajor] / [MaskByLayer] / [MaskByPackage] / [MaskExact] for
+      CIDR-style code routing in dashboards / middleware. Single-code
+      matching uses [HasCode] which is cheaper.
+
+      Package errs — construction half of the public error API.
+
+      facade_gen.go re-exports the read-only introspection surface; construct.go
+      and the Field helpers re-exported beside it are the *construction*
+      surface, so that an external consumer (any module adopting this SDK, with
+      no internal/ access) can mint typed SDK errors rather than only
+      inspecting SDK-origin ones. Together they let a downstream
+      codebase migrate off fmt.Errorf / errors.New onto the SDK error model
+      wholesale — every error carrying a dotted-quad Code, a wire-safe Public
+      message, and a log-only Private envelope.
+
+      # Construction vs. Define
+
+      SDK-internal packages mint sentinels with internal/kernel/errs.Define, which
+      panics at init on a malformed sentinel — safe because a build-time AST audit
+      proves every Define call well-formed before the binary ships. External
+      consumers get no such audit, so [New] and [Wrap] follow a runtime policy
+      instead: a structural failure (bad code, non-SCREAMING_SNAKE reason,
+      empty/over-long/multiline public, empty private) returns a typed validation
+      error (CodeInvalidCode / Reason / Public / Private) — the result is always a
+      usable, introspectable SDK error, never nil and never a panic.
+
+      # Code space for third-party modules
+
+      The dotted-quad MM.LL.PP.SS taxonomy (ADR 0005) assumes a coordinated Major
+      (MM) octet. The SDK only ever allocates Major in the range [0, MinAppMajor)
+      — 0 for internal codes, then the public semver major (1 for pkg/v1, 2 for a
+      future pkg/v2, …). To stay collision-free with the SDK now and across every
+      future SDK release, a consumer assigns its own codes a Major in
+      [MinAppMajor, MaxMajor] (0x40–0x7F). Declare them as hex literals exactly as
+      the SDK does internally:
+
+      	// myapp/errcodes.go — Major 0x40 is application-owned, never SDK-issued.
+      	const (
+      	    CodeUserNotFound errs.Code = 0x40_01_01_01 // 64.1.1.1
+      	    CodeOrderExpired errs.Code = 0x40_01_02_01 // 64.1.2.1
+      	)
+
+      	var ErrUserNotFound = errs.New(CodeUserNotFound, "USER_NOT_FOUND",
+      	    "user not found", "lookup miss in users table")
+
+      The Major ceiling is 0x7F because every Code must round-trip through a
+      positive int32 (the kernel keeps the top uint32 bit clear); 64 application
+      majors is far more than the SDK's semver line will ever consume.
     facade:
       - alias:
           - doc: |-
@@ -701,7 +1255,21 @@ packages:
           out:
             - type: Field
     functions:
-      - in:
+      - doc: |-
+          HasAnyCode walks err's chain and reports whether any *errs.Error
+          carries a Code matching ANY of the supplied codes. Convenience
+          equivalent of `HasCode(err, c1) || HasCode(err, c2) || …` — useful
+          when a retry policy / circuit-breaker / metric routes on a SET of
+          failure modes rather than a single code.
+
+          Returns false when codes is empty.
+
+          	retryable := errs.HasAnyCode(err,
+          	    codec.CodeStreamingUnsupported,
+          	    logger.CodeWriterRequired,
+          	    logger.CodeSinkConfigRequired,
+          	)
+        in:
           - name: err
             type: error
           - name: codes
@@ -710,7 +1278,18 @@ packages:
         out:
           - type: bool
         variadic: true
-      - in:
+      - doc: |-
+          HasAnyReason is the reason-string sibling of [HasAnyCode]. Reports
+          whether any *errs.Error in err's chain carries a Reason matching ANY
+          of the supplied reasons. Useful when call sites read more naturally
+          with the SCREAMING_SNAKE label than the numeric code.
+
+          Returns false when reasons is empty.
+
+          	if errs.HasAnyReason(err, "UNKNOWN_FORMAT", "STREAMING_UNSUPPORTED") {
+          	    // fall back to a different transport
+          	}
+        in:
           - name: err
             type: error
           - name: reasons
@@ -719,7 +1298,26 @@ packages:
         out:
           - type: bool
         variadic: true
-      - in:
+      - doc: |-
+          New constructs a typed SDK error at runtime. On success the returned error
+          carries code / reason / public / private plus any fields. On a structural
+          failure it returns a typed validation error (CodeInvalidCode / Reason /
+          Public / Private) identifying the exact rule broken — the result is always a
+          non-nil, introspectable SDK error, never a panic.
+
+          Arguments mirror the kernel sentinel contract:
+            - code: a dotted-quad Code; use a Major in [MinAppMajor, MaxMajor] to stay
+              collision-free with the SDK (see the package doc and ADR 0019).
+            - reason: a stable SCREAMING_SNAKE identifier (^[A-Z][A-Z0-9_]*$).
+            - public: the wire-safe message — non-empty, ≤120 runes, no newline.
+              Validated here; an over-cap or multiline public yields a typed
+              CodeInvalidPublic error rather than the error you intended.
+            - private: the log-only diagnostic envelope — non-empty, never surfaced.
+            - fields: optional structured metadata (defensively copied).
+
+          HTTP status defaults to 500 and exit code to 70 (EX_SOFTWARE); a per-error
+          exit override is available through Wrap's WrapParams.ExitCode.
+        in:
           - name: code
             type: Code
           - name: reason
@@ -732,7 +1330,18 @@ packages:
         out:
           - type: error
         variadic: true
-      - in:
+      - doc: |-
+          Wrap attaches a cause to a new error with origin-wins semantics and preserves
+          the chain (errors.Is / errors.Unwrap walk through it). When the cause is
+          already an SDK error (directly or behind a fmt.Errorf("%w") wrap) the result
+          inherits its Code/Reason/Public/Private and appends params.Code to the trail;
+          otherwise params.Code becomes the origin. Bad params at runtime do not panic —
+          the returned error carries a typed validation code.
+
+          Declared as a function (not a var alias over the kernel Wrap) so the public
+          signature returns error: the concrete *errs.Error stays unexported, never
+          leaking through the facade.
+        in:
           - name: cause
             type: error
           - name: params

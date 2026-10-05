@@ -1,7 +1,3 @@
-// Package logger — declares the WriterEntryConfig DTO consumed by FromConfig.
-// A WriterEntryConfig names a registered writer and carries its raw, codec-
-// decoded option map; FromConfig hands that map to the writer's Decoder (or a
-// default mapping) to obtain a typed writer.Config.
 package logger
 
 // WriterEntryConfig names one writer in a TopologyConfig and carries its raw

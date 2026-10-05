@@ -1,11 +1,3 @@
-// Package token — the claims <-> JSON conversion shared by both formats.
-//
-// JWT and PASETO agree on the seven registered claim NAMES and disagree on
-// their value encodings: JWT writes NumericDate (RFC 7519 §2) and allows "aud"
-// to be a string or an array of strings; PASETO writes RFC 3339 timestamps and
-// allows exactly one audience. So the traversal is written once and the two
-// encodings are a [claimShape] each — rather than two claim decoders that
-// would drift apart on everything except the part that actually differs.
 package token
 
 import (

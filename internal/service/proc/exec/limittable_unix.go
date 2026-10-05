@@ -1,12 +1,5 @@
 //go:build unix
 
-// Package exec — Unix Resource→RLIMIT_* table. Only the constants the stdlib
-// syscall package exports are mapped; RLIMIT_NPROC and RLIMIT_MEMLOCK live in
-// golang.org/x/sys (banned here), so those resources stay unmapped and surface
-// UnknownResource rather than a wrong limit. The address-space limit (RLIMIT_AS)
-// is present on every supported target EXCEPT OpenBSD, so it is added by a
-// build-tagged addPlatformLimits (limittable_as.go / limittable_openbsd.go)
-// rather than referenced here — that keeps this file compiling on OpenBSD.
 package exec
 
 import (

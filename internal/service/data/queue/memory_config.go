@@ -1,4 +1,3 @@
-// Package queue — the in-memory broker's configuration.
 package queue
 
 import (

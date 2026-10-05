@@ -1,4 +1,3 @@
-// Package net — the configuration-friendly duration value.
 package net
 
 import (

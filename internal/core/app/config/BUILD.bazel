@@ -7,10 +7,10 @@ go_library(
     srcs = [
         "codes_gen.go",
         "design_gen.go",
+        "doc.go",
         "errors.go",
         "origin.go",
         "schema.go",
-        "source.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/app/config",
     visibility = [

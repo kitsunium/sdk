@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # internal/service/data/codec/jsonshape/
 
 ## Purpose
@@ -18,7 +18,8 @@ json/v2's streaming methods by signature so it does not import json/v2.
 
 | File | Role |
 |---|---|
-| `shape.go` | package doc, `Kind` and its nine values (`String`, `MarshalText`), `ShapeValue`, `FieldValue`, `Of`, `For` |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `shape.go` | `Kind` and its nine values (`String`, `MarshalText`), `ShapeValue`, `FieldValue`, `Of`, `For` |
 | `walk.go` | the walker: the path of named types being described (recursion becomes a `Ref`), pointers, the three known types, opaque types, the kinds, slices (base64 or array), maps (`keyWritable`), structs |
 | `fields.go` | `members` — json/v2's struct field walk under the v1 options, breadth first; `embed` (promote, collect, or a member after all); `writable`; `dominantMembers`; `dominantFallback`; `optional`, `quoted`, `emptiable`, `throughPointer` |
 | `tag.go` | `parseTag` — the json tag grammar the engine reads: names up to a reserved character, identifiers, `case:` and `format:` values, single-quoted strings |

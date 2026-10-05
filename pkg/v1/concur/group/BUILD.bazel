@@ -5,6 +5,7 @@ package(default_visibility = ["//visibility:public"])
 go_library(
     name = "group",
     srcs = [
+        "doc.go",
         "facade_gen.go",
         "group.go",
     ],

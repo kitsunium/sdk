@@ -1,4 +1,3 @@
-// Package trace — Status: whether the operation the span describes succeeded.
 package trace
 
 // StatusCode is opentelemetry/proto/trace/v1.Status.StatusCode. Three values,

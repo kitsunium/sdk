@@ -10,6 +10,7 @@ go_library(
         "decode_scalar.go",
         "decode_value.go",
         "decoder.go",
+        "doc.go",
         "encode.go",
         "encode_value.go",
         "encoder.go",

@@ -1,5 +1,3 @@
-// Package config — traced loads: the same pipeline, and for every key of the
-// target which layer supplied its final value (ADR 0097).
 package config
 
 import (

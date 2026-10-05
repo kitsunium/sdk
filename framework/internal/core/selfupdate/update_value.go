@@ -1,4 +1,3 @@
-// Package selfupdate — the values a self-update reports.
 package selfupdate
 
 // UpdateValue is the outcome of a version check or an install: whether a newer

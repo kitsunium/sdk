@@ -10,6 +10,7 @@ go_library(
         "combinators.go",
         "combine.go",
         "conditions.go",
+        "doc.go",
         "grant_value.go",
         "rbac.go",
         "rbac_config.go",

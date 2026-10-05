@@ -1,4 +1,3 @@
-// Package resilience — token-bucket rate-limit policy.
 package resilience
 
 import (

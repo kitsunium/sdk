@@ -1,7 +1,3 @@
-// Package memlimit — resolving WHICH cgroup limit files govern this process:
-// where each hierarchy is mounted, which part of the filesystem that mount
-// exposes, which cgroup the process belongs to, and the ancestors whose caps
-// bound it just as effectively.
 package memlimit
 
 import (

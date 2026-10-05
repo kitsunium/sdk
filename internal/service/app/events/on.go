@@ -1,5 +1,3 @@
-// Package events — hosts the TYPED registration front end: the generic
-// functions that hide the erasure the heterogeneous bus is built on.
 package events
 
 import (

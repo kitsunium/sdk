@@ -1,14 +1,3 @@
-// Package msgpack — the timestamp extension (spec.md §Timestamp extension
-// type, type −1). A time.Time is written in the SHORTEST of the three forms
-// the instant fits, the choice the vendor-backed codec made, byte for byte:
-//
-//	timestamp 32  fixext 4,  type −1, uint32 seconds            (0 ≤ sec < 2³², no nanoseconds)
-//	timestamp 64  fixext 8,  type −1, nsec<<34 | seconds        (0 ≤ sec < 2³⁴)
-//	timestamp 96  ext 8 (12), type −1, uint32 nsec, int64 sec   (everything else, negative included)
-//
-// Only the instant crosses the wire. A decoded time is in UTC — the vendor
-// returned time.Local, which made the same bytes decode to a different
-// time.Time on every machine; the instant was and is identical.
 package msgpack
 
 import (

@@ -1,7 +1,3 @@
-// Package cli — the one error the engine builds rather than declares. The
-// domain's codes and sentinels are declared in internal/core/app/cli
-// (ADR 0160); this file holds only the WrapParams that raise
-// HELP_WRITE_FAILED over the writer's own error.
 package cli
 
 import (

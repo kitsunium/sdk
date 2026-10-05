@@ -24,7 +24,8 @@ package declares no code.
 
 | File | Holds |
 |---|---|
-| `queue.go` | package doc, the dead-letter `causeValue` reduction, `randomHex`, the two shared guards (`checkBatch`, `checkSize`), `deadLetterNotFound` |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `queue.go` | the dead-letter `causeValue` reduction, `randomHex`, the two shared guards (`checkBatch`, `checkSize`), `deadLetterNotFound` |
 | `retry.go` | `retryDelay`: RetryDelay, or the `kernel/backoff` curve from it to `MaxRetryDelay` — one function the three brokers call (ADR 0151) |
 | `memory.go` | `NewMemory` and the in-heap broker: the heap-ordered lease expiry, the ready list ordered at insertion; `Reject`, `ReplayDeadLetter`, `DeleteDeadLetter` |
 | `memory_config.go` / `mem_record.go` / `lease_expiry.go` | `MemoryConfig` and the two values the memory broker keeps |

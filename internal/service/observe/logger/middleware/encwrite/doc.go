@@ -1,3 +1,6 @@
+// Package encwrite — declares the Config value type consumed by
+// NewEncWriter. Kept in its own file per the one-exported-struct rule.
+//
 // Package encwrite encrypts each log record's bytes before delivery to a
 // downstream sink — the transform-the-bytes middleware category (ADR 0014 D5).
 //
@@ -15,4 +18,7 @@
 //		_ "github.com/kitsunium/sdk/internal/service/crypto/aead/aesgcm"
 //		_ "github.com/kitsunium/sdk/internal/service/crypto/kdf/hkdfsha256"
 //	)
+//
+// Package encwrite — the EncWriter decorator that seals each record's bytes
+// under a per-sink subkey and frames the box for a downstream byte sink.
 package encwrite

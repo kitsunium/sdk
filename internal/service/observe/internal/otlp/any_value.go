@@ -1,5 +1,3 @@
-// Package otlp — common.v1.AnyValue, restricted to the cases the shared
-// attribute model has.
 package otlp
 
 // AnyValue is common.v1.AnyValue, restricted to the four SCALAR cases the

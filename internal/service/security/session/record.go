@@ -1,4 +1,3 @@
-// Package session — the stored form of a session.
 package session
 
 import "time"

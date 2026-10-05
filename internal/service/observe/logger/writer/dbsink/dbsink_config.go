@@ -1,8 +1,3 @@
-// Package dbsink — the Config value type plus Compose, the single entry point a
-// concrete driver adapter uses to build the levelgate(async(dbSink)) chain.
-// Keeping the composition order here (not in each driver) means every DB writer
-// inherits the same back-pressure + level-floor wiring as the s3 factory, with
-// only the execBatch seam and the plain-data Config varying per driver.
 package dbsink
 
 import (

@@ -1,3 +1,6 @@
+// Package tee — declares the Config value type consumed by New. Kept in its
+// own file per the one-exported-struct rule.
+//
 // Package tee provides a logger middleware that fans each record out to
 // every primary sink and, only when all primaries reject it, spills the
 // record to a dead-letter sink.
@@ -23,4 +26,7 @@
 //
 // A TeeSink is safe for concurrent producers when its primary and spill
 // sinks are. It holds no mutable per-record state.
+//
+// Package tee — the TeeSink decorator that fans each record out to every
+// primary sink and spills to a dead-letter sink only when all primaries fail.
 package tee

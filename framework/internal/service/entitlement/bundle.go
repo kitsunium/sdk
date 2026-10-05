@@ -1,5 +1,3 @@
-// Package entitlement - the published bundle: roster and signature in ONE
-// document, because two documents cannot be fetched atomically.
 package entitlement
 
 import (

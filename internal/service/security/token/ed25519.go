@@ -1,4 +1,3 @@
-// Package token — the Ed25519 signing binding.
 package token
 
 import (

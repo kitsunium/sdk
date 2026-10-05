@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "sse",
     srcs = [
+        "doc.go",
         "frame.go",
         "options.go",
         "sse.go",

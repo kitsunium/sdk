@@ -1,4 +1,3 @@
-// Package token — the PASETO v4.public issuing policy.
 package token
 
 import (

@@ -1,11 +1,3 @@
-// Package config — the KEY pass: which keys a load must find, and which it
-// must refuse.
-//
-// It runs on the MERGED MAP, before the decode, and that position is the whole
-// argument. After the decode an absent key and a key set to its zero are the
-// same bytes, so no constraint over the decoded value can tell "the operator
-// did not configure a port" from "the operator configured port 0". Before it,
-// the question is trivial: the key is either there or it is not.
 package config
 
 import "slices"

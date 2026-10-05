@@ -1,4 +1,3 @@
-// Package yaml — the parser: its state, its cursor, and one document.
 package yaml
 
 import (

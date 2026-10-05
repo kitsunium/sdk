@@ -1,6 +1,3 @@
-// Package baseenc — buffered writer used by variants whose stdlib has no
-// streaming encoder (base16 uppercase). Held in its own file so the
-// KTN-STRUCT-ONEFILE rule sees exactly one exported-shape struct per file.
 package baseenc
 
 import (

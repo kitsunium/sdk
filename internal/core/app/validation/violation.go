@@ -1,5 +1,3 @@
-// Package validation — hosts ViolationValue, the located statement that one
-// value failed one rule.
 package validation
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

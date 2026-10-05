@@ -1,7 +1,3 @@
-// Package errs — hosts the PrefixMatcher target used by
-// errors.Is for CIDR-style Code matching. PrefixMatcher deliberately does
-// NOT implement the `error` interface so it cannot escape into error
-// chains as a return value — callers pass it only to errors.Is.
 package errs
 
 // PrefixMatcher is a NON-ERROR sentinel used ONLY as a target for errors.Is.

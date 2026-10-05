@@ -1,4 +1,3 @@
-// Package kit — the consumer that drains a queue into its handler.
 package kit
 
 import (

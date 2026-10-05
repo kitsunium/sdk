@@ -1,7 +1,3 @@
-// Package bson — Decimal128, BSON's IEEE 754-2008 128-bit decimal in the
-// binary integer decimal (BID) encoding, and its string forms as the BSON
-// decimal128 specification defines them. Conversion is exact or refused:
-// nothing here rounds.
 package bson
 
 import (

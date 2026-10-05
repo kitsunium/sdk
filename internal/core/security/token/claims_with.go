@@ -1,4 +1,3 @@
-// Package token — the copy-on-write setters that build a [ClaimsValue].
 package token
 
 import (

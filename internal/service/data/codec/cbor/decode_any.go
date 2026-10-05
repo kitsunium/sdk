@@ -1,23 +1,3 @@
-// Package cbor — decoding into an untyped target. Each data item becomes its
-// default Go value, built without reflection:
-//
-//	unsigned integer          uint64
-//	negative integer          int64, or big.Int below math.MinInt64
-//	byte string               []byte
-//	text string               string
-//	array                     []any
-//	map, every key text       map[string]any
-//	map, any other key        map[any]any
-//	true, false               bool
-//	null, undefined           nil
-//	half, single, double      float64
-//	tag 0 or 1                time.Time
-//	tag 2 or 3 (bignum)       big.Int
-//	any other tag             its content, as though untagged
-//
-// An unassigned simple value has no Go value and is refused, as RFC 8949
-// §5.4 allows a decoder to; so is a map key Go cannot hash — a byte string,
-// an array, a map or a bignum — since it cannot be a key of a map[any]any.
 package cbor
 
 import (

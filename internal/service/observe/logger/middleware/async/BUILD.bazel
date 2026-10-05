@@ -8,6 +8,7 @@ go_library(
         "async_sink.go",
         "async_sink_policy.go",
         "config.go",
+        "doc.go",
         "drainer.go",
         "entry.go",
         "runtime.go",

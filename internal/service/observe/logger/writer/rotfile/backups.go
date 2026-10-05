@@ -1,5 +1,3 @@
-// Package rotfile — backup-name arithmetic and the per-slot move/gzip helpers
-// split out of rotate.go so each function stays under KTN-FUNC-MAXLOC.
 package rotfile
 
 import (

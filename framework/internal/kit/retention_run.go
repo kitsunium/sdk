@@ -1,4 +1,3 @@
-// Package kit — one pass of retention: what is due is erased or deleted.
 package kit
 
 import (

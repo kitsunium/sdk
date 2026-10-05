@@ -1,5 +1,3 @@
-// Package secret — the read-only store over the process environment, with the
-// NAME_FILE convention Docker and Kubernetes secrets use.
 package secret
 
 import (

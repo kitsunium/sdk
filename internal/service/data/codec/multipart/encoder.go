@@ -1,8 +1,3 @@
-// Package multipart — adapts mime/multipart.Writer to codec.Encoder.
-//
-// This is the ONLY write path in the package: Marshal and Append both drive
-// this encoder over a scratch buffer, so a body built in memory and a body
-// streamed to a socket go through identical code and identical bounds.
 package multipart
 
 import (

@@ -1,4 +1,3 @@
-// Package static — one file's response: its caching, its type, its body.
 package static
 
 import (

@@ -1,4 +1,3 @@
-// Package trace — the in-memory recorder's configuration.
 package trace
 
 import coreotel "github.com/kitsunium/sdk/internal/core/observe/otel"

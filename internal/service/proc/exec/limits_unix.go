@@ -1,12 +1,5 @@
 //go:build unix
 
-// Package exec — Unix umask / rlimit validation for the spawn. The Go runtime
-// exposes no SysProcAttr hook to run setrlimit(2)/umask(2) in the child between
-// fork and exec, so Start honours both via the re-exec trampoline
-// (trampoline_unix.go): a Spec requesting a mapped Rlimit or a Umask is spawned
-// through a self-invocation that applies the limits then execs the target. This
-// validator therefore only rejects a Resource with no platform RLIMIT_* mapping
-// (the SDK's "no silent field loss" rule) — every mappable field is honoured.
 package exec
 
 import (

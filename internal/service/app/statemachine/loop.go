@@ -1,6 +1,3 @@
-// Package statemachine — hosts the machine's own loop: Step, one pass over
-// what is due; Run, which paces the passes and sleeps until the next
-// transition due or a write, never polling; and what OnLoop is told.
 package statemachine
 
 import (

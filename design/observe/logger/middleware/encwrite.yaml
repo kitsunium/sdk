@@ -18,6 +18,15 @@ packages:
             name: CodeFramingFailed
             value: "0x00_03_1C_02"
         type: errs.Code
+    doc: |-
+      Package encwrite declares the codes and sentinels of the logger's
+      byte-encrypting middleware,
+      internal/service/observe/logger/middleware/encwrite: range 0.3.28.*,
+      allocated to that engine (ADR 0014 service slot 0x1c) and declared here since
+      ADR 0160, so the engine declares none.
+
+      Package encwrite — declares the sentinels returned by the byte-encrypting
+      sink. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE form.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/observe/logger/middleware/encwrite
@@ -39,8 +48,36 @@ packages:
             private: "service/observe/logger/middleware/encwrite: sealed box length exceeds the uint32 length prefix"
             public: Encrypting middleware could not frame the sealed record
             reason: FRAMING_FAILED
-  - functions:
-      - in:
+  - doc: |-
+      Package encwrite — declares the Config value type consumed by
+      NewEncWriter. Kept in its own file per the one-exported-struct rule.
+
+      Package encwrite encrypts each log record's bytes before delivery to a
+      downstream sink — the transform-the-bytes middleware category (ADR 0014 D5).
+
+      EncWriter wraps a core/observe/logger.Sink. At construction it derives a per-sink
+      subkey from the configured master key via HKDF-SHA256 (crypto.Subkey), so the
+      raw key never seals directly. For every record it seals the record bytes under
+      that subkey with AES-256-GCM (crypto.Seal, nonce hidden in the box), then
+      frames the sealed box with a 4-byte big-endian length prefix —
+      [uint32 len(box)][box] — before handing it to the downstream sink. Close
+      zeroizes both the master key and the derived subkey on every path.
+
+      Activate the schemes by blank-importing the AEAD and deriver packages:
+
+      	import (
+      		_ "github.com/kitsunium/sdk/internal/service/crypto/aead/aesgcm"
+      		_ "github.com/kitsunium/sdk/internal/service/crypto/kdf/hkdfsha256"
+      	)
+
+      Package encwrite — the EncWriter decorator that seals each record's bytes
+      under a per-sink subkey and frames the box for a downstream byte sink.
+    functions:
+      - doc: |-
+          NewEncWriter builds an EncWriter from cfg, deriving the per-sink subkey
+          via HKDF-SHA256. It returns an error wrapping EncWriteSealFailed when the
+          subkey cannot be derived from cfg.Key.
+        in:
           - name: cfg
             type: Config
         name: NewEncWriter
@@ -54,17 +91,32 @@ packages:
       corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
     path: github.com/kitsunium/sdk/internal/service/observe/logger/middleware/encwrite
     types:
-      - name: Config
+      - doc: |-
+          Config configures an EncWriter: the downstream sink, the master key the
+          per-sink subkey is derived from, and the HKDF info label that binds that
+          subkey to a purpose.
+        name: Config
         struct:
           fields:
-            - name: Sink
+            - doc: Sink is the downstream destination for framed sealed boxes.
+              name: Sink
               type: corelogger.Sink
-            - name: Key
+            - doc: Key is the master key from which a per-sink subkey is derived.
+              name: Key
               type: corecrypto.Key
-            - name: Info
+            - doc: |-
+                Info is the HKDF info label for per-sink domain separation; empty falls
+                back to a package default that binds the subkey to the sink purpose.
+              name: Info
               type: string
-      - methods:
-          - in:
+      - doc: |-
+          EncWriter seals each record's bytes under a per-sink subkey and writes the
+          length-prefixed sealed box to the downstream sink. Safe for concurrent use.
+        methods:
+          - doc: |-
+              Write seals p under the per-sink subkey, frames it with a length prefix, and
+              delivers it to the downstream sink. It returns the downstream byte count.
+            in:
               - name: ctx
                 type: context.Context
               - name: r
@@ -78,14 +130,20 @@ packages:
               - name: err
                 type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Flush forwards the flush to the downstream sink; this middleware buffers
+              nothing of its own.
+            in:
               - name: ctx
                 type: context.Context
             name: Flush
             out:
               - type: error
             recv: pointer
-          - name: Close
+          - doc: |-
+              Close zeroizes the master key and the derived subkey on every path, then
+              closes the downstream sink.
+            name: Close
             out:
               - type: error
             recv: pointer

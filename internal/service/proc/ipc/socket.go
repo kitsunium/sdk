@@ -1,8 +1,5 @@
 //go:build !windows
 
-// Package ipc — the Unix socket: a 0700 directory, a 0600 socket, a leftover
-// removed only when nobody answers on it and it is ours, and the peer the
-// kernel names where it does.
 package ipc
 
 import (

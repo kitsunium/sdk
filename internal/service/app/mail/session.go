@@ -1,4 +1,3 @@
-// Package mail — one open SMTP conversation.
 package mail
 
 import (

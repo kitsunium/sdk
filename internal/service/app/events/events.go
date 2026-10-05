@@ -1,5 +1,3 @@
-// Package events — hosts the engine: registration, removal, and the
-// copy-on-write membership the dispatch reads.
 package events
 
 import (

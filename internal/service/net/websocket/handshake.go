@@ -1,4 +1,3 @@
-// Package websocket — the RFC 6455 §4.2 opening handshake.
 package websocket
 
 import (

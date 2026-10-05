@@ -1,14 +1,3 @@
-// Package ipc is the private socket's contract (ADR 0148, ADR 0160): who is
-// at the other end of a connection, the connection that carries that answer,
-// the two ports a private socket is reached through — the Listener that
-// accepts and the Dialer that connects — and the codes every refusal carries.
-//
-// The engine is internal/service/proc/ipc: a Unix socket in a 0700 directory
-// whose whole path is audited, the kernel's word on the peer where it gives
-// one, a named pipe with its own DACL on Windows. Nothing here opens a socket.
-// The ports exist so a caller that holds a Listener or a Dialer can be handed
-// a double in a test — connections from net.Pipe with the peer the test
-// chooses — instead of a socket on disk.
 package ipc
 
 import (

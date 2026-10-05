@@ -5,6 +5,7 @@ package(default_visibility = ["//visibility:public"])
 go_library(
     name = "json",
     srcs = [
+        "doc.go",
         "facade_gen.go",
         "json.go",
     ],

@@ -1,5 +1,3 @@
-// Package kit — binaries and their process roles: one executable, several
-// Apps, and the versioned contracts between them (D22).
 package kit
 
 import (

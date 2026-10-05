@@ -1,4 +1,3 @@
-// Package i18n — the message key, the compiled message, and its rendering.
 package i18n
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

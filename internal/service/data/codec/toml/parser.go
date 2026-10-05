@@ -1,7 +1,3 @@
-// Package toml — the parser: one pass over a TOML v1.0.0 document that
-// builds its tree and refuses, as the specification requires, a key or a
-// table defined twice, a table extended from a place the specification does
-// not allow, and every byte the grammar has no place for.
 package toml
 
 import (

@@ -1,10 +1,5 @@
 //go:build freebsd || dragonfly
 
-// Package reaper — FreeBSD / DragonFly BSD descendant-reaper arming via
-// procctl(2). procctl(P_PID, 0, PROC_REAP_ACQUIRE, NULL) makes the calling
-// process the reaper for its whole descendant tree, the BSD analogue of Linux's
-// prctl(PR_SET_CHILD_SUBREAPER): orphaned descendants reparent to this process
-// instead of PID1, so a non-init supervisor still receives their SIGCHLD.
 package reaper
 
 import (

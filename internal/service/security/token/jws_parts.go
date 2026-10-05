@@ -1,4 +1,3 @@
-// Package token — the parsed, not-yet-authenticated shape of a compact token.
 package token
 
 import coretoken "github.com/kitsunium/sdk/internal/core/security/token"

@@ -1,11 +1,3 @@
-// Package secret provides the concrete secret stores — in memory, the process
-// environment, a directory on disk — the Keyring that sees one secret's
-// versions as keys, and the Rotator that mints new versions on a schedule
-// (ADR 0096). Every store implements core/security/secret.Store.
-//
-// This file holds the argument checks every store applies identically and the
-// version arithmetic they share, so that three backends cannot disagree about
-// what a valid Put or a correct prune is.
 package secret
 
 import (

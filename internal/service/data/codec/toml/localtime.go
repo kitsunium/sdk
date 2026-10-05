@@ -1,12 +1,3 @@
-// Package toml — the three TOML values that have no Go type of their own: a
-// date, a time of day and a date-time, each in no time zone. A decode into an
-// untyped target (map[string]any, any) returns them; a decode into time.Time
-// places them in time.Local, the only zone a local value can be read in.
-//
-// The three types keep the field layout and the methods of the
-// github.com/pelletier/go-toml/v2 types this codec returned before it was
-// written natively, so a type switch moves from one to the other by changing
-// its import and nothing else.
 package toml
 
 import (

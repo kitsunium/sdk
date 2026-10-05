@@ -1,5 +1,3 @@
-// Package rotfile — the wrap points every failure of this writer goes through,
-// so each carries its code from internal/core/observe/logger/writer/rotfile.
 package rotfile
 
 import (

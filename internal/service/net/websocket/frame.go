@@ -1,9 +1,3 @@
-// Package websocket — the frame header and its wire form (RFC 6455 §5).
-//
-// Reading and writing frames is this package's mechanism, not the domain's
-// contract (ADR 0160 §4): it moved here from internal/core/net, which keeps
-// what a second implementation would share — the opcode, the close code, the
-// message and the control-frame ceiling (corenet.WSMaxControlPayload).
 package websocket
 
 import (

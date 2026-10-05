@@ -1,17 +1,3 @@
-// Package logfile is the hardened open both file sinks share: the append-only
-// sink in internal/service/observe/logger/sink/file and the rotating one in
-// internal/service/observe/logger/writer/rotfile, which re-runs it on every reopen after a
-// rotation. A path whose final component is a symbolic link is refused twice —
-// by an os.Lstat BEFORE the open (policy) and by O_NOFOLLOW AT the open where
-// the kernel has it (the TOCTOU window the check leaves) — and both refusals
-// name the indirection the same way, so an operator reading one line can tell
-// a planted link from a full disk (CWE-59).
-//
-// Both sinks carried a copy of all of it; the copies differed in nothing but
-// their error code and their wording (OPEN_FAILED 0.3.14.* for the sink,
-// ROT_FILE_OPEN_FAILED for rotfile). Those are what this package does not own:
-// a sink hands it a RefusalSpec carrying its two wraps, and every refusal leaves
-// under that sink's code, in its words. It declares no code.
 package logfile
 
 import (

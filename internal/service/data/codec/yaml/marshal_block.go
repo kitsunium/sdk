@@ -1,4 +1,3 @@
-// Package yaml — encoding: the block layout of mappings, sequences and keys.
 package yaml
 
 import (

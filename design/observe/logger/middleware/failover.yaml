@@ -16,6 +16,16 @@ packages:
             name: CodeFailoverEmpty
             value: "0x00_03_13_02"
         type: errs.Code
+    doc: |-
+      Package failover declares the codes and sentinels of the logger's failover
+      middleware, internal/service/observe/logger/middleware/failover: range
+      0.3.19.*, allocated to that engine (ADR 0005
+      service/observe/logger/middleware/failover block) and declared here since ADR
+      0160, so the engine declares none.
+
+      Package failover — declares the sentinels returned by the
+      failover Sink. Each var's name equals its errs.Define Reason in
+      SCREAMING_SNAKE form.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/observe/logger/middleware/failover
@@ -35,8 +45,17 @@ packages:
             private: service/observe/logger/middleware/failover.New called with zero sinks
             public: Failover requires at least one downstream sink
             reason: FAILOVER_EMPTY
-  - functions:
-      - in:
+  - doc: |-
+      Package failover implements a sequential-retry Sink that tries downstream
+      sinks in order until one succeeds. The first successful Write returns
+      nil; if every sink fails, Write returns Exhausted wrapping an
+      errors.Join of the per-sink failures.
+
+      Use case: emit logs to a primary collector with a local file as a
+      fallback so logs survive a network outage.
+    functions:
+      - doc: New constructs a failover Sink trying each branch in order.
+        in:
           - name: branches
             type: corelogger.Sink
         name: New

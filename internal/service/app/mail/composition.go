@@ -1,5 +1,3 @@
-// Package mail — the per-message build state, and the MIME structure it
-// assembles.
 package mail
 
 import (

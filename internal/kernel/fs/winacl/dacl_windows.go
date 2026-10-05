@@ -1,36 +1,5 @@
 //go:build windows
 
-// Package winacl — the reader: a directory's discretionary list, fetched with
-// GetNamedSecurityInfoW and walked entry by entry with GetAce.
-//
-// # The cost estimate that deferred it three times, re-checked
-//
-// ADR 0081 §Alternatives priced a DACL check at roughly 250 lines of ABI and
-// deferred it; ADR 0082 §Deferred carried that forward unchanged. Reading
-// go1.27's syscall package rather than assuming shrinks it to two entry points,
-// because the standard library already exports everything else this needs:
-//
-//   - syscall.StringToSid builds a SID from its string form, so the well-known
-//     identifiers cost nothing (security_windows.go, ConvertStringSidToSidW);
-//   - (*syscall.SID).String renders one back, so the comparison is a string
-//     comparison and EqualSid is not needed at all;
-//   - syscall.LocalFree releases the security descriptor.
-//
-// What is left is GetNamedSecurityInfoW and GetAce, bound from advapi32.dll
-// with syscall.NewLazyDLL — the same discipline ADR 0081 used to bind
-// LockFileEx from kernel32 (internal/kernel/fs/flock), and for the same
-// reason: golang.org/x/sys is banned SDK-wide (ADR 0018), and binding two
-// stable exports adds no module, no go.sum entry and no MODULE.bazel change.
-//
-// # Every way to the end of the list is named
-//
-// The walk reaches a verdict only by reading the whole list. Every failure on
-// the way — a path that cannot be converted, an object whose security
-// information cannot be read, an ACE that cannot be fetched — answers "no
-// grant found" AND names what stopped it, so a caller can tell it from the
-// verdict. Neither answer is a refusal: the reader decides nothing (see the
-// package comment), and the SDK's two callers resolve "could not look" in
-// opposite directions, each for a reason of its own.
 package winacl
 
 import (

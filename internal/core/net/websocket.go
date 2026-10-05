@@ -1,7 +1,3 @@
-// Package net — the WebSocket protocol's vocabulary (RFC 6455): the opening
-// handshake's constants and the control-frame ceiling. Reading and writing the
-// protocol — the handshake's key check and digest, the frame codec, the close
-// payload, the UTF-8 check — is internal/service/net/websocket's (ADR 0160 §4).
 package net
 
 // WSGUID is the fixed string RFC 6455 §1.3 concatenates to Sec-WebSocket-Key

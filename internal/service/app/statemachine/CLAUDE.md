@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T20:00:30Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # internal/service/app/statemachine/
 
 ## Purpose
@@ -22,7 +22,8 @@ declares none and raises the core's.
 
 | File | Role |
 |---|---|
-| `machine.go` | package doc; `StateMachine`, `NewStateMachine`, the opening reconciliation (`open`, `loadJournal`, `syncJournal`, `admit`); `Census`, `Record`, `Records` |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `machine.go` | `StateMachine`, `NewStateMachine`, the opening reconciliation (`open`, `loadJournal`, `syncJournal`, `admit`); `Census`, `Record`, `Records` |
 | `definition.go` | `MachineSpec` + `NewMachineSpec`, `Initial`/`On`/`After`/`At`/`When`/`OnEnter`/`OnTransition`, `Problems`/`States`/`Transitions`/`InitialState`/`Can`; `TransitionValue`, `ChangeValue` |
 | `blueprint.go` | the frozen copy a machine runs: indexes by (event, state) and by state; `dueAt`, `evaluate` (the first-declared rule, a panicking guard recovered) |
 | `config.go` | `Config`, `FiringValue`, `DefaultMinGap`, `DefaultMaxHistory`; `settings` — the resolved config and the hooks' nil-safe calls, `finish` (the observer's end, its panic recovered apart) |

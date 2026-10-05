@@ -1,4 +1,3 @@
-// Package writer — RotFileConfig value type for the "rotfile" writer.
 package writer
 
 import (

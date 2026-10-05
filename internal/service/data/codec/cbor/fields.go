@@ -1,8 +1,3 @@
-// Package cbor — struct fields: which fields of a struct are on the wire,
-// under which key, and in which order. The visibility and embedding rules
-// are encoding/json's; the key comes from the `cbor` tag, or from the `json`
-// tag when a field has no `cbor` tag — the same resolution fxamacker/cbor
-// applied, so a struct keeps its encoding across the change of engine.
 package cbor
 
 import (

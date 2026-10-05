@@ -6,6 +6,7 @@ go_library(
     name = "storetest",
     srcs = [
         "codes_gen.go",
+        "doc.go",
         "storetest.go",
     ],
     importpath = "github.com/kitsunium/sdk/framework/kit/storetest",

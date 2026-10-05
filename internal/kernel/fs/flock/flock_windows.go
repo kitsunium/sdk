@@ -1,48 +1,5 @@
 //go:build windows
 
-// Package flock — LockFileEx, on the kernel that has no flock(2) (ADR 0081).
-//
-// LockFileEx is the nearest primitive and it is genuinely a different one, so
-// this file states every difference rather than smoothing it over. A lock is
-// the one primitive whose failures are invisible at the moment they happen and
-// expensive at every later moment, and an emulation that behaves almost like
-// flock(2) is worth less than none, because its caller stops looking. Each row
-// was measured on a real windows-latest kernel before the first backend over it
-// was written (ADR 0081):
-//
-//	                                       flock(2)                 LockFileEx
-//	two separate opens, one process        excludes                 excludes
-//	the SAME description locked again      succeeds — a conversion  refused — ERROR_LOCK_VIOLATION
-//	another process while held             excludes                 excludes
-//	enforced against unrelated I/O         no — advisory            yes — mandatory
-//	scope                                  the whole file           a byte range: here, every byte
-//
-// # It locks a byte RANGE, so the range is the whole file
-//
-// Offset zero, 2^64-1 bytes, spelled MAXDWORD in both length halves — the
-// documented idiom for "everything", and legal past end-of-file ("Locking a
-// region that goes beyond the current end-of-file position is not an error").
-// Any smaller range leaves the bytes outside it readable and writable by every
-// other handle while the lock is held, which is a decision about the file's
-// contents and so the caller's, not this package's.
-//
-// # Its locks are MANDATORY, not advisory
-//
-// The kernel enforces them against ordinary reads and writes: while the lock
-// is held, another handle's read or write of the file fails with
-// ERROR_LOCK_VIOLATION — a foreign `type` of a held file included. The holder
-// is exempt: the documented rule is per HANDLE, and the handle that placed the
-// lock keeps full access to the range, so the holder reads and writes the file
-// through the very descriptor that carries the lock.
-//
-// # A second lock through the same handle is REFUSED, where flock(2) CONVERTS
-//
-// This is the row where the two kernels are opposites. flock(LOCK_EX) on a
-// description that already holds LOCK_EX succeeds immediately; LockFileEx on a
-// range an overlapping lock already covers is refused, whichever handle asks
-// and whichever process owns it. Exclusion between the goroutines of one
-// process therefore falls out of the kernel here and does not on Unix, and a
-// caller that wants the same behaviour on both keeps a gate of its own.
 package flock
 
 import (

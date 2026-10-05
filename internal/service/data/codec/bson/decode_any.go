@@ -1,12 +1,3 @@
-// Package bson — decoding into an interface: the Go value each BSON type
-// becomes when nothing else says what it should be. The table is the previous
-// library's, its types replaced by this package's: a double is a float64, an
-// int32 an int32, an int64 an int64, a string a string, a boolean a bool, a
-// null nil, an array an A, a datetime a DateTime, a binary a Binary, and so
-// on. A document becomes the ancestor type when one is set — the type of the
-// nearest enclosing map[string]any, M or slice of E — and a D otherwise, so a
-// document decoded into *any is a D all the way down while one decoded into a
-// map[string]any is maps all the way down.
 package bson
 
 import (

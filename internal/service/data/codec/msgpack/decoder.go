@@ -1,21 +1,3 @@
-// Package msgpack — the streaming decoder. When the 4 KiB read-ahead already
-// holds the whole next value — what valueExtent checks, allocating nothing —
-// Decode decodes it IN PLACE, by the same code Unmarshal runs, and consumes
-// it. Otherwise it FRAMES the value: it reads exactly the bytes of the next
-// value into a pooled scratch buffer, walking headers with the same table the
-// in-memory decoder uses and keeping a count of values still owed instead of
-// recursing, and decodes the frame. A value the fast path cannot vouch for —
-// incomplete or malformed — always takes the framed path, which says why, so
-// both paths fail alike. Framing never trusts a declared length with memory:
-// a string, binary or extension payload is refused outright when it is longer
-// than the stream can still deliver under its bound, and is otherwise read in
-// frameChunk pieces, so what a hostile header costs is what its bytes cost.
-//
-// The bound is the one the vendor-backed decoder had: one byte past
-// maxMsgPackBytes, for the whole stream. A clean end of input between two
-// values is io.EOF; an end inside a value, a malformed byte or a value that
-// does not fit its target is UNMARSHAL_FAILED, and ends the stream — More
-// reports false and every later Decode returns the same error.
 package msgpack
 
 import (

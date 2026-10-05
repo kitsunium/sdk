@@ -1,4 +1,3 @@
-// Package crypto — the Seal / Open dispatch over the AEAD registry.
 package crypto
 
 // Version is the box wire-format version, the first byte of every sealed box

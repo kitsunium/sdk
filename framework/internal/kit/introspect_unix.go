@@ -1,6 +1,5 @@
 //go:build unix
 
-// Package kit — how the source endpoint opens a file on Unix.
 package kit
 
 import (

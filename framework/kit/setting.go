@@ -1,4 +1,3 @@
-// Package kit — settings: a value the environment gives a service.
 package kit
 
 import (

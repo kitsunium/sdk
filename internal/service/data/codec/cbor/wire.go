@@ -1,6 +1,3 @@
-// Package cbor — the RFC 8949 vocabulary: the eight major types, the
-// additional information of an initial byte, the head every data item opens
-// with, and the IEEE 754 half-precision float a decoder must read.
 package cbor
 
 import (

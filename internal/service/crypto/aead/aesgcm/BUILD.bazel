@@ -4,7 +4,10 @@ package(default_visibility = ["//internal/service:service_consumers"])
 
 go_library(
     name = "aesgcm",
-    srcs = ["aesgcm.go"],
+    srcs = [
+        "aesgcm.go",
+        "doc.go",
+    ],
     importpath = "github.com/kitsunium/sdk/internal/service/crypto/aead/aesgcm",
     visibility = [
         "//:__subpackages__",

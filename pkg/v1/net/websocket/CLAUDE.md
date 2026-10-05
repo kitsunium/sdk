@@ -129,8 +129,9 @@ overwhelmingly a browser's `WebSocket`, which needs nothing from this SDK.
 
 ## Do NOT
 
-- Hand-edit `README.md` — it is generated from the package doc comment
-  (`cd pkg/v1 && go generate ./net/websocket/...`, or `make docs-readme`).
+- Hand-edit `README.md` — `tools/genindex` writes it from the committed
+  `docs/api` (`make docs-readme`, ADR 0167); the package comment is `doc.go`'s,
+  which kit writes from the design (`design/net.yaml`).
 - Add logic here; it belongs in `internal/service/net/websocket`.
 - Call `Conn.Receive` from more than one goroutine — the protocol is one ordered
   frame stream and two readers would each take half of a message — or from
@@ -141,7 +142,7 @@ overwhelmingly a browser's `WebSocket`, which needs nothing from this SDK.
 
 ## Generated
 
-`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/net.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the package comment and the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
+`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/net.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the declarations of their own, and `doc.go` — kit's too (ADR 0167) — the package comment. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
 
 ## Verification
 

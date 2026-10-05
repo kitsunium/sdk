@@ -1,4 +1,3 @@
-// Package kit — the decoding of a request into its typed value.
 package kit
 
 import (

@@ -1,6 +1,3 @@
-// Package profiling — the goroutine view: one goroutine as the runtime's dump
-// describes it, and goroutines grouped. Reading the dump and grouping are the
-// engine's, internal/service/observe/profiling.
 package profiling
 
 import "time"

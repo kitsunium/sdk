@@ -1,4 +1,3 @@
-// Package session — the in-process store.
 package session
 
 import (

@@ -1,6 +1,3 @@
-// Package rotfile — rotatingSink (the rotating Sink implementation) plus the
-// open/reopen hardening shared with the rotation cycle. Its Config lives in the
-// parent-prefixed sibling rotating_sink_config.go (KTN-STRUCT-ONEFILE).
 package rotfile
 
 import (

@@ -1,11 +1,3 @@
-// Package logger — exposes the in-memory test sink (NewMemorySink) and its
-// RecordSnapshot element type so consumers can assert on what was logged.
-//
-// Package logger — exposes the Sink port, the multi-sink helper and the
-// per-branch level gate alongside the encoder-aware constructor NewWithSink.
-// Together they let consumers replace the default text-on-stderr wiring
-// (NewText / Default) with arbitrary fan-out / async / file / syslog
-// topologies — without reaching into internal/* packages.
 package logger
 
 import (

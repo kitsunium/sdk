@@ -1,4 +1,3 @@
-// Package vfs — the file-mode rule every implementation shares.
 package vfs
 
 import (

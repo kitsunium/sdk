@@ -1,13 +1,3 @@
-// Package journald — journaldSink, the terminal datagram sink. It frames each
-// record as a single "MESSAGE=<line>\n" journal entry into a reused buffer and
-// sends it as one unix datagram, so the steady-state Write path allocates
-// nothing (the buffer grows once, then is reused under the mutex). Non-blocking
-// back-pressure is provided by the async middleware composed around it.
-//
-// Framing note: the native journald protocol length-prefixes multiline field
-// values; this sink emits the simple "MESSAGE=<line>\n" form, which is correct
-// because the SDK encoders strip CR/LF/NUL from the message — a record is always
-// a single line at this layer.
 package journald
 
 import (

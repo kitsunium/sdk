@@ -1,14 +1,3 @@
-// Package jwk — the bridge between a JWK and the key encodings the SDK's own
-// schemes already speak, so adopting the format costs no re-encoding by hand:
-//
-//	service/crypto/sign/ecdsasig    PKIX DER public / SEC1 DER private
-//	service/crypto/sign/ed25519sig  raw 32-octet public / raw 64-octet private
-//	service/crypto/mac/hmacsha2     core/crypto.Key (redacting, 32 octets)
-//
-// The out-bound accessors named *Private / Secret hand back live key material,
-// exactly as core/crypto.Key.Bytes() does, and carry the same rule: they feed a
-// scheme, never a log line. They are in-process handoffs — the serialisation
-// guard is MarshalPublic / MarshalPrivate, one layer up.
 package jwk
 
 import (

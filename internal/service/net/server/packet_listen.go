@@ -1,4 +1,3 @@
-// Package server — datagram listener construction and the read loop.
 package server
 
 import (

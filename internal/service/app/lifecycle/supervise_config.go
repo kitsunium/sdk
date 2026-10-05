@@ -1,5 +1,3 @@
-// Package lifecycle — the supervisor's construction parameters and the
-// defaults its zero values clamp to.
 package lifecycle
 
 import (

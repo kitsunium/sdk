@@ -1,10 +1,3 @@
-//go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /framework/internal/service/entitlement .
-
-// Package entitlement - orchestration: turn local key material plus a signed
-// roster into a grant, or refuse. The fetch is attempted on every cold
-// verification and the only thing on disk allowed to stand in for it is a
-// bundle this machine already authenticated, read back through the same
-// signature and freshness checks — never a decision, always the same document.
 package entitlement
 
 import (

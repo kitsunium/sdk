@@ -1,4 +1,3 @@
-// Package config — file Source (codec-dispatched parse).
 package config
 
 import (

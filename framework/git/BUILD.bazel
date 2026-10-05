@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "git",
-    srcs = ["git.go"],
+    srcs = [
+        "doc.go",
+        "git.go",
+    ],
     importpath = "github.com/kitsunium/sdk/framework/git",
     visibility = ["//visibility:public"],
     deps = [

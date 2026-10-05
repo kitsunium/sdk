@@ -1,4 +1,3 @@
-// Package crypto — the opaque, redacting symmetric Key value type.
 package crypto
 
 import "bytes"

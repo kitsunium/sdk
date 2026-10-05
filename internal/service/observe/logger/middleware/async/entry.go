@@ -1,6 +1,3 @@
-// Package async — holds the recycled payload struct that travels
-// through the ring buffer between the producer (Write) and the consumer
-// (drain goroutine).
 package async
 
 import corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"

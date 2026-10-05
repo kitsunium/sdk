@@ -1,6 +1,3 @@
-// Package baseenc — adapts the base-N stream-reader pipeline to
-// codec.Decoder. Each Decode call drives a stdlib json.Decoder over the
-// base-N decoded byte stream wrapped around the caller's io.Reader.
 package baseenc
 
 import (

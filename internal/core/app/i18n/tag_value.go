@@ -1,4 +1,3 @@
-// Package i18n — the language tag, and the BCP 47 subset it admits.
 package i18n
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

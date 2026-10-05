@@ -1,4 +1,3 @@
-// Package notify — the notifier (child) side: sending sd_notify datagrams.
 package notify
 
 import (

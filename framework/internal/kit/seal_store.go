@@ -1,4 +1,3 @@
-// Package kit — a store that seals: its records as they rest.
 package kit
 
 import (

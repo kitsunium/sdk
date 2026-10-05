@@ -1,7 +1,5 @@
 //go:build windows
 
-// Package winacl — the hypothetical accounts a DACL is evaluated against, and
-// why one map keyed by SID is the wrong shape.
 package winacl
 
 // tokenSet is the accounts the "can anybody?" question is asked on behalf of.

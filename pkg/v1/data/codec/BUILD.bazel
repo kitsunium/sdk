@@ -15,6 +15,7 @@ go_library(
         "codec.go",
         "codes_gen.go",
         "compressed.go",
+        "doc.go",
         "facade_gen.go",
         "promote.go",
     ],

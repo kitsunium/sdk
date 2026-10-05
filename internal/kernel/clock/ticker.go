@@ -1,5 +1,3 @@
-// Package clock — hosts the [Ticker] contract, the handle a [Waiter] returns
-// for a repeating wake-up.
 package clock
 
 import "time"

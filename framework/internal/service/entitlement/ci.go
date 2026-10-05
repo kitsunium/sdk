@@ -1,9 +1,3 @@
-// Package entitlement - obtaining the proof that a run is CI.
-//
-// The token itself is fetched from the runner, which means the URL and the
-// bearer credential both arrive as environment variables — attacker-controlled
-// input by the same standard as everything else this package reads. They are
-// validated before use rather than trusted because of where they came from.
 package entitlement
 
 import (

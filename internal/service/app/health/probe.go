@@ -1,6 +1,3 @@
-// Package health — hosts the probe answers: the phase the process is in, the
-// three short-circuits that make the phases mean something, and the
-// aggregation rule.
 package health
 
 import (

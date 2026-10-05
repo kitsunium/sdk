@@ -1,5 +1,3 @@
-// Package mysql — the credentials a new connection is opened with, read
-// again from the URL each time.
 package mysql
 
 import driver "github.com/go-sql-driver/mysql"

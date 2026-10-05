@@ -54,6 +54,13 @@ packages:
             name: CodeInvalidMailID
             value: "0x00_03_51_06"
         type: errs.Code
+    doc: |-
+      Package spool — range 0.3.81.* (ADR 0111 service/app/mail/spool block,
+      declared here since ADR 0160).
+
+      Package spool — declares the sentinel *errs.Error outcomes of the durable
+      mail outbox. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE
+      form.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/app/mail/spool
@@ -118,41 +125,178 @@ packages:
             public: The mail identifier is malformed
             reason: INVALID_MAIL_ID
   - constants:
-      - name: DefaultSendTimeout
+      - blockDoc: |-
+          The defaults a zero field clamps to (ADR 0031: each zero has one reading —
+          "not thought about" — and the value below is the one that needs no
+          explanation).
+        doc: |-
+          DefaultSendTimeout bounds one hand-over to the transport. The lease a
+          delivery holds is twice it, so a slow relay can never make the queue
+          hand the same mail to a second attempt while the first is still talking.
+        name: DefaultSendTimeout
         type: time.Duration
         value: "60000000000"
-      - name: DefaultRetryBase
+      - blockDoc: |-
+          The defaults a zero field clamps to (ADR 0031: each zero has one reading —
+          "not thought about" — and the value below is the one that needs no
+          explanation).
+        doc: |-
+          DefaultRetryBase and DefaultRetryMax bound the wait between attempts:
+          one second after the first failure, doubling, never more than five
+          minutes. A zero backoff would retry at once — a relay that is down would
+          be dialled as fast as the queue can lease.
+        name: DefaultRetryBase
         type: time.Duration
         value: "1000000000"
-      - name: DefaultRetryMax
+      - blockDoc: |-
+          The defaults a zero field clamps to (ADR 0031: each zero has one reading —
+          "not thought about" — and the value below is the one that needs no
+          explanation).
+        name: DefaultRetryMax
         type: time.Duration
         value: "300000000000"
-      - name: DefaultMaxMessageBytes
+      - blockDoc: |-
+          The defaults a zero field clamps to (ADR 0031: each zero has one reading —
+          "not thought about" — and the value below is the one that needs no
+          explanation).
+        doc: |-
+          DefaultMaxMessageBytes bounds one spooled mail, attachments included,
+          as the record the spool writes. It is above the queue's own default
+          because a mail with an attachment is routinely a few megabytes.
+        name: DefaultMaxMessageBytes
         type: int
         value: 32 << 20
-      - name: DeliveredMemory
+      - blockDoc: |-
+          The defaults a zero field clamps to (ADR 0031: each zero has one reading —
+          "not thought about" — and the value below is the one that needs no
+          explanation).
+        doc: |-
+          DeliveredMemory is how many delivered mails the spool remembers, by ID,
+          to drop a redelivery rather than send it twice.
+        name: DeliveredMemory
         type: int
         value: "1024"
-      - name: EventQueued
+      - blockDoc: What can happen to a spooled mail. The zero value is none of them.
+        doc: "EventQueued: Send or SendWithID put the mail in the spool."
+        name: EventQueued
         type: EventKind
         value: "1"
-      - name: EventSent
+      - blockDoc: What can happen to a spooled mail. The zero value is none of them.
+        doc: "EventSent: the transport accepted the mail."
+        name: EventSent
         type: EventKind
         value: "2"
-      - name: EventRetrying
+      - blockDoc: What can happen to a spooled mail. The zero value is none of them.
+        doc: "EventRetrying: an attempt failed and the next is due at Next."
+        name: EventRetrying
         type: EventKind
         value: "3"
-      - name: EventDeadLettered
+      - blockDoc: What can happen to a spooled mail. The zero value is none of them.
+        doc: |-
+          EventDeadLettered: the last attempt failed; the mail is kept, with
+          that failure, and never delivered again.
+        name: EventDeadLettered
         type: EventKind
         value: "4"
-      - name: EventDuplicate
+      - blockDoc: What can happen to a spooled mail. The zero value is none of them.
+        doc: |-
+          EventDuplicate: the queue handed back a mail under an identifier this
+          spool had already delivered — its lease lapsed while the relay was
+          accepting it, or a SendWithID repeated the identifier — and it was
+          dropped instead of sent twice. A repeat's own EventQueued comes first,
+          so an observer keyed by identifier reads this one as "delivered
+          already".
+        name: EventDuplicate
         type: EventKind
         value: "5"
-      - name: MaxIDBytes
+      - doc: |-
+          MaxIDBytes bounds a mail's identifier, whoever minted it. It is well above
+          every identifier the SDK mints — a UUID, a ULID, a TypeID under the longest
+          prefix TypeID allows — and low enough that "Message-ID: <id@domain>" keeps
+          within RFC 5322's line limit beside the longest domain an address may carry.
+        name: MaxIDBytes
         type: int
         value: "255"
+    doc: |-
+      Package spool — the spool's construction parameters, the defaults their
+      zero values clamp to, and the refusals.
+
+      Package spool — one delivery: the record read back, a duplicate dropped,
+      the attempt bounded, and its failure parked, or dead-lettered.
+
+      Package spool — what a spool tells its observer, what an attempt knows
+      about itself, and what a dead letter keeps.
+
+      Package spool — a mail's identifier: the one rule it keeps, whoever minted
+      it, because it becomes the left half of the mail's Message-ID.
+
+      Package spool — the memory of what was delivered, which is what drops a
+      redelivery instead of sending a mail twice.
+
+      Package spool is outbound mail made durable: Send validates a mail and
+      queues it, and the spool's consumer hands it to a mail transport, retrying a
+      failure with a backoff and dead-lettering the mail after its last attempt. A
+      redelivery of a mail it delivered is dropped, and every attempt, the one
+      resend a crash can cause included, carries the same Message-ID. ADR 0111.
+
+      # Where it sits
+
+      It composes two domains and adds what neither has. The mail domain composes
+      and refuses a mail and hands it to a transport, synchronously, once. The
+      queue domain keeps bytes durably and delivers them at least once. The spool
+      is the mail-shaped use of the queue: its records are mails, a failed
+      delivery waits a backoff that grows with the attempt instead of the queue's
+      fixed retry delay, the last failure is the dead letter's reason, and a
+      redelivered mail that was in fact delivered is recognised and dropped.
+
+      # What Send promises
+
+      Send refuses, at the call site, everything the transport would refuse
+      later: a header carrying a line break, an address that is not one, a mail
+      with no recipient or no body. It stamps what a retry must not change — the
+      sender when the mail names none, the Date, and a Message-ID made of the
+      spool's identifier at the sender's domain — and returns once the mail is in
+      the spool: durable, with a Dir, before Send returns.
+
+      # An identifier the caller minted
+
+      Send mints the mail's identifier with Config.NewID. SendWithID queues the
+      mail under one its caller minted instead, for a caller that must know the
+      identifier before the spool has the mail — a framework that holds a mail
+      until a transaction commits returns the identifier at the call and queues
+      the mail after the commit. Every identifier, whoever minted it, is
+      non-empty, at most MaxIDBytes and an RFC 5322 dot-atom, because it becomes
+      the left half of the mail's Message-ID: a caller's that is not is
+      InvalidMailID, a generator's SpoolMisconfigured. A repeated identifier is
+      not refused. The spool cannot see the identifiers in its queue without
+      reading every record; it drops a mail under an identifier it delivered, as
+      it drops every redelivery.
+
+      # How a mail is delivered
+
+      Run consumes the spool, one mail at a time, on the goroutine that calls it.
+      Each attempt runs under SendTimeout, with its AttemptValue in the context.
+      An attempt that fails with attempts left PARKS the mail: its lease is
+      extended by Backoff.Delay(attempt) and left to lapse, and the queue hands it
+      back then, its delivery count — the count that decides the dead letter, and
+      that survives a crash — incremented. The last attempt's failure is the
+      queue's nack, and the queue dead-letters the mail with that failure.
+
+      # Exactly once, and the one duplicate left
+
+      A mail this spool delivered is remembered by its identifier (the last
+      DeliveredMemory of them), so a redelivery — the lease lapsed while the relay
+      was still accepting the mail — is dropped rather than sent. The lease is
+      twice SendTimeout, so that needs a relay slower than the timeout. What
+      remains is a process that dies between the relay's acceptance and the
+      acknowledgement: the next process sends the mail again, with the SAME
+      Message-ID, which is how a receiver recognises it. No transport offers more:
+      SMTP has no idempotent submission.
     functions:
-      - in:
+      - doc: |-
+          AttemptFrom returns the attempt a delivery context carries, and whether it
+          carries one: only a context the spool handed its transport does.
+        in:
           - name: ctx
             type: context.Context
         name: AttemptFrom
@@ -161,7 +305,10 @@ packages:
             type: AttemptValue
           - name: ok
             type: bool
-      - in:
+      - doc: |-
+          New builds a spool from cfg over a durable queue in cfg.Dir, or an
+          in-memory one without it. It starts nothing: Run delivers.
+        in:
           - name: cfg
             type: Config
         name: New
@@ -174,93 +321,225 @@ packages:
       kbackoff: github.com/kitsunium/sdk/internal/kernel/backoff
     path: github.com/kitsunium/sdk/internal/service/app/mail/spool
     types:
-      - name: Config
+      - doc: |-
+          Config configures [New]. Transport and MaxAttempts are required; every
+          other field is optional.
+        name: Config
         struct:
           fields:
-            - name: Transport
+            - doc: |-
+                Transport delivers each mail: the SMTP transport, the capture transport
+                in development and tests, a provider's connector.
+              name: Transport
               type: coremail.Transport
-            - name: Clock
+            - doc: |-
+                Clock stamps every mail and every event, bounds every attempt and paces
+                every retry. Nil means clock.System; a clock.ManualClock drives a test's
+                retries without a sleep.
+              name: Clock
               type: clock.Timed
-            - name: Observe
+            - doc: |-
+                Observe is told what happens to every mail — queued, sent, retrying,
+                dead-lettered, dropped as a duplicate — one call at a time, on the
+                caller of Send or the spool's own consumer. A mail's Queued event comes
+                before every event of its delivery, even when the consumer delivers it
+                before Send returns. It must be short, and must not call Send, which
+                would wait for the call it is made from. Nil tells nobody: the spool
+                writes nothing anywhere itself.
+              name: Observe
               type: func(EventValue)
-            - name: Annotate
+            - doc: |-
+                Annotate returns what Send's context knows that a delivery should know
+                too — a trace to continue, the caller's identity — kept with the mail
+                and handed back to every attempt through AttemptFrom. Nil keeps nothing.
+                It must not return a secret: it is written into the spool as it is.
+              name: Annotate
               type: func(ctx context.Context) map[string]string
-            - name: NewID
+            - doc: |-
+                NewID mints the spool's identifier for a mail Send queues; SendWithID
+                takes its caller's instead. Nil mints a ULID. Every identifier must be
+                new: the spool drops a mail whose identifier it delivered already, as a
+                redelivery. One that is empty, longer than MaxIDBytes or not an RFC 5322
+                dot-atom is refused at Send (SpoolMisconfigured), since it would become
+                the left half of the mail's Message-ID.
+              name: NewID
               type: func() (string, error)
-            - name: Dir
+            - doc: |-
+                Dir is the spool's directory: a durable queue that outlives the
+                process, shared by every process that names it. Empty keeps the spool
+                in memory, and a process that ends loses what it had not delivered.
+              name: Dir
               type: string
-            - name: From
+            - doc: |-
+                From is the sender of every mail that names none. It must be a usable
+                address when set.
+              name: From
               type: coremail.AddressValue
-            - name: Backoff
+            - doc: |-
+                Backoff is the wait before each retry: Backoff.Delay(attempt). The zero
+                value is the DefaultRetryBase–DefaultRetryMax curve, and a curve without
+                a positive BaseDelay starts from DefaultRetryBase under its own ceiling:
+                a failed mail is never retried at once.
+              name: Backoff
               type: kbackoff.Value
-            - name: MaxAttempts
+            - doc: |-
+                MaxAttempts is how many deliveries a mail gets before it is
+                dead-lettered with its last failure. It is REQUIRED: zero reads as
+                "unlimited" or as "none", two opposites, and neither is a mail spool.
+              name: MaxAttempts
               type: int
-            - name: SendTimeout
+            - doc: SendTimeout bounds one attempt. Not positive means DefaultSendTimeout.
+              name: SendTimeout
               type: time.Duration
-            - name: MaxMessageBytes
+            - doc: |-
+                MaxMessageBytes bounds one spooled mail. Zero means
+                DefaultMaxMessageBytes; negative is refused.
+              name: MaxMessageBytes
               type: int
-            - name: PollInterval
+            - doc: |-
+                PollInterval is how late a mail another PROCESS spooled into Dir may be
+                noticed; a mail spooled by this process is delivered at once. Zero is
+                the queue's own default.
+              name: PollInterval
               type: time.Duration
-      - methods:
-          - name: String
+      - doc: EventKind names what an [EventValue] reports.
+        methods:
+          - doc: |-
+              String renders the kind for a log line; a value this package never mints
+              renders as "unknown".
+            name: String
             out:
               - type: string
             recv: value
         name: EventKind
         underlying: uint8
-      - name: EventValue
+      - doc: |-
+          EventValue is one thing that happened to one mail. The mail, its metadata
+          and its queue time travel with every event, because a spool may deliver a
+          mail an earlier process queued, and an observer building a mailbox has
+          seen no Send for it.
+        name: EventValue
         struct:
           fields:
-            - name: Err
+            - doc: |-
+                Err is the failed attempt's error, for EventRetrying and
+                EventDeadLettered.
+              name: Err
               type: error
-            - name: Meta
+            - doc: Meta is what Config.Annotate returned when the mail was sent.
+              name: Meta
               type: map[string]string
-            - name: At
-            - name: QueuedAt
-            - name: Next
+            - doc: |-
+                At is when it happened; QueuedAt when the mail was queued; Next when
+                the next attempt is due, for EventRetrying.
+              name: At
+            - doc: |-
+                At is when it happened; QueuedAt when the mail was queued; Next when
+                the next attempt is due, for EventRetrying.
+              name: QueuedAt
+            - doc: |-
+                At is when it happened; QueuedAt when the mail was queued; Next when
+                the next attempt is due, for EventRetrying.
+              name: Next
               type: time.Time
-            - name: ID
+            - doc: ID is the spool's identifier for the mail.
+              name: ID
               type: string
-            - name: Message
+            - doc: |-
+                Message is the mail, as it was stamped at Send: sender, date and
+                Message-ID filled in.
+              name: Message
               type: coremail.MessageValue
-            - name: Attempt
+            - doc: Attempt numbers the delivery attempt, from 1; zero for EventQueued.
+              name: Attempt
               type: int
-            - name: Kind
+            - doc: Kind says what happened.
+              name: Kind
               type: EventKind
-      - name: AttemptValue
+      - doc: |-
+          AttemptValue is what one delivery attempt knows about itself. The spool
+          puts it in the context it hands the transport, so a transport — or a
+          framework's wrapper around one — can continue the trace of the Send, name
+          the attempt in a log, or refuse a mail it has seen before.
+        name: AttemptValue
         struct:
           fields:
-            - name: QueuedAt
+            - doc: QueuedAt is when Send queued the mail.
+              name: QueuedAt
               type: time.Time
-            - name: Meta
+            - doc: Meta is what Config.Annotate returned at Send.
+              name: Meta
               type: map[string]string
-            - name: ID
+            - doc: ID is the spool's identifier for the mail.
+              name: ID
               type: string
-            - name: Attempt
+            - doc: Attempt numbers this attempt, from 1.
+              name: Attempt
               type: int
-      - name: DeadLetterValue
+      - doc: |-
+          DeadLetterValue is a mail the spool gave up on, with why: the mail as it was
+          spooled, when it was queued and when it failed for the last time, and that
+          failure's reason, wire-safe cause and code.
+        name: DeadLetterValue
         struct:
           fields:
-            - name: Meta
+            - doc: Meta is what Config.Annotate returned at Send.
+              name: Meta
               type: map[string]string
-            - name: FailedAt
-            - name: QueuedAt
+            - doc: |-
+                FailedAt is when the last attempt failed; QueuedAt when the mail was
+                queued.
+              name: FailedAt
+            - doc: |-
+                FailedAt is when the last attempt failed; QueuedAt when the mail was
+                queued.
+              name: QueuedAt
               type: time.Time
-            - name: ID
+            - doc: |-
+                ID is the spool's identifier for the mail — empty when the record did
+                not decode, and QueueID then names it.
+              name: ID
               type: string
-            - name: QueueID
+            - doc: QueueID is the queue's identifier for the record.
+              name: QueueID
               type: string
-            - name: Reason
-            - name: Cause
+            - doc: |-
+                Reason and Cause are the last failure's SCREAMING_SNAKE reason and its
+                wire-safe Public text; the Private half stayed in the failing
+                process's log.
+              name: Reason
+            - doc: |-
+                Reason and Cause are the last failure's SCREAMING_SNAKE reason and its
+                wire-safe Public text; the Private half stayed in the failing
+                process's log.
+              name: Cause
               type: string
-            - name: Message
+            - doc: Message is the mail, as it was spooled.
+              name: Message
               type: coremail.MessageValue
-            - name: Attempts
+            - doc: Attempts is how many deliveries it got.
+              name: Attempts
               type: int
-            - name: Code
+            - doc: Code is the last failure's dotted-quad code, or 0.
+              name: Code
               type: uint32
-      - methods:
-          - in:
+      - doc: |-
+          Spool is a durable outbox for mail. Build one with [New]; Send and
+          SendWithID queue, Run delivers. It is safe for concurrent use.
+        methods:
+          - doc: |-
+              Send validates msg, stamps what a retry must not change, and queues it
+              under an identifier Config.NewID mints. It returns that identifier once the
+              mail is in the spool — on disk, with a Dir. A mail without a sender gets
+              Config.From; without a Date, the spool's clock; without a Message-ID, one
+              made of its identifier at the sender's domain, which every attempt keeps.
+
+              A refusal is the mail domain's own typed verdict (HeaderInjection,
+              InvalidAddress, NoRecipients, EmptyBody…), the queue's (MessageTooLarge),
+              SpoolMisconfigured for an identifier from Config.NewID that breaks the rule
+              SendWithID states, or SpoolClosed; nothing is queued. A Send racing Close
+              either lands before the queue closes or is SpoolClosed.
+            in:
               - name: ctx
                 type: context.Context
               - name: msg
@@ -272,7 +551,35 @@ packages:
               - name: err
                 type: error
             recv: pointer
-          - in:
+          - doc: |-
+              SendWithID is Send under an identifier its caller minted, for a caller that
+              must know the identifier before the spool has the mail: a framework that
+              holds a mail until its transaction commits returns the identifier at the
+              call and queues the mail after the commit. SendWithID stamps what Send
+              stamps, the Message-ID it makes is id at the sender's domain, and the
+              events, the attempts and the dead letter carry id.
+
+              The identifier must be non-empty, at most MaxIDBytes, and an RFC 5322
+              dot-atom — the grammar of a Message-ID's left half: printable ASCII, no
+              special, no empty label — even when the mail brings its own Message-ID,
+              because the rule belongs to the identifier and not to one mail. Anything
+              else is InvalidMailID, which names the rule it broke and never the
+              identifier; nothing is queued. Identifiers are compared byte for byte.
+
+              The identifier is the caller's promise that the mail is new, as one from
+              Config.NewID is. The spool does not look for it among the mails it holds;
+              a repeated identifier meets the ledger every redelivery meets. A mail under
+              an identifier this process delivered — among the last DeliveredMemory — is
+              dropped at delivery with EventDuplicate, after its own EventQueued, instead
+              of being sent. So SendWithID repeated after a failure that hid a landed
+              publication sends the mail once, while the process remembers it. An
+              identifier whose mail was dead-lettered was never delivered, and carries a
+              new attempt. After a restart the ledger is empty, and a repeat is sent
+              again — under the same Message-ID, when that was made of id.
+
+              Every other refusal is Send's, and a SendWithID racing Close lands or is
+              SpoolClosed.
+            in:
               - name: ctx
                 type: context.Context
               - name: id
@@ -283,14 +590,24 @@ packages:
             out:
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              Run delivers the spool until ctx ends, on the calling goroutine: it returns
+              nil when ctx ends, and the queue's error when the spool's storage fails —
+              a spool whose directory stopped answering is not something to retry in a
+              loop, and a supervisor restarting Run is. A delivery's failure is never
+              returned: it is retried, and then dead-lettered.
+            in:
               - name: ctx
                 type: context.Context
             name: Run
             out:
               - type: error
             recv: pointer
-          - in:
+          - doc: |-
+              DeadLetters returns up to max mails the spool gave up on, oldest first,
+              with the last failure of each. It removes nothing: a dead letter is
+              evidence.
+            in:
               - name: ctx
                 type: context.Context
               - name: maxLetters
@@ -300,14 +617,89 @@ packages:
               - type: "[]DeadLetterValue"
               - type: error
             recv: pointer
-          - name: Close
+          - doc: |-
+              Close refuses every later Send and closes the spool's queue, once the
+              publications in flight have landed. Closing twice is closing once. Stop Run
+              first — cancel its context and wait for it to return — or a delivery may be
+              cut off mid-attempt; the mail it held comes back when its lease lapses.
+            name: Close
             out:
               - type: error
             recv: pointer
         name: Spool
         struct:
           unexported: true
-  - facade:
+  - doc: |-
+      Package spool is the public facade for the durable mail outbox: the place a
+      mail waits between the call that wants it sent and the relay that takes it.
+
+      A mail transport (package [github.com/kitsunium/sdk/pkg/v1/app/mail]) sends
+      once, synchronously, and a relay that is down makes that the caller's
+      problem. A [Spool] is the outbox between them: [Spool].Send validates a
+      mail — refusing at the call site everything the transport would refuse later
+      — stamps what a retry must not change (the sender from [Config].From when
+      the mail names none, the Date, and a Message-ID made of the spool's
+      identifier at the sender's domain), and returns once the mail is queued:
+      durable, in a directory that outlives the process, when [Config].Dir is set.
+      [Spool].Run hands each mail to the transport, one at a time, and a failure
+      waits a backoff that grows with the attempt — one second, doubling, to five
+      minutes by default — before the next; after [Config].MaxAttempts the mail is
+      dead-lettered with its last failure, readable through [Spool].DeadLetters.
+
+      	outbox, err := spool.New(spool.Config{
+      		Transport:   transport, // a mail.Transport: mail.NewSMTP, mail.NewCapture, …
+      		Dir:         "/var/lib/app/outbox", // empty: in memory
+      		MaxAttempts: 6,
+      		From:        mail.Address{Name: "App", Addr: "app@example.com"},
+      	})
+      	go outbox.Run(ctx) // or under lifecycle.NewSupervisor
+      	id, err := outbox.Send(ctx, mail.Message{To: to, Subject: "Welcome", Text: body})
+
+      A redelivery of a mail the spool delivered — its lease lapsed while a slow
+      relay was still accepting it — is recognised by its identifier and dropped.
+      The one duplicate no outbox can prevent is a process that dies between the
+      relay's acceptance and the acknowledgement; the next process sends the mail
+      again under the SAME Message-ID, which is how a receiver recognises it.
+      Every attempt carries its [Attempt] in its context — the identifier, the
+      count, and what [Config].Annotate kept from the Send's context — so a
+      transport can continue the Send's trace, and every mail's fate reaches
+      [Config].Observe. The spool writes nothing anywhere itself.
+
+      # An identifier minted before the mail is spooled
+
+      [Spool].Send mints the mail's identifier. A caller that must know it before
+      the spool has the mail — a framework that holds a mail until a transaction
+      commits, and returns the identifier at the call — mints it itself and
+      queues the mail later with [Spool].SendWithID, which stamps what Send
+      stamps and makes the Message-ID of that identifier:
+
+      	mailIDs, err := id.NewTypeID("mail") // github.com/kitsunium/sdk/pkg/v1/app/id
+      	outboxID, err := mailIDs.New()       // at the call, inside the transaction
+      	// … once the transaction has committed:
+      	err = outbox.SendWithID(ctx, outboxID, msg)
+
+      The identifier becomes the left half of the mail's Message-ID, so it must be
+      an RFC 5322 dot-atom — printable ASCII, no space, no special, no empty label
+      — of at most [MaxIDBytes] bytes, even for a mail that brings its own
+      Message-ID. Anything else is [InvalidMailID], which never quotes the
+      identifier, and nothing is queued. A [Config].NewID that mints such an
+      identifier is [Misconfigured] at Send.
+
+      A repeated identifier is not refused. A mail under one the spool delivered
+      is dropped at delivery as an [EventDuplicate], after its own [EventQueued],
+      so a SendWithID retried after an ambiguous failure sends the mail once while
+      the process remembers it. A mail dead-lettered under an identifier was never
+      delivered, and can be queued again under it. After a restart the spool
+      remembers nothing, and a repeat is sent again — under the same Message-ID,
+      when that was made of the identifier.
+
+      # Why a package of its own
+
+      The outbox stands on the queue domain, and a durable one on the filesystem
+      and the SQL ports beneath it. A program that only composes and sends mail
+      imports package mail and links none of that; one that wants the outbox
+      imports this package as well.
+    facade:
       - const:
           - doc: |-
               DefaultSendTimeout bounds one delivery attempt when Config.SendTimeout

@@ -1,7 +1,3 @@
-// Package profiling — hosts the protocol-buffer wire reader the profile
-// decoder stands on: varints, length-delimited fields, and the skip of a field
-// the decoder does not read. Written from the encoding's specification so the
-// SDK carries no protobuf dependency (the same choice as OTLP/JSON, ADR 0048).
 package profiling
 
 import (

@@ -1,4 +1,3 @@
-// Package mail — the SMTP transport's configuration, and its zero value.
 package mail
 
 import (

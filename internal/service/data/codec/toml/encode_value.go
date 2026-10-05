@@ -1,5 +1,3 @@
-// Package toml — values written after a key: scalars, strings in the spelling
-// that needs no escape when there is one, arrays and inline tables.
 package toml
 
 import (

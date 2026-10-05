@@ -1,6 +1,3 @@
-// Package writer — holds the process-wide Factory registry. Service- and
-// public-level writer packages register themselves via package-level var
-// initialisers when imported (no init()), mirroring core/data/codec.
 package writer
 
 import (

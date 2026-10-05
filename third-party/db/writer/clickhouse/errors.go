@@ -1,10 +1,3 @@
-// Package clickhouse — range 0.3.33.* (ADR 0015 service slot 0x21).
-//
-// Package clickhouse — declares the sentinels returned by the ClickHouse
-// writer's constructor and INSERT path. Each var's name equals its errs.Define
-// Reason in SCREAMING_SNAKE form (short names per the AWS-writer convention; the
-// package qualifier gives context). No DSN, credential, or record value is ever
-// echoed into these errors (secret gate).
 package clickhouse
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

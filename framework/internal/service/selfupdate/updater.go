@@ -1,7 +1,3 @@
-//go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /framework/internal/service/selfupdate .
-
-// Package selfupdate replaces the running binary with a newer signed release.
-// It checks GitHub releases for newer versions and downloads/replaces the binary.
 package selfupdate
 
 import (

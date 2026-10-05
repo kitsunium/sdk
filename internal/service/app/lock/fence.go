@@ -1,5 +1,3 @@
-// Package lock — the on-disk fencing ledger: the one piece of state the file
-// locker keeps, and the reason its tokens survive a restart.
 package lock
 
 import (

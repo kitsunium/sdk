@@ -1,4 +1,3 @@
-// Package group — the typed fan-out built on the Group.
 package group
 
 import "context"

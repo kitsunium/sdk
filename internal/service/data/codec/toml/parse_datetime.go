@@ -1,7 +1,3 @@
-// Package toml — dates and times: offset date-time, local date-time, local
-// date and local time, read as RFC 3339 spells them with the two liberties
-// TOML adds — a space for the T, and a fraction of any length, truncated past
-// the nanosecond (§Offset Date-Time).
 package toml
 
 // Field widths and bounds of RFC 3339.

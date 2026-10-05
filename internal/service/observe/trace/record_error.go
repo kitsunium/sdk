@@ -1,4 +1,3 @@
-// Package trace — recording an error on a span.
 package trace
 
 import (

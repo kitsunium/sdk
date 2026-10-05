@@ -2,30 +2,163 @@ apiVersion: kit.kitsunium/design/v2
 domain: framework/git
 packages:
   - aliases:
-      - name: ChangedSet
+      - doc: |-
+          ChangedSet is what a branch changed, queryable by line, file or directory. It
+          aliases the core git port.
+        name: ChangedSet
         target: coregit.ChangedSet
-      - name: LineRange
+      - doc: |-
+          LineRange is an inclusive, 1-based run of changed lines. It aliases the core
+          git value type.
+        name: LineRange
         target: coregit.LineRangeValue
-      - name: Resolution
+      - doc: |-
+          Resolution is the outcome of resolving a changed set, including the degraded
+          outcome where none could be trusted. It aliases the core git value type.
+        name: Resolution
         target: coregit.ResolutionValue
-      - name: Config
+      - doc: |-
+          Config is where the repository is and which files the caller counts as
+          changed. It aliases the service type: these are one implementation's
+          construction parameters, which is what ADR 0074 says belongs with the engine.
+        name: Config
         target: svcgit.Config
-      - name: Include
+      - doc: |-
+          Include decides which files belong in the changed set. A nil Include admits
+          every file.
+        name: Include
         target: svcgit.IncludeFunc
-      - name: HeadState
+      - doc: |-
+          HeadState is what a working tree is at: the commit HEAD names, its
+          committer date in the offset it was recorded with, and whether a tracked
+          file differs from it. It aliases the service type — the core git port models no
+          commit, so this is one engine's value (ADR 0074).
+        name: HeadState
         target: svcgit.HeadValue
     constants:
-      - name: CodeRepositoryUnresolved
+      - doc: |-
+          CodeRepositoryUnresolved identifies a path that is not inside a readable
+          repository. Match it with errs.HasCode: it is the one refusal a caller can act
+          on by falling back to a non-VCS path.
+        name: CodeRepositoryUnresolved
         type: errs.Code
         value: "0x00_02_21_01"
-      - name: CodeCommandFailed
+      - doc: |-
+          CodeCommandFailed identifies a version-control command that exited non-zero —
+          a corrupted object store, a permission error, a missing binary.
+        name: CodeCommandFailed
         type: errs.Code
         value: "0x00_02_21_02"
-      - name: CodePathAbsent
+      - doc: |-
+          CodePathAbsent identifies a path that does not exist at the requested commit,
+          which is deliberately distinct from a successful read of an empty file. It is
+          what ShowFile returns when the commit resolves and its tree holds no object
+          at the path.
+        name: CodePathAbsent
         type: errs.Code
         value: "0x00_02_21_03"
+    doc: |-
+      Package git answers what a branch changed and what a working tree is at, by
+      shelling out to the git binary.
+
+      It is the framework's public package over framework/internal/service/git (ADR
+      0158): the value types are aliases of the core git contract's types and the
+      functions delegate straight to the service implementation. What a running
+      program was BUILT from is not here — that is pkg/v1/proc/process's Build and Self,
+      which stay in the SDK; this package asks git about a working tree.
+
+      # Usage
+
+      Resolve the changed set, then ask about it at whichever granularity matters:
+
+      	import (
+      		"github.com/kitsunium/sdk/framework/git"
+      	)
+
+      	res := git.Resolve(ctx, git.Config{Root: "/path/to/repo"})
+      	if res.Degraded() {
+      		// res.Reason says why; treat EVERYTHING as in scope.
+      		return
+      	}
+      	if res.Set.ContainsLine(file, line) { /* this line moved */ }
+
+      # Degrading is not failing, and an empty set is not a degrade
+
+      Resolve returns no error. Any condition that prevents a trustworthy answer —
+      no repository, a shallow clone, an unresolved default branch, no merge-base,
+      a git invocation that failed or timed out — produces a ResolutionValue with
+      FullFallback set and a Reason, never a partial set and never an empty one.
+
+      The distinction is the reason this package exists in this shape. "Nothing
+      changed" and "I could not tell what changed" are opposite instructions to the
+      caller, and a resolver that answered the second with an empty set would make a
+      scoped review silently pass on a branch it never examined. Check Degraded
+      before reading Set.
+
+      # What counts as changed
+
+      The set spans four sources, because a review that ignored uncommitted work
+      would contradict what the author sees: the three-dot merge-base delta to HEAD,
+      the index, the working tree, and untracked files. Renames and copies are
+      detected (-M -C); a pure rename or a deletion marks the file and its directory
+      touched while contributing no line range, so ContainsFile answers true where
+      ContainsLine answers false for every line.
+
+      Config.Include is the caller's policy for which files belong. A nil Include
+      admits everything; a Go tool passes a ".go" suffix test and a generated-file
+      probe. The source implementation hard-coded exactly that pair, and this
+      package deliberately does not: it is one caller's policy, not the domain's.
+
+      # Which spelling of a path answers
+
+      Queries are compared lexically, so two spellings of one file do not match
+      each other — with one exception, and it is the spelling a caller does not
+      choose. git canonicalises the repository root, so pointing Config.Root at a
+      symbolic link records every path under the link's target. Resolve therefore
+      records every entry under BOTH the root you gave and the one git reports, so
+      either answers and a query costs exactly what it did before. An indirection
+      anywhere else in a path you query is still lexical and still does not match.
+
+      # What a working tree is at
+
+      Head answers the question a build description asks about a local module:
+      which commit its working tree is on, when that commit was made, and whether
+      tracked files differ from it.
+
+      	head, err := git.Head(ctx, "/path/to/module")
+      	if err != nil {
+      		// no repository, no git, or no commit yet: go without.
+      	}
+      	fmt.Println(head.Revision, head.Time, head.Modified)
+
+      Modified counts TRACKED files only, staged or not; an untracked file does
+      not make a tree modified. That is narrower than the vcs.modified stamp Go
+      writes into a binary, which counts untracked files too. Nothing is cached,
+      because modified is the one fact here that changes without a commit.
+
+      # Running against a repository you do not control
+
+      Every invocation is hardened against a hostile `.git/config`, which travels
+      with a clone. `core.fsmonitor` and `core.hooksPath` are neutralised with -c
+      (which beats every config file), and `--no-ext-diff` is injected into the
+      subcommands that honour `diff.external` — setting that key empty does not
+      disable it, it makes git try to execute "" and abort. Both were demonstrated
+      executing an attacker-chosen command on a read-only query before the guard,
+      and not after.
+
+      A second group executes nothing and is guarded for a different reason.
+      `diff.srcPrefix`, `diff.dstPrefix`, `diff.mnemonicPrefix` and `diff.noprefix`
+      rename the `a/` and `b/` prefixes of a diff header, which files the line
+      ranges under a path nobody queries: measured, ContainsFile stayed true and
+      ContainsLine went false for a line that had just changed. All four are pinned
+      to git's defaults. See the service package's CLAUDE.md for what was
+      deliberately NOT hardened, and why.
     functions:
-      - in:
+      - doc: |-
+          Resolve computes the changed set for the repository containing cfg.Root,
+          returning a degraded Resolution rather than an error when it cannot be
+          trusted. Check Resolution.Degraded before reading Set.
+        in:
           - name: ctx
             type: context.Context
           - name: cfg
@@ -33,7 +166,20 @@ packages:
         name: Resolve
         out:
           - type: Resolution
-      - in:
+      - doc: |-
+          GitDir resolves the git directory governing root — the one holding HEAD and
+          the index — and memoizes it per root.
+
+          It never assumes `.git` is a directory: in a linked worktree or a submodule it
+          is a `gitdir:` pointer FILE, and this follows it. The result is absolute and
+          cleaned, and failures are never memoized.
+
+          The memo is re-validated on every call against two lstats — roughly a
+          thousandth of the subprocess they stand in for — so a repository that moved,
+          one deleted and re-created, and a root that becomes its own repository under
+          a parent one each get a fresh answer. A repository created at a directory
+          BETWEEN root and the worktree top level is not noticed.
+        in:
           - name: ctx
             type: context.Context
           - name: root
@@ -44,7 +190,17 @@ packages:
             type: string
           - name: err
             type: error
-      - in:
+      - doc: |-
+          Head reports what the working tree containing dir is at: its head commit,
+          that commit's time, and whether tracked files differ from it.
+
+          A dir outside any repository — or absent, or on a machine without git — is
+          CodeRepositoryUnresolved. A repository whose HEAD names no commit yet, a
+          bare repository and a failed read are CodeCommandFailed. The three git
+          commands it runs are hardened like every other one here, and the commit
+          time is read from the raw commit object rather than through `git log`, so a
+          planted signature program has nothing to verify.
+        in:
           - name: ctx
             type: context.Context
           - name: dir
@@ -55,7 +211,15 @@ packages:
             type: HeadState
           - name: err
             type: error
-      - in:
+      - doc: |-
+          ShowFile returns the content of relPath at commit sha, verbatim.
+
+          Its two refusals are different instructions. CodePathAbsent means the commit
+          is readable and holds nothing at that path, which is what tells "deleted"
+          from "emptied" — an empty file is a successful read of "". CodeCommandFailed
+          means anything else: a commit that does not resolve, an unreadable object
+          store, no git. Match with errs.HasCode.
+        in:
           - name: ctx
             type: context.Context
           - name: repoRoot
@@ -95,6 +259,26 @@ packages:
             name: CodePathAbsent
             value: "0x00_02_21_03"
         type: errs.Code
+    doc: |-
+      Package git — the error-code range owned by this domain (ADR 0005 §Registry).
+
+      Package git — the sentinels every implementation of this domain returns.
+
+      Package git is the version-control contract: what "the set a branch changed"
+      is, and what a resolution of it reports.
+
+      The domain is deliberately thin. It names a CHANGED SET — the files, line
+      ranges and directories a branch touched relative to its merge-base — and the
+      outcome of computing one. It does not model repositories, commits, refs or
+      history: the SDK has exactly one implementation, which shells out to the git
+      binary (framework/internal/service/git), and a contract broader than that would
+      describe nothing real.
+
+      There is **no registry**. A registry's key would be a VCS name, and resolving
+      one from a config string would let a typo silently swap the implementation
+      with every call still succeeding — the same argument ADR 0052 makes for lock.
+
+      Package git — the LineRangeValue value type: an inclusive run of changed lines.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/framework/internal/core/git
@@ -127,9 +311,32 @@ packages:
             public: the path does not exist at that commit
             reason: PATH_ABSENT
     types:
-      - interface:
+      - doc: |-
+          ChangedSet reports what a branch changed, at the three granularities a caller
+          can ask about. It is FROZEN at four methods.
+
+          Every path argument is absolute. Implementations normalise through
+          filepath.Clean before comparing, so a caller need not — but Clean is LEXICAL
+          and resolves no symbolic link, so two spellings of one file do not match each
+          other. There is exactly one exception, and it exists because it is the one
+          spelling a caller cannot choose: THE ROOT IT NAMED. An implementation whose
+          backend canonicalises that root away still answers for paths spelled through
+          the caller's root, and for paths spelled the backend's way — the two roots a
+          caller actually has in hand. An indirection anywhere else in a queried path
+          is still lexical, and still does not match.
+
+          The three Contains methods are not interchangeable and none implies another in
+          the direction a caller might assume: a pure rename or a deletion touches a
+          FILE and its DIRECTORY while contributing no line range at all, so
+          ContainsFile can be true where ContainsLine is false for every line of it.
+          That is the point — a check that only looks at lines silently ignores a
+          deleted file.
+        interface:
           methods:
-            - in:
+            - doc: |-
+                ContainsLine reports whether line on absFile falls inside a changed hunk.
+                Lines are 1-based and the bounds are inclusive.
+              in:
                 - name: absFile
                   type: string
                 - name: line
@@ -137,44 +344,109 @@ packages:
               name: ContainsLine
               out:
                 - type: bool
-            - in:
+            - doc: |-
+                ContainsFile reports whether absFile appears anywhere in the diff,
+                including as the old side of a rename or a deletion.
+              in:
                 - name: absFile
                   type: string
               name: ContainsFile
               out:
                 - type: bool
-            - in:
+            - doc: |-
+                ContainsDir reports whether absDir directly encloses any touched file.
+                It is not recursive: a parent of a touched directory is not itself
+                touched.
+              in:
                 - name: absDir
                   type: string
               name: ContainsDir
               out:
                 - type: bool
-            - name: IsEmpty
+            - doc: |-
+                IsEmpty reports whether nothing at all was touched — a clean branch, or
+                one whose every change the caller's own filter excluded.
+              name: IsEmpty
               out:
                 - type: bool
         name: ChangedSet
-      - methods:
-          - name: Degraded
+      - doc: |-
+          ResolutionValue is the outcome of resolving what a branch changed.
+
+          It has exactly two readable shapes and the zero value is neither, which is
+          deliberate: a ResolutionValue nobody produced carries a nil Set AND
+          FullFallback false, a combination no constructor mints, so a caller that
+          forgot to check reads "nothing changed" from no code path that ever ran.
+          Check Degraded first.
+
+            - Resolved: Set is non-nil and BaseRef / BaseSHA / HeadSHA name the
+              comparison that produced it.
+            - Degraded: FullFallback is true and Reason says why. Set is nil. The
+              caller must treat EVERYTHING as in scope.
+
+          The degraded shape is the whole reason this is a value rather than
+          (ChangedSet, error). A resolver that cannot be trusted must never answer with
+          an empty set: "nothing changed" and "I could not tell what changed" are
+          opposite instructions, and conflating them is how a review silently passes on
+          a branch it never looked at.
+        methods:
+          - doc: |-
+              Degraded reports whether the resolution failed to produce a trustworthy set
+              and the caller must treat everything as in scope.
+
+              It is the predicate callers want, and it reads from FullFallback rather than
+              from a nil Set so the two can never disagree.
+
+              The receiver is a pointer because the value is 88 bytes — four strings, an
+              interface and a bool — and copying all of it to read one bool is what
+              KTN-VAR-BIGSTRUCT exists to catch. Assign the resolution to a variable and
+              call it on that; the chained form Resolve(...).Degraded() does not compile,
+              which is a fair trade for not copying 88 bytes per query.
+            name: Degraded
             out:
               - type: bool
             recv: pointer
         name: ResolutionValue
         struct:
           fields:
-            - name: Set
+            - doc: Set is what the branch changed, or nil when FullFallback is true.
+              name: Set
               type: ChangedSet
-            - name: BaseRef
+            - doc: |-
+                BaseRef is the default-branch ref the comparison used, e.g. "origin/main".
+                Empty when degraded.
+              name: BaseRef
               type: string
-            - name: BaseSHA
+            - doc: |-
+                BaseSHA is the merge-base commit between BaseRef and HEAD. Empty when
+                degraded.
+              name: BaseSHA
               type: string
-            - name: HeadSHA
+            - doc: HeadSHA is the commit HEAD resolved to. Empty when degraded.
+              name: HeadSHA
               type: string
-            - name: FullFallback
+            - doc: |-
+                FullFallback reports that no trustworthy changed set could be computed and
+                the caller must fall back to considering everything in scope.
+              name: FullFallback
               type: bool
-            - name: Reason
+            - doc: |-
+                Reason is the human-readable cause of the fallback, meant to be surfaced
+                rather than swallowed. Empty when not degraded.
+              name: Reason
               type: string
-      - methods:
-          - in:
+      - doc: |-
+          LineRangeValue is an inclusive, 1-based range of source lines taken from a
+          diff hunk's "+"-side, i.e. post-edit line numbers.
+
+          A whole-file change — a new or untracked file — is represented by a range
+          starting at 1 and ending at a synthetic upper bound, so a membership test
+          matches any line without the parser needing to know the file's true length.
+        methods:
+          - doc: |-
+              Contains reports whether line falls inside the range. Both bounds are
+              inclusive, which is what makes a single-line hunk (Start == End) match.
+            in:
               - name: line
                 type: int
             name: Contains
@@ -184,18 +456,76 @@ packages:
         name: LineRangeValue
         struct:
           fields:
-            - name: Start
+            - doc: Start is the first changed line, inclusive and 1-based.
+              name: Start
               type: int
-            - name: End
+            - doc: End is the last changed line, inclusive.
+              name: End
               type: int
-  - functions:
-      - in:
+  - doc: |-
+      Package git — the changed set: which files, line ranges and directories a
+      branch touched. The concrete implementation of the core coregit.ChangedSet port.
+
+      Package git — the compile-time proof that ChangedSetValue still satisfies the
+      core port.
+
+      Hoisted out of changed_set.go per KTN-IFACE-ASSERT-PLACEMENT: the production
+      source carries no purely verificational declarations. Without this assertion a
+      method renamed here would only fail at the call site that still expected the
+      old name, which may be in another repository.
+
+      Package git — the resolver's construction parameters.
+
+      Package git — parsing git's unified-diff and name-status output into a
+      changed set.
+
+      Package git implements the core git contract by shelling out to the git binary.
+
+      There is no VCS library dependency: git's own porcelain is the contract, and
+      every invocation is hardened against a repository that may be hostile — see
+      hardenedGitConfig.
+
+      Package git — resolving the git directory that governs a path, once per root.
+
+      Package git — what a working tree is at: its head commit, that commit's
+      time, and whether tracked files differ from it.
+
+      Package git — resolving what a branch changed versus its merge-base with the
+      default branch.
+
+      Package git — reading a file's content at a specific commit.
+    functions:
+      - doc: |-
+          NewChangedSetValue returns an empty changed-set rooted at the given absolute
+          repository top-level.
+        in:
           - name: repoRoot
             type: string
         name: NewChangedSetValue
         out:
           - type: "*ChangedSetValue"
-      - in:
+      - doc: |-
+          GitDir resolves the git directory governing root — the directory that
+          holds HEAD and the index — by shelling `git rev-parse --git-dir` and
+          memoizing the result per root. It never assumes `.git` is a directory: in
+          linked worktrees and submodules `.git` is a `gitdir:` pointer FILE, and
+          rev-parse follows it to the real per-worktree git directory. The returned
+          path is absolute and cleaned. An error means root is not inside a git
+          repository (or git failed); failures are never memoized.
+
+          The memo is re-validated on every call against two lstats — ~2.9 µs together
+          where the subprocess they stand in for measures ~2.7 ms — and is served only
+          while both still describe the resolution: the `.git` entry at root is the
+          same file it was, or is still absent, and the resolved git directory is still
+          the same directory. A repository that MOVES, one deleted and re-created, and
+          a root that becomes its own repository under a parent one are each caught by
+          that pair.
+
+          What the pair does not catch is a repository created at a directory BETWEEN
+          root and the worktree top level: root's own `.git` is still absent, the
+          memoized git directory still exists, and only rev-parse's own discovery walk
+          would notice that a nearer one now wins.
+        in:
           - name: ctx
             type: context.Context
           - name: root
@@ -206,7 +536,26 @@ packages:
             type: string
           - name: err
             type: error
-      - in:
+      - doc: |-
+          Head reports what the working tree containing dir is at: the commit HEAD
+          names, its time, and whether tracked files differ from it.
+
+          It runs three read-only git commands, all through the hardened runner, so a
+          hostile .git/config cannot turn the query into command execution the way it
+          can a bare `git status` (see hardenedGitConfig). The commit time is read
+          from the raw commit object rather than through `git log`, because log
+          honours log.showSignature and would hand a planted gpg.program a signature
+          to "verify". The status runs with --no-optional-locks, so asking never
+          takes the index lock a concurrent `git commit` in the same tree needs.
+
+          It caches nothing: modified is the one fact here that changes without a
+          commit. A caller asking often keeps its own answer.
+
+          A dir outside any repository — or one that does not exist, or a machine
+          with no git — is RepositoryUnresolved. A repository whose HEAD names no
+          commit yet (an unborn branch), a bare repository, and a failed read are
+          CommandFailed, with the subcommand and git's stderr in Private.
+        in:
           - name: ctx
             type: context.Context
           - name: dir
@@ -217,7 +566,21 @@ packages:
             type: HeadValue
           - name: err
             type: error
-      - in:
+      - doc: |-
+          Resolve computes the changed set for the repository containing cfg.Root
+          (a directory hint; "" resolves from the current working directory).
+
+          It is fail-safe by design: any condition that prevents a trustworthy diff
+          (no repository, shallow clone, unresolved default branch, no merge-base)
+          yields a ResolutionValue with FullFallback=true and a Reason — never an error
+          and never a silent empty diff. The caller degrades to treating everything as
+          in scope, and surfaces Reason.
+
+          That asymmetry is the whole design. "Nothing changed" and "I could not tell
+          what changed" are opposite instructions to a caller, and a resolver that
+          returned an empty set for the second would make a review pass on a branch it
+          never looked at.
+        in:
           - name: ctx
             type: context.Context
           - name: cfg
@@ -225,7 +588,22 @@ packages:
         name: Resolve
         out:
           - type: coregit.ResolutionValue
-      - in:
+      - doc: |-
+          ShowFile returns the content of relPath at commit sha via `git show`.
+          relPath is resolved relative to repoRoot (the "./" prefix pins git's
+          path resolution to the -C directory instead of the repository top level).
+
+          The content is returned VERBATIM. It deliberately does not go through
+          runGitOutput, whose trim is right for a SHA or a ref name and wrong for a
+          file: leading and trailing whitespace is the file's own, and a
+          whitespace-only blob would otherwise come back indistinguishable from empty.
+
+          A failure is one of two refusals and never the same one twice. PathAbsent
+          says the commit is there and holds no object at that path, which is what a
+          caller reconstructing history needs in order to tell "deleted" from
+          "emptied" — an empty file is a successful read of "". CommandFailed says
+          anything else: an unreachable commit, an unreadable object store, no git.
+        in:
           - name: ctx
             type: context.Context
           - name: repoRoot
@@ -242,8 +620,15 @@ packages:
       coregit: github.com/kitsunium/sdk/framework/internal/core/git
     path: github.com/kitsunium/sdk/framework/internal/service/git
     types:
-      - methods:
-          - in:
+      - doc: |-
+          ChangedSetValue holds the files, line ranges, and directories that a
+          branch changed versus its merge-base. All paths are absolute and normalised
+          through filepath.Clean so membership tests match the engine's resolved issue
+          positions. Build it with NewChangedSetValue and the add* methods; query it
+          with the Contains* methods.
+        methods:
+          - doc: ContainsLine reports whether line on absFile is within a changed hunk.
+            in:
               - name: absFile
                 type: string
               - name: line
@@ -252,42 +637,98 @@ packages:
             out:
               - type: bool
             recv: pointer
-          - in:
+          - doc: |-
+              ContainsFile reports whether absFile appears anywhere in the diff,
+              including as the old side of a rename or a deletion.
+            in:
               - name: absFile
                 type: string
             name: ContainsFile
             out:
               - type: bool
             recv: pointer
-          - in:
+          - doc: |-
+              ContainsDir reports whether absDir directly encloses any touched file. It is
+              NOT recursive: the parent of a touched directory is not itself touched.
+            in:
               - name: absDir
                 type: string
             name: ContainsDir
             out:
               - type: bool
             recv: pointer
-          - name: IsEmpty
+          - doc: |-
+              IsEmpty reports whether the changed-set contains no touched files at all
+              (clean branch, or a branch whose every change the caller's filter excluded).
+            name: IsEmpty
             out:
               - type: bool
             recv: pointer
         name: ChangedSetValue
         struct:
           unexported: true
-      - name: Config
+      - doc: |-
+          Config is what Resolve needs to know: where the repository is, and which files
+          the caller considers part of the change.
+
+          Both fields have a meaningful zero and neither is refused (ADR 0031): an empty
+          Root resolves from the process working directory, which is what a tool run
+          inside the repository wants, and a nil Include admits every file, which is the
+          safe direction — a filter defaulting to "exclude" would under-report a diff.
+        name: Config
         struct:
           fields:
-            - name: Root
+            - doc: |-
+                Root is a directory inside the repository to resolve from. Empty resolves
+                from the process working directory.
+              name: Root
               type: string
-            - name: Include
+            - doc: |-
+                Include decides which files belong in the changed set. Nil admits all.
+
+                This is where a caller states the policy the source implementation had
+                hard-coded: a Go linter passes a test for a ".go" suffix and a
+                generated-file probe; a documentation tool passes something else; a tool
+                that wants everything passes nil.
+              name: Include
               type: IncludeFunc
-      - name: IncludeFunc
+      - doc: |-
+          IncludeFunc reports whether the file at absPath belongs in the changed set.
+
+          It replaces what the source implementation hard-coded: a ".go" suffix test
+          plus a generated-file probe. Those are one caller's policy, not the domain's —
+          a changed set over Markdown, or one that keeps generated files, is just as
+          legitimate — so the policy is the caller's to state.
+
+          A nil IncludeFunc includes everything. That is the safe default in the ADR
+          0031 sense: the failure mode of including too much is a wider scope, while a
+          default that silently dropped files would under-report a diff, which is the
+          one answer this package must never give.
+        name: IncludeFunc
         underlying: func(absPath string) bool
-      - name: HeadValue
+      - doc: |-
+          HeadValue is what a working tree is at: the commit HEAD names, that
+          commit's time, and whether any tracked file differs from it.
+
+          It is the engine's own value (ADR 0074): the core git port answers what a branch
+          CHANGED and deliberately models no commit, so a second implementation of
+          that port would have no reason to produce this.
+        name: HeadValue
         struct:
           fields:
-            - name: Time
+            - doc: |-
+                Time is the commit's committer date, in the offset it was recorded
+                with — what `git log --format=%cI` prints.
+              name: Time
               type: time.Time
-            - name: Revision
+            - doc: Revision is the full object name of the commit HEAD resolves to.
+              name: Revision
               type: string
-            - name: Modified
+            - doc: |-
+                Modified reports that a TRACKED file differs from HEAD, staged or not.
+                An untracked file does not count: it is not part of what the commit
+                describes, and a build stamp that turned dirty whenever an editor left
+                a swap file would say nothing. This is narrower than the vcs.modified
+                Go stamps into a binary, which counts untracked files too.
+              name: Modified
               type: bool

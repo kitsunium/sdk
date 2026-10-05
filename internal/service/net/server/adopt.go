@@ -1,4 +1,3 @@
-// Package server — adoption of listeners inherited from a supervisor.
 package server
 
 import (

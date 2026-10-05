@@ -1,6 +1,5 @@
 //go:build linux
 
-// Package reaper — Linux PR_SET_CHILD_SUBREAPER arming via prctl(2).
 package reaper
 
 import (

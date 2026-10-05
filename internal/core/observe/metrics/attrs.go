@@ -1,8 +1,3 @@
-// Package metrics — the sibling port that registers asynchronous instruments.
-//
-// Package metrics — this signal's half of the shared attribute model
-// (internal/core/observe/otel): the refusal an unusable set earns HERE, the Resource a
-// Meter publishes, and the one attribute key only a meter ever writes.
 package metrics
 
 import coreotel "github.com/kitsunium/sdk/internal/core/observe/otel"

@@ -1,6 +1,3 @@
-// Package config provides concrete configuration sources (env, file), the
-// merge+decode loader, and a cross-OS poll watcher implementing core/app/config.
-// Stdlib-only (file parsing dispatches through the codec registry). ADR 0028.
 package config
 
 import (

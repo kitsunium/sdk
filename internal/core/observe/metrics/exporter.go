@@ -1,7 +1,3 @@
-// Package metrics — declares the sentinel *errs.Error values. Each var's name
-// equals its errs.Define Reason in SCREAMING_SNAKE form.
-//
-// Package metrics — the Exporter contract + process-wide exporter registry.
 package metrics
 
 import (

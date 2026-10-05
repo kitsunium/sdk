@@ -1,5 +1,3 @@
-// Package docstore — opening a store: the configuration checked, the indexes
-// declared, and a persistent store loaded.
 package docstore
 
 import (

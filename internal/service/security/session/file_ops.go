@@ -1,4 +1,3 @@
-// Package session — the file store's reading half, and the lock around it.
 package session
 
 import (

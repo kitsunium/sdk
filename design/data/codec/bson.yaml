@@ -43,6 +43,22 @@ packages:
             name: CodeBSONValueInvalid
             value: "0x00_03_24_05"
         type: errs.Code
+    doc: |-
+      Package bson declares the error codes and the sentinels of the BSON codec,
+      internal/service/data/codec/bson — range 0.3.36.* (ADR 0021
+      service/data/codec/bson block).
+
+      The codes live in the core at the path that mirrors the package emitting
+      them (ADR 0160 §2) and keep the values they were allocated with: the LL
+      byte 3 records the layer that allocated the range, not the directory that
+      declares it today (ADR 0160 §3). Nothing here encodes or decodes — the
+      mechanism, and the constructors that attach a failure's detail, stay in
+      the service package.
+
+      Package bson — the sentinel *errs.Error values, one per code. Each
+      Reason derives from its var name or from its Code constant (ADR 0020);
+      the Public and Private texts are the ones the service package always
+      emitted, so moving the declaration changed no rendering.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/data/codec/bson
@@ -81,65 +97,229 @@ packages:
             public: BSON value is invalid
             reason: BSON_VALUE_INVALID
   - constants:
-      - name: BinaryGeneric
+      - blockDoc: |-
+          Binary subtypes, BSON 1.1. A subtype is a single byte the codec carries
+          through unchanged; only BinaryGeneric and BinaryOld decode into []byte.
+        doc: BinaryGeneric is the default subtype, and the one a []byte is written as.
+        name: BinaryGeneric
         type: byte
         value: "0x00"
-      - name: BinaryFunction
+      - blockDoc: |-
+          Binary subtypes, BSON 1.1. A subtype is a single byte the codec carries
+          through unchanged; only BinaryGeneric and BinaryOld decode into []byte.
+        doc: BinaryFunction marks a function.
+        name: BinaryFunction
         type: byte
         value: "0x01"
-      - name: BinaryOld
+      - blockDoc: |-
+          Binary subtypes, BSON 1.1. A subtype is a single byte the codec carries
+          through unchanged; only BinaryGeneric and BinaryOld decode into []byte.
+        doc: |-
+          BinaryOld is the deprecated generic subtype: its bytes are themselves an
+          int32 length followed by that many bytes, and the codec writes and checks
+          that inner length.
+        name: BinaryOld
         type: byte
         value: "0x02"
-      - name: BinaryUUIDOld
+      - blockDoc: |-
+          Binary subtypes, BSON 1.1. A subtype is a single byte the codec carries
+          through unchanged; only BinaryGeneric and BinaryOld decode into []byte.
+        doc: BinaryUUIDOld is the deprecated, byte-order-ambiguous UUID subtype.
+        name: BinaryUUIDOld
         type: byte
         value: "0x03"
-      - name: BinaryUUID
+      - blockDoc: |-
+          Binary subtypes, BSON 1.1. A subtype is a single byte the codec carries
+          through unchanged; only BinaryGeneric and BinaryOld decode into []byte.
+        doc: BinaryUUID is an RFC 9562 UUID.
+        name: BinaryUUID
         type: byte
         value: "0x04"
-      - name: BinaryMD5
+      - blockDoc: |-
+          Binary subtypes, BSON 1.1. A subtype is a single byte the codec carries
+          through unchanged; only BinaryGeneric and BinaryOld decode into []byte.
+        doc: BinaryMD5 is an MD5 digest.
+        name: BinaryMD5
         type: byte
         value: "0x05"
-      - name: BinaryEncrypted
+      - blockDoc: |-
+          Binary subtypes, BSON 1.1. A subtype is a single byte the codec carries
+          through unchanged; only BinaryGeneric and BinaryOld decode into []byte.
+        doc: BinaryEncrypted is a client-side encrypted value.
+        name: BinaryEncrypted
         type: byte
         value: "0x06"
-      - name: BinaryColumn
+      - blockDoc: |-
+          Binary subtypes, BSON 1.1. A subtype is a single byte the codec carries
+          through unchanged; only BinaryGeneric and BinaryOld decode into []byte.
+        doc: BinaryColumn is a compressed time-series column.
+        name: BinaryColumn
         type: byte
         value: "0x07"
-      - name: BinarySensitive
+      - blockDoc: |-
+          Binary subtypes, BSON 1.1. A subtype is a single byte the codec carries
+          through unchanged; only BinaryGeneric and BinaryOld decode into []byte.
+        doc: BinarySensitive marks data a server must not log.
+        name: BinarySensitive
         type: byte
         value: "0x08"
-      - name: BinaryVector
+      - blockDoc: |-
+          Binary subtypes, BSON 1.1. A subtype is a single byte the codec carries
+          through unchanged; only BinaryGeneric and BinaryOld decode into []byte.
+        doc: BinaryVector is a packed numeric vector.
+        name: BinaryVector
         type: byte
         value: "0x09"
-      - name: BinaryUserDefined
+      - blockDoc: |-
+          Binary subtypes, BSON 1.1. A subtype is a single byte the codec carries
+          through unchanged; only BinaryGeneric and BinaryOld decode into []byte.
+        doc: BinaryUserDefined is the first of the subtypes reserved for applications.
+        name: BinaryUserDefined
         type: byte
         value: "0x80"
+    doc: |-
+      Package bson is the BSON codec: a native implementation of the BSON 1.1
+      specification (bsonspec.org) behind the universal core/data/codec.Codec
+      dispatch, written with the standard library alone.
+
+      BSON is a document format: the top-level value MUST encode as a document — a
+      struct, a map, a D — so Marshal of a top-level scalar or array surfaces
+      BSON_MARSHAL_FAILED. Go values map onto BSON as the MongoDB Go driver's v1
+      default registry mapped them, struct tags included
+      (bson:"name,omitempty,minsize,truncate,inline"), and the BSON types Go has
+      no type for decode into this package's own: ObjectID, DateTime, Decimal128,
+      Binary, Regex, Timestamp, D, M, A and the rest.
+
+      Unmarshal checks the whole input before it touches the target — every
+      declared length against the bytes remaining, every terminator, every type
+      byte, every string's UTF-8, a nesting depth of at most 100 — so a malformed
+      document is refused whole and never half-decoded. The codec is not a
+      StreamingCodec; it implements the optional Appender.
+
+      Package bson — Decimal128, BSON's IEEE 754-2008 128-bit decimal in the
+      binary integer decimal (BID) encoding, and its string forms as the BSON
+      decimal128 specification defines them. Conversion is exact or refused:
+      nothing here rounds.
+
+      Package bson — the decoder's entry point, its dispatch on the target's plan,
+      and the element walk. It runs over a document the validator accepted, and
+      still checks every length it slices by, so input that changes under it
+      yields an error and never a panic.
+
+      Package bson — decoding into an interface: the Go value each BSON type
+      becomes when nothing else says what it should be. The table is the previous
+      library's, its types replaced by this package's: a double is a float64, an
+      int32 an int32, an int64 an int64, a string a string, a boolean a bool, a
+      null nil, an array an A, a datetime a DateTime, a binary a Binary, and so
+      on. A document becomes the ancestor type when one is set — the type of the
+      nearest enclosing map[string]any, M or slice of E — and a D otherwise, so a
+      document decoded into *any is a D all the way down while one decoded into a
+      map[string]any is maps all the way down.
+
+      Package bson — decoding into the containers: slices, arrays, D, maps and
+      structs. Each follows the previous library's rules: a slice reuses its
+      backing array, an array keeps the elements a short value does not reach, a
+      map is added to rather than replaced, a struct keeps the fields the document
+      does not name.
+
+      Package bson — decoding into scalar targets. The conversions accepted are
+      the previous library's: a number decodes into any numeric target it fits, a
+      boolean into a number and a number into a boolean, null and undefined into
+      the zero value; anything else is refused rather than guessed.
+
+      Package bson — decoding into the codec's own value types and into the
+      stdlib types it knows: time.Time, url.URL and json.Number. A null or an
+      undefined is the zero value of every one of them.
+
+      Package bson — the encoder's entry point and dispatch. It appends one
+      document to a byte slice, reflection planned once per type, the common
+      interface values taken by a type switch instead. Each element's type byte is
+      written as a placeholder and set once the value has said what it encodes as;
+      each document's length is reserved and filled in when the document ends.
+
+      Package bson — encoding of the containers: arrays, ordered documents,
+      structs and maps. A map's entries are written in the map's own order and
+      then put in ascending key order, so the same map always encodes to the same
+      bytes.
+
+      Package bson — the encoder's primitive writes: the fixed-width numbers, the
+      strings, the binaries, each little-endian as BSON stores them.
+
+      Package bson — encoding of the codec's own value types and of the stdlib
+      types the codec knows: time.Time, url.URL and json.Number.
+
+      Package bson — the constructors that give each failure its own log-only
+      detail. The codes and the sentinels they wrap are declared in
+      internal/core/data/codec/bson (ADR 0160).
+
+      Package bson — ObjectID, BSON's twelve-byte identifier, and its textual
+      forms: 24 lowercase hexadecimal digits in text and in JSON, the form MongoDB
+      tooling prints.
+
+      Package bson — the per-type plans: how a Go type maps onto BSON, worked out
+      once from reflection and cached by reflect.Type, so an encode or a decode
+      only reads what was decided. A plan is built under one mutex and published
+      complete; reading a published plan takes no lock.
+
+      Package bson — the Go types for the BSON values Go has no type of its own
+      for. Decoding into an interface produces them, encoding writes them back as
+      the BSON type they stand for, and they carry the semantics the codec's
+      previous library gave its own equivalents, so a value that crossed a
+      map[string]any before keeps meaning the same thing.
+
+      Package bson — the structural validator. Unmarshal runs it over the whole
+      input before the target is touched, so a malformed document never leaves a
+      half-decoded value behind, and the decoder that follows reads bytes whose
+      every length, terminator, type byte and string has been checked. Every
+      declared length is compared with the bytes actually remaining before
+      anything is sliced or allocated from it.
+
+      Package bson — the BSON 1.1 wire vocabulary (bsonspec.org): the element type
+      bytes, the binary subtypes, the bounds every reader and writer shares, and
+      the little-endian reads they are built from.
     functions:
-      - name: New
+      - doc: New returns the BSON codec singleton.
+        name: New
         out:
           - type: codec.Codec
-      - in:
+      - doc: |-
+          NewDecimal128 returns the decimal whose BID encoding is high (the first
+          eight bytes, as a uint64) and low (the last eight).
+        in:
           - name: high
           - name: low
             type: uint64
         name: NewDecimal128
         out:
           - type: Decimal128
-      - in:
+      - doc: |-
+          ParseDecimal128 parses the specification's string form: an optional sign, a
+          decimal with or without a point, an optional exponent introduced by e or E,
+          or one of NaN, Inf and Infinity in any case. A value that a decimal128
+          cannot hold exactly — more than 34 significant digits, or an exponent out of
+          range — is refused with BSON_VALUE_INVALID rather than rounded; trailing
+          zeros are traded for exponent, both ways, as far as that keeps it exact.
+        in:
           - name: s
             type: string
         name: ParseDecimal128
         out:
           - type: Decimal128
           - type: error
-      - in:
+      - doc: |-
+          ObjectIDFromHex parses the 24-digit hexadecimal form of an ObjectID, in
+          either case. Anything else is refused with BSON_VALUE_INVALID.
+        in:
           - name: s
             type: string
         name: ObjectIDFromHex
         out:
           - type: ObjectID
           - type: error
-      - in:
+      - doc: |-
+          NewDateTimeFromTime returns the DateTime t falls in, truncated to the
+          millisecond: the instant a time.Time is written as.
+        in:
           - name: t
             type: time.Time
         name: NewDateTimeFromTime
@@ -149,35 +329,54 @@ packages:
       codec: github.com/kitsunium/sdk/internal/core/data/codec
     path: github.com/kitsunium/sdk/internal/service/data/codec/bson
     types:
-      - methods:
-          - name: GetBytes
+      - doc: |-
+          Decimal128 is a BSON decimal128: a coefficient of up to 34 decimal digits,
+          an exponent in [-6176, 6111], a sign, and the specials NaN and ±Infinity.
+          The zero value is 0E-6176, the value whose sixteen bytes are all zero; it is
+          what IsZero reports, and what omitempty leaves out.
+        methods:
+          - doc: GetBytes returns the two halves NewDecimal128 takes.
+            name: GetBytes
             out:
               - name: high
               - name: low
                 type: uint64
             recv: value
-          - name: IsNaN
+          - doc: IsNaN reports whether d is a NaN, quiet or signalling, whatever its sign.
+            name: IsNaN
             out:
               - type: bool
             recv: value
-          - name: IsInf
+          - doc: IsInf returns +1 for +Infinity, -1 for -Infinity, and 0 otherwise.
+            name: IsInf
             out:
               - type: int
             recv: value
-          - name: IsZero
+          - doc: |-
+              IsZero reports whether d is the zero value — all sixteen bytes zero. It is
+              not a numeric test: "0", "0E+3" and "-0" are zeros IsZero does not report.
+            name: IsZero
             out:
               - type: bool
             recv: value
-          - name: String
+          - doc: |-
+              String returns the specification's string form: "NaN", "Infinity",
+              "-Infinity", plain notation when the exponent is not positive and the
+              adjusted exponent is at least -6, scientific notation otherwise.
+            name: String
             out:
               - type: string
             recv: value
-          - name: MarshalJSON
+          - doc: MarshalJSON writes d's string form as a JSON string.
+            name: MarshalJSON
             out:
               - type: "[]byte"
               - type: error
             recv: value
-          - in:
+          - doc: |-
+              UnmarshalJSON reads a JSON string holding the string form, or the
+              extended-JSON object {"$numberDecimal": "…"}. A JSON null leaves d unchanged.
+            in:
               - name: data
                 type: "[]byte"
             name: UnmarshalJSON
@@ -187,41 +386,60 @@ packages:
         name: Decimal128
         struct:
           unexported: true
-      - methods:
-          - name: Hex
+      - doc: |-
+          ObjectID is a BSON ObjectID: a four-byte big-endian creation time in
+          seconds, five bytes unique to the generating process, and a three-byte
+          counter. The zero value is NilObjectID. Decoding an ObjectID into a string
+          target yields its hexadecimal form; decoding a 24-digit hexadecimal string
+          into an ObjectID target parses it.
+        methods:
+          - doc: Hex returns the 24-digit lowercase hexadecimal form of id.
+            name: Hex
             out:
               - type: string
             recv: value
-          - name: String
+          - doc: String renders id as ObjectID("…") for a log line or a test failure.
+            name: String
             out:
               - type: string
             recv: value
-          - name: IsZero
+          - doc: IsZero reports whether id is NilObjectID — what omitempty leaves out.
+            name: IsZero
             out:
               - type: bool
             recv: value
-          - name: Timestamp
+          - doc: Timestamp returns the creation time id carries, to the second, in UTC.
+            name: Timestamp
             out:
               - type: time.Time
             recv: value
-          - name: MarshalText
+          - doc: |-
+              MarshalText writes the hexadecimal form, so an ObjectID can key a map that
+              encoding/json writes.
+            name: MarshalText
             out:
               - type: "[]byte"
               - type: error
             recv: value
-          - in:
+          - doc: UnmarshalText reads the hexadecimal form MarshalText writes.
+            in:
               - name: text
                 type: "[]byte"
             name: UnmarshalText
             out:
               - type: error
             recv: pointer
-          - name: MarshalJSON
+          - doc: MarshalJSON writes the hexadecimal form as a JSON string.
+            name: MarshalJSON
             out:
               - type: "[]byte"
               - type: error
             recv: value
-          - in:
+          - doc: |-
+              UnmarshalJSON reads a JSON string holding the hexadecimal form, or the
+              extended-JSON object {"$oid": "…"}. The empty string reads as NilObjectID,
+              and a JSON null leaves id unchanged.
+            in:
               - name: data
                 type: "[]byte"
             name: UnmarshalJSON
@@ -230,57 +448,101 @@ packages:
             recv: pointer
         name: ObjectID
         underlying: "[objectIDSize]byte"
-      - name: D
+      - doc: |-
+          D is a document whose element order matters: the shape a decode into an
+          interface produces for a document, and the one to encode when the order of
+          the keys is part of the meaning — a command, a sort specification. Encode an
+          M or a struct when it is not. A nil D encodes as null.
+        name: D
         underlying: "[]E"
-      - name: E
+      - doc: |-
+          E is one element of a D: a key and its value. Encoded on its own, outside
+          a D, it is an ordinary struct, the document {"key": …, "value": …}.
+        name: E
         struct:
           fields:
-            - name: Key
+            - doc: Key is the element name. It must not contain a NUL byte.
+              name: Key
               type: string
-            - name: Value
+            - doc: Value is any value the codec encodes.
+              name: Value
               type: any
-      - name: M
+      - doc: |-
+          M is a document whose element order does not matter. The codec writes a
+          map's keys in sorted order, so encoding the same M twice gives the same
+          bytes.
+        name: M
         underlying: map[string]any
-      - name: A
+      - doc: "A is an array: the shape a decode into an interface produces for one."
+        name: A
         underlying: "[]any"
-      - methods:
-          - in:
+      - doc: |-
+          Binary is a BSON binary value: the bytes and the subtype naming what they
+          are. A []byte encodes as a Binary of subtype BinaryGeneric; a Binary of any
+          other subtype keeps its subtype through a round trip.
+        methods:
+          - doc: Equal reports whether b and other hold the same subtype and bytes.
+            in:
               - name: other
                 type: Binary
             name: Equal
             out:
               - type: bool
             recv: value
-          - name: IsZero
+          - doc: |-
+              IsZero reports whether b is the empty generic binary — what omitempty
+              leaves out.
+            name: IsZero
             out:
               - type: bool
             recv: value
         name: Binary
         struct:
           fields:
-            - name: Subtype
+            - doc: Subtype is the BSON binary subtype, BinaryGeneric for opaque bytes.
+              name: Subtype
               type: byte
-            - name: Data
+            - doc: Data is the payload.
+              name: Data
               type: "[]byte"
-      - name: Undefined
+      - doc: |-
+          Undefined is the deprecated BSON undefined value. It decodes into an
+          interface as Undefined{}, and into a typed target as that type's zero.
+        name: Undefined
         struct: {}
-      - name: "Null"
+      - doc: |-
+          Null is the BSON null value, for writing an explicit null into a D. A null
+          decodes into an interface as nil.
+        name: "Null"
         struct: {}
-      - name: MinKey
+      - doc: MinKey is the BSON value that sorts lower than every other.
+        name: MinKey
         struct: {}
-      - name: MaxKey
+      - doc: MaxKey is the BSON value that sorts higher than every other.
+        name: MaxKey
         struct: {}
-      - methods:
-          - name: Time
+      - doc: |-
+          DateTime is a BSON datetime: milliseconds since the Unix epoch, UTC. A
+          time.Time encodes as one and decodes from one; DateTime is what a decode
+          into an interface produces.
+        methods:
+          - doc: |-
+              Time returns the instant dt denotes, in the local time zone; call UTC on it
+              for the zone BSON stores.
+            name: Time
             out:
               - type: time.Time
             recv: value
-          - name: MarshalJSON
+          - doc: MarshalJSON writes dt as encoding/json writes the UTC time.Time it denotes.
+            name: MarshalJSON
             out:
               - type: "[]byte"
               - type: error
             recv: value
-          - in:
+          - doc: |-
+              UnmarshalJSON reads the textual form MarshalJSON writes. A JSON null leaves
+              dt unchanged, as it leaves a time.Time.
+            in:
               - name: data
                 type: "[]byte"
             name: UnmarshalJSON
@@ -289,95 +551,131 @@ packages:
             recv: pointer
         name: DateTime
         underlying: int64
-      - methods:
-          - name: String
+      - doc: |-
+          Regex is a BSON regular expression: a pattern and its options. Neither may
+          contain a NUL byte. The codec writes the options in alphabetical order, as
+          the specification requires, whatever order they were given in.
+        methods:
+          - doc: String renders r for a log line or a test failure.
+            name: String
             out:
               - type: string
             recv: value
-          - in:
+          - doc: Equal reports whether r and other have the same pattern and options.
+            in:
               - name: other
                 type: Regex
             name: Equal
             out:
               - type: bool
             recv: value
-          - name: IsZero
+          - doc: IsZero reports whether r is the empty regex — what omitempty leaves out.
+            name: IsZero
             out:
               - type: bool
             recv: value
         name: Regex
         struct:
           fields:
-            - name: Pattern
+            - doc: Pattern is the expression.
+              name: Pattern
               type: string
-            - name: Options
+            - doc: Options are the single-letter flags, such as "i" or "imx".
+              name: Options
               type: string
-      - methods:
-          - name: String
+      - doc: |-
+          DBPointer is the deprecated BSON DBPointer: a namespace and an ObjectID.
+          It is read and written so a document carrying one survives a round trip.
+        methods:
+          - doc: String renders p for a log line or a test failure.
+            name: String
             out:
               - type: string
             recv: value
-          - in:
+          - doc: Equal reports whether p and other name the same namespace and identifier.
+            in:
               - name: other
                 type: DBPointer
             name: Equal
             out:
               - type: bool
             recv: value
-          - name: IsZero
+          - doc: IsZero reports whether p is the empty pointer — what omitempty leaves out.
+            name: IsZero
             out:
               - type: bool
             recv: value
         name: DBPointer
         struct:
           fields:
-            - name: DB
+            - doc: DB is the namespace the pointer names.
+              name: DB
               type: string
-            - name: Pointer
+            - doc: Pointer is the identifier within it.
+              name: Pointer
               type: ObjectID
-      - name: JavaScript
+      - doc: JavaScript is BSON JavaScript code.
+        name: JavaScript
         underlying: string
-      - name: Symbol
+      - doc: |-
+          Symbol is the deprecated BSON symbol, read and written as a distinct type so
+          a round trip does not turn it into a string.
+        name: Symbol
         underlying: string
-      - methods:
-          - name: String
+      - doc: |-
+          CodeWithScope is the deprecated BSON JavaScript-with-scope: code and the
+          document its free variables are bound in. Scope must encode as a document —
+          a struct, a map or a D; a decode always produces a D.
+        methods:
+          - doc: String renders c for a log line or a test failure.
+            name: String
             out:
               - type: string
             recv: value
         name: CodeWithScope
         struct:
           fields:
-            - name: Code
+            - doc: Code is the JavaScript.
+              name: Code
               type: JavaScript
-            - name: Scope
+            - doc: Scope is the document.
+              name: Scope
               type: any
-      - methods:
-          - in:
+      - doc: |-
+          Timestamp is the BSON replication timestamp: seconds since the epoch and an
+          ordinal within the second. It is not a date; encode a time.Time for one.
+        methods:
+          - doc: After reports whether t is later than other.
+            in:
               - name: other
                 type: Timestamp
             name: After
             out:
               - type: bool
             recv: value
-          - in:
+          - doc: Before reports whether t is earlier than other.
+            in:
               - name: other
                 type: Timestamp
             name: Before
             out:
               - type: bool
             recv: value
-          - in:
+          - doc: Equal reports whether t and other are the same timestamp.
+            in:
               - name: other
                 type: Timestamp
             name: Equal
             out:
               - type: bool
             recv: value
-          - name: IsZero
+          - doc: IsZero reports whether t is the zero timestamp — what omitempty leaves out.
+            name: IsZero
             out:
               - type: bool
             recv: value
-          - in:
+          - doc: Compare returns -1 when t is before other, +1 when it is after, 0 when equal.
+            in:
               - name: other
                 type: Timestamp
             name: Compare
@@ -387,18 +685,83 @@ packages:
         name: Timestamp
         struct:
           fields:
-            - name: T
+            - doc: T is the seconds since the Unix epoch.
+              name: T
               type: uint32
-            - name: I
+            - doc: I is the increment, ordering operations within the same second.
+              name: I
               type: uint32
     variables:
-      - name: Codec
+      - doc: Codec is the registered BSON singleton.
+        name: Codec
         type: codec.Codec
-      - name: NilObjectID
+      - doc: NilObjectID is the zero ObjectID.
+        name: NilObjectID
         type: ObjectID
   - constants:
-      - name: Format
+      - doc: |-
+          Format is the name BSON is registered under. It is an untyped constant, so
+          it goes wherever a format name is taken — the codec package's Marshal,
+          config.FSSource's string, i18n.LoadFS's codec.Format — without a conversion.
+        name: Format
         value: "\"bson\""
+    doc: |-
+      Package bson is BSON, MongoDB's binary document format, implemented with the
+      standard library alone. Importing it registers the BSON codec with the SDK's
+      codec registry — and no other codec (ADR 0134) — and names the Go types the
+      BSON values Go has no type of its own for decode into:
+
+      	import "github.com/kitsunium/sdk/pkg/v1/data/codec/bson"
+
+      	data, err := bson.Marshal(bson.D{{Key: "name", Value: "kitsune"}, {Key: "tails", Value: 9}})
+      	var doc map[string]any
+      	err = bson.Unmarshal(data, &doc) // doc["tails"] is an int32
+
+      Everything that dispatches through the registry by format name reads and
+      writes BSON as well: the codec package's Marshal and Unmarshal under
+      [Format], config.FSSource, i18n.LoadFS. Importing it beside
+      github.com/kitsunium/sdk/pkg/v1/data/codec is harmless: the format is registered
+      once.
+
+      # Mapping
+
+      The top level is a document: a struct, a map, a [D]; anything else is
+      refused. Struct fields take the tag bson:"name,omitempty,minsize,truncate,inline"
+      and default to the field name in lower case. int, int8, int16, int32, uint8
+      and uint16 are written as int32 (int as int64 when it does not fit), int64,
+      uint, uint32 and uint64 as int64, floats as double, []byte as a generic
+      binary, time.Time as a UTC datetime in milliseconds, a nil slice, map or
+      pointer as null, and map keys in sorted order, so the same value always
+      encodes to the same bytes. A type can write and read itself through
+      MarshalBSON() ([]byte, error) and UnmarshalBSON([]byte) error.
+
+      Decoding into an interface gives float64, int32, int64, string, bool, nil,
+      [A] for an array, [DateTime], [Binary], [ObjectID], [Decimal128] and the
+      other value types below — and, for a document, a [D] when decoding into
+      *any, a map[string]any when decoding into a map[string]any. Numbers decode
+      into any numeric field they fit, a double into an integer only when whole
+      unless the field is tagged truncate.
+
+      # Safety
+
+      Unmarshal checks the whole input before it writes anything: one document,
+      at most 10 MiB, every declared length within the bytes there are, every
+      string UTF-8, nested at most 100 levels. A malformed document is refused
+      whole. Marshal refuses what BSON cannot hold — a string that is not UTF-8, a
+      uint64 past the int64 range, a cyclic value — instead of writing something
+      a reader would refuse.
+
+      # Errors
+
+      Failures carry the range 0.3.36.*; match them with errs.HasCode:
+
+      	CodeMarshalFailed     0.3.36.1  a value with no BSON form, or a top level that is not a document
+      	CodeUnmarshalFailed   0.3.36.2  malformed input, or a value the target cannot hold
+      	CodeSizeExceeded      0.3.36.3  an input past 10 MiB
+      	CodeDepthExceeded     0.3.36.4  nesting past 100 levels, either way
+      	CodeValueInvalid      0.3.36.5  ObjectIDFromHex, ParseDecimal128 and the JSON forms refusing their input
+
+      No error message quotes a key or a value from the input.
     facade:
       - const:
           - doc: BinaryGeneric is the default subtype, the one a []byte is written as.
@@ -610,14 +973,20 @@ packages:
             - type: Decimal128
             - type: error
     functions:
-      - in:
+      - doc: |-
+          Marshal encodes v, which must encode as a document, into a slice the caller
+          owns.
+        in:
           - name: v
             type: any
         name: Marshal
         out:
           - type: "[]byte"
           - type: error
-      - in:
+      - doc: |-
+          Append encodes v and appends the document to dst; a dst with room
+          allocates nothing. On failure dst is returned with its original length.
+        in:
           - name: dst
             type: "[]byte"
           - name: v
@@ -626,7 +995,10 @@ packages:
         out:
           - type: "[]byte"
           - type: error
-      - in:
+      - doc: |-
+          Unmarshal decodes one BSON document into v, a non-nil pointer or map. The
+          input is checked whole before v is written.
+        in:
           - name: data
             type: "[]byte"
           - name: v
@@ -640,15 +1012,27 @@ packages:
       svcbson: github.com/kitsunium/sdk/internal/service/data/codec/bson
     path: github.com/kitsunium/sdk/pkg/v1/data/codec/bson
     variables:
-      - name: MarshalFailed
+      - blockDoc: The sentinels, for errors.Is, and the nil ObjectID.
+        doc: MarshalFailed marks a value Marshal or Append cannot encode.
+        name: MarshalFailed
         type: "*errs.Error"
-      - name: UnmarshalFailed
+      - blockDoc: The sentinels, for errors.Is, and the nil ObjectID.
+        doc: UnmarshalFailed marks input Unmarshal refuses.
+        name: UnmarshalFailed
         type: "*errs.Error"
-      - name: SizeExceeded
+      - blockDoc: The sentinels, for errors.Is, and the nil ObjectID.
+        doc: SizeExceeded marks an Unmarshal input past 10 MiB.
+        name: SizeExceeded
         type: "*errs.Error"
-      - name: DepthExceeded
+      - blockDoc: The sentinels, for errors.Is, and the nil ObjectID.
+        doc: DepthExceeded marks nesting past 100 levels.
+        name: DepthExceeded
         type: "*errs.Error"
-      - name: ValueInvalid
+      - blockDoc: The sentinels, for errors.Is, and the nil ObjectID.
+        doc: ValueInvalid marks a value type's constructor or parser refusing its input.
+        name: ValueInvalid
         type: "*errs.Error"
-      - name: NilObjectID
+      - blockDoc: The sentinels, for errors.Is, and the nil ObjectID.
+        doc: NilObjectID is the zero ObjectID.
+        name: NilObjectID
         type: ObjectID

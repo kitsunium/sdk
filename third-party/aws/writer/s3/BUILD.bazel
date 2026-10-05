@@ -8,6 +8,7 @@ go_library(
         "client.go",
         "codes_gen.go",
         "cred_adapter.go",
+        "doc.go",
         "errors.go",
         "s3.go",
         "s3sink.go",

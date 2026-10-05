@@ -1,15 +1,44 @@
 apiVersion: kit.kitsunium/design/v2
 domain: third-party/x-crypto
 packages:
-  - imports:
+  - doc: |-
+      Package argon2id registers the "argon2id" password-hashing scheme (ADR 0013).
+      It is the memory-hard, OWASP-first-choice password hash — but it depends on
+      golang.org/x/crypto, so it lives under third-party/x-crypto as an OPT-IN
+      scheme (mirroring xchacha vs the stdlib aesgcm default). Blank-import this
+      package to register it, then crypto.HashPassword("argon2id", …) resolves;
+      crypto.VerifyPassword already verifies any registered scheme's stored hashes.
+
+      Stored hashes use the standard argon2 PHC string:
+
+      	$argon2id$v=19$m=19456,t=2,p=1$<b64-salt>$<b64-digest>
+    imports:
       corecrypto: github.com/kitsunium/sdk/internal/core/crypto
     path: github.com/kitsunium/sdk/third-party/x-crypto/argon2id
     variables:
-      - name: PasswordHasher
+      - doc: |-
+          PasswordHasher is the registered argon2id scheme singleton (no init();
+          package-level var initialiser, mirroring the codec/AEAD convention).
+        name: PasswordHasher
         type: corecrypto.PasswordHasher
-  - imports:
+  - doc: |-
+      Package xchacha registers the "xchacha20poly1305" AEAD scheme (ADR 0013).
+      Blank-importing the package self-registers the scheme so
+      crypto.SealAs("xchacha20poly1305", …) / crypto.Open resolve. It is the ONLY
+      place golang.org/x/crypto enters a build for this scheme — declared in the
+      go.mod of the third-party/x-crypto module (ADR 0157), which nothing in the
+      SDK requires, so pkg/v1 consumers stay dep-light (zero x/crypto) unless they
+      opt in with this blank import.
+
+      XChaCha20-Poly1305 uses a 192-bit (24-byte) random nonce, eliminating the
+      birthday-bound message-count limit that AES-256-GCM's 96-bit random nonce
+      imposes — preferred for high-volume random-nonce workloads.
+    imports:
       corecrypto: github.com/kitsunium/sdk/internal/core/crypto
     path: github.com/kitsunium/sdk/third-party/x-crypto/xchacha
     variables:
-      - name: AEAD
+      - doc: |-
+          AEAD is the registered XChaCha20-Poly1305 scheme singleton (no init();
+          package-level var initialiser, mirroring the codec convention).
+        name: AEAD
         type: corecrypto.AEAD

@@ -1,6 +1,3 @@
-// Package metrics — the exportable sum point: the shape a Counter and an
-// UpDownCounter share. The metric envelope that tells them apart lives beside
-// SnapshotValue, whose field it is.
 package metrics
 
 import coreotel "github.com/kitsunium/sdk/internal/core/observe/otel"

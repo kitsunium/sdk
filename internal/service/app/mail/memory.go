@@ -1,4 +1,3 @@
-// Package mail — the in-memory transport, which is a DOUBLE and not a stub.
 package mail
 
 import (

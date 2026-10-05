@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-04T11:15:00Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # internal/core/observe/logger/level/
 
 ## Purpose
@@ -17,9 +17,7 @@ with its doc comment, under `ports:` in `design/observe/logger/level.yaml`, and
 the design, then `kit gen`, then `make api` — never in `design_gen.go`, whose
 header digests `make api-check` verifies. It moved there from `leveler.go`,
 content moved and never deleted; the file, left with nothing but its package
-comment, is gone (rule 5), that line now closing `level_compliance.go`'s —
-go/doc joins every file's package comment in file-name order, so `go doc` reads
-it as before.
+comment, is gone (rule 5); the package comment is `doc.go`'s alone, written by kit from the design (ADR 0167).
 
 ## History — why it lives here, not in `kernel/`
 

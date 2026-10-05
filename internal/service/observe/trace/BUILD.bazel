@@ -6,6 +6,7 @@ go_library(
     name = "trace",
     srcs = [
         "config.go",
+        "doc.go",
         "exporter_otlphttp.go",
         "exporter_otlpjson.go",
         "http_client.go",

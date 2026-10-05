@@ -1,17 +1,5 @@
 //go:build windows
 
-// Package signal — Windows Relay. There is no kill(2) on Windows, so signal
-// forwarding maps onto the two native delivery primitives, bound directly from
-// kernel32 (syscall.NewLazyDLL, ABI cited, no golang.org/x/sys):
-//
-//   - a process-group target (Target < -1) → GenerateConsoleCtrlEvent, the
-//     console control event that reaches every process in the group (CTRL_C for
-//     SIGINT, CTRL_BREAK otherwise — the only event that can target one group);
-//   - a single-pid target (Target > 0) → OpenProcess + TerminateProcess, the
-//     reliable per-process delivery (Windows has no per-pid interrupt).
-//
-// The reserved targets 0 and -1 are refused before any delivery, exactly as the
-// Unix build does, so a zero-value Target never fans out.
 package signal
 
 import (

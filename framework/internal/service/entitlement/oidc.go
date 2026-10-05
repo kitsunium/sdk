@@ -1,37 +1,3 @@
-// Package entitlement - proving a run is CI, rather than taking its word for it.
-//
-// A CI seat is free, so "am I in CI?" becomes a question worth lying about.
-// Every environment variable that answers it — CI, GITHUB_ACTIONS, the absence
-// of a TTY, the hostname — is one `export` away from being whatever the caller
-// wants, so granting anything on that basis makes the device quota decorative.
-//
-// GitHub Actions can answer it properly. A workflow granted `id-token: write`
-// can exchange two runner-injected values for a JWT signed by GitHub, whose
-// claims name the repository and its owner. The request token is an ephemeral
-// runner secret: someone outside Actions cannot obtain one, and nobody can
-// forge the signature without GitHub's private key.
-//
-// What this does NOT prove is that the process holding the token is the job it
-// was minted for. A token exfiltrated from a legitimate run stays usable off-CI
-// until it expires. Closing that needs a server-side nonce, which the offline
-// verification model rules out, so the residue is accepted and stated.
-//
-// Stated as what it IS, which is not what this comment used to claim. "The
-// exposure is one free seat" was never demonstrated and is not true. A short
-// token bounds the DURATION a stolen proof keeps working; it says nothing about
-// the NUMBER of processes that can present it at once. Nothing ties a token to a
-// consumer: VerifyActionsToken is pure and offline, it keeps no record of what it
-// has already admitted, and two verifiers could not share one if it did. So one
-// leaked token satisfies every verifier it reaches, all of them at the same time,
-// for as long as it is valid.
-//
-// The honest bound is ONE FREE SEAT PER VERIFIER FOR UP TO 32 MINUTES:
-// maxTokenLifetime (30 min) is the widest window a token may claim, clockSkew
-// (2 min) is what checkTiming allows on top when admitting one, and their sum is
-// how long after minting a stolen token still verifies. What makes that a bound
-// rather than a sentence is ciseat.go handing the token's own expiry to
-// coreent.GrantDeadline — without it the GRANT outlived the proof by up to a day,
-// and the duration this paragraph names described nothing at all.
 package entitlement
 
 import (

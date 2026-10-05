@@ -1,8 +1,3 @@
-// Package msgpack — slice, array and byte decoders. A declared element count
-// is never trusted with memory: it is first checked against the bytes that
-// remain, then at most preallocBytes worth of elements is reserved, and the
-// slice grows as elements actually decode — so a hostile count costs what its
-// input costs, not what it claims.
 package msgpack
 
 import (

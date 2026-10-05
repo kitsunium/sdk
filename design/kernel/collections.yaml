@@ -1,8 +1,25 @@
 apiVersion: kit.kitsunium/design/v2
 domain: kernel/collections
 packages:
-  - functions:
-      - in:
+  - doc: |-
+      Package cache provides a generic, concurrency-safe LRU + TTL cache
+      (Cache[K,V]) — a kernel primitive (stdlib-only, no domain vocabulary). It
+      reuses the kernel clock so TTL expiry is testable. Fetch on a hit is
+      allocation-free (map lookup + intrusive-list splice); Set allocates one entry
+      per new key. Reads and writes are serialised by a single mutex. Fetch is
+      named Fetch (not Get) because a hit mutates state (LRU promotion + counters).
+
+      Package cache — the New constructor configuration.
+
+      Package cache — the intrusive doubly-linked LRU node.
+
+      Package cache — the key/value pair carried out of the locked section so the
+      OnEvict observer never runs while the cache mutex is held.
+
+      Package cache — the read-only counters snapshot.
+    functions:
+      - doc: NewCache builds a Cache from cfg. A nil cfg.Clock defaults to clock.System.
+        in:
           - name: cfg
             type: Config[K, V]
         name: NewCache
@@ -17,8 +34,14 @@ packages:
       clock: github.com/kitsunium/sdk/internal/kernel/clock
     path: github.com/kitsunium/sdk/internal/kernel/collections/cache
     types:
-      - methods:
-          - in:
+      - doc: |-
+          Cache is a generic LRU+TTL cache safe for concurrent use. The zero value is
+          NOT usable — construct with NewCache.
+        methods:
+          - doc: |-
+              Fetch returns the value for key and whether it was present and unexpired. A
+              hit promotes the entry to most-recently-used (hence Fetch, not a pure Get).
+            in:
               - name: key
                 type: K
             name: Fetch
@@ -28,14 +51,18 @@ packages:
               - name: ok
                 type: bool
             recv: pointer
-          - in:
+          - doc: Set stores key=val with the cache's default TTL.
+            in:
               - name: key
                 type: K
               - name: val
                 type: V
             name: Set
             recv: pointer
-          - in:
+          - doc: |-
+              SetTTL stores key=val with an explicit ttl (0 = no expiry), overriding the
+              default for this entry only.
+            in:
               - name: key
                 type: K
               - name: val
@@ -44,18 +71,26 @@ packages:
                 type: time.Duration
             name: SetTTL
             recv: pointer
-          - in:
+          - doc: |-
+              Delete removes key if present. An explicit Delete does NOT fire OnEvict (that
+              hook is for capacity/expiry removals only).
+            in:
               - name: key
                 type: K
             name: Delete
             recv: pointer
-          - name: Len
+          - doc: |-
+              Len returns the current live entry count (including not-yet-reaped expired
+              entries — expiry is lazy).
+            name: Len
             out:
               - type: int
             recv: pointer
-          - name: Purge
+          - doc: Purge drops every entry without firing OnEvict.
+            name: Purge
             recv: pointer
-          - name: Stats
+          - doc: Stats returns a point-in-time copy of the hit/miss/eviction counters.
+            name: Stats
             out:
               - type: StatsValue
             recv: pointer
@@ -67,23 +102,36 @@ packages:
             name: K
           - constraint: any
             name: V
-      - name: Config
+      - doc: |-
+          Config parameterises a Cache. The zero value is valid: an unbounded cache with
+          no default TTL, the system clock, and no eviction callback.
+        name: Config
         struct:
           fields:
-            - name: MaxEntries
+            - doc: MaxEntries caps the live entry count (LRU eviction above it). 0 = unbounded.
+              name: MaxEntries
               type: int
-            - name: DefaultTTL
+            - doc: DefaultTTL applies to Set entries (SetTTL overrides per-entry). 0 = no expiry.
+              name: DefaultTTL
               type: time.Duration
-            - name: Clock
+            - doc: Clock is the time source (injectable for tests). nil = clock.System.
+              name: Clock
               type: clock.Clock
-            - name: OnEvict
+            - doc: |-
+                OnEvict, if non-nil, is called with the key+value of every entry removed by
+                capacity eviction or expiry (not by an explicit Delete/Set-overwrite).
+              name: OnEvict
               type: func(key K, val V)
         typeParams:
           - constraint: comparable
             name: K
           - constraint: any
             name: V
-      - name: StatsValue
+      - doc: |-
+          StatsValue is a point-in-time copy of a Cache's counters. Hits/Misses
+          count Fetch outcomes; Evictions counts capacity + expiry removals (not
+          explicit Deletes).
+        name: StatsValue
         struct:
           fields:
             - name: Hits
@@ -92,8 +140,52 @@ packages:
               type: uint64
             - name: Evictions
               type: uint64
-  - functions:
-      - in:
+  - doc: |-
+      Package heap provides Heap[T], a binary heap ordered by a comparison
+      function the caller supplies. It is a kernel primitive: stdlib-only, and
+      domain-neutral down to the signatures — one type parameter and one
+      comparison, with no Job, no Task and no Priority anywhere in the API.
+
+      # Why not container/heap
+
+      container/heap exists and cannot be used cleanly here. It is an ALGORITHM
+      over an interface the caller must implement: five methods (Len, Less, Swap,
+      Push, Pop) on a named slice type, where Push takes `any` and Pop returns
+      `any`. Every use site therefore writes the same boilerplate, boxes each
+      element on the way in, and type-asserts it on the way out — a conversion the
+      compiler cannot check and the reader has to trust. That was the right design
+      in 2011; it predates type parameters.
+
+      The generic version costs one comparison function at construction and
+      nothing at all at the call site.
+
+      # Order
+
+      cmp follows the cmp.Compare / slices.SortFunc convention: negative when a
+      sorts before b, zero when they tie, positive otherwise. The element that
+      sorts FIRST is the one at the top, so cmp.Compare[int] gives a MIN-heap and
+      a max-heap is the same function with its arguments reversed. Ties pop in an
+      unspecified order — a binary heap is not stable, and no amount of care in
+      the comparison makes it so.
+
+      # Concurrency
+
+      A Heap is NOT safe for concurrent use. That is deliberate: a lock inside
+      would be paid by every caller, including the many that hold a heap inside a
+      structure they already serialise. The caller picks the lock, or does not
+      need one.
+    functions:
+      - doc: |-
+          New builds an empty Heap ordered by cmp.
+
+          A nil cmp PANICS, at the call that made the mistake. There is no order the
+          SDK can invent for an arbitrary T, so ADR 0031's other branch — clamp to a
+          working default — has nothing to clamp to; this is the refusal branch. It is
+          delivered as a panic rather than an error because the kernel has no error
+          budget for programmer faults (recycler and clock take the same position) and
+          because the alternative, a Heap that panics on the first Push, moves the
+          crash away from the line that caused it.
+        in:
           - name: cmp
             type: func(a, b T) int
         name: New
@@ -104,22 +196,40 @@ packages:
             name: T
     path: github.com/kitsunium/sdk/internal/kernel/collections/heap
     types:
-      - methods:
-          - name: Len
+      - doc: |-
+          Heap is a binary heap ordered by the comparison given to [New].
+
+          The zero value is NOT usable — a heap with no comparison has no order — so
+          construct with [New]. Not safe for concurrent use.
+        methods:
+          - doc: Len reports how many elements the heap holds.
+            name: Len
             out:
               - type: int
             recv: pointer
-          - in:
+          - doc: Push adds v, in O(log n).
+            in:
               - name: v
                 type: T
             name: Push
             recv: pointer
-          - name: Peek
+          - doc: |-
+              Peek returns the top element without removing it, and reports whether there
+              was one. It does not mutate the heap, so unlike a cache read it really is a
+              getter.
+            name: Peek
             out:
               - type: T
               - type: bool
             recv: pointer
-          - name: Pop
+          - doc: |-
+              Pop removes and returns the top element, in O(log n), and reports whether
+              there was one.
+
+              It returns (zero, false) on an empty heap rather than panicking: emptiness is
+              an ordinary state of a queue, not a programmer error, and the (T, bool) shape
+              is the same one kernel/collections/cache uses for a miss.
+            name: Pop
             out:
               - type: T
               - type: bool
@@ -147,8 +257,34 @@ packages:
             name: CodeRingCapZero
             value: "0x00_01_03_03"
         type: errs.Code
+    doc: |-
+      Package ring — range 0.1.3.* (ADR 0005 kernel/collections/ring block).
+
+      Package ring — declares the sentinels returned by this package's
+      constructor and TryWrite / TryRead operations. Each var's name equals its
+      errs.Define Reason in SCREAMING_SNAKE form.
+
+      Package ring provides a lock-free single-producer / single-consumer (SPSC)
+      ring buffer built on sync/atomic. The SPSC constraint gives the maximum
+      throughput for any hot-path producer that serialises enqueues — metrics
+      batch writers, streaming codec pipelines, event-bus accumulators, or any
+      other fixed-capacity non-blocking FIFO use case. Domain-neutral by design
+      per the internal/kernel/ package rule (stdlib-only AND generic).
+
+      SPSC means EXACTLY ONE goroutine calls TryWrite at a time AND EXACTLY ONE
+      goroutine calls TryRead at a time. Concurrent producers or concurrent
+      consumers are NOT safe — those callers should serialise upstream or wrap
+      this primitive with a mutex. The logger async sink takes the mutex-
+      serialisation route (see internal/service/observe/logger/middleware/async); other
+      domains pick whichever coordination fits their topology.
     functions:
-      - in:
+      - doc: |-
+          New constructs a Queue with the supplied logical capacity.
+
+          IFACE-PLUGIN: callers receive a Queue[T] handle so the kernel can swap
+          the backing implementation (single-buffer today, sharded SPMC tomorrow)
+          without breaking call-site code; the concrete struct is unexported.
+        in:
           - name: capacity
             type: int
         name: New
@@ -189,26 +325,35 @@ packages:
             public: Ring buffer capacity must be positive
             reason: RING_CAP_ZERO
     types:
-      - interface:
+      - doc: |-
+          Queue is the lock-free SPSC ring contract. Producer threads call TryWrite;
+          consumer threads call TryRead. Capacity is fixed at construction time.
+        interface:
           methods:
-            - in:
+            - doc: TryWrite enqueues item without blocking; returns Full when saturated.
+              in:
                 - name: item
                   type: T
               name: TryWrite
               out:
                 - name: err
                   type: error
-            - name: TryRead
+            - doc: |-
+                TryRead dequeues the next item without blocking; returns Empty when no
+                item is available.
+              name: TryRead
               out:
                 - name: item
                   type: T
                 - name: err
                   type: error
-            - name: Capacity
+            - doc: Capacity returns the number of usable slots in the ring.
+              name: Capacity
               out:
                 - name: "n"
                   type: int
-            - name: Len
+            - doc: Len returns a snapshot count of items currently held.
+              name: Len
               out:
                 - name: "n"
                   type: int
@@ -216,7 +361,50 @@ packages:
         typeParams:
           - constraint: any
             name: T
-  - facade:
+  - doc: |-
+      Package heap is a binary heap of any element type, ordered by a comparison
+      you give it: Push in O(log n), Pop the element that sorts first in
+      O(log n), Peek at it in O(1).
+
+      	due := heap.New(func(a, b Timer) int { return a.At.Compare(b.At) })
+      	due.Push(Timer{At: later})
+      	due.Push(Timer{At: sooner})
+      	next, ok := due.Pop() // the sooner one
+
+      It is the priority queue the SDK's state machine keeps its agenda in, and
+      its in-memory queue broker its lease expiries, published as an alias of that
+      kernel package (ADR 0159 §4).
+
+      # When to use it
+
+      Whenever the next element to handle is the smallest by some order — the
+      timer due soonest, the job with the highest priority, the k largest values
+      of a stream. container/heap provides the algorithm, over five methods a
+      caller writes on a named slice type, with Push taking any and Pop returning
+      any: the same boilerplate at every use, every element boxed on the way in
+      and type-asserted on the way out. Here the cost is one comparison function
+      at construction, and nothing at the call site.
+
+      # Order
+
+      The comparison follows the cmp.Compare and slices.SortFunc convention:
+      negative when a sorts before b, zero when they tie, positive otherwise. The
+      element that sorts FIRST is at the top, so cmp.Compare[int] gives a min-heap
+      and the same function with its arguments swapped a max-heap. Elements that
+      tie pop in no particular order — a binary heap is not stable.
+
+      # Empty is an answer
+
+      Pop and Peek on an empty heap return the zero value and false: emptiness is
+      an ordinary state of a queue. A nil comparison panics at [New] — there is no
+      order to invent for an arbitrary type.
+
+      # Concurrency
+
+      A Heap is NOT safe for concurrent use. That is deliberate: a lock inside
+      would be paid by every caller, including the many that keep a heap inside a
+      structure they already lock. The caller picks the lock, or needs none.
+    facade:
       - alias:
           - doc: |-
               Heap is a binary heap ordered by the comparison given to [New].
@@ -250,7 +438,53 @@ packages:
     imports:
       kheap: github.com/kitsunium/sdk/internal/kernel/collections/heap
     path: github.com/kitsunium/sdk/pkg/v1/collections/heap
-  - facade:
+  - doc: |-
+      Package ring is a bounded, lock-free queue for exactly ONE producer and
+      exactly ONE consumer: a fixed number of slots, a write that refuses when they
+      are full, and a read that refuses when they are empty — neither ever blocks.
+
+      	q, err := ring.New[Record](1024)
+
+      	// The producer's goroutine — and only that one — writes.
+      	if err := q.TryWrite(rec); errors.Is(err, ring.Full) {
+      	    dropped++ // the caller's policy: drop, retry, or block upstream
+      	}
+
+      	// The consumer's goroutine — and only that one — reads.
+      	rec, err := q.TryRead()
+      	if errors.Is(err, ring.Empty) {
+      	    // nothing yet: wait on a signal, never spin
+      	}
+
+      It is the buffer behind the SDK's asynchronous logger, published as an alias
+      of that kernel package (ADR 0159 §4).
+
+      # When to use it
+
+      Between one goroutine that produces on a hot path and one that consumes, when
+      a full buffer must be an answer rather than a wait — a log record or a metric
+      that the producer would rather drop than stall for. Two atomic loads and a
+      store per operation, no lock and no allocation: an error is one of three
+      sentinels, never built on the fly.
+
+      For anything else a buffered channel is the right tool: it blocks, it wakes
+      the reader, and it takes any number of producers and consumers.
+
+      # One producer, one consumer — a precondition, not a hint
+
+      EXACTLY ONE goroutine may call TryWrite at a time, and EXACTLY ONE may call
+      TryRead. Concurrent producers, or concurrent consumers, corrupt the queue:
+      serialise them upstream, as the SDK's async logger does with a mutex. A
+      multi-producer mode is planned beside this one (ADR 0159 §2); publishing
+      [Queue] froze its four methods, so that mode arrives as another constructor
+      and never as a change to them.
+
+      # Errors
+
+      [Full] answers a TryWrite on a full ring, [Empty] a TryRead on an empty one,
+      and [CapZero] a [New] with a capacity that is not positive. Each is a fixed
+      value, matched with errors.Is or the SDK's errs.HasCode.
+    facade:
       - alias:
           - doc: |-
               Queue is the single-producer, single-consumer ring.

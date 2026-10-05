@@ -1,5 +1,3 @@
-// Package cbor — structs on the encoding side: a map keyed by field name (or
-// by integer, keyasint), or an array (toarray); omitempty and omitzero.
 package cbor
 
 import "reflect"

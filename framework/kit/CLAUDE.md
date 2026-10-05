@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-29T00:00:00Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # framework/kit — the facade a product imports
 
 The framework in which every product is its own diagram, as a product sees
@@ -11,7 +11,7 @@ Nothing is implemented here: a change of behaviour is made there.
 
 | File | Holds |
 |---|---|
-| `doc.go` | the package documentation `go doc` prints (and `README.md`, generated from it by gomarkdoc): a product's building blocks, the diagram, the app's databases, modules, and what `Main` understands |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) — that `go doc` prints: a product's building blocks, the diagram, the app's databases, modules, and what `Main` understands |
 | one file per file of the implementation | its exported names: aliases (`type Store[T any] = kit.StoreService[T]`), constants, variables, and forwarders (`//:` comment; `//go:noinline` where the implementation is — a position is recorded by the caller of the facade, which `callerFrame` reaches past this package) |
 | `facade_external_test.go` | the declarations' positions, taken through the facade, point at the product's lines |
 | `fresh_process_bench_test.go`, `testdata/cliprobe`, `BENCH.md` | a fresh process of the smallest product (one default fail-safe command), built and exec'd: what a status line pays per render when nothing is warm |

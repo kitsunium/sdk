@@ -1,4 +1,3 @@
-// Package kit — workflows: a state machine over the entities of one store.
 package kit
 
 import (

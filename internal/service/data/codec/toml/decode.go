@@ -1,6 +1,3 @@
-// Package toml — the decode: a parsed tree written into a Go value. Untyped
-// targets (map[string]any, any, []any) are built natively; typed ones through
-// reflection, guided by the cached typeInfo of each type.
 package toml
 
 import (

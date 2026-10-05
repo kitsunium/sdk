@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/kernel:kernel_consumers"])
 go_library(
     name = "plugin",
     srcs = [
+        "doc.go",
         "plugin.go",
         "registry.go",
     ],

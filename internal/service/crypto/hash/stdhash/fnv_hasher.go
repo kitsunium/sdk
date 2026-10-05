@@ -1,4 +1,3 @@
-// Package stdhash — FNV-1a 64-bit scheme registration (see package doc in stdhash.go).
 package stdhash
 
 import (

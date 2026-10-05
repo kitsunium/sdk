@@ -1,4 +1,3 @@
-// Package lifecycle — hosts Config, the engine's construction parameters.
 package lifecycle
 
 import (

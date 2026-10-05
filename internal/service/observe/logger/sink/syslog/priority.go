@@ -1,6 +1,3 @@
-// Package syslog — computes the RFC5424 priority value
-// (facility * 8 + severity) consumed by the framing layer. Pulled into
-// its own file so syslog_sink.go stays focused on the Sink contract.
 package syslog
 
 import "github.com/kitsunium/sdk/internal/core/observe/logger/level"

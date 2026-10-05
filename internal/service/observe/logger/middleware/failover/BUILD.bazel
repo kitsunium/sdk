@@ -4,7 +4,10 @@ package(default_visibility = ["//internal/service:service_consumers"])
 
 go_library(
     name = "failover",
-    srcs = ["failover_sink.go"],
+    srcs = [
+        "doc.go",
+        "failover_sink.go",
+    ],
     importpath = "github.com/kitsunium/sdk/internal/service/observe/logger/middleware/failover",
     visibility = [
         "//:__subpackages__",

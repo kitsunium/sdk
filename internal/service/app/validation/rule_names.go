@@ -1,7 +1,3 @@
-// Package validation — the closed set of built-in rule names. A rule name is
-// part of the published contract: it is what a ViolationValue.Rule carries,
-// what an application keys its own translated messages on, and what a validate
-// struct tag spells. Adding one is a decision the SDK maintains forever.
 package validation
 
 const (

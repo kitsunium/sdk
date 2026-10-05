@@ -1,6 +1,3 @@
-// Package clock — hosts the waiting half of the time port: the [Waiter]
-// contract, plus the single guard both implementations funnel their
-// non-positive-period refusal through.
 package clock
 
 import "time"

@@ -1,20 +1,3 @@
-// Package bson is the BSON codec: a native implementation of the BSON 1.1
-// specification (bsonspec.org) behind the universal core/data/codec.Codec
-// dispatch, written with the standard library alone.
-//
-// BSON is a document format: the top-level value MUST encode as a document — a
-// struct, a map, a D — so Marshal of a top-level scalar or array surfaces
-// BSON_MARSHAL_FAILED. Go values map onto BSON as the MongoDB Go driver's v1
-// default registry mapped them, struct tags included
-// (bson:"name,omitempty,minsize,truncate,inline"), and the BSON types Go has
-// no type for decode into this package's own: ObjectID, DateTime, Decimal128,
-// Binary, Regex, Timestamp, D, M, A and the rest.
-//
-// Unmarshal checks the whole input before it touches the target — every
-// declared length against the bytes remaining, every terminator, every type
-// byte, every string's UTF-8, a nesting depth of at most 100 — so a malformed
-// document is refused whole and never half-decoded. The codec is not a
-// StreamingCodec; it implements the optional Appender.
 package bson
 
 import (

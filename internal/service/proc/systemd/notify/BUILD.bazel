@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "notify",
     srcs = [
+        "doc.go",
         "listen_linux.go",
         "listen_other.go",
         "notify.go",

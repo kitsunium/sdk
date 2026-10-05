@@ -1,4 +1,3 @@
-// Package trace — SpanKind: the span's relationship to its neighbours.
 package trace
 
 // SpanKind says how a span relates to its parent and its children, which is what

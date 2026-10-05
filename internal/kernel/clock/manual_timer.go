@@ -1,5 +1,3 @@
-// Package clock — hosts manualTimer, the [Timer] handle a [ManualClock] hands
-// out for a one-shot wait.
 package clock
 
 import "time"

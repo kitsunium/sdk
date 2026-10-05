@@ -1,4 +1,3 @@
-// Package kit — what changed between two versions, and a version written back.
 package kit
 
 import (

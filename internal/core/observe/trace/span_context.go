@@ -1,4 +1,3 @@
-// Package trace — the four facts that identify a span on the wire.
 package trace
 
 // SpanContextValue is the immutable identity of a span: what traceparent and

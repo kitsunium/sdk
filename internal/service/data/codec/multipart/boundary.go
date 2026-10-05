@@ -1,11 +1,3 @@
-// Package multipart — boundary recovery and validation.
-//
-// The delimiter that separates the parts of a multipart body is announced in
-// the message's Content-Type header, NOT in the body. codec.Codec carries no
-// header, so this file is where the gap is closed: the boundary is re-emitted
-// on every delimiter line, which makes a well-formed body self-describing, and
-// these helpers read it back out. See CLAUDE.md §The boundary problem for what
-// that buys and what it does not.
 package multipart
 
 import (

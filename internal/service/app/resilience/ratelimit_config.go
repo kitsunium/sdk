@@ -1,4 +1,3 @@
-// Package resilience — token-bucket rate-limiter configuration.
 package resilience
 
 import "github.com/kitsunium/sdk/internal/kernel/clock"

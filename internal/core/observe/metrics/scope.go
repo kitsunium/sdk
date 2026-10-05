@@ -1,4 +1,3 @@
-// Package metrics — the instrumentation scope this signal publishes.
 package metrics
 
 import coreotel "github.com/kitsunium/sdk/internal/core/observe/otel"

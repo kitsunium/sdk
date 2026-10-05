@@ -1,9 +1,3 @@
-// Package msgpack — how a call fails. Every failure is one of the two codes
-// this package has always owned: MARSHAL_FAILED (0.3.7.1) for an encode and
-// UNMARSHAL_FAILED (0.3.7.2) for a decode, so a caller routing on the reason
-// keeps working whatever the cause. What went wrong is said in Private, which
-// is log-only, and in Fields — offsets, Go type names, limits — and never by
-// quoting the input: a decode failure names where and what, not the bytes.
 package msgpack
 
 import (

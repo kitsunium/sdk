@@ -1,4 +1,3 @@
-// Package net — the completed outbound response value.
 package net
 
 import "net/http"

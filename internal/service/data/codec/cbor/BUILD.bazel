@@ -13,6 +13,7 @@ go_library(
         "decode_scalar.go",
         "decode_struct.go",
         "decoder.go",
+        "doc.go",
         "encode.go",
         "encode_kinds.go",
         "encode_map.go",

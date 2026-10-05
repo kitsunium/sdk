@@ -11,20 +11,45 @@ packages:
             value: "0x00_02_11_01"
         type: errs.Code
     constants:
-      - name: Debug
+      - doc: Debug represents detailed tracing information useful during development.
+        name: Debug
         type: Level
         value: "-4"
-      - name: Info
+      - doc: Info represents routine operational events occurring during normal execution.
+        name: Info
         type: Level
         value: "0"
-      - name: Warn
+      - doc: Warn represents abnormal but recoverable conditions worth human attention.
+        name: Warn
         type: Level
         value: "4"
-      - name: Error
+      - doc: Error represents failures that usually signal a broken invariant and require action.
+        name: Error
         type: Level
         value: "8"
+    doc: |-
+      Package level defines severity levels for log records. It is a core/observe/logger
+      sub-package (logger-domain vocabulary, so not kernel) and remains stdlib-only:
+      no dependency beyond the Go standard library, and specifically never log/slog.
+
+      Package level — compile-time interface conformance assertions.
+
+      Package level — Leveler port (a live, mutable severity threshold).
+
+      Package level — ParseLevel, the inverse of a lowercased Level.String.
+
+      Package level — range 0.2.17.* (ADR 0006 core/observe/logger/level block).
+
+      Package level — Var, the atomic Level holder behind the Leveler port.
     functions:
-      - in:
+      - doc: |-
+          ParseLevel maps a canonical lowercase level name to its Level constant. It is
+          the inverse of Level.String lowercased: "debug", "info", "warn", and "error"
+          round-trip to Debug, Info, Warn, and Error respectively. Input is trimmed of
+          surrounding whitespace and lowercased before matching, so "INFO" and " Warn "
+          resolve too. Any other input yields the zero Level and the LevelUnknown
+          sentinel, so callers parse an env/config string then feed the result to Var.Set.
+        in:
           - name: name
             type: string
         name: ParseLevel
@@ -33,7 +58,10 @@ packages:
             type: Level
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NewVar returns a Var initialised to initial. The returned pointer is the
+          Leveler a gate or sink holds; callers later retune it with Set.
+        in:
           - name: initial
             type: Level
         name: NewVar
@@ -70,20 +98,35 @@ packages:
             public: log level name is not recognised
             reason: LEVEL_UNKNOWN
     types:
-      - methods:
-          - name: String
+      - doc: Level represents the importance of a log record; higher values are more severe.
+        methods:
+          - doc: String returns the uppercase textual label associated with the Level receiver.
+            name: String
             out:
               - type: string
             recv: value
         name: Level
         underlying: int8
-      - methods:
-          - in:
+      - doc: |-
+          Var is an atomically mutable Level holder satisfying Leveler. Its zero value
+          is ready to use and reports Info (the Level zero value), so a freshly
+          declared Var gates at the same default as a config's unset MinLevel. Set and
+          Level are safe for concurrent use; a gate may read Level on the hot path
+          while a control goroutine raises or lowers the floor via Set.
+        methods:
+          - doc: |-
+              Set replaces the current threshold with lvl. The store is atomic, so a
+              concurrent Level caller observes either the old or the new value, never a
+              torn read.
+            in:
               - name: lvl
                 type: Level
             name: Set
             recv: pointer
-          - name: Level
+          - doc: |-
+              Level reports the current threshold. The load is atomic and lock-free,
+              keeping it cheap enough for a per-record gate to call on the hot path.
+            name: Level
             out:
               - type: Level
             recv: pointer

@@ -1,17 +1,3 @@
-// Package jwk — the JWK Set (RFC 7517 §5) and, with it, the package's second
-// deliberate refusal.
-//
-// A set is how key rotation is published: for a window, the old and the new key
-// are both in the document. RFC 7517 §4.5 only SHOULD-s distinct "kid" values,
-// so a set holding two keys under one kid is legal and does happen. Resolving
-// it by taking the first match would make the answer depend on JSON member
-// order — an ordering no RFC guarantees and no publisher promises to keep.
-//
-// So ByKid refuses an ambiguous lookup (AmbiguousKid) and AllByKid is the
-// rotation path: it returns every candidate, in document order, and the caller
-// decides — typically by trying each until a signature verifies. Same principle
-// as ADR 0031: where any SDK-chosen answer would be arbitrary, refuse instead
-// of guessing quietly.
 package jwk
 
 import (

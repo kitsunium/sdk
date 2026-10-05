@@ -1,5 +1,3 @@
-// Package metrics — stdlib text Exporter (one series per line, under a header
-// per instrument name).
 package metrics
 
 import (

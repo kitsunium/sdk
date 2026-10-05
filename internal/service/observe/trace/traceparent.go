@@ -1,6 +1,3 @@
-// Package trace — the traceparent header: parsing it, and writing it back. The
-// span context it carries is a value of internal/core/observe/trace; reading
-// and writing the header is this engine's mechanism (ADR 0160 §4).
 package trace
 
 import (

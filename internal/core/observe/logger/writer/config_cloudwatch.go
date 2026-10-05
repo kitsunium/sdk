@@ -1,4 +1,3 @@
-// Package writer — CloudWatchConfig value type for the "cloudwatch" writer.
 package writer
 
 import (

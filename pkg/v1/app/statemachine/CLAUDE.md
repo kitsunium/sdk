@@ -36,10 +36,11 @@ next transition due.
 - **The package doc says what it does NOT do** — no replay, no durable
   workflow runtime, and a write that bypasses the machine can race with a
   transition — because a reader who assumes otherwise builds the wrong thing.
-- **Method references are plain text in the doc.** gomarkdoc cannot resolve a
-  method of a generic alias, and a bracketed link would render as brackets.
+- **Method references are plain text in the doc.** gomarkdoc, which rendered
+  the README until ADR 0167, could not resolve a method of a generic alias, and
+  a bracketed link rendered as brackets.
 - **Each constant is declared on its own; the sentinels share one block.**
-  gomarkdoc gives a grouped declaration ONE anchor — the first name's — so a
+  gomarkdoc gave a grouped declaration ONE anchor — the first name's — so a
   constant declared alone gets its own; the sentinels cannot, since
   KTN-VAR-GROUP wants one `var` block, so the package doc names them in plain
   text: `[Reentrant]` had led to `TriggerUnknown`, the block's first name.
@@ -48,13 +49,14 @@ next transition due.
 
 ## README is generated
 
-`README.md` is produced by `gomarkdoc` from the package doc comment in
-`statemachine.go` (ADR 0008). Regenerate with `make docs-readme`; do not
-hand-edit it.
+`README.md` is written by `tools/genindex` from the committed `docs/api`
+(`make docs-readme`, ADR 0167); do not hand-edit it. The package comment is in
+`doc.go`, which kit writes from `design/app/statemachine.yaml`: edit the
+design, run `kit gen`, then `make api` and `make docs-readme`.
 
 ## Generated
 
-`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/app/statemachine.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the package comment and the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
+`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/app/statemachine.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the declarations of their own, and `doc.go` — kit's too (ADR 0167) — the package comment. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
 
 ## Verification
 

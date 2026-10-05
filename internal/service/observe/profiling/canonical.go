@@ -1,5 +1,3 @@
-// Package profiling — hosts CanonicalName: one spelling for a function,
-// whoever named it.
 package profiling
 
 import (

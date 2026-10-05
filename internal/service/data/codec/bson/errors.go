@@ -1,6 +1,3 @@
-// Package bson — the constructors that give each failure its own log-only
-// detail. The codes and the sentinels they wrap are declared in
-// internal/core/data/codec/bson (ADR 0160).
 package bson
 
 import (

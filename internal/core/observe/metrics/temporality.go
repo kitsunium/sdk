@@ -1,5 +1,3 @@
-// Package metrics — aggregation temporality, the OTel concept that says which
-// window a reported number covers.
 package metrics
 
 // The three wire spellings, which the text exporter emits verbatim.

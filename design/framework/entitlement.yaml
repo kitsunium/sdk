@@ -2,85 +2,335 @@ apiVersion: kit.kitsunium/design/v2
 domain: framework/entitlement
 packages:
   - aliases:
-      - name: Identity
+      - doc: Identity is the machine's half of the proof. It aliases the core port.
+        name: Identity
         target: coreent.Identity
-      - name: BoundProver
+      - doc: |-
+          BoundProver is Identity's sibling for the one claim the three methods cannot
+          make: possession of the key the ROSTER authorised, rather than of whatever
+          this machine holds when it is asked.
+
+          Implement it when your key custody can bind, and the verifier will prefer it:
+
+          	func (k *MyKeys) ProvePossessionFor(subject, authorised string) error
+
+          Without it the engine asks Fingerprint what you present, compares that answer
+          itself, and then asks ProvePossession — so material replaced between the two
+          calls is signed for, and the strongest thing an implementation can do unaided
+          is notice that something changed without learning what it should have been.
+
+          It is a SIBLING rather than a parameter on ProvePossession because Identity is
+          published through this alias and Go satisfies interfaces structurally: widening
+          it would break every implementation at compile time with no deprecation window,
+          and would not even guarantee the binding — an implementation can accept the
+          parameter and ignore it. ADR 0039, ADR 0040 §4, ADR 0092.
+
+          An Identity that does not implement this is fully supported and unchanged. The
+          window stays open for it, which is said here rather than left to be found.
+        name: BoundProver
         target: coreent.BoundProver
-      - name: Roster
+      - doc: Roster is a published, vendor-signed entitlement roster.
+        name: Roster
         target: coreent.RosterValue
-      - name: Subject
+      - doc: "Subject is one entry in a roster: an identity and what it is entitled to."
+        name: Subject
         target: coreent.SubjectValue
-      - name: CIEntitlement
+      - doc: CIEntitlement is a roster's seat for a continuous-integration account.
+        name: CIEntitlement
         target: coreent.CIEntitlementValue
-      - name: Grant
+      - doc: |-
+          Grant is a verified entitlement, with the deadline past which it must be
+          re-verified and whether it was decided offline.
+
+          Read Deadline() rather than the NotAfter field when you intend to ACT on the
+          deadline: NotAfter's zero value means "no deadline was computed" — the shape a
+          grant seeded from a bare timestamp carries — and the method resolves the
+          fallback the field cannot express. Expired(now) is the same question asked the
+          other way round, and the two are one rule by construction.
+
+          Honouring it is YOURS. See the package comment.
+        name: Grant
         target: coreent.GrantValue
-      - name: Origin
+      - doc: Origin is one place a roster is published.
+        name: Origin
         target: coreent.OriginValue
-      - name: Product
+      - doc: |-
+          Product names the vendor whose roster this binary trusts. It aliases the
+          service type: these are one engine's construction parameters (ADR 0074).
+        name: Product
         target: svcent.ProductValue
-      - name: Service
+      - doc: Service verifies entitlement. It aliases the service handle (ADR 0074).
+        name: Service
         target: svcent.Service
-      - name: Bundle
+      - doc: |-
+          Bundle is the one-document roster form: the raw roster and its detached
+          signature in a single object, because two documents cannot be fetched
+          atomically. It aliases the service type (ADR 0074) — a caller BUILDS one to
+          serve or to cache, which is why it is public at all.
+        name: Bundle
         target: svcent.BundleValue
-      - name: Getter
+      - doc: |-
+          Getter performs the roster HTTP GETs. A consumer substitutes it to exercise
+          the admission logic without a network, which is the only way to test a
+          refusal path that depends on what an origin answered.
+        name: Getter
         target: svcent.Getter
-      - name: BearerFetch
+      - doc: |-
+          BearerFetch performs the one request a [Service] makes with a credential:
+          the GitHub Actions ID-token mint on the CI path, which sends the runner's
+          bearer token. It is a function rather than a [Getter] method because the
+          roster fetch must never carry one.
+
+          [Service].WithBearerFetch replaces the default, and only a test should need
+          to: the default refuses every redirect, so the runner's credential cannot be
+          forwarded to a destination nobody vouched for, and a replacement takes that
+          duty on. It aliases the service type (ADR 0074).
+        name: BearerFetch
         target: svcent.BearerFetch
-      - name: RoughtimeServer
+      - doc: |-
+          RoughtimeServer is one Roughtime server a [Service] may ask for a signed
+          statement of the current time, and the ed25519 key its answer must be signed
+          with: the key, not the address, is the whole trust decision.
+
+          [Service].WithTimeServers takes the list. The check is off by default, and
+          ADVISORY: a server that does not answer, or whose answer does not verify, is
+          no signal and the verification carries on, while one that answers verifiably
+          and disagrees with the local clock by more than five minutes, widened by its
+          own stated uncertainty, refuses with [ErrClockRegressed]. No server ships with
+          the SDK: this client has been checked against its own test fixture and never
+          against a live server, so adding one is a decision for whoever can watch it
+          verify a real answer. It aliases the service type (ADR 0074).
+        name: RoughtimeServer
         target: svcent.RoughtimeServerValue
-      - name: UpdateRequiredError
+      - doc: |-
+          UpdateRequiredError carries the two versions a version-floor refusal is
+          about. It exists as a TYPE rather than a message because a caller that cannot
+          read the required version out of the refusal re-runs the upgrade, gets the
+          same refusal, and loops forever.
+        name: UpdateRequiredError
         target: svcent.UpdateRequiredError
     constants:
-      - name: RosterLifetime
+      - doc: |-
+          RosterLifetime is how long a signed roster stays usable. It bounds how long a
+          revoked subject keeps working offline, and how long a captured roster can be
+          replayed — the same bound, read from either side.
+        name: RosterLifetime
         type: time.Duration
         value: "86400000000000"
-      - name: CodeNoLicence
+      - doc: CodeNoLicence identifies a machine with no entitlement key at all.
+        name: CodeNoLicence
         type: errs.Code
         value: "0x00_02_23_01"
-      - name: CodeRosterUnsigned
+      - doc: |-
+          CodeRosterUnsigned identifies a roster carrying no valid vendor signature —
+          the spoofing signal, since a substituted endpoint cannot produce one.
+        name: CodeRosterUnsigned
         type: errs.Code
         value: "0x00_02_23_02"
-      - name: CodeRosterStale
+      - doc: CodeRosterStale identifies a roster that verified but whose window has closed.
+        name: CodeRosterStale
         type: errs.Code
         value: "0x00_02_23_03"
-      - name: CodeRevoked
+      - doc: CodeRevoked identifies a subject absent from a roster that was itself valid.
+        name: CodeRevoked
         type: errs.Code
         value: "0x00_02_23_04"
-      - name: CodeLicenceExpired
+      - doc: CodeLicenceExpired identifies a subject whose own term has closed.
+        name: CodeLicenceExpired
         type: errs.Code
         value: "0x00_02_23_05"
-      - name: CodeKeyMismatch
+      - doc: |-
+          CodeKeyMismatch identifies a local key that does not match the published
+          fingerprint.
+        name: CodeKeyMismatch
         type: errs.Code
         value: "0x00_02_23_06"
-      - name: CodeRosterUnreachable
+      - doc: |-
+          CodeRosterUnreachable identifies a check that could not decide either way. It
+          is NOT a refusal, and a caller that treats it as one turns an outage into a
+          revocation.
+        name: CodeRosterUnreachable
         type: errs.Code
         value: "0x00_02_23_07"
-      - name: CodeAmbiguousLicence
+      - doc: |-
+          CodeAmbiguousLicence identifies more than one identity on one machine, which
+          no automatic choice can resolve safely.
+        name: CodeAmbiguousLicence
         type: errs.Code
         value: "0x00_02_23_08"
-      - name: CodeCIUnverifiable
+      - doc: CodeCIUnverifiable identifies a CI run whose provenance could not be proven.
+        name: CodeCIUnverifiable
         type: errs.Code
         value: "0x00_02_23_09"
-      - name: CodeCIUnknownKey
+      - doc: |-
+          CodeCIUnknownKey identifies a CI token signed by a key the issuer does not
+          publish.
+        name: CodeCIUnknownKey
         type: errs.Code
         value: "0x00_02_23_0A"
-      - name: CodeCINotEntitled
+      - doc: CodeCINotEntitled identifies a CI account the roster does not cover.
+        name: CodeCINotEntitled
         type: errs.Code
         value: "0x00_02_23_0B"
-      - name: CodeNoPossession
+      - doc: CodeNoPossession identifies a holder who could not prove possession.
+        name: CodeNoPossession
         type: errs.Code
         value: "0x00_02_23_0C"
-      - name: CodeClockRegressed
+      - doc: |-
+          CodeClockRegressed identifies a clock behind the last signed document this
+          machine verified — the anti-rollback ratchet.
+        name: CodeClockRegressed
         type: errs.Code
         value: "0x00_02_23_0D"
-      - name: CodeUpdateRequired
+      - doc: CodeUpdateRequired identifies a build below the floor the roster mandates.
+        name: CodeUpdateRequired
         type: errs.Code
         value: "0x00_02_23_0E"
-      - name: CodeProductInvalid
+      - doc: |-
+          CodeProductInvalid identifies a Product whose origin list could not survive
+          the day it is needed — see Product.Validate.
+        name: CodeProductInvalid
         type: errs.Code
         value: "0x00_02_23_0F"
+    doc: |-
+      Package entitlement verifies a machine's entitlement to run a product:
+      local key material plus a vendor-signed roster, turned into a grant or a
+      typed refusal.
+
+      It is the framework's public package over framework/internal/service/entitlement
+      (ADR 0158): a distribution mechanism, built on pkg/v1 and nothing below it.
+
+      # The trust model, and its ceiling
+
+      One signer: the vendor. What the consuming binary links in is that signer's
+      ed25519 public key, or — while a key is being rotated — an ordered list of the
+      keys it accepts. Everything else — the roster, the per-subject keys, the host
+      serving them — is untrusted input. A hostile endpoint can serve what it likes;
+      it cannot forge a signature made with the vendor's private half.
+
+      What that cannot survive is a patched binary. A check running on someone
+      else's machine is removable by definition. This stops casual sharing and
+      makes revocation real for cooperative installs, and it is deliberately not
+      built as if it were more.
+
+      # The anchor is a list, because one key has no way out
+
+      A binary linking in exactly one anchor cannot be moved to another: rosters
+      signed by a new key are refused against the anchor it holds — before anything
+      reads the version floor that would have told it to upgrade — and the release
+      carrying the new anchor is refused by the installation that needs it. Blocked
+      from both sides, with no path left in band.
+
+      NewWithAnchors takes an ORDERED list and a roster is authentic when it verifies
+      against any entry, which is all rotation needs: publish under B, installations
+      carrying {A, B} take it, installations carrying only {A} keep reading A until
+      they are updated. A bundle already cached under either key is still a valid
+      proof of time, so the anti-rollback ratchet is not reset by a rotation.
+
+      The cost is real and is not hidden: an anchor on the list is a key whose
+      compromise is accepted while it is listed. The list is therefore capped and is
+      a BUILD decision — nothing at runtime can extend it — and an empty one refuses
+      every document rather than accepting every document.
+
+      # Identity is yours to supply
+
+      Proving possession needs key material in a format the standard library
+      cannot parse. Rather than pull golang.org/x/crypto/ssh — and through it
+      golang.org/x/sys, which the SDK and its framework ban — into every consumer's
+      graph, the machine's half of the proof is a PORT:
+
+      	type Identity interface {
+      		Discover() (subject string, err error)
+      		Fingerprint(subject string) (fingerprint string, err error)
+      		ProvePossession(subject string) error
+      	}
+
+      An ssh implementation ships as the connector module framework/connectors/ssh,
+      for consumers who want one and accept the dependency: requiring it is what
+      brings golang.org/x/crypto and golang.org/x/sys into a graph. A consumer that
+      already handles its own key material — which is the common case for a product
+      that enrols its users — implements three methods instead and never requires
+      that module. ADR 0078 has the original measurement, ADR 0079 the split and
+      ADR 0158 the move into the framework.
+
+      # A proof can be bound to the key the roster authorised
+
+      Identity's three methods cannot express "prove possession of the key the roster
+      approved": the engine asks what you present, compares that answer itself, and
+      then asks for a proof, so the authorised value never reaches your code. Anything
+      that replaced the material in between is signed for.
+
+      BoundProver is the sibling that carries it. Implement
+      ProvePossessionFor(subject, authorised) and the verifier prefers it; do not, and
+      nothing changes — the three-method port is frozen and stays supported. The SDK's
+      own ssh implementation implements both.
+
+      # Cannot decide is never no
+
+      A cold Verify reaches the network FIRST. Only when no origin answers does the
+      cached bundle substitute, and it goes back through the signature check on
+      every read, so a frozen copy stops authorising at its own expiry. Failure
+      with nothing cached reports RosterUnreachable and names the NETWORK, because
+      reporting an outage as a revocation is the one wrong answer.
+
+      What is NOT answered, and cannot be locally, is a frozen CLOCK: every source
+      of time an offline process can read belongs to the party being checked. The
+      ratchet raises the cost; it does not close the hole.
+
+      # An older genuine roster cannot undo a newer decision
+
+      The ratchet also bears on ACCEPTANCE, not only on what gets cached. A roster
+      the vendor signed but has since replaced is refused before it reaches the
+      decision, so a lagging mirror or a substituted origin cannot restore a revoked
+      subject, a rotated-out fingerprint, a lower mandatory-update floor, a withdrawn
+      CI account or a relaxed CI policy. Equal signing instants are accepted when the
+      signed payload is identical — which is every ordinary re-verification — and
+      refused when it is not.
+
+      It is CONDITIONAL on the cached bundle persisting, because that bundle IS the
+      mark: the guarantee lapses for a Service built with no cache, for an install
+      the filesystem refused, and for one that stood down on a contended lock. None
+      of the three refuses instead; a contended lock turned into a refused licence
+      would be worse than the replay it would prevent.
+
+      # Honouring the deadline is the consumer's job
+
+      Verify computes a Grant, hands it back and keeps no reference to it. There is
+      no goroutine, no timer and no callback in this SDK that revokes anything when
+      a grant's deadline passes, and a process holding an expired grant is not
+      interrupted. Whatever gates work on a grant has to ask.
+
+      So a grant expiring a second after a check keeps authorising until you look
+      again, and how long that is, is your tick rather than a property of this
+      package. What the package owes you is a deadline you can act on WITHOUT
+      polling, and that is Grant.Deadline(): the EFFECTIVE instant, with the
+      zero-NotAfter fallback already resolved. Schedule on it — a timer, a context
+      deadline — and the question gets asked when the answer changes instead of on a
+      cadence. Grant.Expired(now) is the same rule asked the other way round.
+
+      # A CI seat cannot outlive its token
+
+      BEHAVIOUR CHANGE. A grant issued for a proven GitHub Actions run is now bounded
+      by the Actions token's own expiry as well as by the roster's window and the
+      account's term. The effective bound on a CI seat therefore drops from up to 24 h
+      to at most 30 minutes — maxTokenLifetime, and in practice the few minutes a real
+      token carries. A long-running process on a runner that aged against a CI grant
+      for hours must now re-verify inside that window.
+
+      No clock skew is added to the bound. The two-minute allowance exists to ADMIT a
+      token whose clock disagrees slightly, which is permissive and correct; applying
+      it to a bound would extend the grant past the proof. Together they are what makes
+      the exposure of a leaked token statable at all: one free seat PER VERIFIER for up
+      to 32 minutes. A short token bounds the DURATION a stolen proof keeps working,
+      never the NUMBER of verifiers that will accept it at once.
     functions:
-      - in:
+      - doc: |-
+          New returns a verifier for the given identity, vendor key and product.
+
+          One anchor, which is the one-element list NewWithAnchors takes — not a second
+          representation of the same thing, so no path can disagree with the multi-anchor
+          one about what a single key means.
+        in:
           - name: identity
             type: Identity
           - name: vendor
@@ -90,7 +340,34 @@ packages:
         name: New
         out:
           - type: "*Service"
-      - in:
+      - doc: |-
+          NewWithAnchors returns a verifier that accepts SEVERAL vendor keys, in the
+          order given, so a signing key can be rotated in band.
+
+          It takes identity, the machine's half of the proof; anchors, the ed25519 public
+          keys the binary links in, most-current first; and product, the vendor-specific
+          facts. A roster is authentic when it verifies against ANY of the anchors, which
+          is what lets a vendor publish under a new key while installations carrying only
+          the old one keep working — neither side has to be updated first.
+
+          # What it costs, said here rather than only in the ADR
+
+          Every anchor on the list is a key whose compromise is ACCEPTED while it is
+          listed, so this is strictly more surface than New's single key. What bounds it
+          is that the list is ordered, capped, and a BUILD decision: nothing at runtime
+          can extend it — not a roster field, not an environment variable, not the cache
+          — and a key leaves the list the way it entered, by shipping a build without it.
+          Past the cap the tail is dropped and a line is logged, because a build mistake
+          answered by refusing every verification would take a product down over a
+          misconfiguration.
+
+          An EMPTY list is not a way to disable the signature check: every document is
+          then refused with ErrRosterUnsigned, since with no anchor no signature can be
+          valid.
+
+          Service.WithAnchors sets the same list on a verifier already built, which is
+          what a test or a build assembling its anchors from elsewhere reaches for.
+        in:
           - name: identity
             type: Identity
           - name: anchors
@@ -100,7 +377,14 @@ packages:
         name: NewWithAnchors
         out:
           - type: "*Service"
-      - in:
+      - doc: |-
+          NewWithGetter returns a verifier whose roster fetches go through client.
+
+          It takes client, the HTTP surface the roster is fetched over; identity, the
+          machine's half of the proof; vendor, the ed25519 public key the binary links
+          in; and product, the vendor-specific facts — a nil product uses the
+          documented fallbacks.
+        in:
           - name: client
             type: Getter
           - name: identity
@@ -112,14 +396,24 @@ packages:
         name: NewWithGetter
         out:
           - type: "*Service"
-      - in:
+      - doc: |-
+          RequiresUpdate reports whether current is below the floor a roster mandates.
+
+          It takes the running build's version and the minimum the roster requires —
+          an empty floor requires nothing — and reports whether the build is below it.
+        in:
           - name: current
           - name: floor
             type: string
         name: RequiresUpdate
         out:
           - type: bool
-      - in:
+      - doc: |-
+          UpdateRefusal builds the typed refusal for a build below the roster's floor.
+
+          It takes the running build's version and the minimum the roster requires, and
+          returns an *UpdateRequiredError carrying both.
+        in:
           - name: current
           - name: floor
             type: string
@@ -132,33 +426,315 @@ packages:
       svcent: github.com/kitsunium/sdk/framework/internal/service/entitlement
     path: github.com/kitsunium/sdk/framework/entitlement
     variables:
-      - name: ErrNoLicense
+      - blockDoc: |-
+          The fourteen sentinels, re-exported so errors.Is answers on them. They are
+          the SAME values core declares, not copies, so a caller may compare across the
+          facade boundary; each also carries the matching Code above, so errs.HasCode
+          and errors.Is are two ways of asking one question.
+
+          None is annotated `error`, and that is deliberate. The annotation would erase
+          the concrete type, and with it Code, Reason, Public and ExitCode — every one
+          of which a consumer reads directly off the sentinel to render a message or
+          exit a process. Without it they are reachable only through a type assertion
+          to a type a consumer cannot name, since internal/kernel/errs is internal.
+          pkg/v1/app/lock, pkg/v1/data/cache and pkg/v1/security/authz all declare theirs this way;
+          this package shipped as the outlier, when it was pkg/v1/entitlement.
+          TestTheSentinelsKeepTheirConcreteType
+          fails the BUILD if the annotation comes back.
+
+          A consumer that only needs ONE distinction needs this one: ErrRosterUnreachable
+          says "cannot decide", and treating it as "decided no" turns an outage into a
+          revocation.
+        doc: ErrNoLicense identifies a machine with no entitlement key at all.
+        name: ErrNoLicense
         type: "*errs.Error"
-      - name: ErrRosterUnsigned
+      - blockDoc: |-
+          The fourteen sentinels, re-exported so errors.Is answers on them. They are
+          the SAME values core declares, not copies, so a caller may compare across the
+          facade boundary; each also carries the matching Code above, so errs.HasCode
+          and errors.Is are two ways of asking one question.
+
+          None is annotated `error`, and that is deliberate. The annotation would erase
+          the concrete type, and with it Code, Reason, Public and ExitCode — every one
+          of which a consumer reads directly off the sentinel to render a message or
+          exit a process. Without it they are reachable only through a type assertion
+          to a type a consumer cannot name, since internal/kernel/errs is internal.
+          pkg/v1/app/lock, pkg/v1/data/cache and pkg/v1/security/authz all declare theirs this way;
+          this package shipped as the outlier, when it was pkg/v1/entitlement.
+          TestTheSentinelsKeepTheirConcreteType
+          fails the BUILD if the annotation comes back.
+
+          A consumer that only needs ONE distinction needs this one: ErrRosterUnreachable
+          says "cannot decide", and treating it as "decided no" turns an outage into a
+          revocation.
+        doc: ErrRosterUnsigned identifies a roster carrying no valid vendor signature.
+        name: ErrRosterUnsigned
         type: "*errs.Error"
-      - name: ErrRosterStale
+      - blockDoc: |-
+          The fourteen sentinels, re-exported so errors.Is answers on them. They are
+          the SAME values core declares, not copies, so a caller may compare across the
+          facade boundary; each also carries the matching Code above, so errs.HasCode
+          and errors.Is are two ways of asking one question.
+
+          None is annotated `error`, and that is deliberate. The annotation would erase
+          the concrete type, and with it Code, Reason, Public and ExitCode — every one
+          of which a consumer reads directly off the sentinel to render a message or
+          exit a process. Without it they are reachable only through a type assertion
+          to a type a consumer cannot name, since internal/kernel/errs is internal.
+          pkg/v1/app/lock, pkg/v1/data/cache and pkg/v1/security/authz all declare theirs this way;
+          this package shipped as the outlier, when it was pkg/v1/entitlement.
+          TestTheSentinelsKeepTheirConcreteType
+          fails the BUILD if the annotation comes back.
+
+          A consumer that only needs ONE distinction needs this one: ErrRosterUnreachable
+          says "cannot decide", and treating it as "decided no" turns an outage into a
+          revocation.
+        doc: |-
+          ErrRosterStale identifies a roster that verified but no longer authorises:
+          its own window has closed, or a newer signed decision has superseded it.
+        name: ErrRosterStale
         type: "*errs.Error"
-      - name: ErrRevoked
+      - blockDoc: |-
+          The fourteen sentinels, re-exported so errors.Is answers on them. They are
+          the SAME values core declares, not copies, so a caller may compare across the
+          facade boundary; each also carries the matching Code above, so errs.HasCode
+          and errors.Is are two ways of asking one question.
+
+          None is annotated `error`, and that is deliberate. The annotation would erase
+          the concrete type, and with it Code, Reason, Public and ExitCode — every one
+          of which a consumer reads directly off the sentinel to render a message or
+          exit a process. Without it they are reachable only through a type assertion
+          to a type a consumer cannot name, since internal/kernel/errs is internal.
+          pkg/v1/app/lock, pkg/v1/data/cache and pkg/v1/security/authz all declare theirs this way;
+          this package shipped as the outlier, when it was pkg/v1/entitlement.
+          TestTheSentinelsKeepTheirConcreteType
+          fails the BUILD if the annotation comes back.
+
+          A consumer that only needs ONE distinction needs this one: ErrRosterUnreachable
+          says "cannot decide", and treating it as "decided no" turns an outage into a
+          revocation.
+        doc: ErrRevoked identifies a subject absent from a roster that was itself valid.
+        name: ErrRevoked
         type: "*errs.Error"
-      - name: ErrLicenseExpired
+      - blockDoc: |-
+          The fourteen sentinels, re-exported so errors.Is answers on them. They are
+          the SAME values core declares, not copies, so a caller may compare across the
+          facade boundary; each also carries the matching Code above, so errs.HasCode
+          and errors.Is are two ways of asking one question.
+
+          None is annotated `error`, and that is deliberate. The annotation would erase
+          the concrete type, and with it Code, Reason, Public and ExitCode — every one
+          of which a consumer reads directly off the sentinel to render a message or
+          exit a process. Without it they are reachable only through a type assertion
+          to a type a consumer cannot name, since internal/kernel/errs is internal.
+          pkg/v1/app/lock, pkg/v1/data/cache and pkg/v1/security/authz all declare theirs this way;
+          this package shipped as the outlier, when it was pkg/v1/entitlement.
+          TestTheSentinelsKeepTheirConcreteType
+          fails the BUILD if the annotation comes back.
+
+          A consumer that only needs ONE distinction needs this one: ErrRosterUnreachable
+          says "cannot decide", and treating it as "decided no" turns an outage into a
+          revocation.
+        doc: ErrLicenseExpired identifies a subject whose own term has closed.
+        name: ErrLicenseExpired
         type: "*errs.Error"
-      - name: ErrKeyMismatch
+      - blockDoc: |-
+          The fourteen sentinels, re-exported so errors.Is answers on them. They are
+          the SAME values core declares, not copies, so a caller may compare across the
+          facade boundary; each also carries the matching Code above, so errs.HasCode
+          and errors.Is are two ways of asking one question.
+
+          None is annotated `error`, and that is deliberate. The annotation would erase
+          the concrete type, and with it Code, Reason, Public and ExitCode — every one
+          of which a consumer reads directly off the sentinel to render a message or
+          exit a process. Without it they are reachable only through a type assertion
+          to a type a consumer cannot name, since internal/kernel/errs is internal.
+          pkg/v1/app/lock, pkg/v1/data/cache and pkg/v1/security/authz all declare theirs this way;
+          this package shipped as the outlier, when it was pkg/v1/entitlement.
+          TestTheSentinelsKeepTheirConcreteType
+          fails the BUILD if the annotation comes back.
+
+          A consumer that only needs ONE distinction needs this one: ErrRosterUnreachable
+          says "cannot decide", and treating it as "decided no" turns an outage into a
+          revocation.
+        doc: ErrKeyMismatch identifies a local key that does not match the published fingerprint.
+        name: ErrKeyMismatch
         type: "*errs.Error"
-      - name: ErrRosterUnreachable
+      - blockDoc: |-
+          The fourteen sentinels, re-exported so errors.Is answers on them. They are
+          the SAME values core declares, not copies, so a caller may compare across the
+          facade boundary; each also carries the matching Code above, so errs.HasCode
+          and errors.Is are two ways of asking one question.
+
+          None is annotated `error`, and that is deliberate. The annotation would erase
+          the concrete type, and with it Code, Reason, Public and ExitCode — every one
+          of which a consumer reads directly off the sentinel to render a message or
+          exit a process. Without it they are reachable only through a type assertion
+          to a type a consumer cannot name, since internal/kernel/errs is internal.
+          pkg/v1/app/lock, pkg/v1/data/cache and pkg/v1/security/authz all declare theirs this way;
+          this package shipped as the outlier, when it was pkg/v1/entitlement.
+          TestTheSentinelsKeepTheirConcreteType
+          fails the BUILD if the annotation comes back.
+
+          A consumer that only needs ONE distinction needs this one: ErrRosterUnreachable
+          says "cannot decide", and treating it as "decided no" turns an outage into a
+          revocation.
+        doc: ErrRosterUnreachable identifies a check that could not decide either way.
+        name: ErrRosterUnreachable
         type: "*errs.Error"
-      - name: ErrAmbiguousLicense
+      - blockDoc: |-
+          The fourteen sentinels, re-exported so errors.Is answers on them. They are
+          the SAME values core declares, not copies, so a caller may compare across the
+          facade boundary; each also carries the matching Code above, so errs.HasCode
+          and errors.Is are two ways of asking one question.
+
+          None is annotated `error`, and that is deliberate. The annotation would erase
+          the concrete type, and with it Code, Reason, Public and ExitCode — every one
+          of which a consumer reads directly off the sentinel to render a message or
+          exit a process. Without it they are reachable only through a type assertion
+          to a type a consumer cannot name, since internal/kernel/errs is internal.
+          pkg/v1/app/lock, pkg/v1/data/cache and pkg/v1/security/authz all declare theirs this way;
+          this package shipped as the outlier, when it was pkg/v1/entitlement.
+          TestTheSentinelsKeepTheirConcreteType
+          fails the BUILD if the annotation comes back.
+
+          A consumer that only needs ONE distinction needs this one: ErrRosterUnreachable
+          says "cannot decide", and treating it as "decided no" turns an outage into a
+          revocation.
+        doc: ErrAmbiguousLicense identifies more than one identity on one machine.
+        name: ErrAmbiguousLicense
         type: "*errs.Error"
-      - name: ErrCIUnverifiable
+      - blockDoc: |-
+          The fourteen sentinels, re-exported so errors.Is answers on them. They are
+          the SAME values core declares, not copies, so a caller may compare across the
+          facade boundary; each also carries the matching Code above, so errs.HasCode
+          and errors.Is are two ways of asking one question.
+
+          None is annotated `error`, and that is deliberate. The annotation would erase
+          the concrete type, and with it Code, Reason, Public and ExitCode — every one
+          of which a consumer reads directly off the sentinel to render a message or
+          exit a process. Without it they are reachable only through a type assertion
+          to a type a consumer cannot name, since internal/kernel/errs is internal.
+          pkg/v1/app/lock, pkg/v1/data/cache and pkg/v1/security/authz all declare theirs this way;
+          this package shipped as the outlier, when it was pkg/v1/entitlement.
+          TestTheSentinelsKeepTheirConcreteType
+          fails the BUILD if the annotation comes back.
+
+          A consumer that only needs ONE distinction needs this one: ErrRosterUnreachable
+          says "cannot decide", and treating it as "decided no" turns an outage into a
+          revocation.
+        doc: ErrCIUnverifiable identifies a CI run whose provenance could not be proven.
+        name: ErrCIUnverifiable
         type: "*errs.Error"
-      - name: ErrCIUnknownKey
+      - blockDoc: |-
+          The fourteen sentinels, re-exported so errors.Is answers on them. They are
+          the SAME values core declares, not copies, so a caller may compare across the
+          facade boundary; each also carries the matching Code above, so errs.HasCode
+          and errors.Is are two ways of asking one question.
+
+          None is annotated `error`, and that is deliberate. The annotation would erase
+          the concrete type, and with it Code, Reason, Public and ExitCode — every one
+          of which a consumer reads directly off the sentinel to render a message or
+          exit a process. Without it they are reachable only through a type assertion
+          to a type a consumer cannot name, since internal/kernel/errs is internal.
+          pkg/v1/app/lock, pkg/v1/data/cache and pkg/v1/security/authz all declare theirs this way;
+          this package shipped as the outlier, when it was pkg/v1/entitlement.
+          TestTheSentinelsKeepTheirConcreteType
+          fails the BUILD if the annotation comes back.
+
+          A consumer that only needs ONE distinction needs this one: ErrRosterUnreachable
+          says "cannot decide", and treating it as "decided no" turns an outage into a
+          revocation.
+        doc: ErrCIUnknownKey identifies a CI token signed by a key the issuer does not publish.
+        name: ErrCIUnknownKey
         type: "*errs.Error"
-      - name: ErrCINotEntitled
+      - blockDoc: |-
+          The fourteen sentinels, re-exported so errors.Is answers on them. They are
+          the SAME values core declares, not copies, so a caller may compare across the
+          facade boundary; each also carries the matching Code above, so errs.HasCode
+          and errors.Is are two ways of asking one question.
+
+          None is annotated `error`, and that is deliberate. The annotation would erase
+          the concrete type, and with it Code, Reason, Public and ExitCode — every one
+          of which a consumer reads directly off the sentinel to render a message or
+          exit a process. Without it they are reachable only through a type assertion
+          to a type a consumer cannot name, since internal/kernel/errs is internal.
+          pkg/v1/app/lock, pkg/v1/data/cache and pkg/v1/security/authz all declare theirs this way;
+          this package shipped as the outlier, when it was pkg/v1/entitlement.
+          TestTheSentinelsKeepTheirConcreteType
+          fails the BUILD if the annotation comes back.
+
+          A consumer that only needs ONE distinction needs this one: ErrRosterUnreachable
+          says "cannot decide", and treating it as "decided no" turns an outage into a
+          revocation.
+        doc: ErrCINotEntitled identifies a CI account the roster does not cover.
+        name: ErrCINotEntitled
         type: "*errs.Error"
-      - name: ErrNoPossession
+      - blockDoc: |-
+          The fourteen sentinels, re-exported so errors.Is answers on them. They are
+          the SAME values core declares, not copies, so a caller may compare across the
+          facade boundary; each also carries the matching Code above, so errs.HasCode
+          and errors.Is are two ways of asking one question.
+
+          None is annotated `error`, and that is deliberate. The annotation would erase
+          the concrete type, and with it Code, Reason, Public and ExitCode — every one
+          of which a consumer reads directly off the sentinel to render a message or
+          exit a process. Without it they are reachable only through a type assertion
+          to a type a consumer cannot name, since internal/kernel/errs is internal.
+          pkg/v1/app/lock, pkg/v1/data/cache and pkg/v1/security/authz all declare theirs this way;
+          this package shipped as the outlier, when it was pkg/v1/entitlement.
+          TestTheSentinelsKeepTheirConcreteType
+          fails the BUILD if the annotation comes back.
+
+          A consumer that only needs ONE distinction needs this one: ErrRosterUnreachable
+          says "cannot decide", and treating it as "decided no" turns an outage into a
+          revocation.
+        doc: ErrNoPossession identifies a holder who could not prove possession.
+        name: ErrNoPossession
         type: "*errs.Error"
-      - name: ErrClockRegressed
+      - blockDoc: |-
+          The fourteen sentinels, re-exported so errors.Is answers on them. They are
+          the SAME values core declares, not copies, so a caller may compare across the
+          facade boundary; each also carries the matching Code above, so errs.HasCode
+          and errors.Is are two ways of asking one question.
+
+          None is annotated `error`, and that is deliberate. The annotation would erase
+          the concrete type, and with it Code, Reason, Public and ExitCode — every one
+          of which a consumer reads directly off the sentinel to render a message or
+          exit a process. Without it they are reachable only through a type assertion
+          to a type a consumer cannot name, since internal/kernel/errs is internal.
+          pkg/v1/app/lock, pkg/v1/data/cache and pkg/v1/security/authz all declare theirs this way;
+          this package shipped as the outlier, when it was pkg/v1/entitlement.
+          TestTheSentinelsKeepTheirConcreteType
+          fails the BUILD if the annotation comes back.
+
+          A consumer that only needs ONE distinction needs this one: ErrRosterUnreachable
+          says "cannot decide", and treating it as "decided no" turns an outage into a
+          revocation.
+        doc: ErrClockRegressed identifies a clock behind the last signed document this machine verified.
+        name: ErrClockRegressed
         type: "*errs.Error"
-      - name: ErrUpdateRequired
+      - blockDoc: |-
+          The fourteen sentinels, re-exported so errors.Is answers on them. They are
+          the SAME values core declares, not copies, so a caller may compare across the
+          facade boundary; each also carries the matching Code above, so errs.HasCode
+          and errors.Is are two ways of asking one question.
+
+          None is annotated `error`, and that is deliberate. The annotation would erase
+          the concrete type, and with it Code, Reason, Public and ExitCode — every one
+          of which a consumer reads directly off the sentinel to render a message or
+          exit a process. Without it they are reachable only through a type assertion
+          to a type a consumer cannot name, since internal/kernel/errs is internal.
+          pkg/v1/app/lock, pkg/v1/data/cache and pkg/v1/security/authz all declare theirs this way;
+          this package shipped as the outlier, when it was pkg/v1/entitlement.
+          TestTheSentinelsKeepTheirConcreteType
+          fails the BUILD if the annotation comes back.
+
+          A consumer that only needs ONE distinction needs this one: ErrRosterUnreachable
+          says "cannot decide", and treating it as "decided no" turns an outage into a
+          revocation.
+        doc: ErrUpdateRequired identifies a build below the floor the roster mandates.
+        name: ErrUpdateRequired
         type: "*errs.Error"
   - codes:
       - const:
@@ -256,11 +832,108 @@ packages:
             value: "0x00_02_23_0F"
         type: errs.Code
     constants:
-      - name: RosterLifetime
+      - doc: |-
+          RosterLifetime bounds how long a verified grant survives without a fresh
+          fetch. It is the single dial of the whole scheme: it caps both how long a
+          revoked subject keeps working and how long a hostile endpoint can replay a
+          genuine roster.
+        name: RosterLifetime
         type: time.Duration
         value: "86400000000000"
+    doc: |-
+      Package entitlement — the error-code range this domain owns (framework/connectors/ssh block).
+
+      Package entitlement is the contract for machine entitlement: turning local
+      key material plus a vendor-signed roster into a grant, or a typed refusal.
+
+      The trust model has exactly one SIGNER: the vendor. What a consuming binary
+      links in is that signer's ed25519 public key — or, while a signing key is
+      being rotated, an ordered list of the keys it will accept, which is a property
+      of the verifier and lives in framework/internal/service/entitlement. Several accepted
+      keys are still one signer: authentication establishes that the vendor issued
+      these bytes and nothing more, so no quorum is being taken. Everything else —
+      the roster, the per-subject keys, the host serving them — is untrusted input. A
+      hostile endpoint can serve whatever it likes; it cannot forge a signature made
+      with the vendor's private half.
+
+      What that anchor cannot do is survive a patched binary. A check running on
+      someone else's machine is removable by definition. This domain stops casual
+      sharing and makes revocation real for cooperative installs; it is not a wall
+      against a determined attacker, and is deliberately not built as if it were.
+
+      # Why Identity is a port
+
+      Proving possession needs key material the user already has, in a format the
+      standard library cannot parse — OpenSSH, via golang.org/x/crypto/ssh, which
+      brings golang.org/x/sys and is banned SDK-wide (ADR 0078). Naming the
+      capability as a port keeps the MECHANISM here, stdlib-only, and puts the one
+      implementation that needs a vendor dependency where a vendor dependency is
+      allowed: the framework's connector module framework/connectors/ssh, which a
+      consumer opts into (ADR 0158).
+
+      A consumer that does not want that dependency supplies its own Identity. That
+      is not a theoretical escape hatch — the product this was versed from does
+      exactly that, keeping its 327 lines of SSH handling rather than pulling the
+      connector's graph for them.
+
+      There is **no registry**. A registry's key would name an identity scheme, and
+      the whole trust chain is anchored to one vendor for one product.
+
+      Package entitlement — the sentinels every implementation of this domain
+      returns.
+
+      Each names a distinct operator situation rather than a generic failure,
+      because callers map them to exit codes and an operator acts on the
+      difference: a revoked subject, an expired window and an unreachable roster
+      need three different responses.
+
+      Package entitlement - the record of a verification that succeeded. A daemon
+      ages against it: memory of a past check must not outlive the roster window,
+      otherwise revocation would never reach a long-running process.
+
+      Package entitlement - where the roster is fetched from. Authority comes from
+      the vendor signature, never from the origin that served the bytes, so the
+      binary is free to ask several places and keep whichever answers.
+
+      Package entitlement - the signed roster: the only statement the binary trusts,
+      and only because the vendor signed it. Origin is irrelevant here; a
+      substituted endpoint can serve any bytes but cannot forge the signature.
     functions:
-      - in:
+      - doc: |-
+          GrantDeadline computes NotAfter from the verification's own lifetime and
+          however many further bounds the caller can name.
+
+          A zero expiry means "not recorded" throughout this package — an absent
+          subject term, or a roster field a predecessor never wrote — and must never
+          be read as "already expired". Zero values are therefore skipped rather than
+          minimised over: otherwise the earliest bound would always be the zero time
+          and every grant would be born dead.
+
+          # Why the bounds are variadic
+
+          Because "a grant may not outlive the document that authorised it" is a rule
+          about however many documents there were, and the CI path has three. It was
+          written as two fixed parameters — the roster's window and the subject's term —
+          which are exactly the two a DEVICE grant rests on. A CI seat rests on a third:
+          the Actions token that proved the run is real, whose own expiry GitHub sets
+          minutes out. ciseat.go therefore bounded the seat by the roster and the
+          account's term and by nothing else, so a grant established by a 30-minute proof
+          survived it by up to a day — the invariant NotAfter's own comment states,
+          contradicted by the one caller that had a document the signature said the least
+          about.
+
+          Variadic rather than a fourth parameter so the two existing call sites compile
+          unchanged and read unchanged; a caller with nothing extra to name passes
+          nothing extra.
+
+          # No skew here, deliberately
+
+          checkTiming allows clockSkew when ADMITTING an Actions token, which is the
+          permissive direction and the right one there: refusing a genuine token over two
+          minutes of drift would break a working runner. Adding the same allowance to a
+          BOUND would run the opposite way — it would extend the grant past the proof —
+          so the bound is the claim as written.
+        in:
           - name: verifiedAt
             type: time.Time
           - name: bounds
@@ -458,15 +1131,41 @@ packages:
             public: a newer version is required
             reason: UPDATE_REQUIRED
     types:
-      - interface:
+      - doc: |-
+          Identity is the machine's half of the proof: which subject this machine
+          claims to be, and evidence that it holds the private key the roster publishes
+          a fingerprint for.
+
+          It is FROZEN at three methods, and the split is what makes the refusals
+          distinguishable. Discover answers "who are we", Fingerprint answers "what do
+          we present", ProvePossession answers "can we back it up" — and a caller that
+          fails the third after passing the second has key material it cannot use,
+          which is a different operator situation from having none at all.
+
+          Frozen means frozen: it is reachable through a pkg/v1 type alias, so ADR 0039
+          binds and ADR 0040 §4 removes the v0 licence from it — the version does not
+          matter, because structural satisfaction breaks downstream implementations at
+          any version. It is extended by a SIBLING, and BoundProver below is the first
+          one.
+        interface:
           methods:
-            - name: Discover
+            - doc: |-
+                Discover returns the subject identifier this machine is enrolled as.
+
+                It refuses rather than choosing when more than one identity is present:
+                picking one silently would make revocation unverifiable, since the
+                operator could not tell which identity was checked.
+              name: Discover
               out:
                 - name: subject
                   type: string
                 - name: err
                   type: error
-            - in:
+            - doc: |-
+                Fingerprint returns the published fingerprint of the subject's public
+                key, in whatever spelling the roster uses. It is compared by byte
+                equality against the roster's entry and never parsed.
+              in:
                 - name: subject
                   type: string
               name: Fingerprint
@@ -475,16 +1174,76 @@ packages:
                   type: string
                 - name: err
                   type: error
-            - in:
+            - doc: |-
+                ProvePossession demonstrates that this machine holds the private half of
+                the key whose fingerprint Fingerprint returned. A nil error is the proof;
+                there is deliberately no value to inspect, because anything returned here
+                would be a second thing to verify.
+
+                It proves possession of whatever material this implementation holds NOW,
+                which is not the same claim as "possession of the key the roster
+                authorised" — nothing the roster said reaches this method. BoundProver is
+                the sibling that carries the missing half; an implementation that can make
+                the stronger claim implements it, and the engine prefers it when present.
+              in:
                 - name: subject
                   type: string
               name: ProvePossession
               out:
                 - type: error
         name: Identity
-      - interface:
+      - doc: |-
+          BoundProver is Identity's sibling for the one claim the three methods cannot
+          make: possession of the key the ROSTER authorised, rather than of whatever
+          this machine holds at the moment it is asked.
+
+          # The gap it closes
+
+          The verification engine asks Fingerprint what this machine presents, compares
+          the answer ITSELF against the roster's entry, and then asks ProvePossession
+          for a proof. The authorised fingerprint never traverses the port, so an
+          implementation cannot bind the proof to it: between the two calls the material
+          may be replaced — a rotation, a mounted volume remounted, a deliberate swap —
+          and the implementation signs with what it finds on the second call. A consumer
+          can DETECT that by remembering the key object across the two calls and
+          refusing a proof with nothing remembered, which is as far as the three methods
+          reach; it cannot be told which key it was supposed to be holding.
+
+          # Why a sibling and not a fourth parameter
+
+          Identity is reachable through a pkg/v1 type alias, so ADR 0039's rule binds
+          and ADR 0040 §4 says the version does not matter: a published interface is
+          extended by a sibling, never by widening, because Go satisfies interfaces
+          STRUCTURALLY and every downstream implementation breaks at compile time with
+          no deprecation window. Widening ProvePossession would be worse than adding a
+          method — it invalidates a method implementers have already written — and it
+          would not even buy the guarantee that tempts it: an implementation can satisfy
+          a two-parameter signature and ignore the second argument, so binding is the
+          implementation's choice under either shape. The sibling buys the same real
+          property and breaks nobody.
+
+          # What its ABSENCE means, stated rather than left to be discovered
+
+          An Identity that does not implement this keeps the three-method behaviour
+          exactly: the engine falls back to ProvePossession and the window between the
+          two calls stays open. That is not a mechanism this package can close from
+          here, and pretending otherwise would be the claim that outruns the code.
+        interface:
           methods:
-            - in:
+            - doc: |-
+                ProvePossessionFor demonstrates that this machine holds the private half
+                of the key whose PUBLISHED fingerprint is authorised — the value the
+                roster records for this subject, in the roster's own spelling.
+
+                A nil error is the proof, for the same reason it is on ProvePossession.
+                An implementation that finds it holds different material refuses with
+                ErrKeyMismatch: that is what "a local key that does not match the
+                published fingerprint" means, so the refusal taxonomy does not grow.
+
+                authorised is compared however the implementation compares fingerprints —
+                byte equality, in the roster's spelling, is what Fingerprint's own
+                contract already requires.
+              in:
                 - name: subject
                 - name: authorised
                   type: string
@@ -492,12 +1251,82 @@ packages:
               out:
                 - type: error
         name: BoundProver
-      - methods:
-          - name: Deadline
+      - doc: |-
+          GrantValue records a verification that succeeded, and how long that
+          verification may be remembered.
+
+          The timestamp alone is not enough to age against, which is the defect this
+          type carried until NotAfter existed. A grant used to expire at
+          VerifiedAt+RosterLifetime and nothing else, so a daemon that happened to
+          verify late in a roster's window kept serving for a further 24 hours after
+          that window closed — up to 47 hours after the vendor last signed anything,
+          in a scheme whose single dial is a 24-hour bound. It outlived the subject's
+          OWN term too: a licence expiring at noon left a daemon that verified at
+          11:59 serving until the following day.
+        methods:
+          - doc: |-
+              Deadline reports the instant this grant stops authorising anything — the
+              EFFECTIVE one, which is not always the NotAfter field.
+
+              # Why the field is not enough
+
+              NotAfter's zero value means "no deadline was computed", and Expired then ages
+              the grant against VerifiedAt+RosterLifetime instead. That fallback lived
+              inside Expired and nowhere else, so a caller reading the FIELD to schedule its
+              next check read the zero instant and had no way to derive the deadline the SDK
+              would actually apply. Its only remaining option was to poll — which is
+              precisely how a grant that expires a second after a check keeps authorising
+              until the next tick, whatever the tick is.
+
+              With the effective instant readable, a consumer can wake AT the deadline
+              rather than sometime after it: arm a timer on Deadline(), or pass it to a
+              context. That is the SDK's whole contribution to the problem, and the rest is
+              stated in Expired's own comment.
+
+              Expired is defined in terms of this method rather than repeating the fallback,
+              because two copies of one rule is how a field and a method come to disagree
+              about when a grant died.
+
+              A POINTER receiver for the same reason Expired has one — see there.
+            name: Deadline
             out:
               - type: time.Time
             recv: pointer
-          - in:
+          - doc: |-
+              Expired reports whether a grant may no longer be relied on. A daemon that
+              cannot refresh must stop trusting its own memory eventually, otherwise
+              revocation would never reach it.
+
+              # Honouring the deadline is the CONSUMER's job, and nothing here enforces it
+
+              This is a value type. Verify computes a grant, hands it back and keeps no
+              reference to it: there is no goroutine, no timer and no callback anywhere in
+              this SDK that revokes anything when Deadline passes, and a process holding an
+              expired grant is not interrupted. Whatever gates work on a grant has to ask.
+
+              So a grant expiring a second after a check keeps authorising until the
+              consumer looks again, and how long that is, is the consumer's tick — not a
+              property of this domain. What the domain owes is a deadline that can be acted
+              on WITHOUT polling, which is what Deadline is for: schedule on it, and the
+              question is asked when the answer changes rather than on a cadence.
+
+              Said here rather than only in an ADR, because a consumer reading this method
+              is exactly the reader who might otherwise assume something upstream is
+              watching the clock for them.
+
+              A POINTER receiver on a read-only method, which is unusual and deliberate:
+              the struct outgrew KTN-VAR-BIGSTRUCT's by-value threshold when Offline was
+              added, and every caller passes this as a METHOD VALUE
+              (`licenseStillValidFrom(svc, refusal, grant.Expired)`) that would otherwise
+              copy the whole struct into the closure on every watchdog tick.
+
+              It is a method-set change and therefore a source-level API change, named here
+              rather than left to be discovered: Expired is no longer in GrantValue's VALUE
+              method set, so a NON-ADDRESSABLE grant — a map entry, a composite literal
+              used inline — stops compiling against it. Every caller in this repository
+              holds an addressable grant, and pkg/license has no consumer outside the
+              module, which is what makes the trade payable; a released SDK would not.
+            in:
               - name: now
                 type: time.Time
             name: Expired
@@ -507,23 +1336,88 @@ packages:
         name: GrantValue
         struct:
           fields:
-            - name: Subject
+            - doc: Subject is the client UUID that was verified.
+              name: Subject
               type: string
-            - name: VerifiedAt
+            - doc: VerifiedAt is when the roster was last successfully authenticated.
+              name: VerifiedAt
               type: time.Time
-            - name: NotAfter
+            - doc: |-
+                NotAfter is the instant this grant stops authorising anything: the
+                EARLIEST of the verification's own lifetime and every document the
+                verification rested on — the roster's expiry, the subject's term, and
+                for a CI seat the expiry of the Actions token that proved the run.
+                Each bounds something different, so the tightest is the only correct
+                answer — a grant may not outlive the document that authorised it.
+
+                The zero value means "no deadline was computed", which is how a grant
+                seeded from a bare timestamp behaves: serve.go does exactly that at
+                start-up, from the root gate's verification, with no roster in scope.
+                The fallback is the verification's own lifetime rather than reading a
+                zero deadline as already-past, which would refuse a daemon at the very
+                instant it starts.
+
+                Which is why a caller that wants to ACT on the deadline should read
+                Deadline() and not this field: the method resolves that fallback and the
+                field cannot. Honouring either is the consumer's job — nothing in this
+                SDK revokes anything when the instant passes. See Expired.
+              name: NotAfter
               type: time.Time
-            - name: Offline
+            - doc: |-
+                Offline records that no origin answered and the decision rested on the
+                last bundle this machine authenticated.
+
+                It changes nothing about the grant's authority: an offline roster
+                passed the identical signature and window checks, and NotAfter above
+                already bounds it by that roster's own expiry. It exists so the fact can
+                be SAID. A binary quietly running on a copy of a document it can no
+                longer fetch is the one state where "it worked" and "it is still true"
+                come apart, and the operator is the only party who can act on that.
+              name: Offline
               type: bool
-      - name: OriginValue
+      - doc: |-
+          OriginValue is one publication point for the roster pair.
+
+          It carries no trust of its own: the vendor signature over the bytes is
+          what authorises anything, so an origin is only ever an availability
+          choice. That is precisely why the list can be extended freely — a hostile
+          entry gains nothing, and a dead one is skipped.
+        name: OriginValue
         struct:
           fields:
-            - name: Name
+            - doc: |-
+                Name identifies the origin in diagnostics. It is not part of the
+                trust decision — nothing here is — but an operator staring at a
+                refusal needs to know which endpoints were tried.
+              name: Name
               type: string
-            - name: BundleURL
+            - doc: |-
+                BundleURL serves the signed bundle: roster and signature in one
+                document. ONE url, not two, because two objects cannot be fetched
+                atomically — see BundleValue for the five-minute cache window that made
+                a correct client refuse a correct roster.
+              name: BundleURL
               type: string
-      - methods:
-          - in:
+      - doc: |-
+          RosterValue is the signed statement of who may run the linter. It carries
+          no secret: every field is publishable, which is why it can live in a public
+          repository. Authority comes from the detached signature, never from the
+          origin that served the bytes.
+        methods:
+          - doc: |-
+              CIEntitlementFor returns what the roster grants an account's CI runs.
+
+              Absence is not an error worth distinguishing from a refusal here: either
+              way the caller falls back to the device path, which is what an
+              unentitled CI run should do.
+
+              All four refusals render the SAME sentence, which is deliberate: a refusal
+              naming the account it refused hands the party being kept out a way to read
+              the roster one probe at a time. Which account, and which deadline, travel as
+              FIELDS — errs.FieldsOf reaches them, err.Error() does not — and the condition
+              field is what keeps "no roster at all" distinguishable from "this account has
+              no seat" for the operator who is entitled to the difference.
+            in:
               - name: accountID
                 type: string
               - name: now
@@ -535,7 +1429,24 @@ packages:
               - name: err
                 type: error
             recv: pointer
-          - in:
+          - doc: |-
+              SubjectFor returns the roster's record for a subject. A missing entry
+              reports ErrRevoked, but the roster is a stateless snapshot with no
+              history: absence is exactly how a withdrawn licence looks, and it is
+              indistinguishable here from a subject whose enrolment was never approved
+              in the first place. Callers surfacing this to a human must name both
+              possibilities rather than assert the more alarming one as fact.
+
+              The refused subject travels as a FIELD and not in the sentence. A revocation
+              that quotes back the uuid it refused confirms that uuid to whoever presented
+              it, which is a thing a refusal has no business doing; errs.FieldsOf still
+              hands it to the operator's log.
+
+              It is total on a nil receiver, which its sibling CIEntitlementFor has always
+              been. Reachable through the Roster alias in framework/entitlement, where a
+              consumer holding a nil roster got a panic from one method and a refusal from
+              the other.
+            in:
               - name: uuid
                 type: string
             name: SubjectFor
@@ -548,37 +1459,111 @@ packages:
         name: RosterValue
         struct:
           fields:
-            - name: IssuedAt
+            - doc: IssuedAt is when the vendor signed this roster.
+              name: IssuedAt
               tag: json:"iat"
               type: time.Time
-            - name: ExpiresAt
+            - doc: |-
+                ExpiresAt closes the roster's own signing-freshness window. Past it
+                the roster is refused even though its signature still verifies. This
+                bounds replay and revocation latency for the roster as a whole; it is
+                independent of any one subject's ExpiresAt below.
+              name: ExpiresAt
               tag: json:"exp"
               type: time.Time
-            - name: Subjects
+            - doc: Subjects maps a client UUID to what the roster records for it.
+              name: Subjects
               tag: json:"subjects"
               type: map[string]SubjectValue
-            - name: RequiredVersion
+            - doc: |-
+                RequiredVersion is the lowest binary version allowed to run, as a
+                SemVer tag ("v1.5.14"). Empty means no floor, which is how a roster
+                published before this field existed behaves — absence must not lock
+                out every client that predates it.
+
+                It lives HERE, in the signed roster, rather than being read from a
+                release API, and that placement is the whole design. The roster is
+                already fetched on every cold start and already authenticated against
+                the compiled-in anchor, so a mandatory update inherits both properties
+                for free: it cannot be skipped by staying offline (the fetch is
+                mandatory), and it cannot be forged by redirecting the endpoint (the
+                signature is checked first). A version read from an unauthenticated
+                API would be defeated by one line in /etc/hosts.
+              name: RequiredVersion
               tag: json:"minv,omitempty"
               type: string
-            - name: CIAccounts
+            - doc: |-
+                CIAccounts maps a GitHub account's NUMERIC id to what the roster grants
+                its CI runs. A run inside that account's Actions may be authorised
+                without spending one of the licence's device seats.
+
+                Keyed by id and never by login: a login can be renamed, and a released
+                one can be claimed by somebody else, so matching on the name would turn
+                a freed handle into a way in.
+
+                Absent for a roster that grants no CI entitlement, which is also how
+                every roster published before this field existed behaves — absence must
+                not be read as anything but "no CI seat".
+              name: CIAccounts
               tag: json:"ci,omitempty"
               type: map[string]CIEntitlementValue
-            - name: CIRelaxed
+            - doc: |-
+                CIRelaxed restores the historical fall-through: inside GitHub Actions a
+                failed CI seat stops being a refusal and the device path answers next.
+
+                The DEFAULT is the strict direction, which is the inversion this field
+                records. A CI seat used to be tried first and every failure swallowed,
+                so a device key dropped onto a runner bought unlimited CI without any CI
+                entitlement — the one hole a licence scheme aimed at CI cannot leave
+                open. Requiring the seat is now what happens unless this says otherwise.
+
+                It lives in the signed roster, and that placement is the whole design.
+                "A run in Actions need not prove it is one" is a statement only the
+                vendor is entitled to make, and it has to travel somewhere the party
+                being checked cannot rewrite — a flag or an environment variable would
+                be set by that very party. Note the direction: this field can only
+                RELAX, so forging it is the one thing an attacker would want and the one
+                thing the signature prevents; absence, which is what any tampering
+                produces, is the strict reading.
+
+                The strictness applies only when InCI reports both runner variables
+                present. A laptop never had a seat to prove, and refusing one would be a
+                far worse defect than the hole this closes.
+              name: CIRelaxed
               tag: json:"cilax,omitempty"
               type: bool
-      - name: CIEntitlementValue
+      - doc: CIEntitlementValue is what the roster grants one account's CI.
+        name: CIEntitlementValue
         struct:
           fields:
-            - name: ExpiresAt
+            - doc: |-
+                ExpiresAt closes the entitlement, and is the licence's own term so CI
+                stops exactly when the devices do. The zero value means no term was
+                recorded, treated as no expiry rather than an instantly-closed one —
+                the same rule SubjectValue follows, for the same reason.
+              name: ExpiresAt
               tag: json:"exp"
               type: time.Time
-      - name: SubjectValue
+      - doc: |-
+          SubjectValue is one enrolled client's entry: the fingerprint that proves
+          which key is theirs, and the date past which their own entitlement closes
+          regardless of how fresh the roster itself is.
+        name: SubjectValue
         struct:
           fields:
-            - name: Fingerprint
+            - doc: |-
+                Fingerprint is the SHA256 fingerprint of the subject's public key.
+                Recording the fingerprint rather than the key itself keeps the roster
+                small and makes the comparison exact.
+              name: Fingerprint
               tag: json:"fp"
               type: string
-            - name: ExpiresAt
+            - doc: |-
+                ExpiresAt closes this subject's individual term. The zero value means
+                no term was recorded, which is treated as no expiry rather than an
+                instantly-closed one — a subject published before this field existed
+                must not be locked out by its mere absence.
+              name: ExpiresAt
               tag: json:"exp"
               type: time.Time
   - codes:
@@ -597,17 +1582,320 @@ packages:
             value: "0x00_03_43_01"
         type: errs.Code
     constants:
-      - name: ActionsJWKSURL
+      - doc: |-
+          ActionsJWKSURL is where GitHub publishes the keys. Fixed, https, and never
+          taken from a token: letting the thing being verified choose its own key
+          source is the whole trust decision handed to the attacker.
+        name: ActionsJWKSURL
         type: string
         value: "\"https://token.actions.githubusercontent.com/.well-known/jwks\""
-      - name: ActionsIssuer
+      - doc: ActionsIssuer is the only issuer whose tokens mean anything here.
+        name: ActionsIssuer
         type: string
         value: "\"https://token.actions.githubusercontent.com\""
-      - name: DefaultActionsAudience
+      - doc: |-
+          DefaultActionsAudience is the audience a product that names none falls back
+          to. A product SHOULD set its own: an audience shared between products lets a
+          token minted for one satisfy the other's gate.
+
+          A dedicated audience matters: a token minted for some other service — a
+          cloud provider, a registry — must not be replayable here, and `aud` is what
+          keeps the two apart. It is chosen by us, not by the caller, precisely so a
+          workflow cannot request a token this verifier will accept for a purpose it
+          never agreed to.
+        name: DefaultActionsAudience
         type: string
         value: "\"kitsunium-sdk-entitlement\""
+    doc: |-
+      Package entitlement — the trust anchors this verifier accepts, and why there
+      is more than one of them.
+
+      # The rotation that had no in-band path
+
+      One anchor is one key with no way out. An installation whose anchor must
+      change — because the vendor's signing key is being retired, or because it was
+      compromised — had no path in band: rosters signed by a new key B are refused
+      against the anchor A the binary links in, BEFORE anything reads the version
+      floor that would have told it to upgrade; and a release signed by B is refused
+      by the very installation that needs it. Blocked from both sides, with the only
+      remaining route out of band — an operator fetching a binary by hand.
+
+      Accepting an ORDERED LIST of anchors is what opens that path: publish B, and
+      the installations carrying {A, B} take it while those carrying only {A} keep
+      reading A's rosters until they are updated. Neither side has to be updated
+      first, which is the whole of what rotation needs.
+
+      # The tension, stated rather than hidden
+
+      Every anchor on the list is a key whose compromise is ACCEPTED for as long as
+      it stays there. A list is therefore strictly more surface than a single key,
+      and the mitigation is not a mechanism — it is that the list is ORDERED, BOUNDED
+      at maxAnchors, and decided at BUILD time. Nothing at runtime can add to it: no
+      roster field, no environment variable, no cache file. A compromised key leaves
+      the list the way it entered — by shipping a build without it — and the bound is
+      what keeps that a decision somebody has to make rather than a slot that is
+      always free.
+
+      Package entitlement - the published bundle: roster and signature in ONE
+      document, because two documents cannot be fetched atomically.
+
+      Package entitlement - the offline fallback: re-presenting a roster this machine
+      already authenticated, under exactly the freshness rules that would apply to
+      the same bytes coming off the wire.
+
+      This reverses half of a documented decision, so it states which half.
+      Service used to hold no cache at all, on the grounds that "a disk cache able
+      to authorize would let a frozen file (or a frozen clock) keep a revoked
+      subject running forever". The frozen FILE is answered here and was never the
+      risk it looked like: the cached bytes are the vendor's own signed bundle,
+      they go back through ParseBundle on every read, and coreent.ParseRoster refuses a
+      window wider than coreent.RosterLifetime, one that has not opened, and one that has
+      closed. A frozen file therefore stops authorising at its own ExpiresAt —
+      which is the bound errors.go already advertises for coreent.ErrRosterStale ("it
+      bounds how long a revoked client keeps working offline"), a sentence that
+      described nothing until this file existed.
+
+      The frozen CLOCK is NOT answered, and no local mechanism can answer it. Every
+      source of time an offline process can read — the system clock, file mtimes,
+      a monotonic counter that dies at reboot — belongs to the party being checked.
+      It was not answered before this file either: a captured bundle served from a
+      local origin, behind a trust store the holder controls, with the clock parked
+      inside its window, ran the binary indefinitely without any cache. What this
+      file changes for such a holder is the effort, not the outcome; what it
+      changes for an honest one is that a laptop off the network keeps working
+      until the last roster it saw expires.
+
+      Package entitlement - exclusion over the cache directory, which is the one
+      thing write-then-rename does not provide.
+
+      Renaming a staged file over an installed one is atomic for a READER: nobody
+      ever observes half a bundle at the name they look for. It says nothing about
+      two WRITERS, and the ratchet is not a write — it is a read, a comparison and
+      a write, and the comparison is only worth anything if nothing moves between
+      it and the write it guards.
+
+      The exclusion is also what lets a refresh land on Windows. There, replacing
+      a file another handle holds open is refused, and every file Go opens is held
+      that way: syscall.Open asks for FILE_SHARE_READ|FILE_SHARE_WRITE and never
+      FILE_SHARE_DELETE. Keeping readers and the writer off the bundle at the same
+      time removes the collision rather than retrying past it. Sharing DELETE from
+      the read side is NOT an alternative: measured on windows-latest, MoveFileEx
+      still refuses a destination held with FILE_SHARE_DELETE — see
+      Test_windowsRenameOverAnOpenDestination, which asserts all three share modes
+      on a real kernel, and ADR 0079's Deferred section for what is still open.
+
+      Package entitlement - the read side of the cache guard where the kernel
+      already provides what the guard would buy.
+
+      Package entitlement - the read side of the cache guard where the kernel
+      does not provide it, and a reader is what breaks a writer.
+
+      Package entitlement - obtaining the proof that a run is CI.
+
+      The token itself is fetched from the runner, which means the URL and the
+      bearer credential both arrive as environment variables — attacker-controlled
+      input by the same standard as everything else this package reads. They are
+      validated before use rather than trusted because of where they came from.
+
+      Package entitlement - authorising a CI run instead of a device.
+
+      A proven CI run costs no device seat, so it is tried before the device path.
+      Every failure here is silent and falls through: not being in CI, having no
+      token, not being covered are all ordinary situations, and the device check
+      is what answers next. Only a device failure is ever reported to a human,
+      because only a device failure is something they can act on.
+
+      Package entitlement — the crypto domain's operations this engine uses: a
+      signature check and two digests, asked through pkg/v1 rather than crypto/*
+      (ADR 0158 §2). RS256, which the crypto domain has no scheme for, is not here:
+      it is oidc.go's, and its doc comment says why it stays local.
+
+      Package entitlement — the one error code this IMPLEMENTATION owns and the
+      sentinel that carries it, as opposed to the fifteen the CONTRACT declares in
+      framework/internal/core/entitlement.
+
+      The split is the same one ADR 0079 drew through the domain: core names the
+      operator situations every implementation of the port must be able to report —
+      revoked, expired, unreachable, no possession — and this range names the
+      failures that exist only because this engine has a cache, a network and a
+      filesystem. A caller matching on the contract's codes is unaffected by
+      anything declared here.
+
+      The code and its sentinel share a file rather than the codes.go / errors.go
+      pair the larger service packages use: with exactly one of each, splitting
+      them puts a two-member group across two files and nothing else in either,
+      which is what KTN-STRUCT-PARTITION is for.
+
+      Registered in design/sdk.yaml's codes.ranges, which kit writes into
+      codeRangeOwners (ADR 0035, ADR 0164), and in //:audit_sources, so a
+      code declared here that reaches into another package's range fails the build
+      rather than passing quietly.
+
+      The Public below is wire-safe and names no path: the public half is the one
+      documented safe to put in a response body, and every input this package has
+      is a publication endpoint, an untrusted document or a directory on somebody's
+      disk. Where it happened lives in Private and in Fields, and diagnose renders
+      them for the one place here that is a log rather than a wire.
+
+      Package entitlement - refusing a JSON document that names one member twice.
+
+      encoding/json accepts {"a":1,"a":2} and keeps the LAST value, silently. The
+      roster's signature covers the RAW bytes and is verified before any decoding,
+      so this is not a forgery a third party can mount: what it is, is a divergence
+      between the party that PUBLISHED a document and the party that READS it. Two
+      readers of one byte-identical, correctly signed payload — one keeping the
+      first member, one keeping the last — hold different rosters and can both
+      prove the vendor signed what they hold.
+
+      Refusing is the only reading that cannot contradict anybody. RFC 8725 §2.6
+      states the same rule for the JWT case.
+
+      It is not pkg/v1/data/codec/strictjson, although ADR 0158 §2 sends JSON there and
+      strictjson refuses a duplicate name too. strictjson also refuses every member
+      its target does not declare — ADR 0102's one reading, with no mode to relax
+      it — and the four documents read here must ignore one: RFC 7517 §4 for a JWK
+      member, RFC 7519 §4 for a claim, and a signed roster an older client still
+      has to read once the vendor adds a field. Measured: a JWK carrying a member
+      its decoding type does not declare is refused MEMBER_UNKNOWN by strictjson.
+
+      Package entitlement - the published keys GitHub signs its OIDC tokens with.
+
+      Unlike the roster, this set carries no vendor signature: it is authenticated
+      by TLS to a fixed host and nothing else. That is weaker, and it is why a
+      token verified against it grants only a free CI seat — never a licence. The
+      worst a substituted JWKS can do is hand out seats it should not; it cannot
+      make an unlicensed machine licensed, because the device path does not
+      consult it at all.
+
+      Package entitlement - proving a run is CI, rather than taking its word for it.
+
+      A CI seat is free, so "am I in CI?" becomes a question worth lying about.
+      Every environment variable that answers it — CI, GITHUB_ACTIONS, the absence
+      of a TTY, the hostname — is one `export` away from being whatever the caller
+      wants, so granting anything on that basis makes the device quota decorative.
+
+      GitHub Actions can answer it properly. A workflow granted `id-token: write`
+      can exchange two runner-injected values for a JWT signed by GitHub, whose
+      claims name the repository and its owner. The request token is an ephemeral
+      runner secret: someone outside Actions cannot obtain one, and nobody can
+      forge the signature without GitHub's private key.
+
+      What this does NOT prove is that the process holding the token is the job it
+      was minted for. A token exfiltrated from a legitimate run stays usable off-CI
+      until it expires. Closing that needs a server-side nonce, which the offline
+      verification model rules out, so the residue is accepted and stated.
+
+      Stated as what it IS, which is not what this comment used to claim. "The
+      exposure is one free seat" was never demonstrated and is not true. A short
+      token bounds the DURATION a stolen proof keeps working; it says nothing about
+      the NUMBER of processes that can present it at once. Nothing ties a token to a
+      consumer: VerifyActionsToken is pure and offline, it keeps no record of what it
+      has already admitted, and two verifiers could not share one if it did. So one
+      leaked token satisfies every verifier it reaches, all of them at the same time,
+      for as long as it is valid.
+
+      The honest bound is ONE FREE SEAT PER VERIFIER FOR UP TO 32 MINUTES:
+      maxTokenLifetime (30 min) is the widest window a token may claim, clockSkew
+      (2 min) is what checkTiming allows on top when admitting one, and their sum is
+      how long after minting a stolen token still verifies. What makes that a bound
+      rather than a sentence is ciseat.go handing the token's own expiry to
+      coreent.GrantDeadline — without it the GRANT outlived the proof by up to a day,
+      and the duration this paragraph names described nothing at all.
+
+      Package entitlement — the product: which vendor's roster this binary trusts,
+      and the names its artefacts carry.
+
+      Package entitlement — parsing and authenticating a published roster.
+
+      The signature check lives HERE rather than with the value it produces: core
+      declares what a roster IS, and verifying one is a mechanism with a
+      cryptographic dependency and a freshness policy.
+
+      Package entitlement - Roughtime: an Ed25519-signed statement of the current time,
+      bound to a nonce this process just drew.
+
+      What it is FOR, stated narrowly because the honest scope is narrow. The clock
+      ratchet in cache.go catches a clock moving backwards past vendor-signed
+      evidence; it cannot catch a clock that is simply wrong in a direction the
+      ratchet never sees, and its resolution is the roster's publication interval.
+      A signed timestamp bound to a fresh nonce answers both, and it is the only
+      shape that does: an unsigned source (an NTP reply, an HTTPS Date header) is
+      forged by anyone on the path, and a signed source without a nonce is replayed
+      from a capture.
+
+      What it is NOT. It needs the network, so it contributes nothing in the case
+      the offline grace window exists for — and an adversary who can substitute an
+      origin can also drop UDP to a nonstandard port, which is the entire cost of
+      evading it. It is therefore ADVISORY: unreachable or unverifiable means no
+      signal and the verification proceeds, because refusing a legitimate user
+      whose network blocks port 2002 would trade a real cost for a defence that
+      attacker never has to face.
+
+      It also never advances the ratchet, and that restriction is load-bearing. A
+      response this package accepted in error could otherwise pin the high-water
+      mark into the future and refuse the machine permanently. The only thing a
+      Roughtime answer can do is refuse a clock that disagrees with it NOW.
+
+      # Interoperability is unverified
+
+      The constants below are taken from the Roughtime draft, and this client has
+      never completed a handshake with a live server: UDP/2002 is filtered on the
+      network this was written on, and three independent servers were probed with
+      both protocol variants for a total of zero replies. The verifier is tested
+      against a server fixture in this package, which proves it is self-consistent
+      and NOT that it speaks the same dialect as Cloudflare or Netnod.
+
+      RoughtimeServers is empty in committed source for exactly that reason, in the
+      same spirit as vendorPublicKeyB64: the mechanism ships, the anchor does not.
+      Populating it is a deliberate act by somebody who has watched this client
+      verify a real response, and until then every path here is inert.
+
+      Package entitlement - verifying a Roughtime answer.
+
+      Three signatures and a proof, in an order chosen so nothing downstream runs
+      on bytes upstream has not vouched for: the long-term key signs a delegation,
+      the delegated key signs the response, the response commits to a Merkle root,
+      and the root is shown to contain the nonce this process drew a moment ago.
+      Drop any one of the four and the answer becomes replayable, forgeable, or
+      about somebody else's request.
+
+      Package entitlement - the Roughtime tagged-message encoding.
+
+      Split from roughtime.go because it is pure parsing of untrusted bytes and
+      nothing else: every function here reads a length or an offset that a hostile
+      server chose, so every one of them bounds-checks before it indexes. Keeping
+      that apart from the signature checks makes it possible to read either half
+      without holding the other in your head.
+
+      Package entitlement - orchestration: turn local key material plus a signed
+      roster into a grant, or refuse. The fetch is attempted on every cold
+      verification and the only thing on disk allowed to stand in for it is a
+      bundle this machine already authenticated, read back through the same
+      signature and freshness checks — never a decision, always the same document.
+
+      Package entitlement - the mandatory-update floor. The roster says which
+      version is the lowest allowed to run; this decides whether the binary
+      asking is above it.
+
+      Package entitlement — the three shapes every error in this package is built
+      with, so the choice at a call site is which sentinel rather than which
+      spelling.
+
+      The split between the first two is whether this package DECIDED the failure
+      or was TOLD about one. A decision has no cause to carry — nothing failed, a
+      rule was applied to a document — and the sentinel itself is the whole of it.
+      A report from outside has a cause that must survive, because
+      errors.Is(err, fs.ErrNotExist) and the text the operating system wrote are
+      the two things a wrapper most often destroys.
+
+      The third, annotate, adds a field to an error whose identity belongs to
+      somebody else.
     functions:
-      - in:
+      - doc: |-
+          ParseBundle decodes a published bundle and authenticates the roster inside
+          it. It is the only entry point production uses; ParseRoster remains for
+          callers that already hold the two byte slices.
+        in:
           - name: raw
             type: "[]byte"
           - name: vendor
@@ -620,10 +1908,22 @@ packages:
             type: "*coreent.RosterValue"
           - name: err
             type: error
-      - name: InCI
+      - doc: |-
+          InCI reports whether this process can even attempt to prove it is a CI run.
+
+          It is deliberately NOT an entitlement check: both variables being present
+          means only that a token could be requested. Anyone can set them, which is
+          exactly why proving anything requires the signature that follows.
+        name: InCI
         out:
           - type: bool
-      - in:
+      - doc: |-
+          RequestActionsToken exchanges the runner's credentials for an OIDC token.
+
+          The audience is ours and is set here rather than taken from anywhere: a
+          workflow must not be able to ask for a token this verifier will then accept
+          for a purpose it never agreed to.
+        in:
           - name: get
             type: BearerFetch
           - name: audience
@@ -634,7 +1934,21 @@ packages:
             type: string
           - name: err
             type: error
-      - in:
+      - doc: |-
+          DefaultBearerFetch is the transport the mint request should use.
+
+          It refuses redirects outright. checkTokenURL vouches for the URL it is
+          GIVEN, and a redirect is a second destination nobody checked: Go's default
+          client decides whether to forward an Authorization header by comparing
+          HOSTS, not schemes, so a same-host https→http redirect would put the
+          runner's credential on the wire in plaintext. There is no legitimate
+          redirect on this endpoint, so the safe answer and the correct one coincide.
+
+          It builds a net/http client over http.DefaultTransport rather than reaching
+          for pkg/v1/net/client: the guarded transport ignores HTTP(S)_PROXY, which a
+          self-hosted runner may depend on, and its configuration documents no way to
+          follow no redirect at all — a zero MaxRedirects is its default of three.
+        in:
           - name: url
           - name: bearer
             type: string
@@ -644,7 +1958,18 @@ packages:
             type: "*http.Response"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          VerifyCI proves this run is CI for an entitled account, or explains why not.
+
+          keys are the published JWKS entries; roster is the already-authenticated
+          roster. Both are passed in so this stays a pure decision: the caller owns
+          the fetching, and every refusal here is a property of the token or of the
+          roster rather than of the network.
+
+          audience is the product's own OIDC audience. It is a parameter rather than a
+          constant because an audience shared between two products lets a token minted
+          for one satisfy the other's gate — see ProductValue.CIAudience.
+        in:
           - name: get
             type: BearerFetch
           - name: keys
@@ -661,7 +1986,15 @@ packages:
             type: "*ActionsClaimsValue"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          ParseJWKS decodes a key set and builds the usable RSA keys from it.
+
+          Unusable entries are skipped rather than fatal: GitHub may publish a key
+          type or use this package does not verify, and refusing the whole set over
+          one of them would take down every CI seat for a reason unrelated to any of
+          them. A set with NO usable key is an error, because that is
+          indistinguishable from having no keys at all.
+        in:
           - name: raw
             type: "[]byte"
         name: ParseJWKS
@@ -670,7 +2003,20 @@ packages:
             type: map[string]*rsa.PublicKey
           - name: err
             type: error
-      - in:
+      - doc: |-
+          VerifyActionsToken authenticates a GitHub Actions OIDC token and returns what
+          it asserts.
+
+          keys are the JWKS entries fetched from GitHub. Passing them in rather than
+          fetching here keeps this function offline and total: every refusal below is
+          a property of the token, so a test can cover them without a network, and the
+          fetch's own failure modes stay where the other network code lives.
+
+          The order is deliberate: structure, then algorithm, then signature, then
+          claims. Nothing about the payload is trusted until the signature over it has
+          verified — reading a claim first and acting on it is how a forged token gets
+          to choose what it is checked against.
+        in:
           - name: raw
             type: string
           - name: keys
@@ -685,7 +2031,11 @@ packages:
             type: "*ActionsClaimsValue"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          ParseRoster decodes and authenticates a roster. Signature verification runs
+          before any field is trusted, and `now` is passed in rather than read from
+          the clock so callers can test the boundary.
+        in:
           - name: raw
           - name: sig
             type: "[]byte"
@@ -699,7 +2049,13 @@ packages:
             type: "*coreent.RosterValue"
           - name: err
             type: error
-      - in:
+      - doc: |-
+          QueryRoughtime asks one server what time it is and verifies the answer.
+
+          The nonce is drawn here rather than taken from the caller: freshness is the
+          only thing separating this from a replayed capture, and a caller that could
+          supply the nonce could supply yesterday's.
+        in:
           - name: server
             type: RoughtimeServerValue
         name: QueryRoughtime
@@ -710,7 +2066,14 @@ packages:
             type: time.Duration
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NewService builds a verifier over the caller's ssh directory.
+
+          One anchor, which is the single-key form every caller had before rotation was
+          possible: it is the one-element list and not a second representation, so no
+          path in this package can disagree with the multi-anchor one about what a
+          single key means.
+        in:
           - name: identity
             type: coreent.Identity
           - name: vendor
@@ -720,7 +2083,15 @@ packages:
         name: NewService
         out:
           - type: "*Service"
-      - in:
+      - doc: |-
+          NewServiceWithAnchors builds a verifier that accepts several vendor keys, in
+          the order given.
+
+          This is what a build in the middle of a key rotation links in: the key being
+          retired and the key replacing it, so rosters signed by either are authentic
+          here while installations carrying only one of them keep working. See anchors.go
+          for the rotation this opens and for the surface it costs.
+        in:
           - name: identity
             type: coreent.Identity
           - name: anchors
@@ -730,7 +2101,8 @@ packages:
         name: NewServiceWithAnchors
         out:
           - type: "*Service"
-      - in:
+      - doc: NewServiceWithGetter builds a verifier over an injected getter.
+        in:
           - name: client
             type: Getter
           - name: identity
@@ -742,7 +2114,12 @@ packages:
         name: NewServiceWithGetter
         out:
           - type: "*Service"
-      - in:
+      - doc: |-
+          NewServiceWithOrigins builds a verifier over an injected getter and an
+          explicit origin list, so a test can exercise the fallback order — which
+          origin wins, and what happens when the first few are unusable — without
+          naming production endpoints.
+        in:
           - name: client
             type: Getter
           - name: identity
@@ -754,14 +2131,52 @@ packages:
         name: NewServiceWithOrigins
         out:
           - type: "*Service"
-      - in:
+      - doc: |-
+          RequiresUpdate reports whether `current` is below the roster's floor.
+
+          The comparison is SemVer, not string ordering: "v1.5.9" sorts after
+          "v1.5.14" lexically, which would let exactly the builds a floor is meant
+          to retire keep running.
+
+          Two cases deliberately do NOT require an update:
+
+            - No floor recorded. A roster published before this field existed must
+              not lock out every client that predates it.
+            - A binary NEWER than the floor. A release candidate under test, or a
+              mirror that was rolled back, must keep working — the updater only ever
+              moves forward, so refusing a newer build would leave it with no way
+              out at all.
+
+          "Cannot be ordered" is NOT one case but two, and they fail in OPPOSITE
+          directions. Treating them alike is what made the floor optional:
+
+            - An unparseable FLOOR fails OPEN. A typo in the roster is the vendor's
+              mistake, and bricking every client in the field over it would be far
+              worse than a missed upgrade prompt. The licence check itself is
+              unaffected.
+            - An unparseable, absent or unstamped CURRENT fails CLOSED. "dev" used to
+              pass here on the grounds that a source build "carries no anchor either"
+              — true of the ordinary developer loop, and irrelevant to the case that
+              matters: a build that DOES carry an anchor and reports "dev" satisfied
+              the licence check while ignoring the floor entirely. The same held for
+              a caller that simply never called WithVersion, which is one forgotten
+              method call away and was already true of `license status`.
+
+          The asymmetry is the point. A binary cannot demonstrate it is at or above
+          a bar it cannot name, and the action that resolves it — install a published
+          build — is precisely what coreent.ErrUpdateRequired already asks for. The cost is
+          stated where it is paid: an anchored build whose version stamp failed is
+          refused, and the ordinary unanchored developer loop never reaches this
+          function at all because enforceLicense returns before Verify is called.
+        in:
           - name: current
           - name: floor
             type: string
         name: RequiresUpdate
         out:
           - type: bool
-      - in:
+      - doc: UpdateRefusal builds the error a caller reports when the floor is not met.
+        in:
           - name: current
           - name: floor
             type: string
@@ -792,118 +2207,308 @@ packages:
             public: the offline entitlement cache could not be written
             reason: CACHE_UNWRITABLE
     types:
-      - name: BundleValue
+      - doc: |-
+          BundleValue is what a publication point actually serves: the roster's exact
+          bytes and the vendor's signature over them, in a single object.
+
+          It exists because the roster and its detached signature used to be two
+          files, and two files cannot be fetched atomically. raw.githubusercontent.com
+          caches each object independently with max-age=300, so for up to five minutes
+          after every re-signature a client could receive a NEW signature over an OLD
+          roster — measured on the live endpoints, not hypothesised. That mismatch is
+          indistinguishable from forgery, so the client refused with the most alarming
+          error the scheme has (coreent.ErrRosterUnsigned, the spoofing case) while nothing
+          was wrong. With hourly signing that is roughly 8% of all wall-clock time.
+
+          One object cannot desynchronise with itself. It also halves the cold-start
+          cost, since there is now one round trip instead of two.
+        name: BundleValue
         struct:
           fields:
-            - name: Payload
+            - doc: |-
+                Payload is the roster document, base64. Carrying the bytes rather than
+                a nested object is what keeps the signature verifiable: it covers this
+                exact byte sequence, and re-serialising a decoded struct would not
+                reproduce it.
+              name: Payload
               tag: json:"payload"
               type: string
-            - name: Signature
+            - doc: |-
+                Signature is the vendor's detached ed25519 signature over the decoded
+                payload, base64.
+              name: Signature
               tag: json:"sig"
               type: string
-      - name: JWKValue
+      - doc: |-
+          JWKValue is one published signing key, in the JWK shape.
+
+          Only the fields needed to rebuild an RSA public key and to decide whether it
+          may verify a signature are declared. Anything else GitHub publishes is
+          ignored on purpose: a field that is not read cannot be relied on by
+          accident.
+        name: JWKValue
         struct:
           fields:
-            - name: KeyType
+            - doc: KeyType must be RSA for anything this package can verify.
+              name: KeyType
               tag: json:"kty"
               type: string
-            - name: KeyID
+            - doc: KeyID is what a token's `kid` header selects.
+              name: KeyID
               tag: json:"kid"
               type: string
-            - name: Use
+            - doc: |-
+                Use, when present, must be "sig": a key published for encryption is
+                being repurposed if it verifies signatures.
+              name: Use
               tag: json:"use"
               type: string
-            - name: Algorithm
+            - doc: Algorithm, when present, must be RS256.
+              name: Algorithm
               tag: json:"alg"
               type: string
-            - name: Modulus
+            - doc: Modulus is the RSA modulus, base64url, minimally encoded.
+              name: Modulus
               tag: json:"n"
               type: string
-            - name: Exponent
+            - doc: Exponent is the RSA public exponent, base64url, minimally encoded.
+              name: Exponent
               tag: json:"e"
               type: string
-      - name: JWKSValue
+      - doc: JWKSValue is a published key set.
+        name: JWKSValue
         struct:
           fields:
-            - name: Keys
+            - doc: Keys are the published signing keys.
+              name: Keys
               tag: json:"keys"
               type: "[]JWKValue"
-      - name: ActionsClaimsValue
+      - doc: |-
+          ActionsClaimsValue is what a verified GitHub Actions token asserts.
+
+          Only the claims this package acts on are decoded. Everything else GitHub
+          puts in the token is deliberately ignored: a field that is not read cannot
+          be relied on by accident.
+        name: ActionsClaimsValue
         struct:
           fields:
-            - name: Issuer
+            - doc: |-
+                Issuer must be ActionsIssuer; anything else is another identity
+                provider entirely.
+              name: Issuer
               tag: json:"iss"
               type: string
-            - name: Subject
+            - doc: |-
+                Subject identifies the workflow context. It is recorded for diagnostics
+                and policy, never parsed for ownership: its format varies with
+                environments, customisation and GitHub's immutable-subject rollout, so
+                reading an owner out of it would break silently.
+              name: Subject
               tag: json:"sub"
               type: string
-            - name: Audience
+            - doc: |-
+                Audience is who the token was minted for. GitHub emits a single string;
+                the JWT spec allows an array, so both are accepted on decode.
+              name: Audience
               tag: json:"aud"
               type: audienceClaim
-            - name: RepositoryOwnerID
+            - doc: |-
+                RepositoryOwnerID is the entitlement key: the account id, which survives
+                renames and cannot be reused. RepositoryOwner is the display name for
+                the same account and must never be what a licence matches on — a freed
+                handle can be claimed by someone else.
+
+                GitHub sends a decimal string and nothing here VALIDATES that: the only
+                check is that it is non-empty, and the value is compared to the roster's
+                keys by string equality. "Numeric" therefore describes what the issuer
+                emits, not a property this package enforces — and it does not need to,
+                because a value that is not one of the roster's keys is not entitled
+                whatever its shape. A decimal check would be a second syntax for a
+                comparison that is already exact.
+              name: RepositoryOwnerID
               tag: json:"repository_owner_id"
               type: string
-            - name: RepositoryOwner
+            - doc: RepositoryOwner is the account's current login, for diagnostics only.
+              name: RepositoryOwner
               tag: json:"repository_owner"
               type: string
-            - name: Repository
+            - doc: Repository is "owner/name", for diagnostics and optional narrowing.
+              name: Repository
               tag: json:"repository"
               type: string
-            - name: EventName
+            - doc: |-
+                EventName is the workflow trigger, DECODED AND READ BY NOTHING. It is
+                carried so a diagnostic can print it and so a future policy would not
+                have to change the wire shape to see it.
+
+                It used to say pull_request_target "runs with the base repository's
+                identity while potentially executing code from a fork, so a policy may
+                want to refuse it" — which is true of Actions and describes no
+                behaviour of this package. Four lines above, this type's own doc
+                comment says a field that is not read cannot be relied on by accident;
+                a field whose comment describes a policy is exactly how that gets
+                relied on. Test_VerifyActionsToken_ignoresTheClaimsNothingReads makes
+                the silence mechanical.
+              name: EventName
               tag: json:"event_name"
               type: string
-            - name: RunnerEnvironment
+            - doc: |-
+                RunnerEnvironment distinguishes "github-hosted" from "self-hosted",
+                DECODED AND READ BY NOTHING, for the same reason and with the same
+                warning as EventName above.
+              name: RunnerEnvironment
               tag: json:"runner_environment"
               type: string
-            - name: ExpiresAt
+            - doc: ExpiresAt, IssuedAt and NotBefore are NumericDate seconds.
+              name: ExpiresAt
               tag: json:"exp"
               type: int64
-            - name: IssuedAt
+            - doc: IssuedAt is when GitHub minted the token.
+              name: IssuedAt
               tag: json:"iat"
               type: int64
-            - name: NotBefore
+            - doc: NotBefore is when the token becomes usable.
+              name: NotBefore
               tag: json:"nbf"
               type: int64
-      - methods:
-          - name: DefaultCacheDir
+      - doc: |-
+          ProductValue names the product whose entitlement is being verified, and where
+          its roster is published.
+
+          It is the whole of what the source implementation kept as package constants:
+          the publication origins, the cache directory name, the OIDC audience, and the
+          enrolment issue URL. Every one is a property of one vendor's distribution
+          rather than of the verification mechanism, and together they are the only
+          reason a correct implementation served exactly one binary.
+
+          The zero value is usable and inert in the safe direction: no origins means
+          nothing to fetch, so Verify refuses with RosterUnreachable rather than
+          silently trusting anything.
+        methods:
+          - doc: |-
+              DefaultCacheDir returns where the last authenticated roster is kept.
+
+              An empty string means "no cache", which disables the offline fallback
+              entirely rather than guessing at a location. That is the safe direction: a
+              machine that cannot say where its cache lives falls back to requiring the
+              network, which is the behaviour this package had before the cache existed.
+            name: DefaultCacheDir
             out:
               - type: string
             recv: pointer
-          - name: Label
+          - doc: |-
+              Label is the name this product is known by, falling back to the package name
+              when no product was configured.
+
+              The receiver is a pointer on every method here because ProductValue is 72
+              bytes — four strings and a slice header — and copying all of it to read one
+              field is what KTN-VAR-BIGSTRUCT exists to catch. Hold the product in a
+              variable and call on that.
+
+              It tolerates a nil receiver, as every method here does: the one code path
+              that runs when nothing else is working must not be the one that panics.
+
+              It returns the product's name, or "entitlement" when there is none.
+            name: Label
             out:
               - type: string
             recv: pointer
-          - name: PublishedOrigins
+          - doc: |-
+              PublishedOrigins returns the places this product's roster is published,
+              tolerating a nil receiver as every accessor here does.
+
+              It exists because the FIELD cannot: reading p.Origins off a nil product
+              panics, and the two constructors did exactly that while the package
+              documented the opposite. A nil product publishes nowhere, which is a
+              verifier that will refuse with RosterUnreachable — the documented fallback,
+              and a very different outcome from a panic at construction.
+
+              It returns the product's publication points, or nil when there is no
+              product.
+            name: PublishedOrigins
             out:
               - type: "[]coreent.OriginValue"
             recv: pointer
-          - name: Validate
+          - doc: |-
+              Validate reports the ways a product's origin list would fail it when it
+              matters, which is the one moment nobody is watching: the day the roster
+              cannot be fetched.
+
+              The source implementation asserted these as a test over its own shipped
+              constants. Moving the origins to the caller would have moved the property out
+              of reach with them, so the assertions become a method any consumer can call —
+              at construction, or in its own suite.
+
+              Four things are checked, and the last is the one that is easy to get wrong:
+
+                - no empty Name or BundleURL, since an origin that cannot be named cannot
+                  be reported when it fails;
+                - no duplicate name;
+                - no duplicate URL, because two entries at one URL are one origin listed
+                  twice rather than a fallback;
+                - at least two DISTINCT hosts. Independent publication paths within one
+                  repository do count — that is what survives a ruleset refusing the
+                  signing bot's push to the default branch — but they must not all resolve
+                  to the same host.
+
+              It returns a joined error naming every failure rather than the first, because
+              a caller fixing an origin list wants the whole list.
+            name: Validate
             out:
               - type: error
             recv: pointer
         name: ProductValue
         struct:
           fields:
-            - name: Name
+            - doc: |-
+                Name is the product's binary name. It scopes the cache directory and
+                labels generated key material.
+              name: Name
               type: string
-            - name: Origins
+            - doc: |-
+                Origins are the roster publication locations, tried in order. The first
+                that answers with an authentic bundle wins.
+              name: Origins
               type: "[]coreent.OriginValue"
-            - name: CIAudience
+            - doc: |-
+                CIAudience is the OIDC audience a CI provenance token must carry. It must
+                be unique to this product: a token minted for one audience must not
+                satisfy another's gate.
+              name: CIAudience
               type: string
-            - name: EnrolURL
+            - doc: |-
+                EnrolURL is where a new subject is directed to request enrolment. Empty
+                means the product offers no self-service path.
+              name: EnrolURL
               type: string
-      - name: RoughtimeServerValue
+      - doc: |-
+          RoughtimeServerValue is one server this client will ask, and the key it must
+          answer with.
+
+          The public key is the whole trust decision: a server is not trusted because
+          of where it is, it is trusted because a statement carries its signature. That
+          is the same rule the roster follows, with a different anchor.
+        name: RoughtimeServerValue
         struct:
           fields:
-            - name: Name
+            - doc: Name identifies the server in diagnostics.
+              name: Name
               type: string
-            - name: Address
+            - doc: Address is "host:port", reached over UDP.
+              name: Address
               type: string
-            - name: PublicKey
+            - doc: |-
+                PublicKey is the server's long-term ed25519 public half, which signs
+                the delegation that in turn signs each response.
+              name: PublicKey
               type: ed25519.PublicKey
-      - interface:
+      - doc: |-
+          Getter performs the roster HTTP GETs. Injected so tests exercise the
+          admission logic without a network.
+        interface:
           methods:
-            - in:
+            - doc: Get retrieves a URL.
+              in:
                 - name: url
                   type: string
               name: Get
@@ -911,52 +2516,149 @@ packages:
                 - type: "*http.Response"
                 - type: error
         name: Getter
-      - name: BearerFetch
+      - doc: |-
+          BearerFetch performs the one request in this package that carries a
+          credential.
+
+          A function rather than an interface: only this request needs an
+          Authorization header, and widening Getter would put a bearer parameter on
+          the roster fetch, which must never send one. Naming it as a single-method
+          interface would also force the -er form of GetWithBearer, which is not a
+          word.
+        name: BearerFetch
         underlying: func(url, bearer string) (resp *http.Response, err error)
-      - methods:
-          - in:
+      - doc: |-
+          Service verifies entitlement.
+
+          It DOES keep the last bundle it authenticated, which reverses half of an
+          earlier decision — "it holds no cached roster on purpose: a disk cache able
+          to authorize would let a frozen file (or a frozen clock) keep a revoked
+          subject running forever". The frozen file is answered: the cached bytes go
+          back through ParseBundle on every read, so a frozen copy stops authorising
+          at its own ExpiresAt, at most coreent.RosterLifetime after it was signed. The frozen
+          clock is not answered and cannot be, here or anywhere else in an offline
+          binary — it was not answered before the cache existed either. cache.go
+          carries the full argument, next to the code it justifies.
+        methods:
+          - doc: |-
+              WithCache points the offline fallback at a directory, or disables it with "".
+
+              Only NewService sets this in production, and only the test constructors leave
+              it empty: a Service built with an injected getter must not touch a real
+              filesystem unless the test asked it to.
+            in:
               - name: dir
                 type: string
             name: WithCache
             out:
               - type: "*Service"
             recv: pointer
-          - in:
+          - doc: |-
+              WithTimeServers points the clock corroboration at a set of Roughtime servers,
+              or disables it with an empty list.
+
+              Separate from the constructor because it is off by default and because the
+              list is a trust decision — each entry pins a public key — that belongs to
+              whoever assembled the binary rather than to this package.
+            in:
               - name: servers
                 type: "[]RoughtimeServerValue"
             name: WithTimeServers
             out:
               - type: "*Service"
             recv: pointer
-          - in:
+          - doc: |-
+              WithBearerFetch replaces the transport used for the Actions token mint.
+
+              Only a test should need this. The default refuses redirects, which is what
+              keeps the runner's credential from being forwarded to a destination
+              checkTokenURL never vouched for.
+            in:
               - name: fetch
                 type: BearerFetch
             name: WithBearerFetch
             out:
               - type: "*Service"
             recv: pointer
-          - in:
+          - doc: |-
+              WithOrigins replaces the publication points this verifier will try.
+
+              It changes WHERE the roster is looked for and nothing about whether the
+              answer is believed: authority comes from the vendor signature, never from the
+              origin that served the bytes, so pointing this at a hostile endpoint gains
+              that endpoint nothing — it can serve whatever it likes and still cannot forge
+              the anchor. That is what makes the setter safe to expose at all.
+
+              An empty list is a construction error rather than a way to disable the fetch,
+              and currentRoster says so rather than reporting an unreachable roster nobody
+              asked for.
+            in:
               - name: origins
                 type: "[]coreent.OriginValue"
             name: WithOrigins
             out:
               - type: "*Service"
             recv: pointer
-          - in:
+          - doc: |-
+              WithVersion records the binary's own version so Verify can apply the
+              roster's mandatory-update floor.
+
+              It is a separate call rather than a constructor parameter because
+              pkg/license must not import the command package that owns the version
+              string, and because a caller with nothing to declare — a test, a tool
+              embedding the check — should not have to invent one.
+            in:
               - name: version
                 type: string
             name: WithVersion
             out:
               - type: "*Service"
             recv: pointer
-          - in:
+          - doc: |-
+              WithAnchors replaces the vendor keys this verifier accepts.
+
+              It takes the full ORDERED list and does not add to what the constructor
+              recorded: an additive setter would make the order depend on the call sequence,
+              and the order is the build's statement of which anchor is current. The list
+              the caller passes is the list, and the constructor's key is not implicitly
+              first in it.
+
+              A separate call rather than a parameter on every constructor because the
+              single-key form is the common one and must keep reading as it does; this is
+              what a test, or a build assembling its anchors from somewhere other than a
+              constant, reaches for. NewServiceWithAnchors is the production spelling.
+
+              An empty list is not a way to disable authentication: parseBundleAnyAnchor
+              refuses every document with coreent.ErrRosterUnsigned, because with no anchor
+              no signature can be valid.
+            in:
               - name: anchors
                 type: "[][]byte"
             name: WithAnchors
             out:
               - type: "*Service"
             recv: pointer
-          - in:
+          - doc: |-
+              Verify performs a full cold verification: fetch, authenticate, match, and
+              prove possession. Every call reaches for the network first — this is the
+              path a fresh process takes — and when no origin answers it falls back to the
+              last bundle this machine authenticated, which is refused by the same
+              signature and window rules that would refuse it over HTTPS. A machine that
+              has never fetched one successfully still cannot start.
+
+              The ORDER below is load-bearing, and neither the offline fallback nor the
+              clock ratchet disturbs it. The ratchet runs FIRST, before anything reads a
+              date: a function that is about to compare four deadlines against the local
+              clock should establish that the clock has not been moved before it starts,
+              not after. The
+              mandatory-update floor runs BEFORE the subject is looked up on purpose: an
+              out-of-date binary must be told to upgrade whether or not its licence is
+              also in order, and the upgrade path is the same either way. Because the
+              cached roster is substituted inside currentRoster rather than around it,
+              that floor applies to a cached document exactly as it does to a fetched one
+              — which is what stops an out-of-date binary from skipping it by going
+              offline, including by going offline with a copy in hand.
+            in:
               - name: now
                 type: time.Time
             name: Verify
@@ -969,22 +2671,51 @@ packages:
         name: Service
         struct:
           unexported: true
-      - methods:
-          - name: Error
+      - doc: |-
+          UpdateRequiredError is the refusal raised when a binary sits below the
+          roster's floor. It carries both versions as FIELDS, not just in its
+          message, because the caller has to act on the floor and not merely print
+          it: after upgrading it must check that the newly installed build actually
+          clears the bar.
+
+          Without that, a floor the published release cannot satisfy — a roster
+          asking for v9.9.9 while the mirror still serves v1.5.10 — makes the gate
+          upgrade to no effect, re-execute, refuse again, and loop forever. That is
+          not hypothetical: it is what the end-to-end test did before this type
+          existed.
+        methods:
+          - doc: |-
+              Error renders both versions: "from what, to what" is the only question
+              anyone asks at that point.
+            name: Error
             out:
               - type: string
             recv: pointer
-          - name: Unwrap
+          - doc: |-
+              Unwrap ties the typed error to the sentinel so errors.Is keeps working
+              through the exit-code dispatch.
+            name: Unwrap
             out:
               - type: error
             recv: pointer
         name: UpdateRequiredError
         struct:
           fields:
-            - name: Current
+            - doc: Current is the version of the binary that was refused.
+              name: Current
               type: string
-            - name: Required
+            - doc: Required is the lowest version the roster accepts.
+              name: Required
               type: string
     variables:
-      - name: RoughtimeServers
+      - doc: |-
+          RoughtimeServers is the list this client queries, EMPTY in committed source.
+
+          Empty means the network-time check does nothing, which is the correct state
+          until somebody has watched this client verify a live response: an entry added
+          on the strength of an untested implementation would either be inert anyway or
+          — worse — start refusing machines over a parsing bug. Adding one is the same
+          kind of decision as stamping the vendor anchor, and belongs to whoever can
+          confirm it works.
+        name: RoughtimeServers
         type: "[]RoughtimeServerValue"

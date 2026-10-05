@@ -1,10 +1,3 @@
-// Package multipart — the memory bound applied to every decode AND every
-// encode. A multipart body is the shape an upload arrives in, so the decoder
-// is the SDK surface most exposed to a hostile stream: unbounded, a single
-// crafted part drives io.ReadAll to an OOM, and a boundary flood does the same
-// with a very large number of empty parts. Three bounds close both doors
-// (per-part bytes, part count, aggregate bytes); the encoder enforces the
-// identical set so the codec never emits a body it would refuse to read back.
 package multipart
 
 import (

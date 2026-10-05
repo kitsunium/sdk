@@ -1,6 +1,3 @@
-// Package cbor — the kind encoders of the types with an encoding of their
-// own: time.Time as Unix seconds, a type's MarshalCBOR verbatim once checked,
-// and a BinaryMarshaler as a byte string.
 package cbor
 
 import (

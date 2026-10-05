@@ -4,7 +4,10 @@ package(default_visibility = ["//internal/service:service_consumers"])
 
 go_library(
     name = "hkdfsha256",
-    srcs = ["hkdfsha256.go"],
+    srcs = [
+        "doc.go",
+        "hkdfsha256.go",
+    ],
     importpath = "github.com/kitsunium/sdk/internal/service/crypto/kdf/hkdfsha256",
     visibility = [
         "//:__subpackages__",

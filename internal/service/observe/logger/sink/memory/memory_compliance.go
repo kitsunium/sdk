@@ -1,4 +1,3 @@
-// Package memory — compile-time proof that *Memory satisfies the core Sink port.
 package memory
 
 import corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"

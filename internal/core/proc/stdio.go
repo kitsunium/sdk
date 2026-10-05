@@ -1,5 +1,3 @@
-// Package proc — the StdioMode value: how a spawned child's standard streams
-// (stdin, stdout, stderr) are connected.
 package proc
 
 import "strconv"

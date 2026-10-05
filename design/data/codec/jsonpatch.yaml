@@ -11,6 +11,27 @@ packages:
             note: "range: 0.3.90.0 - 0.3.90.255"
             value: "0x00_03_5A_01"
         type: errs.Code
+    doc: |-
+      Package jsonpatch declares the error codes and the sentinels of the
+      JSON-difference package (RFC 6902 operations, not a codec),
+      internal/service/data/codec/jsonpatch — range 0.3.90.* (ADR 0143
+      service/data/codec/jsonpatch block).
+
+      The codes live in the core at the path that mirrors the package emitting
+      them (ADR 0160 §2) and keep the values they were allocated with: the LL
+      byte 3 records the layer that allocated the range, not the directory that
+      declares it today (ADR 0160 §3). Nothing here encodes or decodes — the
+      mechanism, and the constructors that attach a failure's detail, stay in
+      the service package.
+
+      Package jsonpatch — the sentinel *errs.Error values, one per code. Each
+      Reason derives from its var name or from its Code constant (ADR 0020);
+      the Public and Private texts are the ones the service package always
+      emitted, so moving the declaration changed no rendering.
+
+      No Public and no Private below carries a byte of either document: a
+      document compared is routinely a record holding personal data, and an error
+      is where input classically leaks back out.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/data/codec/jsonpatch
@@ -29,17 +50,73 @@ packages:
             public: A document to compare is not a JSON value
             reason: NOT_JSON
   - constants:
-      - name: Add
+      - blockDoc: The three operations a diff emits.
+        doc: |-
+          Add adds a member to an object, or inserts an element into an array
+          before the one at the index — after every element when the index is
+          the array's length.
+        name: Add
         type: Op
         value: "\"add\""
-      - name: Remove
+      - blockDoc: The three operations a diff emits.
+        doc: Remove removes a member of an object, or the element at the index.
+        name: Remove
         type: Op
         value: "\"remove\""
-      - name: Replace
+      - blockDoc: The three operations a diff emits.
+        doc: Replace replaces the value at the path, the whole document at "".
+        name: Replace
         type: Op
         value: "\"replace\""
+    doc: |-
+      Package jsonpatch computes the structural difference between two JSON
+      documents as RFC 6902 operations — add, remove and replace, each at an
+      RFC 6901 JSON Pointer — with the value each operation writes AND the value
+      it replaces or removes (ADR 0143). Public facade: pkg/v1/data/codec/jsonpatch.
+
+      It is what a record's history needs to say what changed between two of its
+      versions: the operations are the edits, both values are what a reader shows,
+      and applied in order to the first document they give the second.
+
+      # How documents are compared
+
+      Each document must be exactly one JSON value, read strictly: no duplicated
+      member name, valid UTF-8, no trailing data. Values are compared as RFC 6902
+      §4.6 compares them — strings once unescaped, numbers numerically (1, 1.0 and
+      1e0 are one number, compared exactly, never through a float), arrays element
+      by element, objects by member name whatever their order.
+
+      # What the operations are
+
+        - Two objects: a member only the first has is removed, one only the second
+          has is added, and one both have is compared in turn. Members come in
+          byte order of their names, so the same two documents always give the
+          same operations.
+        - Two arrays: the elements both keep, in order, are found — the longest
+          common subsequence of the elements that differ, after the equal ones at
+          both ends — and between two kept elements, those removed and those added
+          are paired in order and compared in turn, the rest removed or added. An
+          insertion in the middle is one add, not a rewrite of every element after
+          it. Indices are those of the array as the operations before have left
+          it, as RFC 6902 applies them.
+        - Anything else that differs — another kind, another string, another number
+          — is replaced whole; two roots of different kinds are one replace at "".
+
+      # What it is not
+
+      It emits no move, copy or test, and does not apply a patch. A value is the
+      JSON of that part of the document, compact; a number keeps its spelling.
+      Nothing it returns in an error comes from a document.
+
+      Package jsonpatch — a JSON document read into a tree, compared by value, and
+      written back compact.
     functions:
-      - in:
+      - doc: |-
+          Diff returns the operations that turn the JSON document from into the JSON
+          document to, in the order they apply: none — an empty slice — when the two
+          are the same value. It returns NotJSON, naming the document and the offset,
+          when either is not exactly one JSON value.
+        in:
           - name: from
           - name: to
             type: "[]byte"
@@ -51,24 +128,80 @@ packages:
       json: encoding/json
     path: github.com/kitsunium/sdk/internal/service/data/codec/jsonpatch
     types:
-      - name: Op
+      - doc: Op is what an operation does, as RFC 6902 names it.
+        name: Op
         underlying: string
-      - name: EditValue
+      - doc: |-
+          EditValue is one operation of a diff: what it does, where, and both values.
+          Its JSON is an RFC 6902 operation, with the value it replaces or removes
+          under "old" — a member RFC 6902 does not define for these operations, which
+          a patch applier ignores (§4) — so a list of them is a JSON Patch document.
+        name: EditValue
         struct:
           fields:
-            - name: Op
+            - doc: Op is add, remove or replace.
+              name: Op
               tag: json:"op"
               type: Op
-            - name: Path
+            - doc: Path is the RFC 6901 JSON Pointer of the value the operation changes.
+              name: Path
               tag: json:"path"
               type: string
-            - name: Value
+            - doc: |-
+                Value is the value the operation writes: add and replace; absent for
+                remove.
+              name: Value
               tag: json:"value,omitempty"
               type: json.RawMessage
-            - name: Old
+            - doc: |-
+                Old is the value the operation replaces or removes: replace and
+                remove; absent for add.
+              name: Old
               tag: json:"old,omitempty"
               type: json.RawMessage
-  - facade:
+  - doc: |-
+      Package jsonpatch computes the structural difference between two JSON
+      documents as RFC 6902 operations — add, remove and replace, each at an
+      RFC 6901 JSON Pointer — with the value each operation writes and the value
+      it replaces or removes (ADR 0143).
+
+      	edits, err := jsonpatch.Diff(before, after)
+      	for _, e := range edits {
+      		fmt.Println(e.Op, e.Path, string(e.Old), "->", string(e.Value))
+      	}
+
+      It is what a record's history needs to say what changed between two of its
+      versions — a document store's versions are JSON for that reason — and the
+      operations, applied in order to the first document, give the second.
+      json.Marshal of the result is a JSON Patch document: RFC 6902's op, path and
+      value, with the value replaced or removed under "old", a member RFC 6902
+      does not define for these operations and which a patch applier ignores.
+
+      # How documents are compared
+
+      Each document must be exactly one JSON value, read strictly — no duplicated
+      member name, valid UTF-8, no trailing data — or Diff returns [NotJSON],
+      naming which document and the offset, never a byte of it. Values are
+      compared as RFC 6902 §4.6 compares them: strings once unescaped, numbers
+      exactly by value (1, 1.0 and 1e0 are one number, and no float is involved),
+      arrays element by element, objects by member name whatever their order.
+
+      # What the operations are
+
+      Two objects: a member only the first has is removed, one only the second
+      has is added, and one both have is compared in turn, members in byte order
+      of their names — the same two documents always give the same operations.
+      Two arrays: the elements both keep in order are found, after the equal ones
+      at both ends, and between two kept elements the removed and the added are
+      paired in order and compared, the rest removed or added — so an insertion in
+      the middle is one add. An index is that of the array as the operations
+      before have left it, as RFC 6902 applies them. Past a bound on the elements
+      to align, those in the middle are paired by position: a longer patch, still
+      a correct one. Anything else that differs is replaced whole; two roots of
+      different kinds are one replace at "".
+
+      It emits no move, copy or test, and applies no patch.
+    facade:
       - const:
           - doc: Add adds a member, or inserts an element before the one at the index.
             name: Add

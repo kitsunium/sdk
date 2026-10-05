@@ -6,6 +6,7 @@ go_library(
     name = "static",
     srcs = [
         "config.go",
+        "doc.go",
         "lookup.go",
         "lookup_other.go",
         "lookup_unix.go",

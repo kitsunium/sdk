@@ -83,8 +83,6 @@ GATES=(
 # Guards that `make lint` runs AND the `bazel` job invokes as a direct
 # `bash <path>` step: each must exist, be a step of the workflow and a line of
 # the Makefile's `lint` recipe. Add a guard here in the commit that wires it.
-# check-readme-drift.sh and check-readme-determinism.sh are CI steps only —
-# gomarkdoc is not a `make lint` prerequisite — and are not listed.
 GUARDS=(
   scripts/pre-commit/check-alloc-lane-coverage.sh
   scripts/pre-commit/check-audit-coverage.sh
@@ -94,6 +92,8 @@ GUARDS=(
   scripts/pre-commit/check-pkg-docs.sh
   scripts/pre-commit/check-bench-md.sh
   scripts/pre-commit/check-error-codes-drift.sh
+  # Every README is what docs/api writes (ADR 0167): genindex, no binary.
+  scripts/pre-commit/check-readme-drift.sh
   # The platforms table genindex reads is the cross-build matrix CI compiles.
   scripts/pre-commit/check-platforms.sh
   scripts/check-layer-deps.sh

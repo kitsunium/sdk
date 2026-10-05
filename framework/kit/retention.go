@@ -1,4 +1,3 @@
-// Package kit — retention: how long a store keeps its personal data.
 package kit
 
 import (

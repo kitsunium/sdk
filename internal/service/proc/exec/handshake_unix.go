@@ -1,15 +1,5 @@
 //go:build unix
 
-// Package exec — the parent<->trampoline handshake pipe. The re-exec trampoline
-// (trampoline_unix.go) applies rlimits/umask in a forked child before exec'ing
-// the real target; if that application fails, or the execve itself fails, the
-// child exits with a distinct status — but Start could not otherwise tell that
-// apart from a legitimate target exit of the same code. This pipe closes the gap:
-// the child inherits the write end as handshakeFD and reports a one-byte status
-// through it, so Start surfaces a typed RlimitFailed / SpawnFailed instead of a
-// silent spawn. It is the same self-pipe + close-on-exec trick os/exec uses for
-// its own errpipe: a clean execve closes the fd (the parent reads EOF = success),
-// a failure writes a status byte first.
 package exec
 
 import (

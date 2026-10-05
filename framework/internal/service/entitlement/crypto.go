@@ -1,7 +1,3 @@
-// Package entitlement — the crypto domain's operations this engine uses: a
-// signature check and two digests, asked through pkg/v1 rather than crypto/*
-// (ADR 0158 §2). RS256, which the crypto domain has no scheme for, is not here:
-// it is oidc.go's, and its doc comment says why it stays local.
 package entitlement
 
 import (

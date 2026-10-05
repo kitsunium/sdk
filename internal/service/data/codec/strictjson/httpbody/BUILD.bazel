@@ -4,7 +4,10 @@ package(default_visibility = ["//internal/service:service_consumers"])
 
 go_library(
     name = "httpbody",
-    srcs = ["httpbody.go"],
+    srcs = [
+        "doc.go",
+        "httpbody.go",
+    ],
     importpath = "github.com/kitsunium/sdk/internal/service/data/codec/strictjson/httpbody",
     visibility = [
         "//:__subpackages__",

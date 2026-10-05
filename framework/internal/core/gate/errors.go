@@ -1,10 +1,3 @@
-// Package gate — the one refusal this domain mints.
-//
-// It is one rather than several on purpose. Every fault a policy can carry is
-// the same kind of fault — somebody wrote a policy that cannot do its job — and
-// Validate joins them so a caller fixing one sees all of them. Splitting the
-// range would give a caller several codes to branch on for a condition with a
-// single response: fix the policy and restart.
 package gate
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

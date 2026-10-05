@@ -1,6 +1,5 @@
 //go:build !linux
 
-// Package server — batch-reader selection on platforms without recvmmsg.
 package server
 
 import stdnet "net"

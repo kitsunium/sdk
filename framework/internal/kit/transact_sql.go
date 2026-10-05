@@ -1,4 +1,3 @@
-// Package kit — a transaction on a database, the database's own.
 package kit
 
 import (

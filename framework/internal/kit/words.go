@@ -1,4 +1,3 @@
-// Package kit — the sentences kit says, in every language it speaks.
 package kit
 
 import (

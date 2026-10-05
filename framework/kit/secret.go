@@ -1,5 +1,3 @@
-// Package kit — secrets: the values the product declares and the operator
-// provides.
 package kit
 
 import (

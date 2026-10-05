@@ -16,6 +16,7 @@ go_library(
         "config_s3.go",
         "credentials.go",
         "design_gen.go",
+        "doc.go",
         "errors.go",
         "registry.go",
         "writer.go",

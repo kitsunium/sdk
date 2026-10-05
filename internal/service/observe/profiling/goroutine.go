@@ -1,6 +1,3 @@
-// Package profiling — hosts the goroutine view: the process's goroutines, each
-// with its state, how long it has waited, its labels and its stack, parsed
-// from the runtime's own dump.
 package profiling
 
 import (

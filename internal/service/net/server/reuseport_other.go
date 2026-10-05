@@ -1,6 +1,5 @@
 //go:build !linux && !darwin && !freebsd && !netbsd && !openbsd && !dragonfly
 
-// Package server — the SO_REUSEPORT floor for platforms without it.
 package server
 
 // reusePortSupported reports whether this platform can bind several listeners

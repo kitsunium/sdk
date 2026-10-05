@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T04:55:00Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # pkg/v1/proc
 
 ## Purpose
@@ -74,8 +74,9 @@ same typed error their `Create`/`Start` form returns.
 - **`Supported` is platform-level, not a runtime probe.** It reflects whether a
   native backend exists on the GOOS, NOT runtime availability (e.g. cgroup present
   but not delegated). Use the per-facade probe for that (`cgroup.Available()`).
-- The capability × platform matrix lives in the package doc comment (`capability.go`)
-  and is mirrored in the generated `README.md`.
+- The capability × platform matrix lives in the package doc comment (`doc.go`,
+  written by kit from the design — ADR 0167) and is mirrored in the generated
+  `README.md`.
 - **A GOOS joins a row only on the evidence of its own kernel.** `illumos` and
   `solaris` are listed apart — `runtime.GOOS` names them apart although the
   `solaris` build tag selects both — and joined the matrix only once
@@ -96,8 +97,10 @@ if proc.Supported(proc.CapCgroup) { /* confine */ }
 
 ## README is generated
 
-`README.md` is produced by `gomarkdoc` from the `capability.go` package doc
-(ADR 0008). Edit the doc comment, then `make docs-readme`. Do **not** hand-edit it.
+`README.md` is written by `tools/genindex` from the committed `docs/api`
+(`make docs-readme`, ADR 0167). Do **not** hand-edit it. The package comment is
+in `doc.go`, which kit writes from the design (`design/proc.yaml`): edit the
+design, run `kit gen`, then `make api` and `make docs-readme`.
 
 ## Do NOT
 

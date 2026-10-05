@@ -1,4 +1,3 @@
-// Package scheduler — hosts entry, the engine's per-registration state.
 package scheduler
 
 import (

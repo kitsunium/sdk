@@ -1,4 +1,3 @@
-// Package kit — history: the former values of the fields that keep them.
 package kit
 
 import (

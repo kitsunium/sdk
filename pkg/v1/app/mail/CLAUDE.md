@@ -13,9 +13,9 @@ the envelope without a transport. The durable outbox (ADR 0111, ADR 0141) is NOT
 queue, no filesystem engine and no SQL port — `go list -deps` of this package
 names none of `data/queue`, `data/vfs`, `data/sql` or `app/id`.
 
-Consumer-facing prose lives in the package doc comment in `mail.go` and is
-rendered into `README.md` by `gomarkdoc` (rule 10 / ADR 0008). This file is the
-maintainer's half.
+Consumer-facing prose lives in the package doc comment in `doc.go`, which kit
+writes from `design/app/mail.yaml`, and reaches `README.md` through `docs/api`
+and `tools/genindex` (rule 10 / ADR 0167). This file is the maintainer's half.
 
 ## Surface
 
@@ -69,17 +69,17 @@ and `errs.CodeOf` covers the rest. This mirrors `pkg/v1/data/vfs`.
 - **Do NOT re-export a mutable default transport.** ADR 0030's reasoning applies
   one step further: a package-level transport armed from an import would dial a
   network from an `init`.
-- **Do NOT hand-edit `README.md`.** Edit the package doc comment in `mail.go`
-  and run `go generate ./v1/app/mail/` (rule 10).
+- **Do NOT hand-edit `README.md`.** Edit the package doc comment in the design,
+  run `kit gen`, then `make api` and `make docs-readme` (rule 10, ADR 0167).
 
 ## Generated
 
-`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/app/mail.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the package comment and the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
+`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/app/mail.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the declarations of their own, and `doc.go` — kit's too (ADR 0167) — the package comment. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
 
 ## Verification
 
 ```bash
 cd pkg && GOWORK=off go test -race ./v1/app/mail/...
-cd pkg && go generate ./v1/app/mail/   # regenerates README.md from the doc comment
+make docs-readme   # rewrites README.md from docs/api
 cd pkg && go list -deps ./v1/app/mail | grep -E 'data/(queue|vfs|sql)'   # prints nothing
 ```

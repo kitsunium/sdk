@@ -1,4 +1,3 @@
-// Package kit — jobs: scheduled work run by the daemon's loop.
 package kit
 
 import (

@@ -1,4 +1,3 @@
-// Package id — NanoID generator (URL-safe alphabet, configurable length).
 package id
 
 import (

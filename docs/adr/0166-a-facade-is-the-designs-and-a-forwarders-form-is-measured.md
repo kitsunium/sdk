@@ -4,6 +4,7 @@
 - **Date**: 2026-10-05
 - **Deciders**: SDK maintainers (the owner's decision: stage 3 of "kit regenerates the Go SDK from its design")
 - **Amends**: [ADR 0163](0163-the-sdk-is-designed-by-its-diagram-and-kit-writes-only-data-and-test-pins.md) §1 (doc text is recorded for ports alone), §2 (what kit writes) and §10 (the one function variable is an exception); [ADR 0164](0164-an-error-code-is-the-designs-and-kit-writes-it.md) §2 (the production code kit writes now holds functions, not only declarations and the calls that initialise them)
+- **Amended by**: [ADR 0167](0167-a-doc-comment-is-the-designs-and-a-readme-is-written-from-docs-api.md) — §Consequences: a doc edit on a package comment or a hand-written declaration is a design edit too, and the three package-comment sentences named here are corrected through the design
 - **Related**: [ADR 0165](0165-a-performance-contract-is-the-designs-kit-measures-what-the-compiler-decides-and-a-test-holds-the-rest.md) (a budget is a function's performance contract; an `inline` budget on a forwarder decides its form here), [ADR 0008](0008-readme-from-code-generation.md) (READMEs stay gomarkdoc's), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (what a `pkg/v1` alias may point at), [ADR 0138](0138-a-doc-link-resolves-or-it-is-not-written.md), [ADR 0155](0155-every-layer-groups-its-packages-by-family-and-a-path-may-move-while-v0.md)
 
 ## Context

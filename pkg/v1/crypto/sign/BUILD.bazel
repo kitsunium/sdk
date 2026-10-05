@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "sign",
-    srcs = ["sign.go"],
+    srcs = [
+        "doc.go",
+        "sign.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/crypto/sign",
     visibility = ["//visibility:public"],
     deps = [

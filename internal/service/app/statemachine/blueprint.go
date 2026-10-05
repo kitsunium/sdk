@@ -1,6 +1,3 @@
-// Package statemachine — hosts the blueprint: a definition frozen for one
-// machine, indexed for the lookups a transition makes, and the evaluation of
-// what is due for an entity.
 package statemachine
 
 import (

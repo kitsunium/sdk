@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # internal/kernel/clock/
 
 ## Purpose
@@ -54,7 +54,8 @@ only producer of — splitting them left three files nothing else referenced.
 
 | File | Holds |
 |---|---|
-| `clock.go` | package doc + `Clock` + `Timed` |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `clock.go` | `Clock` + `Timed` |
 | `waiter.go` | `Waiter` + `requirePositivePeriod` (the shared refusal) |
 | `timer.go` / `ticker.go` | the `Timer` / `Ticker` contracts |
 | `system.go` | `systemClock` + the `System` singleton, and the `*time.Timer` / `*time.Ticker` adapters |

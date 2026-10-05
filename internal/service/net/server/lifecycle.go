@@ -1,4 +1,3 @@
-// Package server — the start, accept and drain lifecycle.
 package server
 
 import (

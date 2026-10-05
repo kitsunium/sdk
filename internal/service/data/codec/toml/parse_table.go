@@ -1,5 +1,3 @@
-// Package toml — table headers, key-value pairs and keys: the half of the
-// parser that decides where a value goes and whether TOML allows it there.
 package toml
 
 // header reads a [table] or [[array of tables]] header and makes its table

@@ -1,6 +1,3 @@
-// Package ssh - enrolment: minting a subject identity locally and turning
-// it into a request the vendor can act on. The private half never leaves the
-// machine; what travels is the public half and the UUID naming it.
 package ssh
 
 import (

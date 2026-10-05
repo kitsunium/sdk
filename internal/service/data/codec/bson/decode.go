@@ -1,7 +1,3 @@
-// Package bson — the decoder's entry point, its dispatch on the target's plan,
-// and the element walk. It runs over a document the validator accepted, and
-// still checks every length it slices by, so input that changes under it
-// yields an error and never a panic.
 package bson
 
 import (

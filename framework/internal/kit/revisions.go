@@ -1,4 +1,3 @@
-// Package kit — record revisions: a store's previous versions of each record.
 package kit
 
 import (

@@ -1,28 +1,3 @@
-// Package entitlement - the offline fallback: re-presenting a roster this machine
-// already authenticated, under exactly the freshness rules that would apply to
-// the same bytes coming off the wire.
-//
-// This reverses half of a documented decision, so it states which half.
-// Service used to hold no cache at all, on the grounds that "a disk cache able
-// to authorize would let a frozen file (or a frozen clock) keep a revoked
-// subject running forever". The frozen FILE is answered here and was never the
-// risk it looked like: the cached bytes are the vendor's own signed bundle,
-// they go back through ParseBundle on every read, and coreent.ParseRoster refuses a
-// window wider than coreent.RosterLifetime, one that has not opened, and one that has
-// closed. A frozen file therefore stops authorising at its own ExpiresAt —
-// which is the bound errors.go already advertises for coreent.ErrRosterStale ("it
-// bounds how long a revoked client keeps working offline"), a sentence that
-// described nothing until this file existed.
-//
-// The frozen CLOCK is NOT answered, and no local mechanism can answer it. Every
-// source of time an offline process can read — the system clock, file mtimes,
-// a monotonic counter that dies at reboot — belongs to the party being checked.
-// It was not answered before this file either: a captured bundle served from a
-// local origin, behind a trust store the holder controls, with the clock parked
-// inside its window, ran the binary indefinitely without any cache. What this
-// file changes for such a holder is the effort, not the outcome; what it
-// changes for an honest one is that a laptop off the network keeps working
-// until the last roster it saw expires.
 package entitlement
 
 import (

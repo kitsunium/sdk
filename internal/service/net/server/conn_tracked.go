@@ -1,4 +1,3 @@
-// Package server — the socket that holds its connection slot until it closes.
 package server
 
 import (

@@ -1,7 +1,3 @@
-// Package net — declares the sentinel *errs.Error outcomes of the network
-// domain. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE form.
-// Service implementations and the pkg/v1 facades wrap these sentinels; they
-// declare no codes of their own (the ADR 0016 proc precedent).
 package net
 
 // sysexits codes restated locally so the sentinels below carry an honest process

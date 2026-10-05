@@ -1,4 +1,3 @@
-// Package server — the bounds only an HTTP group has.
 package server
 
 import "time"

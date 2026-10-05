@@ -1,4 +1,3 @@
-// Package client — the policy-enforcing RoundTripper.
 package client
 
 import (

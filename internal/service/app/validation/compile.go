@@ -1,5 +1,3 @@
-// Package validation — the struct-tag compiler. Everything here runs once per
-// type, at construction; nothing here runs during a validation.
 package validation
 
 import (

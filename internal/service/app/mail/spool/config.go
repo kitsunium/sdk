@@ -1,5 +1,3 @@
-// Package spool — the spool's construction parameters, the defaults their
-// zero values clamp to, and the refusals.
 package spool
 
 import (

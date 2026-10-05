@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T03:30:00Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # framework/connectors/ssh/
 
 ## Purpose
@@ -38,7 +38,8 @@ has recorded for this package since ADR 0078.
 
 | File | Role |
 |---|---|
-| `sshidentity.go` | the package doc, and `SSHIdentity` — the three port methods over a key directory, plus the `BoundProver` sibling |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `sshidentity.go` | `SSHIdentity` — the three port methods over a key directory, plus the `BoundProver` sibling |
 | `sshidentity_compliance.go` | the compile-time proof that it still satisfies the port |
 | `discover.go` | which subject this machine is enrolled as, and the refusal to guess |
 | `key.go` / `key_unix.go` / `key_windows.go` | load, fingerprint, prove possession, permission checks |

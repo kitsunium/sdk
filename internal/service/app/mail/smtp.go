@@ -1,19 +1,3 @@
-// Package mail — the SMTP transport.
-//
-// It is built ON net/smtp and does not reimplement RFC 5321. The package is
-// FROZEN upstream — its own documentation says "The smtp package is frozen and
-// is not accepting new features" — which is a statement about features and not
-// about maintenance: it still receives security fixes, and the protocol it
-// implements has not gained a feature this domain wants since RFC 3207.
-//
-// What this package therefore commits to maintaining is the POLICY above it,
-// which is where every decision that matters lives: that a required STARTTLS
-// is refused rather than downgraded, that credentials never travel over an
-// unencrypted session, that the verified TLS name is set (net/smtp does not set
-// it), and that a context actually stops a send (net/smtp has no context at
-// all). If net/smtp is ever deprecated rather than frozen, the client is
-// replaced here and [coremail.Transport] does not change — which is the reason
-// the port has one method and no session on it.
 package mail
 
 import (

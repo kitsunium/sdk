@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T03:30:00Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # framework/internal/core/entitlement/
 
 ## Purpose
@@ -19,7 +19,8 @@ else (framework/CLAUDE.md rule 1).
 
 | File | Role |
 |---|---|
-| `entitlement.go` | the package doc, the `Identity` port and its `BoundProver` sibling |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `entitlement.go` | the `Identity` port and its `BoundProver` sibling |
 | `roster.go` | `RosterValue` (+ its lookups `SubjectFor` / `CIEntitlementFor`), `SubjectValue`, `CIEntitlementValue`, `RosterLifetime` |
 | `grant.go` | `GrantValue` (+ `Deadline` / `Expired`) — what a successful verification hands back — and `GrantDeadline` |
 | `origin.go` | `OriginValue` — one place a roster is published |

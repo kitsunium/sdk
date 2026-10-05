@@ -1,4 +1,3 @@
-// Package session — minting a session identifier from a random source.
 package session
 
 import (

@@ -1,4 +1,3 @@
-// Package session — the immutable session a Store hands back.
 package session
 
 import (

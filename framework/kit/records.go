@@ -1,5 +1,3 @@
-// Package kit — records: the product's data as modules and the Studio reach
-// it.
 package kit
 
 import (

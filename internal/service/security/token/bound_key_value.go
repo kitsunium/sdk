@@ -1,4 +1,3 @@
-// Package token — one JWK Set member, with its binding already derived.
 package token
 
 // boundKeyValue is one JWK Set member with its verifying binding already

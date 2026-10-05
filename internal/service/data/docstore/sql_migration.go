@@ -1,5 +1,3 @@
-// Package docstore — the SQL store's tables, as a migration the caller runs
-// under its own version table.
 package docstore
 
 import (

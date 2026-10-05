@@ -1,10 +1,3 @@
-// Package logger — declares the recycled event-record bucket consumed
-// by the Builder API. Pulling RecordEvent values from a recycler.Pool
-// removes the builder and scratchpad allocations from the hot path; the
-// handler still clones the accumulated attrs on every Send, so the
-// steady-state cost is ONE heap allocation per emit, not zero. Combined
-// with the kind-discriminated Value union the remaining per-call cost is
-// dominated by the encoder + sink rather than GC pressure.
 package logger
 
 import (

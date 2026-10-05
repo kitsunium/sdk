@@ -1,5 +1,3 @@
-// Package redact — which members of a Go type's JSON form are secret by
-// declaration, worked out once per type.
 package redact
 
 import (

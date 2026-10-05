@@ -1,4 +1,3 @@
-// Package kit — idempotency keys and their leases.
 package kit
 
 import (

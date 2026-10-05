@@ -1,4 +1,3 @@
-// Package kit — stores on SQL: the SDK's document store over a database.
 package kit
 
 import (

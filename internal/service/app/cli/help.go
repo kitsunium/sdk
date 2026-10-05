@@ -1,5 +1,3 @@
-// Package cli — the help, generated from the declarations and from nowhere
-// else.
 package cli
 
 import (

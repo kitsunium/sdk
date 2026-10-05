@@ -1,7 +1,5 @@
 //go:build !unix
 
-// Package self — the CPU time the process used, where the kernel's count is
-// not at hand.
 package self
 
 import "time"

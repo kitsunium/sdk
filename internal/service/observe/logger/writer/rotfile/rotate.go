@@ -1,6 +1,3 @@
-// Package rotfile — rotation cycle: threshold check, backup shift, optional
-// gzip, and the hardened reopen. Kept out of sink.go so each function stays
-// under KTN-FUNC-MAXLOC.
 package rotfile
 
 import "os"

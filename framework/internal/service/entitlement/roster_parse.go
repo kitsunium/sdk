@@ -1,8 +1,3 @@
-// Package entitlement — parsing and authenticating a published roster.
-//
-// The signature check lives HERE rather than with the value it produces: core
-// declares what a roster IS, and verifying one is a mechanism with a
-// cryptographic dependency and a freshness policy.
 package entitlement
 
 import (

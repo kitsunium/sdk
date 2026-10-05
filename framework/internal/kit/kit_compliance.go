@@ -1,5 +1,3 @@
-// Package kit — the compile-time proof of which roles each declaration plays:
-// the interfaces the app reaches its nodes and options through.
 package kit
 
 import "github.com/kitsunium/sdk/pkg/v1/app/statemachine"

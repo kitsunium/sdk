@@ -1,13 +1,5 @@
 //go:build linux
 
-// Package exec — Linux pre-exec cgroup v2 placement. When a Spec sets
-// CgroupPath, the child must join that control group BEFORE it execs the target,
-// so the controller limits (memory.max, pids.max, …) bind from the first
-// instruction rather than after a post-spawn Group.Add(pid) race. The parent
-// validates the path up front (validateCgroupPath); the trampoline then writes
-// its own pid into <path>/cgroup.procs (applyCgroupPlacement) between the rlimit
-// step and execve. cgroups are Linux-only, so this file is the only place that
-// touches them; the !linux sibling rejects a non-empty path as UnsupportedPlatform.
 package exec
 
 import (

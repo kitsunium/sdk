@@ -1,4 +1,3 @@
-// Package kit — the migrate command.
 package kit
 
 import (

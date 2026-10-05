@@ -103,14 +103,183 @@ packages:
             value: "0x00_03_35_05"
         type: errs.Code
     constants:
-      - name: DefaultMaxMessageBytes
+      - doc: |-
+          DefaultMaxMessageBytes bounds a payload when [PolicyValue.MaxMessageBytes]
+          is left at zero. One mebibyte is the value the industry converged on —
+          NATS's default, Kafka's default `message.max.bytes`, four times SQS's
+          maximum — and the reason it is a CLAMP rather than a refusal is that its
+          zero has exactly one sensible reading and the wrong answer is survivable:
+          too small is a refused publish at the call site that made the mistake, and
+          the alternative to any bound at all is one producer filling a disk.
+        name: DefaultMaxMessageBytes
         type: int
         value: 1 << 20
-      - name: MaxDeadlineOffset
+      - doc: |-
+          MaxDeadlineOffset is the furthest ahead of now a deadline built from a
+          policy may lie: the ceiling on [PolicyValue.VisibilityTimeout] and
+          [PolicyValue.RetryDelay], REFUSED above it rather than clamped.
+
+          It is not a judgement about how long a lease should last — ADR 0054 argues
+          against even an hour. It is the representable range, with a margin. Every
+          deadline is now plus one of these durations, and a durable broker records it
+          as Unix nanoseconds in an int64 — that is the form a filename carries, and
+          time.Time.UnixNano's own range — which ends on 2262-04-11. Past that instant
+          the number wraps negative, and a name carrying it cannot be read back: the
+          message it names is never reclaimed and never delivered, and its receipt
+          reads [UnknownReceipt]. math.MaxInt64, the value somebody reaches for to
+          mean "never", is 292 years, so it wraps a deadline set today.
+
+          A century keeps every deadline representable for any clock reading before
+          2162, and no lease or retry delay has a reading anywhere near it. Validate
+          has no clock, so a fixed ceiling is the only bound it can check; an
+          implementation that computes a deadline from its own clock at runtime — a
+          lease extension, whose duration Validate never sees — checks the instant
+          itself.
+        name: MaxDeadlineOffset
         type: time.Duration
         value: "3153600000000000000"
+    doc: |-
+      Package queue — the ADR 0039 capability siblings of the frozen [Broker]
+      port, and the dead-letter record one of them returns.
+
+      Package queue — range 0.2.23.* (ADR 0054 core/data/queue block), and the
+      brokers' and the consumer engine's 0.3.53.* (ADR 0054 service/data/queue
+      block, declared here since ADR 0160).
+
+      Package queue — the two ADR 0039 siblings that act on the dead-letter store:
+      sending a message there at once, and deciding what becomes of one there.
+
+      Package queue — declares the sentinel *errs.Error port outcomes, and the
+      implementation outcomes of the brokers and the consumer engine in
+      internal/service/data/queue (ADR 0160: every code is declared in the core,
+      at the service's path). Each var's name equals its errs.Define Reason in
+      SCREAMING_SNAKE form.
+
+      Package queue — hosts the three values that travel between a producer, a
+      broker and a consumer: the message, the lease, and the delivery that pairs
+      them.
+
+      Package queue — hosts the delivery policy every broker is configured with,
+      and the guard both implementations run so that the two refuse identical
+      inputs identically.
+
+      Package queue declares the SDK's ASYNCHRONOUS, DURABLE message queue port:
+      the [Broker] a producer publishes into and a consumer leases from, the
+      [Handler] that processes one delivery, and the values that carry a message,
+      its lease and its eventual dead letter. A core sibling admitted by ADR 0054.
+
+      # queue is not events, and the line was drawn before this package existed
+
+      ADR 0053 §D1 wrote the frontier down while queue was still hypothetical,
+      precisely so it could not be renegotiated by whoever wrote it. This package
+      is the right-hand column, on every axis:
+
+      	                     | events                   | queue (this package)
+      	---------------------|--------------------------|--------------------------
+      	Scope                | one process              | many processes
+      	Timing               | synchronous              | asynchronous
+      	Goroutine            | the publisher's          | a consumer's
+      	Transaction          | the publisher's          | its own
+      	Durability           | none                     | the point of it
+      	Retries / DLQ        | none                     | the point of it
+      	Process dies in      | the event never happened | the message is still
+      	flight               |                          | there
+
+      A caller who wants "several things happen right now, on my goroutine,
+      inside my transaction" wants internal/core/app/events. This package will not
+      give them a faster version of it: [Broker.Publish] costs a disk flush,
+      because that flush IS the guarantee.
+
+      # A publication may join the publisher's transaction; the handler never does
+
+      The Transaction row is about where the WORK runs, and a handler always runs
+      in a transaction of its own, on a consumer's goroutine. What a broker over
+      the publisher's own database may do is make the MESSAGE part of the
+      publisher's transaction (ADR 0151): published inside it, the message exists
+      if and only if that transaction commits — the transactional outbox, and the
+      only way a message and the write that caused it are never one without the
+      other. That moves no row of the table: the handler still runs later,
+      elsewhere, and in its own transaction.
+
+      # The delivery guarantee is AT-LEAST-ONCE, and the type says so
+
+      Exactly-once delivery does not exist over a transport. What exists is
+      at-least-once delivery plus an idempotent consumer, and every system that
+      advertises the first is selling the second with the consumer's half left as
+      an exercise. This port therefore promises at-least-once and puts the
+      consequence in the signature rather than in a paragraph:
+      [DeliveryValue.Deliveries] is a field of every delivery, it counts from 1,
+      and a value greater than 1 means this consumer — or another one, in another
+      process — has already seen these bytes.
+
+      A message is removed at ACKNOWLEDGEMENT, never at read. [Broker.Receive]
+      LEASES a message: it becomes invisible to every other consumer until
+      [PolicyValue.VisibilityTimeout] elapses. If the consumer acknowledges, the
+      message is gone. If the consumer dies — SIGKILL, a power cut, an OOM — it
+      never acknowledges, the lease lapses, and the message is delivered again
+      with Deliveries incremented. That is the entire mechanism, and it is why
+      the guarantee is at-least-once and not at-most-once.
+
+      # What this port does NOT guarantee
+
+        - **Exactly-once.** See above. Make the handler idempotent; the SDK's
+          consumer engine (internal/service/data/queue.Consume) makes you assert that
+          in code.
+        - **Order under retry.** A queue with one consumer and no failures
+          delivers in publication order. A retried message becomes visible again
+          LATER than messages published after it, so a single failure reorders
+          the stream — and more than one consumer removes ordering entirely.
+          There is no per-key ordering here; see the ADR's Deferred section.
+        - **Durability beyond what fsync actually does.** An implementation that
+          flushes has done everything a process can do; a lying disk cache, a
+          virtualised host that acknowledges early, or a filesystem mounted with
+          barriers off will still lose an acknowledged write, and no library can
+          detect that.
+
+      # Layers
+
+      The three concrete brokers — one in memory, one on the filesystem, one in a
+      SQL database — the consumer engine, and the dead-letter record live in
+      internal/service/data/queue. This package owns the contract, the domain values,
+      the policy and its guard, and the typed sentinels a refusal carries.
+
+      Package queue — the failure a handler reports when no retry can fix it.
+
+      Package queue — the ADR 0039 sibling that lets a consumer sleep until there
+      may be work, and the value it answers with (ADR 0104).
     functions:
-      - in:
+      - doc: |-
+          DoNotRetry marks cause as a failure no retry can fix, so the consumer engine
+          dead-letters the message at once instead of handing it back for another
+          attempt (ADR 0151).
+
+          	var order Order
+          	if err := json.Unmarshal(d.Message.Payload, &order); err != nil {
+          		return queue.DoNotRetry(err) // the same bytes will never decode
+          	}
+
+          It is for a failure that belongs to the MESSAGE — a payload that does not
+          decode, a reference to something since deleted, a request the handler will
+          refuse however often it is asked — and never to the moment: a downstream
+          that is down, a lock that is held, a deadline that passed are what retries
+          are for. Retrying the first kind spends [PolicyValue.MaxDeliveries] leases
+          and retry delays on an outcome already known, and keeps the dead letter an
+          operator needs to see out of the store for as long.
+
+          The mark is an errs.Wrap onto cause, so what a dead letter records of the
+          failure is unchanged: an SDK error keeps its own Reason, Code and Public —
+          origin wins, and [CodeNotRetryable] joins only its wrap trail — while a
+          cause that is not an SDK error, or no cause at all, records [NotRetryable]
+          itself, whose Public says what happened. Recognise the mark with
+          errs.HasCode(err, CodeNotRetryable); errors.Is(err, NotRetryable) answers
+          only where NotRetryable is the origin.
+
+          The engine reaches the broker's [Rejecter] for it. A broker without that
+          sibling is nacked as before, so the message is retried until
+          MaxDeliveries and dead-lettered with the same cause: the shortcut is lost,
+          never the message. A panic is never read as the mark — the recovered value
+          travels as a field of the engine's own verdict, not as its origin.
+        in:
           - name: cause
             type: error
         name: DoNotRetry
@@ -660,99 +829,583 @@ packages:
             public: The queue handler panicked and was recovered
             reason: HANDLER_PANICKED
     types:
-      - name: DeadLetterValue
+      - doc: |-
+          DeadLetterValue is one message the broker gave up on, together with why.
+
+          A dead letter without its cause is an investigation nobody can run, so the
+          cause is part of the record rather than a line in whatever log has since
+          rotated away. What is kept of the cause is CLAUDE.md rule 4's split, and
+          the split is deliberate: the wire-safe Public half and the dotted-quad code
+          go to the store, the Private half stays in the log of the process that
+          failed, and [MessageValue.ID] joins the two. A dead-letter store is read by
+          whoever is investigating — frequently not the process, the host or the
+          trust domain that produced the failure — so it is the wrong place for the
+          half of an error the SDK defines as log-only.
+        name: DeadLetterValue
         struct:
           fields:
-            - name: FailedAt
+            - doc: FailedAt is when the last attempt failed and the message was moved.
+              name: FailedAt
               type: time.Time
-            - name: Reason
+            - doc: |-
+                Reason is the SCREAMING_SNAKE identifier of the failure — the
+                errs.Error Reason of the cause, NOT_RETRYABLE for a handler's
+                [DoNotRetry] around an error that carried none, or LEASE_EXPIRED when
+                the message died by exhausting its deliveries without any consumer ever
+                reporting anything.
+              name: Reason
               type: string
-            - name: Cause
+            - doc: |-
+                Cause is the wire-safe Public half of the last failure, or an empty
+                string when the consumer reported no cause at all. It never carries
+                the message payload, which is a security property this domain shares
+                with the rest of the SDK: a queue moves bytes a consumer must not
+                leak, and an error message is the classic place they leak from.
+              name: Cause
               type: string
-            - name: Message
+            - doc: |-
+                Message is the work, unmodified, with the identifier it was published
+                under.
+              name: Message
               type: MessageValue
-            - name: Code
+            - doc: |-
+                Code is the dotted-quad errs.Code of the last failure, or 0 when the
+                cause carried none. It is a uint32 rather than an errs.Code so that
+                this package's values stay free of the kernel's error type in a shape
+                a consumer may serialise; errs.Code(dl.Code) converts.
+              name: Code
               type: uint32
-            - name: Deliveries
+            - doc: |-
+                Deliveries is how many times the message was delivered before it was
+                abandoned. It equals [PolicyValue.MaxDeliveries] for every dead letter
+                this SDK's brokers produce by running out of attempts, and is the count
+                the message had for one a handler rejected ([Rejecter]).
+              name: Deliveries
               type: int
-      - name: MessageValue
+      - doc: |-
+          MessageValue is one unit of work as the broker minted it. Every field is
+          assigned by [Broker.Publish]; a caller never fills one in, which is why
+          Publish takes a payload rather than one of these.
+        name: MessageValue
         struct:
           fields:
-            - name: EnqueuedAt
+            - doc: |-
+                EnqueuedAt is when the broker accepted the message. It is the ordering
+                key a FIFO implementation sorts on, and it is the broker's clock, not
+                the producer's.
+              name: EnqueuedAt
               type: time.Time
-            - name: ID
+            - doc: |-
+                ID identifies the message for the life of the queue and beyond it: a
+                dead letter carries the same value, so the log line the failing
+                consumer wrote and the record left on disk can be joined without either
+                one carrying the other's half of the story (CLAUDE.md rule 4).
+
+                It is opaque. Its shape is the implementation's, it is unique within
+                one queue, and nothing outside the broker that minted it may parse it.
+              name: ID
               type: string
-            - name: Payload
+            - doc: |-
+                Payload is the caller's bytes, unmodified and uninterpreted. This
+                domain does not encode: pick a codec, marshal, publish the bytes.
+
+                The slice belongs to the receiver — a durable broker read it from a
+                device, and an in-memory one copies before handing it over, so a
+                handler may keep it, mutate it, or hold it past the acknowledgement
+                without corrupting a redelivery.
+              name: Payload
               type: "[]byte"
-      - name: ReceiptValue
+      - doc: |-
+          ReceiptValue is the handle to ONE lease: the only thing [Broker.Ack],
+          [Broker.Nack] and [LeaseExtender.Extend] accept, and the only proof that
+          this consumer is the one currently holding the message.
+
+          It is opaque and it is NOT the message identifier. Two deliveries of the
+          same message carry the same [MessageValue.ID] and different receipts, which
+          is what lets a broker refuse an acknowledgement from a consumer whose lease
+          has already lapsed and been taken by somebody else. Do not parse it, do not
+          construct one, and do not store one past the lease it names.
+
+          It is a defined string rather than a struct with an unexported field
+          because a receipt has to survive being handed to a goroutine, put in a map
+          and printed in a log, and because it is not a secret: it names a lease on a
+          queue the holder can already read. What it must not be is FORGEABLE into
+          somebody else's lease, and that is a property of how the implementation
+          mints it, not of the type.
+        name: ReceiptValue
         underlying: string
-      - name: LeaseValue
+      - doc: |-
+          LeaseValue is a consumer's exclusive claim on one message: the receipt that
+          proves it and the instant it lapses.
+
+          The two travel together because neither is usable alone. A receipt without
+          a deadline cannot tell a long-running handler whether it still owns the
+          work; a deadline without a receipt cannot acknowledge anything.
+        name: LeaseValue
         struct:
           fields:
-            - name: ExpiresAt
+            - doc: |-
+                ExpiresAt is when the claim lapses and the message becomes eligible for
+                redelivery. It is the broker's clock.
+
+                It is a promise about VISIBILITY and not about mutual exclusion: after
+                this instant another consumer may hold the same message while this one
+                is still running. A handler that is still working past it is producing
+                a duplicate, which the at-least-once guarantee already permits — see
+                [LeaseExtender] for the way to avoid producing one on purpose.
+              name: ExpiresAt
               type: time.Time
-            - name: Receipt
+            - doc: Receipt names this lease to [Broker.Ack] and [Broker.Nack].
+              name: Receipt
               type: ReceiptValue
-      - name: DeliveryValue
+      - doc: |-
+          DeliveryValue is one message handed to one consumer, with everything the
+          consumer needs to decide what to do about it.
+        name: DeliveryValue
         struct:
           fields:
-            - name: Lease
+            - doc: Lease is the claim this delivery grants and the receipt that ends it.
+              name: Lease
               type: LeaseValue
-            - name: Message
+            - doc: Message is the work.
+              name: Message
               type: MessageValue
-            - name: Deliveries
+            - doc: |-
+                Deliveries counts how many times this message has been handed to a
+                consumer, INCLUDING this one. It is 1 on the first delivery.
+
+                It is a field of the port rather than a note in the documentation
+                because it is the at-least-once guarantee made unignorable: a consumer
+                cannot read a delivery without reading the number that says this may
+                not be the first time. A value above 1 means a previous consumer
+                failed, timed out, or died — the three are indistinguishable from
+                here, deliberately, since none of them changes what the handler must
+                do.
+
+                It is also the number [PolicyValue.MaxDeliveries] is compared against:
+                a delivery whose count already equals the maximum is the last one this
+                message gets before the dead-letter store.
+              name: Deliveries
               type: int
-      - methods:
-          - name: Validate
+      - doc: |-
+          PolicyValue is the delivery discipline a broker enforces: how long a lease
+          lasts, how many attempts a message gets, how long a failure waits, and how
+          large a payload may be.
+
+          # Its zero value is REFUSED, and that is the decision
+
+          ADR 0031 gives two branches — clamp where a working default needs no
+          explanation, refuse where any value the SDK invented would be arbitrary —
+          and this one struct uses both, which is why they are worth reading side by
+          side.
+
+            - [PolicyValue.VisibilityTimeout] and [PolicyValue.MaxDeliveries] are
+              REFUSED at zero. Each has two natural readings that are OPPOSITES, and
+              in each case one of them silently destroys the guarantee: a zero
+              visibility timeout is either "redeliver immediately", which is a
+              delivery storm, or "never redeliver", which is a lost message; zero
+              deliveries is either "unlimited", which lets one poison message loop
+              forever and the dead-letter store stay empty, or "none", which is a
+              queue that delivers nothing. This is core/app/lock's argument for refusing
+              a zero TTL, and it is the same argument because it is the same class of
+              value: a lifetime belongs to the work being protected, and only the
+              caller knows what that is.
+            - [PolicyValue.RetryDelay] and [PolicyValue.MaxMessageBytes] are CLAMPED.
+              A zero retry delay means "as soon as the lease lapses", which is one
+              reading, is harmless, and is what a caller who has not thought about
+              backoff wants. A zero size bound means [DefaultMaxMessageBytes].
+            - [PolicyValue.MaxRetryDelay] is neither: its zero is the behaviour the
+              struct had before the field existed — a retry delay that does not grow —
+              which is one reading and the only backward-compatible one.
+
+          Both branches in one struct is the point. A domain in which every zero is
+          refused teaches a reader nothing except that the author was nervous.
+
+          The three durations are bounded from ABOVE as well, by [MaxDeadlineOffset],
+          and that refusal is about arithmetic rather than about readings: a deadline
+          further out than that cannot be recorded by a durable broker at all.
+        methods:
+          - doc: |-
+              Validate reports whether the policy is one a broker can honour, and refuses
+              it BY FIELD when it is not.
+
+              It lives in core so that the memory, file and SQL brokers refuse identical
+              inputs identically — the property that makes the first usable as a test
+              double for the other two. It is the same instrument core/data/vfs's ValidatePath
+              and ValidatePerm are, for the same reason.
+            name: Validate
             out:
               - type: error
             recv: value
-          - name: Normalized
+          - doc: |-
+              Normalized returns the policy with its clamped fields resolved, so that
+              every implementation reads the same numbers rather than each remembering to
+              apply the same default.
+
+              It does NOT validate: call [PolicyValue.Validate] first, at construction,
+              where the refusal reaches the caller who wrote the mistake.
+            name: Normalized
             out:
               - type: PolicyValue
             recv: value
         name: PolicyValue
         struct:
           fields:
-            - name: VisibilityTimeout
+            - doc: |-
+                VisibilityTimeout is how long a [Broker.Receive] hides a message from
+                every other consumer. It is the deadline the consumer is racing, and
+                it must be longer than the slowest run of the handler — or the handler
+                must renew it through [LeaseExtender].
+
+                It is the single knob that sets how quickly a dead consumer's work is
+                picked up: a message held by a process that has been SIGKILLed
+                reappears exactly this long after it was leased, and not before.
+
+                A non-positive value is refused ([QueueMisconfigured]), and so is one
+                above [MaxDeadlineOffset].
+              name: VisibilityTimeout
               type: time.Duration
-            - name: RetryDelay
+            - doc: |-
+                RetryDelay is how long a NACKED message stays invisible before it
+                becomes eligible again, measured from the nack.
+
+                It does NOT apply to a lease that simply lapsed: that message has
+                already been invisible for a whole visibility timeout, and charging it
+                a second wait would punish a crashed consumer more than a failing one.
+
+                Zero is a working value and means "eligible as soon as the nack
+                returns". Negative is read as zero. Above [MaxDeadlineOffset] it is
+                refused ([QueueMisconfigured]).
+
+                It is the same wait after every failure unless [PolicyValue]
+                .MaxRetryDelay makes it grow.
+              name: RetryDelay
               type: time.Duration
-            - name: MaxRetryDelay
+            - doc: |-
+                MaxRetryDelay makes the retry delay GROW, and is where the growth
+                stops. When it is positive, a message nacked on its n-th delivery waits
+                RetryDelay × 2^(n−1), held at MaxRetryDelay — the SDK's one backoff
+                curve (kernel/backoff, ADR 0103), keyed on the delivery that failed,
+                so a downstream that is down is asked less and less often instead of at
+                a fixed cadence it is already failing to keep up with (ADR 0151).
+
+                Zero keeps RetryDelay constant, which is what every policy did before
+                this field existed: a policy that does not name it behaves exactly as
+                it did. That is the zero's one reading — a ceiling nobody set is not a
+                request for unbounded growth, which could not be recorded anyway.
+
+                A negative value is refused, because it is not a ceiling and the caller
+                who wrote it meant something; so is one above [MaxDeadlineOffset],
+                whose deadline a durable broker could not record; so is a ceiling with
+                no RetryDelay to grow from, which would leave every retry at zero while
+                reading like a backoff; and so is a ceiling below RetryDelay, which
+                would silently shorten every wait the caller asked for
+                ([QueueMisconfigured], naming the field).
+              name: MaxRetryDelay
               type: time.Duration
-            - name: MaxDeliveries
+            - doc: |-
+                MaxDeliveries is how many times one message may be handed to a
+                consumer before the broker gives up and dead-letters it. It is
+                compared against [DeliveryValue.Deliveries], which counts from 1, so a
+                value of 1 means "one attempt, then the dead-letter store" and is a
+                legitimate configuration rather than an off-by-one.
+
+                A non-positive value is refused ([QueueMisconfigured]).
+              name: MaxDeliveries
               type: int
-            - name: MaxMessageBytes
+            - doc: |-
+                MaxMessageBytes bounds one payload. A larger payload is refused at
+                [Broker.Publish] with [MessageTooLarge], at the call site that built
+                it, rather than accepted and discovered by a consumer that cannot read
+                it back.
+
+                Zero means [DefaultMaxMessageBytes]. Negative is refused, because it
+                is not a bound at all and the caller who wrote it meant something.
+              name: MaxMessageBytes
               type: int
-      - name: Handler
+      - doc: |-
+          Handler processes one delivery. It is the port a consumer implements, and
+          it is a FUNCTION type rather than an interface — the shape
+          internal/core/CLAUDE.md already admits for resilience.Operation,
+          scheduler.Job, lifecycle.Start and events.Listener. ADR 0039's rule is that
+          a published port must not grow a method; a func type satisfies it
+          structurally, because it cannot grow one at all.
+
+          It receives the whole [DeliveryValue] and not just the payload, so that
+          [DeliveryValue.Deliveries] is in front of whoever writes the handler. A
+          handler WILL be called more than once for the same message — that is the
+          guarantee, not a malfunction — and the count is the only thing that lets it
+          say so in a log.
+
+          Returning nil acknowledges. Returning an error nacks: the message is
+          retried, or dead-lettered once it has exhausted
+          [PolicyValue.MaxDeliveries]. Returning [DoNotRetry](err) says no retry can
+          fix it, and the message is dead-lettered at once, with err, through a
+          broker's [Rejecter]. ctx is the consumer's and IS honoured: unlike
+          events.Listener, a handler that outlives its context is holding a lease it
+          is about to lose, so abandoning the work is the correct response and the
+          message will simply be redelivered.
+        name: Handler
         underlying: func(ctx context.Context, delivery DeliveryValue) error
-      - name: NackValue
+      - doc: |-
+          NackValue is what [Broker.Nack] decided.
+
+          It exists because "I reported the failure" and "that message is now dead"
+          are different facts, and a consumer that cannot tell them apart cannot log
+          the one that matters. Every field is a scalar: a nack is on the failure
+          path, but it is on the failure path of a queue that is expected to retry,
+          so it is not rare enough to allocate on.
+        name: NackValue
         struct:
           fields:
-            - name: Deliveries
+            - doc: |-
+                Deliveries is how many times the message had been delivered when it
+                failed, counting from 1.
+              name: Deliveries
               type: int
-            - name: VisibleAt
+            - doc: |-
+                VisibleAt is when the message becomes available again. It is the zero
+                Time when DeadLettered is true.
+              name: VisibleAt
               type: time.Time
-            - name: DeadLettered
+            - doc: |-
+                DeadLettered reports that the message exhausted
+                [PolicyValue.MaxDeliveries] and was moved to the dead-letter store
+                with its cause. It will not be delivered again, unless somebody replays
+                it ([DeadLetterManager]).
+              name: DeadLettered
               type: bool
-      - name: WakeValue
+      - doc: |-
+          WakeValue is what an idle consumer waits on: an event, or an instant the
+          broker already knows about.
+        name: WakeValue
         struct:
           fields:
-            - name: Signal
+            - doc: |-
+                Signal is closed by the next event that may make a message receivable
+                through this broker in this process: a Publish, or a Nack that hands a
+                message back. It is never nil, and it is never closed by a publication
+                made in another process.
+              name: Signal
               type: <-chan struct{}
-            - name: In
+            - doc: |-
+                In is how long, measured on the broker's own clock at the moment Wake
+                was called, until a message the broker already holds becomes
+                receivable with no further event: a retry delay ending, or a lease
+                lapsing because its consumer died. It is meaningful only when
+                Scheduled is true; zero or less means now.
+
+                It is a duration and not an instant so that a consumer whose clock is
+                not the broker's still waits the right length of time rather than
+                comparing two clocks that disagree.
+              name: In
               type: time.Duration
-            - name: Scheduled
+            - doc: |-
+                Scheduled reports that In names such a moment. It is false when the
+                broker holds nothing that will become receivable on its own.
+              name: Scheduled
               type: bool
   - constants:
-      - name: DefaultPollInterval
+      - doc: |-
+          DefaultPollInterval is how long an idle worker waits before asking again,
+          when [ConsumerConfig.PollInterval] is left at zero.
+
+          It is a CLAMP and not a refusal (ADR 0031): its zero has one reading — "you
+          did not think about polling" — and 100 ms is defensible for every queue,
+          because it bounds idle latency at a tenth of a second while costing one
+          directory read per worker per tenth of a second. A caller who cares picks
+          their own.
+
+          Every broker in this package is a [corequeue.Waker], so for them it bounds
+          only what a wake cannot see — a publication made by ANOTHER process into a
+          durable queue — and a caller that has no such producer can raise it a
+          hundredfold. It stays at 100 ms because a zero must keep meaning what it
+          always meant for a broker that cannot wake anyone.
+        name: DefaultPollInterval
         type: time.Duration
         value: "100000000"
-      - name: MaxSQLTableLen
+      - doc: |-
+          MaxSQLTableLen is the longest table name [NewSQL] and [SQLMigration] accept,
+          in bytes: PostgreSQL's identifier limit. The broker derives no table from
+          it, so the whole limit is the caller's.
+        name: MaxSQLTableLen
         type: int
         value: "63"
+    doc: |-
+      Package queue — the consumer engine: the pull loop that runs a Handler on a
+      CONSUMER'S goroutine, which is the third axis of ADR 0053's frontier.
+
+      Package queue — the consumer engine's configuration, its one mandatory
+      assertion, and the clamps that make every other field safe to omit.
+
+      Package queue — who else can write a queue directory, asked of the mode bits:
+      the whole answer on Unix, where a directory's other-write bit and its sticky
+      bit are exactly the two facts the question needs.
+
+      Package queue — who else can write a queue directory, asked of Windows in the
+      only vocabulary it has for it: the directory's DACL, read by the one reader
+      this repository has (internal/kernel/fs/winacl — the lock domain's reader,
+      ADR 0084/0086, moved to the kernel so that the queue no longer reaches into
+      another service for it; ADR 0159).
+
+      # Why the mode rule cannot run here
+
+      os.Stat SYNTHESISES a mode from FILE_ATTRIBUTE_READONLY on Windows, so every
+      writable directory reports 0777 with no sticky bit, and the Unix rule refused
+      every queue directory a caller could name — as QUEUE_DIRECTORY_UNUSABLE, an
+      error that blames the deployment for the platform (ADR 0018 §(a)'s failure
+      mode). The first Windows run of the whole suite found it: every /file case.
+
+      # The same two questions, asked of the DACL
+
+      The root is refused when an identifier meaning anybody may take away an
+      entry it did not create — winacl.ReplaceRights, the Windows spelling of
+      "world-writable and not sticky". A state is refused when such an identifier
+      may put an entry there at all — a file (a planted message) or a directory
+      or junction — or take one away, or alter a file created there through what
+      that file would inherit: on Unix a message is written 0600 whatever the
+      directory allows, here it inherits the directory's list.
+
+      # Where it does not reach
+
+      The broker cannot yet RUN here: internal/service/data/vfs refuses Windows by
+      design (no flushable directory handle, a mode that is not an ACL), so NewFile
+      returns UNSUPPORTED_PLATFORM once these checks pass. They run anyway, so the
+      refusal a caller meets on Windows is the platform's rather than a false
+      verdict on their directory — and so the rules are right on the day vfs gains
+      a Windows backend.
+
+      Package queue — the durable broker: one directory, three subdirectories,
+      and rename(2) as the only thing that changes a fact.
+
+      Package queue — the durable broker's configuration, and the directory
+      checks it runs before anything is opened.
+
+      Package queue — the durable broker's failure path: handing a message back,
+      renewing a lease, and the record left behind for whoever investigates.
+
+      Package queue — the durable queue's state machine is a NAME. This file is
+      its grammar: what a queued, an in-flight and an abandoned message are
+      called, and how a name is read back into the facts it carries.
+
+      Package queue — the durable broker's read path: reclaiming the leases of
+      consumers that died, and leasing what is visible.
+
+      Package queue — the durable broker's dead-letter decisions: putting a dead
+      letter back into the queue, or deleting it.
+
+      Package queue — one entry in the in-memory broker's lease-deadline heap.
+
+      Package queue — the record the in-memory broker keeps about one message.
+
+      Package queue — the in-memory broker: the double a consumer's own tests run
+      against, and the control the durability measurements are read against.
+
+      Package queue — the in-memory broker's configuration.
+
+      Package queue implements the asynchronous, durable message queue declared
+      in internal/core/data/queue (ADR 0054): three brokers — one in the heap, one on
+      the filesystem, one in a table of the caller's own SQL database (ADR 0151) —
+      the consumer engine that drives a [corequeue.Handler] against any of them,
+      and the dead-letter record they all write.
+
+      # Three brokers, one set of refusals
+
+      [NewMemory] exists so a consumer can test its own code without a directory
+      or a database, and that is only worth something if the brokers answer
+      identically. They therefore share the core policy guard
+      (corequeue.PolicyValue.Validate), the retry delay (retryDelay), the same
+      typed sentinels, and a table-driven conformance suite that runs the SAME
+      cases against all three. Where they cannot be identical — surviving a
+      restart, crossing a process boundary, joining the caller's transaction, what
+      a flush costs — the difference is named rather than discovered by a reader.
+
+      # The one thing the SQL broker does that neither other can
+
+      [NewSQL] keeps the queue in one table of the database the application
+      already writes, and every call runs on the transaction its context carries.
+      So a message published inside the caller's transaction exists if and only if
+      that transaction commits: the transactional outbox, which no broker whose
+      publication is durable on its own can offer.
+
+      # The one thing the file broker does that the memory broker cannot
+
+      It survives the consumer. Every piece of state the durable queue keeps —
+      which messages are queued, which are leased, when each lease lapses, how
+      many times each has been delivered — lives in a DIRECTORY ENTRY, not in
+      this process's heap. A consumer that is SIGKILLed mid-handler leaves an
+      entry whose deadline is in the past, and the next consumer to look, in any
+      process on that machine, renames it back and delivers it again.
+      TestAKilledConsumerLosesItsLeaseAndTheMessageComesBack does exactly that,
+      with a real subprocess and a real SIGKILL, because a test that calls Nack
+      proves only that Nack works.
+
+      # Why the durable broker holds no long-lived handle
+
+      There is no Close in this package and no descriptor kept between calls.
+      Every operation opens what it needs, moves what it must, and returns. That
+      costs a syscall or two per call and buys the property the domain is for: a
+      process that dies leaves nothing half-open, nothing to recover, and no
+      state that only it could have interpreted. It is also what makes the
+      broker genuinely inter-process — two brokers in two processes over one
+      directory are the same queue, with no coordination beyond the filesystem.
+
+      # Why there is no lock file
+
+      Exclusion between consumers is [os.Rename], not a lock. Renaming a queued
+      message into the in-flight directory is atomic and it FAILS for the loser,
+      so two consumers reaching for the same message resolve it in the kernel
+      with no lock, no lease and no polling — and it resolves the same way for
+      two goroutines in one process as for two processes, which ADR 0052
+      measured that flock(2) emphatically does not.
+
+      Package queue — how long a nacked message waits, the same way in all three
+      brokers.
+
+      Package queue — the SQL broker: the queue in one table of the caller's own
+      database, every call on the transaction its context carries (ADR 0151).
+
+      Package queue — the SQL broker's construction parameters, and the refusals
+      a configuration no SQL broker could run gets.
+
+      Package queue — the SQL broker's dead letters: burying one a handler
+      rejected, reading them back, and the two decisions an operator takes.
+
+      Package queue — the only place the SQL broker renders SQL. Every statement
+      it sends is built here, once, at NewSQL, for its dialect and its table; the
+      two whose length depends on a batch are rendered per call from the same
+      parts. Every one is spelled with the vocabulary core/data/sql's Dialect owns: the
+      bind markers, the quoting and the row lock.
+
+      Package queue — the SQL broker's table, as a migration the caller runs under
+      its own version table.
+
+      Package queue — the SQL broker's read path: leasing what is due, and
+      burying the leases whose consumers died with no attempt left.
+
+      Package queue — waking an idle consumer: the broadcast every broker closes on
+      a publication, and the table that lets two durable brokers over one queue —
+      one directory, or one database and table — in one process wake each other's
+      consumers.
     functions:
-      - in:
+      - doc: |-
+          Consume runs cfg.Handler against broker until ctx is done.
+
+          It is the third column of ADR 0053's frontier made concrete: the handler
+          runs on a goroutine this function owns, not on the publisher's, and it runs
+          in a different process from the publisher whenever the broker is a durable
+          one. Publish returned long ago and knows nothing about any of this.
+
+          It returns nil when ctx ends — a cancelled consumer is a stopped consumer,
+          not a failed one — and returns the broker's error when the BROKER fails,
+          because a queue whose storage has stopped answering is not something a
+          consumer can poll its way out of. A HANDLER's error is never returned: it
+          is nacked, retried, and eventually dead-lettered, which is the entire point
+          of the domain.
+
+          Every worker returns before Consume does, so a caller that cancels and
+          waits knows no handler is still running.
+        in:
           - name: ctx
             type: context.Context
           - name: broker
@@ -762,7 +1415,36 @@ packages:
         name: Consume
         out:
           - type: error
-      - in:
+      - doc: |-
+          NewFile returns a broker whose messages survive the process that published
+          them.
+
+          # Why internal/service/data/vfs, and where it stops
+
+          The durable publication of a message is exactly what corevfs.AtomicWriter
+          promises: a temporary in the same directory, the payload, an fsync of the
+          FILE, a rename, an fsync of the DIRECTORY — five steps whose failure paths
+          ADR 0056 tested by injecting a failure at each one and comparing the
+          destination's hash. Rewriting that here would be eighty lines of subtle
+          code duplicating something the SDK merged, measured and proved, and the
+          first thing to rot would be the failure paths, which are the only part that
+          matters.
+
+          It stops at corevfs.WritableFS, which has WriteFile, MkdirAll, Remove and
+          RemoveAll and NO RENAME. That is not an oversight in vfs and it is not
+          worked around here: the port is FROZEN (ADR 0039), so adding a fifth method
+          to carry this domain's state machine would break every downstream
+          implementation at compile time. The state transitions therefore go through
+          os.Root directly, which confines them to the queue directory by the same
+          mechanism vfs itself uses, and the boundary between the two is exactly the
+          boundary between "publish a whole file" and "move one".
+
+          It refuses, at construction rather than at first use: a policy it cannot
+          honour ([corequeue.QueueMisconfigured]), a directory it cannot use safely
+          ([corequeue.QueueDirectoryUnusable]), and a platform with no atomic replace
+          or no flushable directory handle — core/proc.UnsupportedPlatform, raised by
+          internal/service/data/vfs.NewOS and passed through unmodified (ADR 0018).
+        in:
           - name: cfg
             type: FileConfig
         name: NewFile
@@ -771,7 +1453,13 @@ packages:
             type: corequeue.Broker
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NewMemory returns an in-process broker holding its messages in the heap.
+
+          It refuses a policy it cannot honour at CONSTRUCTION rather than at first
+          use, through the same core/data/queue.PolicyValue.Validate the file broker runs
+          — which is what makes this an honest double for it.
+        in:
           - name: cfg
             type: MemoryConfig
         name: NewMemory
@@ -780,7 +1468,15 @@ packages:
             type: corequeue.Broker
           - name: err
             type: error
-      - in:
+      - doc: |-
+          NewSQL returns a broker whose queue is one table of the caller's database,
+          created by [SQLMigration]. It sends no statement: everything decidable
+          without a database is decided here.
+
+          It refuses, at construction rather than at first use, a policy it cannot
+          honour (core/data/queue.QueueMisconfigured) and a transactor, dialect or table it
+          cannot use ([corequeue.SQLQueueMisconfigured]).
+        in:
           - name: cfg
             type: SQLConfig
         name: NewSQL
@@ -789,7 +1485,18 @@ packages:
             type: corequeue.Broker
           - name: err
             type: error
-      - in:
+      - doc: |-
+          SQLMigration returns the migration that creates the one table an SQL queue
+          named table keeps on dialect, as a core/data/sql MigrationValue numbered version,
+          for the caller's Migrator to run under the caller's version table. Its Down
+          drops the table, and every message in it — queued, leased and dead.
+
+          The SDK numbers nothing: a migration is a value its consumer constructs
+          (ADR 0055 §D12), and only the consumer knows where the queue's table sits in
+          its own history. Its one statement does nothing when the table already
+          exists — or is already gone — so applying it over a table a previous
+          deployment made changes nothing (ADR 0151).
+        in:
           - name: dialect
             type: coresql.Dialect
           - name: table
@@ -806,51 +1513,455 @@ packages:
       coresql: github.com/kitsunium/sdk/internal/core/data/sql
     path: github.com/kitsunium/sdk/internal/service/data/queue
     types:
-      - name: ConsumerConfig
+      - doc: |-
+          ConsumerConfig configures [Consume]: what to run, how many of it, how often
+          to look, and the one thing about the handler the SDK cannot check for
+          itself.
+
+          Every field except Handler and HandlerIsIdempotent is CLAMPED, so a caller
+          with no opinion writes two fields and gets a correct consumer.
+        name: ConsumerConfig
         struct:
           fields:
-            - name: Handler
+            - doc: Handler processes one delivery. It must be non-nil.
+              name: Handler
               type: corequeue.Handler
-            - name: Clock
+            - doc: |-
+                Clock drives the idle wait. Nil means clock.System.
+
+                Nothing in this package calls time.Sleep; an idle worker waits through
+                Waiter.After and a cancelled context wakes it immediately.
+              name: Clock
               type: clock.Timed
-            - name: PollInterval
+            - doc: |-
+                PollInterval is how long a worker waits after finding the queue empty.
+                Zero means [DefaultPollInterval]; negative is read as zero.
+
+                When the broker is a [corequeue.Waker] — every broker in this package
+                is — it is an upper bound and not a cadence: a Publish or a Nack in
+                this process wakes the worker at once, and a retry delay ending or a
+                lease lapsing wakes it at that instant. What is left for the poll to
+                find is a publication another process made into a durable queue, so set
+                it to how late such a message may be noticed — seconds, not
+                milliseconds, is the usual answer — and an idle consumer then costs
+                nothing between polls.
+              name: PollInterval
               type: time.Duration
-            - name: Parallelism
+            - doc: |-
+                Parallelism is how many independent workers run. Each one polls, leases
+                and processes on its OWN goroutine, which is what makes this the
+                consumer's goroutine rather than the publisher's.
+
+                Non-positive is clamped to 1: one worker is what a caller who did not
+                think about concurrency wants, it is never wrong, and there is nothing
+                here for the SDK to invent.
+
+                Above 1 there is NO ordering left, in any sense.
+              name: Parallelism
               type: int
-            - name: BatchSize
+            - doc: |-
+                BatchSize is how many messages one worker leases per poll. Non-positive
+                is clamped to 1.
+
+                Above 1 a worker processes its batch SEQUENTIALLY, so the extra
+                messages are held under a lease they are not yet being worked on: a
+                batch of 50 with a 30-second visibility timeout gives the last message
+                30 seconds minus the other 49's processing time. Batch for throughput
+                against a durable broker, where one poll is a directory read; do not
+                batch to get parallelism, which is what Parallelism is.
+              name: BatchSize
               type: int
-            - name: HandlerIsIdempotent
+            - doc: |-
+                HandlerIsIdempotent asserts, IN CODE, that Handler is safe to run more
+                than once for the same message.
+
+                It must be true. Its zero value is false and is REFUSED
+                ([corequeue.ConsumerMisconfigured]), and that refusal is the domain's
+                one piece of deliberate ceremony.
+
+                The reason is that this queue delivers AT LEAST ONCE and cannot do
+                otherwise. A consumer that dies between finishing the work and
+                acknowledging it has done the work and not said so, and the message
+                comes back — that is not a bug to be fixed, it is the only honest
+                behaviour available to a queue whose consumers can die. Exactly-once
+                delivery does not exist over a transport; what exists is at-least-once
+                plus an idempotent consumer, and the second half is the caller's.
+
+                The SDK cannot check it, so it makes the caller assert it where a
+                reviewer will see it. It is precisely
+                resilience.HedgeConfig.Idempotent's instrument, for precisely its
+                reason, and it has the same useful side effect:
+                `grep -rn HandlerIsIdempotent` enumerates every place in a codebase
+                where somebody promised this.
+              name: HandlerIsIdempotent
               type: bool
-      - name: FileConfig
+      - doc: |-
+          FileConfig configures [NewFile]: which directory holds the queue, which
+          clock reads its deadlines, and what delivery discipline it enforces.
+
+          Its Policy's zero value is refused at construction — see
+          core/data/queue.PolicyValue — and so is a directory whose entries any account
+          could replace.
+        name: FileConfig
         struct:
           fields:
-            - name: Clock
+            - doc: |-
+                Clock reads time. It is the narrow half of kernel/clock because this
+                broker never waits: a lapsed lease is noticed by the next Receive, not
+                by a timer.
+
+                Injecting a ManualClock makes every deadline in a SINGLE-process test
+                instant. It cannot make a cross-process test instant, and that
+                asymmetry is not an oversight: a lease deadline is a wall-clock instant
+                written into a filename precisely so that another process can read it,
+                and another process does not share this one's fake clock. The
+                consumer-death test therefore waits on the real clock, and says so.
+
+                Nil means clock.System.
+              name: Clock
               type: clock.Clock
-            - name: Dir
+            - doc: |-
+                Dir is the queue directory. It is created owner-only when absent, and
+                refused when it exists and any account outside the owner and group
+                could replace its entries. Its three state directories are held to the
+                same rule — created owner-only, checked when somebody else made them —
+                and refused besides when one is a symlink or not a directory at all.
+                On Windows "owner-only" is not something a mode can say: a directory
+                inherits its parent's access control list, and the rule reads that list
+                instead (dirtrust_windows.go).
+
+                Two brokers over one Dir — in one process or in two — are ONE queue.
+                That is the domain's inter-process claim, and it is the whole reason
+                the directory is the configuration rather than an implementation
+                detail.
+              name: Dir
               type: string
-            - name: Policy
+            - doc: |-
+                Policy is the delivery discipline. Its zero value is refused; see
+                core/data/queue.PolicyValue.
+              name: Policy
               type: corequeue.PolicyValue
-      - name: MemoryConfig
+      - doc: |-
+          MemoryConfig configures [NewMemory]: which clock reads its deadlines, and
+          what delivery discipline it enforces.
+
+          Its Policy's zero value is refused at construction through the SAME guard
+          [NewFile] runs, which is what makes this broker an honest double for that
+          one.
+        name: MemoryConfig
         struct:
           fields:
-            - name: Clock
+            - doc: |-
+                Clock reads time. A memory broker never WAITS — expiry is noticed on
+                the next Receive — so it asks for the narrow half of kernel/clock and
+                a test can drive every deadline in this package with a ManualClock and
+                no sleeping at all.
+
+                Nil means clock.System.
+              name: Clock
               type: clock.Clock
-            - name: Policy
+            - doc: |-
+                Policy is the delivery discipline. Its zero value is refused; see
+                core/data/queue.PolicyValue.
+              name: Policy
               type: corequeue.PolicyValue
-      - name: SQLConfig
+      - doc: |-
+          SQLConfig configures [NewSQL]: the database the queue lives in, its table,
+          which clock stamps its instants, and what delivery discipline it enforces.
+          Transactor, Dialect and Table are required, and Policy's zero value is
+          refused as it is for every broker.
+        name: SQLConfig
         struct:
           fields:
-            - name: Transactor
+            - doc: |-
+                Transactor is the transaction manager of the database the queue lives
+                in — the one the caller's own transactions are opened with, so a call
+                made under one of them joins it. It must also be a core/data/sql Joiner and
+                Deferrer, which the SDK's own transactor is: the first is how a
+                publication joins the caller's transaction, the second how it wakes a
+                consumer only once that transaction has committed.
+              name: Transactor
               type: coresql.Transactor
-            - name: Clock
+            - doc: |-
+                Clock stamps every instant the broker writes — a message's visibility,
+                a lease's deadline, a dead letter's failure — and reads the instant a
+                lease is judged against. Nil means clock.System.
+
+                The instants are the BROKER's, never the database's NOW(): a test
+                drives every deadline with a ManualClock, as it does the other two
+                brokers'. Brokers in several processes over one table compare
+                instants their own clocks wrote, so those clocks must agree to within
+                the precision a lease needs — as they must for the file broker.
+              name: Clock
               type: clock.Clock
-            - name: Table
+            - doc: |-
+                Table names the queue's one table, which [SQLMigration] creates. It is
+                a lower-case SQL identifier of at most [MaxSQLTableLen] bytes, holds no
+                three underscores in a row — docstore's derived tables do — and does
+                not start with "sqlite_".
+
+                Two brokers over one database and one Table — in one process or in
+                twenty — are ONE queue, as two file brokers over one directory are.
+              name: Table
               type: string
-            - name: Policy
+            - doc: |-
+                Policy is the delivery discipline. Its zero value is refused; see
+                core/data/queue.PolicyValue.
+              name: Policy
               type: corequeue.PolicyValue
-            - name: Dialect
+            - doc: |-
+                Dialect is the engine's, and must be the Transactor's own: the SQL the
+                broker speaks to it.
+              name: Dialect
               type: coresql.Dialect
-  - facade:
+  - doc: |-
+      Package queue is the public facade for the SDK's ASYNCHRONOUS, DURABLE
+      message queue: one process publishes work, another process picks it up
+      later, and a crash in between loses nothing.
+
+      	broker, err := queue.NewFile(queue.FileConfig{
+      		Dir: "/var/lib/myapp/jobs",
+      		Policy: queue.Policy{
+      			VisibilityTimeout: 30 * time.Second, // longer than the slowest handler
+      			MaxDeliveries:     5,                // then the dead-letter store
+      			RetryDelay:        2 * time.Second,
+      		},
+      	})
+
+      	// …in the producer, possibly in another process entirely:
+      	msg, err := broker.Publish(ctx, payload)
+
+      	// …in the consumer:
+      	err = queue.Consume(ctx, broker, queue.ConsumerConfig{
+      		Handler: func(ctx context.Context, d queue.Delivery) error {
+      			return process(ctx, d.Message.Payload) // d.Deliveries says if this is a retry
+      		},
+      		HandlerIsIdempotent: true, // required; see below
+      		Parallelism:         4,
+      	})
+
+      # This is not an event bus, and the difference is the whole design
+
+      Read this before anything else in the package. pkg/v1/app/events and this
+      package are described with the same words — publish, handler, message — and
+      they guarantee opposite things:
+
+      	                | events                     | queue (this package)
+      	----------------|----------------------------|---------------------------
+      	Scope           | one process                | many processes
+      	Timing          | synchronous                | asynchronous
+      	Goroutine       | the publisher's            | a consumer's
+      	Transaction     | the publisher's            | its own
+      	Durability      | none                       | the point of it
+      	Retries / DLQ   | none                       | the point of it
+      	If the process  | the event never happened   | the message is still
+      	dies mid-flight |                            | there
+
+      If you want several things to happen right now, on your goroutine, inside
+      your transaction, you want events and this package will be slower and
+      harder for no benefit: [Broker].Publish on a durable broker costs a disk
+      flush, because that flush IS the guarantee.
+
+      The Transaction row is about where the WORK runs, and a handler always runs
+      in its own. What [NewSQL] adds is that the MESSAGE can be part of yours: see
+      "A queue in your own database" below.
+
+      # Delivery is AT LEAST ONCE, and you must handle duplicates
+
+      Exactly-once delivery does not exist over a transport. What exists is
+      at-least-once delivery plus an idempotent consumer, and any library that
+      advertises the first is selling you the second with your half left as an
+      exercise. This one says so instead — in three places you cannot miss:
+
+        - [Delivery].Deliveries is a field of every delivery. It counts from 1,
+          and a value above 1 means these bytes have been handled before, by you
+          or by a consumer in another process.
+        - [ConsumerConfig].HandlerIsIdempotent must be set to true. Its zero
+          value is refused, so a handler cannot acquire the promise by omission,
+          and `grep -rn HandlerIsIdempotent` enumerates every place in your
+          codebase where somebody made it.
+        - A message is removed at ACKNOWLEDGEMENT, never at read. That is what
+          makes redelivery possible, and it is not negotiable: a consumer that
+          dies after doing the work and before acknowledging it has done the work
+          and not said so, and the queue has no way to tell that from a consumer
+          that died before doing anything.
+
+      # Ordering is NOT guaranteed, and a single retry is enough to lose it
+
+      One consumer, no failures, one durable broker: messages arrive in
+      publication order. Change any of the three and they do not.
+
+      The one people discover in production is the retry. A message that fails is
+      made visible again LATER, so messages published after it are delivered
+      before it is retried. There is no per-key ordering here and no ordered
+      mode; if two messages must be processed in order, they are one message.
+
+      # What a crash actually costs
+
+      A consumer that is SIGKILLed mid-handler holds a lease it will never
+      release. Nothing is lost: the lease lapses after
+      [Policy].VisibilityTimeout and the next consumer to look — in any process
+      on that machine — picks the message up with [Delivery].Deliveries
+      incremented. That timeout is therefore how long a dead consumer's work sits
+      idle, and it is the one number worth thinking about when you wire this.
+
+      A message whose consumers keep dying is dead-lettered like any other, by
+      the same [Policy].MaxDeliveries count, so a payload that crashes the
+      process cannot loop forever taking every consumer with it.
+
+      # The dead-letter store keeps the cause
+
+      After [Policy].MaxDeliveries attempts the message is moved to the
+      dead-letter store together with why: the failure's reason, its dotted-quad
+      code, and its wire-safe Public half. The log-only Private half is NOT kept
+      — a dead-letter store is read by whoever is investigating, often not the
+      process or even the trust domain that failed — and [Message].ID is the join
+      key back to the log line that has it.
+
+      Read them with the [DeadLetterReader] capability, which every broker here
+      implements. Reading does not remove them; evidence that a read consumes is
+      evidence the second investigator does not get.
+
+      	if reader, ok := broker.(queue.DeadLetterReader); ok {
+      		dead, err := reader.DeadLetters(ctx, 100)
+      	}
+
+      What becomes of one is then a decision, and [DeadLetterManager] is where it
+      is taken: ReplayDeadLetter queues it again — same ID, same payload, its
+      count reset, so it has every attempt again — once the downstream is fixed,
+      and DeleteDeadLetter removes it for good. An ID the store does not hold is
+      [DeadLetterNotFound].
+
+      	if manager, ok := broker.(queue.DeadLetterManager); ok {
+      		err := manager.ReplayDeadLetter(ctx, dead[0].Message.ID)
+      	}
+
+      # A failure no retry can fix is dead-lettered at once
+
+      A payload that does not decode will not decode on the fifth attempt either.
+      Return [DoNotRetry] around the error and [Consume] dead-letters the message
+      on its FIRST failure, through the broker's [Rejecter], with your error as
+      the cause the dead letter records:
+
+      	var order Order
+      	if err := json.Unmarshal(d.Message.Payload, &order); err != nil {
+      		return queue.DoNotRetry(err)
+      	}
+
+      Keep it for failures that belong to the message. A downstream that is down,
+      a lock that is held, a deadline that passed are what retries are for. The
+      mark is recognised with errs.HasCode(err, queue.CodeNotRetryable); a broker
+      of your own without [Rejecter] is nacked as before, and the message then
+      reaches the dead-letter store after its last attempt with the same cause.
+
+      # A retry delay that grows
+
+      [Policy].RetryDelay is the same wait after every failure. Set
+      [Policy].MaxRetryDelay and it grows instead — RetryDelay after the first
+      failure, doubling, never more than the ceiling — so a downstream that is
+      down is asked less and less often:
+
+      	queue.Policy{
+      		VisibilityTimeout: 30 * time.Second,
+      		MaxDeliveries:     10,
+      		RetryDelay:        time.Second,     // 1 s, 2 s, 4 s, …
+      		MaxRetryDelay:     5 * time.Minute, // … never more than five minutes
+      	}
+
+      Zero keeps the constant delay every policy had before the field existed. A
+      ceiling with no RetryDelay to grow from, or one below it, is refused.
+
+      # Zero values are safe or refused, never inert
+
+      [Policy].VisibilityTimeout and [Policy].MaxDeliveries are REFUSED at zero,
+      because each has two natural readings that are opposites and one of each
+      pair silently destroys the guarantee — "redeliver instantly" against "never
+      redeliver", "unlimited attempts" against "no attempts". Any value the SDK
+      invented would be arbitrary, and a lease lifetime belongs to the work being
+      protected.
+
+      [Policy].RetryDelay and [Policy].MaxMessageBytes are CLAMPED, because their
+      zeros have one reading each and it is harmless: no extra delay, and
+      [DefaultMaxMessageBytes].
+
+      The three durations are also bounded from ABOVE by [MaxDeadlineOffset], a
+      century, and refused past it — not as a judgement about leases but because
+      the durable brokers write every deadline as Unix nanoseconds, into a file
+      name or a 64-bit column, which end in 2262. A deadline past that could not
+      be read back, and the message it names would never be delivered again. The
+      math.MaxInt64 somebody reaches for to mean "never" is 292 years, so it is
+      refused rather than stranding the message; an extension that would reach
+      past 2262 is refused by every broker for the same reason.
+
+      # An idle consumer sleeps until there is work
+
+      Every broker here implements [Waker], and [Consume] waits on it: a Publish,
+      a Nack or a replay in this process wakes an idle worker at once, and a retry
+      delay ending or a lease lapsing wakes it at that instant. [ConsumerConfig]
+      .PollInterval is then an upper bound rather than a cadence — what is left
+      for it to find is a message ANOTHER process published into a durable queue —
+      so an idle consumer costs nothing between polls and a poll of a few seconds
+      loses no latency inside one process:
+
+      	queue.Consume(ctx, broker, queue.ConsumerConfig{
+      		Handler:             handle,
+      		HandlerIsIdempotent: true,
+      		PollInterval:        5 * time.Second, // bounds only a publication from another process
+      	})
+
+      Two durable brokers over one directory — or one database and table — in one
+      process share their wake, as they share everything else: they are one queue.
+
+      # A queue in your own database, joined to your transaction
+
+      [NewSQL] keeps the queue in one table of the PostgreSQL, MySQL or SQLite
+      database your application already writes, handed over as the [sql.Transactor]
+      you open your own transactions with. Every call runs on the transaction its
+      context carries — a savepoint of it — so a message published inside yours
+      exists if and only if yours commits. That is the transactional outbox: the
+      write and the message that announces it are never one without the other,
+      and a process that dies between your commit and a publication loses
+      nothing, because there is no between.
+
+      	create, err := queue.SQLMigration(sql.DialectPostgres, "app__jobs", 20260930120000) // run by your Migrator
+      	jobs, err := queue.NewSQL(queue.SQLConfig{
+      		Transactor: tm, Dialect: sql.DialectPostgres, Table: "app__jobs",
+      		Policy: queue.Policy{VisibilityTimeout: 30 * time.Second, MaxDeliveries: 5},
+      	})
+      	err = sql.Transact(ctx, tm, func(ctx context.Context, _ sql.Executor) error {
+      		if err := orders.Insert(ctx, order); err != nil {
+      			return err // no message either
+      		}
+      		_, err := jobs.Publish(ctx, payload) // joins this transaction
+      		return err
+      	})
+
+      Idle consumers are woken once the publication's transaction commits, never
+      for one rolled back. An idle Receive is one indexed read and takes no lock;
+      a Receive that leases locks the rows it takes and skips those another
+      consumer holds (FOR UPDATE SKIP LOCKED — MySQL 8.0.1, MariaDB 10.6) or, on
+      SQLite, takes the one write lock. A failure of the database is
+      [QueueBackendFailed], with the driver's error reachable through errors.As
+      and its text — which quotes rows — withheld; it ends [Consume], as a storage
+      failure always has, and a database fails transiently where a directory
+      rarely does — so run a consumer over it under lifecycle's supervisor, and
+      open SQLite with a busy timeout.
+
+      # Three brokers
+
+      [NewFile] and [NewSQL] are the real ones. [NewFile]'s state is a directory,
+      it survives the process, and two brokers over one directory — in one process
+      or in twenty — are one queue. [NewSQL]'s state is a table, with the same
+      guarantees, and the one property a directory cannot give: a publication
+      inside your database transaction.
+
+      [NewMemory] is the test double. It gives your own tests the port's full
+      semantics with no directory and no flush, which is what makes them fast
+      enough to run on every save. It is one process and it holds nothing on a
+      device, so a restart is a total loss: using it in production buys the
+      asynchrony and throws away the durability, which is the exact confusion the
+      frontier table above exists to prevent.
+    facade:
       - const:
           - doc: |-
               DefaultMaxMessageBytes is the payload bound applied when

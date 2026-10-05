@@ -80,6 +80,35 @@ packages:
             name: CodeInvalidInterval
             value: "0x00_03_2B_05"
         type: errs.Code
+    doc: |-
+      Package scheduler — ranges 0.2.12.* (ADR 0041 core/app/scheduler block) and
+      0.3.43.* (ADR 0041 service/app/scheduler block, declared here since ADR 0160).
+
+      Package scheduler — declares the sentinel *errs.Error outcomes of the
+      domain: the registration refusals, and the parser's refusals of a schedule.
+      Each var's name equals its errs.Define Reason in SCREAMING_SNAKE form.
+
+      Package scheduler declares the time-driven execution port of the SDK: the
+      [Job] that runs, the [Schedule] that says when, and the [Scheduler] that
+      owns the pairing and fires it. A core sibling admitted by ADR 0041.
+
+      Both halves of the contract are FUNCTION ports rather than interfaces — the
+      shape internal/core/CLAUDE.md already admits for resilience.Operation. Each
+      is a single behaviour, so a named func IS the contract and needs no adapter
+      at the call site; it is also the narrowest thing pkg/v1 can publish. ADR
+      0039's lesson is that a published port cannot grow a method without breaking
+      every downstream implementer at compile time, and a func type cannot grow
+      one at all.
+
+      The concrete schedules (a POSIX cron expression, a fixed interval) and the
+      engine that drives them live in internal/service/app/scheduler; this package
+      owns only the contract, the two domain values, and the typed sentinels the
+      engine emits. Cron vocabulary deliberately does not appear here: the port
+      knows about instants, not about expressions.
+
+      Package scheduler — hosts EntryValue, the registration a Scheduler owns.
+
+      Package scheduler — hosts ResultValue, the record of one scheduling decision.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/app/scheduler
@@ -211,40 +240,173 @@ packages:
             public: The interval must be greater than zero
             reason: INVALID_INTERVAL
     types:
-      - name: Job
+      - doc: |-
+          Job is the unit of work a [Scheduler] fires. It MUST honour ctx: the
+          scheduler passes the context Run was called with, so cancelling that context
+          is how a shutdown reaches a running job. A Job that ignores ctx delays Run's
+          return by its own duration — the scheduler waits for it rather than
+          abandoning it, because a job still running after the caller believes the
+          scheduler stopped is worse than a slow shutdown.
+
+          A Job's error is reported through [ResultValue] and is otherwise ignored: a
+          failing job never stops the scheduler and never affects another entry.
+        name: Job
         underlying: func(ctx context.Context) error
-      - name: Schedule
+      - doc: |-
+          Schedule reports the first instant STRICTLY after `after` at which a job is
+          due, and whether such an instant exists at all. A false second return means
+          the schedule will never fire again; the scheduler disarms that entry and
+          keeps running the others.
+
+          Implementations MUST be pure — the same `after` always yields the same
+          answer — and MUST be safe for concurrent use. The scheduler calls Next
+          repeatedly, including several times in one pass when fires were missed, and
+          a Schedule returning a value that is not strictly after its argument would
+          make that loop spin forever.
+        name: Schedule
         underlying: func(after time.Time) (next time.Time, ok bool)
-      - name: EntryValue
+      - doc: |-
+          EntryValue is one registered pairing of a [Schedule] with a [Job], under a
+          name that identifies it in every [ResultValue] and every error field.
+
+          The zero value is not runnable and is refused by Add ([InvalidEntry]) rather
+          than accepted and silently never fired.
+        name: EntryValue
         struct:
           fields:
-            - name: Name
+            - doc: |-
+                Name identifies the entry in results and errors. It must be non-empty
+                and unique within one Scheduler.
+              name: Name
               type: string
-            - name: Schedule
+            - doc: Schedule decides when the Job is due.
+              name: Schedule
               type: Schedule
-            - name: Job
+            - doc: Job is the work to run.
+              name: Job
               type: Job
-            - name: AllowOverlap
+            - doc: |-
+                AllowOverlap permits a fire while the previous run of THIS entry has not
+                returned. The zero value (false) skips that fire and reports it as
+                [ResultValue.Skipped] — the safe default, because the SDK cannot know
+                whether two concurrent copies of a Job are safe and the symptom of
+                getting it wrong is a duplicated side effect rather than an error.
+                Setting it is the caller's in-code assertion that concurrent copies are
+                safe, the same instrument resilience.HedgeConfig.Idempotent uses for the
+                same class of claim (ADR 0031).
+              name: AllowOverlap
               type: bool
-      - name: ResultValue
+      - doc: |-
+          ResultValue is what a [Scheduler] reports for every decision it takes about
+          an entry — a run that happened, and a fire that was deliberately not run.
+          Reporting the second is the point: a scheduler that only reports runs makes
+          a permanently-skipped entry indistinguishable from an entry that is doing
+          its job.
+
+          It is also the SDK's own test instrument. Because every decision emits one,
+          a test can WAIT for the decision it expects instead of sleeping to prove a
+          negative — which is what lets the scheduler suite assert cadences, missed
+          deadlines and overlap without a single time.Sleep.
+
+          This is a published concrete shape (pkg/v1/app/scheduler.Result is an alias), so
+          ADR 0040 applies: it may still gain or change a field while the module is
+          v0, loudly and in the commit message, and not after v1.
+        name: ResultValue
         struct:
           fields:
-            - name: Name
+            - doc: Name is the entry's registered name.
+              name: Name
               type: string
-            - name: Scheduled
+            - doc: |-
+                Scheduled is the due instant this decision stands for. When fires were
+                missed it is the LATEST due instant at or before the wake-up, never the
+                oldest: the scheduler skips rather than catches up, so the run that
+                happens is the current one and the stale ones are what got dropped.
+              name: Scheduled
               type: time.Time
-            - name: Started
+            - doc: Started is when the Job was invoked. Zero when Skipped.
+              name: Started
               type: time.Time
-            - name: Finished
+            - doc: Finished is when the Job returned. Zero when Skipped.
+              name: Finished
               type: time.Time
-            - name: Missed
+            - doc: |-
+                Missed counts the due instants that were dropped because they had
+                already passed when the scheduler woke — a machine that slept, a
+                timer that overran, a job that held the slot. It never causes extra
+                runs; it exists so "skip" is not the same thing as "silently drop".
+
+                It counts only instants missed WITHIN one Run: the scheduler keeps no
+                state across restarts, so fires missed while the process was down are
+                not visible to it and are not counted here.
+              name: Missed
               type: int
-            - name: Skipped
+            - doc: |-
+                Skipped reports that the fire was not run because the previous run of
+                this entry had not returned and AllowOverlap is false.
+              name: Skipped
               type: bool
-            - name: Err
+            - doc: |-
+                Err is the Job's own error, verbatim and unwrapped, so errors.Is against
+                the caller's own sentinels keeps working. It is [JobPanicked] when the
+                Job panicked and the scheduler recovered.
+              name: Err
               type: error
-  - functions:
-      - in:
+  - doc: |-
+      Package scheduler — hosts Config, the engine's construction parameters.
+
+      Package scheduler provides the concrete half of the scheduling domain: a
+      five-field POSIX cron parser, a fixed-interval schedule, and the engine that
+      fires core/app/scheduler.Job values through core/app/scheduler.Schedule. ADR 0041.
+
+      The engine depends on internal/kernel/clock.Timed, never on package time
+      directly, so a test drives cadence, missed deadlines and overlap by moving a
+      ManualClock instead of sleeping (ADR 0039).
+
+      Cross-OS: 100% portable Go (time, context, sync, sync/atomic, strconv,
+      strings). Cron's finest field is the minute, which is deliberately coarser
+      than any platform's timer resolution — see CLAUDE.md §What is guaranteed.
+
+      Package scheduler — hosts the calendar cursor the cron walk advances.
+
+      Package scheduler — hosts entry, the engine's per-registration state.
+
+      Package scheduler — hosts Every, the fixed-interval Schedule.
+
+      Package scheduler — hosts fieldSpec, the description of one cron field and
+      the parser that turns its text into a membership set.
+
+      Package scheduler — the parser's refusal helpers. Every rejection names what
+      was wrong in structured fields; the Public message stays a fixed literal.
+
+      Package scheduler — hosts the run loop: waiting, firing, and draining.
+
+      Package scheduler — hosts the engine: registration, and the state Run needs.
+    functions:
+      - doc: |-
+          Parse compiles a five-field POSIX cron expression, evaluated in UTC.
+
+          UTC is the default rather than time.Local because time.Local depends on TZ
+          and on the host: the same expression would mean different instants on two
+          machines in one fleet, and the difference would surface as a job that ran an
+          hour early on one node. A caller who wants local time says so, with
+          ParseInLocation(expr, time.Local).
+
+          Accepted: five space-separated fields — minute (0-59), hour (0-23),
+          day-of-month (1-31), month (1-12 or JAN-DEC), day-of-week (0-6 or SUN-SAT,
+          Sunday = 0) — each of which may be "*", a value, an "a-b" range, a
+          comma-separated list, or a "*/n" / "a-b/n" step. Names are
+          case-insensitive. The macros @yearly, @annually, @monthly, @weekly, @daily,
+          @midnight and @hourly expand to the expressions above.
+
+          Refused, by name rather than by guessing: six- and seven-field expressions
+          (seconds / year), @reboot, @every, the Quartz operators L, W, # and ?, a
+          step written over a single value, an inverted range, 7 for Sunday, and a
+          valid expression that matches no date on the calendar.
+
+          When both day fields are restricted, POSIX makes them an OR: "0 0 13 * FRI"
+          fires on every 13th AND on every Friday, not only on Friday the 13th.
+        in:
           - name: expr
             type: string
         name: Parse
@@ -253,7 +415,25 @@ packages:
             type: coresched.Schedule
           - name: err
             type: error
-      - in:
+      - doc: |-
+          ParseInLocation compiles a cron expression evaluated in loc.
+
+          A nil loc is REFUSED, not read as UTC: nil is what an unchecked
+          time.LoadLocation returns on failure, so accepting it would turn a missing
+          tzdata into a schedule that silently runs on a different clock. Parse is the
+          way to ask for UTC.
+
+          Around a DST transition in loc the semantics are exact and are not
+          negotiable per caller:
+
+            - Spring forward. A wall-clock time that does not exist that day does not
+              fire. "0 2 * * *" in a zone that skips 02:00-03:00 skips that day
+              entirely; it is not shifted to 01:00 or 03:00, because both of those are
+              instants the expression does not name.
+            - Fall back. A wall-clock time that happens twice fires ONCE, at the first
+              occurrence. The schedule is strictly increasing by contract, and the
+              second occurrence is behind the instant already returned.
+        in:
           - name: expr
             type: string
           - name: loc
@@ -264,7 +444,25 @@ packages:
             type: coresched.Schedule
           - name: err
             type: error
-      - in:
+      - doc: |-
+          Every returns a [coresched.Schedule] due one period after each previous due
+          instant. It exists because @every is refused by the cron parser: an interval
+          is not a calendar expression, and pretending it is confuses two different
+          ideas — "every 30 seconds" has no month, no weekday and no DST question,
+          while "0 2 * * *" has all three.
+
+          The period is measured from the previous DUE instant, not from the previous
+          completion, so a slow job does not shift the cadence. When a run overruns
+          its period the next fire is already late; the scheduler then applies the
+          domain's missed-deadline rule (skip and count) rather than queueing.
+
+          A non-positive period is refused ([coresched.InvalidInterval]) rather than clamped: a
+          schedule due infinitely often is not a slow schedule, it is a busy loop, and
+          no substitute value would be anything but a guess at the caller's intent
+          (ADR 0031). Sub-minute periods are accepted here — unlike cron, which stops
+          at the minute — but the timing guarantee is the domain's: not early, and
+          late by however much the platform's timers and the machine's load impose.
+        in:
           - name: period
             type: time.Duration
         name: Every
@@ -273,7 +471,13 @@ packages:
             type: coresched.Schedule
           - name: err
             type: error
-      - in:
+      - doc: |-
+          New returns a Scheduler built from cfg. It cannot fail: a nil Clock falls
+          back to clock.System and a nil OnResult to no observation, both of which are
+          working configurations rather than inert ones (ADR 0031). What CAN fail —
+          an unrunnable entry, an unparseable expression — fails at Add and at Parse,
+          where the caller made the mistake.
+        in:
           - name: cfg
             type: Config
         name: New
@@ -284,14 +488,123 @@ packages:
       coresched: github.com/kitsunium/sdk/internal/core/app/scheduler
     path: github.com/kitsunium/sdk/internal/service/app/scheduler
     types:
-      - name: Config
+      - doc: |-
+          Config parameterises [New]. Both fields are optional and the zero value
+          builds a working scheduler — one that runs on the wall clock and reports
+          nothing.
+        name: Config
         struct:
           fields:
-            - name: Clock
+            - doc: |-
+                Clock is the time source the engine reads AND waits on. A nil Clock
+                falls back to clock.System.
+
+                It is clock.Timed rather than clock.Clock because this engine does both
+                halves: it stamps results and it waits for deadlines. Depending on
+                package time directly instead would make every cadence assertion in the
+                test suite a sleep, which is the claim ADR 0039 exists to make true.
+              name: Clock
               type: clock.Timed
-            - name: OnResult
+            - doc: |-
+                OnResult observes every decision the scheduler takes — each run, with
+                the job's own error, and each fire skipped for overlap.
+
+                Calls are SERIALISED: the hook need not be safe for concurrent use, and
+                in exchange a hook that blocks blocks the scheduler. Keep it short; hand
+                off to a logger or a channel rather than doing work in it.
+
+                A nil hook is a working configuration, not a refusal: a caller whose
+                jobs log their own failures has nothing to observe here. It does mean
+                the job's error goes NOWHERE — the SDK will not write it to stderr on
+                the caller's behalf (ADR 0030) — so a caller who wants to know their
+                jobs are failing must wire this.
+              name: OnResult
               type: func(coresched.ResultValue)
-  - facade:
+  - doc: |-
+      Package scheduler is the public facade for the SDK's time-driven execution
+      domain: a five-field POSIX cron parser, a fixed-interval schedule, and an
+      engine that fires jobs on either.
+
+      	sched := scheduler.New(scheduler.Config{
+      	    OnResult: func(r scheduler.Result) { log.Info("job", "name", r.Name, "err", r.Err) },
+      	})
+
+      	nightly, err := scheduler.Parse("0 2 * * *") // 02:00 UTC, every day
+      	if err != nil {
+      	    return err // an unusable expression is refused HERE, not at 02:00
+      	}
+      	if err := sched.Add(scheduler.Entry{Name: "rollup", Schedule: nightly, Job: rollup}); err != nil {
+      	    return err
+      	}
+      	err = sched.Run(ctx) // blocks until ctx is cancelled, then drains
+
+      # What is refused, and when
+
+      A [Scheduler] with no entries is legitimate — it runs empty and waits for
+      its context, which is what a service with every job behind a feature flag
+      looks like. An unusable ENTRY is not: an empty name, a nil Job or a nil
+      Schedule is refused by [Scheduler].Add, and an unusable cron expression is
+      refused by [Parse]. The two are different questions and the SDK answers them
+      differently on purpose (ADR 0031).
+
+      [Parse] refuses by name rather than by guessing. Six- and seven-field
+      expressions (the seconds and year dialects), @reboot, @every, the Quartz
+      operators L, W, # and ?, a step written over a single value, an inverted
+      range, 7 for Sunday, and any expression that matches no date on the calendar
+      — "0 0 30 2 *" — all come back as a typed error at construction. Fixed
+      intervals are [Every], which is a different idea from a calendar expression
+      and has a different name for that reason.
+
+      # Time zones
+
+      [Parse] evaluates in UTC. [ParseInLocation] takes any *time.Location, and
+      refuses a nil one — nil is what an unchecked time.LoadLocation leaves you
+      with, and reading it as UTC would silently run the job on a different clock.
+      A named location needs the host's tz database or a blank import of
+      time/tzdata in your binary; the SDK does not import it for you.
+
+      Around a DST transition the rules are fixed and documented rather than
+      emergent:
+
+        - Spring forward — a wall-clock time that does not exist that day does not
+          fire. "0 2 * * *" in a zone that skips 02:00-03:00 skips that day. It is
+          not shifted to 01:00 or 03:00: those are instants the expression does
+          not name.
+        - Fall back — a wall-clock time that happens twice fires once, at the
+          first occurrence.
+
+      # Missed deadlines, and overlap
+
+      The scheduler SKIPS and COUNTS. When the machine sleeps, or a run holds its
+      slot past the next deadline, the job runs once for the most recent due
+      instant and [Result].Missed reports how many older ones were dropped. It
+      never replays them: a process that was down for a day would come back to a
+      burst of stale work at the worst possible moment. Fires missed while the
+      process was not running are invisible — this scheduler keeps no state across
+      restarts.
+
+      When a run has not returned by the next deadline, the default is to SKIP
+      that fire and report it as [Result].Skipped. Queueing grows without bound
+      behind a persistently slow job; running copies in parallel duplicates a side
+      effect the SDK cannot know is safe. A caller who knows concurrent copies are
+      safe says so with [Entry].AllowOverlap — an in-code assertion, like
+      resilience.HedgeConfig.Idempotent, whose zero value is the safe answer.
+
+      # What is guaranteed
+
+      A job is never fired EARLY. Lateness has no upper bound: it is whatever the
+      platform's timer resolution, the machine's load and the OS's scheduling
+      impose, and on a machine that suspends it is unbounded. This is why cron's
+      finest field here is the minute and why a seconds field is refused — a
+      six-field expression would promise a resolution no GOOS in the SDK's support
+      matrix delivers uniformly (ADR 0018).
+
+      A failing job never stops the scheduler and never affects another entry. A
+      PANICKING job is recovered, reported as [JobPanicked] in [Result].Err, and
+      the scheduler keeps running — one job's bug must not take the process down.
+      The [Config].OnResult hook is the caller's own code and is deliberately NOT
+      recovered.
+    facade:
       - alias:
           - doc: Job is the public alias for the ctx-aware unit of scheduled work.
             name: Job

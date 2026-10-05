@@ -1,4 +1,3 @@
-// Package authz — hosts GrantValue, one row of the role → permissions table.
 package authz
 
 // GrantValue binds one role to the permissions it confers. The role name is

@@ -1,5 +1,3 @@
-// Package kit — the warnings for endpoints that set passwords outside a
-// policy.
 package kit
 
 import (

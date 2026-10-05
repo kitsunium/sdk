@@ -1,6 +1,3 @@
-// Package server is the inbound half of the SDK's network domain (ADR 0029):
-// one unified listener engine for TCP, Unix, TLS and mutual TLS, serving
-// pluggable handlers grouped behind shared middlewares and policies.
 package server
 
 import (

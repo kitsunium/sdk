@@ -1,18 +1,3 @@
-// Package session implements the server-side session domain declared in
-// internal/core/security/session (ADR 0045): two concrete stores — one in memory, one on
-// disk — and the AEAD sealer that renders a session identifier as a cookie
-// value.
-//
-// Both stores answer the same contract and differ only in where the record
-// lives and how long it survives. The memory store dies with the process; the
-// file store survives a restart, is confined to one host, and makes real
-// operating-system guarantees that this package refuses to fake where the
-// mechanism does not exist (see file_store.go and fsguard_unix.go).
-//
-// Nothing here waits on the wall clock. Every deadline is read from an injected
-// kernel/clock.Clock, so an expiry test advances a ManualClock instead of
-// sleeping. The narrow half of the port is deliberate: a session store READS
-// time, it never waits on it, so it takes Clock rather than Timed.
 package session
 
 import (

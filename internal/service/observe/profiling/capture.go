@@ -1,5 +1,3 @@
-// Package profiling — hosts the captures: the process's CPU over a bounded
-// window, and its live heap.
 package profiling
 
 import (

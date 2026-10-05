@@ -1,5 +1,3 @@
-//go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /framework/kit/config/toml .
-
 // Package toml lets a kit product read TOML configuration files —
 // config/config.toml, config/<env>.toml — as it reads JSON ones. kit reads
 // JSON itself; importing this package is the whole of what a product does to

@@ -1,8 +1,3 @@
-// Package redis — the client seam: the ONLY file that imports the Redis driver.
-// newClient builds a lazy client over a Unix socket and returns the execBatch
-// closure (a pipelined XADD run) plus a closeFn that releases the client.
-// Returning a closeFn rather than the *redis.Client keeps the driver type out of
-// the sink wrapper, so go-redis stays confined to this file.
 package redis
 
 import (

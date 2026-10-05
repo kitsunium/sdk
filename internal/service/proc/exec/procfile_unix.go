@@ -1,8 +1,5 @@
 //go:build unix
 
-// Package exec — Unix procfs writer: a tiny os.WriteFile shim used to set
-// /proc/<pid>/oom_score_adj, isolated so the platform-specific path handling
-// stays out of the attribute logic.
 package exec
 
 import "os"

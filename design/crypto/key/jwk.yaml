@@ -89,6 +89,25 @@ packages:
             name: CodeJWKAmbiguousKid
             value: "0x00_03_2A_0B"
         type: errs.Code
+    doc: |-
+      Package jwk — the JSON Web Key format's codes, range 0.3.42.* (ADR 0005).
+
+      The range was allocated to internal/service/crypto/key/jwk, which reads and
+      writes the format, and is declared here, at the same path in the core, since
+      ADR 0160: a domain's codes live in its core and the service only uses them.
+      The values did not change with the move, and the LL byte still records the
+      service layer that allocated them.
+
+      Package jwk — declares the sentinel *errs.Error values for JWK / JWK Set
+      parsing, serialisation and selection, which internal/service/crypto/key/jwk
+      returns. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE
+      form. The Private strings name that service package, where each condition
+      is detected.
+
+      None of these Public strings names a member VALUE: a JWK carries key
+      material, and an error message is the one place it must never surface. The
+      Private strings name the member and the rule that rejected it, never its
+      contents.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/crypto/key/jwk
@@ -208,29 +227,144 @@ packages:
             public: Several keys in the set carry that key id
             reason: AMBIGUOUS_KID
   - constants:
-      - name: TypeEC
+      - doc: |-
+          TypeEC is an elliptic-curve key over a NIST prime curve (RFC 7518 §6.2):
+          public members "x"/"y", private member "d".
+        name: TypeEC
         type: Type
         value: "\"EC\""
-      - name: TypeOKP
+      - doc: |-
+          TypeOKP is an octet key pair — an Edwards-curve key (RFC 8037 §2):
+          public member "x", private member "d" (the 32-octet seed).
+        name: TypeOKP
         type: Type
         value: "\"OKP\""
-      - name: TypeOct
+      - doc: |-
+          TypeOct is a symmetric key carried whole in "k" (RFC 7518 §6.4). It has
+          no public half, which is why MarshalPublic refuses it.
+        name: TypeOct
         type: Type
         value: "\"oct\""
-      - name: CurveP256
+      - doc: |-
+          CurveP256 is NIST P-256, the curve behind JOSE "ES256" and the SDK's
+          registered "ecdsa-p256" signer.
+        name: CurveP256
         type: Curve
         value: "\"P-256\""
-      - name: CurveP384
+      - doc: |-
+          CurveP384 is NIST P-384 (JOSE "ES384"). Representable here, but the SDK
+          registers no signer for it — see the package CLAUDE.md.
+        name: CurveP384
         type: Curve
         value: "\"P-384\""
-      - name: CurveP521
+      - doc: |-
+          CurveP521 is NIST P-521 (JOSE "ES512"); field elements are 66 octets, not
+          65, because 521 bits round up to 66 whole octets.
+        name: CurveP521
         type: Curve
         value: "\"P-521\""
-      - name: CurveEd25519
+      - doc: CurveEd25519 is the Edwards curve behind JOSE "EdDSA" (RFC 8037).
+        name: CurveEd25519
         type: Curve
         value: "\"Ed25519\""
+    doc: |-
+      Package jwk — the bridge between a JWK and the key encodings the SDK's own
+      schemes already speak, so adopting the format costs no re-encoding by hand:
+
+      	service/crypto/sign/ecdsasig    PKIX DER public / SEC1 DER private
+      	service/crypto/sign/ed25519sig  raw 32-octet public / raw 64-octet private
+      	service/crypto/mac/hmacsha2     core/crypto.Key (redacting, 32 octets)
+
+      The out-bound accessors named *Private / Secret hand back live key material,
+      exactly as core/crypto.Key.Bytes() does, and carry the same rule: they feed a
+      scheme, never a log line. They are in-process handoffs — the serialisation
+      guard is MarshalPublic / MarshalPrivate, one layer up.
+
+      Package jwk — curve arithmetic and the two validity checks a JWK parser is
+      most often missing: that the declared point is actually ON the declared
+      curve, and that a declared private scalar actually derives that point.
+
+      Both go through crypto/ecdh rather than crypto/elliptic: ecdh.Curve's
+      NewPublicKey / NewPrivateKey validate their input (on-curve, not the identity,
+      scalar in [1, n-1]) whereas the elliptic.Curve point methods are deprecated
+      precisely because they do not.
+
+      Package jwk implements the RFC 7517 JSON Web Key representation for the key
+      types the SDK's crypto domain already ships: EC (NIST P-256/P-384/P-521),
+      OKP (Ed25519) and oct (symmetric). It is stdlib-only — a JWK is JSON plus
+      base64url plus curve arithmetic, all of which crypto/ecdh, crypto/ed25519,
+      crypto/x509 and encoding/json already provide — so it adds no dependency to
+      internal/service.
+
+      It is a FORMAT, not a connector: nothing here fetches a JWK Set over HTTP,
+      caches one, or follows an OpenID discovery document. Bytes in, bytes out.
+
+      # Exporting a private key is opt-in, never the default
+
+      core/crypto.Key redacts itself precisely so key material cannot fall out of a
+      log line, and a JWK serialiser is by construction a function that turns
+      protected material into JSON. So the two paths are named, not flagged:
+      MarshalPublic emits public members only and is what MarshalJSON — the path
+      encoding/json takes by itself — delegates to, while MarshalPrivate is the
+      only call that can emit "d" or "k", and reads as such at the call site. A
+      symmetric key has no public half at all, so MarshalPublic refuses it with
+      NoPublicForm rather than quietly publishing the secret (ADR 0030: the default
+      must not be the dangerous one).
+
+      KeyValue redacts under %v / %s / %#v the same way core/crypto.Key does: the
+      rendering names kty, crv, kid and whether private material is present, and
+      never a byte of the material itself.
+
+      Package jwk — the encode half, and the place the package's one real security
+      decision lives.
+
+      Serialising a key is the operation that undoes core/crypto.Key's redaction:
+      it turns protected material into JSON somebody will write to a file, a
+      config map, or an HTTP response. So the two directions are not a boolean
+      argument — they are two differently named methods, and the one the language
+      reaches for on its own (MarshalJSON, i.e. plain json.Marshal) is the safe
+      one. Emitting "d" or "k" requires typing MarshalPrivate at the call site,
+      where a reviewer reads it.
+
+      Package jwk — the decode half: JSON document to KeyValue, with every
+      RFC 7517 / 7518 / 8037 rejection made explicit and typed.
+
+      Parsing accepts private members. That is not the asymmetry this package
+      guards: a caller parsing its own private JWK already holds the material. The
+      guarded direction is serialisation (see marshal.go), where a protected value
+      would become publishable JSON.
+
+      There is deliberately no KeyValue.UnmarshalJSON. Parse is the single entry
+      point, so there is exactly one place where a document becomes a key and
+      exactly one set of checks it must pass — and KeyValue keeps a uniform value
+      receiver, which is what makes MarshalJSON fire on a plain (non-pointer) key
+      and therefore what makes the safe default actually reachable.
+
+      Package jwk — the JWK Set (RFC 7517 §5) and, with it, the package's second
+      deliberate refusal.
+
+      A set is how key rotation is published: for a window, the old and the new key
+      are both in the document. RFC 7517 §4.5 only SHOULD-s distinct "kid" values,
+      so a set holding two keys under one kid is legal and does happen. Resolving
+      it by taking the first match would make the answer depend on JSON member
+      order — an ordering no RFC guarantees and no publisher promises to keep.
+
+      So ByKid refuses an ambiguous lookup (AmbiguousKid) and AllByKid is the
+      rotation path: it returns every candidate, in document order, and the caller
+      decides — typically by trying each until a signature verifies. Same principle
+      as ADR 0031: where any SDK-chosen answer would be arbitrary, refuse instead
+      of guessing quietly.
+
+      Package jwk — the RFC 7517 JSON wire shapes and the base64url codec every
+      member goes through. Kept apart from the value type so nothing in jwk.go has
+      an exported-looking JSON surface: keyJSON is the ONLY struct with json tags,
+      and it is unexported, so encoding/json can never reach a KeyValue by
+      reflection.
     functions:
-      - in:
+      - doc: |-
+          FromECDSAPublic builds an EC JWK from a PKIX (SubjectPublicKeyInfo) DER blob
+          — the shape service/crypto/sign/ecdsasig returns as its public key.
+        in:
           - name: der
             type: "[]byte"
         name: FromECDSAPublic
@@ -239,7 +373,10 @@ packages:
             type: KeyValue
           - name: err
             type: error
-      - in:
+      - doc: |-
+          FromECDSAPrivate builds an EC JWK carrying "d" from a SEC1 EC DER blob — the
+          shape service/crypto/sign/ecdsasig returns as its private key.
+        in:
           - name: der
             type: "[]byte"
         name: FromECDSAPrivate
@@ -248,7 +385,10 @@ packages:
             type: KeyValue
           - name: err
             type: error
-      - in:
+      - doc: |-
+          FromEd25519Public builds an OKP JWK from a raw 32-octet Ed25519 public key —
+          the shape service/crypto/sign/ed25519sig returns.
+        in:
           - name: pub
             type: "[]byte"
         name: FromEd25519Public
@@ -257,7 +397,12 @@ packages:
             type: KeyValue
           - name: err
             type: error
-      - in:
+      - doc: |-
+          FromEd25519Private builds an OKP JWK carrying "d" from a raw 64-octet
+          crypto/ed25519 private key (seed||public) — the shape
+          service/crypto/sign/ed25519sig returns. RFC 8037 §2 stores only the 32-octet seed
+          in "d", so the expansion is dropped and re-derived on the way out.
+        in:
           - name: priv
             type: "[]byte"
         name: FromEd25519Private
@@ -266,7 +411,14 @@ packages:
             type: KeyValue
           - name: err
             type: error
-      - in:
+      - doc: |-
+          FromSecret builds an oct JWK from the SDK's redacting symmetric key — the one
+          service/crypto/mac/hmacsha2 tags and verifies with.
+
+          The resulting key is still redacting under %v, and still refuses
+          MarshalPublic: wrapping a crypto.Key in a JWK must not be a way around the
+          protection crypto.Key was given.
+        in:
           - name: secret
             type: corecrypto.Key
         name: FromSecret
@@ -275,7 +427,17 @@ packages:
             type: KeyValue
           - name: err
             type: error
-      - in:
+      - doc: |-
+          Parse decodes one JWK object (RFC 7517 §4). It accepts a public or a private
+          key and validates it fully: required members present, members spelled as
+          unpadded base64url, coordinates at the curve's fixed length, the point on the
+          declared curve, and — when "d" is present — the private scalar deriving
+          exactly the declared public key.
+
+          Members this package does not model are ignored, per RFC 7517 §4, and are NOT
+          carried through to a later Marshal: re-emitting a member we never understood
+          would be vouching for it.
+        in:
           - name: document
             type: "[]byte"
         name: Parse
@@ -284,14 +446,26 @@ packages:
             type: KeyValue
           - name: err
             type: error
-      - in:
+      - doc: NewSet builds a Set from keys, in the given order.
+        in:
           - name: keys
             type: KeyValue
         name: NewSet
         out:
           - type: Set
         variadic: true
-      - in:
+      - doc: |-
+          ParseSet decodes a JWK Set document. Every member goes through Parse, so a
+          set is accepted only when all of its keys are, and a member's own rejection
+          code survives the wrapper (origin wins) instead of collapsing to "malformed".
+
+          The "keys" member is required (RFC 7517 §5.1): an absent or null one is
+          MissingMember, not an empty set. An empty ARRAY is a valid empty set — that
+          is a publisher saying "no keys right now", which is different from a document
+          that forgot to say anything. A document, or a member, that is JSON null is
+          Malformed: it is no object at all, which json.Unmarshal would otherwise let
+          through as a zero struct reading like a missing member.
+        in:
           - name: document
             type: "[]byte"
         name: ParseSet
@@ -304,100 +478,158 @@ packages:
       corecrypto: github.com/kitsunium/sdk/internal/core/crypto
     path: github.com/kitsunium/sdk/internal/service/crypto/key/jwk
     types:
-      - name: Type
+      - doc: Type is the JWK "kty" member — the key-type family a JWK describes.
+        name: Type
         underlying: string
-      - name: Curve
+      - doc: Curve is the JWK "crv" member — the curve a key lives on.
+        name: Curve
         underlying: string
-      - methods:
-          - name: ECDSAPublic
+      - doc: |-
+          KeyValue is one parsed or constructed JSON Web Key. It is an immutable value:
+          the constructors copy every octet slice in, the accessors copy every octet
+          slice out, and the With* methods return a modified copy rather than mutating
+          the receiver.
+
+          Every field is unexported so encoding/json cannot reach the material by
+          reflection; the only serialisation paths are the named MarshalPublic /
+          MarshalPrivate pair and the MarshalJSON delegate.
+        methods:
+          - doc: |-
+              ECDSAPublic renders the key as a PKIX DER blob, ready for
+              service/crypto/sign/ecdsasig.Verify or crypto.Verify.
+            name: ECDSAPublic
             out:
               - name: der
                 type: "[]byte"
               - name: err
                 type: error
             recv: value
-          - name: ECDSAPrivate
+          - doc: |-
+              ECDSAPrivate renders the key as a SEC1 EC DER blob, ready for
+              service/crypto/sign/ecdsasig.Sign. It hands back live private material — the same
+              contract core/crypto.Key.Bytes() carries: straight to the scheme, never to a
+              log.
+            name: ECDSAPrivate
             out:
               - name: der
                 type: "[]byte"
               - name: err
                 type: error
             recv: value
-          - name: Ed25519Public
+          - doc: |-
+              Ed25519Public returns the raw 32-octet public key, ready for
+              service/crypto/sign/ed25519sig.Verify.
+            name: Ed25519Public
             out:
               - name: pub
                 type: "[]byte"
               - name: err
                 type: error
             recv: value
-          - name: Ed25519Private
+          - doc: |-
+              Ed25519Private returns the raw 64-octet private key (seed||public) that
+              service/crypto/sign/ed25519sig.Sign expects, re-expanded from the stored seed. It
+              hands back live private material — straight to the scheme, never to a log.
+            name: Ed25519Private
             out:
               - name: priv
                 type: "[]byte"
               - name: err
                 type: error
             recv: value
-          - name: Secret
+          - doc: |-
+              Secret returns the key as a core/crypto.Key, re-entering the redacting type
+              so the material is protected again the moment it leaves this package.
+
+              The SDK's symmetric surface is fixed at crypto.KeyLen octets, so an oct JWK
+              of any other size is refused with the core InvalidKey sentinel — RFC 7518
+              §6.4 allows any length, but nothing in this SDK could consume it.
+            name: Secret
             out:
               - name: secret
                 type: corecrypto.Key
               - name: err
                 type: error
             recv: value
-          - name: Kty
+          - doc: Kty reports the key's "kty" member. The zero KeyValue reports the empty Type.
+            name: Kty
             out:
               - type: Type
             recv: value
-          - name: Crv
+          - doc: Crv reports the key's "crv" member, empty for a symmetric key.
+            name: Crv
             out:
               - type: Curve
             recv: value
-          - name: Kid
+          - doc: |-
+              Kid reports the key's "kid" member, empty when the key carries none. A kid is
+              a selection hint chosen by whoever published the key — never trust it as
+              proof of anything.
+            name: Kid
             out:
               - type: string
             recv: value
-          - name: Use
+          - doc: Use reports the key's "use" member ("sig" / "enc"), empty when absent.
+            name: Use
             out:
               - type: string
             recv: value
-          - name: Alg
+          - doc: Alg reports the key's "alg" member, empty when absent.
+            name: Alg
             out:
               - type: string
             recv: value
-          - name: KeyOps
+          - doc: KeyOps returns a copy of the key's "key_ops" member, nil when absent.
+            name: KeyOps
             out:
               - type: "[]string"
             recv: value
-          - name: IsZero
+          - doc: |-
+              IsZero reports whether k is the zero KeyValue — no kty, hence nothing to
+              serialise. Every marshaller rejects it with MissingMember.
+            name: IsZero
             out:
               - type: bool
             recv: value
-          - name: IsPrivate
+          - doc: |-
+              IsPrivate reports whether k holds private material ("d" or "k"). It is the
+              question to ask before publishing a set: a true here means MarshalPrivate,
+              and only MarshalPrivate, can serialise this key whole.
+            name: IsPrivate
             out:
               - type: bool
             recv: value
-          - in:
+          - doc: WithKid returns a copy of k carrying kid. Passing the empty string clears it.
+            in:
               - name: kid
                 type: string
             name: WithKid
             out:
               - type: KeyValue
             recv: value
-          - in:
+          - doc: |-
+              WithUse returns a copy of k carrying use ("sig" / "enc"). The value is not
+              validated — RFC 7517 §4.2 leaves the vocabulary open.
+            in:
               - name: use
                 type: string
             name: WithUse
             out:
               - type: KeyValue
             recv: value
-          - in:
+          - doc: |-
+              WithAlg returns a copy of k carrying alg (e.g. "ES256"). The value is not
+              checked against crv: an "alg" is a publisher's assertion, and rejecting an
+              unfamiliar one here would break interop for no security gain.
+            in:
               - name: alg
                 type: string
             name: WithAlg
             out:
               - type: KeyValue
             recv: value
-          - in:
+          - doc: WithKeyOps returns a copy of k carrying key_ops. The slice is copied.
+            in:
               - name: ops
                 type: string
             name: WithKeyOps
@@ -405,57 +637,109 @@ packages:
               - type: KeyValue
             recv: value
             variadic: true
-          - name: Public
+          - doc: |-
+              Public returns the public half of k: the same key with its private member
+              dropped. It refuses a symmetric key with NoPublicForm, because "the public
+              half of an oct key" is not a thing that exists — the k member IS the secret.
+            name: Public
             out:
               - name: pub
                 type: KeyValue
               - name: err
                 type: error
             recv: value
-          - in:
+          - doc: |-
+              Equal reports whether k and other describe the same key, comparing every
+              member including the private one. The comparison is NOT constant-time and
+              must not be used to authenticate anything; it exists so round-trip tests and
+              set de-duplication can ask a precise question.
+            in:
               - name: other
                 type: KeyValue
             name: Equal
             out:
               - type: bool
             recv: value
-          - name: String
+          - doc: |-
+              String implements fmt.Stringer and renders only non-secret metadata, so a
+              stray %v or %s can never print key material — the same contract
+              core/crypto.Key holds, extended to the members a JWK adds around it.
+            name: String
             out:
               - type: string
             recv: value
-          - name: GoString
+          - doc: |-
+              GoString implements fmt.GoStringer so %#v stays redacted too — fmt bypasses
+              String for Go-syntax formatting and would otherwise dump the raw slices.
+            name: GoString
             out:
               - type: string
             recv: value
-          - name: MarshalPublic
+          - doc: |-
+              MarshalPublic renders the public JWK: "kty", "crv", the public members, and
+              whatever metadata the key carries. It never emits "d" or "k".
+
+              A symmetric key is refused with NoPublicForm rather than rendered without its
+              "k": an oct JWK IS its secret, so there is no public projection of one, and
+              handing back a key-shaped object with no key would be worse than an error.
+            name: MarshalPublic
             out:
               - name: document
                 type: "[]byte"
               - name: err
                 type: error
             recv: value
-          - name: MarshalPrivate
+          - doc: |-
+              MarshalPrivate renders the full JWK, private member included: "d" for EC and
+              OKP, "k" for oct. It is the ONLY method that emits key material, and it is
+              named so the call site says what it does.
+
+              A key holding no private material is refused with NoPrivateMaterial rather
+              than silently downgraded to MarshalPublic's output — a caller that asked for
+              a private JWK and received a public one would ship a broken key store and
+              find out at first use.
+            name: MarshalPrivate
             out:
               - name: document
                 type: "[]byte"
               - name: err
                 type: error
             recv: value
-          - name: MarshalJSON
+          - doc: |-
+              MarshalJSON implements json.Marshaler by delegating to MarshalPublic, so the
+              path taken by plain json.Marshal, by a struct that embeds a KeyValue, and by
+              any generic encoder is the public one. There is no flag, no option struct and
+              no context value that flips it — the private path has its own name.
+            name: MarshalJSON
             out:
               - name: document
                 type: "[]byte"
               - name: err
                 type: error
             recv: value
-          - name: Thumbprint
+          - doc: |-
+              Thumbprint returns the RFC 7638 JWK thumbprint of k: the base64url SHA-256 of
+              the canonical JSON built from the REQUIRED members of the key type only, in
+              lexicographic order. It is the standard way to mint a "kid" that is stable
+              across publishers and distinct per key — which is what keeps Set.ByKid from
+              hitting the AmbiguousKid refusal.
+
+              For a symmetric key the input includes "k". The digest is one-way, but RFC
+              7638 §3.2.1 is explicit that a LOW-ENTROPY secret can be recovered from its
+              thumbprint by brute force; the SDK's crypto.Key is 32 random octets, so the
+              warning binds only to keys built from elsewhere.
+            name: Thumbprint
             out:
               - name: thumb
                 type: string
               - name: err
                 type: error
             recv: value
-          - name: WithThumbprintKid
+          - doc: |-
+              WithThumbprintKid returns a copy of k whose "kid" is its RFC 7638
+              thumbprint — a deterministic, collision-resistant id derived from the key
+              itself rather than from a counter somebody has to remember to bump.
+            name: WithThumbprintKid
             out:
               - name: identified
                 type: KeyValue
@@ -465,23 +749,43 @@ packages:
         name: KeyValue
         struct:
           unexported: true
-      - methods:
-          - name: Len
+      - doc: |-
+          Set is an RFC 7517 §5 JWK Set: an ordered collection of keys published
+          together. It is an immutable value — constructors copy in, accessors copy
+          out — and it redacts under %v the same way KeyValue does.
+        methods:
+          - doc: Len reports how many keys the set holds.
+            name: Len
             out:
               - type: int
             recv: value
-          - name: Keys
+          - doc: Keys returns the set's members in document order.
+            name: Keys
             out:
               - type: "[]KeyValue"
             recv: value
-          - in:
+          - doc: |-
+              AllByKid returns every key carrying kid, in document order — the rotation
+              path. During a rollover a caller typically walks the candidates until one
+              verifies, which is exactly the decision this package refuses to make for it.
+
+              An empty kid returns no candidates rather than every keyless key: "match the
+              keys that have no id" is never what a lookup by id means.
+            in:
               - name: kid
                 type: string
             name: AllByKid
             out:
               - type: "[]KeyValue"
             recv: value
-          - in:
+          - doc: |-
+              ByKid returns THE key carrying kid.
+
+              It refuses both ends of the ambiguity: no match is KeyNotFound, and more than
+              one match is AmbiguousKid with the candidate count attached — never "the
+              first one", which would silently depend on member order. Callers handling
+              rotation use AllByKid and choose explicitly.
+            in:
               - name: kid
                 type: string
             name: ByKid
@@ -491,32 +795,55 @@ packages:
               - name: err
                 type: error
             recv: value
-          - name: MarshalPublic
+          - doc: |-
+              MarshalPublic renders the set with every member in its public form — the
+              document a JWKS endpoint serves.
+
+              It marshals whole or not at all: one symmetric member makes the whole call
+              fail with NoPublicForm (with the offending index attached) rather than
+              silently dropping that key. A caller that publishes a set believing it holds
+              five keys, and serves four, has a rotation outage nobody logged.
+            name: MarshalPublic
             out:
               - name: document
                 type: "[]byte"
               - name: err
                 type: error
             recv: value
-          - name: MarshalPrivate
+          - doc: |-
+              MarshalPrivate renders the set with every member in its private form. Like
+              KeyValue.MarshalPrivate, it is the only path that emits key material, and it
+              is named so at the call site. A public-only member fails the whole call with
+              NoPrivateMaterial.
+            name: MarshalPrivate
             out:
               - name: document
                 type: "[]byte"
               - name: err
                 type: error
             recv: value
-          - name: MarshalJSON
+          - doc: |-
+              MarshalJSON implements json.Marshaler by delegating to MarshalPublic, so a
+              Set handed to plain json.Marshal — or embedded in an HTTP response struct —
+              serialises its public form and nothing else.
+            name: MarshalJSON
             out:
               - name: document
                 type: "[]byte"
               - name: err
                 type: error
             recv: value
-          - name: String
+          - doc: |-
+              String implements fmt.Stringer and reports only counts, so a stray %v on a
+              set of private keys prints a shape, never material.
+            name: String
             out:
               - type: string
             recv: value
-          - name: GoString
+          - doc: |-
+              GoString implements fmt.GoStringer so %#v stays redacted too — without it fmt
+              would walk the unexported members and print their octet slices.
+            name: GoString
             out:
               - type: string
             recv: value

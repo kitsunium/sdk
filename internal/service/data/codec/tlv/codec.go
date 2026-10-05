@@ -1,11 +1,3 @@
-// Package tlv implements a self-describing Type-Length-Value codec.
-// Every value is encoded as a 1-byte tag, an unsigned LEB128 length, and
-// a tag-specific value payload. Composite tags (slice/map/struct) recurse
-// into nested TLV records. Reflection drives both directions so arbitrary
-// Go values fit through the same Marshal/Unmarshal interface.
-//
-// The codec is registered under Name "tlv" and the canonical
-// "application/x-tlv" MIME type at package import time.
 package tlv
 
 import (

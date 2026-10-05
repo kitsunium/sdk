@@ -4,7 +4,10 @@ package(default_visibility = ["//internal/service:service_consumers"])
 
 go_library(
     name = "levelgate",
-    srcs = ["gate.go"],
+    srcs = [
+        "doc.go",
+        "gate.go",
+    ],
     importpath = "github.com/kitsunium/sdk/internal/service/observe/logger/writer/levelgate",
     visibility = [
         "//:__subpackages__",

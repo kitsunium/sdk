@@ -1,14 +1,3 @@
-// Package secret — the two ways this package turns a failure into a verdict:
-// storeFailure, around the error a caller's SubjectKeyStore returned, and
-// wrapAs, around one of the domain's sentinels. Every sentinel and code it
-// raises is declared in internal/core/security/secret (ADR 0160); this
-// package declares none.
-//
-// No Public, Private or field built here carries a secret, a data key or a
-// sealed box. A secret's name, a version number, an environment variable's
-// NAME, a valid subject reference and an operation may travel as log-only
-// fields; a file path does not, because the directory a store owns is a
-// deployment detail an error has no reason to repeat.
 package secret
 
 import (

@@ -1,5 +1,3 @@
-// Package redact — text: the credentials of a URL, and a cut that respects
-// runes.
 package redact
 
 import (

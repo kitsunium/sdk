@@ -1,5 +1,3 @@
-// Package kit — the build a graph describes: the modules and versions it was
-// made of.
 package kit
 
 import (

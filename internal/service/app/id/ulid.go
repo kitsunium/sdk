@@ -1,4 +1,3 @@
-// Package id — ULID generator (48-bit time + 80-bit random, Crockford base32).
 package id
 
 import (

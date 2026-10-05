@@ -1,4 +1,3 @@
-// Package cache — the read-only counters snapshot.
 package cache
 
 // StatsValue is a point-in-time copy of a Cache's counters. Hits/Misses

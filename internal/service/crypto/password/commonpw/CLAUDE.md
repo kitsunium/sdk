@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-29T00:30:00Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # internal/service/crypto/password/commonpw/
 
 ## Purpose
@@ -25,14 +25,16 @@ fail.
 | Provenance | the 10 000 most frequent passwords of the ten million credentials Mark Burnett released into the public domain in 2015 (xato.net; the Internet Archive item `10MillionPasswords` carries the Public Domain Mark) |
 
 To refresh it: fetch the same path at a newer commit, replace the file, and
-update the commit and the digest here, in the package doc and in the test —
+update the commit and the digest here, in the package comment (the design's,
+which `kit gen` writes into `doc.go`, ADR 0167) and in the test —
 the three must agree, and the test fails until they do.
 
 ## Contents
 
 | File | Role |
 |---|---|
-| `commonpw.go` | package doc (source, licence, comparison), the embedded `listText`, `sorted` (lower-cased, deduplicated, sorted once, at the first question), `IsCommon`, `compareFolded`, `Len` |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167): source, licence, comparison |
+| `commonpw.go` | the embedded `listText`, `sorted` (lower-cased, deduplicated, sorted once, at the first question), `IsCommon`, `compareFolded`, `Len` |
 | `xato-net-10-million-passwords-10000.txt` | the list, 10 000 lines, one of them empty |
 | `LICENSE.SecLists` | SecLists' MIT licence |
 | `.gitattributes` | both files `-text`: a Windows checkout with `core.autocrlf` would otherwise rewrite the list's line endings, and its digest with them — found by the `windows` lane |

@@ -1,5 +1,3 @@
-// Package kit — the kit tag: the classes and words a field of personal data
-// carries.
 package kit
 
 import (

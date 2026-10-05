@@ -1,4 +1,3 @@
-// Package session — the small filesystem helpers behind atomic publication.
 package session
 
 import (

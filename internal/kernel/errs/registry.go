@@ -1,6 +1,3 @@
-// Package errs — placeholder companion to the SDK-wide AST audit
-// (registry_external_test.go). There is no runtime registry today; the
-// code allocation table lives in ADR 0002 and the audit test embeds it.
 package errs
 
 // registrySentinel is a compile-time marker that the registry audit is

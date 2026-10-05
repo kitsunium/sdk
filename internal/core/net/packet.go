@@ -1,4 +1,3 @@
-// Package net — the received datagram port.
 package net
 
 import (

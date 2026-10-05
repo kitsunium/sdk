@@ -15,6 +15,7 @@ go_library(
         "ciseat.go",
         "codes_gen.go",
         "crypto.go",
+        "doc.go",
         "jsonnames.go",
         "jwks.go",
         "oidc.go",

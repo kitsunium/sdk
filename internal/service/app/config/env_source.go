@@ -1,4 +1,3 @@
-// Package config — environment-variable Source.
 package config
 
 import (

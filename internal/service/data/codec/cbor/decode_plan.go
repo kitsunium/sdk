@@ -1,5 +1,3 @@
-// Package cbor — decode plans: how a data item is stored into a value of one
-// Go type, resolved once per type and cached, the mirror of encode plans.
 package cbor
 
 import (

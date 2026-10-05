@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T09:00:00Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # internal/service/data/docstore/
 
 ## Purpose
@@ -37,7 +37,8 @@ configurations and the file engine's `StatsValue` (ADR 0074).
 
 | File | Surface |
 |---|---|
-| `docstore.go` | package doc, `Store[T]`, `StatsValue`; the reads — `Get`, `List`, `Filter`, `Entries`, `Lookup`, `Find`, `Stats`; `decode` → `decodeAs` (shared), `jsonCause` (a decoding failure described without a byte of the document) |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `docstore.go` | `Store[T]`, `StatsValue`; the reads — `Get`, `List`, `Filter`, `Entries`, `Lookup`, `Find`, `Stats`; `decode` → `decodeAs` (shared), `jsonCause` (a decoding failure described without a byte of the document) |
 | `open.go` | `Open[T](Config[T], ...IndexSpec[T])`; `newStore`; `open` — load, rebuild, THEN fold, so a refused open writes no data |
 | `config.go` | `Config[T]` (`Key`, `FS`, `Clock`, `Held`, `Path`, `FoldAt`, `Versions`), `DefaultFoldAt`; the refusals (`StoreMisconfigured`), `validateIndexes` — over `core/data/docstore.IndexSpec` — and `validateVersions` (shared) |
 | `write.go` | `Put` / `Insert` / `Replace` (the three write modes), `Update`, `Delete`; `prepare` → `encodeAs` (shared, outside every lock) → `commit` / `modify` / `remove` (under the writers' lock) → `persistAndApply`, which computes the versions a write leaves before it persists anything; `encodeCause` |

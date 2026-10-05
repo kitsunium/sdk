@@ -1,6 +1,3 @@
-// Package syslog — holds the Config struct consumed by
-// NewWithConfig. Pulled into its own file per the SDK's
-// one-exported-struct-per-file convention.
 package syslog
 
 import "net"

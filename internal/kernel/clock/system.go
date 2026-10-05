@@ -1,6 +1,3 @@
-// Package clock — hosts the production implementation of the time port:
-// systemClock, a zero-sized value delegating every method to package time, and
-// the [System] singleton every consumer defaults to.
 package clock
 
 import "time"

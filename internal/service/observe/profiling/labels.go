@@ -1,5 +1,3 @@
-// Package profiling — hosts the reading of goroutine labels in their two
-// printed forms, and their matching onto a dump whose headers lack them.
 package profiling
 
 import (

@@ -1,7 +1,3 @@
-// Package yaml — how a refusal is built: the position every decoding refusal
-// carries, a syntax error at it, a construct refused by name, and an encoding
-// failure. The codes (range 0.3.4.*) and the sentinels are declared in
-// internal/core/data/codec/yaml (ADR 0160).
 package yaml
 
 import (

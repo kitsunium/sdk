@@ -7,8 +7,8 @@ go_library(
     srcs = [
         "attrs.go",
         "codes_gen.go",
-        "counter.go",
         "design_gen.go",
+        "doc.go",
         "exporter.go",
         "gauge_value.go",
         "histogram_value.go",

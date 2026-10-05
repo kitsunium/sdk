@@ -1,7 +1,3 @@
-// Package statemachine — hosts the book: what a machine keeps beside the
-// store — one record per entity, the census per state, the entities held by a
-// read or a transition — and its writes through the Journal, one key at a
-// time.
 package statemachine
 
 import (

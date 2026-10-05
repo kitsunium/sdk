@@ -45,20 +45,22 @@ boot.
 - **The package doc states what is estimated** — a sampled heap, a CPU
   counted at about 100 Hz — so a test asks where the bytes are.
 - **Each constant is declared on its own; the sentinels share one block.**
-  gomarkdoc gives a grouped declaration ONE anchor — the first name's — so a
-  constant declared alone gets its own; the sentinels cannot, since
+  gomarkdoc, the README renderer before ADR 0167, gave a grouped declaration
+  ONE anchor — the first name's — so a constant declared alone got its own;
+  the sentinels could not, since
   KTN-VAR-GROUP wants one `var` block, so the package doc names them in plain
   text rather than link every one of them to `WindowInvalid`.
 
 ## README is generated
 
-`README.md` is produced by `gomarkdoc` from the package doc comment in
-`profiling.go` (ADR 0008). Regenerate with `make docs-readme`; do not hand-edit
-it.
+`README.md` is written by `tools/genindex` from the committed `docs/api`
+(`make docs-readme`, ADR 0167); do not hand-edit it. The package comment is in
+`doc.go`, which kit writes from the design: edit the design, run `kit gen`,
+then `make api` and `make docs-readme`.
 
 ## Generated
 
-`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/observe/profiling.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the package comment and the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
+`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/observe/profiling.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: `doc.go` holds the package comment, which kit writes from the design (ADR 0167), and the hand-written files the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
 
 ## Verification
 

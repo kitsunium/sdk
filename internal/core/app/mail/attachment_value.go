@@ -1,4 +1,3 @@
-// Package mail — one file or inline part, as a value.
 package mail
 
 // DefaultAttachmentType is the media type used when an attachment names none.

@@ -1,4 +1,3 @@
-// Package health — hosts Probe, the three questions an orchestrator asks.
 package health
 
 // Probe names which of the three questions is being asked. It is a closed set

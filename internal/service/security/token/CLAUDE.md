@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T07:14:15Z -->
+<!-- updated: 2026-10-05T00:00:00Z -->
 # internal/service/security/token/
 
 ## Purpose
@@ -48,7 +48,8 @@ exactly as trustworthy as the key itself.
 
 | File | Surface |
 |---|---|
-| `token.go` | package doc + the shared bounds (`DefaultMaxTokenLen`, `MaxTokenLenCeiling`, `DefaultMaxClaimDepth`, `MaxKeyCandidatesCeiling`, `MaxLeeway`) |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `token.go` | the shared bounds (`DefaultMaxTokenLen`, `MaxTokenLenCeiling`, `DefaultMaxClaimDepth`, `MaxKeyCandidatesCeiling`, `MaxLeeway`) |
 | `issuer_config.go` / `verifier_config.go` | `IssuerConfig` / `VerifierConfig` |
 | `paseto_issuer_config.go` / `paseto_verifier_config.go` | the FLAT PASETO configs + their projections onto the shared policy |
 | `policy.go` / `bounds_value.go` | `policyValue` — the validated, defaults-applied verification policy |

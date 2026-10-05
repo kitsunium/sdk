@@ -1,36 +1,5 @@
 //go:build windows
 
-// Package ipc — the private endpoint on Windows: a named pipe.
-//
-// A Unix socket there is a file in a directory, but Windows has no search
-// permission to make a directory the gate, so the endpoint is a named pipe,
-// the object Windows secures by itself:
-//
-//   - its DACL grants this process's account only, protected from
-//     inheritance (SDDL "D:P(A;;GA;;;<SID>)"), so no other account can open
-//     it — Everyone, Authenticated Users and Administrators included;
-//   - PIPE_REJECT_REMOTE_CLIENTS refuses a client of another machine;
-//   - the first instance is created with FILE_FLAG_FIRST_PIPE_INSTANCE: when
-//     the name exists — another daemon, or a squatter that made it first —
-//     the listen fails (IN_USE) rather than joining an instance somebody
-//     else controls, and the next instance is created before a connection is
-//     handed out, so the name never lapses while the listener lives;
-//   - each end reads the other's account from its process token
-//     (GetNamedPipeClientProcessId / GetNamedPipeServerProcessId, then
-//     OpenProcessToken): a client refuses a server of another account before
-//     it sends a byte (ENDPOINT_FOREIGN), and opens the pipe at
-//     SECURITY_IDENTIFICATION, so the server can learn who it is but never
-//     act as it.
-//
-// The pipe is named after Config.Path, so one configuration serves every
-// platform: \\.\pipe\ipc-<16 hex digits of the path's SHA-256>-<base name>.
-// Nothing is created in the path's directory.
-//
-// The handles are opened overlapped and handed to os.NewFile, which puts
-// them on the runtime's poller: reads, writes and deadlines are the os
-// package's. kernel32 and advapi32 are bound with syscall.NewLazyDLL, as the
-// lock domain binds LockFileEx and GetNamedSecurityInfoW — golang.org/x/sys
-// is banned SDK-wide (ADR 0018).
 package ipc
 
 import (
