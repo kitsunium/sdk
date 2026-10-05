@@ -86269,7 +86269,7 @@
       "spelled": "func(err error) int",
       "canonical": "func(err error) int",
       "doc": "Status is the process exit status for what [Executor].Execute returned: 0\nwhen err is nil, and errs.ExitCodeOf(err) otherwise.\n\nIt is a guard on the SDK's existing convention and not a second one.\nerrs.ExitCodeOf answers \"what status does THIS ERROR map to\", so it returns\nthe EX_SOFTWARE default (70) for a nil it was never meant to be handed —\nwhich is correct for an accessor and catastrophic at a CLI boundary, where\nsuccess is the common case. This is the one place in the SDK where nil has\nto mean 0, so this is where the guard lives.\n\n\tos.Exit(cli.Status(app.Execute(ctx, os.Args[1:])))\n",
-      "file": "pkg/v1/app/cli/cli.go",
+      "file": "pkg/v1/app/cli/decl_gen.go",
       "layer": "public",
       "family": "app"
     },
@@ -86368,7 +86368,7 @@
       "spelled": "func(fsys fs.FS, format string, path string) Source",
       "canonical": "func(fsys io/fs.FS, format string, path string) github.com/kitsunium/sdk/pkg/v1/app/config.Source",
       "doc": "FSSource returns a Source reading path inside fsys and parsing it as format\n— [FileSource] over an io/fs.FS, such as an embed.FS. path is an io/fs name:\nslash-separated and unrooted. It fails with SourceFailed exactly where\nFileSource does, a file fsys does not hold included, and a nil fsys is\nrefused when the source loads. A traced load reports it as [LayerFile] with\npath as the detail.\n",
-      "file": "pkg/v1/app/config/config.go",
+      "file": "pkg/v1/app/config/decl_gen.go",
       "layer": "public",
       "family": "app"
     },
@@ -86380,7 +86380,7 @@
       "spelled": "func(format string, path string) Source",
       "canonical": "func(format string, path string) github.com/kitsunium/sdk/pkg/v1/app/config.Source",
       "doc": "FileSource returns a Source reading path and parsing it as format (the codec\nmust be registered — blank-import its package, e.g. pkg/v1/data/codec).\n",
-      "file": "pkg/v1/app/config/config.go",
+      "file": "pkg/v1/app/config/decl_gen.go",
       "layer": "public",
       "family": "app"
     },
@@ -96549,7 +96549,7 @@
       "spelled": "func(data []byte, v any) error",
       "canonical": "func(data []byte, v any) error",
       "doc": "Unmarshal decodes one BSON document into v, a non-nil pointer or map. The\ninput is checked whole before v is written.\n",
-      "file": "pkg/v1/data/codec/bson/bson.go",
+      "file": "pkg/v1/data/codec/bson/decl_gen.go",
       "layer": "public",
       "family": "data"
     },
@@ -101501,7 +101501,7 @@
       "spelled": "func(ctx context.Context, tm Transactor, fn TxFunc) error",
       "canonical": "func(ctx context.Context, tm github.com/kitsunium/sdk/pkg/v1/data/sql.Transactor, fn github.com/kitsunium/sdk/pkg/v1/data/sql.TxFunc) error",
       "doc": "Transact runs fn inside a transaction with the driver's default isolation.\n\nIt is the ergonomic form of [Transactor].Transact for the common case. The\nport itself keeps the options parameter so it never needs a second method\n(ADR 0039); this helper keeps the call site short.\n",
-      "file": "pkg/v1/data/sql/sql.go",
+      "file": "pkg/v1/data/sql/decl_gen.go",
       "layer": "public",
       "family": "data"
     },
@@ -102666,7 +102666,7 @@
       "spelled": "func(cause error, params WrapParams, fields ...Field) error",
       "canonical": "func(cause error, params github.com/kitsunium/sdk/pkg/v1/errs.WrapParams, fields ...github.com/kitsunium/sdk/pkg/v1/errs.Field) error",
       "doc": "Wrap attaches a cause to a new error with origin-wins semantics and preserves\nthe chain (errors.Is / errors.Unwrap walk through it). When the cause is\nalready an SDK error (directly or behind a fmt.Errorf(\"%w\") wrap) the result\ninherits its Code/Reason/Public/Private and appends params.Code to the trail;\notherwise params.Code becomes the origin. Bad params at runtime do not panic —\nthe returned error carries a typed validation code.\n\nDeclared as a function (not a var alias over the kernel Wrap) so the public\nsignature returns error: the concrete *errs.Error stays unexported, never\nleaking through the facade.\n",
-      "file": "pkg/v1/errs/construct.go",
+      "file": "pkg/v1/errs/decl_gen.go",
       "layer": "public",
       "family": "root"
     },
@@ -104904,7 +104904,7 @@
       "spelled": "func(ctx context.Context, lg Logger, msg string, attrs ...Attr)",
       "canonical": "func(ctx context.Context, lg github.com/kitsunium/sdk/pkg/v1/observe/logger.Logger, msg string, attrs ...github.com/kitsunium/sdk/pkg/v1/observe/logger.Attr)",
       "doc": "Debug emits a RecordEvent at LevelDebug through lg.\n",
-      "file": "pkg/v1/observe/logger/logger.go",
+      "file": "pkg/v1/observe/logger/decl_gen.go",
       "layer": "public",
       "family": "observe"
     },
@@ -104940,7 +104940,7 @@
       "spelled": "func(key string, val time.Duration) Attr",
       "canonical": "func(key string, val time.Duration) github.com/kitsunium/sdk/pkg/v1/observe/logger.Attr",
       "doc": "Duration builds an Attr carrying a time.Duration value.\n",
-      "file": "pkg/v1/observe/logger/logger.go",
+      "file": "pkg/v1/observe/logger/decl_gen.go",
       "layer": "public",
       "family": "observe"
     },
@@ -105015,7 +105015,7 @@
       "spelled": "func() string",
       "canonical": "func() string",
       "doc": "FrameworkVersion returns the linked-in SDK version, or \"dev\" if unset.\n",
-      "file": "pkg/v1/observe/logger/version.go",
+      "file": "pkg/v1/observe/logger/decl_gen.go",
       "layer": "public",
       "family": "observe"
     },
@@ -105039,7 +105039,7 @@
       "spelled": "func(ctx context.Context, lg Logger, msg string, attrs ...Attr)",
       "canonical": "func(ctx context.Context, lg github.com/kitsunium/sdk/pkg/v1/observe/logger.Logger, msg string, attrs ...github.com/kitsunium/sdk/pkg/v1/observe/logger.Attr)",
       "doc": "Info emits a RecordEvent at LevelInfo through lg.\n",
-      "file": "pkg/v1/observe/logger/logger.go",
+      "file": "pkg/v1/observe/logger/decl_gen.go",
       "layer": "public",
       "family": "observe"
     },
@@ -105383,7 +105383,7 @@
       "spelled": "func() Encoder",
       "canonical": "func() github.com/kitsunium/sdk/pkg/v1/observe/logger.Encoder",
       "doc": "NewJSONEncoder returns a structured single-line JSON encoder, rendering each\nrecord as one encoding/json-compatible object per line:\n{\"ts\":…,\"level\":…,\"msg\":…,<flat attrs>}. Grouped attributes flatten to\ndotted keys (\"g1.g2.key\") to match the text encoder's convention. Pass it to\nNewWithSink via SinkConfig.Encoder for machine-readable output.\n",
-      "file": "pkg/v1/observe/logger/encoder.go",
+      "file": "pkg/v1/observe/logger/decl_gen.go",
       "layer": "public",
       "family": "observe"
     },
@@ -105443,7 +105443,7 @@
       "spelled": "func() Encoder",
       "canonical": "func() github.com/kitsunium/sdk/pkg/v1/observe/logger.Encoder",
       "doc": "NewTextEncoder returns the default human-readable encoder, rendering each\nrecord as \"TIME LEVEL msg key=val …\\n\" with RFC3339-millisecond timestamps.\nIt is a named peer of TextEncoder bound to the real system clock.\n",
-      "file": "pkg/v1/observe/logger/encoder.go",
+      "file": "pkg/v1/observe/logger/decl_gen.go",
       "layer": "public",
       "family": "observe"
     },
@@ -105467,7 +105467,7 @@
       "spelled": "func(w io.Writer) (sink Sink, err error)",
       "canonical": "func(w io.Writer) (sink github.com/kitsunium/sdk/pkg/v1/observe/logger.Sink, err error)",
       "doc": "NewWriterSink wraps an arbitrary [io.Writer] in a [Sink] so callers can\ncompose plain file / network / bytes.Buffer writers with [Multi] for\nfan-out. The returned Sink serialises Write calls through an internal\nmutex (identical contract to [ConsoleStderr] / [ConsoleStdout]).\n\nReturns [WriterRequired] when w is nil.\n\n\tf, _ := os.OpenFile(\"/var/log/app.log\", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)\n\tfileSink, _ := logger.NewWriterSink(f)\n\tlg, _ := logger.NewWithSink(logger.SinkConfig{\n\t    Sink: logger.Multi(logger.ConsoleStderr(), fileSink),\n\t})\n",
-      "file": "pkg/v1/observe/logger/sink.go",
+      "file": "pkg/v1/observe/logger/decl_gen.go",
       "layer": "public",
       "family": "observe"
     },
@@ -105642,7 +105642,7 @@
       "spelled": "func() Encoder",
       "canonical": "func() github.com/kitsunium/sdk/pkg/v1/observe/logger.Encoder",
       "doc": "TextEncoder returns a fresh text Encoder bound to the real system clock.\nCallers passing a custom Encoder to NewWithSink usually want this as a\nstarting point — it is the same encoder NewText / Default rely on.\n",
-      "file": "pkg/v1/observe/logger/sink.go",
+      "file": "pkg/v1/observe/logger/decl_gen.go",
       "layer": "public",
       "family": "observe"
     },
@@ -105771,7 +105771,7 @@
       "spelled": "func(ctx context.Context, lg Logger, msg string, attrs ...Attr)",
       "canonical": "func(ctx context.Context, lg github.com/kitsunium/sdk/pkg/v1/observe/logger.Logger, msg string, attrs ...github.com/kitsunium/sdk/pkg/v1/observe/logger.Attr)",
       "doc": "Warn emits a RecordEvent at LevelWarn through lg.\n",
-      "file": "pkg/v1/observe/logger/logger.go",
+      "file": "pkg/v1/observe/logger/decl_gen.go",
       "layer": "public",
       "family": "observe"
     },
@@ -105938,7 +105938,7 @@
       "spelled": "func(lg logger.Logger) (h slog.Handler, err error)",
       "canonical": "func(lg github.com/kitsunium/sdk/pkg/v1/observe/logger.Logger) (h log/slog.Handler, err error)",
       "doc": "NewHandler returns an slog.Handler that forwards every record to lg.\n\nA nil lg returns [LoggerRequired] (1.1.1.1) rather than a handler that\nsilently discards: this package exists to guarantee one pipeline, and a\nbridge to nowhere would defeat the guarantee at the exact moment a caller\nbelieved it held.\n",
-      "file": "pkg/v1/observe/logger/slogbridge/slogbridge.go",
+      "file": "pkg/v1/observe/logger/slogbridge/decl_gen.go",
       "layer": "public",
       "family": "observe"
     },
@@ -109309,7 +109309,7 @@
       "spelled": "func(caps ...Capability) []Capability",
       "canonical": "func(caps ...github.com/kitsunium/sdk/pkg/v1/proc.Capability) []github.com/kitsunium/sdk/pkg/v1/proc.Capability",
       "doc": "MissingCapabilities returns the subset of caps with no native backend on the\ncurrent platform; an empty (nil) result means every capability is present.\n",
-      "file": "pkg/v1/proc/capability.go",
+      "file": "pkg/v1/proc/decl_gen.go",
       "layer": "public",
       "family": "proc"
     },
@@ -109333,7 +109333,7 @@
       "spelled": "func(c Capability) bool",
       "canonical": "func(c github.com/kitsunium/sdk/pkg/v1/proc.Capability) bool",
       "doc": "Supported reports whether cap has a native backend on the current GOOS. It is\npure, allocation-free and race-clean: it consults runtime.GOOS only, never a\nruntime delegation probe (see the package doc on cgroup.Available()).\n",
-      "file": "pkg/v1/proc/capability.go",
+      "file": "pkg/v1/proc/decl_gen.go",
       "layer": "public",
       "family": "proc"
     },

@@ -125,7 +125,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/proc.UnsupportedPlatfor
 Code `0.2.6.1` · reason `UNSUPPORTED_PLATFORM` · public "This operation is not supported on this platform"
 
 <a name="MissingCapabilities"></a>
-## func [MissingCapabilities](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/capability.go>)
+## func [MissingCapabilities](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/decl_gen.go>)
 
 ```go
 func MissingCapabilities(caps ...Capability) []Capability
@@ -143,7 +143,7 @@ func MustSupport(caps ...Capability)
 MustSupport panics when any requested capability is missing on the current platform, and is a no-op otherwise. It is the consumer's OPT-IN fail-fast: the SDK never calls it. The panic value is the typed \[errs] UnsupportedPlatform error (code 0.2.6.1), so a top-level recover() can classify it via errs.CodeOf / HasCode rather than a bare string.
 
 <a name="Supported"></a>
-## func [Supported](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/capability.go>)
+## func [Supported](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/decl_gen.go>)
 
 ```go
 func Supported(c Capability) bool

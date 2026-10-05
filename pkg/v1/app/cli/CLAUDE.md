@@ -67,3 +67,7 @@ bazel test --config=race //pkg/v1/app/cli:cli_test
 # OR
 cd pkg && GOWORK=off go test -race ./v1/app/cli
 ```
+
+## Declarations
+
+`decl_gen.go` is written by kit gen from the design (ADR 0170): `Status`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name.

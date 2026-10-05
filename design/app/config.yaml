@@ -1299,6 +1299,7 @@ packages:
           - name: path
             type: string
         name: FileSource
+        impl: fileSource
         out:
           - type: Source
       - doc: |-
@@ -1315,6 +1316,7 @@ packages:
           - name: path
             type: string
         name: FSSource
+        impl: fsSource
         out:
           - type: Source
     imports:

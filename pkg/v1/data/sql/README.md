@@ -485,7 +485,7 @@ Statements returns a [Step](#Step) that runs the given statements in order on th
 It is the smallest useful helper and deliberately not a file loader: it invents no directory layout, no naming convention and no parser. Where the text comes from — a literal, an embed.FS, a generator — stays yours.
 
 <a name="Transact"></a>
-## func [Transact](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/sql.go>)
+## func [Transact](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/decl_gen.go>)
 
 ```go
 func Transact(ctx context.Context, tm Transactor, fn TxFunc) error

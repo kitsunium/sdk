@@ -266,7 +266,7 @@ A value is coerced to a typed Go value only when the WHOLE value is one complete
 An EMPTY prefix reads the whole process environment, so pairing it with a schema that refuses unknown keys refuses PATH, HOME and everything else the shell exported. That is a fact about the source, not about the schema: give the source a prefix, or set [SchemaSpec](#SchemaSpec).AllowUnknownKeys.
 
 <a name="FSSource"></a>
-## func [FSSource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/config.go>)
+## func [FSSource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/decl_gen.go>)
 
 ```go
 func FSSource(fsys fs.FS, format string, path string) Source
@@ -275,7 +275,7 @@ func FSSource(fsys fs.FS, format string, path string) Source
 FSSource returns a Source reading path inside fsys and parsing it as format — [FileSource](#FileSource) over an io/fs.FS, such as an embed.FS. path is an io/fs name: slash-separated and unrooted. It fails with SourceFailed exactly where FileSource does, a file fsys does not hold included, and a nil fsys is refused when the source loads. A traced load reports it as [LayerFile](#LayerFile) with path as the detail.
 
 <a name="FileSource"></a>
-## func [FileSource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/config.go>)
+## func [FileSource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/decl_gen.go>)
 
 ```go
 func FileSource(format string, path string) Source

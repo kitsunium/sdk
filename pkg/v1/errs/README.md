@@ -477,7 +477,7 @@ func String(key string, val string) Field
 String builds a Field holding a string value.
 
 <a name="Wrap"></a>
-## func [Wrap](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/construct.go>)
+## func [Wrap](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/decl_gen.go>)
 
 ```go
 func Wrap(cause error, params WrapParams, fields ...Field) error

@@ -2650,6 +2650,7 @@ packages:
           - name: c
             type: Capability
         name: Supported
+        impl: supported
         out:
           - type: bool
       - doc: |-
@@ -2659,6 +2660,7 @@ packages:
           - name: caps
             type: Capability
         name: MissingCapabilities
+        impl: missingCapabilities
         out:
           - type: "[]Capability"
         variadic: true

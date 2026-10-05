@@ -69,3 +69,7 @@ sentinels. Stdlib-only → dep-light; cross-OS (poll watcher).
 ```
 bazel test --config=race //pkg/v1/app/config:config_test
 ```
+
+## Declarations
+
+`decl_gen.go` is written by kit gen from the design (ADR 0170): `FileSource` and `FSSource`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name.

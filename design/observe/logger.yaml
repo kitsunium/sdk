@@ -2323,6 +2323,7 @@ packages:
           record as "TIME LEVEL msg key=val …\n" with RFC3339-millisecond timestamps.
           It is a named peer of TextEncoder bound to the real system clock.
         name: NewTextEncoder
+        impl: newTextEncoder
         out:
           - type: Encoder
       - doc: |-
@@ -2332,6 +2333,7 @@ packages:
           dotted keys ("g1.g2.key") to match the text encoder's convention. Pass it to
           NewWithSink via SinkConfig.Encoder for machine-readable output.
         name: NewJSONEncoder
+        impl: newJSONEncoder
         out:
           - type: Encoder
       - doc: |-
@@ -2440,6 +2442,7 @@ packages:
           - name: attrs
             type: Attr
         name: Debug
+        impl: debug
         variadic: true
       - doc: Info emits a RecordEvent at LevelInfo through lg.
         in:
@@ -2452,6 +2455,7 @@ packages:
           - name: attrs
             type: Attr
         name: Info
+        impl: info
         variadic: true
       - doc: Warn emits a RecordEvent at LevelWarn through lg.
         in:
@@ -2464,6 +2468,7 @@ packages:
           - name: attrs
             type: Attr
         name: Warn
+        impl: warn
         variadic: true
       - doc: Error emits a RecordEvent at LevelError through lg.
         in:
@@ -2537,6 +2542,7 @@ packages:
           - name: val
             type: time.Duration
         name: Duration
+        impl: duration
         out:
           - type: Attr
       - doc: Time builds an Attr carrying a time.Time value.
@@ -2590,6 +2596,7 @@ packages:
           - name: w
             type: io.Writer
         name: NewWriterSink
+        impl: newWriterSink
         out:
           - name: sink
             type: Sink
@@ -2600,6 +2607,7 @@ packages:
           Callers passing a custom Encoder to NewWithSink usually want this as a
           starting point — it is the same encoder NewText / Default rely on.
         name: TextEncoder
+        impl: textEncoder
         out:
           - type: Encoder
       - doc: |-
@@ -2626,6 +2634,7 @@ packages:
           - type: TraceContext
       - doc: FrameworkVersion returns the linked-in SDK version, or "dev" if unset.
         name: FrameworkVersion
+        impl: frameworkVersion
         out:
           - type: string
       - doc: |-
@@ -2948,6 +2957,7 @@ packages:
           - name: lg
             type: logger.Logger
         name: NewHandler
+        impl: newHandler
         out:
           - name: h
             type: slog.Handler

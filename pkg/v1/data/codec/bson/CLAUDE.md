@@ -68,3 +68,7 @@ tool on PATH; `TestItRegistersItsFormatAlone` holds under both.
 ## Reference
 
 - ADR 0021, ADR 0134; `internal/service/data/codec/bson/CLAUDE.md`
+
+## Declarations
+
+`decl_gen.go` is written by kit gen from the design (ADR 0170): `Unmarshal`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name.

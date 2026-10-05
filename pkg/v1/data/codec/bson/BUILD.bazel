@@ -6,6 +6,7 @@ go_library(
     name = "bson",
     srcs = [
         "bson.go",
+        "decl_gen.go",
         "doc.go",
         "facade_gen.go",
     ],

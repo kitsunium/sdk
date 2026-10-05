@@ -1402,6 +1402,7 @@ packages:
           - name: fields
             type: Field
         name: Wrap
+        impl: wrap
         out:
           - type: error
         variadic: true

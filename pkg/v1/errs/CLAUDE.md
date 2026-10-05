@@ -73,3 +73,7 @@ cd pkg/v1 && GOWORK=off go test -race ./errs/...
 `cd pkg && GOWORK=off go build -gcflags=-m ./v1/errs` reports `can inline` for every forwarder but `CodeOf` (cost 88; `ReasonOf` is the variable), and `cd pkg && GOWORK=off go test -run='^$' -bench=Facade -count=10 ./v1/errs` prices each forwarded name (`facade_bench_test.go`).
 
 `accessors_external_test.go` walks every accessor against a real failure path (`logger.NewText(Config{})` → `WriterRequired`) and against stdlib-only / nil cases, and reads `mail.ParseURL`'s `problem` clause through `FieldsOf` — in order under a consumer's own wrap, with the URL's password in no field and no rendering.
+
+## Declarations
+
+`decl_gen.go` is written by kit gen from the design (ADR 0170): `Wrap`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name.

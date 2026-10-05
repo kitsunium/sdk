@@ -48,9 +48,9 @@ func Append(dst []byte, v any) ([]byte, error) {
 	return a.Append(dst, v)
 }
 
-// Unmarshal decodes one BSON document into v, a non-nil pointer or map. The
-// input is checked whole before v is written.
-func Unmarshal(data []byte, v any) error {
+// unmarshal is Unmarshal's body: decl_gen.go writes Unmarshal, from the
+// design, as one call of it.
+func unmarshal(data []byte, v any) error {
 	//: the registered codec's own decoder.
 	return svcbson.New().Unmarshal(data, v)
 }

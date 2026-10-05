@@ -7,6 +7,7 @@ go_library(
     srcs = [
         "accessors.go",
         "construct.go",
+        "decl_gen.go",
         "doc.go",
         "facade_gen.go",
     ],

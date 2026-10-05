@@ -7,6 +7,7 @@ go_library(
     srcs = [
         "cli.go",
         "cli_compliance.go",
+        "decl_gen.go",
         "doc.go",
         "facade_gen.go",
     ],

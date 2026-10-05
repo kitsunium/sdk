@@ -2060,6 +2060,7 @@ packages:
           - name: fn
             type: TxFunc
         name: Transact
+        impl: transact
         out:
           - type: error
     imports:

@@ -386,7 +386,7 @@ func ParseDecimal128(s string) (Decimal128, error)
 ParseDecimal128 parses a decimal's string form — "1.23", "-4E+5", "NaN", "Infinity" — refusing one a decimal128 cannot hold exactly.
 
 <a name="Unmarshal"></a>
-## func [Unmarshal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go>)
+## func [Unmarshal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/decl_gen.go>)
 
 ```go
 func Unmarshal(data []byte, v any) error

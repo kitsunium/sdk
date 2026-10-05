@@ -115,20 +115,23 @@ func DefaultMulti(path string) (lg Logger, err error) {
 	)
 }
 
-// Debug emits a RecordEvent at LevelDebug through lg.
-func Debug(ctx context.Context, lg Logger, msg string, attrs ...Attr) {
+// debug is Debug's body: decl_gen.go writes Debug, from the
+// design, as one call of it.
+func debug(ctx context.Context, lg Logger, msg string, attrs ...Attr) {
 	//: delegate to the Logger contract at LevelDebug.
 	lg.Log(ctx, LevelDebug, msg, attrs...)
 }
 
-// Info emits a RecordEvent at LevelInfo through lg.
-func Info(ctx context.Context, lg Logger, msg string, attrs ...Attr) {
+// info is Info's body: decl_gen.go writes Info, from the
+// design, as one call of it.
+func info(ctx context.Context, lg Logger, msg string, attrs ...Attr) {
 	//: delegate to the Logger contract at LevelInfo.
 	lg.Log(ctx, LevelInfo, msg, attrs...)
 }
 
-// Warn emits a RecordEvent at LevelWarn through lg.
-func Warn(ctx context.Context, lg Logger, msg string, attrs ...Attr) {
+// warn is Warn's body: decl_gen.go writes Warn, from the
+// design, as one call of it.
+func warn(ctx context.Context, lg Logger, msg string, attrs ...Attr) {
 	//: delegate to the Logger contract at LevelWarn.
 	lg.Log(ctx, LevelWarn, msg, attrs...)
 }
@@ -175,8 +178,9 @@ func Uint64(key string, val uint64) Attr {
 	return Attr{Key: key, Value: corelogger.Uint64Value(val)}
 }
 
-// Duration builds an Attr carrying a time.Duration value.
-func Duration(key string, val time.Duration) Attr {
+// duration is Duration's body: decl_gen.go writes Duration, from the
+// design, as one call of it.
+func duration(key string, val time.Duration) Attr {
 	//: wrap into the shared AttrValue shape via the typed constructor.
 	return Attr{Key: key, Value: corelogger.DurationValue(val)}
 }

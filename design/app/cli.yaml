@@ -935,6 +935,7 @@ packages:
           - name: err
             type: error
         name: Status
+        impl: status
         out:
           - type: int
       - doc: |-

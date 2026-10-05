@@ -82,3 +82,7 @@ writes from `design/data/sql.yaml`: edit the design, run `kit gen`, then
 cd pkg && GOWORK=off go test -race ./v1/data/sql
 make docs-readme   # rewrites README.md from docs/api
 ```
+
+## Declarations
+
+`decl_gen.go` is written by kit gen from the design (ADR 0170): `Transact`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name.
