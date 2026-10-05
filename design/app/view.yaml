@@ -324,6 +324,7 @@ packages:
           Available returns every registered [Engine], sorted, so a caller can print
           what its imports actually wired up. It is nil before any Register.
         name: Available
+        impl: available
         out:
           - type: "[]Engine"
       - doc: |-
@@ -364,6 +365,7 @@ packages:
           - name: s
             type: string
         name: TrustHTML
+        impl: trustHTML
         out:
           - type: TrustedHTML
     imports:

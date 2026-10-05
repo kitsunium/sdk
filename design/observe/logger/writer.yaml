@@ -128,6 +128,7 @@ packages:
           - name: sessionToken
             type: string
         name: NewCredentialValue
+        impl: newCredentialValue
         out:
           - type: CredentialValue
       - doc: |-
@@ -182,6 +183,7 @@ packages:
           Available returns the sorted list of registered Names, or nil before any
           Register.
         name: Available
+        impl: available
         out:
           - type: "[]Name"
     imports:
@@ -752,6 +754,7 @@ packages:
               String for %#v (Go-syntax formatting) and would otherwise dump the unexported
               credential fields; GoString closes that leak.
             name: GoString
+            impl: goString
             out:
               - type: string
             recv: value

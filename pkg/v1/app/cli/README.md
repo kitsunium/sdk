@@ -334,7 +334,7 @@ type Command struct {
 ```
 
 <a name="Command.IsGroup"></a>
-### func \(Command\) [IsGroup](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/cli/cli_command.go>)
+### func \(Command\) [IsGroup](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/cli/decl_gen.go>)
 
 ```go
 func (Command) IsGroup() bool

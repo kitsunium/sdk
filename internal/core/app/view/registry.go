@@ -108,9 +108,9 @@ func Lookup(name Engine) (factory Factory, found bool) {
 	return registry.Lookup(name)
 }
 
-// Available returns every registered [Engine], sorted, so a caller can print
-// what its imports actually wired up. It is nil before any Register.
-func Available() []Engine {
+// available is Available's body: decl_gen.go writes Available, from the
+// design, as one call of it.
+func available() []Engine {
 	//: sorted output keeps logs and tests deterministic.
 	return registry.Names()
 }

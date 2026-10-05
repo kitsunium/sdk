@@ -221,6 +221,7 @@ packages:
           - name: raw
             type: "[]byte"
         name: NewID
+        impl: newID
         out:
           - name: id
             type: ID
@@ -683,6 +684,7 @@ packages:
               value or to [Sealer.Seal]; never to a logger, a metric label, a URL, or an
               error's Public string. A zero-value ID reveals "".
             name: Reveal
+            impl: reveal
             out:
               - type: string
             recv: value
@@ -710,6 +712,7 @@ packages:
               - name: other
                 type: ID
             name: Equal
+            impl: equal
             out:
               - type: bool
             recv: value
@@ -717,6 +720,7 @@ packages:
               IsZero reports whether the ID names nothing — the zero value, which no
               constructor produces. A store refuses it with [InvalidID].
             name: IsZero
+            impl: isZero
             out:
               - type: bool
             recv: value
@@ -732,6 +736,7 @@ packages:
               GoString implements fmt.GoStringer so %#v stays redacted: fmt bypasses String
               for Go-syntax formatting and would otherwise dump the backing slice.
             name: GoString
+            impl: goString
             out:
               - type: string
             recv: value
@@ -789,6 +794,7 @@ packages:
               averaging or by preferring the later one — the earlier deadline always wins,
               which is what makes the absolute timeout a ceiling rather than a suggestion.
             name: ExpiresAt
+            impl: expiresAt
             out:
               - type: time.Time
             recv: value
@@ -807,6 +813,7 @@ packages:
               [Store] method returns alongside its error. There is no "invalid, but here
               are the claims anyway" path.
             name: IsZero
+            impl: isZero
             out:
               - type: bool
             recv: value
@@ -817,6 +824,7 @@ packages:
               - name: key
                 type: string
             name: Get
+            impl: get
             out:
               - name: value
                 type: string
@@ -879,6 +887,7 @@ packages:
               GoString implements fmt.GoStringer so %#v stays redacted too — fmt bypasses
               String for Go-syntax formatting and would otherwise dump every field.
             name: GoString
+            impl: goString
             out:
               - type: string
             recv: value

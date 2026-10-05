@@ -34,9 +34,9 @@ func (m StdioMode) String() string {
 	return "stdiomode(" + strconv.Itoa(int(m)) + ")"
 }
 
-// Known reports whether m is one of the defined StdioInherit/StdioNull/StdioCapture
-// modes (i.e. m <= StdioCapture).
-func (m StdioMode) Known() bool {
+// known is StdioMode.Known's body: decl_gen.go writes StdioMode.Known, from the
+// design, as one call of it.
+func (m StdioMode) known() bool {
 	//: the defined modes are the contiguous range [StdioInherit, StdioCapture].
 	return m <= StdioCapture
 }

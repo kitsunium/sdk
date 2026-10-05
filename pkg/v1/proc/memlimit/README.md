@@ -126,7 +126,7 @@ type Limit struct {
 ```
 
 <a name="Limit.Applied"></a>
-### func \(Limit\) [Applied](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/memory.go>)
+### func \(Limit\) [Applied](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/decl_gen.go>)
 
 ```go
 func (Limit) Applied() bool

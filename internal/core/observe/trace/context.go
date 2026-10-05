@@ -11,13 +11,9 @@ type contextKeyType struct{}
 // spanContextKey is the singleton key. A struct{} key allocates nothing.
 var spanContextKey contextKeyType
 
-// ContextWithSpanContext returns a copy of parent carrying context.
-//
-// An INVALID context is still stored rather than skipped. Storing it is what
-// makes "this scope deliberately has no trace" expressible: a handler that ran
-// under an unsampled or absent traceparent shadows any outer context instead of
-// silently re-parenting its children onto it.
-func ContextWithSpanContext(parent context.Context, context SpanContextValue) context.Context {
+// contextWithSpanContext is ContextWithSpanContext's body: decl_gen.go writes ContextWithSpanContext, from the
+// design, as one call of it.
+func contextWithSpanContext(parent context.Context, context SpanContextValue) context.Context {
 	//: one typed value in one unexported slot.
 	return contextWithValue(parent, context)
 }

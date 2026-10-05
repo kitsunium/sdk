@@ -775,6 +775,7 @@ packages:
               valued (n is 1, v is 1), which is precisely why v and f are separate
               operands.
             name: IsIntegerValued
+            impl: isIntegerValued
             out:
               - type: bool
             recv: value
@@ -822,6 +823,7 @@ packages:
             recv: value
           - doc: Valid reports whether f is one of the six categories CLDR defines.
             name: Valid
+            impl: valid
             out:
               - type: bool
             recv: value
@@ -943,6 +945,7 @@ packages:
               - name: form
                 type: Form
             name: HasForm
+            impl: hasForm
             out:
               - type: bool
             recv: value
@@ -950,6 +953,7 @@ packages:
               IsPlural reports whether the message carries any category beyond
               [FormOther].
             name: IsPlural
+            impl: isPlural
             out:
               - type: bool
             recv: value
@@ -1064,6 +1068,7 @@ packages:
             recv: value
           - doc: Script returns the Titlecase script subtag, or "" when the tag carries none.
             name: Script
+            impl: script
             out:
               - type: string
             recv: value
@@ -1088,6 +1093,7 @@ packages:
               the rule is satisfied by the grammar and there is nothing to skip — stated
               here because a reader comparing this code to the RFC will look for it.
             name: Parent
+            impl: parent
             out:
               - name: parent
                 type: TagValue

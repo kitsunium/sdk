@@ -294,6 +294,7 @@ packages:
           - name: ex
             type: Executor
         name: Irreversible
+        impl: irreversible
         out:
           - type: error
     imports:
@@ -861,6 +862,7 @@ packages:
             recv: value
           - doc: Valid reports whether d is a dialect this domain can actually spell.
             name: Valid
+            impl: valid
             out:
               - type: bool
             recv: value
@@ -877,6 +879,7 @@ packages:
               releases when its holder dies, as a server releases an advisory lock
               (ADR 0140).
             name: SupportsAdvisoryLock
+            impl: supportsAdvisoryLock
             out:
               - type: bool
             recv: value
@@ -934,6 +937,7 @@ packages:
               [Dialect.Valid] renders the clause: an engine without one refuses the
               statement, which is louder than a lock dropped in silence.
             name: ForUpdate
+            impl: forUpdate
             out:
               - type: string
             recv: value
@@ -950,6 +954,7 @@ packages:
               SQLite transaction that has written holds the database's only write lock,
               so no row it reads is held by anybody else.
             name: ForUpdateSkipLocked
+            impl: forUpdateSkipLocked
             out:
               - type: string
             recv: value
@@ -1050,6 +1055,7 @@ packages:
               the kind of "helpful" behaviour that produces a data race nobody can find
               (ADR 0055 §D5).
             name: IsZero
+            impl: isZero
             out:
               - type: bool
             recv: value
@@ -1057,6 +1063,7 @@ packages:
               StdOptions renders the value as the stdlib's own option struct, ready for
               (*sql.DB).BeginTx.
             name: StdOptions
+            impl: stdOptions
             out:
               - type: "*stdsql.TxOptions"
             recv: value

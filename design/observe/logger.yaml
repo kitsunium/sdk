@@ -223,6 +223,7 @@ packages:
           - name: v
             type: int64
         name: Int64Value
+        impl: int64Value
         out:
           - type: Value
       - doc: |-
@@ -232,6 +233,7 @@ packages:
           - name: v
             type: int
         name: IntValue
+        impl: intValue
         out:
           - type: Value
       - doc: Uint64Value builds a Value of kind uint64.
@@ -239,6 +241,7 @@ packages:
           - name: v
             type: uint64
         name: Uint64Value
+        impl: uint64Value
         out:
           - type: Value
       - doc: Float64Value builds a Value of kind float64.
@@ -246,6 +249,7 @@ packages:
           - name: v
             type: float64
         name: Float64Value
+        impl: float64Value
         out:
           - type: Value
       - doc: BoolValue builds a Value of kind bool.
@@ -253,6 +257,7 @@ packages:
           - name: v
             type: bool
         name: BoolValue
+        impl: boolValue
         out:
           - type: Value
       - doc: |-
@@ -262,6 +267,7 @@ packages:
           - name: v
             type: time.Duration
         name: DurationValue
+        impl: durationValue
         out:
           - type: Value
       - doc: |-
@@ -272,6 +278,7 @@ packages:
           - name: v
             type: time.Time
         name: TimeValue
+        impl: timeValue
         out:
           - type: Value
       - doc: |-
@@ -282,6 +289,7 @@ packages:
           - name: attrs
             type: AttrValue
         name: GroupValue
+        impl: groupValue
         out:
           - type: Value
         variadic: true
@@ -293,6 +301,7 @@ packages:
           - name: v
             type: any
         name: AnyValue
+        impl: anyValue
         out:
           - type: Value
     imports:
@@ -628,6 +637,7 @@ packages:
               - name: dst
                 type: "[]byte"
             name: AppendTraceIDHex
+            impl: appendTraceIDHex
             out:
               - type: "[]byte"
             recv: value
@@ -638,6 +648,7 @@ packages:
               - name: dst
                 type: "[]byte"
             name: AppendSpanIDHex
+            impl: appendSpanIDHex
             out:
               - type: "[]byte"
             recv: value
@@ -726,6 +737,7 @@ packages:
               Kind is not KindDuration; callers MUST guard with Kind() before calling
               this accessor.
             name: Duration
+            impl: duration
             out:
               - type: time.Duration
             recv: value

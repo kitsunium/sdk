@@ -193,7 +193,7 @@ type Resource int
 ```
 
 <a name="Resource.Known"></a>
-### func \(Resource\) [Known](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/proc.go>)
+### func \(Resource\) [Known](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/decl_gen.go>)
 
 ```go
 func (Resource) Known() bool

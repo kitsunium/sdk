@@ -1218,7 +1218,7 @@ func (CredentialValue) AccessKeyID() string
 AccessKeyID returns the AWS access key ID (may be empty).
 
 <a name="CredentialValue.GoString"></a>
-### func \(CredentialValue\) [GoString](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/writer/credentials.go>)
+### func \(CredentialValue\) [GoString](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/writer/decl_gen.go>)
 
 ```go
 func (CredentialValue) GoString() string
@@ -1414,7 +1414,7 @@ type LevelVar struct{}
 ```
 
 <a name="LevelVar.Level"></a>
-### func \(LevelVar\) [Level](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/level/var.go>)
+### func \(LevelVar\) [Level](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/level/decl_gen.go>)
 
 ```go
 func (*LevelVar) Level() Level
@@ -1423,7 +1423,7 @@ func (*LevelVar) Level() Level
 Level reports the current threshold. The load is atomic and lock-free, keeping it cheap enough for a per-record gate to call on the hot path.
 
 <a name="LevelVar.Set"></a>
-### func \(LevelVar\) [Set](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/level/var.go>)
+### func \(LevelVar\) [Set](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/level/decl_gen.go>)
 
 ```go
 func (*LevelVar) Set(lvl Level)
@@ -1872,7 +1872,7 @@ type TraceContext struct {
 ```
 
 <a name="TraceContext.AppendSpanIDHex"></a>
-### func \(TraceContext\) [AppendSpanIDHex](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/trace_context.go>)
+### func \(TraceContext\) [AppendSpanIDHex](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/decl_gen.go>)
 
 ```go
 func (TraceContext) AppendSpanIDHex(dst []byte) []byte
@@ -1881,7 +1881,7 @@ func (TraceContext) AppendSpanIDHex(dst []byte) []byte
 AppendSpanIDHex appends the span identifier to dst as 16 lowercase hex digits and returns the extended buffer. Same contract as AppendTraceIDHex.
 
 <a name="TraceContext.AppendTraceIDHex"></a>
-### func \(TraceContext\) [AppendTraceIDHex](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/trace_context.go>)
+### func \(TraceContext\) [AppendTraceIDHex](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/decl_gen.go>)
 
 ```go
 func (TraceContext) AppendTraceIDHex(dst []byte) []byte

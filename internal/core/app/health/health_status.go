@@ -41,34 +41,16 @@ func (s Status) String() string {
 	}
 }
 
-// Serving reports whether a probe carrying this status should keep receiving
-// traffic — which is exactly the question an HTTP status code answers.
-//
-// Degraded serves. That is the whole meaning of marking a check non-critical:
-// if a degraded replica were removed from routing, a "non-critical" cache
-// outage would take the fleet down just as thoroughly as a critical one.
-//
-// A Status outside the three does NOT serve — String already calls it
-// "unknown", and a verdict nobody minted is the one that must not authorise
-// routing (the zero-value rule of the type comment, applied to every other
-// value nobody assigned on purpose).
-func (s Status) Serving() bool {
+// serving is Status.Serving's body: decl_gen.go writes Status.Serving, from the
+// design, as one call of it.
+func (s Status) serving() bool {
 	//: exactly the two serving states, never "anything but the floor".
 	return s == StatusDegraded || s == StatusHealthy
 }
 
-// Worst returns the more severe of two statuses, which is the SDK's whole
-// aggregation rule: a set is as healthy as its least healthy member.
-//
-// It exists as a named function rather than an inline min so the rule has one
-// definition and one test, and so a reader looking for "how does one failing
-// check affect the whole probe" finds a function rather than an idiom.
-//
-// A value outside the three ranks with Unhealthy. Status is ordered
-// worst-first, so a plain min would rank a cast value like Status(42) ABOVE
-// Healthy and let Worst(Healthy, Status(42)) answer Healthy — the fail-open
-// Serving already refuses for the same value.
-func Worst(a, b Status) Status {
+// worst is Worst's body: decl_gen.go writes Worst, from the
+// design, as one call of it.
+func worst(a, b Status) Status {
 	//: Status is ordered worst-first, so the more severe verdict is the
 	//: smaller value. Degraded can therefore never mask Unhealthy, and a value
 	//: no verdict spells is folded in as the most severe one.

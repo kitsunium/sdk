@@ -134,6 +134,7 @@ packages:
           Available returns the sorted list of registered Formats, or nil before any
           Register.
         name: Available
+        impl: available
         out:
           - type: "[]Format"
     imports:

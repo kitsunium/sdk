@@ -415,7 +415,7 @@ It returns a genuine nil interface when the report is OK. That is why ReportValu
 The error carries the violation COUNT and the list of paths, never the messages and never the values: the full report is the report. A caller that needs every message keeps the ReportValue; the error is the interop shape.
 
 <a name="Report.First"></a>
-### func \(Report\) [First](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/validation/report.go>)
+### func \(Report\) [First](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/validation/decl_gen.go>)
 
 ```go
 func (Report) First() (violation ViolationValue, ok bool)
@@ -424,7 +424,7 @@ func (Report) First() (violation ViolationValue, ok bool)
 First returns the earliest violation and whether there was one. Constraints report in the order they were composed, so "first" is the outermost rule on the earliest field — the one a stop-at-first caller wants.
 
 <a name="Report.OK"></a>
-### func \(Report\) [OK](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/validation/report.go>)
+### func \(Report\) [OK](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/validation/decl_gen.go>)
 
 ```go
 func (Report) OK() bool
@@ -433,7 +433,7 @@ func (Report) OK() bool
 OK reports whether the value satisfied every constraint. It is the question to ask; comparing len(report) to zero says the same thing less clearly.
 
 <a name="Report.Paths"></a>
-### func \(Report\) [Paths](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/validation/report.go>)
+### func \(Report\) [Paths](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/validation/decl_gen.go>)
 
 ```go
 func (Report) Paths() []string

@@ -379,7 +379,7 @@ type ExitResult struct {
 ```
 
 <a name="ExitResult.Success"></a>
-### func \(ExitResult\) [Success](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/exit.go>)
+### func \(ExitResult\) [Success](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/decl_gen.go>)
 
 ```go
 func (ExitResult) Success() bool
@@ -551,7 +551,7 @@ type Resource int
 ```
 
 <a name="Resource.Known"></a>
-### func \(Resource\) [Known](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/proc.go>)
+### func \(Resource\) [Known](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/decl_gen.go>)
 
 ```go
 func (Resource) Known() bool
@@ -593,7 +593,7 @@ func (Signal) Int() int
 Int reports the raw platform signal number underlying s.
 
 <a name="Signal.Known"></a>
-### func \(Signal\) [Known](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/signal.go>)
+### func \(Signal\) [Known](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/decl_gen.go>)
 
 ```go
 func (Signal) Known() bool
@@ -602,7 +602,7 @@ func (Signal) Known() bool
 Known reports whether s names a signal in the platform table.
 
 <a name="Signal.OS"></a>
-### func \(Signal\) [OS](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/signal.go>)
+### func \(Signal\) [OS](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/decl_gen.go>)
 
 ```go
 func (Signal) OS() os.Signal
@@ -790,7 +790,7 @@ type StdioMode uint8
 ```
 
 <a name="StdioMode.Known"></a>
-### func \(StdioMode\) [Known](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/stdio.go>)
+### func \(StdioMode\) [Known](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/decl_gen.go>)
 
 ```go
 func (StdioMode) Known() bool

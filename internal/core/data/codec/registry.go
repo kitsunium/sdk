@@ -201,9 +201,9 @@ func LookupExt(ext string) (c Codec, ok bool) {
 	return Lookup(name)
 }
 
-// Available returns the sorted list of registered Formats, or nil before any
-// Register.
-func Available() []Format {
+// available is Available's body: decl_gen.go writes Available, from the
+// design, as one call of it.
+func available() []Format {
 	//: sorted ascending, the caller's own slice.
 	return registry.Names()
 }

@@ -152,21 +152,18 @@ func (m MessageValue) patternFor(form Form) (body PatternValue, ok bool) {
 	return PatternValue{}, false
 }
 
-// HasForm reports whether the message carries a pattern for form.
-//
-// It is what internal/service/app/i18n's load-time completeness check reads: for
-// each category the registered language's rules can produce, the message must
-// answer true, or the catalogue is refused naming the key and the category.
-func (m MessageValue) HasForm(form Form) bool {
+// hasForm is MessageValue.HasForm's body: decl_gen.go writes MessageValue.HasForm, from the
+// design, as one call of it.
+func (m MessageValue) hasForm(form Form) bool {
 	//: the same resolution Format performs, without the render.
 	_, ok := m.patternFor(form)
 	//: present or not.
 	return ok
 }
 
-// IsPlural reports whether the message carries any category beyond
-// [FormOther].
-func (m MessageValue) IsPlural() bool {
+// isPlural is MessageValue.IsPlural's body: decl_gen.go writes MessageValue.IsPlural, from the
+// design, as one call of it.
+func (m MessageValue) isPlural() bool {
 	//: the plural slice is nil for a message with only `other`.
 	return len(m.plural) > 0
 }

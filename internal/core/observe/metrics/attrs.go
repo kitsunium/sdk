@@ -15,21 +15,16 @@ import coreotel "github.com/kitsunium/sdk/internal/core/observe/otel"
 // reaches by accident.
 const OverflowAttrKey string = "sdk_metric_overflow"
 
-// ValidateAttrs panics with InvalidAttribute (0.2.9.4) when sorted cannot name
-// a series: an empty Key, a value no constructor ever set, or the same Key
-// twice. It is the check every instrument fetch runs, on the already sorted
-// set; the rules are the shared model's (internal/core/observe/otel.ValidateAttrs), the
-// code is this signal's.
-func ValidateAttrs(sorted []coreotel.AttrValue) {
+// validateAttrs is ValidateAttrs's body: decl_gen.go writes ValidateAttrs, from the
+// design, as one call of it.
+func validateAttrs(sorted []coreotel.AttrValue) {
 	//: the shared rules, refused under this signal's own code.
 	coreotel.ValidateAttrs(sorted, InvalidAttribute)
 }
 
-// NormalizeResource returns the ResourceValue a Meter publishes: attributes
-// sorted, validated, owned, and carrying ServiceNameKey whether or not the
-// caller supplied it. An unusable attribute set panics with InvalidAttribute,
-// at construction, rather than at the first export.
-func NormalizeResource(resource coreotel.ResourceValue) coreotel.ResourceValue {
+// normalizeResource is NormalizeResource's body: decl_gen.go writes NormalizeResource, from the
+// design, as one call of it.
+func normalizeResource(resource coreotel.ResourceValue) coreotel.ResourceValue {
 	//: the shared normalisation, refused under this signal's own code.
 	return coreotel.NormalizeResource(resource, InvalidAttribute)
 }

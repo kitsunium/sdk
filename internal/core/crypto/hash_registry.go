@@ -10,35 +10,31 @@ import (
 // shared read-mostly schemeRegistry — register once at import, Sum is lock-free.
 var hashers = schemeRegistry[Hasher]{verb: "RegisterHasher"}
 
-// RegisterHasher inserts h under h.Algorithm() and returns it so callers can
-// bind the singleton to a typed package-level variable like
-// `var Hasher = crypto.RegisterHasher(sha256Hasher{})`. Panics on a nil hasher
-// or when a distinct hasher already claims the same Algorithm.
+// registerHasher is RegisterHasher's body: decl_gen.go writes RegisterHasher, from the
+// design, as one call of it.
 //
 // IFACE-PLUGIN: the registry hands plug-in Hasher instances back to callers so
 // each scheme keeps its concrete type unexported; the stable contract is the
 // Hasher interface itself.
-//
-// "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
-// plug-in whose type is not comparable both satisfy the port and neither can
-// serve one call (see internal/kernel/plugin).
-func RegisterHasher(h Hasher) Hasher {
+func registerHasher(h Hasher) Hasher {
 	//: refuse an unusable hasher, then publish it under its Algorithm; both
 	//: refusals panic at boot with the dotted-quad code.
 	return hashers.register(h)
 }
 
-// LookupHasher returns the Hasher registered under name.
+// lookupHasher is LookupHasher's body: decl_gen.go writes LookupHasher, from the
+// design, as one call of it.
 //
 // IFACE-PLUGIN: the registry stores plug-in Hasher instances behind the Hasher
 // interface — concrete types are intentionally unexported per scheme.
-func LookupHasher(name Algorithm) (h Hasher, ok bool) {
+func lookupHasher(name Algorithm) (h Hasher, ok bool) {
 	//: a lock-free snapshot read; a miss hands back nil AND false.
 	return hashers.table.Lookup(name)
 }
 
-// AvailableHashers returns the sorted list of registered hash Algorithms.
-func AvailableHashers() []Algorithm {
+// availableHashers is AvailableHashers's body: decl_gen.go writes AvailableHashers, from the
+// design, as one call of it.
+func availableHashers() []Algorithm {
 	//: sorted ascending, the caller's own slice; nil before any registration.
 	return hashers.table.Names()
 }

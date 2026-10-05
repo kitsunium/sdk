@@ -188,6 +188,7 @@ packages:
           - name: value
             type: string
         name: AttrString
+        impl: attrString
         out:
           - type: AttrValue
       - doc: |-
@@ -201,6 +202,7 @@ packages:
           - name: value
             type: int64
         name: AttrInt64
+        impl: attrInt64
         out:
           - type: AttrValue
       - doc: |-
@@ -213,6 +215,7 @@ packages:
           - name: value
             type: bool
         name: AttrBool
+        impl: attrBool
         out:
           - type: AttrValue
       - doc: |-
@@ -228,6 +231,7 @@ packages:
           - name: values
             type: string
         name: AttrStrings
+        impl: attrStrings
         out:
           - type: AttrValue
         variadic: true
@@ -254,6 +258,7 @@ packages:
           - name: attrs
             type: AttrValue
         name: NewRequestValue
+        impl: newRequestValue
         out:
           - type: RequestValue
         variadic: true
@@ -438,6 +443,7 @@ packages:
               [KindString] — the caller MUST check it: the zero string is a legitimate
               text value, so the returned value alone cannot report a mismatch.
             name: StringValue
+            impl: stringValue
             out:
               - name: value
                 type: string
@@ -448,6 +454,7 @@ packages:
               Int64Value returns the whole-number payload. ok is false when the attribute
               is not [KindInt64].
             name: Int64Value
+            impl: int64Value
             out:
               - name: value
                 type: int64
@@ -459,6 +466,7 @@ packages:
               [KindBool] — and this is the accessor where ignoring ok is most expensive,
               since false is both "the flag is off" and "there is no flag".
             name: BoolValue
+            impl: boolValue
             out:
               - name: value
               - name: ok
@@ -470,6 +478,7 @@ packages:
               share across goroutines: a caller that sorts or appends to the result cannot
               reach the attribute the next request will evaluate.
             name: StringsValue
+            impl: stringsValue
             out:
               - name: values
                 type: "[]string"
@@ -488,6 +497,7 @@ packages:
               - name: want
                 type: string
             name: Contains
+            impl: contains
             out:
               - name: found
               - name: ok
@@ -617,6 +627,7 @@ packages:
               true for [Abstain], so it authorizes every request no policy recognised, and
               it is true for a corrupt Decision value as well.
             name: Granted
+            impl: granted
             out:
               - type: bool
             recv: value
@@ -626,6 +637,7 @@ packages:
               zeroed struct field read as a Decision, a value from a future version of a
               caller's own code — and the SDK refuses on it rather than guessing.
             name: Valid
+            impl: valid
             out:
               - type: bool
             recv: value
@@ -692,6 +704,7 @@ packages:
               - name: key
                 type: string
             name: Attr
+            impl: attr
             out:
               - name: attr
                 type: AttrValue
@@ -703,6 +716,7 @@ packages:
               diagnostics and tests; no rule reads it, because "how many facts" never
               answers "which fact".
             name: AttrCount
+            impl: attrCount
             out:
               - type: int
             recv: value

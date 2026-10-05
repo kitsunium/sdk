@@ -60,8 +60,9 @@ func (r Resource) String() string {
 	return "unknown"
 }
 
-// Known reports whether r is a defined resource other than the zero value.
-func (r Resource) Known() bool {
+// known is Resource.Known's body: decl_gen.go writes Resource.Known, from the
+// design, as one call of it.
+func (r Resource) known() bool {
 	//: defined resources occupy the contiguous range above the zero value.
 	return r > ResourceUnknown && r <= ResourceMemLock
 }

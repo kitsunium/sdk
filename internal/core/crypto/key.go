@@ -7,10 +7,9 @@ import "bytes"
 // fixed length keeps the surface tiny and the validation total.
 const KeyLen int = 32
 
-// NewKey builds a Key from raw, which MUST be exactly KeyLen (32) bytes. A wrong
-// length returns InvalidKey rather than silently truncating or padding; the
-// bytes are copied so a later mutation of raw cannot affect the Key.
-func NewKey(raw []byte) (key Key, err error) {
+// newKey is NewKey's body: decl_gen.go writes NewKey, from the
+// design, as one call of it.
+func newKey(raw []byte) (key Key, err error) {
 	//: reject any non-32-byte input — never truncate or pad a key silently.
 	if len(raw) != KeyLen {
 		//: surface the typed sentinel; callers HasCode(err, CodeInvalidKey).
@@ -28,9 +27,9 @@ func (k Key) Bytes() []byte {
 	return bytes.Clone(k.raw)
 }
 
-// Zeroize overwrites the key material with zeros. Because copies share one
-// backing array, this clears the secret for every copy of the Key.
-func (k Key) Zeroize() {
+// zeroize is Key.Zeroize's body: decl_gen.go writes Key.Zeroize, from the
+// design, as one call of it.
+func (k Key) zeroize() {
 	//: clear the shared backing array in place (no-op on a zero-value Key).
 	clear(k.raw)
 }
@@ -42,9 +41,9 @@ func (k Key) String() string {
 	return "<redacted>"
 }
 
-// GoString implements fmt.GoStringer so %#v stays redacted too — fmt bypasses
-// String for Go-syntax formatting and would otherwise dump the raw slice.
-func (k Key) GoString() string {
+// goString is Key.GoString's body: decl_gen.go writes Key.GoString, from the
+// design, as one call of it.
+func (k Key) goString() string {
 	//: same constant marker — %#v must never expose key material.
 	return "<redacted>"
 }

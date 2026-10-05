@@ -28,16 +28,9 @@ const (
 	SpanKindConsumer
 )
 
-// Resolved returns the kind a span actually carries: SpanKindUnspecified clamps
-// to SpanKindInternal, every declared value is honoured, and anything else — a
-// cast, since there is no other way to produce one — clamps too.
-//
-// It clamps where Temporality refuses (ADR 0044 §Decision 3), and the asymmetry
-// applies the clamp-or-refuse question honestly: an unstated temporality changes what a
-// NUMBER means, so no default can be chosen for the caller; an unstated kind
-// changes only how a span is drawn, and the specification itself names the
-// default. A clamp is right exactly when the SDK is not substituting judgement.
-func (k SpanKind) Resolved() SpanKind {
+// resolved is SpanKind.Resolved's body: decl_gen.go writes SpanKind.Resolved, from the
+// design, as one call of it.
+func (k SpanKind) resolved() SpanKind {
 	//: every value the schema declares is honoured as written.
 	switch k {
 	//: the four remote kinds, plus the explicit internal one.

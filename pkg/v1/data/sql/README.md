@@ -622,7 +622,7 @@ type Dialect uint8
 ```
 
 <a name="Dialect.ForUpdate"></a>
-### func \(Dialect\) [ForUpdate](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/sql_dialect.go>)
+### func \(Dialect\) [ForUpdate](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/decl_gen.go>)
 
 ```go
 func (Dialect) ForUpdate() string
@@ -633,7 +633,7 @@ ForUpdate renders the clause that ends a read by locking the rows it returns unt
 SQLite has no row lock and no such clause, and renders the empty string: a SQLite transaction excludes every other writer with the database's one write lock, which it takes at its first WRITE, so a transaction that must read under exclusion writes first (ADR 0140). A dialect that is not [Dialect.Valid](#Dialect.Valid) renders the clause: an engine without one refuses the statement, which is louder than a lock dropped in silence.
 
 <a name="Dialect.ForUpdateSkipLocked"></a>
-### func \(Dialect\) [ForUpdateSkipLocked](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/sql_dialect.go>)
+### func \(Dialect\) [ForUpdateSkipLocked](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/decl_gen.go>)
 
 ```go
 func (Dialect) ForUpdateSkipLocked() string
@@ -677,7 +677,7 @@ func (Dialect) String() string
 String returns the dialect's canonical lowercase name.
 
 <a name="Dialect.SupportsAdvisoryLock"></a>
-### func \(Dialect\) [SupportsAdvisoryLock](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/sql_dialect.go>)
+### func \(Dialect\) [SupportsAdvisoryLock](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/decl_gen.go>)
 
 ```go
 func (Dialect) SupportsAdvisoryLock() bool
@@ -688,7 +688,7 @@ SupportsAdvisoryLock reports whether the engine offers a SESSION-SCOPED advisory
 SQLite does not: it has no advisory-lock function, only the file lock that serialises writers. That distinction decides HOW [Migrator](#Migrator) promises mutual exclusion across processes, so it is a property of the dialect and not a runtime discovery (ADR 0055 §D7). On SQLite the runner holds the database file's write lock for the whole run instead, which the operating system releases when its holder dies, as a server releases an advisory lock (ADR 0140).
 
 <a name="Dialect.Valid"></a>
-### func \(Dialect\) [Valid](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/sql_dialect.go>)
+### func \(Dialect\) [Valid](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/decl_gen.go>)
 
 ```go
 func (Dialect) Valid() bool
@@ -1089,7 +1089,7 @@ type TxOptions struct {
 ```
 
 <a name="TxOptions.IsZero"></a>
-### func \(TxOptions\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/sql_txoptions.go>)
+### func \(TxOptions\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/decl_gen.go>)
 
 ```go
 func (TxOptions) IsZero() bool
@@ -1100,7 +1100,7 @@ IsZero reports whether the options ask for nothing beyond the driver's defaults.
 It exists because a NESTED scope is a savepoint, and a savepoint can change neither the isolation level nor the read-only-ness of the transaction it sits inside. Non-zero options on a nested call are therefore refused with [NestedIsolation](#NestedIsolation) rather than ignored — silently downgrading a caller's explicit \`Serializable\` to whatever the outer transaction happened to use is the kind of "helpful" behaviour that produces a data race nobody can find (ADR 0055 §D5).
 
 <a name="TxOptions.StdOptions"></a>
-### func \(TxOptions\) [StdOptions](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/sql_txoptions.go>)
+### func \(TxOptions\) [StdOptions](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/decl_gen.go>)
 
 ```go
 func (TxOptions) StdOptions() *stdsql.TxOptions

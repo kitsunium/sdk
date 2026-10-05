@@ -1160,7 +1160,7 @@ func (Value) Format(state fmt.State, verb rune)
 Format implements fmt.Formatter, so EVERY verb writes the placeholder — %v, %+v, %#v, %s, %x and the rest. %q writes it quoted, because a caller who asked for quotes is usually building a larger quoted rendering.
 
 <a name="Value.GoString"></a>
-### func \(Value\) [GoString](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/value.go>)
+### func \(Value\) [GoString](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/decl_gen.go>)
 
 ```go
 func (Value) GoString() string
@@ -1169,7 +1169,7 @@ func (Value) GoString() string
 GoString implements fmt.GoStringer so %#v stays redacted: fmt bypasses String for Go-syntax formatting and would otherwise print the struct.
 
 <a name="Value.IsZero"></a>
-### func \(Value\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/value.go>)
+### func \(Value\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/decl_gen.go>)
 
 ```go
 func (Value) IsZero() bool
@@ -1187,7 +1187,7 @@ func (Value) Len() int
 Len reports the secret's length in bytes. A length is metadata, not the secret, and a caller validating key material needs it; it is exposed here so that nobody reveals a secret only to measure it.
 
 <a name="Value.MarshalJSON"></a>
-### func \(Value\) [MarshalJSON](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/value.go>)
+### func \(Value\) [MarshalJSON](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/decl_gen.go>)
 
 ```go
 func (Value) MarshalJSON() (encoded []byte, err error)
@@ -1196,7 +1196,7 @@ func (Value) MarshalJSON() (encoded []byte, err error)
 MarshalJSON implements json.Marshaler and writes [Redacted](#Redacted) as a JSON string, so a configuration dumped as JSON never carries the secret. encoding/json escapes the angle brackets, which changes the spelling on the wire and not the string it decodes to.
 
 <a name="Value.MarshalText"></a>
-### func \(Value\) [MarshalText](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/value.go>)
+### func \(Value\) [MarshalText](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/decl_gen.go>)
 
 ```go
 func (Value) MarshalText() (text []byte, err error)
@@ -1205,7 +1205,7 @@ func (Value) MarshalText() (text []byte, err error)
 MarshalText implements encoding.TextMarshaler and writes [Redacted](#Redacted), which is what TOML, YAML, XML and log/slog's text handler reach for.
 
 <a name="Value.Reveal"></a>
-### func \(Value\) [Reveal](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/value.go>)
+### func \(Value\) [Reveal](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/decl_gen.go>)
 
 ```go
 func (Value) Reveal() []byte
@@ -1216,7 +1216,7 @@ Reveal returns a fresh copy of the secret's bytes — the only way out besides [
 Hand the result to the API that consumes the secret; never to a logger, a metric label, a URL or an error message.
 
 <a name="Value.RevealString"></a>
-### func \(Value\) [RevealString](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/value.go>)
+### func \(Value\) [RevealString](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/decl_gen.go>)
 
 ```go
 func (Value) RevealString() string
@@ -1243,7 +1243,7 @@ func (*Value) UnmarshalJSON(data []byte) error
 UnmarshalJSON implements json.Unmarshaler. It accepts a JSON STRING and nothing else: a number has already been re-spelled before a decoder sees it (1e3 arrives as 1000, a twenty-digit token loses its tail to float64), so storing one would store a secret nobody wrote. A null leaves the Value as it was, which is encoding/json's own convention for a field that decodes itself. Every refusal is [ValueRefused](#ValueRefused), and none of them quotes the input.
 
 <a name="Value.UnmarshalText"></a>
-### func \(Value\) [UnmarshalText](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/value.go>)
+### func \(Value\) [UnmarshalText](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/decl_gen.go>)
 
 ```go
 func (*Value) UnmarshalText(text []byte) error

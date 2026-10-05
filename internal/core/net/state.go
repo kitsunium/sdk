@@ -1,9 +1,8 @@
 package net
 
-// Degraded reports whether any listener fell back from a requested
-// optimisation, so a caller can assert "no silent degradation" in one call
-// instead of walking the slice.
-func (s StateValue) Degraded() bool {
+// degraded is StateValue.Degraded's body: decl_gen.go writes StateValue.Degraded, from the
+// design, as one call of it.
+func (s StateValue) degraded() bool {
 	//: any degraded listener degrades the whole server's answer.
 	for _, listener := range s.Listeners {
 		//: the first degraded listener settles it.

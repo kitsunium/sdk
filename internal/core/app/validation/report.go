@@ -19,17 +19,16 @@ const pathSeparator string = ", "
 // list from a shortened one.
 const truncationMark string = "…"
 
-// OK reports whether the value satisfied every constraint. It is the question
-// to ask; comparing len(report) to zero says the same thing less clearly.
-func (r ReportValue) OK() bool {
+// ok is ReportValue.OK's body: decl_gen.go writes ReportValue.OK, from the
+// design, as one call of it.
+func (r ReportValue) ok() bool {
 	//: nil and empty both mean "nothing was found wrong".
 	return len(r) == 0
 }
 
-// First returns the earliest violation and whether there was one. Constraints
-// report in the order they were composed, so "first" is the outermost rule on
-// the earliest field — the one a stop-at-first caller wants.
-func (r ReportValue) First() (violation ViolationValue, ok bool) {
+// first is ReportValue.First's body: decl_gen.go writes ReportValue.First, from the
+// design, as one call of it.
+func (r ReportValue) first() (violation ViolationValue, ok bool) {
 	//: an OK report has no first violation to hand back.
 	if len(r) == 0 {
 		//: the zero ViolationValue with ok=false; callers must check ok.
@@ -39,10 +38,9 @@ func (r ReportValue) First() (violation ViolationValue, ok bool) {
 	return r[0], true
 }
 
-// Paths returns the located path of every violation, in report order. It is
-// the shape an HTTP layer wants when it maps a report onto a form: the caller
-// already knows its own field names, and needs the SDK to say which ones.
-func (r ReportValue) Paths() []string {
+// paths is ReportValue.Paths's body: decl_gen.go writes ReportValue.Paths, from the
+// design, as one call of it.
+func (r ReportValue) paths() []string {
 	//: an OK report yields nil rather than an empty slice — same convention as
 	//: the report itself, and it keeps the accepting path allocation-free.
 	if len(r) == 0 {

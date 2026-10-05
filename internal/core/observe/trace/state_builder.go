@@ -2,10 +2,9 @@ package trace
 
 import "slices"
 
-// NewStateBuilder returns an empty builder with room for size members. A size
-// above MaxTraceStateMembers is clamped to it — no list holds more — and a
-// negative one is read as zero.
-func NewStateBuilder(size int) StateBuilder {
+// newStateBuilder is NewStateBuilder's body: decl_gen.go writes NewStateBuilder, from the
+// design, as one call of it.
+func newStateBuilder(size int) StateBuilder {
 	//: the room is a hint; the grammar's own cap bounds it.
 	return StateBuilder{entries: make([]traceStateEntry, 0, min(max(size, 0), MaxTraceStateMembers))}
 }
@@ -28,11 +27,9 @@ func (b *StateBuilder) Add(key, value string) bool {
 	return true
 }
 
-// State returns the list built so far, leftmost first, and leaves the builder
-// empty. The builder hands its storage to the value rather than copying it, so
-// it lets go of that storage too: a later Add starts a new list instead of
-// writing into one that is meant to be immutable.
-func (b *StateBuilder) State() StateValue {
+// state is StateBuilder.State's body: decl_gen.go writes StateBuilder.State, from the
+// design, as one call of it.
+func (b *StateBuilder) state() StateValue {
 	state := StateValue{entries: b.entries}
 	b.entries = nil
 	//: an empty builder yields the empty list.

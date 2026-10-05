@@ -6,34 +6,31 @@ import "github.com/kitsunium/sdk/internal/kernel/errs"
 // read-mostly schemeRegistry — register once at import, dispatch is lock-free.
 var agreements = schemeRegistry[Agreement]{verb: "RegisterAgreement"}
 
-// RegisterAgreement inserts a under a.Algorithm() and returns it so callers can
-// bind the singleton to a typed package-level variable. Panics on a nil scheme
-// or when a distinct scheme already claims the same Algorithm.
+// registerAgreement is RegisterAgreement's body: decl_gen.go writes RegisterAgreement, from the
+// design, as one call of it.
 //
 // IFACE-PLUGIN: the registry hands plug-in Agreement instances back to callers
 // so each scheme keeps its concrete type unexported; the contract is the
 // Agreement interface itself.
-//
-// "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
-// plug-in whose type is not comparable both satisfy the port and neither can
-// serve one call (see internal/kernel/plugin).
-func RegisterAgreement(a Agreement) Agreement {
+func registerAgreement(a Agreement) Agreement {
 	//: refuse an unusable scheme, then publish it under its Algorithm; both
 	//: refusals panic at boot with the dotted-quad code.
 	return agreements.register(a)
 }
 
-// LookupAgreement returns the Agreement scheme registered under name.
+// lookupAgreement is LookupAgreement's body: decl_gen.go writes LookupAgreement, from the
+// design, as one call of it.
 //
 // IFACE-PLUGIN: the registry stores plug-in Agreement instances behind the
 // Agreement interface — concrete types are intentionally unexported per scheme.
-func LookupAgreement(name Algorithm) (a Agreement, ok bool) {
+func lookupAgreement(name Algorithm) (a Agreement, ok bool) {
 	//: a lock-free snapshot read; a miss hands back nil AND false.
 	return agreements.table.Lookup(name)
 }
 
-// AvailableAgreements returns the sorted list of registered agreement Algorithms.
-func AvailableAgreements() []Algorithm {
+// availableAgreements is AvailableAgreements's body: decl_gen.go writes AvailableAgreements, from the
+// design, as one call of it.
+func availableAgreements() []Algorithm {
 	//: sorted ascending, the caller's own slice; nil before any registration.
 	return agreements.table.Names()
 }

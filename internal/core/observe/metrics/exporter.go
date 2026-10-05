@@ -43,17 +43,19 @@ func RegisterExporter(e Exporter) Exporter {
 	return e
 }
 
-// LookupExporter returns the Exporter registered under name.
+// lookupExporter is LookupExporter's body: decl_gen.go writes LookupExporter, from the
+// design, as one call of it.
 //
 // IFACE-PLUGIN: the registry stores plug-in exporters behind the Exporter
 // interface — concrete backend types stay unexported.
-func LookupExporter(name ExporterName) (e Exporter, ok bool) {
+func lookupExporter(name ExporterName) (e Exporter, ok bool) {
 	//: a snapshot read; a miss hands back nil AND false.
 	return registry.Lookup(name)
 }
 
-// AvailableExporters returns the sorted list of registered ExporterNames.
-func AvailableExporters() []ExporterName {
+// availableExporters is AvailableExporters's body: decl_gen.go writes AvailableExporters, from the
+// design, as one call of it.
+func availableExporters() []ExporterName {
 	//: sorted, and nil before any Register.
 	return registry.Names()
 }

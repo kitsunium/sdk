@@ -1,20 +1,8 @@
 package authz
 
-// NewRequestValue builds the immutable question. Attributes are indexed by
-// their key; a later attribute with the same key replaces an earlier one, so
-// the caller can layer defaults and then override them.
-//
-// An attribute with an empty key or the zero [KindInvalid] kind is DROPPED
-// rather than stored. The invariant is worth the drop: every attribute a rule
-// can find is one it can use, so "found but unusable" is not a state any rule
-// has to handle. The dropped attribute is then simply absent, and absence is
-// already a refusal in every rule that names it — the failure mode is closed.
-//
-// An empty action or resource is accepted and matches no grant and no rule, so
-// such a request is refused by the closure. It is not rejected here because
-// doing so would put an error return on the constructor every request calls,
-// to catch a mistake that already fails closed.
-func NewRequestValue(subject, action, resource string, attrs ...AttrValue) RequestValue {
+// newRequestValue is NewRequestValue's body: decl_gen.go writes NewRequestValue, from the
+// design, as one call of it.
+func newRequestValue(subject, action, resource string, attrs ...AttrValue) RequestValue {
 	//: the common request carries attributes; build the map only when it does,
 	//: so an attribute-free request allocates nothing beyond the value itself.
 	var indexed map[string]AttrValue
@@ -56,24 +44,18 @@ func (r RequestValue) Resource() string {
 	return r.resource
 }
 
-// Attr resolves an attribute by name. ok is false when the request does not
-// carry it — which callers MUST NOT read as a zero-valued attribute.
-//
-// This two-value shape is the whole reason the attribute bag is not exported
-// as a map. "The subject has no department" and "nobody told us the subject's
-// department" are different facts, and a rule that cannot tell them apart
-// grants access to every request that simply omitted the attribute.
-func (r RequestValue) Attr(key string) (attr AttrValue, ok bool) {
+// attr is RequestValue.Attr's body: decl_gen.go writes RequestValue.Attr, from the
+// design, as one call of it.
+func (r RequestValue) attr(key string) (attr AttrValue, ok bool) {
 	//: a nil map reads as empty, so no branch is needed for the no-attrs case.
 	attr, ok = r.attrs[key]
 	//: hand back both halves; the caller decides what absence means.
 	return attr, ok
 }
 
-// AttrCount returns how many attributes the request carries. It exists for
-// diagnostics and tests; no rule reads it, because "how many facts" never
-// answers "which fact".
-func (r RequestValue) AttrCount() int {
+// attrCount is RequestValue.AttrCount's body: decl_gen.go writes RequestValue.AttrCount, from the
+// design, as one call of it.
+func (r RequestValue) attrCount() int {
 	//: len of a nil map is 0, so the no-attrs case needs no branch.
 	return len(r.attrs)
 }

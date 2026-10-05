@@ -86,24 +86,16 @@ func (d Dialect) String() string {
 	return dialectNames[DialectUnknown]
 }
 
-// Valid reports whether d is a dialect this domain can actually spell.
-func (d Dialect) Valid() bool {
+// valid is Dialect.Valid's body: decl_gen.go writes Dialect.Valid, from the
+// design, as one call of it.
+func (d Dialect) valid() bool {
 	//: DialectUnknown is the only in-range value that is not usable.
 	return d == DialectPostgres || d == DialectMySQL || d == DialectSQLite
 }
 
-// SupportsAdvisoryLock reports whether the engine offers a SESSION-SCOPED
-// advisory lock — one the server releases when the connection holding it
-// drops.
-//
-// SQLite does not: it has no advisory-lock function, only the file lock that
-// serialises writers. That distinction decides HOW [Migrator] promises mutual
-// exclusion across processes, so it is a property of the dialect and not a
-// runtime discovery (ADR 0055 §D7). On SQLite the runner holds the database
-// file's write lock for the whole run instead, which the operating system
-// releases when its holder dies, as a server releases an advisory lock
-// (ADR 0140).
-func (d Dialect) SupportsAdvisoryLock() bool {
+// supportsAdvisoryLock is Dialect.SupportsAdvisoryLock's body: decl_gen.go writes Dialect.SupportsAdvisoryLock, from the
+// design, as one call of it.
+func (d Dialect) supportsAdvisoryLock() bool {
 	//: Postgres has pg_advisory_lock, MySQL has GET_LOCK; both die with the
 	//: session, which is the entire reason they were chosen.
 	return d == DialectPostgres || d == DialectMySQL
@@ -164,18 +156,9 @@ func (d Dialect) QuoteIdent(name string) string {
 	return ""
 }
 
-// ForUpdate renders the clause that ends a read by locking the rows it returns
-// until the transaction ends, leading space included: " FOR UPDATE" on
-// PostgreSQL and MySQL. On MySQL it is also a locking read, which reads the
-// latest committed rows rather than a REPEATABLE READ transaction's snapshot.
-//
-// SQLite has no row lock and no such clause, and renders the empty string: a
-// SQLite transaction excludes every other writer with the database's one write
-// lock, which it takes at its first WRITE, so a transaction that must read
-// under exclusion writes first (ADR 0140). A dialect that is not
-// [Dialect.Valid] renders the clause: an engine without one refuses the
-// statement, which is louder than a lock dropped in silence.
-func (d Dialect) ForUpdate() string {
+// forUpdate is Dialect.ForUpdate's body: decl_gen.go writes Dialect.ForUpdate, from the
+// design, as one call of it.
+func (d Dialect) forUpdate() string {
 	//: SQLite: the database's write lock is the exclusion.
 	if d == DialectSQLite {
 		//: nothing to add.
@@ -185,18 +168,9 @@ func (d Dialect) ForUpdate() string {
 	return " FOR UPDATE"
 }
 
-// ForUpdateSkipLocked renders the clause that ends a read by locking the rows
-// it returns and SKIPPING those another transaction holds, leading space
-// included: " FOR UPDATE SKIP LOCKED" on PostgreSQL and MySQL. Two readers
-// then never wait on each other's rows and never take the same one.
-//
-// It needs PostgreSQL 9.5, MySQL 8.0.1 or MariaDB 10.6 — later than the
-// floors [DialectPostgres] and [DialectMySQL] name — and an older server
-// refuses the statement. SQLite renders the empty string and a dialect that is
-// not [Dialect.Valid] the clause, for the reasons [Dialect.ForUpdate] gives: a
-// SQLite transaction that has written holds the database's only write lock,
-// so no row it reads is held by anybody else.
-func (d Dialect) ForUpdateSkipLocked() string {
+// forUpdateSkipLocked is Dialect.ForUpdateSkipLocked's body: decl_gen.go writes Dialect.ForUpdateSkipLocked, from the
+// design, as one call of it.
+func (d Dialect) forUpdateSkipLocked() string {
 	//: SQLite: the database's write lock is the exclusion.
 	if d == DialectSQLite {
 		//: nothing to add.

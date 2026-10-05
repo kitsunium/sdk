@@ -477,7 +477,7 @@ Digest returns the lowercase hex SHA-256 of the identifier: 64 characters, deter
 It is what a [Store](#Store) uses as its lookup key and what the file store uses as a filename, so the identifier itself is never a map key, never a directory entry, and never on disk. A stolen backup therefore yields digests, not usable cookies. The digest is a LOOKUP KEY, not an authenticator: it is unkeyed, so anyone holding an identifier can compute it — which is exactly the point, and exactly why it is not treated as a secret. A zero-value ID digests to "".
 
 <a name="ID.Equal"></a>
-### func \(ID\) [Equal](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/session/id.go>)
+### func \(ID\) [Equal](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/session/decl_gen.go>)
 
 ```go
 func (ID) Equal(other ID) bool
@@ -486,7 +486,7 @@ func (ID) Equal(other ID) bool
 Equal reports whether i and other are the same identifier, in time that does not depend on how many leading bytes they share. Every comparison of a session identifier in this SDK goes through here or through crypto/subtle directly; none of them uses == or string equality.
 
 <a name="ID.GoString"></a>
-### func \(ID\) [GoString](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/session/id.go>)
+### func \(ID\) [GoString](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/session/decl_gen.go>)
 
 ```go
 func (ID) GoString() string
@@ -495,7 +495,7 @@ func (ID) GoString() string
 GoString implements fmt.GoStringer so %#v stays redacted: fmt bypasses String for Go-syntax formatting and would otherwise dump the backing slice.
 
 <a name="ID.IsZero"></a>
-### func \(ID\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/session/id.go>)
+### func \(ID\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/session/decl_gen.go>)
 
 ```go
 func (ID) IsZero() bool
@@ -504,7 +504,7 @@ func (ID) IsZero() bool
 IsZero reports whether the ID names nothing — the zero value, which no constructor produces. A store refuses it with [InvalidID](#InvalidID).
 
 <a name="ID.Reveal"></a>
-### func \(ID\) [Reveal](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/session/id.go>)
+### func \(ID\) [Reveal](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/session/decl_gen.go>)
 
 ```go
 func (ID) Reveal() string
@@ -605,7 +605,7 @@ func (Session) Delete(key string) SessionValue
 Delete returns a copy without key. Deleting an absent key is not an error — the caller asked for the key to be gone and it is.
 
 <a name="Session.ExpiresAt"></a>
-### func \(Session\) [ExpiresAt](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/session/session_value.go>)
+### func \(Session\) [ExpiresAt](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/session/decl_gen.go>)
 
 ```go
 func (Session) ExpiresAt() time.Time
@@ -614,7 +614,7 @@ func (Session) ExpiresAt() time.Time
 ExpiresAt reports the EFFECTIVE deadline: the earlier of the absolute ceiling and the sliding idle window. The two are never reconciled by averaging or by preferring the later one — the earlier deadline always wins, which is what makes the absolute timeout a ceiling rather than a suggestion.
 
 <a name="Session.Get"></a>
-### func \(Session\) [Get](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/session/session_value.go>)
+### func \(Session\) [Get](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/session/decl_gen.go>)
 
 ```go
 func (Session) Get(key string) (value string, ok bool)
@@ -623,7 +623,7 @@ func (Session) Get(key string) (value string, ok bool)
 Get reads one datum. The second return distinguishes "absent" from "present and empty", which a bare "" cannot.
 
 <a name="Session.GoString"></a>
-### func \(Session\) [GoString](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/session/session_value.go>)
+### func \(Session\) [GoString](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/session/decl_gen.go>)
 
 ```go
 func (Session) GoString() string
@@ -641,7 +641,7 @@ func (Session) ID() ID
 ID reports the session's identifier. It is a bearer secret: see [ID](#ID).
 
 <a name="Session.IsZero"></a>
-### func \(Session\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/session/session_value.go>)
+### func \(Session\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/session/decl_gen.go>)
 
 ```go
 func (Session) IsZero() bool

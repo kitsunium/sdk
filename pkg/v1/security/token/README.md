@@ -1183,7 +1183,7 @@ type Algorithm uint8
 ```
 
 <a name="Algorithm.Known"></a>
-### func \(Algorithm\) [Known](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/token.go>)
+### func \(Algorithm\) [Known](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/decl_gen.go>)
 
 ```go
 func (Algorithm) Known() bool
@@ -1234,7 +1234,7 @@ func (Claims) Expiry() time.Time
 Expiry reports the "exp" claim. The zero Time means the claim was ABSENT, never "expired at the epoch" — a verifier decides what to do about absence (see VerifierConfig.AllowMissingExpiry in internal/service/security/token).
 
 <a name="Claims.GoString"></a>
-### func \(Claims\) [GoString](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims.go>)
+### func \(Claims\) [GoString](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/decl_gen.go>)
 
 ```go
 func (Claims) GoString() string
@@ -1252,7 +1252,7 @@ func (Claims) ID() string
 ID reports the "jti" claim, empty when the token carried none.
 
 <a name="Claims.IsZero"></a>
-### func \(Claims\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims.go>)
+### func \(Claims\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/decl_gen.go>)
 
 ```go
 func (Claims) IsZero() bool
@@ -1297,7 +1297,7 @@ func (Claims) PrivateNames() []string
 PrivateNames returns the application claim names, sorted, so a caller enumerating them gets a stable order rather than Go's randomised map order.
 
 <a name="Claims.PrivateRaw"></a>
-### func \(Claims\) [PrivateRaw](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims.go>)
+### func \(Claims\) [PrivateRaw](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/decl_gen.go>)
 
 ```go
 func (Claims) PrivateRaw(name string) (raw []byte, found bool)
@@ -1326,7 +1326,7 @@ func (Claims) Subject() string
 Subject reports the "sub" claim, empty when the token carried none.
 
 <a name="Claims.WithAudience"></a>
-### func \(Claims\) [WithAudience](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims_with.go>)
+### func \(Claims\) [WithAudience](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/decl_gen.go>)
 
 ```go
 func (Claims) WithAudience(aud ...string) ClaimsValue
@@ -1335,7 +1335,7 @@ func (Claims) WithAudience(aud ...string) ClaimsValue
 WithAudience returns a copy of c whose "aud" claim is exactly aud. Passing no argument clears the claim; the slice is copied, so a later mutation of the caller's backing array cannot reach the claim set.
 
 <a name="Claims.WithExpiry"></a>
-### func \(Claims\) [WithExpiry](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims_with.go>)
+### func \(Claims\) [WithExpiry](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/decl_gen.go>)
 
 ```go
 func (Claims) WithExpiry(exp time.Time) ClaimsValue
@@ -1344,7 +1344,7 @@ func (Claims) WithExpiry(exp time.Time) ClaimsValue
 WithExpiry returns a copy of c carrying exp. The zero Time clears the claim, which a verifier reads as "no expiry was sent" — not as "expired".
 
 <a name="Claims.WithID"></a>
-### func \(Claims\) [WithID](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims_with.go>)
+### func \(Claims\) [WithID](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/decl_gen.go>)
 
 ```go
 func (Claims) WithID(jti string) ClaimsValue
@@ -1353,7 +1353,7 @@ func (Claims) WithID(jti string) ClaimsValue
 WithID returns a copy of c carrying jti. The empty string clears it.
 
 <a name="Claims.WithIssuedAt"></a>
-### func \(Claims\) [WithIssuedAt](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims_with.go>)
+### func \(Claims\) [WithIssuedAt](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/decl_gen.go>)
 
 ```go
 func (Claims) WithIssuedAt(iat time.Time) ClaimsValue
@@ -1362,7 +1362,7 @@ func (Claims) WithIssuedAt(iat time.Time) ClaimsValue
 WithIssuedAt returns a copy of c carrying iat. The zero Time clears it.
 
 <a name="Claims.WithIssuer"></a>
-### func \(Claims\) [WithIssuer](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims_with.go>)
+### func \(Claims\) [WithIssuer](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/decl_gen.go>)
 
 ```go
 func (Claims) WithIssuer(iss string) ClaimsValue
@@ -1371,7 +1371,7 @@ func (Claims) WithIssuer(iss string) ClaimsValue
 WithIssuer returns a copy of c carrying iss. The empty string clears it.
 
 <a name="Claims.WithNotBefore"></a>
-### func \(Claims\) [WithNotBefore](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims_with.go>)
+### func \(Claims\) [WithNotBefore](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/decl_gen.go>)
 
 ```go
 func (Claims) WithNotBefore(nbf time.Time) ClaimsValue
@@ -1397,7 +1397,7 @@ It refuses three things rather than accommodating them:
 raw is copied and is NOT validated as JSON here: the format package that produced it already parsed it, and re-parsing in the value type would put a second, differently-strict JSON reader on the trusted path.
 
 <a name="Claims.WithSubject"></a>
-### func \(Claims\) [WithSubject](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims_with.go>)
+### func \(Claims\) [WithSubject](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/decl_gen.go>)
 
 ```go
 func (Claims) WithSubject(sub string) ClaimsValue
@@ -1872,7 +1872,7 @@ func (Key) Bytes() []byte
 Bytes returns a fresh copy of the raw key material for handoff to a cipher. Callers MUST NOT log the result; the redaction only covers String / GoString. A zero-value Key returns nil.
 
 <a name="Key.GoString"></a>
-### func \(Key\) [GoString](<https://github.com/kitsunium/sdk/blob/main/internal/core/crypto/key.go>)
+### func \(Key\) [GoString](<https://github.com/kitsunium/sdk/blob/main/internal/core/crypto/decl_gen.go>)
 
 ```go
 func (Key) GoString() string
@@ -1890,7 +1890,7 @@ func (Key) String() string
 String implements fmt.Stringer and always redacts so the key never reaches a log line through %v / %s.
 
 <a name="Key.Zeroize"></a>
-### func \(Key\) [Zeroize](<https://github.com/kitsunium/sdk/blob/main/internal/core/crypto/key.go>)
+### func \(Key\) [Zeroize](<https://github.com/kitsunium/sdk/blob/main/internal/core/crypto/decl_gen.go>)
 
 ```go
 func (Key) Zeroize()

@@ -19,7 +19,7 @@ here since ADR 0160. A code keeps its value when its declaration moves.
 
 | File | Surface |
 |---|---|
-| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `ReportValue`, `Constraint` and `ViolationValue` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `ReportValue`, `Constraint` and `ViolationValue` — each struct with every field, unexported ones included; `ReportValue.OK`, `ReportValue.First` and `ReportValue.Paths`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
 | `report.go` | `ReportValue []ViolationValue` + `OK` / `First` / `Paths` / `Err` |
 | `path.go` | `RootPath`, `JoinField`, `JoinIndex` — the path grammar |
 | `codes_gen.go` | `Code*` constants — ranges 0.2.15.* and 0.3.47.* (the five violation codes carry no sentinel: a violation is not an error); `ValidationFailed` / `ConstraintMisconfigured`, and the tag compiler's `InvalidRule` / `UnsupportedTarget` (`errs.Define`) — written by kit gen from `design/app/validation.yaml` (ADR 0164) |

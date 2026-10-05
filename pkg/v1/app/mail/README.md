@@ -507,7 +507,7 @@ type Address struct {
 ```
 
 <a name="Address.IsZero"></a>
-### func \(Address\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/mail/address_value.go>)
+### func \(Address\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/mail/decl_gen.go>)
 
 ```go
 func (Address) IsZero() bool
@@ -546,7 +546,7 @@ type Attachment struct {
 ```
 
 <a name="Attachment.Inline"></a>
-### func \(Attachment\) [Inline](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/mail/attachment_value.go>)
+### func \(Attachment\) [Inline](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/mail/decl_gen.go>)
 
 ```go
 func (*Attachment) Inline() bool

@@ -6,35 +6,31 @@ import "io"
 // read-mostly schemeRegistry — register once at import, dispatch is lock-free.
 var streamSealers = schemeRegistry[StreamSealer]{verb: "RegisterStreamSealer"}
 
-// RegisterStreamSealer inserts s under s.Algorithm() and returns it so callers
-// can bind the singleton to a typed package-level variable. Panics on a nil
-// sealer or when a distinct sealer already claims the same Algorithm.
+// registerStreamSealer is RegisterStreamSealer's body: decl_gen.go writes RegisterStreamSealer, from the
+// design, as one call of it.
 //
 // IFACE-PLUGIN: the registry hands plug-in StreamSealer instances back to
 // callers so each scheme keeps its concrete type unexported; the contract is the
 // StreamSealer interface itself.
-//
-// "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
-// plug-in whose type is not comparable both satisfy the port and neither can
-// serve one call (see internal/kernel/plugin).
-func RegisterStreamSealer(s StreamSealer) StreamSealer {
+func registerStreamSealer(s StreamSealer) StreamSealer {
 	//: refuse an unusable sealer, then publish it under its Algorithm; both
 	//: refusals panic at boot with the dotted-quad code.
 	return streamSealers.register(s)
 }
 
-// LookupStreamSealer returns the StreamSealer registered under name.
+// lookupStreamSealer is LookupStreamSealer's body: decl_gen.go writes LookupStreamSealer, from the
+// design, as one call of it.
 //
 // IFACE-PLUGIN: the registry stores plug-in StreamSealer instances behind the
 // StreamSealer interface — concrete types are intentionally unexported per scheme.
-func LookupStreamSealer(name Algorithm) (s StreamSealer, ok bool) {
+func lookupStreamSealer(name Algorithm) (s StreamSealer, ok bool) {
 	//: a lock-free snapshot read; a miss hands back nil AND false.
 	return streamSealers.table.Lookup(name)
 }
 
-// AvailableStreamSealers returns the sorted list of registered streaming-AEAD
-// Algorithms.
-func AvailableStreamSealers() []Algorithm {
+// availableStreamSealers is AvailableStreamSealers's body: decl_gen.go writes AvailableStreamSealers, from the
+// design, as one call of it.
+func availableStreamSealers() []Algorithm {
 	//: sorted ascending, the caller's own slice; nil before any registration.
 	return streamSealers.table.Names()
 }

@@ -330,6 +330,7 @@ packages:
           - name: name
             type: string
         name: IsRegisteredClaim
+        impl: isRegisteredClaim
         out:
           - type: bool
       - doc: |-
@@ -340,6 +341,7 @@ packages:
           pkg/v1/security/token re-exports it as the shorter NewClaims, since the Value suffix
           is a core-layer naming rule (KTN-STRUCT-ROLE) and not a consumer's concern.
         name: NewClaimsValue
+        impl: newClaimsValue
         out:
           - type: ClaimsValue
     imports:
@@ -750,6 +752,7 @@ packages:
               - name: name
                 type: string
             name: PrivateRaw
+            impl: privateRaw
             out:
               - name: raw
                 type: "[]byte"
@@ -758,6 +761,7 @@ packages:
             recv: value
           - doc: IsZero reports whether c carries no claim at all.
             name: IsZero
+            impl: isZero
             out:
               - type: bool
             recv: value
@@ -779,6 +783,7 @@ packages:
               GoString implements fmt.GoStringer so %#v stays redacted too — fmt bypasses
               String for Go-syntax formatting and would otherwise dump every field.
             name: GoString
+            impl: goString
             out:
               - type: string
             recv: value
@@ -787,6 +792,7 @@ packages:
               - name: iss
                 type: string
             name: WithIssuer
+            impl: withIssuer
             out:
               - type: ClaimsValue
             recv: value
@@ -795,6 +801,7 @@ packages:
               - name: sub
                 type: string
             name: WithSubject
+            impl: withSubject
             out:
               - type: ClaimsValue
             recv: value
@@ -803,6 +810,7 @@ packages:
               - name: jti
                 type: string
             name: WithID
+            impl: withID
             out:
               - type: ClaimsValue
             recv: value
@@ -814,6 +822,7 @@ packages:
               - name: aud
                 type: string
             name: WithAudience
+            impl: withAudience
             out:
               - type: ClaimsValue
             recv: value
@@ -825,6 +834,7 @@ packages:
               - name: exp
                 type: time.Time
             name: WithExpiry
+            impl: withExpiry
             out:
               - type: ClaimsValue
             recv: value
@@ -833,6 +843,7 @@ packages:
               - name: nbf
                 type: time.Time
             name: WithNotBefore
+            impl: withNotBefore
             out:
               - type: ClaimsValue
             recv: value
@@ -841,6 +852,7 @@ packages:
               - name: iat
                 type: time.Time
             name: WithIssuedAt
+            impl: withIssuedAt
             out:
               - type: ClaimsValue
             recv: value
@@ -927,6 +939,7 @@ packages:
               guard every constructor runs before binding a key, so an out-of-range value
               is refused at construction rather than at the first verification.
             name: Known
+            impl: known
             out:
               - type: bool
             recv: value

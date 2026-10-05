@@ -209,8 +209,9 @@ func (t TagValue) Language() string {
 	return t.canonical[:t.langN]
 }
 
-// Script returns the Titlecase script subtag, or "" when the tag carries none.
-func (t TagValue) Script() string {
+// script is TagValue.Script's body: decl_gen.go writes TagValue.Script, from the
+// design, as one call of it.
+func (t TagValue) script() string {
 	//: absent is the empty string, not a zero-length slice of the canonical.
 	if t.scriptN == 0 {
 		//: no script.
@@ -234,19 +235,9 @@ func (t TagValue) Region() string {
 	return t.canonical[len(t.canonical)-int(t.regionN):]
 }
 
-// Parent removes the most specific subtag and reports whether one was removed:
-// "fr-Latn-CA" → "fr-Latn" → "fr" → (zero tag, false).
-//
-// It is the truncation RFC 4647 §3.4 Lookup performs, and it is a value
-// operation rather than a negotiation policy, so it lives here. It allocates
-// nothing: the parent's canonical form is a prefix of the child's.
-//
-// RFC 4647 §3.4 also says a single-character subtag is skipped rather than
-// used as a lookup key, because a lone "u" or "x" is an extension singleton
-// and not a language. This subset admits no single-character subtag at all, so
-// the rule is satisfied by the grammar and there is nothing to skip — stated
-// here because a reader comparing this code to the RFC will look for it.
-func (t TagValue) Parent() (parent TagValue, ok bool) {
+// parent is TagValue.Parent's body: decl_gen.go writes TagValue.Parent, from the
+// design, as one call of it.
+func (t TagValue) parent() (parent TagValue, ok bool) {
 	//: strip the region first — it is the most specific subtag.
 	if t.regionN != 0 {
 		//: the parent's canonical form is a prefix of this one.

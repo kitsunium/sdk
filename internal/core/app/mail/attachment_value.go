@@ -6,9 +6,9 @@ package mail
 // — the class of code that decides an uploaded .txt is really HTML.
 const DefaultAttachmentType string = "application/octet-stream"
 
-// Inline reports whether this part is referenced from the body rather than
-// listed as a file.
-func (a *AttachmentValue) Inline() bool {
+// inline is AttachmentValue.Inline's body: decl_gen.go writes AttachmentValue.Inline, from the
+// design, as one call of it.
+func (a *AttachmentValue) inline() bool {
 	//: one field decides both the disposition and the enclosing subtype.
 	return a.ContentID != ""
 }

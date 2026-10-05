@@ -52,8 +52,9 @@ func LookupExporter(name ExporterName) (e SpanExporter, ok bool) {
 	return registry.Lookup(name)
 }
 
-// AvailableExporters returns the sorted list of registered ExporterNames.
-func AvailableExporters() []ExporterName {
+// availableExporters is AvailableExporters's body: decl_gen.go writes AvailableExporters, from the
+// design, as one call of it.
+func availableExporters() []ExporterName {
 	//: sorted, and nil before any Register.
 	return registry.Names()
 }

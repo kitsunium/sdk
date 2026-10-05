@@ -181,7 +181,7 @@ ClientConfig returns a fresh \*tls.Config for dialling a peer. Each call yields 
 "Fresh" covers the slices and the trust pool, not only the outer struct. A new \*tls.Config whose Certificates and RootCAs still point at the identity's own would leave cfg.Certificates\[0] = other and cfg.RootCAs.AddCert(evil) reaching every other configuration the identity has ever minted, including ones already in use — which is the opposite of what an opaque, immutable identity is for. Who pays that cost, and how often, is the CALLER's choice and not a property of this method: net/client calls it once inside New and net/server once per listener, but service/app/mail calls it per connection — which for SMTP is per message — deliberately, because StartTLS takes the config and a transport that reused one would hand every send a \*tls.Config another send could still be mutating. Three slice clones are nothing beside an SMTP round trip; the sentence that used to sit here said "never per request", which was true of the two net callers and false of the third.
 
 <a name="Identity.GoString"></a>
-### func \(Identity\) [GoString](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/identity.go>)
+### func \(Identity\) [GoString](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/decl_gen.go>)
 
 ```go
 func (Identity) GoString() string
@@ -190,7 +190,7 @@ func (Identity) GoString() string
 GoString implements fmt.GoStringer so %#v stays redacted too — fmt bypasses String for Go-syntax formatting and would otherwise dump the unexported fields.
 
 <a name="Identity.IsZero"></a>
-### func \(Identity\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/identity.go>)
+### func \(Identity\) [IsZero](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/decl_gen.go>)
 
 ```go
 func (Identity) IsZero() bool

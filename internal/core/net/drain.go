@@ -6,20 +6,9 @@ import "context"
 // and no string constant can be typo'd into a silent miss.
 type drainSignalKey struct{}
 
-// WithDrainSignal returns ctx carrying the channel a server closes when it
-// begins draining.
-//
-// A request context is deliberately NOT what carries this. Cancelling it would
-// tell every in-flight handler to abandon the response it is halfway through,
-// which is the opposite of a graceful drain — the drain exists so those
-// responses finish. This signal is additive: a handler that ignores it behaves
-// exactly as before, and a handler that holds a connection open indefinitely —
-// an event stream, a long poll — gets the one piece of information it cannot
-// otherwise have, namely that finishing now is the cooperative thing to do.
-//
-// The channel is closed, never sent on, so every observer sees it and a late
-// observer sees it immediately.
-func WithDrainSignal(ctx context.Context, draining <-chan struct{}) context.Context {
+// withDrainSignal is WithDrainSignal's body: decl_gen.go writes WithDrainSignal, from the
+// design, as one call of it.
+func withDrainSignal(ctx context.Context, draining <-chan struct{}) context.Context {
 	//: attach under a private key; the getter is the only reader.
 	return context.WithValue(ctx, drainSignalKey{}, draining)
 }

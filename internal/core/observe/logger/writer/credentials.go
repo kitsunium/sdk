@@ -1,8 +1,8 @@
 package writer
 
-// NewCredentialValue builds a CredentialValue from SigV4 material. An empty
-// sessionToken is valid for long-lived keys; supply it for STS / assumed roles.
-func NewCredentialValue(accessKeyID, secretAccessKey, sessionToken string) CredentialValue {
+// newCredentialValue is NewCredentialValue's body: decl_gen.go writes NewCredentialValue, from the
+// design, as one call of it.
+func newCredentialValue(accessKeyID, secretAccessKey, sessionToken string) CredentialValue {
 	//: store the SigV4 material behind the redacting value.
 	return CredentialValue{
 		accessKeyID:     accessKeyID,
@@ -37,10 +37,9 @@ func (c CredentialValue) String() string {
 	return "<redacted>"
 }
 
-// GoString implements fmt.GoStringer so %#v stays redacted too. fmt bypasses
-// String for %#v (Go-syntax formatting) and would otherwise dump the unexported
-// credential fields; GoString closes that leak.
-func (c CredentialValue) GoString() string {
+// goString is CredentialValue.GoString's body: decl_gen.go writes CredentialValue.GoString, from the
+// design, as one call of it.
+func (c CredentialValue) goString() string {
 	//: same constant marker — %#v must never expose credential material.
 	return "<redacted>"
 }

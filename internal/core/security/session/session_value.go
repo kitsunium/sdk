@@ -69,11 +69,9 @@ func (s SessionValue) LastSeen() time.Time {
 	return s.lastSeen
 }
 
-// ExpiresAt reports the EFFECTIVE deadline: the earlier of the absolute
-// ceiling and the sliding idle window. The two are never reconciled by
-// averaging or by preferring the later one — the earlier deadline always wins,
-// which is what makes the absolute timeout a ceiling rather than a suggestion.
-func (s SessionValue) ExpiresAt() time.Time {
+// expiresAt is SessionValue.ExpiresAt's body: decl_gen.go writes SessionValue.ExpiresAt, from the
+// design, as one call of it.
+func (s SessionValue) expiresAt() time.Time {
 	//: a sliding window that outran the ceiling would make the ceiling
 	//: decorative; the store clamps at write time and this is the guard that
 	//: makes the invariant true even for a value built elsewhere.
@@ -92,17 +90,16 @@ func (s SessionValue) LiveAt(now time.Time) bool {
 	return now.Before(s.ExpiresAt())
 }
 
-// IsZero reports whether this is the zero SessionValue — what every failing
-// [Store] method returns alongside its error. There is no "invalid, but here
-// are the claims anyway" path.
-func (s SessionValue) IsZero() bool {
+// isZero is SessionValue.IsZero's body: decl_gen.go writes SessionValue.IsZero, from the
+// design, as one call of it.
+func (s SessionValue) isZero() bool {
 	//: the identifier is the one field no real session lacks.
 	return s.id.IsZero()
 }
 
-// Get reads one datum. The second return distinguishes "absent" from "present
-// and empty", which a bare "" cannot.
-func (s SessionValue) Get(key string) (value string, ok bool) {
+// get is SessionValue.Get's body: decl_gen.go writes SessionValue.Get, from the
+// design, as one call of it.
+func (s SessionValue) get(key string) (value string, ok bool) {
 	//: a nil map reads as empty, so no guard is needed.
 	value, ok = s.data[key]
 	//: absent keys report ok == false.
@@ -176,9 +173,9 @@ func (s SessionValue) String() string {
 		" expires:" + s.ExpiresAt().UTC().Format(time.RFC3339) + "}"
 }
 
-// GoString implements fmt.GoStringer so %#v stays redacted too — fmt bypasses
-// String for Go-syntax formatting and would otherwise dump every field.
-func (s SessionValue) GoString() string {
+// goString is SessionValue.GoString's body: decl_gen.go writes SessionValue.GoString, from the
+// design, as one call of it.
+func (s SessionValue) goString() string {
 	//: same shape-only rendering as String.
 	return s.String()
 }

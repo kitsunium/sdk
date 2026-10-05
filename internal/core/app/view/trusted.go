@@ -30,19 +30,9 @@ import "html/template"
 // this class of rule. It is not shipped here.
 type TrustedHTML = template.HTML
 
-// TrustHTML marks s as HTML that is already safe to write unescaped.
-//
-// Every call is an assertion that s was produced by the server and sanitised —
-// a Markdown renderer's output, a fragment from a template the same program
-// authored. It is never correct to hand it a string that arrived from a
-// request, a database field a user controls, or a third-party API.
-//
-// The function exists because the conversion it performs needs a NAME. A
-// reviewer scanning a diff for `template.HTML(` has to know that identifier
-// matters; a reviewer scanning for `TrustHTML` is reading the word "trust" in
-// the SDK's own vocabulary, at the call site where the decision was actually
-// made.
-func TrustHTML(s string) TrustedHTML {
+// trustHTML is TrustHTML's body: decl_gen.go writes TrustHTML, from the
+// design, as one call of it.
+func trustHTML(s string) TrustedHTML {
 	//: the conversion is the entire body — the spelling is the deliverable.
 	return TrustedHTML(s)
 }

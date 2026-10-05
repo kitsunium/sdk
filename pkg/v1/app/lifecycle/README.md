@@ -570,7 +570,7 @@ func (Signal) Int() int
 Int reports the raw platform signal number underlying s.
 
 <a name="Signal.Known"></a>
-### func \(Signal\) [Known](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/signal.go>)
+### func \(Signal\) [Known](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/decl_gen.go>)
 
 ```go
 func (Signal) Known() bool
@@ -579,7 +579,7 @@ func (Signal) Known() bool
 Known reports whether s names a signal in the platform table.
 
 <a name="Signal.OS"></a>
-### func \(Signal\) [OS](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/signal.go>)
+### func \(Signal\) [OS](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/decl_gen.go>)
 
 ```go
 func (Signal) OS() os.Signal

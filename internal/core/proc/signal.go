@@ -7,9 +7,9 @@ import (
 	"syscall"
 )
 
-// OS bridges s to the os.Signal expected by os/signal and Process.Signal. It is
-// a zero-cost conversion to syscall.Signal — the canonical os.Signal carrier.
-func (s Signal) OS() os.Signal {
+// os is Signal.OS's body: decl_gen.go writes Signal.OS, from the
+// design, as one call of it.
+func (s Signal) os() os.Signal {
 	//: syscall.Signal is the portable os.Signal implementation across platforms.
 	return syscall.Signal(s)
 }
@@ -32,8 +32,9 @@ func (s Signal) String() string {
 	return "signal " + strconv.Itoa(int(s))
 }
 
-// Known reports whether s names a signal in the platform table.
-func (s Signal) Known() bool {
+// known is Signal.Known's body: decl_gen.go writes Signal.Known, from the
+// design, as one call of it.
+func (s Signal) known() bool {
 	_, ok := signalNames[s]
 	//: membership in the platform table is the definition of a known signal.
 	return ok

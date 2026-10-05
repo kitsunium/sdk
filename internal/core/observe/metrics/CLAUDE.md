@@ -58,7 +58,7 @@ the package comment is `doc.go`'s alone, written by kit from the design (ADR 016
 
 | File | Surface |
 |---|---|
-| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `ExporterName`, `GaugeValue`, `HistogramValue`, `ObserveInt64`, `ObserveFloat64`, `Int64Callback`, `Float64Callback`, `SumMetricValue`, `GaugeMetricValue`, `HistogramMetricValue`, `SnapshotValue`, `SumValue` and `Temporality` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `ExporterName`, `GaugeValue`, `HistogramValue`, `ObserveInt64`, `ObserveFloat64`, `Int64Callback`, `Float64Callback`, `SumMetricValue`, `GaugeMetricValue`, `HistogramMetricValue`, `SnapshotValue`, `SumValue` and `Temporality` — each struct with every field, unexported ones included; `Temporality.Resolved`, `ValidateAttrs`, `NormalizeResource`, `LookupExporter` and `AvailableExporters`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
 | `attrs.go` | this signal's half of the shared attribute model: `OverflowAttrKey`, `ValidateAttrs` (the per-fetch check, refusing with `InvalidAttribute`) and `NormalizeResource` (the Resource a Meter publishes) — both delegate the RULES to `internal/core/observe/otel` and keep the CODE |
 | `scope.go` | `DefaultScopeName` + `NormalizeScope` — the default only this signal may claim |
 | `temporality.go` | `Temporality` (Unspecified/Delta/Cumulative) + `String` + `Resolved` |

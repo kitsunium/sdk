@@ -36,19 +36,16 @@ var (
 	readerPool = recycler.NewPool[*bytes.Reader](func() *bytes.Reader { return new(bytes.Reader) })
 )
 
-// AcquireBuffer returns a clean, zero-length *bytes.Buffer from the shared
-// pool. The recycler reset the buffer on its previous Put, so callers append
-// directly without re-resetting. The caller owns it until ReleaseBuffer.
-func AcquireBuffer() *bytes.Buffer {
+// acquireBuffer is AcquireBuffer's body: decl_gen.go writes AcquireBuffer, from the
+// design, as one call of it.
+func acquireBuffer() *bytes.Buffer {
 	//: already reset on its previous Put — hand the clean buffer to the caller.
 	return bufferPool.Get()
 }
 
-// ReleaseBuffer returns buf to the shared pool unless its capacity exceeds
-// MaxRetainedBufBytes, in which case the recycler orphans it for the GC.
-// Callers MUST NOT use buf — or any slice aliasing buf.Bytes() — after this
-// call; clone first if the encoded bytes must outlive the release.
-func ReleaseBuffer(buf *bytes.Buffer) {
+// releaseBuffer is ReleaseBuffer's body: decl_gen.go writes ReleaseBuffer, from the
+// design, as one call of it.
+func releaseBuffer(buf *bytes.Buffer) {
 	//: nil-safe no-op — the generic CappedPool cannot nil-check *bytes.Buffer.
 	if buf == nil {
 		//: nothing to recycle.

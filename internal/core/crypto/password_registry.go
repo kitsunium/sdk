@@ -11,35 +11,31 @@ const phcMinSegments int = 3
 // lock-free.
 var passwordHashers = schemeRegistry[PasswordHasher]{verb: "RegisterPasswordHasher"}
 
-// RegisterPasswordHasher inserts p under p.Algorithm() and returns it so callers
-// can bind the singleton to a typed package-level variable. Panics on a nil
-// hasher or when a distinct hasher already claims the same Algorithm.
+// registerPasswordHasher is RegisterPasswordHasher's body: decl_gen.go writes RegisterPasswordHasher, from the
+// design, as one call of it.
 //
 // IFACE-PLUGIN: the registry hands plug-in PasswordHasher instances back to
 // callers so each scheme keeps its concrete type unexported; the contract is the
 // PasswordHasher interface itself.
-//
-// "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
-// plug-in whose type is not comparable both satisfy the port and neither can
-// serve one call (see internal/kernel/plugin).
-func RegisterPasswordHasher(p PasswordHasher) PasswordHasher {
+func registerPasswordHasher(p PasswordHasher) PasswordHasher {
 	//: refuse an unusable hasher, then publish it under its Algorithm; both
 	//: refusals panic at boot with the dotted-quad code.
 	return passwordHashers.register(p)
 }
 
-// LookupPasswordHasher returns the PasswordHasher registered under name.
+// lookupPasswordHasher is LookupPasswordHasher's body: decl_gen.go writes LookupPasswordHasher, from the
+// design, as one call of it.
 //
 // IFACE-PLUGIN: the registry stores plug-in PasswordHasher instances behind the
 // PasswordHasher interface — concrete types are intentionally unexported per scheme.
-func LookupPasswordHasher(name Algorithm) (p PasswordHasher, ok bool) {
+func lookupPasswordHasher(name Algorithm) (p PasswordHasher, ok bool) {
 	//: a lock-free snapshot read; a miss hands back nil AND false.
 	return passwordHashers.table.Lookup(name)
 }
 
-// AvailablePasswordHashers returns the sorted list of registered password
-// Algorithms.
-func AvailablePasswordHashers() []Algorithm {
+// availablePasswordHashers is AvailablePasswordHashers's body: decl_gen.go writes AvailablePasswordHashers, from the
+// design, as one call of it.
+func availablePasswordHashers() []Algorithm {
 	//: sorted ascending, the caller's own slice; nil before any registration.
 	return passwordHashers.table.Names()
 }

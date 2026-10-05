@@ -19,36 +19,30 @@ const (
 	KindStrings
 )
 
-// AttrString builds a text attribute.
-func AttrString(key, value string) AttrValue {
+// attrString is AttrString's body: decl_gen.go writes AttrString, from the
+// design, as one call of it.
+func attrString(key, value string) AttrValue {
 	//: kind is set explicitly so the zero AttrValue stays KindInvalid.
 	return AttrValue{key: key, kind: KindString, text: value}
 }
 
-// AttrInt64 builds a whole-number attribute. Timestamps travel here as Unix
-// seconds: the domain deliberately has no time kind, because an attribute
-// carrying a time zone would make two requests with the same instant compare
-// unequal.
-func AttrInt64(key string, value int64) AttrValue {
+// attrInt64 is AttrInt64's body: decl_gen.go writes AttrInt64, from the
+// design, as one call of it.
+func attrInt64(key string, value int64) AttrValue {
 	//: kind is set explicitly so the zero AttrValue stays KindInvalid.
 	return AttrValue{key: key, kind: KindInt64, number: value}
 }
 
-// AttrBool builds a flag attribute. A flag that is present and false is a
-// different fact from a flag that is absent, and this is the constructor that
-// lets a caller state the first one.
-func AttrBool(key string, value bool) AttrValue {
+// attrBool is AttrBool's body: decl_gen.go writes AttrBool, from the
+// design, as one call of it.
+func attrBool(key string, value bool) AttrValue {
 	//: kind is set explicitly so the zero AttrValue stays KindInvalid.
 	return AttrValue{key: key, kind: KindBool, flag: value}
 }
 
-// AttrStrings builds a set attribute — roles, groups, scopes. The slice is
-// cloned, so the caller keeps ownership of the one it passed.
-//
-// AttrStrings(key) with no values is a legitimate attribute: it states that
-// the subject holds NO roles, which is a different fact from the caller not
-// having said. Rules distinguish the two, and only the second is an error.
-func AttrStrings(key string, values ...string) AttrValue {
+// attrStrings is AttrStrings's body: decl_gen.go writes AttrStrings, from the
+// design, as one call of it.
+func attrStrings(key string, values ...string) AttrValue {
 	//: clone so a later append by the caller cannot rewrite a live attribute.
 	return AttrValue{key: key, kind: KindStrings, list: slices.Clone(values)}
 }
@@ -65,10 +59,9 @@ func (a AttrValue) Kind() AttrKind {
 	return a.kind
 }
 
-// StringValue returns the text payload. ok is false when the attribute is not
-// [KindString] — the caller MUST check it: the zero string is a legitimate
-// text value, so the returned value alone cannot report a mismatch.
-func (a AttrValue) StringValue() (value string, ok bool) {
+// stringValue is AttrValue.StringValue's body: decl_gen.go writes AttrValue.StringValue, from the
+// design, as one call of it.
+func (a AttrValue) stringValue() (value string, ok bool) {
 	//: a mismatch returns the zero value AND false, never one or the other.
 	if a.kind != KindString {
 		//: not text — report the mismatch rather than an empty string.
@@ -78,9 +71,9 @@ func (a AttrValue) StringValue() (value string, ok bool) {
 	return a.text, true
 }
 
-// Int64Value returns the whole-number payload. ok is false when the attribute
-// is not [KindInt64].
-func (a AttrValue) Int64Value() (value int64, ok bool) {
+// int64Value is AttrValue.Int64Value's body: decl_gen.go writes AttrValue.Int64Value, from the
+// design, as one call of it.
+func (a AttrValue) int64Value() (value int64, ok bool) {
 	//: a mismatch returns the zero value AND false, never one or the other.
 	if a.kind != KindInt64 {
 		//: not a number — report the mismatch rather than a zero.
@@ -90,10 +83,9 @@ func (a AttrValue) Int64Value() (value int64, ok bool) {
 	return a.number, true
 }
 
-// BoolValue returns the flag payload. ok is false when the attribute is not
-// [KindBool] — and this is the accessor where ignoring ok is most expensive,
-// since false is both "the flag is off" and "there is no flag".
-func (a AttrValue) BoolValue() (value, ok bool) {
+// boolValue is AttrValue.BoolValue's body: decl_gen.go writes AttrValue.BoolValue, from the
+// design, as one call of it.
+func (a AttrValue) boolValue() (value, ok bool) {
 	//: a mismatch returns the zero value AND false, never one or the other.
 	if a.kind != KindBool {
 		//: not a flag — report the mismatch rather than a false.
@@ -103,11 +95,9 @@ func (a AttrValue) BoolValue() (value, ok bool) {
 	return a.flag, true
 }
 
-// StringsValue returns a copy of the set payload. ok is false when the
-// attribute is not [KindStrings]. The copy is what makes an AttrValue safe to
-// share across goroutines: a caller that sorts or appends to the result cannot
-// reach the attribute the next request will evaluate.
-func (a AttrValue) StringsValue() (values []string, ok bool) {
+// stringsValue is AttrValue.StringsValue's body: decl_gen.go writes AttrValue.StringsValue, from the
+// design, as one call of it.
+func (a AttrValue) stringsValue() (values []string, ok bool) {
 	//: a mismatch returns the zero value AND false, never one or the other.
 	if a.kind != KindStrings {
 		//: not a set — report the mismatch rather than an empty slice.
@@ -117,14 +107,9 @@ func (a AttrValue) StringsValue() (values []string, ok bool) {
 	return slices.Clone(a.list), true
 }
 
-// Contains reports whether a [KindStrings] attribute holds want. ok is false
-// when the attribute is not [KindStrings], which the caller MUST distinguish
-// from a set that simply does not contain want.
-//
-// It exists so membership does not have to allocate: [AttrValue.StringsValue]
-// clones, and membership is the single hottest attribute read in the domain —
-// every RBAC evaluation performs one per role.
-func (a AttrValue) Contains(want string) (found, ok bool) {
+// contains is AttrValue.Contains's body: decl_gen.go writes AttrValue.Contains, from the
+// design, as one call of it.
+func (a AttrValue) contains(want string) (found, ok bool) {
 	//: a mismatch returns false AND false, so neither answer can be misread.
 	if a.kind != KindStrings {
 		//: not a set — report the mismatch rather than "not a member".

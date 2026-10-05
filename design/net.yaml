@@ -652,6 +652,7 @@ packages:
           - name: draining
             type: <-chan struct{}
         name: WithDrainSignal
+        impl: withDrainSignal
         out:
           - type: context.Context
       - doc: |-
@@ -1331,6 +1332,7 @@ packages:
               - name: c
                 type: Conn
             name: ServeConn
+            impl: serveConn
             out:
               - type: error
             recv: value
@@ -1357,6 +1359,7 @@ packages:
         methods:
           - doc: Duration returns the value as a plain time.Duration.
             name: Duration
+            impl: duration
             out:
               - type: time.Duration
             recv: value
@@ -1409,6 +1412,7 @@ packages:
               GoString implements fmt.GoStringer so %#v stays redacted too — fmt bypasses
               String for Go-syntax formatting and would otherwise dump the unexported fields.
             name: GoString
+            impl: goString
             out:
               - type: string
             recv: value
@@ -1416,6 +1420,7 @@ packages:
               IsZero reports whether the identity carries no material at all, which is the
               zero value a caller gets when no TLS was configured.
             name: IsZero
+            impl: isZero
             out:
               - type: bool
             recv: value
@@ -1651,6 +1656,7 @@ packages:
               - name: p
                 type: Packet
             name: ServePacket
+            impl: servePacket
             out:
               - type: error
             recv: value
@@ -1679,6 +1685,7 @@ packages:
               - name: req
                 type: RequestValue
             name: Allow
+            impl: allow
             out:
               - type: error
             recv: value
@@ -1822,6 +1829,7 @@ packages:
               optimisation, so a caller can assert "no silent degradation" in one call
               instead of walking the slice.
             name: Degraded
+            impl: degraded
             out:
               - type: bool
             recv: value
@@ -1959,6 +1967,7 @@ packages:
               if it ever does. One predicate, both directions, no chance of the two
               drifting apart.
             name: Sendable
+            impl: sendable
             out:
               - type: bool
             recv: value
@@ -1971,6 +1980,7 @@ packages:
               therefore a protocol error waiting for the first well-behaved peer that
               closes without saying why.
             name: Echoable
+            impl: echoable
             out:
               - type: WSCloseCode
             recv: value
@@ -1988,6 +1998,7 @@ packages:
         methods:
           - doc: OpCode returns the frame opcode this message is carried under.
             name: OpCode
+            impl: opCode
             out:
               - type: WSOpCode
             recv: value
@@ -2016,11 +2027,13 @@ packages:
               Control frames are the ones that may be injected BETWEEN the fragments of a
               message, so the distinction decides which fragmentation rules apply.
             name: IsControl
+            impl: isControl
             out:
               - type: bool
             recv: value
           - doc: Defined reports whether RFC 6455 assigns this opcode a meaning.
             name: Defined
+            impl: defined
             out:
               - type: bool
             recv: value

@@ -139,14 +139,9 @@ func (c CountValue) VisibleFractionDigits() int {
 	return int(c.visibleFractionDigits)
 }
 
-// IsIntegerValued reports whether operand n equals operand i — that is,
-// whether the visible fraction digits are all zero.
-//
-// It is the shape every "n = k" and "n % k = a..b" CLDR clause needs, and
-// having it here means no rule computes a float. Decimal(1.0, 1) is integer
-// valued (n is 1, v is 1), which is precisely why v and f are separate
-// operands.
-func (c CountValue) IsIntegerValued() bool {
+// isIntegerValued is CountValue.IsIntegerValued's body: decl_gen.go writes CountValue.IsIntegerValued, from the
+// design, as one call of it.
+func (c CountValue) isIntegerValued() bool {
 	//: n == i exactly when the fraction digits carry no value.
 	return c.fractionValue == 0
 }

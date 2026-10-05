@@ -151,6 +151,7 @@ packages:
           Available returns the sorted list of registered Algorithms, or nil before
           any Register.
         name: Available
+        impl: available
         out:
           - type: "[]Algorithm"
     imports:

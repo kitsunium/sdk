@@ -656,7 +656,7 @@ type HandlerFunc func(ctx context.Context, c Conn) error
 ```
 
 <a name="HandlerFunc.ServeConn"></a>
-### func \(HandlerFunc\) [ServeConn](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/serve.go>)
+### func \(HandlerFunc\) [ServeConn](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/decl_gen.go>)
 
 ```go
 func (HandlerFunc) ServeConn(ctx context.Context, c Conn) error
@@ -903,7 +903,7 @@ type PacketHandlerFunc func(ctx context.Context, p Packet) error
 ```
 
 <a name="PacketHandlerFunc.ServePacket"></a>
-### func \(PacketHandlerFunc\) [ServePacket](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/serve.go>)
+### func \(PacketHandlerFunc\) [ServePacket](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/decl_gen.go>)
 
 ```go
 func (PacketHandlerFunc) ServePacket(ctx context.Context, p Packet) error
@@ -1074,7 +1074,7 @@ type State struct {
 ```
 
 <a name="State.Degraded"></a>
-### func \(State\) [Degraded](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/state.go>)
+### func \(State\) [Degraded](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/decl_gen.go>)
 
 ```go
 func (State) Degraded() bool

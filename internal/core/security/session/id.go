@@ -22,11 +22,9 @@ const IDLen int = 32
 // encoding on every call.
 var canonicalEncoding = base64.RawURLEncoding.Strict()
 
-// NewID builds an ID from raw, which MUST be exactly [IDLen] bytes. A wrong
-// length returns [InvalidID] rather than padding or truncating — a truncated
-// identifier is a weaker secret that would still work. The bytes are copied so
-// a later mutation of raw cannot reach the ID.
-func NewID(raw []byte) (id ID, err error) {
+// newID is NewID's body: decl_gen.go writes NewID, from the
+// design, as one call of it.
+func newID(raw []byte) (id ID, err error) {
 	//: refuse any length but the one; never silently reshape a secret.
 	if len(raw) != IDLen {
 		//: typed refusal — callers match errs.HasCode(err, CodeInvalidID).
@@ -59,14 +57,9 @@ func ParseID(encoded string) (id ID, err error) {
 	return NewID(raw)
 }
 
-// Reveal returns the canonical unpadded base64url form — 43 characters, all of
-// them in the RFC 6265 cookie-octet set, so the result needs no further
-// escaping to be a cookie value.
-//
-// This is the ONLY way the secret leaves the type. Hand it to a Set-Cookie
-// value or to [Sealer.Seal]; never to a logger, a metric label, a URL, or an
-// error's Public string. A zero-value ID reveals "".
-func (i ID) Reveal() string {
+// reveal is ID.Reveal's body: decl_gen.go writes ID.Reveal, from the
+// design, as one call of it.
+func (i ID) reveal() string {
 	//: nil raw renders empty rather than panicking; a zero ID names nothing.
 	//: The encoder always leaves the unused bits clear, which is exactly the
 	//: spelling ParseID's strict decoder accepts.
@@ -96,19 +89,17 @@ func (i ID) Digest() string {
 	return hex.EncodeToString(sum[:])
 }
 
-// Equal reports whether i and other are the same identifier, in time that does
-// not depend on how many leading bytes they share. Every comparison of a
-// session identifier in this SDK goes through here or through crypto/subtle
-// directly; none of them uses == or string equality.
-func (i ID) Equal(other ID) bool {
+// equal is ID.Equal's body: decl_gen.go writes ID.Equal, from the
+// design, as one call of it.
+func (i ID) equal(other ID) bool {
 	//: ConstantTimeCompare already returns 0 on a length mismatch, so a zero
 	//: ID never equals a real one and no early return leaks the length.
 	return subtle.ConstantTimeCompare(i.raw, other.raw) == 1
 }
 
-// IsZero reports whether the ID names nothing — the zero value, which no
-// constructor produces. A store refuses it with [InvalidID].
-func (i ID) IsZero() bool {
+// isZero is ID.IsZero's body: decl_gen.go writes ID.IsZero, from the
+// design, as one call of it.
+func (i ID) isZero() bool {
 	//: only the zero value has no bytes; both constructors enforce IDLen.
 	return len(i.raw) == 0
 }
@@ -121,9 +112,9 @@ func (i ID) String() string {
 	return "<redacted>"
 }
 
-// GoString implements fmt.GoStringer so %#v stays redacted: fmt bypasses String
-// for Go-syntax formatting and would otherwise dump the backing slice.
-func (i ID) GoString() string {
+// goString is ID.GoString's body: decl_gen.go writes ID.GoString, from the
+// design, as one call of it.
+func (i ID) goString() string {
 	//: same constant marker as String.
 	return "<redacted>"
 }

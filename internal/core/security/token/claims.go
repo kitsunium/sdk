@@ -46,20 +46,16 @@ var registeredClaims = []string{
 	ClaimExpiry, ClaimNotBefore, ClaimIssuedAt, ClaimID,
 }
 
-// IsRegisteredClaim reports whether name is one of the seven registered claim
-// names this domain models itself.
-func IsRegisteredClaim(name string) bool {
+// isRegisteredClaim is IsRegisteredClaim's body: decl_gen.go writes IsRegisteredClaim, from the
+// design, as one call of it.
+func isRegisteredClaim(name string) bool {
 	//: seven entries — a linear scan beats a map allocation.
 	return slices.Contains(registeredClaims, name)
 }
 
-// NewClaimsValue returns an empty claim set to build on. The zero ClaimsValue
-// is equally valid and equally empty; this constructor exists so a call site
-// reads as a statement of intent rather than a struct literal.
-//
-// pkg/v1/security/token re-exports it as the shorter NewClaims, since the Value suffix
-// is a core-layer naming rule (KTN-STRUCT-ROLE) and not a consumer's concern.
-func NewClaimsValue() ClaimsValue {
+// newClaimsValue is NewClaimsValue's body: decl_gen.go writes NewClaimsValue, from the
+// design, as one call of it.
+func newClaimsValue() ClaimsValue {
 	//: every field's zero value already means "claim absent".
 	return ClaimsValue{}
 }
@@ -115,10 +111,9 @@ func (c ClaimsValue) PrivateNames() []string {
 	return slices.Sorted(maps.Keys(c.private))
 }
 
-// PrivateRaw returns a copy of the raw JSON encoding of the named application
-// claim. The second result reports presence, so a claim explicitly set to JSON
-// null is distinguishable from a claim that was never sent.
-func (c ClaimsValue) PrivateRaw(name string) (raw []byte, found bool) {
+// privateRaw is ClaimsValue.PrivateRaw's body: decl_gen.go writes ClaimsValue.PrivateRaw, from the
+// design, as one call of it.
+func (c ClaimsValue) privateRaw(name string) (raw []byte, found bool) {
 	//: map lookup on the raw encodings.
 	stored, ok := c.private[name]
 	//: absence is a normal answer, not an error.
@@ -130,8 +125,9 @@ func (c ClaimsValue) PrivateRaw(name string) (raw []byte, found bool) {
 	return slices.Clone(stored), true
 }
 
-// IsZero reports whether c carries no claim at all.
-func (c ClaimsValue) IsZero() bool {
+// isZero is ClaimsValue.IsZero's body: decl_gen.go writes ClaimsValue.IsZero, from the
+// design, as one call of it.
+func (c ClaimsValue) isZero() bool {
 	//: an empty claim set has no registered claim and no private one.
 	return c.issuer == "" && c.subject == "" && c.id == "" &&
 		len(c.audience) == 0 && len(c.private) == 0 &&
@@ -154,9 +150,9 @@ func (c ClaimsValue) String() string {
 		" private:" + strconv.Itoa(len(c.private)) + "}"
 }
 
-// GoString implements fmt.GoStringer so %#v stays redacted too — fmt bypasses
-// String for Go-syntax formatting and would otherwise dump every field.
-func (c ClaimsValue) GoString() string {
+// goString is ClaimsValue.GoString's body: decl_gen.go writes ClaimsValue.GoString, from the
+// design, as one call of it.
+func (c ClaimsValue) goString() string {
 	//: same shape-only rendering as String.
 	return c.String()
 }

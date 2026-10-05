@@ -72,9 +72,9 @@ func Lookup(name Scheme) (g Generator, ok bool) {
 	return registry.Lookup(name)
 }
 
-// Available returns the sorted list of registered Schemes, or nil before any
-// Register.
-func Available() []Scheme {
+// available is Available's body: decl_gen.go writes Available, from the
+// design, as one call of it.
+func available() []Scheme {
 	//: sorted ascending, the caller's own slice.
 	return registry.Names()
 }

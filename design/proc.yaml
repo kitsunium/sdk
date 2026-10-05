@@ -769,6 +769,7 @@ packages:
         methods:
           - doc: Success reports whether the process exited normally with status zero.
             name: Success
+            impl: success
             out:
               - type: bool
             recv: value
@@ -852,6 +853,7 @@ packages:
               comparison against Limit — a zero Limit and "no limit applied" are the same
               state today, and tying call sites to that coincidence would be fragile.
             name: Applied
+            impl: applied
             out:
               - type: bool
             recv: value
@@ -881,21 +883,25 @@ packages:
         methods:
           - doc: Ready reports whether the datagram carried READY=1.
             name: Ready
+            impl: ready
             out:
               - type: bool
             recv: value
           - doc: Reloading reports whether the datagram carried RELOADING=1.
             name: Reloading
+            impl: reloading
             out:
               - type: bool
             recv: value
           - doc: Stopping reports whether the datagram carried STOPPING=1.
             name: Stopping
+            impl: stopping
             out:
               - type: bool
             recv: value
           - doc: Watchdog reports whether the datagram carried WATCHDOG=1 (a keep-alive ping).
             name: Watchdog
+            impl: watchdog
             out:
               - type: bool
             recv: value
@@ -936,6 +942,7 @@ packages:
             recv: value
           - doc: Known reports whether r is a defined resource other than the zero value.
             name: Known
+            impl: known
             out:
               - type: bool
             recv: value
@@ -951,6 +958,7 @@ packages:
               OS bridges s to the os.Signal expected by os/signal and Process.Signal. It is
               a zero-cost conversion to syscall.Signal — the canonical os.Signal carrier.
             name: OS
+            impl: os
             out:
               - type: os.Signal
             recv: value
@@ -968,6 +976,7 @@ packages:
             recv: value
           - doc: Known reports whether s names a signal in the platform table.
             name: Known
+            impl: known
             out:
               - type: bool
             recv: value
@@ -1111,6 +1120,7 @@ packages:
               Known reports whether m is one of the defined StdioInherit/StdioNull/StdioCapture
               modes (i.e. m <= StdioCapture).
             name: Known
+            impl: known
             out:
               - type: bool
             recv: value

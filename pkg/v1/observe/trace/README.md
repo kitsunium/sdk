@@ -985,7 +985,7 @@ type Attr struct {
 ```
 
 <a name="Attr.AppendIdentity"></a>
-### func \(Attr\) [AppendIdentity](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/otel/attr_value.go>)
+### func \(Attr\) [AppendIdentity](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/otel/decl_gen.go>)
 
 ```go
 func (Attr) AppendIdentity(dst []byte) []byte
@@ -1170,7 +1170,7 @@ type Kind int32
 ```
 
 <a name="Kind.Resolved"></a>
-### func \(Kind\) [Resolved](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/span_kind.go>)
+### func \(Kind\) [Resolved](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/decl_gen.go>)
 
 ```go
 func (Kind) Resolved() SpanKind
@@ -1220,7 +1220,7 @@ func (Link) IsValid() bool
 IsValid reports whether the link names a joinable span.
 
 <a name="Link.Normalized"></a>
-### func \(Link\) [Normalized](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/link_value.go>)
+### func \(Link\) [Normalized](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/decl_gen.go>)
 
 ```go
 func (Link) Normalized() LinkValue
@@ -1595,7 +1595,7 @@ type SpanContext struct {
 ```
 
 <a name="SpanContext.IsSampled"></a>
-### func \(SpanContext\) [IsSampled](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/span_context.go>)
+### func \(SpanContext\) [IsSampled](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/decl_gen.go>)
 
 ```go
 func (SpanContext) IsSampled() bool
@@ -1606,7 +1606,7 @@ IsSampled reports whether the sampled bit is set on this context.
 It is the ONLY sampling question anything downstream asks. The decision is taken once, at the root of the trace, and travels in this bit; re-deciding per span produces a trace with holes in the middle, which is worse than no trace at all because it looks complete.
 
 <a name="SpanContext.IsValid"></a>
-### func \(SpanContext\) [IsValid](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/span_context.go>)
+### func \(SpanContext\) [IsValid](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/decl_gen.go>)
 
 ```go
 func (SpanContext) IsValid() bool
@@ -1615,7 +1615,7 @@ func (SpanContext) IsValid() bool
 IsValid reports whether the context names a joinable span: both identifiers present and non-zero.
 
 <a name="SpanContext.WithState"></a>
-### func \(SpanContext\) [WithState](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/span_context.go>)
+### func \(SpanContext\) [WithState](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/decl_gen.go>)
 
 ```go
 func (SpanContext) WithState(state StateValue) SpanContextValue
@@ -1673,7 +1673,7 @@ func (SpanData) Duration() time.Duration
 Duration reports how long the span covered, or zero when it never ended.
 
 <a name="SpanData.IsRoot"></a>
-### func \(SpanData\) [IsRoot](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/span_value.go>)
+### func \(SpanData\) [IsRoot](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/decl_gen.go>)
 
 ```go
 func (SpanData) IsRoot() bool
@@ -1817,7 +1817,7 @@ type Spans struct {
 ```
 
 <a name="Spans.IsEmpty"></a>
-### func \(Spans\) [IsEmpty](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/spans_value.go>)
+### func \(Spans\) [IsEmpty](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/decl_gen.go>)
 
 ```go
 func (Spans) IsEmpty() bool
@@ -1849,7 +1849,7 @@ type Status struct {
 ```
 
 <a name="Status.IsUnset"></a>
-### func \(Status\) [IsUnset](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/status_value.go>)
+### func \(Status\) [IsUnset](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/decl_gen.go>)
 
 ```go
 func (Status) IsUnset() bool
@@ -1906,7 +1906,7 @@ type TraceFlags byte
 ```
 
 <a name="TraceFlags.IsSampled"></a>
-### func \(TraceFlags\) [IsSampled](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/identifier.go>)
+### func \(TraceFlags\) [IsSampled](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/decl_gen.go>)
 
 ```go
 func (TraceFlags) IsSampled() bool
@@ -1915,7 +1915,7 @@ func (TraceFlags) IsSampled() bool
 IsSampled reports whether the sampled bit is set.
 
 <a name="TraceFlags.Sanitized"></a>
-### func \(TraceFlags\) [Sanitized](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/identifier.go>)
+### func \(TraceFlags\) [Sanitized](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/decl_gen.go>)
 
 ```go
 func (TraceFlags) Sanitized() TraceFlags
@@ -1926,7 +1926,7 @@ Sanitized returns f with every bit this specification version does not define cl
 It is applied on the way OUT, never on the way in. §3.2.2.5.2 says a vendor MUST set undefined bits to zero, so emitting a bit we did not set would make this SDK a non-conforming producer; but §3.2.4 says a receiver must not "assume anything about unknown fields", so clearing them on the way in would destroy information a future version defines. Keeping the received byte and masking at format time satisfies both halves at once.
 
 <a name="TraceFlags.WithSampled"></a>
-### func \(TraceFlags\) [WithSampled](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/identifier.go>)
+### func \(TraceFlags\) [WithSampled](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/decl_gen.go>)
 
 ```go
 func (TraceFlags) WithSampled(sampled bool) TraceFlags

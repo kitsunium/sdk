@@ -15,8 +15,9 @@ func (s SpanValue) Duration() time.Duration {
 	return s.EndTime.Sub(s.StartTime)
 }
 
-// IsRoot reports whether the span has no parent.
-func (s SpanValue) IsRoot() bool {
+// isRoot is SpanValue.IsRoot's body: decl_gen.go writes SpanValue.IsRoot, from the
+// design, as one call of it.
+func (s SpanValue) isRoot() bool {
 	//: an invalid parent context is the schema's "no parent".
 	return !s.Parent.IsValid()
 }

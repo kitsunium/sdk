@@ -78,9 +78,9 @@ func lookupByID(id byte) (a AEAD, ok bool) {
 	return idIndex.Lookup(id)
 }
 
-// Available returns the sorted list of registered Algorithms, or nil before
-// any Register.
-func Available() []Algorithm {
+// available is Available's body: decl_gen.go writes Available, from the
+// design, as one call of it.
+func available() []Algorithm {
 	//: sorted ascending, the caller's own slice.
 	return aeads.table.Names()
 }

@@ -6,59 +6,63 @@ import (
 	"time"
 )
 
-// WithIssuer returns a copy of c carrying iss. The empty string clears it.
-func (c ClaimsValue) WithIssuer(iss string) ClaimsValue {
+// withIssuer is ClaimsValue.WithIssuer's body: decl_gen.go writes ClaimsValue.WithIssuer, from the
+// design, as one call of it.
+func (c ClaimsValue) withIssuer(iss string) ClaimsValue {
 	//: the value receiver already gave us the copy.
 	c.issuer = iss
 	//: hand back the modified copy, receiver untouched.
 	return c
 }
 
-// WithSubject returns a copy of c carrying sub. The empty string clears it.
-func (c ClaimsValue) WithSubject(sub string) ClaimsValue {
+// withSubject is ClaimsValue.WithSubject's body: decl_gen.go writes ClaimsValue.WithSubject, from the
+// design, as one call of it.
+func (c ClaimsValue) withSubject(sub string) ClaimsValue {
 	//: same copy-on-write shape as WithIssuer.
 	c.subject = sub
 	//: hand back the modified copy.
 	return c
 }
 
-// WithID returns a copy of c carrying jti. The empty string clears it.
-func (c ClaimsValue) WithID(jti string) ClaimsValue {
+// withID is ClaimsValue.WithID's body: decl_gen.go writes ClaimsValue.WithID, from the
+// design, as one call of it.
+func (c ClaimsValue) withID(jti string) ClaimsValue {
 	//: same copy-on-write shape as WithIssuer.
 	c.id = jti
 	//: hand back the modified copy.
 	return c
 }
 
-// WithAudience returns a copy of c whose "aud" claim is exactly aud. Passing no
-// argument clears the claim; the slice is copied, so a later mutation of the
-// caller's backing array cannot reach the claim set.
-func (c ClaimsValue) WithAudience(aud ...string) ClaimsValue {
+// withAudience is ClaimsValue.WithAudience's body: decl_gen.go writes ClaimsValue.WithAudience, from the
+// design, as one call of it.
+func (c ClaimsValue) withAudience(aud ...string) ClaimsValue {
 	//: clone so the claim set does not alias the caller's slice.
 	c.audience = slices.Clone(aud)
 	//: hand back the modified copy.
 	return c
 }
 
-// WithExpiry returns a copy of c carrying exp. The zero Time clears the claim,
-// which a verifier reads as "no expiry was sent" — not as "expired".
-func (c ClaimsValue) WithExpiry(exp time.Time) ClaimsValue {
+// withExpiry is ClaimsValue.WithExpiry's body: decl_gen.go writes ClaimsValue.WithExpiry, from the
+// design, as one call of it.
+func (c ClaimsValue) withExpiry(exp time.Time) ClaimsValue {
 	//: time.Time is a value; assignment is the copy.
 	c.expiry = exp
 	//: hand back the modified copy.
 	return c
 }
 
-// WithNotBefore returns a copy of c carrying nbf. The zero Time clears it.
-func (c ClaimsValue) WithNotBefore(nbf time.Time) ClaimsValue {
+// withNotBefore is ClaimsValue.WithNotBefore's body: decl_gen.go writes ClaimsValue.WithNotBefore, from the
+// design, as one call of it.
+func (c ClaimsValue) withNotBefore(nbf time.Time) ClaimsValue {
 	//: time.Time is a value; assignment is the copy.
 	c.notBefore = nbf
 	//: hand back the modified copy.
 	return c
 }
 
-// WithIssuedAt returns a copy of c carrying iat. The zero Time clears it.
-func (c ClaimsValue) WithIssuedAt(iat time.Time) ClaimsValue {
+// withIssuedAt is ClaimsValue.WithIssuedAt's body: decl_gen.go writes ClaimsValue.WithIssuedAt, from the
+// design, as one call of it.
+func (c ClaimsValue) withIssuedAt(iat time.Time) ClaimsValue {
 	//: time.Time is a value; assignment is the copy.
 	c.issuedAt = iat
 	//: hand back the modified copy.

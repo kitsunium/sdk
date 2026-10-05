@@ -193,7 +193,7 @@ func (Key) Bytes() []byte
 Bytes returns a fresh copy of the raw key material for handoff to a cipher. Callers MUST NOT log the result; the redaction only covers String / GoString. A zero-value Key returns nil.
 
 <a name="Key.GoString"></a>
-### func \(Key\) [GoString](<https://github.com/kitsunium/sdk/blob/main/internal/core/crypto/key.go>)
+### func \(Key\) [GoString](<https://github.com/kitsunium/sdk/blob/main/internal/core/crypto/decl_gen.go>)
 
 ```go
 func (Key) GoString() string
@@ -211,7 +211,7 @@ func (Key) String() string
 String implements fmt.Stringer and always redacts so the key never reaches a log line through %v / %s.
 
 <a name="Key.Zeroize"></a>
-### func \(Key\) [Zeroize](<https://github.com/kitsunium/sdk/blob/main/internal/core/crypto/key.go>)
+### func \(Key\) [Zeroize](<https://github.com/kitsunium/sdk/blob/main/internal/core/crypto/decl_gen.go>)
 
 ```go
 func (Key) Zeroize()

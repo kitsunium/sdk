@@ -168,6 +168,7 @@ packages:
           Available returns the sorted list of registered Schemes, or nil before any
           Register.
         name: Available
+        impl: available
         out:
           - type: "[]Scheme"
     imports:

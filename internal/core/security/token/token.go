@@ -51,10 +51,9 @@ func (a Algorithm) String() string {
 	}
 }
 
-// Known reports whether a names an algorithm this domain implements. It is the
-// guard every constructor runs before binding a key, so an out-of-range value
-// is refused at construction rather than at the first verification.
-func (a Algorithm) Known() bool {
+// known is Algorithm.Known's body: decl_gen.go writes Algorithm.Known, from the
+// design, as one call of it.
+func (a Algorithm) known() bool {
 	//: the enum is contiguous; anything past the last constant is not ours.
 	return a >= AlgorithmHS256 && a <= AlgorithmPasetoV4Public
 }

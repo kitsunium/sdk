@@ -51,11 +51,9 @@ func (s MemorySource) String() string {
 	}
 }
 
-// Applied reports whether the derivation installed a limit. It is true for
-// exactly one source, and it is the predicate a caller wants rather than a
-// comparison against Limit — a zero Limit and "no limit applied" are the same
-// state today, and tying call sites to that coincidence would be fragile.
-func (m MemoryLimitValue) Applied() bool {
+// applied is MemoryLimitValue.Applied's body: decl_gen.go writes MemoryLimitValue.Applied, from the
+// design, as one call of it.
+func (m MemoryLimitValue) applied() bool {
 	//: MemorySourceCgroup is the only outcome that installs anything.
 	return m.Source == MemorySourceCgroup
 }

@@ -24,17 +24,16 @@ const (
 	WSPong WSOpCode = 0xA
 )
 
-// IsControl reports whether the opcode names a control frame.
-//
-// Control frames are the ones that may be injected BETWEEN the fragments of a
-// message, so the distinction decides which fragmentation rules apply.
-func (o WSOpCode) IsControl() bool {
+// isControl is WSOpCode.IsControl's body: decl_gen.go writes WSOpCode.IsControl, from the
+// design, as one call of it.
+func (o WSOpCode) isControl() bool {
 	//: the opcode space is split at 8 precisely so this test is one bit.
 	return byte(o)&wsControlBit != 0
 }
 
-// Defined reports whether RFC 6455 assigns this opcode a meaning.
-func (o WSOpCode) Defined() bool {
+// defined is WSOpCode.Defined's body: decl_gen.go writes WSOpCode.Defined, from the
+// design, as one call of it.
+func (o WSOpCode) defined() bool {
 	//: the six assigned opcodes; every other value in the four-bit space is
 	//: reserved, and reserved means "fail the connection", not "ignore".
 	switch o {

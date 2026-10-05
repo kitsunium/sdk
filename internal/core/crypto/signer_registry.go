@@ -4,34 +4,31 @@ package crypto
 // schemeRegistry — register once at import, dispatch is lock-free.
 var signers = schemeRegistry[Signer]{verb: "RegisterSigner"}
 
-// RegisterSigner inserts s under s.Algorithm() and returns it so callers can
-// bind the singleton to a typed package-level variable. Panics on a nil signer
-// or when a distinct signer already claims the same Algorithm.
+// registerSigner is RegisterSigner's body: decl_gen.go writes RegisterSigner, from the
+// design, as one call of it.
 //
 // IFACE-PLUGIN: the registry hands plug-in Signer instances back to callers so
 // each scheme keeps its concrete type unexported; the contract is the Signer
 // interface itself.
-//
-// "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
-// plug-in whose type is not comparable both satisfy the port and neither can
-// serve one call (see internal/kernel/plugin).
-func RegisterSigner(s Signer) Signer {
+func registerSigner(s Signer) Signer {
 	//: refuse an unusable signer, then publish it under its Algorithm; both
 	//: refusals panic at boot with the dotted-quad code.
 	return signers.register(s)
 }
 
-// LookupSigner returns the Signer registered under name.
+// lookupSigner is LookupSigner's body: decl_gen.go writes LookupSigner, from the
+// design, as one call of it.
 //
 // IFACE-PLUGIN: the registry stores plug-in Signer instances behind the Signer
 // interface — concrete types are intentionally unexported per scheme.
-func LookupSigner(name Algorithm) (s Signer, ok bool) {
+func lookupSigner(name Algorithm) (s Signer, ok bool) {
 	//: a lock-free snapshot read; a miss hands back nil AND false.
 	return signers.table.Lookup(name)
 }
 
-// AvailableSigners returns the sorted list of registered signature Algorithms.
-func AvailableSigners() []Algorithm {
+// availableSigners is AvailableSigners's body: decl_gen.go writes AvailableSigners, from the
+// design, as one call of it.
+func availableSigners() []Algorithm {
 	//: sorted ascending, the caller's own slice; nil before any registration.
 	return signers.table.Names()
 }

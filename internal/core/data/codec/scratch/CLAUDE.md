@@ -89,3 +89,7 @@ lane runs both.
 bazel test --config=race //internal/core/data/codec/scratch:scratch_test
 bazel test --config=alloc //internal/core/data/codec/scratch:scratch_test
 ```
+
+## Declarations
+
+`decl_gen.go` is written by kit gen from the design (ADR 0170): the declaration of ; `AcquireBuffer` and `ReleaseBuffer`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name.

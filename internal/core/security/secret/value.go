@@ -91,20 +91,16 @@ func NewValue(raw []byte) Value {
 	return Value{held: &heldBytes{raw: bytes.Clone(raw)}}
 }
 
-// FromString returns a Value holding text. An empty text yields the zero
-// Value.
-func FromString(text string) Value {
+// fromString is FromString's body: decl_gen.go writes FromString, from the
+// design, as one call of it.
+func fromString(text string) Value {
 	//: the conversion copies; a string is immutable anyway.
 	return NewValue([]byte(text))
 }
 
-// Reveal returns a fresh copy of the secret's bytes — the only way out besides
-// [Value.RevealString]. The copy is the caller's: mutating it cannot reach the
-// Value. The zero Value reveals nil.
-//
-// Hand the result to the API that consumes the secret; never to a logger, a
-// metric label, a URL or an error message.
-func (v Value) Reveal() []byte {
+// reveal is Value.Reveal's body: decl_gen.go writes Value.Reveal, from the
+// design, as one call of it.
+func (v Value) reveal() []byte {
 	//: the zero Value has nothing to reveal.
 	if v.held == nil {
 		//: nil, not an empty slice, so a caller can tell "unset" apart.
@@ -114,10 +110,9 @@ func (v Value) Reveal() []byte {
 	return bytes.Clone(v.held.raw)
 }
 
-// RevealString returns the secret as a string. The same warning as
-// [Value.Reveal] applies, with one more: a Go string cannot be cleared, so a
-// revealed string lives until the collector reclaims it.
-func (v Value) RevealString() string {
+// revealString is Value.RevealString's body: decl_gen.go writes Value.RevealString, from the
+// design, as one call of it.
+func (v Value) revealString() string {
 	//: the zero Value reveals the empty string.
 	if v.held == nil {
 		//: nothing held.
@@ -127,8 +122,9 @@ func (v Value) RevealString() string {
 	return string(v.held.raw)
 }
 
-// IsZero reports whether the Value is the empty secret.
-func (v Value) IsZero() bool {
+// isZero is Value.IsZero's body: decl_gen.go writes Value.IsZero, from the
+// design, as one call of it.
+func (v Value) isZero() bool {
 	//: only the zero Value has no held bytes; NewValue never stores an empty one.
 	return v.held == nil
 }
@@ -164,9 +160,9 @@ func (v Value) String() string {
 	return Redacted
 }
 
-// GoString implements fmt.GoStringer so %#v stays redacted: fmt bypasses
-// String for Go-syntax formatting and would otherwise print the struct.
-func (v Value) GoString() string {
+// goString is Value.GoString's body: decl_gen.go writes Value.GoString, from the
+// design, as one call of it.
+func (v Value) goString() string {
 	//: the same constant as String.
 	return Redacted
 }
@@ -186,19 +182,17 @@ func (v Value) Format(state fmt.State, verb rune) {
 	writeRendering(state, Redacted)
 }
 
-// MarshalJSON implements json.Marshaler and writes [Redacted] as a JSON string,
-// so a configuration dumped as JSON never carries the secret. encoding/json
-// escapes the angle brackets, which changes the spelling on the wire and not
-// the string it decodes to.
-func (v Value) MarshalJSON() (encoded []byte, err error) {
+// marshalJSON is Value.MarshalJSON's body: decl_gen.go writes Value.MarshalJSON, from the
+// design, as one call of it.
+func (v Value) marshalJSON() (encoded []byte, err error) {
 	//: a fresh slice every time, so a caller that edits it cannot poison the
 	//: next rendering.
 	return []byte(`"` + Redacted + `"`), nil
 }
 
-// MarshalText implements encoding.TextMarshaler and writes [Redacted], which is
-// what TOML, YAML, XML and log/slog's text handler reach for.
-func (v Value) MarshalText() (text []byte, err error) {
+// marshalText is Value.MarshalText's body: decl_gen.go writes Value.MarshalText, from the
+// design, as one call of it.
+func (v Value) marshalText() (text []byte, err error) {
 	//: a fresh slice, for the same reason as MarshalJSON.
 	return []byte(Redacted), nil
 }
@@ -231,12 +225,9 @@ func (v *Value) UnmarshalJSON(data []byte) error {
 	return v.UnmarshalText([]byte(text))
 }
 
-// UnmarshalText implements encoding.TextUnmarshaler. The text becomes the
-// secret, copied — except [Redacted] itself, which is refused with
-// [ValueRefused]: every rendering of a Value writes it, so finding it on the
-// way in means a rendered configuration was loaded as a real one, and every
-// secret in it would otherwise silently become the placeholder.
-func (v *Value) UnmarshalText(text []byte) error {
+// unmarshalText is Value.UnmarshalText's body: decl_gen.go writes Value.UnmarshalText, from the
+// design, as one call of it.
+func (v *Value) unmarshalText(text []byte) error {
 	//: a rendering fed back is refused, never stored.
 	if string(text) == Redacted {
 		//: ValueRefused names nothing: the input is known and is not a secret.

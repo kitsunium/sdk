@@ -783,6 +783,7 @@ packages:
               IsZero reports whether the address carries no addr-spec at all, which is the
               zero value a caller gets from an unfilled struct field.
             name: IsZero
+            impl: isZero
             out:
               - type: bool
             recv: value
@@ -821,6 +822,7 @@ packages:
               Inline reports whether this part is referenced from the body rather than
               listed as a file.
             name: Inline
+            impl: inline
             out:
               - type: bool
             recv: pointer

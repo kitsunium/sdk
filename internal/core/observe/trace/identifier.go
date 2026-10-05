@@ -104,15 +104,16 @@ func ParseSpanID(text string) (id SpanID, err error) {
 	return decoded, nil
 }
 
-// IsSampled reports whether the sampled bit is set.
-func (f TraceFlags) IsSampled() bool {
+// isSampled is TraceFlags.IsSampled's body: decl_gen.go writes TraceFlags.IsSampled, from the
+// design, as one call of it.
+func (f TraceFlags) isSampled() bool {
 	//: bit 0 is the only flag version 00 defines.
 	return f&FlagSampled != 0
 }
 
-// WithSampled returns f with the sampled bit set to sampled, leaving every
-// other bit as it was.
-func (f TraceFlags) WithSampled(sampled bool) TraceFlags {
+// withSampled is TraceFlags.WithSampled's body: decl_gen.go writes TraceFlags.WithSampled, from the
+// design, as one call of it.
+func (f TraceFlags) withSampled(sampled bool) TraceFlags {
 	//: setting is an or, clearing is an and-not; neither touches the rest.
 	if sampled {
 		//: raise bit 0.
@@ -122,16 +123,9 @@ func (f TraceFlags) WithSampled(sampled bool) TraceFlags {
 	return f &^ FlagSampled
 }
 
-// Sanitized returns f with every bit this specification version does not define
-// cleared.
-//
-// It is applied on the way OUT, never on the way in. §3.2.2.5.2 says a vendor
-// MUST set undefined bits to zero, so emitting a bit we did not set would make
-// this SDK a non-conforming producer; but §3.2.4 says a receiver must not
-// "assume anything about unknown fields", so clearing them on the way in would
-// destroy information a future version defines. Keeping the received byte and
-// masking at format time satisfies both halves at once.
-func (f TraceFlags) Sanitized() TraceFlags {
+// sanitized is TraceFlags.Sanitized's body: decl_gen.go writes TraceFlags.Sanitized, from the
+// design, as one call of it.
+func (f TraceFlags) sanitized() TraceFlags {
 	//: FlagSampled is the whole defined surface of version 00.
 	return f & FlagSampled
 }

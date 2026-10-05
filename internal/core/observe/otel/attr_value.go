@@ -112,15 +112,9 @@ func (a AttrValue) Float64() float64 {
 	return math.Float64frombits(a.num)
 }
 
-// AppendIdentity appends an INJECTIVE binary encoding of the attribute's value
-// — its kind tag followed by fixed-width or length-prefixed bytes — to dst.
-//
-// The kind tag is what keeps String("v", "1") and Int64("v", 1) apart: without
-// it the two would encode identically and two series carrying different
-// dimensions would silently accumulate into one. It lives with the type rather
-// than in the meter so that every Meter implementation inherits the same
-// injectivity instead of re-deriving it.
-func (a AttrValue) AppendIdentity(dst []byte) []byte {
+// appendIdentity is AttrValue.AppendIdentity's body: decl_gen.go writes AttrValue.AppendIdentity, from the
+// design, as one call of it.
+func (a AttrValue) appendIdentity(dst []byte) []byte {
 	//: the tag opens the value and discriminates every case below.
 	dst = append(dst, byte(a.kind))
 	//: one encoding per kind; each is self-delimiting.
@@ -185,9 +179,9 @@ func (a AttrValue) AppendText(dst []byte) []byte {
 	}
 }
 
-// CompareAttrKey orders two attributes by Key alone. A package-level function
-// value, not a closure, so passing it to slices.SortFunc allocates nothing.
-func CompareAttrKey(a, b AttrValue) int {
+// compareAttrKey is CompareAttrKey's body: decl_gen.go writes CompareAttrKey, from the
+// design, as one call of it.
+func compareAttrKey(a, b AttrValue) int {
 	//: Key alone decides the order; duplicates are refused, not tie-broken.
 	return strings.Compare(a.Key, b.Key)
 }

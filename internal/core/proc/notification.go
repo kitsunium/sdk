@@ -1,25 +1,29 @@
 package proc
 
-// Ready reports whether the datagram carried READY=1.
-func (n NotificationValue) Ready() bool {
+// ready is NotificationValue.Ready's body: decl_gen.go writes NotificationValue.Ready, from the
+// design, as one call of it.
+func (n NotificationValue) ready() bool {
 	//: a nil State indexes safely to "" — an absent field is simply not ready.
 	return n.State["READY"] == "1"
 }
 
-// Reloading reports whether the datagram carried RELOADING=1.
-func (n NotificationValue) Reloading() bool {
+// reloading is NotificationValue.Reloading's body: decl_gen.go writes NotificationValue.Reloading, from the
+// design, as one call of it.
+func (n NotificationValue) reloading() bool {
 	//: a nil State indexes safely to "" — an absent field means not reloading.
 	return n.State["RELOADING"] == "1"
 }
 
-// Stopping reports whether the datagram carried STOPPING=1.
-func (n NotificationValue) Stopping() bool {
+// stopping is NotificationValue.Stopping's body: decl_gen.go writes NotificationValue.Stopping, from the
+// design, as one call of it.
+func (n NotificationValue) stopping() bool {
 	//: a nil State indexes safely to "" — an absent field means not stopping.
 	return n.State["STOPPING"] == "1"
 }
 
-// Watchdog reports whether the datagram carried WATCHDOG=1 (a keep-alive ping).
-func (n NotificationValue) Watchdog() bool {
+// watchdog is NotificationValue.Watchdog's body: decl_gen.go writes NotificationValue.Watchdog, from the
+// design, as one call of it.
+func (n NotificationValue) watchdog() bool {
 	//: a nil State indexes safely to "" — an absent field means no ping.
 	return n.State["WATCHDOG"] == "1"
 }

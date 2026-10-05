@@ -92,9 +92,9 @@ func Open(n Name, cfg Config) (sink corelogger.Sink, err error) {
 	return factory.Open(cfg)
 }
 
-// Available returns the sorted list of registered Names, or nil before any
-// Register.
-func Available() []Name {
+// available is Available's body: decl_gen.go writes Available, from the
+// design, as one call of it.
+func available() []Name {
 	//: sorted ascending, the caller's own slice.
 	return registry.Names()
 }

@@ -69,9 +69,9 @@ func Lookup(name Algorithm) (c Compressor, ok bool) {
 	return registry.Lookup(name)
 }
 
-// Available returns the sorted list of registered Algorithms, or nil before
-// any Register.
-func Available() []Algorithm {
+// available is Available's body: decl_gen.go writes Available, from the
+// design, as one call of it.
+func available() []Algorithm {
 	//: sorted ascending, the caller's own slice.
 	return registry.Names()
 }

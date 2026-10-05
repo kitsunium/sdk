@@ -41,7 +41,7 @@ the package comment is `doc.go`'s alone, written by kit from the design (ADR 016
 | File | Surface |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
-| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `ExitValue`, `LimitValue`, `MemorySource`, `MemoryLimitValue`, `NotificationValue`, `Resource`, `Signal`, `Spec` and `StdioMode` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `ExitValue`, `LimitValue`, `MemorySource`, `MemoryLimitValue`, `NotificationValue`, `Resource`, `Signal`, `Spec` and `StdioMode` — each struct with every field, unexported ones included; `ExitValue.Success`, `MemoryLimitValue.Applied`, `NotificationValue.Ready`, `NotificationValue.Reloading`, `NotificationValue.Stopping`, `NotificationValue.Watchdog`, `Resource.Known`, `Signal.OS`, `Signal.Known` and `StdioMode.Known`, each one call of its unexported body, measured to inline with the body inlined into it. Every body stays hand-written, in the files this document names — each wrapper's under its unexported name |
 | `proc.go` | `Resource` enum (`ResourceNoFile`/`ResourceNProc`/`ResourceCore`/`ResourceAS`/`ResourceCPU`/`ResourceFSize`/`ResourceData`/`ResourceStack`/`ResourceMemLock`; the zero is `ResourceUnknown`) + `String`/`Known` |
 | `signal.go` (+ `signal_unix.go` / `signal_other.go`) | `Signal` value type: `Parse` / `String` / `OS` / `Int` / `Known`; platform name table |
 | `stdio.go` | `StdioMode` — how a child's stdin/stdout/stderr are wired (`StdioInherit`/`StdioNull`/`StdioCapture`) + `String`/`Known` |

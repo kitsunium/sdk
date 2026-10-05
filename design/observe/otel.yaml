@@ -119,6 +119,7 @@ packages:
           - name: b
             type: AttrValue
         name: CompareAttrKey
+        impl: compareAttrKey
         out:
           - type: int
       - doc: |-
@@ -210,6 +211,7 @@ packages:
           - name: defaultName
             type: string
         name: NormalizeScope
+        impl: normalizeScope
         out:
           - type: ScopeValue
     path: github.com/kitsunium/sdk/internal/core/observe/otel
@@ -277,6 +279,7 @@ packages:
               - name: dst
                 type: "[]byte"
             name: AppendIdentity
+            impl: appendIdentity
             out:
               - type: "[]byte"
             recv: value

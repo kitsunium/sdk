@@ -241,6 +241,7 @@ packages:
           - name: a
             type: Agreement
         name: RegisterAgreement
+        impl: registerAgreement
         out:
           - type: Agreement
       - doc: |-
@@ -252,6 +253,7 @@ packages:
           - name: name
             type: Algorithm
         name: LookupAgreement
+        impl: lookupAgreement
         out:
           - name: a
             type: Agreement
@@ -259,6 +261,7 @@ packages:
             type: bool
       - doc: AvailableAgreements returns the sorted list of registered agreement Algorithms.
         name: AvailableAgreements
+        impl: availableAgreements
         out:
           - type: "[]Algorithm"
       - doc: |-
@@ -310,6 +313,7 @@ packages:
           - name: d
             type: Deriver
         name: RegisterDeriver
+        impl: registerDeriver
         out:
           - type: Deriver
       - doc: |-
@@ -321,6 +325,7 @@ packages:
           - name: name
             type: Algorithm
         name: LookupDeriver
+        impl: lookupDeriver
         out:
           - name: d
             type: Deriver
@@ -328,6 +333,7 @@ packages:
             type: bool
       - doc: AvailableDerivers returns the sorted list of registered KDF Algorithms.
         name: AvailableDerivers
+        impl: availableDerivers
         out:
           - type: "[]Algorithm"
       - doc: |-
@@ -368,6 +374,7 @@ packages:
           - name: h
             type: Hasher
         name: RegisterHasher
+        impl: registerHasher
         out:
           - type: Hasher
       - doc: |-
@@ -379,6 +386,7 @@ packages:
           - name: name
             type: Algorithm
         name: LookupHasher
+        impl: lookupHasher
         out:
           - name: h
             type: Hasher
@@ -386,6 +394,7 @@ packages:
             type: bool
       - doc: AvailableHashers returns the sorted list of registered hash Algorithms.
         name: AvailableHashers
+        impl: availableHashers
         out:
           - type: "[]Algorithm"
       - doc: |-
@@ -438,6 +447,7 @@ packages:
           - name: raw
             type: "[]byte"
         name: NewKey
+        impl: newKey
         out:
           - name: key
             type: Key
@@ -458,6 +468,7 @@ packages:
           - name: m
             type: MAC
         name: RegisterMAC
+        impl: registerMAC
         out:
           - type: MAC
       - doc: |-
@@ -469,6 +480,7 @@ packages:
           - name: name
             type: Algorithm
         name: LookupMAC
+        impl: lookupMAC
         out:
           - name: m
             type: MAC
@@ -476,6 +488,7 @@ packages:
             type: bool
       - doc: AvailableMACs returns the sorted list of registered MAC Algorithms.
         name: AvailableMACs
+        impl: availableMACs
         out:
           - type: "[]Algorithm"
       - doc: |-
@@ -531,6 +544,7 @@ packages:
           - name: p
             type: PasswordHasher
         name: RegisterPasswordHasher
+        impl: registerPasswordHasher
         out:
           - type: PasswordHasher
       - doc: |-
@@ -542,6 +556,7 @@ packages:
           - name: name
             type: Algorithm
         name: LookupPasswordHasher
+        impl: lookupPasswordHasher
         out:
           - name: p
             type: PasswordHasher
@@ -551,6 +566,7 @@ packages:
           AvailablePasswordHashers returns the sorted list of registered password
           Algorithms.
         name: AvailablePasswordHashers
+        impl: availablePasswordHashers
         out:
           - type: "[]Algorithm"
       - doc: |-
@@ -631,6 +647,7 @@ packages:
           Available returns the sorted list of registered Algorithms, or nil before
           any Register.
         name: Available
+        impl: available
         out:
           - type: "[]Algorithm"
       - doc: |-
@@ -684,6 +701,7 @@ packages:
           - name: s
             type: Signer
         name: RegisterSigner
+        impl: registerSigner
         out:
           - type: Signer
       - doc: |-
@@ -695,6 +713,7 @@ packages:
           - name: name
             type: Algorithm
         name: LookupSigner
+        impl: lookupSigner
         out:
           - name: s
             type: Signer
@@ -702,6 +721,7 @@ packages:
             type: bool
       - doc: AvailableSigners returns the sorted list of registered signature Algorithms.
         name: AvailableSigners
+        impl: availableSigners
         out:
           - type: "[]Algorithm"
       - doc: |-
@@ -768,6 +788,7 @@ packages:
           - name: s
             type: StreamSealer
         name: RegisterStreamSealer
+        impl: registerStreamSealer
         out:
           - type: StreamSealer
       - doc: |-
@@ -779,6 +800,7 @@ packages:
           - name: name
             type: Algorithm
         name: LookupStreamSealer
+        impl: lookupStreamSealer
         out:
           - name: s
             type: StreamSealer
@@ -788,6 +810,7 @@ packages:
           AvailableStreamSealers returns the sorted list of registered streaming-AEAD
           Algorithms.
         name: AvailableStreamSealers
+        impl: availableStreamSealers
         out:
           - type: "[]Algorithm"
       - doc: |-
@@ -1418,6 +1441,7 @@ packages:
               Zeroize overwrites the key material with zeros. Because copies share one
               backing array, this clears the secret for every copy of the Key.
             name: Zeroize
+            impl: zeroize
             recv: value
           - doc: |-
               String implements fmt.Stringer and always redacts so the key never reaches a
@@ -1430,6 +1454,7 @@ packages:
               GoString implements fmt.GoStringer so %#v stays redacted too — fmt bypasses
               String for Go-syntax formatting and would otherwise dump the raw slice.
             name: GoString
+            impl: goString
             out:
               - type: string
             recv: value

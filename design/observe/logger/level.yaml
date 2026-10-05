@@ -65,6 +65,7 @@ packages:
           - name: initial
             type: Level
         name: NewVar
+        impl: newVar
         out:
           - type: "*Var"
     imports:
@@ -127,11 +128,13 @@ packages:
               - name: lvl
                 type: Level
             name: Set
+            impl: set
             recv: pointer
           - doc: |-
               Level reports the current threshold. The load is atomic and lock-free,
               keeping it cheap enough for a per-record gate to call on the hot path.
             name: Level
+            impl: level
             out:
               - type: Level
             recv: pointer

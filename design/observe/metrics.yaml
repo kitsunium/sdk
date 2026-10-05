@@ -267,6 +267,7 @@ packages:
           - name: sorted
             type: "[]coreotel.AttrValue"
         name: ValidateAttrs
+        impl: validateAttrs
       - doc: |-
           NormalizeResource returns the ResourceValue a Meter publishes: attributes
           sorted, validated, owned, and carrying ServiceNameKey whether or not the
@@ -276,6 +277,7 @@ packages:
           - name: resource
             type: coreotel.ResourceValue
         name: NormalizeResource
+        impl: normalizeResource
         out:
           - type: coreotel.ResourceValue
       - doc: |-
@@ -303,6 +305,7 @@ packages:
           - name: name
             type: ExporterName
         name: LookupExporter
+        impl: lookupExporter
         out:
           - name: e
             type: Exporter
@@ -310,6 +313,7 @@ packages:
             type: bool
       - doc: AvailableExporters returns the sorted list of registered ExporterNames.
         name: AvailableExporters
+        impl: availableExporters
         out:
           - type: "[]ExporterName"
       - doc: |-
@@ -1037,6 +1041,7 @@ packages:
               programming error and panics with InvalidTemporality rather than being
               quietly folded into the default, which would hide the cast forever.
             name: Resolved
+            impl: resolved
             out:
               - type: Temporality
             recv: value

@@ -264,6 +264,7 @@ packages:
           - name: b
             type: Status
         name: Worst
+        impl: worst
         out:
           - type: Status
     imports:
@@ -844,6 +845,7 @@ packages:
               routing (the zero-value rule of the type comment, applied to every other
               value nobody assigned on purpose).
             name: Serving
+            impl: serving
             out:
               - type: bool
             recv: value

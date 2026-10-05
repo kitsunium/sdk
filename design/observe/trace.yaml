@@ -436,6 +436,7 @@ packages:
           - name: sorted
             type: "[]coreotel.AttrValue"
         name: ValidateAttrs
+        impl: validateAttrs
       - doc: |-
           SortAttrs returns a sorted, validated, owned copy of attrs — what a span, an
           event and a link record, so the caller's slice cannot be mutated afterwards
@@ -445,6 +446,7 @@ packages:
           - name: attrs
             type: "[]coreotel.AttrValue"
         name: SortAttrs
+        impl: sortAttrs
         out:
           - type: "[]coreotel.AttrValue"
       - doc: |-
@@ -456,6 +458,7 @@ packages:
           - name: resource
             type: coreotel.ResourceValue
         name: NormalizeResource
+        impl: normalizeResource
         out:
           - type: coreotel.ResourceValue
       - doc: |-
@@ -471,6 +474,7 @@ packages:
           - name: context
             type: SpanContextValue
         name: ContextWithSpanContext
+        impl: contextWithSpanContext
         out:
           - type: context.Context
       - doc: |-
@@ -517,6 +521,7 @@ packages:
             type: bool
       - doc: AvailableExporters returns the sorted list of registered ExporterNames.
         name: AvailableExporters
+        impl: availableExporters
         out:
           - type: "[]ExporterName"
       - doc: |-
@@ -578,6 +583,7 @@ packages:
           - name: size
             type: int
         name: NewStateBuilder
+        impl: newStateBuilder
         out:
           - type: StateBuilder
     imports:
@@ -924,6 +930,7 @@ packages:
         methods:
           - doc: IsSampled reports whether the sampled bit is set.
             name: IsSampled
+            impl: isSampled
             out:
               - type: bool
             recv: value
@@ -934,6 +941,7 @@ packages:
               - name: sampled
                 type: bool
             name: WithSampled
+            impl: withSampled
             out:
               - type: TraceFlags
             recv: value
@@ -948,6 +956,7 @@ packages:
               destroy information a future version defines. Keeping the received byte and
               masking at format time satisfies both halves at once.
             name: Sanitized
+            impl: sanitized
             out:
               - type: TraceFlags
             recv: value
@@ -972,6 +981,7 @@ packages:
               Normalized returns the link a span actually records: attributes sorted,
               validated and owned.
             name: Normalized
+            impl: normalized
             out:
               - type: LinkValue
             recv: value
@@ -1127,6 +1137,7 @@ packages:
               IsValid reports whether the context names a joinable span: both identifiers
               present and non-zero.
             name: IsValid
+            impl: isValid
             out:
               - type: bool
             recv: value
@@ -1138,6 +1149,7 @@ packages:
               span produces a trace with holes in the middle, which is worse than no trace
               at all because it looks complete.
             name: IsSampled
+            impl: isSampled
             out:
               - type: bool
             recv: value
@@ -1148,6 +1160,7 @@ packages:
               - name: state
                 type: StateValue
             name: WithState
+            impl: withState
             out:
               - type: SpanContextValue
             recv: value
@@ -1197,6 +1210,7 @@ packages:
               changes only how a span is drawn, and the specification itself names the
               default. A clamp is right exactly when the SDK is not substituting judgement.
             name: Resolved
+            impl: resolved
             out:
               - type: SpanKind
             recv: value
@@ -1241,6 +1255,7 @@ packages:
             recv: value
           - doc: IsRoot reports whether the span has no parent.
             name: IsRoot
+            impl: isRoot
             out:
               - type: bool
             recv: value
@@ -1311,6 +1326,7 @@ packages:
               IsEmpty reports whether the payload carries no span. An exporter uses it to
               skip a POST that would carry nothing.
             name: IsEmpty
+            impl: isEmpty
             out:
               - type: bool
             recv: value
@@ -1370,6 +1386,7 @@ packages:
               it lets go of that storage too: a later Add starts a new list instead of
               writing into one that is meant to be immutable.
             name: State
+            impl: state
             out:
               - type: StateValue
             recv: pointer
@@ -1509,6 +1526,7 @@ packages:
               IsUnset reports whether the status carries no judgement at all. It is what the
               OTLP encoder asks before deciding whether the `status` field is worth a line.
             name: IsUnset
+            impl: isUnset
             out:
               - type: bool
             recv: value

@@ -5,35 +5,31 @@ package crypto
 // once at import, dispatch is lock-free.
 var derivers = schemeRegistry[Deriver]{verb: "RegisterDeriver"}
 
-// RegisterDeriver inserts d under d.Algorithm() and returns it so callers can
-// bind the singleton to a typed package-level variable like
-// `var Deriver = crypto.RegisterDeriver(hkdfSHA256{})`. Panics on a nil deriver
-// or when a distinct deriver already claims the same Algorithm.
+// registerDeriver is RegisterDeriver's body: decl_gen.go writes RegisterDeriver, from the
+// design, as one call of it.
 //
 // IFACE-PLUGIN: the registry hands plug-in Deriver instances back to callers so
 // each scheme keeps its concrete type unexported; the stable contract is the
 // Deriver interface itself.
-//
-// "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
-// plug-in whose type is not comparable both satisfy the port and neither can
-// serve one call (see internal/kernel/plugin).
-func RegisterDeriver(d Deriver) Deriver {
+func registerDeriver(d Deriver) Deriver {
 	//: refuse an unusable deriver, then publish it under its Algorithm; both
 	//: refusals panic at boot with the dotted-quad code.
 	return derivers.register(d)
 }
 
-// LookupDeriver returns the Deriver registered under name.
+// lookupDeriver is LookupDeriver's body: decl_gen.go writes LookupDeriver, from the
+// design, as one call of it.
 //
 // IFACE-PLUGIN: the registry stores plug-in Deriver instances behind the Deriver
 // interface — concrete types are intentionally unexported per scheme.
-func LookupDeriver(name Algorithm) (d Deriver, ok bool) {
+func lookupDeriver(name Algorithm) (d Deriver, ok bool) {
 	//: a lock-free snapshot read; a miss hands back nil AND false.
 	return derivers.table.Lookup(name)
 }
 
-// AvailableDerivers returns the sorted list of registered KDF Algorithms.
-func AvailableDerivers() []Algorithm {
+// availableDerivers is AvailableDerivers's body: decl_gen.go writes AvailableDerivers, from the
+// design, as one call of it.
+func availableDerivers() []Algorithm {
 	//: sorted ascending, the caller's own slice; nil before any registration.
 	return derivers.table.Names()
 }

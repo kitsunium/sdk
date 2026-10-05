@@ -13,14 +13,9 @@ import (
 // the kind of literal that gets "fixed" to 16 by a well-meaning edit.
 const decimalBase int = 10
 
-// Irreversible is the [Step] a caller assigns to [MigrationValue.Down] to
-// declare that the migration cannot be reversed. It always fails, with a typed
-// error naming the version.
-//
-// It is a value rather than a nil convention so the claim appears in the diff
-// and in the version-table review, and so `Down` reports a refusal the caller
-// wrote rather than a nil dereference the SDK discovered.
-func Irreversible(ctx context.Context, ex Executor) error {
+// irreversible is Irreversible's body: decl_gen.go writes Irreversible, from the
+// design, as one call of it.
+func irreversible(ctx context.Context, ex Executor) error {
 	//: neither half is read: the refusal is unconditional, and the signature
 	//: is fixed by [Step], which this value must satisfy.
 	_, _ = ctx, ex
