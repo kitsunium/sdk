@@ -45,7 +45,8 @@ clone in `plugin`, each domain's refusal with its registry (ADR 0011, ADR 0159).
 
 ```sh
 bazel test --config=race //internal/kernel/concur/snapshot:snapshot_test
-# zero-alloc gate runs HORS race (race instrumentation perturbs allocs) — the
-# alloc lane (`make test-alloc`, target listed in tools/alloc-lane-targets.txt):
+# the zero-alloc contracts (design/sdk.yaml budgets, ADR 0165) run race off —
+# perf_gen_test.go over perf_fixtures_test.go, in kit's section of the alloc
+# lane (`make test-alloc`, tools/alloc-lane-targets.txt):
 bazel test --config=alloc //internal/kernel/concur/snapshot:snapshot_test
 ```

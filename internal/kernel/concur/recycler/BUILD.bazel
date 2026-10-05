@@ -24,13 +24,13 @@ go_test(
     srcs = [
         "api_gen_test.go",
         "capped_external_test.go",
+        "perf_fixtures_test.go",
+        "perf_gen_test.go",
         "recycler_bench_test.go",
         "recycler_external_test.go",
-        "recycler_integration_test.go",
         "recycler_internal_test.go",
     ],
     embed = [":recycler"],
-    deps = ["//internal/kernel/concur/buffer"],
 )
 
 filegroup(

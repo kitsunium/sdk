@@ -11,7 +11,7 @@ import (
 )
 
 // TestFanoutWidthAddsNoAllocation pins the half of the SDK's "one alloc per
-// emit" claim that TestV116BuildSendAllocatesOnePerEmit never touched. That
+// emit" claim that TestPerfAllocsBuildSend never touched. That
 // guard measures DEPTH — the handler's attrs clone on a single sink — and says
 // nothing about WIDTH, so a fan-out that allocated once per record on every
 // healthy write went unnoticed until a profile found it.
@@ -66,6 +66,10 @@ const fanoutRuns int = 2000
 // would push an accumulating regression past its own growth steps — the same
 // blindness this file counts totals to avoid.
 const allocRuntimeWarmup int = 30000
+
+// allocSink defeats dead-code elimination in the allocation probes of this
+// package's race-off files.
+var allocSink any
 
 // mallocsOver totals the allocations f performs across runs, and exists because
 // testing.AllocsPerRun cannot see an amortised one. Its last line is

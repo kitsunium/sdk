@@ -4,7 +4,7 @@
 # file per domain or package group, each with its inputs and outputs —
 # `surface: closed` makes an exported symbol no file declares a finding. An
 # API change starts here, then `kit gen` writes the pins, the ports, the
-# codes (ADR 0164) and pkg/v1's facades (ADR 0165); the SDK's CI reads this
+# codes (ADR 0164) and pkg/v1's facades (ADR 0166); the SDK's CI reads this
 # directory as bytes only (ADR 0163 §3).
 apiVersion: kit.kitsunium/design/v2
 project:
@@ -26,7 +26,7 @@ auxiliary:
   - tools/sdkguard
 # The order is the direction (ADR 0068, ADR 0147, ADR 0157); the kernel is
 # rule 1, both halves; the service mirrors the core (ADR 0160); pkg/v1 is the
-# facade (ADR 0074), whose re-exports are its packages' facade: (ADR 0165).
+# facade (ADR 0074), whose re-exports are its packages' facade: (ADR 0166).
 layers:
   - name: kernel
     paths: [internal/kernel]
@@ -349,14 +349,31 @@ codes:
 # ADR 0158's.
 stdlib:
   vendors: [third-party, framework/connectors]
-# The race-off allocation lane (CLAUDE.md rule 12).
+# The race-off allocation lane (CLAUDE.md rule 12): the hand-written
+# targets, and the section kit gen keeps of it — every package whose budgets
+# name a fixture, so that its perf_gen_test.go runs (ADR 0165).
 allocLane: tools/alloc-lane-targets.txt
+# Each designed function's performance contract (ADR 0165). What the
+# compiler decides — inline, inlineCost, escapes — kit check measures from
+# go build -gcflags=<package>=-m=2 on the host cell, and prints for every
+# budget's function whether it holds or not. What a call costs — allocs (at
+# most), allocsMin (at least) — the perf_gen_test.go kit gen writes counts,
+# race off, over the hand-written fixture the budget names (func
+# perf<Fixture>(tb testing.TB) func(), in the package's
+# perf_fixtures_test.go), as a total over 30 000 calls after as many
+# warm-up calls; bench asks it for a benchmark whose ns/op is only ever a
+# benchstat delta, never a number.
 budgets:
-  # Inline: each measured "can inline" (go build
-  # -gcflags=github.com/kitsunium/sdk/internal/kernel/errs=-m); HasCode does
-  # not inline (cost 190) and has no budget.
+  # errs: the accessors inline (each measured "can inline": the *Error
+  # field reads at cost 3, Pack at 18, CodeOf to PrivateOf at 73 to 75 —
+  # HasCode does not, cost 190, and has no inline budget), the field reads
+  # and Pack leak nothing (CodeOf to PrivateOf leak err, which they walk),
+  # and the kernel zero-allocation gate's errs probes, bound 0.
   - fn: go:github.com/kitsunium/sdk/internal/kernel/errs.Pack
     inline: true
+    escapes: []
+    allocs: 0
+    fixture: Pack
   - fn: go:github.com/kitsunium/sdk/internal/kernel/errs.CodeOf
     inline: true
   - fn: go:github.com/kitsunium/sdk/internal/kernel/errs.ReasonOf
@@ -368,7 +385,7 @@ budgets:
   # A pkg/v1 forwarder with an inline budget forwards only while the compiler
   # inlines it, and is otherwise a variable bound to its callee: kit measures
   # it (go build -gcflags=<package>=-m=2, on the platforms' first cell) and
-  # records the verdict in facade_gen.go (ADR 0165). errs.ReasonOf's forwarder
+  # records the verdict in facade_gen.go (ADR 0166). errs.ReasonOf's forwarder
   # costs 88 against the inliner's 80 — the kernel accessor alone costs 75 —
   # and measured slower than the variable by more than the 3 % a forwarder may
   # cost (ADR 0163 §10): CPU time per call +1.88 %, +1.07 %, +3.88 % (p =
@@ -378,12 +395,106 @@ budgets:
   # Every other forwarder is a function, whatever it costs.
   - fn: go:github.com/kitsunium/sdk/pkg/v1/errs.ReasonOf
     inline: true
-  # Allocs: the allocation claims the lane holds — a version comparison
-  # allocates nothing (ADR 0156 §4), nor a recycler's Get (ADR 0010) or a
-  # snapshot's Load (ADR 0011).
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/errs.(*Error).Code
+    inline: true
+    escapes: []
+    allocs: 0
+    fixture: ErrorCode
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/errs.(*Error).Reason
+    inline: true
+    escapes: []
+    allocs: 0
+    fixture: ErrorReason
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/errs.(*Error).Public
+    inline: true
+    escapes: []
+    allocs: 0
+    fixture: ErrorPublic
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/errs.(*Error).Private
+    inline: true
+    escapes: []
+    allocs: 0
+    fixture: ErrorPrivate
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/errs.HasCode
+    allocs: 0
+    fixture: HasCode
+    bench:
+      nsop: {maxDelta: 3%, vs: base}
+  # The rest of the kernel gate: the clock's reads through System, the
+  # ring's two verbs on both of their paths, a warm buffer round trip — all
+  # through a port or an exported function, bound 0.
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/clock.Clock.Now
+    allocs: 0
+    fixture: Now
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/clock.Clock.Since
+    allocs: 0
+    fixture: Since
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/collections/ring.Queue[...].TryWrite
+    allocs: 0
+    fixture: TryWrite
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/collections/ring.Queue[...].TryRead
+    allocs: 0
+    fixture: TryRead
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/concur/buffer.Get
+    allocs: 0
+    fixture: GetPut
+  # A version comparison, and every other reading, allocates nothing (ADR
+  # 0156 §4).
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/semver.IsValid
+    allocs: 0
+    fixture: IsValid
   - fn: go:github.com/kitsunium/sdk/internal/kernel/semver.Compare
     allocs: 0
+    fixture: Compare
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/semver.Prerelease
+    allocs: 0
+    fixture: Prerelease
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/semver.IsPseudoVersion
+    allocs: 0
+    fixture: IsPseudoVersion
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/semver.PseudoVersionRev
+    allocs: 0
+    fixture: PseudoVersionRev
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/semver.PseudoVersionTime
+    allocs: 0
+    fixture: PseudoVersionTime
+  # A recycler's warm round trip (ADR 0010) and a snapshot's three verbs
+  # (ADR 0011) allocate nothing.
   - fn: go:github.com/kitsunium/sdk/internal/kernel/concur/recycler.(*Pool[...]).Get
     allocs: 0
+    fixture: PoolGetPut
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/concur/recycler.(*CappedPool[...]).Get
+    allocs: 0
+    fixture: CappedPoolGetPut
   - fn: go:github.com/kitsunium/sdk/internal/kernel/concur/snapshot.(*Value[...]).Load
     allocs: 0
+    fixture: Load
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/concur/snapshot.(*Value[...]).Store
+    allocs: 0
+    fixture: Store
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/concur/snapshot.(*Value[...]).Swap
+    allocs: 0
+    fixture: Swap
+  # The codecs' shared scratch: a warm round trip allocates nothing, and a
+  # detach exactly once — the caller's own copy.
+  - fn: go:github.com/kitsunium/sdk/internal/core/data/codec/scratch.AcquireBuffer
+    allocs: 0
+    fixture: AcquireBuffer
+  - fn: go:github.com/kitsunium/sdk/internal/core/data/codec/scratch.AcquireReader
+    allocs: 0
+    fixture: AcquireReader
+  - fn: go:github.com/kitsunium/sdk/internal/core/data/codec/scratch.DetachBuffer
+    allocs: 1
+    allocsMin: 1
+    fixture: DetachBuffer
+  # The logger: an emit is not allocation-free (at least the handler's attrs
+  # clone, V116 — the floor of "one alloc per emit"), and reading the span
+  # off a context allocates nothing (ADR 0062).
+  - fn: go:github.com/kitsunium/sdk/pkg/v1/observe/logger.Build
+    allocsMin: 1
+    fixture: BuildSend
+    bench:
+      nsop: {maxDelta: 3%, vs: base}
+  - fn: go:github.com/kitsunium/sdk/pkg/v1/observe/logger.TraceContextFromContext
+    allocs: 0
+    fixture: TraceContext

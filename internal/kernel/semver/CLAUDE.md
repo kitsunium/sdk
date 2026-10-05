@@ -78,7 +78,8 @@ refuses. Sorting is `slices.SortFunc(list, semver.Compare)`.
 | `pseudo_external_test.go` | x/mod's own `pseudoTests` table both ways, the shape boundary (where the stamp may sit, fourteen digits, a hyphen-free revision), a time that is no instant, and the ordering that puts a pseudo-version between its tags |
 | `oracle_external_test.go` | differential tests against three oracles written from the documents — the regular expression SemVer 2.0.0 publishes, the toolchain's pseudo-version pattern, and §11 over `math/big` — on ~23 000 one-edit mutants of every seed, plus three fuzz targets |
 | `parse_internal_test.go` | the one-comparison `isDigit` / `isLetter` against their plain ranges, over all 256 bytes |
-| `semver_alloc_external_test.go` | `//go:build !race` — every function allocates nothing; run by the alloc lane only (rule 12, `tools/alloc-lane-targets.txt`) |
+| `perf_fixtures_test.go` | `//go:build !race` — the fixtures of the design's budgets (`allocs: 0` on every function, ADR 0165): one call each, over every branch that could allocate |
+| `perf_gen_test.go` | written by kit gen from those budgets: each fixture's call counted over 30 000 calls after as many warm-up calls; run by the alloc lane only (rule 12, kit's section of `tools/alloc-lane-targets.txt`) |
 | `semver_bench_test.go` | the figures in `BENCH.md` |
 
 ## Do NOT
@@ -98,7 +99,7 @@ refuses. Sorting is `slices.SortFunc(list, semver.Compare)`.
 
 ```
 cd internal/kernel && GOWORK=off go test -race -count=1 ./semver/
-cd internal/kernel && GOWORK=off go test -count=1 -run TestReadingsAllocateNothing ./semver/   # the alloc gate, race off
+go test -count=1 -run TestPerfAllocs ./internal/kernel/semver/   # the alloc gate, race off
 cd internal/kernel && GOWORK=off go test -run '^$' -fuzz '^FuzzCompare$' -fuzztime 60s ./semver/
 bazel test --config=race //internal/kernel/semver:semver_test
 bazel test --config=alloc //internal/kernel/semver:semver_test

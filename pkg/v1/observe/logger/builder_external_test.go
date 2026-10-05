@@ -176,7 +176,7 @@ func Test_Build(t *testing.T) {
 // against re-introducing the false zero-alloc framing for the Build path.
 // Regression for V116 — the doc previously asserted that switching to Build
 // "drops to near-zero" the steady-state byte cost, a guarantee the code
-// (1 alloc/op, proven by TestV116BuildSendAllocatesOnePerEmit) does not provide.
+// (1 alloc/op, held by the design contract on Build that TestPerfAllocsBuildSend runs, ADR 0165) does not provide.
 func TestV116BenchDocRetractsZeroAllocClaim(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

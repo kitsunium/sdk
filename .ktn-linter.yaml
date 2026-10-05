@@ -281,7 +281,7 @@ rules:
   # Scoped to the pkg/v1 facade layer, where the finding describes the design
   # instead of a defect. A facade's declarations are "unrelated" to each other
   # by construction: they are a domain's whole vocabulary published side by
-  # side. Since ADR 0165 every alias, re-export and forwarder of pkg/v1 lives in
+  # side. Since ADR 0166 every alias, re-export and forwarder of pkg/v1 lives in
   # the package's facade_gen.go, which kit writes and this linter skips as
   # generated, so the five facade files this list named until then
   # (security/authz/authz.go, app/i18n/i18n.go, net/server/server.go,
@@ -291,7 +291,7 @@ rules:
   # data/codec/codec.go is the one left: it declares the codec's vocabulary —
   # the 26 Format constants, values of its own and not re-exports — beside the
   # dispatch verbs that take them. The Format alias and the forwarders that tied
-  # the two together moved to facade_gen.go (ADR 0165), so the constants now
+  # the two together moved to facade_gen.go (ADR 0166), so the constants now
   # read as 26 unrelated groups. Splitting them into a file of their own would
   # move 26 documented constants for a rule that cannot see the generated half
   # of the package; the README is generated from the package doc comment and

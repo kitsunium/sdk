@@ -17,8 +17,8 @@ half.
 
 | File | Surface |
 |---|---|
-| `token.go` | package doc — the fragments `codes.go`, `constants.go`, `constructors.go` and `sentinels.go` held, joined in file-name order when their declarations moved to `facade_gen.go` (ADR 0165) — + `PrivateClaim` / `SetPrivateClaim` |
-| `facade_gen.go` | kit's, from `design/security/token.yaml`'s `facade:` (ADR 0165): the type aliases (`Algorithm`, `Claims`, `Issuer`, `Verifier`, the four `*Config`, `Key` / `JWK` / `JWKSet` / `KeyType` / `Curve`), `NewClaims`, the four `Algorithm*` values, the seven `Claim*` names and the JWK vocabulary (three `KeyType*`, four `Curve*`), the ten issuer/verifier `New*` forwarders and the three JWK loaders `ParseJWK` / `ParseJWKSet` / `NewJWKSet`, the 29 verdict vars re-exported from `core/security/token` (all 23 token verdicts, ADR 0160) and `core/crypto/key/jwk` (the six `JWK*` parse refusals), and the 29 `Code*` constants re-exported for `errs.HasCode` |
+| `token.go` | package doc — the fragments `codes.go`, `constants.go`, `constructors.go` and `sentinels.go` held, joined in file-name order when their declarations moved to `facade_gen.go` (ADR 0166) — + `PrivateClaim` / `SetPrivateClaim` |
+| `facade_gen.go` | kit's, from `design/security/token.yaml`'s `facade:` (ADR 0166): the type aliases (`Algorithm`, `Claims`, `Issuer`, `Verifier`, the four `*Config`, `Key` / `JWK` / `JWKSet` / `KeyType` / `Curve`), `NewClaims`, the four `Algorithm*` values, the seven `Claim*` names and the JWK vocabulary (three `KeyType*`, four `Curve*`), the ten issuer/verifier `New*` forwarders and the three JWK loaders `ParseJWK` / `ParseJWKSet` / `NewJWKSet`, the 29 verdict vars re-exported from `core/security/token` (all 23 token verdicts, ADR 0160) and `core/crypto/key/jwk` (the six `JWK*` parse refusals), and the 29 `Code*` constants re-exported for `errs.HasCode` |
 
 ## Why the codes are re-exported
 
@@ -109,7 +109,7 @@ reason `Claims` aliases `ClaimsValue`.
 
 ## Generated
 
-`facade_gen.go` is kit's (ADR 0165): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/security/token.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the package comment and the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
+`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/security/token.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the package comment and the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
 
 ## Verification
 

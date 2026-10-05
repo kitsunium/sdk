@@ -23,12 +23,6 @@ const traceRuns int = 2000
 // smallest: enough for the runtime's own allocations to miss one of them.
 const traceWindows int = 5
 
-// traceAllocSink defeats dead-code elimination in the extraction probe. It is
-// TYPED rather than an any: assigning a 24-byte struct into an interface boxes
-// it, which is one heap allocation of the test's own making and would hide the
-// very number this file measures.
-var traceAllocSink logger.TraceContext
-
 // allocProbeAttrs is pre-built outside the measured closure so the variadic
 // slice is not re-allocated per call — the emit paths below then differ only
 // in whether a span is in scope.
@@ -96,7 +90,7 @@ func traceMallocsOver(runs int, f func()) uint64 {
 // allocation per emit — the attrs clone the handler makes on every record —
 // and stamping a record with its span must not buy a second one.
 //
-// It is deliberately stricter than TestV116BuildSendAllocatesOnePerEmit, which
+// It is deliberately stricter than TestPerfAllocsBuildSend, which
 // asserts only ">= 1" (it exists to refute a "zero-allocation" doc claim, so it
 // is one-sided and would not have noticed a regression upward). This one pins
 // the exact number on all three emission paths, and pins it for the in-span and
@@ -190,44 +184,6 @@ func TestT34TraceCorrelationAddsNoAllocation(t *testing.T) {
 		//: and stamping the span buys nothing on top of it.
 		if traced != plain {
 			t.Errorf("%s: %d emits inside a span performed %d allocations, want the same %d as outside one", tc.name, traceRuns, traced, plain)
-		}
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) { runCase(t, tc) })
-	}
-}
-
-// TestT34TraceContextExtractionIsAllocationFree isolates the claim the emit
-// path rests on: reading the span off a context allocates nothing, whether a
-// span is in scope or not. If this ever regresses the per-emit budget goes with
-// it, and the failure is easier to read here than through a whole Logger.
-//
-// MUTATION-CHECKED with the same appending seenTraces, and this is the arm that
-// makes the case for counting totals on its own: running last, against a slice
-// the tests above have already grown past eight thousand entries, the whole
-// defect is ONE allocation in two thousand calls — and it still fails, at
-// `hit — a span is in scope: 2000 calls performed 1 allocations, want 0`.
-// testing.AllocsPerRun reported 0.00 for the same measurement, which is the
-// integer division doing exactly what it is documented to do. The miss arm
-// keeps passing under both forms, correctly — a context with no span returns
-// before the append — and that asymmetry is the whole reason both cases are in
-// the table.
-func TestT34TraceContextExtractionIsAllocationFree(t *testing.T) {
-	type tc struct {
-		name string
-		ctx  context.Context
-	}
-	tests := []tc{
-		{name: "hit — a span is in scope", ctx: tracedContext(t.Context())},
-		{name: "miss — no span in scope", ctx: t.Context()},
-	}
-	runCase := func(t *testing.T, tc tc) {
-		t.Helper()
-		got := traceMallocsOver(traceRuns, func() {
-			traceAllocSink = logger.TraceContextFromContext(tc.ctx)
-		})
-		if got != 0 {
-			t.Errorf("%s: %d calls performed %d allocations, want 0", tc.name, traceRuns, got)
 		}
 	}
 	for _, tc := range tests {

@@ -62,4 +62,4 @@ cd internal/kernel && GOWORK=off go test -race -cover ./collections/ring
 # coverage target: 90%
 ```
 
-Tests: `ring_external_test.go` (public contract: TryWrite/TryRead happy paths, full / empty sentinels, capacity reporting, Len snapshot, FIFO order, single-producer/single-consumer race coverage), `ring_internal_test.go` (cursor arithmetic, slot-clear-on-read, wrap-around at `cap+1`), `ring_bench_test.go` (the numbers in `BENCH.md`).
+Tests: `ring_external_test.go` (public contract: TryWrite/TryRead happy paths, full / empty sentinels, capacity reporting, Len snapshot, FIFO order, single-producer/single-consumer race coverage), `ring_internal_test.go` (cursor arithmetic, slot-clear-on-read, wrap-around at `cap+1`), `ring_bench_test.go` (the numbers in `BENCH.md`), `perf_fixtures_test.go` (race off: the fixtures of the design's budgets on `Queue.TryWrite` and `Queue.TryRead`, both paths of each allocating nothing — ADR 0165) and `perf_gen_test.go` (kit gen's, run by the alloc lane).

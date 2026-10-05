@@ -27,7 +27,7 @@ const toolsModule = "github.com/kitsunium/sdk/pkg"
 // one: for the test, the directory pkg/ is a Go module of its own,
 // github.com/kitsunium/sdk/pkg — as it was before ADR 0162 —, and the position
 // is clock.NewManualClock's, in a file under that directory — kit's
-// facade_gen.go since ADR 0165, so the tests name the file the position is
+// facade_gen.go since ADR 0166, so the tests name the file the position is
 // in rather than spelling one.
 func toolsPos(t *testing.T) pos {
 	t.Helper()

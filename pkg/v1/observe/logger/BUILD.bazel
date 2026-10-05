@@ -53,7 +53,6 @@ go_test(
     srcs = [
         "api_gen_test.go",
         "builder_external_test.go",
-        "builder_integration_test.go",
         "caller_external_test.go",
         "encoder_external_test.go",
         "fanout_integration_test.go",
@@ -64,6 +63,8 @@ go_test(
         "logger_bench_test.go",
         "logger_external_test.go",
         "memory_external_test.go",
+        "perf_fixtures_test.go",
+        "perf_gen_test.go",
         "sink_external_test.go",
         "tracecontext_external_test.go",
         "tracecontext_integration_test.go",

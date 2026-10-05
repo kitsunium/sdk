@@ -19,7 +19,7 @@ compressed.go — MarshalCompressed / UnmarshalCompressed verbs + CompressAlgori
                 (ADR 0014 D1); compresses and decompresses through pkg/v1/data/transform
                 (DecompressBounded at the frame's 64 MiB), whose import registers
                 gzip+flate+zlib — only gzip and flate are framed
-facade_gen.go — kit's (ADR 0165), from design/data/codec.yaml's facade:: the aliases and
+facade_gen.go — kit's (ADR 0166), from design/data/codec.yaml's facade:: the aliases and
                 forwarders the files here name, and what multipart.go held before its
                 package comment joined promote.go's — MultipartForm / MultipartPart
                 aliases + MultipartContentType: exactly what a consumer needs to build a
@@ -159,7 +159,7 @@ other codec in `go list -deps`.
 
 ## Generated
 
-`facade_gen.go` is kit's (ADR 0165): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/data/codec.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the package comment and the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
+`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/data/codec.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the package comment and the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
 
 ## Verification
 

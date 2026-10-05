@@ -9,7 +9,7 @@ and `internal/service/security/secret` (the three store configurations,
 `Keyring`, `Policy`, `RotatorConfig`, `Rotator`), plus thin
 forwarding constructors — and, since **ADR 0142**, the subject keys:
 `SubjectKeys` over a `SubjectKeyStore`. No logic lives here: every one of them
-is in `facade_gen.go`, which kit writes (ADR 0165), and `secret.go` keeps the
+is in `facade_gen.go`, which kit writes (ADR 0166), and `secret.go` keeps the
 package comment, `subjectkeys.go`'s joined after its own.
 
 ## Surface
@@ -40,7 +40,7 @@ package comment, `subjectkeys.go`'s joined after its own.
   the engine's and alias service.
 - The subject keys lived in their own file, `subjectkeys.go`, because
   ktn-linter's cohesion rule reads the facade as one file per seam; since ADR
-  0165 they are declared in the design and written into `facade_gen.go`,
+  0166 they are declared in the design and written into `facade_gen.go`,
   which ktn-linter skips as generated, and the file is gone (rule 5).
 - The slog proof lives in `pkg/v1/observe/logger/slogbridge`, the one package allowed to
   import `log/slog` (ADR 0032).
@@ -52,7 +52,7 @@ package comment, `subjectkeys.go`'s joined after its own.
 
 ## Generated
 
-`facade_gen.go` is kit's (ADR 0165): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/security/secret.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the package comment and the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
+`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/security/secret.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the package comment and the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
 
 ## Verification
 

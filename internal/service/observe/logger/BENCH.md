@@ -2,7 +2,7 @@
 # Benchmarks — `internal/service/observe/logger` and the sink chain
 
 The SDK's headline claim is **one allocation per emit**. It is stated in the
-root `CLAUDE.md`, pinned by `TestV116BuildSendAllocatesOnePerEmit`, and it had
+root `CLAUDE.md`, pinned by `TestPerfAllocsBuildSend`, and it had
 only ever been measured for the logger core over a single terminal sink —
 **not for anything a real deployment wires underneath it**.
 
@@ -98,7 +98,7 @@ failures that were not happening. It is now flat: 16.80 ns at two branches,
 17.18 ns at five. Length of the fallback chain no longer costs anything until
 something actually fails.
 
-`TestV116BuildSendAllocatesOnePerEmit` and the stricter
+`TestPerfAllocsBuildSend` and the stricter
 `TestT34TraceCorrelationAddsNoAllocation` (exactly 1 alloc, all three emission
 paths) both still pass. Neither was touched.
 
