@@ -179,3 +179,7 @@ go test -run '^$' -fuzz FuzzUnmarshal -fuzztime 60s ./internal/service/data/code
 ```
 
 Benchmarks and the comparison with the driver: `BENCH.md`.
+
+## Declarations
+
+`decl_gen.go` is written by kit gen from the design (ADR 0170): the declarations of `Decimal128`, `ObjectID`, `D`, `E`, `M`, `A`, `Binary`, `Undefined`, `Null`, `MinKey`, `MaxKey`, `DateTime`, `Regex`, `DBPointer`, `JavaScript`, `Symbol`, `CodeWithScope` and `Timestamp` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names.

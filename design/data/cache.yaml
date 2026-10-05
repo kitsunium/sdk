@@ -537,7 +537,8 @@ packages:
       corecache: github.com/kitsunium/sdk/internal/core/data/cache
     path: github.com/kitsunium/sdk/internal/service/data/cache
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           ChainConfig parameterises [NewChain]. Its zero value builds a working chain;
           the one field is an observation hook, not a policy.
         name: ChainConfig
@@ -554,7 +555,8 @@ packages:
                 that is completely invisible. Wire it.
               name: OnPromoteError
               type: func(key string, err error)
-      - doc: |-
+      - decl: true
+        doc: |-
           MemoryConfig parameterises [NewMemory].
 
           Its zero value is deliberately NOT a working cache: MaxEntries must be

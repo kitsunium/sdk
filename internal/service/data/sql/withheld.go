@@ -6,31 +6,6 @@ import (
 	"fmt"
 )
 
-// Withheld carries a driver's error for errors.Is and errors.As while keeping
-// its text out of Error().
-//
-// A driver describes the row a statement touched. PostgreSQL's unique
-// violation says "Key (doc_key)=(…) already exists" and MySQL's says
-// "Duplicate entry '…'": a document store's key is routinely an e-mail
-// address, and a queue's row holds the caller's payload. So a package whose
-// rows hold a caller's data joins the driver's error through Withheld, beside
-// a verdict of its own — errors.Join, never errs.Wrap, so the verdict's code
-// stays the origin (CLAUDE.md rule 6) — and no rendering of the joined error
-// quotes a row (ADR 0139 §D7, ADR 0151 §D6). The cause stays one errors.As
-// away for a caller who knows its driver, and what it may log.
-//
-// Error() says only what names no row: a context's end, in the context's own
-// words; otherwise the driver error's Go type, with its SQLSTATE or its result
-// code when a method offers one — a class of failure, never its subject.
-//
-// The verdict stays each package's own — docstore's STATEMENT_FAILED, queue's
-// QUEUE_BACKEND_FAILED — since each package's errors are its own; what they
-// share is only this rendering of somebody else's.
-type Withheld struct {
-	// cause is the driver's own error.
-	cause error
-}
-
 // NewWithheld returns cause withheld: reachable by errors.Is and errors.As,
 // absent from Error().
 func NewWithheld(cause error) Withheld {

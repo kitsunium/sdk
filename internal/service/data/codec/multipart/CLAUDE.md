@@ -249,3 +249,7 @@ Locally, without Bazel:
 ```
 cd internal/service && GOWORK=off go test -race ./data/codec/multipart/
 ```
+
+## Declarations
+
+`decl_gen.go` is written by kit gen from the design (ADR 0170): the declarations of `BoundaryCodec`, `BoundaryProvider`, `FormValue`, `PartValue` and `LimitsConfig` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names.

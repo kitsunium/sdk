@@ -52,33 +52,6 @@ func isIdentifier(name string) bool {
 // an underscore.
 func identStart(c byte) bool { return c == '_' || 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' }
 
-// MigrateConfig parameterises [NewMigrator].
-//
-// It carries no directory, no file pattern and no naming convention, and the
-// SDK ships no example migration tree. Migrations are values the consumer
-// builds, because the moment the SDK reads a directory it has invented a
-// convention every consumer must adopt (ADR 0055 §D8).
-type MigrateConfig struct {
-	// Migrations is the complete set this binary carries. Order does not
-	// matter — the runner sorts by Version — but every entry must be valid
-	// and no two may share a version.
-	//
-	// It is COPIED at construction, so a caller appending to their slice
-	// afterwards cannot change what the runner will apply.
-	Migrations []coresql.MigrationValue
-	// VersionTable names the bookkeeping table. Empty clamps to
-	// [DefaultVersionTable]; anything that is not a bare SQL identifier is
-	// REFUSED, because it is interpolated rather than bound.
-	VersionTable string
-	// LockTimeout bounds the wait for the advisory lock. Non-positive clamps
-	// to [DefaultLockTimeout].
-	LockTimeout time.Duration
-	// LockRetryInterval is how often the non-blocking acquisition is retried
-	// while another holder has the lock. Non-positive clamps to
-	// [DefaultLockRetryInterval].
-	LockRetryInterval time.Duration
-}
-
 // resolve validates and normalises the migration configuration.
 func (m MigrateConfig) resolve() (plan migratePlan, err error) {
 	table, err := m.resolvedTable()

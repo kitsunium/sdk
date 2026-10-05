@@ -128,10 +128,12 @@ packages:
       json: encoding/json
     path: github.com/kitsunium/sdk/internal/service/data/codec/jsonpatch
     types:
-      - doc: Op is what an operation does, as RFC 6902 names it.
+      - decl: true
+        doc: Op is what an operation does, as RFC 6902 names it.
         name: Op
         underlying: string
-      - doc: |-
+      - decl: true
+        doc: |-
           EditValue is one operation of a diff: what it does, where, and both values.
           Its JSON is an RFC 6902 operation, with the value it replaces or removes
           under "old" — a member RFC 6902 does not define for these operations, which

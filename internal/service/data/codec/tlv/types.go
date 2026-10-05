@@ -107,6 +107,3 @@ const (
 	// string-tag TLV holding the field name followed by a value TLV.
 	tagStruct Tag = 0x70
 )
-
-// Tag is the 1-byte type discriminator that opens every TLV record.
-type Tag uint8

@@ -23,6 +23,7 @@ under the values this package allocated. This package declares no code.
 | File | Surface |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `PoolConfig`, `Config`, `MigrateConfig` and `Withheld` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `sql.go` | `failed()` — the verdict/driver-error join |
 | `config.go` | `Config`, `PoolConfig`, `Default{MaxLifetime,MaxIdle,CheckTimeout}` |
 | `resolved.go` | `resolved` — the validated, clamped form of a `Config` |

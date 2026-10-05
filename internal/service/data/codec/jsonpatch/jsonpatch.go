@@ -1,7 +1,6 @@
 package jsonpatch
 
 import (
-	"encoding/json"
 	"slices"
 	"strconv"
 	"strings"
@@ -11,9 +10,6 @@ import (
 // middles builds: past it, their elements are paired by position instead,
 // which is still a correct patch — only a longer one.
 const maxAlignCells int = 1 << 18
-
-// Op is what an operation does, as RFC 6902 names it.
-type Op string
 
 // The three operations a diff emits.
 const (
@@ -26,23 +22,6 @@ const (
 	// Replace replaces the value at the path, the whole document at "".
 	Replace Op = "replace"
 )
-
-// EditValue is one operation of a diff: what it does, where, and both values.
-// Its JSON is an RFC 6902 operation, with the value it replaces or removes
-// under "old" — a member RFC 6902 does not define for these operations, which
-// a patch applier ignores (§4) — so a list of them is a JSON Patch document.
-type EditValue struct {
-	// Op is add, remove or replace.
-	Op Op `json:"op"`
-	// Path is the RFC 6901 JSON Pointer of the value the operation changes.
-	Path string `json:"path"`
-	// Value is the value the operation writes: add and replace; absent for
-	// remove.
-	Value json.RawMessage `json:"value,omitempty"`
-	// Old is the value the operation replaces or removes: replace and
-	// remove; absent for add.
-	Old json.RawMessage `json:"old,omitempty"`
-}
 
 // Diff returns the operations that turn the JSON document from into the JSON
 // document to, in the order they apply: none — an empty slice — when the two

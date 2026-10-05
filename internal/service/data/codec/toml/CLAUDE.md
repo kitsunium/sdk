@@ -186,3 +186,7 @@ in every build, and also decodes the whole 10 MiB everywhere but a coverage
 build: under the race detector, which `bazel coverage` keeps on, every
 coverage counter is an instrumented atomic, and that decode took 15.9 s of the
 target's 60 s.
+
+## Declarations
+
+`decl_gen.go` is written by kit gen from the design (ADR 0170): the declarations of `LocalDate`, `LocalTime` and `LocalDateTime` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names.

@@ -392,7 +392,8 @@ packages:
             name: T
     path: github.com/kitsunium/sdk/internal/service/data/codec/jsonshape
     types:
-      - doc: Kind is the JSON kind a value takes on the wire. The zero Kind is Any.
+      - decl: true
+        doc: Kind is the JSON kind a value takes on the wire. The zero Kind is Any.
         methods:
           - doc: "String returns the kind's lower-case name: \"object\", \"integer\", \"any\"."
             name: String
@@ -407,7 +408,8 @@ packages:
             recv: value
         name: Kind
         underlying: uint8
-      - doc: |-
+      - decl: true
+        doc: |-
           ShapeValue describes the values of one Go type on the wire: the JSON kind
           they take and, for a container, the shape of what it holds. It encodes as
           readable JSON; the Go-only parts of its fields are left out.
@@ -459,7 +461,8 @@ packages:
               name: Ref
               tag: json:"ref,omitempty"
               type: string
-      - doc: |-
+      - decl: true
+        doc: |-
           FieldValue is one member of an Object: its wire name and shape, what the
           encoder may do with it, and the Go field it is written from — which a
           framework reads its own tags from.

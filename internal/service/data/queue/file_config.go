@@ -5,7 +5,6 @@ import (
 	"os"
 	"path"
 
-	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 
 	corequeue "github.com/kitsunium/sdk/internal/core/data/queue"
@@ -20,45 +19,6 @@ const queueDirMode fs.FileMode = 0o700
 // because the payload is the caller's data and this domain has no way to know
 // whether it is a cache warm-up or a password reset.
 const messageMode fs.FileMode = 0o600
-
-// FileConfig configures [NewFile]: which directory holds the queue, which
-// clock reads its deadlines, and what delivery discipline it enforces.
-//
-// Its Policy's zero value is refused at construction — see
-// core/data/queue.PolicyValue — and so is a directory whose entries any account
-// could replace.
-type FileConfig struct {
-	// Clock reads time. It is the narrow half of kernel/clock because this
-	// broker never waits: a lapsed lease is noticed by the next Receive, not
-	// by a timer.
-	//
-	// Injecting a ManualClock makes every deadline in a SINGLE-process test
-	// instant. It cannot make a cross-process test instant, and that
-	// asymmetry is not an oversight: a lease deadline is a wall-clock instant
-	// written into a filename precisely so that another process can read it,
-	// and another process does not share this one's fake clock. The
-	// consumer-death test therefore waits on the real clock, and says so.
-	//
-	// Nil means clock.System.
-	Clock clock.Clock
-	// Dir is the queue directory. It is created owner-only when absent, and
-	// refused when it exists and any account outside the owner and group
-	// could replace its entries. Its three state directories are held to the
-	// same rule — created owner-only, checked when somebody else made them —
-	// and refused besides when one is a symlink or not a directory at all.
-	// On Windows "owner-only" is not something a mode can say: a directory
-	// inherits its parent's access control list, and the rule reads that list
-	// instead (dirtrust_windows.go).
-	//
-	// Two brokers over one Dir — in one process or in two — are ONE queue.
-	// That is the domain's inter-process claim, and it is the whole reason
-	// the directory is the configuration rather than an implementation
-	// detail.
-	Dir string
-	// Policy is the delivery discipline. Its zero value is refused; see
-	// core/data/queue.PolicyValue.
-	Policy corequeue.PolicyValue
-}
 
 // prepareQueueDir creates the queue directory and its three states, or checks
 // them when they already exist.

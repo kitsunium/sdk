@@ -6,6 +6,7 @@ go_library(
     name = "toml",
     srcs = [
         "codec.go",
+        "decl_gen.go",
         "decode.go",
         "decode_scalar.go",
         "decode_value.go",

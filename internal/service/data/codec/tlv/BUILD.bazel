@@ -6,6 +6,7 @@ go_library(
     name = "tlv",
     srcs = [
         "codec.go",
+        "decl_gen.go",
         "decoder.go",
         "decoder_typed.go",
         "doc.go",

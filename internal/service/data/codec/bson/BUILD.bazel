@@ -7,6 +7,7 @@ go_library(
     srcs = [
         "codec.go",
         "decimal.go",
+        "decl_gen.go",
         "decode.go",
         "decode_any.go",
         "decode_container.go",

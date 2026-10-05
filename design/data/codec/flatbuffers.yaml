@@ -111,7 +111,8 @@ packages:
       codec: github.com/kitsunium/sdk/internal/core/data/codec
     path: github.com/kitsunium/sdk/internal/service/data/codec/flatbuffers
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           BytesProvider is the optional source interface a Marshal argument may
           satisfy to hand the codec its already-encoded FlatBuffer payload. The
           returned slice MUST remain valid for the lifetime of the codec call;
@@ -126,7 +127,8 @@ packages:
               out:
                 - type: "[]byte"
         name: BytesProvider
-      - doc: |-
+      - decl: true
+        doc: |-
           BytesAcceptor is the optional sink interface an Unmarshal target may
           satisfy to receive the decoded FlatBuffer payload. The codec passes the
           caller's data slice by reference; implementations that need ownership

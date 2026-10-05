@@ -180,7 +180,8 @@ packages:
       codec: github.com/kitsunium/sdk/internal/core/data/codec
     path: github.com/kitsunium/sdk/internal/service/data/codec/tlv
     types:
-      - doc: Tag is the 1-byte type discriminator that opens every TLV record.
+      - decl: true
+        doc: Tag is the 1-byte type discriminator that opens every TLV record.
         name: Tag
         underlying: uint8
     variables:

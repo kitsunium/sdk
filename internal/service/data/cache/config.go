@@ -1,31 +1,10 @@
 package cache
 
 import (
-	"time"
-
 	corecache "github.com/kitsunium/sdk/internal/core/data/cache"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
-
-// MemoryConfig parameterises [NewMemory].
-//
-// Its zero value is deliberately NOT a working cache: MaxEntries must be
-// stated. See [NewMemory] for why that refusal, and not a default, is the
-// right ADR 0031 half here.
-type MemoryConfig struct {
-	// MaxEntries caps the live entry count; the least-recently-used entry is
-	// evicted above it. It MUST be positive.
-	MaxEntries int
-	// DefaultTTL applies to every entry whose own TTL is zero. Zero means the
-	// default is "no deadline", so entries leave only by eviction, by Delete,
-	// or by tag invalidation. Negative is refused.
-	DefaultTTL time.Duration
-	// Clock is the time source, injectable so TTL is testable. nil means
-	// clock.System. Only the reading half of the port is used — a cache reads
-	// time, it never waits for it (ADR 0039).
-	Clock clock.Clock
-}
 
 // validate applies ADR 0031 to the configuration: refuse what the SDK cannot
 // choose on the caller's behalf, and reinterpret nothing.

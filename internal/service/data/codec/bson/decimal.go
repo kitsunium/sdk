@@ -51,14 +51,6 @@ const (
 	decimalExponentSaturation int = 100_000_000
 )
 
-// Decimal128 is a BSON decimal128: a coefficient of up to 34 decimal digits,
-// an exponent in [-6176, 6111], a sign, and the specials NaN and ±Infinity.
-// The zero value is 0E-6176, the value whose sixteen bytes are all zero; it is
-// what IsZero reports, and what omitempty leaves out.
-type Decimal128 struct {
-	h, l uint64
-}
-
 // NewDecimal128 returns the decimal whose BID encoding is high (the first
 // eight bytes, as a uint64) and low (the last eight).
 func NewDecimal128(high, low uint64) Decimal128 {

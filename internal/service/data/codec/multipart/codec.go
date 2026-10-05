@@ -21,33 +21,6 @@ const mimeFormData string = "multipart/form-data"
 // mimeJSON is the Content-Type stamped on the JSON-mediated part.
 const mimeJSON string = "application/json"
 
-// BoundaryCodec is the optional extension this package implements on top of
-// codec.StreamingCodec: the two constructors that take the boundary from the
-// caller instead of recovering it from the bytes.
-//
-// This is the honest form of the streaming API. An HTTP server already holds
-// the authoritative boundary in the request's Content-Type header, and an HTTP
-// client must set that header before it writes the first body byte — neither
-// can be expressed through NewEncoder / NewDecoder, whose signatures the
-// domain fixes. Callers reach it with a type assertion, the same way they
-// reach codec.Appender.
-type BoundaryCodec interface {
-	codec.Codec
-	// NewEncoderWithBoundary streams a body framed by the given boundary.
-	NewEncoderWithBoundary(w io.Writer, boundary string) (enc codec.Encoder, err error)
-	// NewDecoderWithBoundary streams a body framed by the given boundary,
-	// bypassing recovery from the wire entirely.
-	NewDecoderWithBoundary(r io.Reader, boundary string) (dec codec.Decoder, err error)
-}
-
-// BoundaryProvider is implemented by the codec.Encoder this package returns,
-// so a caller streaming a request body can read the generated delimiter and
-// set its Content-Type header before the first byte goes out.
-type BoundaryProvider interface {
-	// Boundary returns the delimiter the encoder writes.
-	Boundary() string
-}
-
 // Package-level state: the codec singleton plus the hoisted MIME table.
 var (
 	//: register the singleton and expose it as a typed package var. The

@@ -161,7 +161,8 @@ packages:
       codec: github.com/kitsunium/sdk/internal/core/data/codec
     path: github.com/kitsunium/sdk/internal/service/data/codec/toml
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           LocalDate is a calendar day in no time zone: a TOML local date. It reads and
           writes itself as RFC 3339 spells a full date, YYYY-MM-DD.
         methods:
@@ -206,7 +207,8 @@ packages:
             - doc: Day is 1 to 31.
               name: Day
               type: int
-      - doc: |-
+      - decl: true
+        doc: |-
           LocalTime is a time of day in no time zone: a TOML local time. It reads and
           writes itself as RFC 3339 spells a partial time, HH:MM:SS with an optional
           fraction.
@@ -253,7 +255,8 @@ packages:
                 Nanosecond.
               name: Precision
               type: int
-      - doc: |-
+      - decl: true
+        doc: |-
           LocalDateTime is a date and a time of day in no time zone: a TOML local
           date-time. It reads and writes itself as the date and the time joined by a
           T.

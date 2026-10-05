@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "jsonpatch",
     srcs = [
+        "decl_gen.go",
         "doc.go",
         "jsonpatch.go",
         "tree.go",

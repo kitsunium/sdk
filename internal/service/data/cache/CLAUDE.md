@@ -20,8 +20,8 @@ allocated. This package declares no code.
 
 | File | Surface |
 |---|---|
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `ChainConfig` and `MemoryConfig` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `config.go` | `MemoryConfig` + its ADR 0031 validation |
-| `chain_config.go` | `ChainConfig` — the `OnPromoteError` hook and why it should be wired |
 | `memory.go` | `NewMemory` + `memoryStore[V]` — the store, its lock discipline, and `Load` |
 | `record.go` | `record[V]` — what the primitive actually stores, and why `expireAt` is duplicated |
 | `tagindex.go` | `tagIndex` — `byKey` / `byTag`, and why both exist |

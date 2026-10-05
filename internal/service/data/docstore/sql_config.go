@@ -1,14 +1,12 @@
 package docstore
 
 import (
-	"context"
 	"regexp"
 	"strconv"
 	"strings"
 
 	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
-	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -54,56 +52,6 @@ const reservedTablePrefix string = "sqlite_"
 // the server's filesystem: a name that differs only by case would be one table
 // on one engine and two on another.
 var tablePattern = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
-
-// SQLConfig configures [OpenSQL]. Key, Transactor, Dialect and Table are
-// required. The secondary indexes are OpenSQL's other arguments, declared
-// with [coredocstore.Unique] and [coredocstore.Index] exactly as for [Open].
-type SQLConfig[T any] struct {
-	// Key returns the key a document is stored under, as for [Open]: a pure
-	// function of the document, compared byte for byte.
-	Key func(T) string
-	// Clock stamps each version with the instant of the write that made it.
-	// Nil is the system clock.
-	Clock clock.Clock
-	// Held reports whether the document stored under key is held — a legal
-	// hold — so that no write prunes its versions, as for [Open]. It is
-	// called by a write that would prune, inside that write's transaction
-	// and with its context, so a read it makes through the same transactor
-	// joins it. Nil holds nothing. It is refused without Versions.
-	Held func(ctx context.Context, key string) bool
-	// Transactor is the transaction manager of the database the store lives
-	// in — the one the caller's own transactions are opened with, so a call
-	// made under one of them joins it. It must also be a core/data/sql Joiner and
-	// Deferrer, which the SDK's own transactor is.
-	Transactor coresql.Transactor
-	// IndexKey, when set, transforms every index key before it reaches the
-	// database — on a write, and on every Lookup and Find — so a table holds
-	// what it returns and never the key itself. An index is an equality
-	// lookup, which a keyed hash keeps: a framework passes an HMAC under a key
-	// of its own, and an e-mail address never reaches a table. It is called
-	// with the index's name and a non-empty key; an empty answer files
-	// nothing, as an empty key does. Nil stores index keys as they are.
-	IndexKey func(index, key string) []byte
-	// Table names the documents' table. The store derives its index table's
-	// name from it by appending "___ix". It is a lower-case SQL identifier of
-	// at most [MaxSQLTableLen] bytes, holds no three underscores in a row,
-	// and does not start with "sqlite_". [SQLMigration] creates both tables.
-	Table string
-	// Dialect is the engine's: the SQL the store speaks to it. It must be the
-	// Transactor's own.
-	Dialect coresql.Dialect
-	// Versions is how many former versions each document keeps beside its
-	// current one, as for [Open]: a write that changes a document makes a
-	// new version and prunes the oldest beyond Versions, in its own
-	// transaction. They live in a third table, <Table>___vs, which
-	// [SQLVersionsMigration] creates. Zero keeps no versions and sends
-	// exactly the statements the store sent before versions existed; a
-	// negative value is refused. The store cannot see a versions table it was
-	// told nothing about: turned off, it leaves the table as it is, and a
-	// document deleted and written again meanwhile would find the rows of the
-	// one it replaced — so drop the table with the migration's Down (ADR 0143).
-	Versions int
-}
 
 // txParts are the two capabilities a SQL store needs of its transactor, found
 // once at OpenSQL.

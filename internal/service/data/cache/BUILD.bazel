@@ -7,8 +7,8 @@ go_library(
     srcs = [
         "cache_compliance.go",
         "chain.go",
-        "chain_config.go",
         "config.go",
+        "decl_gen.go",
         "doc.go",
         "memory.go",
         "record.go",

@@ -1404,7 +1404,8 @@ packages:
       stdsql: database/sql
     path: github.com/kitsunium/sdk/internal/service/data/sql
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           PoolConfig is the connection-pool policy. It is applied to the caller's
           *sql.DB at construction, and it is a POLICY rather than a set of hints: a
           field whose zero value database/sql would read as a decision nobody made is
@@ -1448,7 +1449,8 @@ packages:
                 tuning choice with no dangerous zero.
               name: MaxIdleTime
               type: time.Duration
-      - doc: |-
+      - decl: true
+        doc: |-
           Config parameterises every constructor in this package: the caller's pool,
           the dialect whose grammar the SDK will speak to it, the pool policy applied
           at construction, the time source every budget is read from, and the health
@@ -1490,7 +1492,8 @@ packages:
                 non-positive value clamps to [DefaultCheckTimeout].
               name: CheckTimeout
               type: time.Duration
-      - doc: |-
+      - decl: true
+        doc: |-
           MigrateConfig parameterises [NewMigrator].
 
           It carries no directory, no file pattern and no naming convention, and the
@@ -1526,7 +1529,8 @@ packages:
                 [DefaultLockRetryInterval].
               name: LockRetryInterval
               type: time.Duration
-      - doc: |-
+      - decl: true
+        doc: |-
           Withheld carries a driver's error for errors.Is and errors.As while keeping
           its text out of Error().
 
@@ -1563,7 +1567,10 @@ packages:
             recv: value
         name: Withheld
         struct:
-          unexported: true
+          fields:
+            - doc: cause is the driver's own error.
+              name: cause
+              type: error
   - doc: |-
       Package sql is the public facade for the SDK's relational-database domain:
       transaction ownership, a pool policy, a health check and a migration runner,

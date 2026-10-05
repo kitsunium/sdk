@@ -7,80 +7,10 @@ import (
 	"maps"
 	"slices"
 	"strconv"
-	"sync"
 
 	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
-	corevfs "github.com/kitsunium/sdk/internal/core/data/vfs"
-	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
-
-// Store is a typed, keyed collection of JSON documents with secondary
-// indexes. Build one with [Open]. It is safe for concurrent use.
-type Store[T any] struct {
-	// key is the configured key function.
-	key func(T) string
-	// fs is where the store persists; nil in memory.
-	fs corevfs.FullFS
-	// byName finds an index by its name. It and indexes never change after
-	// Open.
-	byName map[string]*index[T]
-	// docs holds each document's JSON under its key — the snapshot's own
-	// shape, so a fold encodes it as it is.
-	docs map[string]json.RawMessage
-	// versions holds each document's versions under its key, when the store
-	// keeps them, and is nil otherwise. A document stored before the store
-	// kept versions, and not versioned since, has none here. A record is
-	// never changed once stored: a write stores a new one.
-	versions map[string]*versionsRecord
-	// pending names the overlay entries the snapshot does not contain yet.
-	pending map[string]struct{}
-	// clock stamps each version.
-	clock clock.Clock
-	// held reports a document whose versions no write may prune; nil holds
-	// nothing.
-	held func(key string) bool
-	// foldErr is the last automatic fold's failure, until a fold succeeds.
-	foldErr error
-	// path is the snapshot's name, overlay the overlay directory's, and
-	// versionsPath the versions file's.
-	path, overlay, versionsPath string
-	// indexes are the secondary indexes, in declaration order.
-	indexes []*index[T]
-	// onWrite and onDelete are the hooks called after a write or a deletion.
-	onWrite, onDelete hooks
-	// writing serialises writers, folds and Close; they hold it across the
-	// filesystem work.
-	writing sync.Mutex
-	// mu guards docs, versions, pending, the index maps, closed, folds and
-	// foldErr: changed under writing AND mu, read under either.
-	mu sync.RWMutex
-	// foldAt is the configured fold threshold.
-	foldAt int
-	// keep is how many former versions each document keeps; zero keeps no
-	// versions at all.
-	keep int
-	// folds counts the folds since Open.
-	folds int
-	// closed refuses every call once Close ran.
-	closed bool
-}
-
-// StatsValue is what a store can say about itself: how many documents it
-// holds, how far its overlay has grown, and how its folds have gone.
-type StatsValue struct {
-	// FoldError is the last automatic fold's failure, nil once a fold
-	// succeeds. The write that triggered the fold succeeded either way — its
-	// own entry was already durable — and the entries stay until a fold works.
-	FoldError error
-	// Documents is how many documents the store holds.
-	Documents int
-	// Pending is how many overlay entries the snapshot does not contain yet:
-	// zero in memory, and after a fold.
-	Pending int
-	// Folds is how many folds ran since the store opened, Open's own included.
-	Folds int
-}
 
 // Get returns the document stored under key, or DocumentNotFound.
 func (s *Store[T]) Get(key string) (T, error) {

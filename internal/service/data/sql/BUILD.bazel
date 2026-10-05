@@ -6,6 +6,7 @@ go_library(
     name = "sql",
     srcs = [
         "config.go",
+        "decl_gen.go",
         "dialect_sql.go",
         "doc.go",
         "executor.go",

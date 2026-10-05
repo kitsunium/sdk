@@ -15,43 +15,6 @@ const (
 	zeroPadWidth int = 2
 )
 
-// LocalDate is a calendar day in no time zone: a TOML local date. It reads and
-// writes itself as RFC 3339 spells a full date, YYYY-MM-DD.
-type LocalDate struct {
-	// Year is the calendar year.
-	Year int
-	// Month is 1 to 12.
-	Month int
-	// Day is 1 to 31.
-	Day int
-}
-
-// LocalTime is a time of day in no time zone: a TOML local time. It reads and
-// writes itself as RFC 3339 spells a partial time, HH:MM:SS with an optional
-// fraction.
-type LocalTime struct {
-	// Hour is 0 to 23.
-	Hour int
-	// Minute is 0 to 59.
-	Minute int
-	// Second is 0 to 59.
-	Second int
-	// Nanosecond is 0 to 999 999 999.
-	Nanosecond int
-	// Precision is how many fractional digits String writes: as many as the
-	// document had, up to nine. Zero writes the fewest that keep
-	// Nanosecond.
-	Precision int
-}
-
-// LocalDateTime is a date and a time of day in no time zone: a TOML local
-// date-time. It reads and writes itself as the date and the time joined by a
-// T.
-type LocalDateTime struct {
-	LocalDate
-	LocalTime
-}
-
 // AsTime returns the day at midnight in zone.
 func (d LocalDate) AsTime(zone *time.Location) time.Time {
 	//: midnight, in the zone the caller chose.

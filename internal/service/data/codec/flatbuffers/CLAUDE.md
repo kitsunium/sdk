@@ -79,3 +79,7 @@ the `KTN-CONST-MAXLEN` 30-char cap on the const identifier).
 ```shell
 bazel test --config=race //internal/service/data/codec/flatbuffers:flatbuffers_test
 ```
+
+## Declarations
+
+`decl_gen.go` is written by kit gen from the design (ADR 0170): the declarations of `BytesProvider` and `BytesAcceptor`. Their methods, constructors and helpers stay hand-written, in the files this document names.

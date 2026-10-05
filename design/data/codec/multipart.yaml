@@ -266,7 +266,8 @@ packages:
       codec: github.com/kitsunium/sdk/internal/core/data/codec
     path: github.com/kitsunium/sdk/internal/service/data/codec/multipart
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           BoundaryCodec is the optional extension this package implements on top of
           codec.StreamingCodec: the two constructors that take the boundary from the
           caller instead of recovering it from the bytes.
@@ -308,7 +309,8 @@ packages:
                 - name: err
                   type: error
         name: BoundaryCodec
-      - doc: |-
+      - decl: true
+        doc: |-
           BoundaryProvider is implemented by the codec.Encoder this package returns,
           so a caller streaming a request body can read the generated delimiter and
           set its Content-Type header before the first byte goes out.
@@ -319,7 +321,8 @@ packages:
               out:
                 - type: string
         name: BoundaryProvider
-      - doc: |-
+      - decl: true
+        doc: |-
           FormValue is a whole multipart/form-data body: its RFC 2046 delimiter and
           its sections, in wire order.
 
@@ -342,7 +345,8 @@ packages:
             - doc: Parts are the body's sections, in wire order.
               name: Parts
               type: "[]PartValue"
-      - doc: |-
+      - decl: true
+        doc: |-
           PartValue is one section of a multipart/form-data body: a named field,
           optionally a filename and a media type, and the bytes themselves.
 
@@ -384,7 +388,8 @@ packages:
             - doc: Data is the part body.
               name: Data
               type: "[]byte"
-      - doc: |-
+      - decl: true
+        doc: |-
           LimitsConfig bounds what a multipart body may materialise. Every field is a
           ceiling, never a target.
 

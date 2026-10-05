@@ -11,13 +11,6 @@ import (
 // objectIDHexLen is the length of an ObjectID's hexadecimal form.
 const objectIDHexLen int = 2 * objectIDSize
 
-// ObjectID is a BSON ObjectID: a four-byte big-endian creation time in
-// seconds, five bytes unique to the generating process, and a three-byte
-// counter. The zero value is NilObjectID. Decoding an ObjectID into a string
-// target yields its hexadecimal form; decoding a 24-digit hexadecimal string
-// into an ObjectID target parses it.
-type ObjectID [objectIDSize]byte
-
 // NilObjectID is the zero ObjectID.
 var NilObjectID ObjectID
 

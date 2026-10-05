@@ -132,7 +132,7 @@ type BytesAcceptor interface {
 ```
 
 <a name="BytesAcceptor.SetBytes"></a>
-### func \(BytesAcceptor\) [SetBytes](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/flatbuffers/types.go>)
+### func \(BytesAcceptor\) [SetBytes](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/flatbuffers/decl_gen.go>)
 
 ```go
 func (BytesAcceptor) SetBytes(data []byte)
@@ -156,7 +156,7 @@ type BytesProvider interface {
 ```
 
 <a name="BytesProvider.Bytes"></a>
-### func \(BytesProvider\) [Bytes](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/flatbuffers/types.go>)
+### func \(BytesProvider\) [Bytes](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/codec/flatbuffers/decl_gen.go>)
 
 ```go
 func (BytesProvider) Bytes() []byte

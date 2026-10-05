@@ -19,6 +19,7 @@ json/v2's streaming methods by signature so it does not import json/v2.
 | File | Role |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `Kind`, `ShapeValue` and `FieldValue` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `shape.go` | `Kind` and its nine values (`String`, `MarshalText`), `ShapeValue`, `FieldValue`, `Of`, `For` |
 | `walk.go` | the walker: the path of named types being described (recursion becomes a `Ref`), pointers, the three known types, opaque types, the kinds, slices (base64 or array), maps (`keyWritable`), structs |
 | `fields.go` | `members` — json/v2's struct field walk under the v1 options, breadth first; `embed` (promote, collect, or a member after all); `writable`; `dominantMembers`; `dominantFallback`; `optional`, `quoted`, `emptiable`, `throughPointer` |

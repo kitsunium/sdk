@@ -22,27 +22,6 @@ const DefaultMaxParts int = 1024
 // not a bound anybody chose.
 const DefaultMaxTotalBytes int64 = 64 << 20 // 64 MiB
 
-// LimitsConfig bounds what a multipart body may materialise. Every field is a
-// ceiling, never a target.
-//
-// A ZERO field means "use this package's documented default" — never
-// "unlimited" (ADR 0031: a policy's zero value is a safe default or an
-// explicit refusal, never an inert policy). A NEGATIVE field is refused at
-// construction with LimitsInvalid: the SDK can supply a ceiling the caller
-// forgot, but it cannot tell a typo apart from a request for no ceiling at
-// all, and guessing would silently remove the guard the type exists to place.
-//
-// There is deliberately no way to spell "unlimited". A decoder without a
-// ceiling is the defect this type prevents.
-type LimitsConfig struct {
-	// MaxPartBytes caps a single part body; 0 selects DefaultMaxPartBytes.
-	MaxPartBytes int64
-	// MaxParts caps the number of parts; 0 selects DefaultMaxParts.
-	MaxParts int
-	// MaxTotalBytes caps the sum of part bodies; 0 selects DefaultMaxTotalBytes.
-	MaxTotalBytes int64
-}
-
 // resolve returns l with every zero field replaced by its documented default,
 // or a typed LimitsInvalid error when any field is negative.
 //

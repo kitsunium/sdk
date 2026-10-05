@@ -3,7 +3,6 @@ package docstore
 import (
 	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	corevfs "github.com/kitsunium/sdk/internal/core/data/vfs"
-	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -24,50 +23,6 @@ const overlaySuffix string = ".d"
 // versionsSuffix names the versions file beside the snapshot: every
 // document's former versions, as the last fold left them (ADR 0143).
 const versionsSuffix string = ".versions"
-
-// Config configures [Open]. Key is required; every other field is optional,
-// and leaving all of them empty opens a working store kept in memory. The
-// secondary indexes are Open's other arguments.
-type Config[T any] struct {
-	// Key returns the key a document is stored under. It must be a pure
-	// function of the document: the store calls it to file every write and
-	// compares its answers to refuse an update that would rename a document.
-	Key func(T) string
-	// FS is where the store persists, and Path is the snapshot's name inside
-	// it — an io/fs name such as "shop/items.json". The overlay lives beside
-	// the snapshot, in the directory Path + ".d". A nil FS keeps the store in
-	// memory: nothing survives the process, and nothing is written anywhere.
-	FS corevfs.FullFS
-	// Clock stamps each version with the instant of the write that made it.
-	// Nil is the system clock.
-	Clock clock.Clock
-	// Held reports whether the document stored under key is held — a legal
-	// hold — so that no write prunes its versions: they pile up beyond
-	// Versions until a write finds the document released, and that write
-	// prunes them. It is called with the document's key by a write that would
-	// prune, under the writers' lock, so it may read this store and must not
-	// write to it; a panic in it reaches the writer, and nothing is written.
-	// Nil holds nothing. It is refused without Versions.
-	Held func(key string) bool
-	// Path is the snapshot's name inside FS. It is required with FS and
-	// refused without it, because a path with nowhere to be written is a
-	// store that would silently keep nothing.
-	Path string
-	// FoldAt is how many overlay entries fold the overlay into the snapshot
-	// on the write that reaches it. Zero is the default rule: as many entries
-	// as the store holds documents, and at least [DefaultFoldAt]. A negative
-	// value never folds on a write; Fold, Open and Close still do.
-	FoldAt int
-	// Versions is how many former versions each document keeps beside its
-	// current one, the newest: a write that changes a document makes a new
-	// version, and prunes the oldest beyond Versions in the same durable
-	// write. Zero keeps no versions — the store writes exactly the files it
-	// wrote before versions existed — and a negative value is refused. A
-	// persistent store keeps them in the file Path + ".versions" once a fold
-	// ran, and a store opened with zero over files that keep versions is
-	// refused rather than left to drop or corrupt them (ADR 0143).
-	Versions int
-}
 
 // validate refuses a configuration no store could honour, with the indexes
 // Open was given, before anything touches a filesystem.

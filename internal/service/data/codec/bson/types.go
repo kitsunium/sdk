@@ -7,39 +7,6 @@ import (
 	"time"
 )
 
-// D is a document whose element order matters: the shape a decode into an
-// interface produces for a document, and the one to encode when the order of
-// the keys is part of the meaning — a command, a sort specification. Encode an
-// M or a struct when it is not. A nil D encodes as null.
-type D []E
-
-// E is one element of a D: a key and its value. Encoded on its own, outside
-// a D, it is an ordinary struct, the document {"key": …, "value": …}.
-type E struct {
-	// Key is the element name. It must not contain a NUL byte.
-	Key string
-	// Value is any value the codec encodes.
-	Value any
-}
-
-// M is a document whose element order does not matter. The codec writes a
-// map's keys in sorted order, so encoding the same M twice gives the same
-// bytes.
-type M map[string]any
-
-// A is an array: the shape a decode into an interface produces for one.
-type A []any
-
-// Binary is a BSON binary value: the bytes and the subtype naming what they
-// are. A []byte encodes as a Binary of subtype BinaryGeneric; a Binary of any
-// other subtype keeps its subtype through a round trip.
-type Binary struct {
-	// Subtype is the BSON binary subtype, BinaryGeneric for opaque bytes.
-	Subtype byte
-	// Data is the payload.
-	Data []byte
-}
-
 // Equal reports whether b and other hold the same subtype and bytes.
 func (b Binary) Equal(other Binary) bool {
 	//: both halves of the value.
@@ -52,25 +19,6 @@ func (b Binary) IsZero() bool {
 	//: the zero subtype and no bytes.
 	return b.Subtype == BinaryGeneric && len(b.Data) == 0
 }
-
-// Undefined is the deprecated BSON undefined value. It decodes into an
-// interface as Undefined{}, and into a typed target as that type's zero.
-type Undefined struct{}
-
-// Null is the BSON null value, for writing an explicit null into a D. A null
-// decodes into an interface as nil.
-type Null struct{}
-
-// MinKey is the BSON value that sorts lower than every other.
-type MinKey struct{}
-
-// MaxKey is the BSON value that sorts higher than every other.
-type MaxKey struct{}
-
-// DateTime is a BSON datetime: milliseconds since the Unix epoch, UTC. A
-// time.Time encodes as one and decodes from one; DateTime is what a decode
-// into an interface produces.
-type DateTime int64
 
 // NewDateTimeFromTime returns the DateTime t falls in, truncated to the
 // millisecond: the instant a time.Time is written as.
@@ -112,16 +60,6 @@ func (dt *DateTime) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// Regex is a BSON regular expression: a pattern and its options. Neither may
-// contain a NUL byte. The codec writes the options in alphabetical order, as
-// the specification requires, whatever order they were given in.
-type Regex struct {
-	// Pattern is the expression.
-	Pattern string
-	// Options are the single-letter flags, such as "i" or "imx".
-	Options string
-}
-
 // String renders r for a log line or a test failure.
 func (r Regex) String() string {
 	//: a fixed, JSON-looking shape.
@@ -138,15 +76,6 @@ func (r Regex) Equal(other Regex) bool {
 func (r Regex) IsZero() bool {
 	//: no pattern and no options.
 	return r.Pattern == "" && r.Options == ""
-}
-
-// DBPointer is the deprecated BSON DBPointer: a namespace and an ObjectID.
-// It is read and written so a document carrying one survives a round trip.
-type DBPointer struct {
-	// DB is the namespace the pointer names.
-	DB string
-	// Pointer is the identifier within it.
-	Pointer ObjectID
 }
 
 // String renders p for a log line or a test failure.
@@ -167,36 +96,10 @@ func (p DBPointer) IsZero() bool {
 	return p.DB == "" && p.Pointer.IsZero()
 }
 
-// JavaScript is BSON JavaScript code.
-type JavaScript string
-
-// Symbol is the deprecated BSON symbol, read and written as a distinct type so
-// a round trip does not turn it into a string.
-type Symbol string
-
-// CodeWithScope is the deprecated BSON JavaScript-with-scope: code and the
-// document its free variables are bound in. Scope must encode as a document —
-// a struct, a map or a D; a decode always produces a D.
-type CodeWithScope struct {
-	// Code is the JavaScript.
-	Code JavaScript
-	// Scope is the document.
-	Scope any
-}
-
 // String renders c for a log line or a test failure.
 func (c CodeWithScope) String() string {
 	//: a fixed, JSON-looking shape.
 	return fmt.Sprintf(`{"code": "%s", "scope": %v}`, c.Code, c.Scope)
-}
-
-// Timestamp is the BSON replication timestamp: seconds since the epoch and an
-// ordinal within the second. It is not a date; encode a time.Time for one.
-type Timestamp struct {
-	// T is the seconds since the Unix epoch.
-	T uint32
-	// I is the increment, ordering operations within the same second.
-	I uint32
 }
 
 // After reports whether t is later than other.

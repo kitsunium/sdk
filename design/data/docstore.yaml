@@ -1289,9 +1289,11 @@ packages:
       coredocstore: github.com/kitsunium/sdk/internal/core/data/docstore
       coresql: github.com/kitsunium/sdk/internal/core/data/sql
       corevfs: github.com/kitsunium/sdk/internal/core/data/vfs
+      json: encoding/json
     path: github.com/kitsunium/sdk/internal/service/data/docstore
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           Config configures [Open]. Key is required; every other field is optional,
           and leaving all of them empty opens a working store kept in memory. The
           secondary indexes are Open's other arguments.
@@ -1353,7 +1355,8 @@ packages:
         typeParams:
           - constraint: any
             name: T
-      - doc: |-
+      - decl: true
+        doc: |-
           Store is a typed, keyed collection of JSON documents with secondary
           indexes. Build one with [Open]. It is safe for concurrent use.
         methods:
@@ -1627,11 +1630,94 @@ packages:
             recv: pointer
         name: Store
         struct:
-          unexported: true
+          fields:
+            - doc: key is the configured key function.
+              name: key
+              type: func(T) string
+            - doc: fs is where the store persists; nil in memory.
+              name: fs
+              type: corevfs.FullFS
+            - doc: |-
+                byName finds an index by its name. It and indexes never change after
+                Open.
+              name: byName
+              type: map[string]*index[T]
+            - doc: |-
+                docs holds each document's JSON under its key — the snapshot's own
+                shape, so a fold encodes it as it is.
+              name: docs
+              type: map[string]json.RawMessage
+            - doc: |-
+                versions holds each document's versions under its key, when the store
+                keeps them, and is nil otherwise. A document stored before the store
+                kept versions, and not versioned since, has none here. A record is
+                never changed once stored: a write stores a new one.
+              name: versions
+              type: map[string]*versionsRecord
+            - doc: pending names the overlay entries the snapshot does not contain yet.
+              name: pending
+              type: map[string]struct{}
+            - doc: clock stamps each version.
+              name: clock
+              type: clock.Clock
+            - doc: |-
+                held reports a document whose versions no write may prune; nil holds
+                nothing.
+              name: held
+              type: func(key string) bool
+            - doc: foldErr is the last automatic fold's failure, until a fold succeeds.
+              name: foldErr
+              type: error
+            - doc: |-
+                path is the snapshot's name, overlay the overlay directory's, and
+                versionsPath the versions file's.
+              name: path
+            - doc: |-
+                path is the snapshot's name, overlay the overlay directory's, and
+                versionsPath the versions file's.
+              name: overlay
+            - doc: |-
+                path is the snapshot's name, overlay the overlay directory's, and
+                versionsPath the versions file's.
+              name: versionsPath
+              type: string
+            - doc: indexes are the secondary indexes, in declaration order.
+              name: indexes
+              type: "[]*index[T]"
+            - doc: onWrite and onDelete are the hooks called after a write or a deletion.
+              name: onWrite
+            - doc: onWrite and onDelete are the hooks called after a write or a deletion.
+              name: onDelete
+              type: hooks
+            - doc: |-
+                writing serialises writers, folds and Close; they hold it across the
+                filesystem work.
+              name: writing
+              type: sync.Mutex
+            - doc: |-
+                mu guards docs, versions, pending, the index maps, closed, folds and
+                foldErr: changed under writing AND mu, read under either.
+              name: mu
+              type: sync.RWMutex
+            - doc: foldAt is the configured fold threshold.
+              name: foldAt
+              type: int
+            - doc: |-
+                keep is how many former versions each document keeps; zero keeps no
+                versions at all.
+              name: keep
+              type: int
+            - doc: folds counts the folds since Open.
+              name: folds
+              type: int
+            - doc: closed refuses every call once Close ran.
+              name: closed
+              type: bool
         typeParams:
           - constraint: any
             name: T
-      - doc: |-
+      - decl: true
+        doc: |-
           StatsValue is what a store can say about itself: how many documents it
           holds, how far its overlay has grown, and how its folds have gone.
         name: StatsValue
@@ -1654,7 +1740,8 @@ packages:
             - doc: Folds is how many folds ran since the store opened, Open's own included.
               name: Folds
               type: int
-      - doc: |-
+      - decl: true
+        doc: |-
           SQLConfig configures [OpenSQL]. Key, Transactor, Dialect and Table are
           required. The secondary indexes are OpenSQL's other arguments, declared
           with [coredocstore.Unique] and [coredocstore.Index] exactly as for [Open].
@@ -1724,7 +1811,8 @@ packages:
         typeParams:
           - constraint: any
             name: T
-      - doc: |-
+      - decl: true
+        doc: |-
           SQLStore is a typed, keyed collection of JSON documents with secondary
           indexes, kept in two tables of a SQL database. Build one with [OpenSQL]. It
           is safe for concurrent use, and holds nothing but its configuration: the
@@ -2057,7 +2145,56 @@ packages:
             recv: pointer
         name: SQLStore
         struct:
-          unexported: true
+          fields:
+            - doc: key is the configured key function.
+              name: key
+              type: func(T) string
+            - doc: tm opens the store's own transactions, and savepoints in the caller's.
+              name: tm
+              type: coresql.Transactor
+            - doc: tx says where a statement runs, and holds hooks until a commit.
+              name: tx
+              type: txParts
+            - doc: |-
+                indexKey transforms an index key before it reaches the database; nil
+                keeps it as it is.
+              name: indexKey
+              type: func(index, key string) []byte
+            - doc: clock stamps each version.
+              name: clock
+              type: clock.Clock
+            - doc: |-
+                held reports a document whose versions no write may prune; nil holds
+                nothing.
+              name: held
+              type: func(ctx context.Context, key string) bool
+            - doc: |-
+                byName finds an index by its name. It and indexes never change after
+                OpenSQL.
+              name: byName
+              type: map[string]coredocstore.IndexSpec[T]
+            - doc: table is the documents' table, which every refusal names.
+              name: table
+              type: string
+            - doc: stmts are the rendered statements.
+              name: stmts
+              type: sqlStatements
+            - doc: indexes are the secondary indexes, in declaration order.
+              name: indexes
+              type: "[]coredocstore.IndexSpec[T]"
+            - doc: onWrite and onDelete are the hooks called after a write or a deletion.
+              name: onWrite
+            - doc: onWrite and onDelete are the hooks called after a write or a deletion.
+              name: onDelete
+              type: hooks
+            - doc: own are the options of a transaction the store opens itself.
+              name: own
+              type: coresql.TxOptionsValue
+            - doc: |-
+                keep is how many former versions each document keeps; zero keeps no
+                versions, and touches no versions table.
+              name: keep
+              type: int
         typeParams:
           - constraint: any
             name: T

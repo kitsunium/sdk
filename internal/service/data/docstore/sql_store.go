@@ -25,49 +25,6 @@ type rowSet interface {
 	Close() error
 }
 
-// SQLStore is a typed, keyed collection of JSON documents with secondary
-// indexes, kept in two tables of a SQL database. Build one with [OpenSQL]. It
-// is safe for concurrent use, and holds nothing but its configuration: the
-// database is the source of truth, and every call is a round trip.
-//
-// Every call takes a context, and runs on the transaction that context
-// carries for the store's transactor, else on the pool. A write runs in a
-// transaction of its own — a savepoint inside the caller's — so it is atomic
-// on its own either way, and its hooks run once the transaction that holds it
-// has committed.
-type SQLStore[T any] struct {
-	// key is the configured key function.
-	key func(T) string
-	// tm opens the store's own transactions, and savepoints in the caller's.
-	tm coresql.Transactor
-	// tx says where a statement runs, and holds hooks until a commit.
-	tx txParts
-	// indexKey transforms an index key before it reaches the database; nil
-	// keeps it as it is.
-	indexKey func(index, key string) []byte
-	// clock stamps each version.
-	clock clock.Clock
-	// held reports a document whose versions no write may prune; nil holds
-	// nothing.
-	held func(ctx context.Context, key string) bool
-	// byName finds an index by its name. It and indexes never change after
-	// OpenSQL.
-	byName map[string]coredocstore.IndexSpec[T]
-	// table is the documents' table, which every refusal names.
-	table string
-	// stmts are the rendered statements.
-	stmts sqlStatements
-	// indexes are the secondary indexes, in declaration order.
-	indexes []coredocstore.IndexSpec[T]
-	// onWrite and onDelete are the hooks called after a write or a deletion.
-	onWrite, onDelete hooks
-	// own are the options of a transaction the store opens itself.
-	own coresql.TxOptionsValue
-	// keep is how many former versions each document keeps; zero keeps no
-	// versions, and touches no versions table.
-	keep int
-}
-
 // OpenSQL builds a SQL store from cfg, with the secondary indexes given. It
 // sends no statement: its tables are [SQLMigration]'s, run before the store
 // is used.

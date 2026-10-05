@@ -25,6 +25,7 @@ package declares no code.
 | File | Holds |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `ConsumerConfig`, `FileConfig`, `MemoryConfig` and `SQLConfig` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `queue.go` | the dead-letter `causeValue` reduction, `randomHex`, the two shared guards (`checkBatch`, `checkSize`), `deadLetterNotFound` |
 | `retry.go` | `retryDelay`: RetryDelay, or the `kernel/backoff` curve from it to `MaxRetryDelay` — one function the three brokers call (ADR 0151) |
 | `memory.go` | `NewMemory` and the in-heap broker: the heap-ordered lease expiry, the ready list ordered at insertion; `Reject`, `ReplayDeadLetter`, `DeleteDeadLetter` |

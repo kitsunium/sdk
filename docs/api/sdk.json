@@ -74662,7 +74662,7 @@
         }
       ],
       "doc": "ChainConfig parameterises [NewChain]. Its zero value builds a working chain;\nthe one field is an observation hook, not a policy.\n",
-      "file": "internal/service/data/cache/chain_config.go",
+      "file": "internal/service/data/cache/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -74691,7 +74691,7 @@
         }
       ],
       "doc": "MemoryConfig parameterises [NewMemory].\n\nIts zero value is deliberately NOT a working cache: MaxEntries must be\nstated. See [NewMemory] for why that refusal, and not a default, is the\nright ADR 0031 half here.\n",
-      "file": "internal/service/data/cache/config.go",
+      "file": "internal/service/data/cache/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -74859,7 +74859,7 @@
       "spelled": "[]any",
       "canonical": "[]any",
       "doc": "A is an array: the shape a decode into an interface produces for one.\n",
-      "file": "internal/service/data/codec/bson/types.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -74883,7 +74883,7 @@
         }
       ],
       "doc": "Binary is a BSON binary value: the bytes and the subtype naming what they\nare. A []byte encodes as a Binary of subtype BinaryGeneric; a Binary of any\nother subtype keeps its subtype through a round trip.\n",
-      "file": "internal/service/data/codec/bson/types.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75076,7 +75076,7 @@
         }
       ],
       "doc": "CodeWithScope is the deprecated BSON JavaScript-with-scope: code and the\ndocument its free variables are bound in. Scope must encode as a document —\na struct, a map or a D; a decode always produces a D.\n",
-      "file": "internal/service/data/codec/bson/types.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75113,7 +75113,7 @@
       "spelled": "[]E",
       "canonical": "[]github.com/kitsunium/sdk/internal/service/data/codec/bson.E",
       "doc": "D is a document whose element order matters: the shape a decode into an\ninterface produces for a document, and the one to encode when the order of\nthe keys is part of the meaning — a command, a sort specification. Encode an\nM or a struct when it is not. A nil D encodes as null.\n",
-      "file": "internal/service/data/codec/bson/types.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75137,7 +75137,7 @@
         }
       ],
       "doc": "DBPointer is the deprecated BSON DBPointer: a namespace and an ObjectID.\nIt is read and written so a document carrying one survives a round trip.\n",
-      "file": "internal/service/data/codec/bson/types.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75188,7 +75188,7 @@
       "spelled": "int64",
       "canonical": "int64",
       "doc": "DateTime is a BSON datetime: milliseconds since the Unix epoch, UTC. A\ntime.Time encodes as one and decodes from one; DateTime is what a decode\ninto an interface produces.\n",
-      "file": "internal/service/data/codec/bson/types.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75239,7 +75239,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Decimal128 is a BSON decimal128: a coefficient of up to 34 decimal digits,\nan exponent in [-6176, 6111], a sign, and the specials NaN and ±Infinity.\nThe zero value is 0E-6176, the value whose sixteen bytes are all zero; it is\nwhat IsZero reports, and what omitempty leaves out.\n",
-      "file": "internal/service/data/codec/bson/decimal.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75354,7 +75354,7 @@
         }
       ],
       "doc": "E is one element of a D: a key and its value. Encoded on its own, outside\na D, it is an ordinary struct, the document {\"key\": …, \"value\": …}.\n",
-      "file": "internal/service/data/codec/bson/types.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75366,7 +75366,7 @@
       "spelled": "string",
       "canonical": "string",
       "doc": "JavaScript is BSON JavaScript code.\n",
-      "file": "internal/service/data/codec/bson/types.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75378,7 +75378,7 @@
       "spelled": "map[string]any",
       "canonical": "map[string]any",
       "doc": "M is a document whose element order does not matter. The codec writes a\nmap's keys in sorted order, so encoding the same M twice gives the same\nbytes.\n",
-      "file": "internal/service/data/codec/bson/types.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75390,7 +75390,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "MaxKey is the BSON value that sorts higher than every other.\n",
-      "file": "internal/service/data/codec/bson/types.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75402,7 +75402,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "MinKey is the BSON value that sorts lower than every other.\n",
-      "file": "internal/service/data/codec/bson/types.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75462,7 +75462,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Null is the BSON null value, for writing an explicit null into a D. A null\ndecodes into an interface as nil.\n",
-      "file": "internal/service/data/codec/bson/types.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75474,7 +75474,7 @@
       "spelled": "[12]byte",
       "canonical": "[12]byte",
       "doc": "ObjectID is a BSON ObjectID: a four-byte big-endian creation time in\nseconds, five bytes unique to the generating process, and a three-byte\ncounter. The zero value is NilObjectID. Decoding an ObjectID into a string\ntarget yields its hexadecimal form; decoding a 24-digit hexadecimal string\ninto an ObjectID target parses it.\n",
-      "file": "internal/service/data/codec/bson/objectid.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75626,7 +75626,7 @@
         }
       ],
       "doc": "Regex is a BSON regular expression: a pattern and its options. Neither may\ncontain a NUL byte. The codec writes the options in alphabetical order, as\nthe specification requires, whatever order they were given in.\n",
-      "file": "internal/service/data/codec/bson/types.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75677,7 +75677,7 @@
       "spelled": "string",
       "canonical": "string",
       "doc": "Symbol is the deprecated BSON symbol, read and written as a distinct type so\na round trip does not turn it into a string.\n",
-      "file": "internal/service/data/codec/bson/types.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75701,7 +75701,7 @@
         }
       ],
       "doc": "Timestamp is the BSON replication timestamp: seconds since the epoch and an\nordinal within the second. It is not a date; encode a time.Time for one.\n",
-      "file": "internal/service/data/codec/bson/types.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75778,7 +75778,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Undefined is the deprecated BSON undefined value. It decodes into an\ninterface as Undefined{}, and into a typed target as that type's zero.\n",
-      "file": "internal/service/data/codec/bson/types.go",
+      "file": "internal/service/data/codec/bson/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75850,7 +75850,7 @@
       "spelled": "interface{SetBytes(data []byte)}",
       "canonical": "interface{SetBytes(data []byte)}",
       "doc": "BytesAcceptor is the optional sink interface an Unmarshal target may\nsatisfy to receive the decoded FlatBuffer payload. The codec passes the\ncaller's data slice by reference; implementations that need ownership\nMUST copy the slice themselves.\n",
-      "file": "internal/service/data/codec/flatbuffers/types.go",
+      "file": "internal/service/data/codec/flatbuffers/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75862,7 +75862,7 @@
       "recv": "BytesAcceptor",
       "spelled": "func(data []byte)",
       "canonical": "func(data []byte)",
-      "file": "internal/service/data/codec/flatbuffers/types.go",
+      "file": "internal/service/data/codec/flatbuffers/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75874,7 +75874,7 @@
       "spelled": "interface{Bytes() []byte}",
       "canonical": "interface{Bytes() []byte}",
       "doc": "BytesProvider is the optional source interface a Marshal argument may\nsatisfy to hand the codec its already-encoded FlatBuffer payload. The\nreturned slice MUST remain valid for the lifetime of the codec call;\nthe codec performs no copy and treats the buffer as read-only.\n\n`Provider`/`Acceptor` suffixes are registered as legitimate adapter-role\nvocabulary in `/workspace/.ktn-linter.yaml` (per kodflow/ktn-linter#337),\nso `KTN-INTERFACE-ERNAME` does not fire here.\n",
-      "file": "internal/service/data/codec/flatbuffers/types.go",
+      "file": "internal/service/data/codec/flatbuffers/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -75886,7 +75886,7 @@
       "recv": "BytesProvider",
       "spelled": "func() []byte",
       "canonical": "func() []byte",
-      "file": "internal/service/data/codec/flatbuffers/types.go",
+      "file": "internal/service/data/codec/flatbuffers/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -76034,7 +76034,7 @@
         }
       ],
       "doc": "EditValue is one operation of a diff: what it does, where, and both values.\nIts JSON is an RFC 6902 operation, with the value it replaces or removes\nunder \"old\" — a member RFC 6902 does not define for these operations, which\na patch applier ignores (§4) — so a list of them is a JSON Patch document.\n",
-      "file": "internal/service/data/codec/jsonpatch/jsonpatch.go",
+      "file": "internal/service/data/codec/jsonpatch/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -76046,7 +76046,7 @@
       "spelled": "string",
       "canonical": "string",
       "doc": "Op is what an operation does, as RFC 6902 names it.\n",
-      "file": "internal/service/data/codec/jsonpatch/jsonpatch.go",
+      "file": "internal/service/data/codec/jsonpatch/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -76173,7 +76173,7 @@
         }
       ],
       "doc": "FieldValue is one member of an Object: its wire name and shape, what the\nencoder may do with it, and the Go field it is written from — which a\nframework reads its own tags from.\n",
-      "file": "internal/service/data/codec/jsonshape/shape.go",
+      "file": "internal/service/data/codec/jsonshape/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -76210,7 +76210,7 @@
       "spelled": "uint8",
       "canonical": "uint8",
       "doc": "Kind is the JSON kind a value takes on the wire. The zero Kind is Any.\n",
-      "file": "internal/service/data/codec/jsonshape/shape.go",
+      "file": "internal/service/data/codec/jsonshape/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -76349,7 +76349,7 @@
         }
       ],
       "doc": "ShapeValue describes the values of one Go type on the wire: the JSON kind\nthey take and, for a container, the shape of what it holds. It encodes as\nreadable JSON; the Go-only parts of its fields are left out.\n",
-      "file": "internal/service/data/codec/jsonshape/shape.go",
+      "file": "internal/service/data/codec/jsonshape/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -76423,7 +76423,7 @@
       "spelled": "interface{NewDecoderWithBoundary(r io.Reader, boundary string) (dec codec.Decoder, err error); NewEncoderWithBoundary(w io.Writer, boundary string) (enc codec.Encoder, err error); codec.Codec}",
       "canonical": "interface{NewDecoderWithBoundary(r io.Reader, boundary string) (dec github.com/kitsunium/sdk/internal/core/data/codec.Decoder, err error); NewEncoderWithBoundary(w io.Writer, boundary string) (enc github.com/kitsunium/sdk/internal/core/data/codec.Encoder, err error); github.com/kitsunium/sdk/internal/core/data/codec.Codec}",
       "doc": "BoundaryCodec is the optional extension this package implements on top of\ncodec.StreamingCodec: the two constructors that take the boundary from the\ncaller instead of recovering it from the bytes.\n\nThis is the honest form of the streaming API. An HTTP server already holds\nthe authoritative boundary in the request's Content-Type header, and an HTTP\nclient must set that header before it writes the first body byte — neither\ncan be expressed through NewEncoder / NewDecoder, whose signatures the\ndomain fixes. Callers reach it with a type assertion, the same way they\nreach codec.Appender.\n",
-      "file": "internal/service/data/codec/multipart/codec.go",
+      "file": "internal/service/data/codec/multipart/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -76436,7 +76436,7 @@
       "spelled": "func(r io.Reader, boundary string) (dec codec.Decoder, err error)",
       "canonical": "func(r io.Reader, boundary string) (dec github.com/kitsunium/sdk/internal/core/data/codec.Decoder, err error)",
       "doc": "NewDecoderWithBoundary streams a body framed by the given boundary,\nbypassing recovery from the wire entirely.\n",
-      "file": "internal/service/data/codec/multipart/codec.go",
+      "file": "internal/service/data/codec/multipart/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -76449,7 +76449,7 @@
       "spelled": "func(w io.Writer, boundary string) (enc codec.Encoder, err error)",
       "canonical": "func(w io.Writer, boundary string) (enc github.com/kitsunium/sdk/internal/core/data/codec.Encoder, err error)",
       "doc": "NewEncoderWithBoundary streams a body framed by the given boundary.\n",
-      "file": "internal/service/data/codec/multipart/codec.go",
+      "file": "internal/service/data/codec/multipart/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -76461,7 +76461,7 @@
       "spelled": "interface{Boundary() string}",
       "canonical": "interface{Boundary() string}",
       "doc": "BoundaryProvider is implemented by the codec.Encoder this package returns,\nso a caller streaming a request body can read the generated delimiter and\nset its Content-Type header before the first byte goes out.\n",
-      "file": "internal/service/data/codec/multipart/codec.go",
+      "file": "internal/service/data/codec/multipart/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -76474,7 +76474,7 @@
       "spelled": "func() string",
       "canonical": "func() string",
       "doc": "Boundary returns the delimiter the encoder writes.\n",
-      "file": "internal/service/data/codec/multipart/codec.go",
+      "file": "internal/service/data/codec/multipart/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -76561,7 +76561,7 @@
         }
       ],
       "doc": "FormValue is a whole multipart/form-data body: its RFC 2046 delimiter and\nits sections, in wire order.\n\nBoundary is the one field that has no equivalent in the codec.Codec\ncontract, which carries no Content-Type. Empty on Marshal means \"generate\none\"; Unmarshal always fills it with the delimiter it recovered, so a decode\n→ encode round trip keeps the original delimiter. It reproduces the whole\nbody byte for byte only for a body this package encoded, and whose\nfilenames carry no path separator: a PartValue models a part's name,\nfilename, media type and bytes, so any other part header — a\nContent-Transfer-Encoding, a custom one — and another producer's header\norder or casing are not carried through, and a filename is decoded to its\nlast path element (see PartValue.FileName).\n",
-      "file": "internal/service/data/codec/multipart/form.go",
+      "file": "internal/service/data/codec/multipart/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -76603,7 +76603,7 @@
         }
       ],
       "doc": "LimitsConfig bounds what a multipart body may materialise. Every field is a\nceiling, never a target.\n\nA ZERO field means \"use this package's documented default\" — never\n\"unlimited\" (ADR 0031: a policy's zero value is a safe default or an\nexplicit refusal, never an inert policy). A NEGATIVE field is refused at\nconstruction with LimitsInvalid: the SDK can supply a ceiling the caller\nforgot, but it cannot tell a typo apart from a request for no ceiling at\nall, and guessing would silently remove the guard the type exists to place.\n\nThere is deliberately no way to spell \"unlimited\". A decoder without a\nceiling is the defect this type prevents.\n",
-      "file": "internal/service/data/codec/multipart/limits.go",
+      "file": "internal/service/data/codec/multipart/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -76661,7 +76661,7 @@
         }
       ],
       "doc": "PartValue is one section of a multipart/form-data body: a named field,\noptionally a filename and a media type, and the bytes themselves.\n\nThe body is materialised. Streaming happens BETWEEN parts (one part per\nEncode / Decode), not inside one: codec.Decoder's Decode(v any) has nowhere\nto hand back an io.Reader the caller must drain before the next call, so a\npart body is read whole under LimitsConfig.MaxPartBytes. A consumer moving\nobjects too large for that ceiling raises it with NewWithLimits, or reaches\nfor mime/multipart directly — see CLAUDE.md §Not covered.\n\nName, FileName and ContentType are written into the part's header block, so\na CR, an LF or a NUL in any of them is refused with ValueInvalid naming the\nfield: a line break there would end the header line and let the rest of the\nvalue write headers of its own. Nothing is escaped or repaired on the way.\n",
-      "file": "internal/service/data/codec/multipart/form.go",
+      "file": "internal/service/data/codec/multipart/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -76855,7 +76855,7 @@
       "spelled": "uint8",
       "canonical": "uint8",
       "doc": "Tag is the 1-byte type discriminator that opens every TLV record.\n",
-      "file": "internal/service/data/codec/tlv/types.go",
+      "file": "internal/service/data/codec/tlv/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -76896,7 +76896,7 @@
         }
       ],
       "doc": "LocalDate is a calendar day in no time zone: a TOML local date. It reads and\nwrites itself as RFC 3339 spells a full date, YYYY-MM-DD.\n",
-      "file": "internal/service/data/codec/toml/localtime.go",
+      "file": "internal/service/data/codec/toml/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -76972,7 +76972,7 @@
         }
       ],
       "doc": "LocalDateTime is a date and a time of day in no time zone: a TOML local\ndate-time. It reads and writes itself as the date and the time joined by a\nT.\n",
-      "file": "internal/service/data/codec/toml/localtime.go",
+      "file": "internal/service/data/codec/toml/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -77063,7 +77063,7 @@
         }
       ],
       "doc": "LocalTime is a time of day in no time zone: a TOML local time. It reads and\nwrites itself as RFC 3339 spells a partial time, HH:MM:SS with an optional\nfraction.\n",
-      "file": "internal/service/data/codec/toml/localtime.go",
+      "file": "internal/service/data/codec/toml/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -77211,7 +77211,7 @@
         }
       ],
       "doc": "Config configures [Open]. Key is required; every other field is optional,\nand leaving all of them empty opens a working store kept in memory. The\nsecondary indexes are Open's other arguments.\n",
-      "file": "internal/service/data/docstore/config.go",
+      "file": "internal/service/data/docstore/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -77341,7 +77341,7 @@
         }
       ],
       "doc": "SQLConfig configures [OpenSQL]. Key, Transactor, Dialect and Table are\nrequired. The secondary indexes are OpenSQL's other arguments, declared\nwith [coredocstore.Unique] and [coredocstore.Index] exactly as for [Open].\n",
-      "file": "internal/service/data/docstore/sql_config.go",
+      "file": "internal/service/data/docstore/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -77365,7 +77365,7 @@
       "spelled": "[T any] struct{}",
       "canonical": "[T any] struct{}",
       "doc": "SQLStore is a typed, keyed collection of JSON documents with secondary\nindexes, kept in two tables of a SQL database. Build one with [OpenSQL]. It\nis safe for concurrent use, and holds nothing but its configuration: the\ndatabase is the source of truth, and every call is a round trip.\n\nEvery call takes a context, and runs on the transaction that context\ncarries for the store's transactor, else on the pool. A write runs in a\ntransaction of its own — a savepoint inside the caller's — so it is atomic\non its own either way, and its hooks run once the transaction that holds it\nhas committed.\n",
-      "file": "internal/service/data/docstore/sql_store.go",
+      "file": "internal/service/data/docstore/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -77697,7 +77697,7 @@
         }
       ],
       "doc": "StatsValue is what a store can say about itself: how many documents it\nholds, how far its overlay has grown, and how its folds have gone.\n",
-      "file": "internal/service/data/docstore/docstore.go",
+      "file": "internal/service/data/docstore/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -77709,7 +77709,7 @@
       "spelled": "[T any] struct{}",
       "canonical": "[T any] struct{}",
       "doc": "Store is a typed, keyed collection of JSON documents with secondary\nindexes. Build one with [Open]. It is safe for concurrent use.\n",
-      "file": "internal/service/data/docstore/docstore.go",
+      "file": "internal/service/data/docstore/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -78064,7 +78064,7 @@
         }
       ],
       "doc": "ConsumerConfig configures [Consume]: what to run, how many of it, how often\nto look, and the one thing about the handler the SDK cannot check for\nitself.\n\nEvery field except Handler and HandlerIsIdempotent is CLAMPED, so a caller\nwith no opinion writes two fields and gets a correct consumer.\n",
-      "file": "internal/service/data/queue/consume_config.go",
+      "file": "internal/service/data/queue/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -78106,7 +78106,7 @@
         }
       ],
       "doc": "FileConfig configures [NewFile]: which directory holds the queue, which\nclock reads its deadlines, and what delivery discipline it enforces.\n\nIts Policy's zero value is refused at construction — see\ncore/data/queue.PolicyValue — and so is a directory whose entries any account\ncould replace.\n",
-      "file": "internal/service/data/queue/file_config.go",
+      "file": "internal/service/data/queue/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -78143,7 +78143,7 @@
         }
       ],
       "doc": "MemoryConfig configures [NewMemory]: which clock reads its deadlines, and\nwhat delivery discipline it enforces.\n\nIts Policy's zero value is refused at construction through the SAME guard\n[NewFile] runs, which is what makes this broker an honest double for that\none.\n",
-      "file": "internal/service/data/queue/memory_config.go",
+      "file": "internal/service/data/queue/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -78218,7 +78218,7 @@
         }
       ],
       "doc": "SQLConfig configures [NewSQL]: the database the queue lives in, its table,\nwhich clock stamps its instants, and what delivery discipline it enforces.\nTransactor, Dialect and Table are required, and Policy's zero value is\nrefused as it is for every broker.\n",
-      "file": "internal/service/data/queue/sql_config.go",
+      "file": "internal/service/data/queue/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -78269,7 +78269,7 @@
         }
       ],
       "doc": "Config parameterises every constructor in this package: the caller's pool,\nthe dialect whose grammar the SDK will speak to it, the pool policy applied\nat construction, the time source every budget is read from, and the health\nprobe's budget.\n\nIt is passed BY VALUE on purpose. A constructor must not be able to observe\na later mutation of the caller's struct, and the copy happens once per port\nrather than once per statement.\n",
-      "file": "internal/service/data/sql/config.go",
+      "file": "internal/service/data/sql/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -78393,7 +78393,7 @@
         }
       ],
       "doc": "MigrateConfig parameterises [NewMigrator].\n\nIt carries no directory, no file pattern and no naming convention, and the\nSDK ships no example migration tree. Migrations are values the consumer\nbuilds, because the moment the SDK reads a directory it has invented a\nconvention every consumer must adopt (ADR 0055 §D8).\n",
-      "file": "internal/service/data/sql/migrate_config.go",
+      "file": "internal/service/data/sql/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -78475,7 +78475,7 @@
         }
       ],
       "doc": "PoolConfig is the connection-pool policy. It is applied to the caller's\n*sql.DB at construction, and it is a POLICY rather than a set of hints: a\nfield whose zero value database/sql would read as a decision nobody made is\neither clamped or refused, never passed through (ADR 0031).\n",
-      "file": "internal/service/data/sql/config.go",
+      "file": "internal/service/data/sql/decl_gen.go",
       "layer": "service",
       "family": "data"
     },
@@ -78499,7 +78499,7 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Withheld carries a driver's error for errors.Is and errors.As while keeping\nits text out of Error().\n\nA driver describes the row a statement touched. PostgreSQL's unique\nviolation says \"Key (doc_key)=(…) already exists\" and MySQL's says\n\"Duplicate entry '…'\": a document store's key is routinely an e-mail\naddress, and a queue's row holds the caller's payload. So a package whose\nrows hold a caller's data joins the driver's error through Withheld, beside\na verdict of its own — errors.Join, never errs.Wrap, so the verdict's code\nstays the origin (CLAUDE.md rule 6) — and no rendering of the joined error\nquotes a row (ADR 0139 §D7, ADR 0151 §D6). The cause stays one errors.As\naway for a caller who knows its driver, and what it may log.\n\nError() says only what names no row: a context's end, in the context's own\nwords; otherwise the driver error's Go type, with its SQLSTATE or its result\ncode when a method offers one — a class of failure, never its subject.\n\nThe verdict stays each package's own — docstore's STATEMENT_FAILED, queue's\nQUEUE_BACKEND_FAILED — since each package's errors are its own; what they\nshare is only this rendering of somebody else's.\n",
-      "file": "internal/service/data/sql/withheld.go",
+      "file": "internal/service/data/sql/decl_gen.go",
       "layer": "service",
       "family": "data"
     },

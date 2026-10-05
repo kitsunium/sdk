@@ -38,6 +38,7 @@ configurations and the file engine's `StatsValue` (ADR 0074).
 | File | Surface |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `decl_gen.go` | written by kit gen from the design (ADR 0170): the declarations of `Config`, `Store`, `StatsValue`, `SQLConfig` and `SQLStore` — each struct with every field, unexported ones included. Their methods, constructors and helpers stay hand-written, in the files this document names |
 | `docstore.go` | `Store[T]`, `StatsValue`; the reads — `Get`, `List`, `Filter`, `Entries`, `Lookup`, `Find`, `Stats`; `decode` → `decodeAs` (shared), `jsonCause` (a decoding failure described without a byte of the document) |
 | `open.go` | `Open[T](Config[T], ...IndexSpec[T])`; `newStore`; `open` — load, rebuild, THEN fold, so a refused open writes no data |
 | `config.go` | `Config[T]` (`Key`, `FS`, `Clock`, `Held`, `Path`, `FoldAt`, `Versions`), `DefaultFoldAt`; the refusals (`StoreMisconfigured`), `validateIndexes` — over `core/data/docstore.IndexSpec` — and `validateVersions` (shared) |

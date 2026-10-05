@@ -154,3 +154,7 @@ and fails if a buffer comes out non-empty, narrower than `scratchInitialCap` or
 wider than the retain ceiling: a reset that stopped truncating shows up as
 `len=11` after the mid-record failure, and an unbounded pool as a 532 480-byte
 buffer handed out again.
+
+## Declarations
+
+`decl_gen.go` is written by kit gen from the design (ADR 0170): the declaration of `Tag`. Their methods, constructors and helpers stay hand-written, in the files this document names.

@@ -1522,7 +1522,8 @@ packages:
       coresql: github.com/kitsunium/sdk/internal/core/data/sql
     path: github.com/kitsunium/sdk/internal/service/data/queue
     types:
-      - doc: |-
+      - decl: true
+        doc: |-
           ConsumerConfig configures [Consume]: what to run, how many of it, how often
           to look, and the one thing about the handler the SDK cannot check for
           itself.
@@ -1604,7 +1605,8 @@ packages:
                 where somebody promised this.
               name: HandlerIsIdempotent
               type: bool
-      - doc: |-
+      - decl: true
+        doc: |-
           FileConfig configures [NewFile]: which directory holds the queue, which
           clock reads its deadlines, and what delivery discipline it enforces.
 
@@ -1650,7 +1652,8 @@ packages:
                 core/data/queue.PolicyValue.
               name: Policy
               type: corequeue.PolicyValue
-      - doc: |-
+      - decl: true
+        doc: |-
           MemoryConfig configures [NewMemory]: which clock reads its deadlines, and
           what delivery discipline it enforces.
 
@@ -1674,7 +1677,8 @@ packages:
                 core/data/queue.PolicyValue.
               name: Policy
               type: corequeue.PolicyValue
-      - doc: |-
+      - decl: true
+        doc: |-
           SQLConfig configures [NewSQL]: the database the queue lives in, its table,
           which clock stamps its instants, and what delivery discipline it enforces.
           Transactor, Dialect and Table are required, and Policy's zero value is
