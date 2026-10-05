@@ -12,6 +12,9 @@ project:
   type: library
   module: github.com/kitsunium/sdk
   workspace: go.work
+  # The kit this design is written for (design v2, project.kit): the daemon
+  # refuses the project under any other kit, by name, and `make regen`
+  # (scripts/regen.sh) refuses to run one. No part of the design's digest.
   kit:
     version: v0.1.0-rc.4
   surface: closed

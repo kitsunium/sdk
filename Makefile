@@ -1,4 +1,4 @@
-.PHONY: help build test test-framework lint guard bench cover docs docs-check docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare ci-gates-check release-scripts-check pre-commit-check lint-check lint-ktn-check ci-scripts-check vuln-install vuln-check doclinks api api-check
+.PHONY: help build test test-framework lint guard bench cover docs docs-check docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare ci-gates-check release-scripts-check pre-commit-check lint-check lint-ktn-check ci-scripts-check vuln-install vuln-check doclinks api api-check regen
 
 # `make` with no args prints the help. No aliases — every target on its own.
 .DEFAULT_GOAL := help
@@ -36,6 +36,7 @@ help: ## Print this help (default goal).
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "release-dry-run"  "$(DIM)compute-bumps + cut-tags in dry-run (see ADR 0007)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "docs-readme"  "$(DIM)regenerate every pkg/v1/*/README.md from its doc comment (see ADR 0008)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "api"          "$(DIM)write docs/api — every exported symbol, read from the code on the 12 cells — then error-codes and gazelle$(RST)"
+	@printf "  $(GREEN)%-7s$(RST)  %s\n" "regen"        "$(DIM)delete every kit-generated file, kit gen + make api, require zero diff (local: needs the pinned kit)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "profile"      "$(DIM)capture cpu+mem+block+mutex pprof for codec bench (WAVE=<slug>)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "benchstat-diff" "$(DIM)compare two captured waves with mannwhitney p-values (BEFORE / AFTER)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "sdk-bench"        "$(DIM)run every internal/kernel/**/*_bench_test.go → .bench.out (COUNT=N)$(RST)"
@@ -238,6 +239,20 @@ api:
 # runs in `lint-check`, so CI's required job runs it.
 api-check:
 	cd tools/genindex && GOWORK=off go run . -check-api -markers -digests -repo-root $(CURDIR) -platforms $(CURDIR)/scripts/ci/platforms.sh
+
+# `regen` rebuilds every file kit generates from design/, from nothing, and
+# proves the design alone writes them back (scripts/regen.sh): it refuses
+# unless `kit` is on PATH at the version design/sdk.yaml pins
+# (project.kit.version), the tree has no tracked change and no untracked file
+# carries the header; deletes exactly the tracked files whose first line is
+# kit's generated header — never by name, since `*_gen*.go` also matches
+# hand-written files — and clears kit's section of
+# tools/alloc-lane-targets.txt; runs `kit gen`, then
+# `make api`; and fails on any `git diff` or any file it adds untracked.
+# Local only: it needs kit, which is not public, so it is neither in
+# `lint-check` nor a CI gate — `api-check` is CI's hold on the same files.
+regen:
+	bash scripts/regen.sh
 
 # `guard` runs tools/sdkguard over the SDK's own tree, in two passes.
 #
