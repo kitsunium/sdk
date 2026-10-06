@@ -55,14 +55,13 @@ only producer of — splitting them left three files nothing else referenced.
 | File | Holds |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
-| `clock.go` | `Clock` + `Timed` |
-| `waiter.go` | `Waiter` + `requirePositivePeriod` (the shared refusal) |
-| `timer.go` / `ticker.go` | the `Timer` / `Ticker` contracts |
+| `decl_gen.go` | written by kit gen from the design (ADR 0168): the `Clock`, `Timed`, `Waiter`, `Timer` and `Ticker` contracts, the `ManualClock` struct with every field, `NewManualClock`, `ManualClock.NewTimer` and `ManualClock.Sleep` as one call of their unexported bodies, and `ManualClock`'s assertions against `Clock`, `Waiter` and `Timed` |
+| `waiter.go` | `requirePositivePeriod` (the shared refusal) |
 | `system.go` | `systemClock` + the `System` singleton, and the `*time.Timer` / `*time.Ticker` adapters |
-| `manual.go` | `ManualClock` and every method on it |
+| `manual.go` | the bodies `newManualClock`, `newTimer` and `sleep`, and every other `ManualClock` method whole — `Now`, `Since`, `After`, `NewTicker`, `Advance`, `Set`, `Pending` and `BlockUntil` keep their bodies because theirs do not inline (a lock and its `defer`): `ManualClock` is reached through `Clock` and `Timed`, where a wrapper over a body that does not inline would be a call more (ADR 0168) |
 | `manual_wait.go` | `manualWait` + `fireWait` / `drainWait` / `rearmWait`, and the `maxDuration` bound the rearm stays under |
 | `manual_timer.go` / `manual_ticker.go` | the handles `ManualClock` hands out |
-| `clock_compliance.go` | every compile-time interface assertion |
+| `clock_compliance.go` | every compile-time interface assertion of an unexported type (`ManualClock`'s are the design's, in `decl_gen.go`) |
 
 ## Why `Clock` was NOT extended
 

@@ -92,6 +92,7 @@ packages:
           It recognises the SHAPE, as the toolchain's own pattern does: a stamp whose
           fourteen digits are not a real instant still makes a pseudo-version, and
           [PseudoVersionTime] is what reports that the time does not read.
+        impl: isPseudoVersion
         in:
           - name: v
             type: string
@@ -125,6 +126,7 @@ packages:
       - doc: |-
           IsValid reports whether v is a version: SemVer 2.0.0 with a leading "v",
           or one of the shorthands "vMAJOR" and "vMAJOR.MINOR".
+        impl: isValid
         in:
           - name: v
             type: string
@@ -150,6 +152,7 @@ packages:
           Prerelease returns the pre-release part of v with its leading hyphen —
           "-rc.1" for "v1.0.0-rc.1+build" — or "" when v has none: a release, a
           shorthand, or a string that is not a version, which [IsValid] tells apart.
+        impl: prerelease
         in:
           - name: v
             type: string
