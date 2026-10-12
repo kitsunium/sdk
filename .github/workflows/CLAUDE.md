@@ -29,7 +29,7 @@ Bazel, for the reason stated under Do NOT below: Bazel here builds for the host
 only, so a platform it cannot reach is covered by the toolchain that can, or by
 nothing.
 
-Job `bazel` on `ubuntu-latest`, timeout 120 min. Steps in order:
+Job `bazel` on `ubuntu-latest`, timeout 120 min, `needs: shell-gates` with `if: ${{ !cancelled() }}`. Its first step fails unless `needs.shell-gates.result` is `success`: shell-gates is not a required check, and `needs:` alone would make its failure SKIP `bazel`, which GitHub counts as a passing required check — so this is how the gates of shell-gates block a merge (#236). `scripts/ci-gates-check.sh` asserts all three pieces. Steps in order:
 
 1. `bazel-contrib/setup-bazel@…` — caches `bazelisk`, disk cache keyed on `.bazelrc`+`.bazelversion`+`MODULE.bazel`+all `go.mod`/`go.sum`, plus the repository cache. `setup-go` reads the SDK module's `go.mod` at the root and caches on every `go.sum` — the SDK module requires nothing and has none (ADR 0162).
 2. **Drift check** — `bazel mod tidy && bazel run //:gazelle`, then `git diff --exit-code` AND a check for untracked `BUILD.bazel`/`go.mod`/`go.sum`. Catches both modifications and new files (post-audit finding #11).
@@ -45,7 +45,7 @@ Job `bazel` on `ubuntu-latest`, timeout 120 min. Steps in order:
    Then **package docs, BENCH.md presence and error-code drift** — `check-pkg-docs.sh`, `check-bench-md.sh` and `check-error-codes-drift.sh`, which only the opt-in local pre-commit hook ran until it was removed (ADR 0153).
 10. **Layer invariant** — `scripts/check-layer-deps.sh` asserts seven `bazel query` expressions empty (ADR 0068; the last three are the framework's, ADR 0147).
    Then **platforms invariant** — `scripts/pre-commit/check-platforms.sh` fails when `scripts/ci/platforms.sh`, the table tools/genindex judges doc links and writes `docs/api` on, stops naming exactly the cells of the `cross-build` matrix below, in its order. The matrix has to be written in the workflow, so the cells are written twice and this holds the two equal.
-11. **Lint gate, in two halves.** `make lint-check` (`gofumpt -l` + `make guard` + `make doclinks`, ADR 0138, + `make api-check`: `docs/api` regenerated from the code on every cell and compared byte for byte, the code's surface held to the markers of the pins kit writes from `design/` and every generated file to its design file's bytes — ADR 0163) runs unconditionally, and `make lint-ktn-check` (`ktn-linter`, after the vulnerability gate) runs only when a `KTN_LINTER_TOKEN` secret exists. Those three are the checks of `make lint` that no lane ran until #236; the others are steps 2, 7, 8, 9 and 10 above, so this adds a CLASS of analysis rather than repeating one. The split is a measurement, not taste: `kodflow/ktn-linter` is private and a workflow token is scoped to the repository that issued it, so `gh release download v1.11.2 --repo kodflow/ktn-linter` answered `release not found` under `secrets.GITHUB_TOKEN` on this very lane, while the same command run by a credentialed account downloads the asset. `gh` and not `curl`, because the signed redirect drops the Authorization header and a `curl` 404 cannot tell "asset absent" from "not authorised". **`lint-ktn-check` is deliberately absent from `GATES`** — a step a missing secret can skip is not a gate, and the run emits a `::warning::` saying so. Add the secret and the target to `GATES` in the same commit. The pin is v1.45.4 — the build the tree is kept clean under, so the step judges the tree with the rules it was checked against, not with a build 34 releases older — and the install asserts the binary matches it, because 1.9.11 exits 0 with "No issues found" on a tree 1.11.2 rejects. These steps are in THIS job, not in `shell-gates`, because `bazel` and `post-commit` are the only required checks on `main` and a sibling job would report without blocking.
+11. **Lint gate, in two halves.** `make lint-check` (`gofumpt -l` + `make guard` + `make doclinks`, ADR 0138, + `make api-check`: `docs/api` regenerated from the code on every cell and compared byte for byte, the code's surface held to the markers of the pins kit writes from `design/` and every generated file to its design file's bytes — ADR 0163) runs unconditionally, and `make lint-ktn-check` (`ktn-linter`, after the vulnerability gate) runs only when a `KTN_LINTER_TOKEN` secret exists. Those three are the checks of `make lint` that no lane ran until #236; the others are steps 2, 7, 8, 9 and 10 above, so this adds a CLASS of analysis rather than repeating one. The split is a measurement, not taste: `kodflow/ktn-linter` is private and a workflow token is scoped to the repository that issued it, so `gh release download v1.11.2 --repo kodflow/ktn-linter` answered `release not found` under `secrets.GITHUB_TOKEN` on this very lane. **The linter is built from source, never downloaded**: a release binary is stamped with the vendor's licence anchor and demands a licence on the runner, while a source build leaves the anchor empty — the maintainers' mode upstream documents. The Makefile pins the commit (`KTN_LINTER_COMMIT`, the commit of tag v1.45.4 — a commit because a tag can move) and the version stamped into `main.Version`; one step fetches exactly that commit into `$RUNNER_TEMP` with the token as a one-invocation HTTP header, and a second step with NO credential in its environment runs `make lint-ktn-install`, which refuses any other commit or a dirty checkout and asserts the built binary reports the pinned version (1.9.11 exits 0 with "No issues found" on a tree 1.11.2 rejects, so presence proves nothing). A fork or Dependabot pull request receives no secret and takes the same skip branch as an unset secret. **`lint-ktn-check` is deliberately absent from `GATES`** — a step a missing secret can skip is not a gate, and the run emits a `::warning::` saying so; as measured on 2026-10-12, `gh secret list` shows no `KTN_LINTER_TOKEN`. Add the secret and the target to `GATES` in the same commit. These steps are in THIS job because `bazel` and `post-commit` are the only required checks on `main`.
 12. **Vulnerability gate** — `make vuln-install` then `make vuln-check`: `govulncheck` in source mode in every module of the census (`scripts/ci/go-modules.sh`), `GOWORK=off`, one at a time. Fails on a REACHABLE vulnerable symbol (govulncheck's exit 3) and on a scan that did not complete — "no packages matched" included, from any module: the root is the SDK module since ADR 0162, no longer the empty anchor ADR 0157 §5 excused; an imported-but-uncalled vulnerable package is reported and passes. Blocking on purpose, and in THIS job because it is required: the SDK's requires are every consumer's floor, so a reachable vulnerability is ours to fix before anything else merges (ADR 0136, #210). The scanner version is pinned once, in the Makefile, and `vuln-check.sh` refuses any other.
 13. `bazel coverage --combined_report=lcov //...` → uploaded as `coverage-${{ github.run_number }}` artifact (per-run unique name so concurrent runs don't dedupe, post-audit finding #28). Note coverage runs under the default (race-on) config, so it does **not** reflect the step-6 tests.
 
@@ -55,7 +55,9 @@ Concurrency: `${{ github.workflow }}-${{ github.ref }}` with cancel-in-progress.
 
 `ubuntu-latest`, timeout 10 min, `checkout` only — no Bazel, no Go. A sibling
 job so a broken release script is reported in the first minute rather than
-behind the 120-minute Bazel lane.
+behind the 120-minute Bazel lane. It is not a required check: the `bazel` job
+needs it and fails at once when it did not succeed, which is what makes its
+gates block a merge.
 
 1. **install bats-core** — `apt-get install -y bats`. bats is NOT vendored and
    `release-scripts-test.sh` deliberately does not fetch it: a gate that clones
@@ -72,9 +74,15 @@ behind the 120-minute Bazel lane.
    `bash scripts/…` checks of steps 7–10 that `make lint` runs too) is missing,
    is no `run:` step of the `bazel` job, or is no line of the `lint` recipe: a
    deleted step left the guard in `make lint`, gating nothing, and was the one
-   shape the script did not see. `ci-gates-check` is in its own manifest, which
-   catches every gate but itself: nothing deleted can report its own deletion,
-   and `main` currently requires only the `bazel` check (ADR 0088 §Deferred).
+   shape the script did not see. It fails, third, when a gate or guard runs only
+   in a job whose failure does not fail the required `bazel` check — not
+   needed by `bazel`, needed but its result never checked, or needed by a
+   `bazel` with no `!cancelled()`/`always()` and therefore skipped, which
+   passes (`NOT BLOCKING`, #236); `docs-check` is its one `ADVISORY` entry, run
+   by the `docs-site` sibling and reported as such. `ci-gates-check` is in its
+   own manifest, which catches every gate but itself: nothing deleted can
+   report its own deletion (ADR 0088 §Deferred) — but now that `bazel` needs
+   this job, deleting its step still leaves the others it runs blocking.
 3. **Release script regression** — `make release-scripts-check` →
    `scripts/release/release-scripts-test.sh`, which runs `scripts/release/*.bats`.
    That suite existed from ADR 0085 and NOTHING executed it until this job
@@ -88,11 +96,11 @@ behind the 120-minute Bazel lane.
 5. **Pre-commit guard regression** — `make pre-commit-check`.
 
 These four, plus `make test-framework`, `make lint-check`, `make vuln-install`,
-`make vuln-check` and `make lint-ktn-check` in the `bazel` job and `make docs-check` in the
+`make vuln-check`, `make lint-ktn-install` and `make lint-ktn-check` in the `bazel` job and `make docs-check` in the
 `docs-site` job, are the only `make` invocations in this workflow, and that is deliberate:
 `ci-gates-check` asserts the Makefile↔CI link by target NAME, which only works
 if CI goes through the target. The two lint targets are not in THIS job because
-they need a Go toolchain and a downloaded binary — the two things `shell-gates`
+they need a Go toolchain and a built binary — the two things `shell-gates`
 exists to do without. Adding a gate means editing `GATES` **and** this
 file, plus the Makefile's `.PHONY` — all three, or the check fails. That is not
 a claim: adding a gate to `GATES` before wiring its step produced

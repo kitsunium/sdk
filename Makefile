@@ -1,4 +1,4 @@
-.PHONY: help build test test-framework lint guard bench cover docs docs-check docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare ci-gates-check release-scripts-check pre-commit-check lint-check lint-ktn-check ci-scripts-check vuln-install vuln-check doclinks api api-check regen from-zero kit-coverage
+.PHONY: help build test test-framework lint guard bench cover docs docs-check docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare ci-gates-check release-scripts-check pre-commit-check lint-check lint-ktn-check lint-ktn-install ci-scripts-check vuln-install vuln-check doclinks api api-check regen from-zero kit-coverage
 
 # `make` with no args prints the help. No aliases — every target on its own.
 .DEFAULT_GOAL := help
@@ -166,9 +166,9 @@ lint:
 # sees the Makefile↔CI link through a target name.
 #
 # The split is not cosmetic. `gofumpt` is a public Go module and `sdkguard` is
-# in this repository, so `lint-check` needs nothing but the toolchain. The
-# ktn-linter release is in a PRIVATE repository, and a workflow token is scoped
-# to the repository that issues it — measured on this lane, not assumed:
+# in this repository, so `lint-check` needs nothing but the toolchain.
+# kodflow/ktn-linter is a PRIVATE repository, and a workflow token is scoped to
+# the repository that issues it — measured on this lane, not assumed:
 #
 #   gh release download v1.11.2 --repo kodflow/ktn-linter  ->  release not found
 #
@@ -201,6 +201,39 @@ lint-check:
 # style-only test rules (TEST-TABLE/TEST-CONTEXT) that block no CI lane.
 lint-ktn-check:
 	ktn-linter lint --skip-phases=tests ./...
+
+# ktn-linter is BUILT FROM SOURCE at a pinned commit, never downloaded from a
+# release. A release binary is stamped at link time with the vendor's licence
+# anchor (kodflow/ktn-linter cmd/ktn-linter/BUILD.bazel, x_defs
+# STABLE_KTN_ANCHOR) and then demands a licence on the machine that runs it — a
+# CI runner has none. A source build leaves that anchor empty, which upstream
+# documents as the maintainers' mode ("repository access IS the entitlement",
+# cmd/ktn-linter/cmd/vendor_key.go), so its licence gate is inert by
+# construction. The commit is pinned, not the tag: a tag can be moved, a commit
+# cannot, and a lane following `main` would change its verdict with no commit
+# of this repository moving (#223). KTN_LINTER_COMMIT is the commit tag v1.45.4
+# points at; KTN_LINTER_VERSION is stamped into `main.Version` (for a main
+# package `-X` takes `main.`, not the import path — measured, the import path
+# leaves `--version` at `dev`).
+#
+# The target builds an existing checkout and fetches nothing, so the credential
+# that reads the private repository never reaches `go build` or the binary:
+#
+#   gh repo clone kodflow/ktn-linter /tmp/ktn-src
+#   git -C /tmp/ktn-src checkout --detach $(KTN_LINTER_COMMIT)
+#   make lint-ktn-install KTN_LINTER_SRC=/tmp/ktn-src
+#
+# It refuses a checkout at any other commit, or with any local change, because
+# either would install a different linter under the pinned version string.
+KTN_LINTER_VERSION := 1.45.4
+KTN_LINTER_COMMIT := 59856d30900ceb3b5976d6713b052313b522185b
+
+lint-ktn-install:
+	@test -n "$(KTN_LINTER_SRC)" || { echo "lint-ktn-install: set KTN_LINTER_SRC to a kodflow/ktn-linter checkout at $(KTN_LINTER_COMMIT)"; exit 2; }
+	@got="$$(git -C "$(KTN_LINTER_SRC)" rev-parse HEAD)" && [ "$$got" = "$(KTN_LINTER_COMMIT)" ] || { echo "lint-ktn-install: $(KTN_LINTER_SRC) is at $${got:-nothing}, not the pinned $(KTN_LINTER_COMMIT)"; exit 1; }
+	@[ -z "$$(git -C "$(KTN_LINTER_SRC)" status --porcelain)" ] || { echo "lint-ktn-install: $(KTN_LINTER_SRC) has local changes; refusing to build them as $(KTN_LINTER_VERSION)"; exit 1; }
+	cd "$(KTN_LINTER_SRC)" && go build -trimpath -ldflags "-X main.Version=$(KTN_LINTER_VERSION)" -o "$$(go env GOPATH)/bin/ktn-linter" ./cmd/ktn-linter
+	@v="$$("$$(go env GOPATH)/bin/ktn-linter" --version)"; case "$$v" in *" $(KTN_LINTER_VERSION)") echo "ktn-linter built from $(KTN_LINTER_COMMIT): $$v" ;; *) echo "lint-ktn-install: built binary reports '$$v', not $(KTN_LINTER_VERSION)"; exit 1 ;; esac
 
 # `doclinks` fails on every same-package doc link in the repository that names
 # no symbol its package declares — go/doc renders one as literal bracketed text

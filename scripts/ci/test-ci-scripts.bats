@@ -431,3 +431,89 @@ drop_line() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"MISSING GUARD: 'scripts/pre-commit/check-core-symmetry.sh'"* ]]
 }
+
+# ── ci-gates-check.sh: a gate must block the merge (#236) ───────────────────
+
+# shell-gates is not a required check. Its gates block only because the
+# required `bazel` job needs it, checks its result, and is not skipped when it
+# fails — `needs:` alone turns a red shell-gates into a SKIPPED bazel, which
+# GitHub counts as passing. Each test removes one of the three pieces.
+@test "gates: the gates of shell-gates block through the required bazel job" {
+  body="$(job_body "$REPO_ROOT/.github/workflows/bazel-ci.yml" bazel)"
+  [[ "$body" == *"    needs: shell-gates"* ]]
+  [[ "$body" == *'    if: ${{ !cancelled() }}'* ]]
+  [[ "$body" == *'needs.shell-gates.result'* ]]
+}
+
+@test "gates: a gate in a job the required job does not need is NOT BLOCKING" {
+  gates_fixture
+  drop_line .github/workflows/bazel-ci.yml "    needs: shell-gates"
+
+  run bash scripts/ci-gates-check.sh
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"NOT BLOCKING: 'ci-gates-check' runs only in job 'shell-gates'"* ]]
+  [[ "$output" == *"does not list it under needs:"* ]]
+}
+
+@test "gates: a needed job whose result the required job ignores is NOT BLOCKING" {
+  gates_fixture
+  drop_line .github/workflows/bazel-ci.yml 'needs.shell-gates.result'
+
+  run bash scripts/ci-gates-check.sh
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"NOT BLOCKING: 'release-scripts-check'"* ]]
+  [[ "$output" == *"never checks needs.shell-gates.result"* ]]
+}
+
+@test "gates: a result named only in a comment of the required job checks nothing" {
+  gates_fixture
+  sed -e 's/SHELL_GATES_RESULT: ${{ needs.shell-gates.result }}/SHELL_GATES_RESULT: success  # needs.shell-gates.result/' \
+    .github/workflows/bazel-ci.yml >wf.tmp
+  sed -e 's/^\( *\)SHELL_GATES_RESULT: success  # \(.*\)$/\1# \2\n\1SHELL_GATES_RESULT: success/' wf.tmp >.github/workflows/bazel-ci.yml
+
+  run bash scripts/ci-gates-check.sh
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"never checks needs.shell-gates.result"* ]]
+}
+
+@test "gates: a required job skipped when a needed job fails is NOT BLOCKING" {
+  gates_fixture
+  drop_line .github/workflows/bazel-ci.yml '    if: ${{ !cancelled() }}'
+
+  run bash scripts/ci-gates-check.sh
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"NOT BLOCKING: 'ci-gates-check'"* ]]
+  [[ "$output" == *"a skipped required check passes"* ]]
+}
+
+@test "gates: a guard moved out of the required job is NOT BLOCKING" {
+  gates_fixture
+  drop_line .github/workflows/bazel-ci.yml "run: bash scripts/pre-commit/check-core-symmetry.sh"
+  awk '{ print } /^  docs-site:/ { in_docs = 1 } in_docs && /^    steps:/ { print "      - run: bash scripts/pre-commit/check-core-symmetry.sh"; in_docs = 0 }' \
+    .github/workflows/bazel-ci.yml >wf.tmp
+  mv wf.tmp .github/workflows/bazel-ci.yml
+
+  run bash scripts/ci-gates-check.sh
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"NOT BLOCKING: 'scripts/pre-commit/check-core-symmetry.sh' runs only in job 'docs-site'"* ]]
+}
+
+@test "gates: an advisory gate is reported, not failed, and only when listed" {
+  gates_fixture
+
+  run bash scripts/ci-gates-check.sh
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"advisory: 'docs-check' runs in docs-site"* ]]
+
+  drop_line scripts/ci-gates-check.sh "  docs-check"
+  # Keep docs-check a gate, drop it from ADVISORY only.
+  sed -e 's/^  api-check$/  api-check\n  docs-check/' scripts/ci-gates-check.sh >s.tmp && mv s.tmp scripts/ci-gates-check.sh
+  run bash scripts/ci-gates-check.sh
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"NOT BLOCKING: 'docs-check' runs only in job 'docs-site'"* ]]
+}

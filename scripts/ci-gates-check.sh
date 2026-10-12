@@ -24,6 +24,14 @@
 # written `main` requires only the `bazel` check, so it is currently nobody's.
 # Recorded under ADR 0088 Deferred rather than overstated here.
 #
+# A third way a gate stops being one is that it runs and blocks nothing: a step
+# in a job no required check depends on reports red and the merge goes ahead
+# (#236). So every gate and guard must run in REQUIRED_JOB, or in a job that
+# REQUIRED_JOB `needs:`, whose result it checks, and that it does not skip on
+# failure — `needs:` alone makes a failure SKIP the required job, and a skipped
+# required check counts as passing. A gate that is deliberately advisory is
+# listed in ADVISORY with the reason, and reported as such instead of failing.
+#
 # Scope: this asserts the Makefile↔CI link for the targets in GATES, and the
 # same link for the guards in GUARDS — the shell checks `make lint` runs and
 # the `bazel` job invokes directly as `bash scripts/…` steps. A renamed guard
@@ -77,6 +85,20 @@ GATES=(
   # The docs portal built from docs/api: its ⌘K index and API sections equal
   # docs/api, and every link resolves — the `docs-site` job, a sibling of the
   # required ones.
+  docs-check
+)
+
+# The job branch protection requires, by its check name. Measured with
+# `gh api repos/kitsunium/sdk/branches/main/protection` (contexts: ["bazel"]);
+# the ruleset requires `post-commit`, a workflow that runs no gate of this file.
+REQUIRED_JOB="bazel"
+
+# Gates CI runs in a job that blocks nothing, on purpose. Each is reported, not
+# failed; anything else outside a blocking job fails as NOT BLOCKING.
+ADVISORY=(
+  # docs-site: the portal build reads docs/api, which `make api-check` holds to
+  # the code inside the required job; the deploy runs the same check over every
+  # release before it publishes.
   docs-check
 )
 
@@ -142,8 +164,19 @@ fi
 # Anything outside a run: — step names, `name:` prose, the long justification
 # comments this repository writes above each gate — is not a command and must
 # not be able to satisfy enforcement.
-ci_run_commands="$(
+# Each line is `<job id><TAB><command>`; the job is the two-space key under
+# `jobs:` the run: belongs to.
+ci_job_commands="$(
   awk '
+    /^jobs:/ { in_jobs = 1; next }
+    /^[^[:space:]#]/ { in_jobs = 0 }
+    in_jobs && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ {
+      job = $0
+      sub(/^  /, "", job)
+      sub(/:.*/, "", job)
+      in_run = 0
+      next
+    }
     {
       line = $0
       indent = match(line, /[^ ]/) - 1
@@ -154,7 +187,7 @@ ci_run_commands="$(
         if (indent > run_indent) {
           body = line
           sub(/^[[:space:]]+/, "", body)
-          if (body !~ /^#/) { print body }
+          if (body !~ /^#/) { print job "\t" body }
           next
         }
         in_run = 0
@@ -166,16 +199,96 @@ ci_run_commands="$(
         run_indent = indent
         in_run = 1
         # `run: |` and `run: >` carry the command in the block below, not here.
-        if (value != "" && value !~ /^[|>]/) { print value }
+        if (value != "" && value !~ /^[|>]/) { print job "\t" value }
       }
     }
   ' "$WORKFLOW"
 )"
+ci_run_commands="$(cut -f2- <<<"$ci_job_commands")"
 
 if [ -z "${ci_run_commands//[[:space:]]/}" ]; then
   echo "ci-gates-check: $WORKFLOW declares no run: commands — has the layout changed?"
   exit 1
 fi
+
+# job_body <job> — the lines of one job of the workflow, its key excluded.
+job_body() {
+  awk -v job="  $1:" '
+    $0 == job { grab = 1; next }
+    grab && /^  [A-Za-z0-9_-]+:/ { exit }
+    grab && /^[^[:space:]#]/ { exit }
+    grab { print }
+  ' "$WORKFLOW"
+}
+
+required_body="$(job_body "$REQUIRED_JOB")"
+if [ -z "${required_body//[[:space:]]/}" ]; then
+  echo "ci-gates-check: $WORKFLOW has no '$REQUIRED_JOB' job — the required check runs nothing"
+  exit 1
+fi
+
+# The jobs REQUIRED_JOB names in its job-level `needs:`, one per line — the
+# scalar form and the flow-sequence form; a block sequence is refused below
+# rather than misread as none.
+required_needs="$(
+  awk '
+    /^    needs:/ {
+      v = $0
+      sub(/^    needs:[[:space:]]*/, "", v)
+      gsub(/[][,]/, " ", v)
+      n = split(v, a, /[[:space:]]+/)
+      for (i = 1; i <= n; i++) if (a[i] != "") print a[i]
+    }
+  ' <<<"$required_body"
+)"
+required_if="$(grep -E '^    if:' <<<"$required_body" || true)"
+# Its commands and keys without comment lines: a comment naming
+# needs.<job>.result checks nothing.
+required_code="$(grep -vE '^[[:space:]]*#' <<<"$required_body" || true)"
+
+# blocking <job> — whether a red step in <job> fails REQUIRED_JOB's check.
+blocking() {
+  [ "$1" = "$REQUIRED_JOB" ] && return 0
+  grep -qxF -- "$1" <<<"$required_needs" || return 1
+  grep -qF -- "needs.$1.result" <<<"$required_code" || return 1
+  grep -qE '!cancelled\(\)|always\(\)' <<<"$required_if" || return 1
+}
+
+# why_not_blocking <job> — the missing piece, for the message.
+why_not_blocking() {
+  if ! grep -qxF -- "$1" <<<"$required_needs"; then
+    echo "'$REQUIRED_JOB' does not list it under needs:"
+  elif ! grep -qF -- "needs.$1.result" <<<"$required_code"; then
+    echo "'$REQUIRED_JOB' never checks needs.$1.result, so its failure is ignored"
+  else
+    echo "'$REQUIRED_JOB' has no job-level if: !cancelled() or always(), so a failure of $1 SKIPS it, and a skipped required check passes"
+  fi
+}
+
+# jobs_running <regex> — every job holding a run: command that matches.
+jobs_running() {
+  awk -F'\t' -v re="$1" '$2 ~ re { print $1 }' <<<"$ci_job_commands" | sort -u
+}
+
+# check_blocking <label> <regex> — fail unless at least one job running the
+# command blocks the merge; an ADVISORY gate is reported instead.
+check_blocking() {
+  local label="$1" re="$2" job jobs advisory=0 a
+  jobs="$(jobs_running "$re")"
+  [ -n "$jobs" ] || return 0
+  while IFS= read -r job; do
+    blocking "$job" && return 0
+  done <<<"$jobs"
+  for a in "${ADVISORY[@]}"; do [ "$a" = "$label" ] && advisory=1; done
+  if [ "$advisory" -eq 1 ]; then
+    note "advisory: '$label' runs in $(tr '\n' ' ' <<<"$jobs")— a job no required check depends on, as ADVISORY declares"
+    return 0
+  fi
+  job="$(head -n1 <<<"$jobs")"
+  echo "NOT BLOCKING: '$label' runs only in job '$job', and a failure there does not fail the required '$REQUIRED_JOB' check: $(why_not_blocking "$job")"
+  note "make '$REQUIRED_JOB' need the job, check its result and run when it fails — or list '$label' in ADVISORY in $0, saying why"
+  fail=1
+}
 
 # recipe <target> — the commands of one Makefile target's recipe: its
 # tab-indented lines up to the next rule, comment-only lines dropped, as for
@@ -268,6 +381,15 @@ for gate in "${GATES[@]}"; do
     note "a gate CI does not run is not a gate — add the step, or remove it from GATES in $0"
     note "comments and echoed text do not count; it must be a run: command, or a \$(MAKE) line of a gate CI runs"
     fail=1
+    continue
+  fi
+
+  # Where it runs: its own step's job, or the job of the listed gate whose
+  # recipe runs it.
+  if runs_directly "$gate"; then
+    check_blocking "$gate" "(^|[;&|(][[:space:]]*)make ${gate}([[:space:]]|\$)"
+  else
+    check_blocking "$gate" "(^|[;&|(][[:space:]]*)make $(runs_through "$gate")([[:space:]]|\$)"
   fi
 done
 
@@ -304,6 +426,8 @@ for guard in "${GUARDS[@]}"; do
     echo "UNGATED: '${guard}' is a guard but $WORKFLOW never runs it"
     note "add the step to the bazel job, or remove it from GUARDS in $0"
     fail=1
+  else
+    check_blocking "$guard" "(^|[;&|(][[:space:]]*)bash ${guard}([[:space:]]|\$)"
   fi
   if ! grep -qE "(^|[;&|(][[:space:]]*)bash ${guard}([[:space:]]|$)" <<<"$lint_recipe"; then
     echo "NOT LINTED: '${guard}' is a guard but $MAKEFILE's lint recipe never runs it"
@@ -318,4 +442,4 @@ if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 
-printf 'All %d named gates and %d guards are enforced by %s.\n' "${#GATES[@]}" "${#GUARDS[@]}" "$WORKFLOW"
+printf 'All %d named gates and %d guards are enforced by %s, and all but the %d advisory block the required %s check.\n' "${#GATES[@]}" "${#GUARDS[@]}" "$WORKFLOW" "${#ADVISORY[@]}" "$REQUIRED_JOB"
