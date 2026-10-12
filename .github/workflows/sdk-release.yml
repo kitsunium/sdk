@@ -58,6 +58,25 @@ name: SDK Release
 #   3. once a bump HAS been computed, a run that pushes no tag FAILS. A release
 #      that publishes nothing is never a success.
 #
+# LOCKED UNTIL A MAINTAINER SAYS OTHERWISE (ADR 0170). v0.19.6 and v0.19.7 were
+# cut automatically on the day the module split was decided, and every version
+# the proxy fetches is that version for good. So nothing is cut unless the
+# repository variable RELEASE_ENABLED is exactly `true`:
+#
+#   - an automatic run (workflow_run) does not start without it — the job's
+#     `if` reads the variable, so a locked repository shows a skipped job
+#     rather than a red one;
+#   - a dispatch always runs, and asks for a DRY RUN by default (`dry_run`):
+#     both scripts run, cut-tags.sh with --dry-run, the tags it would cut are
+#     printed in the step log and the summary, and nothing is tagged, pushed or
+#     released;
+#   - a dispatch with dry_run=false while the variable is not `true` fails in
+#     its first step, naming the variable. The variable is the lock; the
+#     dispatch form cannot lift it.
+#
+# `gh variable set RELEASE_ENABLED --body true` once a dry run has printed the
+# tags that are meant; `gh variable delete RELEASE_ENABLED` locks again.
+#
 # And rule 2 is load-bearing here: a release lane where `bazel` is missing
 # silently skips the rdeps half and reports "no release". --require-bazel below
 # turns that into a refusal.
@@ -77,6 +96,11 @@ on:
         description: 'Size the whole release range: patch, minor or major (empty = the release:* labels of its merged pull requests). The way past a refused size — ADR 0135.'
         required: false
         default: ""
+      dry_run:
+        description: 'Print the tags this release would cut and publish nothing. A real cut (false) also needs the repository variable RELEASE_ENABLED=true (ADR 0170).'
+        type: boolean
+        required: false
+        default: true
 
 concurrency:
   group: sdk-release-${{ github.ref }}
@@ -91,7 +115,8 @@ jobs:
       github.repository == 'kitsunium/sdk'
       && (github.event_name == 'workflow_dispatch'
         || (github.event.workflow_run.conclusion == 'success'
-            && github.event.workflow_run.event == 'push'))
+            && github.event.workflow_run.event == 'push'
+            && vars.RELEASE_ENABLED == 'true'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -103,8 +128,25 @@ jobs:
     env:
       TARGET_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
       GOWORK: "off"
+      # 'true' on a dispatch that asked for a dry run (its default), 'false' on
+      # every other run — and an automatic one only starts when releases are
+      # enabled. A string, so a step's `if` compares it with 'true' alone.
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
+      RELEASE_ENABLED: ${{ vars.RELEASE_ENABLED }}
 
     steps:
+      - name: Refuse a cut while releases are locked
+        # First, before anything is set up: a dispatch asking for a real cut
+        # while the repository variable is not `true` stops here and names the
+        # variable. A dry run needs no permission, and an automatic run never
+        # reaches this step locked (the job's `if`).
+        if: env.DRY_RUN != 'true'
+        run: |
+          if [ "${RELEASE_ENABLED:-}" != "true" ]; then
+            echo "::error::releases are locked: the repository variable RELEASE_ENABLED is '${RELEASE_ENABLED:-}', not 'true' (ADR 0170). Dispatch with dry_run=true to see the tags, then 'gh variable set RELEASE_ENABLED --body true' to cut them."
+            exit 1
+          fi
+
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           ref: ${{ env.TARGET_SHA }}
@@ -268,6 +310,12 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             args+=(--allow-bootstrap)
           fi
+          # The dry run (a dispatch's default): cut-tags.sh computes the
+          # version and every tag, checks every go.mod it would publish, prints
+          # `DRY-RUN: would tag: …` and pushes nothing.
+          if [ "$DRY_RUN" = "true" ]; then
+            args+=(--dry-run)
+          fi
           case "${BUMP:-}" in
             "") ;;
             patch | minor | major) args+=("--bump=$BUMP") ;;
@@ -306,7 +354,7 @@ jobs:
         # question is "did the publication happen", and only its own output can
         # answer that. Missing file, empty file and a file whose first line is
         # not the SDK's vX.Y.Z are all failures; none of them is a release.
-        if: steps.compute.outputs.majors != '' && steps.cut.outputs.held != 'true'
+        if: steps.compute.outputs.majors != '' && steps.cut.outputs.held != 'true' && env.DRY_RUN != 'true'
         env:
           MAJORS: ${{ steps.compute.outputs.majors }}
         run: |
@@ -333,48 +381,28 @@ jobs:
             cat /tmp/cut.log >&2
             exit 1
           fi
-          # The tombstones of the first release are no vendor module: counted apart.
-          vendors="$(awk 'NF && NR > 1 && !/^(pkg|framework)\/v/ { n++ } END { print n + 0 }' /tmp/cut.log)"
-          tombstones="$(awk 'NF && NR > 1 && /^(pkg|framework)\/v/ { n++ } END { print n + 0 }' /tmp/cut.log)"
-          echo "::notice::published $sdk_tag, $vendors vendor tag(s) and $tombstones tombstone(s)"
+          # Every tag classified by lib/tag-format.sh's anchored shapes — the
+          # ones cut-tags.sh validated before it pushed —, never by a prefix:
+          # a prefix match read a module tag under pkg/ as a tombstone. A tag
+          # no shape accepts fails the step.
+          counts="$(bash scripts/release/release-notes.sh count /tmp/cut.log)"
+          echo "::notice::published $sdk_tag — $counts"
 
       - name: Create the GitHub release
         # ONE release, for the SDK's tag (ADR 0162) — not one per module, which
         # made eighteen for a lockstep release. The vendor tags the release cut
         # are listed in its notes, ahead of the notes GitHub generates; a vendor
-        # module that did not change is said to keep its last tag. The
-        # tombstones of the first release (pkg/vX.Y.Z, framework/vX.Y.Z — the
-        # only lines of the tag list that start with either and a `/v`) are
-        # listed apart: they are no vendor module, and no release of their own.
-        if: steps.compute.outputs.majors != '' && steps.cut.outputs.held != 'true'
+        # module that did not change is said to keep its last tag; the
+        # tombstones of the first release are listed apart. The notes are
+        # scripts/release/release-notes.sh's, which classifies each tag by the
+        # anchored shapes of lib/tag-format.sh and refuses one it does not know.
+        if: steps.compute.outputs.majors != '' && steps.cut.outputs.held != 'true' && env.DRY_RUN != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           sdk_tag="$(awk 'NF { print; exit }' /tmp/cut.log)"
-          vendor_tags="$(awk 'NF && NR > 1 && !/^(pkg|framework)\/v/' /tmp/cut.log)"
-          tombstone_tags="$(awk 'NF && NR > 1 && /^(pkg|framework)\/v/' /tmp/cut.log)"
-          {
-            echo "The SDK module \`github.com/kitsunium/sdk\` at \`$sdk_tag\`."
-            echo
-            if [ -n "$vendor_tags" ]; then
-              echo "Modules that require a vendor, tagged by this release because they changed:"
-              echo
-              while IFS= read -r t; do
-                [ -n "$t" ] && echo "- \`$t\` — \`github.com/kitsunium/sdk/${t%/v*}\`"
-              done <<<"$vendor_tags"
-            else
-              echo "No module that requires a vendor changed: each keeps its last tag."
-            fi
-            if [ -n "$tombstone_tags" ]; then
-              echo
-              echo "The modules the SDK module replaced get their last version, a go.mod that requires \`github.com/kitsunium/sdk\` \`$sdk_tag\` and holds no package, so an import of their paths resolves to the SDK module (ADR 0162):"
-              echo
-              while IFS= read -r t; do
-                [ -n "$t" ] && echo "- \`$t\` — \`github.com/kitsunium/sdk/${t%/v*}\`"
-              done <<<"$tombstone_tags"
-            fi
-          } > /tmp/release-notes.md
+          bash scripts/release/release-notes.sh notes /tmp/cut.log > /tmp/release-notes.md
           # --notes, which gh documents as PREPENDED to the generated notes.
           gh release create "$sdk_tag" --generate-notes --verify-tag --title "$sdk_tag" --notes "$(cat /tmp/release-notes.md)"
 
@@ -423,6 +451,18 @@ jobs:
               echo "This is a legitimate outcome for a change that carries nothing"
               echo "consumer-visible. The reason above is the calculator's own; the"
               echo "full reasoning is in the \`Compute the release token\` step log."
+            elif [ "${DRY_RUN:-}" = "true" ]; then
+              echo "### Dry run: nothing was published"
+              echo
+              echo "Token \`${MAJORS}\`. The tags this release would cut, as"
+              echo "cut-tags.sh --dry-run printed them:"
+              echo
+              echo "\`\`\`"
+              awk '/^DRY-RUN: would tag:/' /tmp/cut.log 2>/dev/null || echo "(none)"
+              echo "\`\`\`"
+              echo
+              echo "A real cut is a dispatch with dry_run=false, and needs the"
+              echo "repository variable RELEASE_ENABLED=true (ADR 0170)."
             elif [ "${HELD:-}" = "true" ]; then
               echo "### Held (bootstrap)"
               echo
