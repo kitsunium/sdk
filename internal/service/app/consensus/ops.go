@@ -350,4 +350,3 @@ func (n *Node) awaitLeader(ctx context.Context, to coreconsensus.NodeID) error {
 		}
 	}
 }
-
