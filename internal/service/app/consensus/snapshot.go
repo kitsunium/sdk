@@ -1,0 +1,412 @@
+package consensus
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"sync"
+
+	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
+)
+
+// snapState tracks the cuts: at most one in flight, coalesced (D7).
+type snapState struct {
+	mu       sync.Mutex
+	last     uint64
+	inFlight bool
+	spools   map[string]coreconsensus.SnapshotSink
+}
+
+// Latest opens the newest complete snapshot of a store (R7-07).
+func Latest(s coreconsensus.SnapshotStore) (coreconsensus.SnapshotHandle, error) {
+	metas, err := s.List()
+	if err != nil {
+		return nil, err
+	}
+	if len(metas) == 0 {
+		return nil, origin(coreconsensus.SnapshotCorrupt, errs.String("why", "no snapshot"))
+	}
+	return s.Open(metas[0].ID)
+}
+
+// restoreFrom verifies a snapshot's digest, then restores the state machine
+// from it, serialised with Apply.
+func (n *Node) restoreFrom(m coreconsensus.SnapshotMeta, durIdx uint64) error {
+	h, err := n.cfg.Snapshots.Open(m.ID)
+	if err != nil {
+		return err
+	}
+	defer h.Close()
+	if err := verifySnapshot(io.NewSectionReader(h, 0, m.EncodedSize), m, n.cfg.SnapshotCodec, n.cfg.MaxSnapshotBytes); err != nil {
+		return err
+	}
+	if durIdx < m.Position.Index {
+		cr := newChunkReader(io.NewSectionReader(h, 0, m.EncodedSize), n.cfg.SnapshotCodec, max(m.ChunkSize, 1), n.cfg.MaxSnapshotBytes)
+		if err := n.cfg.Machine.Restore(cr, m); err != nil {
+			return err
+		}
+		n.am.Lock()
+		n.applied, n.appliedTerm = m.Position.Index, m.Position.Term
+		n.acond.Broadcast()
+		n.am.Unlock()
+	}
+	n.snapState.mu.Lock()
+	n.snapState.last = max(n.snapState.last, m.Position.Index)
+	n.snapState.mu.Unlock()
+	return nil
+}
+
+// maybeSnapshot cuts a snapshot after SnapshotEvery applied entries, on the
+// apply goroutine; the write runs off it unless the machine cannot cut
+// cheaply (D7).
+func (n *Node) maybeSnapshot() {
+	n.am.Lock()
+	idx, term := n.applied, n.appliedTerm
+	n.am.Unlock()
+	ss := &n.snapState
+	ss.mu.Lock()
+	if ss.inFlight || idx < ss.last+n.cfg.SnapshotEvery {
+		ss.mu.Unlock()
+		return
+	}
+	ss.inFlight = true
+	ss.mu.Unlock()
+	if err := n.cut(idx, term, nil); err != nil {
+		ss.mu.Lock()
+		ss.inFlight = false
+		ss.mu.Unlock()
+	}
+}
+
+func (n *Node) metaAt(idx, term uint64) (coreconsensus.SnapshotMeta, bool) {
+	var meta coreconsensus.SnapshotMeta
+	ok := n.exec(func() {
+		st := n.r.Status()
+		conf := n.r.ConfAt(idx)
+		conf.Index = idx
+		meta = coreconsensus.SnapshotMeta{
+			ID: fmt.Sprintf("%020d-%020d", idx, term), Version: 1,
+			Position: coreconsensus.Position{Term: term, Index: idx}, Log: n.ident, Membership: conf,
+			ChainTip: n.r.ChainAt(idx), Codec: string(n.cfg.SnapshotCodec.Algorithm()), ChunkSize: defaultChunkSize,
+			Timing: st.Timing, ClusterVersion: st.Cluster, ClusterGeneration: st.ClusterG, NoSpace: st.NoSpace,
+		}
+	})
+	return meta, ok
+}
+
+// cut captures the state machine at the applied index and writes it. When w
+// is not nil, the encoded stream is copied to it too (SaveSnapshot).
+func (n *Node) cut(idx, term uint64, w io.Writer) error {
+	meta, ok := n.metaAt(idx, term)
+	if !ok {
+		return n.stoppedErr()
+	}
+	snap, err := n.cfg.Machine.Snapshot()
+	if err != nil {
+		return err
+	}
+	if n.cfg.SnapshotPausesApply || w != nil {
+		return n.writeSnapshot(snap, meta, w)
+	}
+	n.wg.Add(1)
+	go func() {
+		defer n.wg.Done()
+		_ = n.writeSnapshot(snap, meta, nil)
+	}()
+	return nil
+}
+
+func (n *Node) writeSnapshot(snap coreconsensus.Snapshot, meta coreconsensus.SnapshotMeta, extra io.Writer) error {
+	defer snap.Release()
+	ss := &n.snapState
+	done := func() {
+		ss.mu.Lock()
+		ss.inFlight = false
+		ss.mu.Unlock()
+	}
+	defer done()
+	sink, spooled, err := n.cfg.Snapshots.Create(meta.ID, meta)
+	if err != nil {
+		return err
+	}
+	if spooled > 0 {
+		_ = sink.Abort()
+		if sink, _, err = n.cfg.Snapshots.Create(meta.ID, meta); err != nil {
+			return err
+		}
+	}
+	var out io.Writer = sink
+	if extra != nil {
+		out = io.MultiWriter(sink, extra)
+	}
+	cw := newChunkWriter(out, n.cfg.SnapshotCodec, defaultChunkSize)
+	if _, err := snap.WriteTo(cw); err != nil {
+		_ = sink.Abort()
+		return err
+	}
+	if err := cw.Close(); err != nil {
+		_ = sink.Abort()
+		return err
+	}
+	meta.EncodedSize, meta.DecodedSize = cw.encoded, cw.decoded
+	copy(meta.SHA256[:], cw.sum.Sum(nil))
+	if err := sink.Commit(meta); err != nil {
+		return err
+	}
+	ss.mu.Lock()
+	ss.last = max(ss.last, meta.Position.Index)
+	ss.mu.Unlock()
+	n.afterCut()
+	return nil
+}
+
+// afterCut keeps the two newest snapshots and compacts the log back to the
+// older one, less SnapshotTrailing, with saturating arithmetic (D7).
+func (n *Node) afterCut() {
+	metas, err := n.cfg.Snapshots.List()
+	if err != nil || len(metas) == 0 {
+		return
+	}
+	for _, m := range metas[min(2, len(metas)):] {
+		_ = n.cfg.Snapshots.Remove(m.ID) // refused while a transfer reads it
+	}
+	older := metas[min(1, len(metas)-1)].Position.Index
+	n.am.Lock()
+	applied := n.applied
+	n.am.Unlock()
+	through := min(older, applied)
+	if through <= n.cfg.SnapshotTrailing {
+		return
+	}
+	through -= n.cfg.SnapshotTrailing
+	n.exec(func() {
+		n.r.Compact(through)
+		n.handleReady()
+	})
+}
+
+// SaveSnapshot cuts a snapshot now and copies its encoded stream to w.
+func (n *Node) SaveSnapshot(ctx context.Context, op coreconsensus.Operator, w io.Writer) (coreconsensus.SnapshotMeta, error) {
+	if !op.Valid() {
+		return coreconsensus.SnapshotMeta{}, origin(coreconsensus.MembershipInvalid, errs.String("why", "operator"))
+	}
+	if _, err := n.Barrier(ctx); err != nil {
+		return coreconsensus.SnapshotMeta{}, err
+	}
+	ss := &n.snapState
+	ss.mu.Lock()
+	if ss.inFlight {
+		ss.mu.Unlock()
+		return coreconsensus.SnapshotMeta{}, origin(coreconsensus.Overloaded, errs.String("why", "a cut is in flight"))
+	}
+	ss.inFlight = true
+	ss.mu.Unlock()
+	// The cut runs on the apply goroutine, serialised with Apply.
+	req := &saveReq{w: w, done: make(chan saveRes, 1)}
+	n.aq.push(applyItem{save: req})
+	select {
+	case r := <-req.done:
+		return r.meta, r.err
+	case <-ctx.Done():
+		return coreconsensus.SnapshotMeta{}, ctx.Err()
+	case <-n.loopDone:
+		return coreconsensus.SnapshotMeta{}, n.stoppedErr()
+	}
+}
+
+type saveReq struct {
+	w    io.Writer
+	done chan saveRes
+}
+
+type saveRes struct {
+	meta coreconsensus.SnapshotMeta
+	err  error
+}
+
+// save runs a SaveSnapshot on the apply goroutine.
+func (n *Node) save(req *saveReq) {
+	n.am.Lock()
+	idx, term := n.applied, n.appliedTerm
+	n.am.Unlock()
+	err := n.cut(idx, term, req.w)
+	var m coreconsensus.SnapshotMeta
+	if err == nil {
+		metas, _ := n.cfg.Snapshots.List()
+		for _, x := range metas {
+			if x.Position.Index == idx {
+				m = x
+			}
+		}
+	} else {
+		n.snapState.mu.Lock()
+		n.snapState.inFlight = false
+		n.snapState.mu.Unlock()
+	}
+	req.done <- saveRes{m, err}
+}
+
+// ---- sending ----
+
+func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
+	if n.sending[to] {
+		return
+	}
+	metas, err := n.cfg.Snapshots.List()
+	if err != nil || len(metas) == 0 {
+		n.r.SnapshotDone(to, false)
+		return
+	}
+	meta := metas[0]
+	h, err := n.cfg.Snapshots.Open(meta.ID)
+	if err != nil {
+		n.r.SnapshotDone(to, false)
+		return
+	}
+	n.sending[to] = true
+	offer := coreconsensus.InstallOffer{Term: n.r.Status().Term, SnapshotID: meta.ID, Meta: meta}
+	n.wg.Add(1)
+	go func() {
+		defer n.wg.Done()
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() {
+			select {
+			case <-n.stopc:
+				cancel()
+			case <-ctx.Done():
+			}
+		}()
+		// The handle pins the snapshot until the transfer completes, so
+		// compaction cannot delete it mid-transfer (R3-16).
+		err := n.cfg.Transport.Stream(ctx, to, offer, func(off int64) (io.ReadCloser, error) {
+			if off < 0 || off > meta.EncodedSize {
+				return nil, origin(coreconsensus.FrameInvalid, errs.Int64("offset", off))
+			}
+			return io.NopCloser(io.NewSectionReader(h, off, meta.EncodedSize-off)), nil
+		})
+		cancel()
+		_ = h.Close()
+		n.exec(func() {
+			delete(n.sending, to)
+			n.r.SnapshotDone(to, err == nil)
+			n.handleReady()
+		})
+	}()
+}
+
+// ---- receiving ----
+
+func (n *Node) offer(from coreconsensus.AuthenticatedPeer, o coreconsensus.InstallOffer) coreconsensus.InstallAccept {
+	acc := coreconsensus.InstallAccept{SnapshotID: o.SnapshotID}
+	ok := n.exec(func() {
+		if code := n.r.CheckOffer(from.ID, o, false); code != 0 {
+			acc.Refused = code
+			return
+		}
+		if o.SnapshotID != o.Meta.ID || o.Meta.Version != 1 {
+			acc.Refused = coreconsensus.CodeVersionUnsupported
+			return
+		}
+		if o.Meta.DecodedSize > n.cfg.MaxSnapshotBytes || o.Meta.EncodedSize > n.cfg.MaxSnapshotBytes {
+			acc.Refused = coreconsensus.CodeSnapshotTooLarge
+			return
+		}
+		metas, err := n.cfg.Snapshots.List()
+		if err != nil {
+			acc.Refused = coreconsensus.CodeStorageFailed
+			return
+		}
+		for _, m := range metas {
+			if m.ID == o.SnapshotID {
+				acc.Held = true
+				return
+			}
+		}
+		sink, off, err := n.cfg.Snapshots.Create(o.SnapshotID, o.Meta)
+		if err != nil {
+			acc.Refused = coreconsensus.CodeStorageFailed
+			return
+		}
+		n.snapState.mu.Lock()
+		if n.snapState.spools == nil {
+			n.snapState.spools = map[string]coreconsensus.SnapshotSink{}
+		}
+		n.snapState.spools[o.SnapshotID] = sink
+		n.snapState.mu.Unlock()
+		acc.Offset = off
+	})
+	if !ok {
+		acc.Refused = coreconsensus.CodeNodeStopped
+	}
+	return acc
+}
+
+func (n *Node) install(req coreconsensus.InstallRequest) error {
+	id := req.Offer.SnapshotID
+	n.snapState.mu.Lock()
+	sink := n.snapState.spools[id]
+	delete(n.snapState.spools, id)
+	n.snapState.mu.Unlock()
+	if sink == nil {
+		return origin(coreconsensus.SnapshotCorrupt, errs.String("why", "no accepted offer"))
+	}
+	meta := req.Offer.Meta
+	want := meta.EncodedSize - req.Offset
+	k, err := io.Copy(sink, io.LimitReader(req.Body, want+1))
+	if err != nil || k != want {
+		// The spool stays: the next offer resumes from its last chunk.
+		return snapshotCorrupt("stream ended early")
+	}
+	if err := sink.Commit(meta); err != nil {
+		return err
+	}
+	done := make(chan error, 1)
+	n.aq.push(applyItem{restore: &restoreReq{meta: meta, done: done}})
+	select {
+	case err = <-done:
+	case <-n.stopc:
+		return n.stoppedErr()
+	}
+	if err != nil {
+		_ = n.cfg.Snapshots.Remove(id)
+		return err
+	}
+	n.exec(func() {
+		n.r.InstallSnapshot(meta)
+		n.handleReady()
+	})
+	return nil
+}
+
+// ---- pre-admission JOIN (D4, R8-09) ----
+
+func (n *Node) join(ctx context.Context, from coreconsensus.AuthenticatedPeer, r coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code) {
+	if n.cfg.JoinAuthorizer == nil || r.Cluster != n.ident.Cluster || r.Slot != from.Slot || from.SPKI == ([32]byte{}) {
+		return coreconsensus.Position{}, coreconsensus.CodeJoinRefused
+	}
+	r.SPKI = from.SPKI
+	for _, m := range n.Membership().Members {
+		if m.Slot == r.Slot {
+			// A slot that still has a live member is refused (R8-11).
+			return coreconsensus.Position{}, coreconsensus.CodeJoinRefused
+		}
+	}
+	op, err := n.cfg.JoinAuthorizer.Authorize(ctx, r)
+	if err != nil || !op.Valid() {
+		return coreconsensus.Position{}, coreconsensus.CodeJoinRefused
+	}
+	m := coreconsensus.Member{ID: r.ID, Incarnation: r.Incarnation, Slot: r.Slot, SPKI: r.SPKI, Address: r.Address, Joining: true}
+	a := wire.Admin{Operator: string(op), Change: wire.ChangeAddLearner, Target: m.ID,
+		Membership: coreconsensus.Membership{Members: []coreconsensus.Member{m}}}
+	data := wire.AppendAdmin(nil, &a)
+	tok, _, err := n.submit(ctx, coreconsensus.Entry{Kind: coreconsensus.EntryMembership, BodySum: wire.BodySum(data), Data: data}, true)
+	if err != nil {
+		if c, ok := errs.CodeOf(err); ok {
+			return coreconsensus.Position{}, c
+		}
+		return coreconsensus.Position{}, coreconsensus.CodeJoinRefused
+	}
+	return tok.Position(), 0
+}

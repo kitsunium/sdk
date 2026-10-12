@@ -320,11 +320,6 @@ func (r *Raft) stepFollower(now time.Time, m core.Message) {
 // handleAppend is the follower's side of AppendEntries, with the three rules
 // raft-sql-poc learned as safety bugs (D6).
 func (r *Raft) handleAppend(m core.Message) {
-	if !r.cfg.CanVote {
-		// An unstamped or silent directory stores nothing it would have to
-		// acknowledge.
-		return
-	}
 	if m.Index < r.log.committed {
 		r.send(core.Message{Kind: core.MsgAppResp, To: m.From, Index: r.log.committed})
 		return
@@ -332,7 +327,7 @@ func (r *Raft) handleAppend(m core.Message) {
 	if !r.log.matchTerm(m.Index, m.LogTerm) {
 		hint := min(m.Index, r.log.lastIndex())
 		flags := core.MessageFlags(0)
-		if m.Index <= r.log.snapIndex && r.log.snapIndex == 0 && r.log.lastIndex() == 0 {
+		if r.cfg.NoTable {
 			flags = core.FlagNeedSnapshot
 		}
 		r.send(core.Message{Kind: core.MsgAppResp, To: m.From, Index: m.Index, Reject: true, RejectHint: hint, Flags: flags})

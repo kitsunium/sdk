@@ -40,6 +40,9 @@ type Config struct {
 	CanVote bool
 	// MaxChainRefusals is N of D4's "no silent loop".
 	MaxChainRefusals int
+	// NoTable is set while the node holds no usable snapshot: it votes and
+	// stores the log but never campaigns, and asks for a snapshot (R7-18).
+	NoTable bool
 	// mut is set by the package's own tests only.
 	mut mutation
 }
@@ -333,6 +336,10 @@ func (r *Raft) Compact(index uint64) {
 	r.confs = append(r.confs[:0], r.confs[n:]...)
 }
 
+// SetCanVote changes whether the node may vote: a joining directory may once
+// its admission is appended.
+func (r *Raft) SetCanVote(v bool) { r.cfg.CanVote = v }
+
 // SnapshotIndex returns the base of the in-memory log.
 func (r *Raft) SnapshotIndex() uint64 { return r.log.snapIndex }
 
@@ -486,7 +493,7 @@ func (r *Raft) quorum() int { return len(r.voters())/2 + 1 }
 // configuration, whose directory may vote.
 func (r *Raft) promotable() bool {
 	m, ok := r.conf().Member(r.id)
-	return ok && m.Voter && !m.Joining && r.cfg.CanVote
+	return ok && m.Voter && !m.Joining && r.cfg.CanVote && !r.cfg.NoTable
 }
 
 func (r *Raft) randomTimeout() time.Duration {

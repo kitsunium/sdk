@@ -32,9 +32,10 @@ type progress struct {
 	lastHeard time.Time
 	// heard is false until the peer answered once in this term.
 	heard bool
-	// refusals counts identical chain refusals at refusedAt (D4, R6-05).
-	refusals  int
-	refusedAt uint64
+	// hbMatch is match at the previous heartbeat answer: a replicating
+	// peer whose match did not move across two answers while appends are in
+	// flight lost one, and is probed again.
+	hbMatch uint64
 }
 
 func (p *progress) reset(next uint64) {

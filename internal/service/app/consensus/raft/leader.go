@@ -220,6 +220,12 @@ func (r *Raft) stepLeader(now time.Time, m core.Message) {
 		if pr.state == stateProbe {
 			pr.probeSent = false
 		}
+		if pr.state == stateReplicate && len(pr.inflight) > 0 && pr.match == pr.hbMatch {
+			// An append in the window was lost: the transport may drop,
+			// and a window that never refills must not stall (R1-11).
+			pr.becomeProbe()
+		}
+		pr.hbMatch = pr.match
 		if pr.match < r.log.lastIndex() {
 			r.sendAppend(m.From, false)
 		}
@@ -685,6 +691,7 @@ func (r *Raft) InstallSnapshot(meta core.SnapshotMeta) {
 		r.voteWindow = meta.Timing.ElectionTimeoutMin
 	}
 	r.clusterVer, r.clusterGen, r.noSpace = meta.ClusterVersion, meta.ClusterGeneration, meta.NoSpace
+	r.cfg.NoTable = false
 	r.confChanged()
 	if r.lead != 0 {
 		r.send(core.Message{Kind: core.MsgAppResp, To: r.lead, Index: r.log.lastIndex()})
