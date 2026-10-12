@@ -1,6 +1,6 @@
 # ADR 0171 — a module per pkg family, one shared internal module, and a published version is never reused
 
-- **Status**: Accepted (the scripts and the release lock are built; §7 measures the split and breaks its cycles; the code split itself is the next change, in the order of §6)
+- **Status**: Accepted (the scripts and the release lock built; §6 step 2 done — the code split as §7 measures it, and the floor written by the release; the first split release is cut by a maintainer's dispatch)
 - **Date**: 2026-10-12
 - **Deciders**: SDK maintainers (the owner's decisions of 2026-10-12, recorded after one round of review)
 - **Amends**: [ADR 0162](0162-the-sdk-is-one-module-and-a-release-is-one-tag.md) (§1 the SDK is one module; §3 tombstones; §4 what a release computes and tags), [ADR 0007](0007-sdk-release-and-versioning.md) (§1 the tag shapes; §2 the size is per module; §4 what a release tags), [ADR 0009](0009-pkg-public-module-resolvability.md) (resolvability is checked per module, and a version is checked against the proxy before it is cut), [ADR 0017](0017-pkg-bare-module-path.md) (the public surface is one module per family under `pkg/v1/`, not the bare `…/pkg`), [ADR 0147](0147-the-framework-is-a-module-of-the-sdk-above-pkg.md) (§9 a connector is a module released on its own), [ADR 0156](0156-the-public-module-links-the-standard-library-and-nothing-else.md) (§1 the rule holds for each family module), [ADR 0157](0157-one-module-per-vendor-released-with-the-sdk.md) (§3 a vendor module is tagged at its own version, only when it changed)
@@ -329,6 +329,24 @@ they are meant to stay on. What tells a consumer on a monolithic root where
 the packages went is the retraction's rationale, which `go get` and
 `go list -m -u` print beside the retracted version.
 
+**Rehearsed before anything is cut** (2026-10-12, on a throwaway clone of
+the branch): `cut-tags.sh --no-push --bump=minor` over `sdk` made 26 tags on
+one release commit — the root `v0.20.0`, `internal` and the eleven families
+at `v0.1.0`, the nine vendor and four connector modules at `v0.20.0` —, the
+root's published go.mod requiring the twelve at `v0.1.0` and retracting
+`[v0.18.0, v0.19.7]`, `internal`'s and every family's requiring the root at
+`v0.20.0`. `check-version-floor.sh` passed that manifest against
+proxy.golang.org (every path above its published maximum, the twelve new
+paths never published). On a file proxy holding those zips beside the
+published `v0.19.7`, a consumer pinned to `v0.19.7` that `go get`s any of the
+eleven families builds, `go get` reporting `upgraded github.com/kitsunium/sdk
+v0.19.7 => v0.20.0` and `go mod tidy` leaving no monolithic root; the control
+— `pkg/v1/app` re-published without its own floor — fails with `ambiguous
+import` although the `internal` it requires carries one. That is why every
+family carries the floor and not `internal` alone: graph pruning reads a
+dependency's requirements one level down, so `internal`'s floor does not reach
+a consumer who requires `app` alone.
+
 ## Consequences / Semantics
 
 - A consumer locks per family; a fix in one family is one `go get` of that
@@ -373,7 +391,12 @@ the packages went is the retraction's rationale, which `go get` and
 
 ## Deferred
 
-- The code split and the root tombstone (§1, §3): after kit N exists (§6).
+- The first split release: a maintainer's dispatch of SDK Release once
+  `RELEASE_ENABLED` is opened (§5), after the dry run and the rehearsal of §7.
+- `tools/sdkguard`'s freshness probe reads the root's requirement only; a
+  consumer who requires families alone is not told a family is behind, and one
+  on a retracted root is told to update the root, which MVS and the
+  retraction then carry. A per-family probe is its own change.
 - Tombstones for `…/internal/{kernel,core,service}` above v0.17.0: only if the
   file-proxy rehearsal shows a consumer reaching them; ADR 0162's migration
   removes them today.

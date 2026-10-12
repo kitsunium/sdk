@@ -29,6 +29,14 @@ testable by a downstream consumer without this package. Twenty-one more carry a
 those lack without this package is a NAME for the type and any way to reach
 `System`.
 
+## Module
+
+`github.com/kitsunium/sdk/pkg/v1/clock` is a Go module of its own since ADR 0171,
+whose `go.mod` is in this directory and holds every package beneath it: a
+consumer requires it at its own version, and a fix here moves no other family.
+It requires `internal` and the families its packages and tests import, as
+`design/sdk.yaml`'s `modules:` declares.
+
 ## Surface
 
 | Symbol | Notes |

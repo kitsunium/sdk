@@ -16,6 +16,14 @@ links neither this package nor any sibling, because Go links what a package
 imports and never its parent directory (checked below), and this package imports
 no child either.
 
+## Module
+
+`github.com/kitsunium/sdk/pkg/v1/proc` is a Go module of its own since ADR 0171,
+whose `go.mod` is in this directory and holds every package beneath it: a
+consumer requires it at its own version, and a fix here moves no other family.
+It requires `internal` and the families its packages and tests import, as
+`design/sdk.yaml`'s `modules:` declares.
+
 ## The family
 
 | Child | What it publishes | Engine under `internal/service/proc` |

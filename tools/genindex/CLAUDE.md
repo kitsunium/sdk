@@ -19,7 +19,8 @@ modes:
   pkg.go.dev, in `go doc` and in the generated READMEs. `make doclinks` runs it
   over the repository, and `make lint-check` runs that;
 - **`-write-api`** (`make api`) — `docs/api/<module>.json` for every module of
-  `go.work`, the SDK module and the 13 vendor modules: every exported symbol,
+  `go.work` — the root, `internal`, the eleven `pkg/v1` families (ADR 0171)
+  and the 13 vendor modules, 26 documents: every exported symbol,
   internal packages included, read from the CODE with go/types on every cell of
   the platforms table, each with its go: id, kind, signature as its file spells
   it and canonically, an alias's owner, doc text, cells, module-relative file,

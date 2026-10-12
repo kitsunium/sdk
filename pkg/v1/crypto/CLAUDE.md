@@ -21,6 +21,14 @@ Consumer-facing prose lives in the package doc comment (`doc.go`, which kit
 writes from the design, ADR 0167) and reaches `README.md` through `docs/api` and
 `tools/genindex` (`make docs-readme`) — edit the design, not the README.
 
+## Module
+
+`github.com/kitsunium/sdk/pkg/v1/crypto` is a Go module of its own since ADR 0171,
+whose `go.mod` is in this directory and holds every package beneath it: a
+consumer requires it at its own version, and a fix here moves no other family.
+It requires `internal` and the families its packages and tests import, as
+`design/sdk.yaml`'s `modules:` declares.
+
 ## The family
 
 | Child | Port of `internal/core/crypto` | Engine under `internal/service/crypto` |

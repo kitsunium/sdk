@@ -3,9 +3,9 @@
 
 ## Purpose
 
-The SDK's public API surface. `pkg/` is a directory of the **one SDK module**, `github.com/kitsunium/sdk`, whose `go.mod` is at the repository root (ADR 0162): consumer packages live under the `v1/` directory and are imported as `github.com/kitsunium/sdk/pkg/v1/*`, and a consumer requires `github.com/kitsunium/sdk`. Until ADR 0162 `pkg/` was a module of its own, the bare `…/pkg` (ADR 0017 — Go forbids a `/v1` module-path suffix), released as `pkg/vX.Y.Z` up to v0.17.0; those tags stay, and a go.mod still on `…/pkg` migrates with the command ADR 0162 gives. `internal/*` is blocked by Go's `internal/` rule, which is also what keeps consumers out under Bazel; the layer order inside the repository is checked on the build graph by `scripts/check-layer-deps.sh`, not by visibility (ADR 0068, amending ADR 0004).
+The SDK's public API surface. Since ADR 0171 each family directory under `v1/` is a **Go module of its own**, `github.com/kitsunium/sdk/pkg/v1/<family>` — `app`, `clock`, `collections`, `concur`, `crypto`, `data`, `errs`, `net`, `observe`, `proc`, `security` —, its `go.mod` in that directory: consumer packages are imported as `github.com/kitsunium/sdk/pkg/v1/*` as before, and a consumer requires the family modules it imports, each at its own version, so a fix in one family is one `go get` that moves no other. `pkg/` itself holds no module and no package. From ADR 0162 to ADR 0171 these packages were directories of the root module `github.com/kitsunium/sdk` (v0.18.0 to v0.19.7, retracted by its go.mod); until ADR 0162 `pkg/` was the bare module `…/pkg` (ADR 0017 — Go forbids a `/v1` module-path suffix), released as `pkg/vX.Y.Z` up to v0.17.0; those tags stay. `internal/*` is blocked by Go's `internal/` rule, which is also what keeps consumers out under Bazel; the layer order inside the repository is checked on the build graph by `scripts/check-layer-deps.sh`, not by visibility (ADR 0068, amending ADR 0004).
 
-The SDK's major is carried by **semver**, one tag `vX.Y.Z` per release: `v0.x.x` while alpha, `v1.x.x` at first stable. A future breaking change of the public surface is a `pkg/v2/` beside `pkg/v1/`, packages of the same module, coexisting with it until deprecation.
+Each family's major is carried by **semver**, one tag `pkg/v1/<family>/vX.Y.Z` per release of that family: `v0.x.x` while alpha, `v1.x.x` at first stable. A future breaking change of the public surface is a `pkg/v2/` beside `pkg/v1/`, coexisting with it until deprecation.
 
 ## Contents
 
@@ -16,13 +16,14 @@ The SDK's major is carried by **semver**, one tag `vX.Y.Z` per release: `v0.x.x`
 ## Versioning policy
 
 - `pkg/v1` signatures are **frozen at the SDK's semver `v1.0.0` tag** (not the `v1/` directory name). Pre-1.0 (`v0.x.x` alpha) breaking changes are allowed; post-1.0 any breaking change goes into `pkg/v2/` (coexists with v1 until deprecation).
-- Security fixes in `internal/*` ship in the SDK module's next release — no `pkg/v1` changes required because it only re-exports.
+- Security fixes in `internal/*` ship in the `internal` module's next release — no `pkg/v1` change required because it only re-exports; a consumer takes it with `go get github.com/kitsunium/sdk/internal@latest`, or with the next release of a family that requires it.
 - Adding `pkg/v2/` is a dedicated ADR.
 
 ### Sizing a release — the `release:*` label (ADR 0135)
 
-A change to `pkg/` (or to `internal/` that reaches it) cuts a **patch** of the
-SDK module by default — one tag `vX.Y.Z` (ADR 0162). Anything that adds an exported symbol needs a **minor**, and the size is
+A change to a family under `pkg/v1/` cuts a **patch** of that family's module
+by default — one tag `pkg/v1/<family>/vX.Y.Z` (ADR 0171); a change to `internal/`
+cuts `internal/vX.Y.Z`. Anything that adds an exported symbol needs a **minor**, and the size is
 set by a maintainer as a LABEL on the pull request — `release:minor` (or
 `release:major`, or `release:patch` to decline a request) — before the merge,
 never by text in a commit message. The release reads the label when it runs,
@@ -83,6 +84,6 @@ What still happens to a `Release-bump:` line:
 
 ```
 bazel test --config=race //pkg/...
-# Fallback per-module:
-cd pkg && GOWORK=off go test -race -cover ./...
+# Fallback, one family module at a time:
+cd pkg/v1/data && GOWORK=off go test -race -cover ./...
 ```

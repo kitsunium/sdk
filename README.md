@@ -100,21 +100,28 @@ imported from `github.com/kitsunium/sdk/framework/…` (ADR 0158).
 
 ## Install
 
-The SDK is one Go module, `github.com/kitsunium/sdk` — `pkg/v1`, the framework
-and the internals they are built on — and it links the standard library and
-nothing else (ADR 0156, ADR 0162):
+Each family of `pkg/v1` is a Go module of its own — `github.com/kitsunium/sdk/pkg/v1/<family>`
+for `app`, `clock`, `collections`, `concur`, `crypto`, `data`, `errs`, `net`,
+`observe`, `proc` and `security` —, so you lock each family at its own version
+and a fix in one moves nothing else (ADR 0171). They are built on one shared
+module, `…/internal`, and the framework is the root module,
+`github.com/kitsunium/sdk`; none links anything but the standard library
+(ADR 0156):
 
 ```bash
-go get github.com/kitsunium/sdk@latest
+go get github.com/kitsunium/sdk/pkg/v1/data@latest github.com/kitsunium/sdk/pkg/v1/errs@latest
 ```
 
 then import the packages you use — `github.com/kitsunium/sdk/pkg/v1/data/codec`,
-`…/pkg/v1/errs`, `…/framework/kit`. Importing them first and running
-`go mod tidy` works as well: up to v0.17.0 they were the modules `…/pkg` and
-`…/framework`, and v0.18.0 gave each a last version that holds no package, so
-Go resolves the imports to `github.com/kitsunium/sdk` (ADR 0162). An
-integration that needs a vendor library is a module of its own, required by
-name, so you take that vendor and no other:
+`…/pkg/v1/errs` — or `github.com/kitsunium/sdk@latest` for `…/framework/kit`.
+Importing them first and running `go mod tidy` works as well: Go resolves an
+import to the module with the longest path that provides it, which is the
+family's. A go.mod pinned to a root between v0.18.0 and v0.19.7, which held
+`pkg/` and `internal/`, is lifted past them by the first family it adds: every
+family requires the root at the first version that holds neither, and the
+root's go.mod retracts the others, so `go list -m -u` says where the packages
+went. An integration that needs a vendor library is a module of its own,
+required by name, so you take that vendor and no other:
 `go get github.com/kitsunium/sdk/third-party/aws@latest`, or
 `…/framework/connectors/postgres`.
 
@@ -193,7 +200,7 @@ func main() {
   go run github.com/kitsunium/sdk/tools/sdkguard@latest -level=invariant ./...
   ```
   It catches the defects that never announce themselves — a second logging pipeline beside the SDK logger (two thresholds, two formats, half-stamped records), stdout used as a log destination under a stdio protocol, a `logger.Version` assigned at runtime. Rules target *constructs*, never imports, so `*slog.Logger` fields and `fmt.Fprintln(os.Stdout, …)` stay legitimate. It also warns — without failing your build — when your `go.mod` pins an SDK older than the latest release, which matters here because a patch is cut whenever an internal package changes, carrying fixes no public-API changelog would show. See ADR 0033 and `tools/sdkguard/CLAUDE.md`.
-- **One module, and a module per vendor** — the SDK is one module at the root (ADR 0162); `go.work` adds the thirteen modules that require a vendor library: the framework's four connectors (three database engines and entitlement's ssh identity) and nine vendor modules under `third-party/` — one per vendor, `codec/yaml` included (ADR 0157). Each can be built standalone with `GOWORK=off`, and `bash scripts/ci/go-modules.sh` lists them all. `e2e/`, `tools/genindex/` and `tools/sdkguard/` are auxiliary modules held deliberately outside it (adding them breaks Bazel's `go_deps`, which reads `go.work`) — build those with `GOWORK=off`.
+- **A module per family, and a module per vendor** — each `pkg/v1/<family>` is a module, `internal/` is one shared module and the root holds the framework (ADR 0171); `go.work` adds the thirteen modules that require a vendor library: the framework's four connectors (three database engines and entitlement's ssh identity) and nine vendor modules under `third-party/` — one per vendor, `codec/yaml` included (ADR 0157). Each can be built standalone with `GOWORK=off`, and `bash scripts/ci/go-modules.sh` lists them all. `e2e/`, `tools/genindex/` and `tools/sdkguard/` are auxiliary modules held deliberately outside it (adding them breaks Bazel's `go_deps`, which reads `go.work`) — build those with `GOWORK=off`.
 
 ## Releases
 

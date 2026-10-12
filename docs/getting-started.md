@@ -9,13 +9,13 @@ This page walks you from "I have a fresh Go project" to running code that uses *
 
 ## Install
 
-The SDK is one Go module, `github.com/kitsunium/sdk` — `pkg/v1`, the framework and the internals they are built on — and it links the standard library and nothing else. Require the module once; only the packages you import end up in your binary:
+Each family of `pkg/v1` is a Go module of its own, `github.com/kitsunium/sdk/pkg/v1/<family>`, built on the shared `…/internal` module; the framework is the root module `github.com/kitsunium/sdk`, and none links anything but the standard library (ADR 0171). Require the families you use, each at its own version; only the packages you import end up in your binary:
 
 ```bash
-go get github.com/kitsunium/sdk@latest
+go get github.com/kitsunium/sdk/pkg/v1/data@latest github.com/kitsunium/sdk/pkg/v1/errs@latest github.com/kitsunium/sdk/pkg/v1/observe@latest
 ```
 
-Writing the imports below first and running `go mod tidy` works as well. Up to v0.17.0 the public packages were the modules `github.com/kitsunium/sdk/pkg` and `…/framework`, and Go resolves an import nothing in your go.mod provides to the module with the LONGEST path whose latest version provides it; v0.18.0 gave both a last version that holds no package, so the tidy resolves the imports to `github.com/kitsunium/sdk`. A go.mod that already requires `…/pkg` migrates with the one command in the root `README.md` (ADR 0162).
+Writing the imports below first and running `go mod tidy` works as well: Go resolves an import nothing in your go.mod provides to the module with the LONGEST path that provides it, which is the family's. A go.mod on a root between v0.18.0 and v0.19.7 — which held `pkg/` and `internal/` — is lifted past them by the first family it adds; one that still requires `…/pkg` migrates with the one command in the root `README.md` (ADR 0162) first.
 
 ## Hello, codec
 

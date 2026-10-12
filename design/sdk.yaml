@@ -1,6 +1,7 @@
 # design/sdk.yaml — the SDK's project file: its structure, and the rules kit
 # holds it to (ADR 0163). The other files of design/ are its surface: every
-# exported symbol of the SDK module and of the thirteen vendor modules, one
+# exported symbol of the SDK's modules (modules: below) — the root, internal,
+# the pkg/v1 families — and of the thirteen vendor modules, one
 # file per domain or package group, each with its inputs and outputs —
 # `surface: closed` makes an exported symbol no file declares a finding. An
 # API change starts here, then `kit gen` writes the pins, the ports, the
@@ -412,7 +413,7 @@ codes:
       owner: pkg/v1/observe/logger/slogbridge
     - range: 1.2.0
       owner: pkg/v1/data/codec
-# ADR 0156 §1: the SDK module requires no module outside the standard
+# ADR 0156 §1: no module of the SDK requires a module outside the standard
 # library; the vendor modules are ADR 0157's, and the framework's connectors
 # ADR 0158's.
 stdlib:
