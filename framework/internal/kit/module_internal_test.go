@@ -20,15 +20,14 @@ import (
 )
 
 // toolsModule is the Go module toolsPos says its positions belong to.
-const toolsModule = "github.com/kitsunium/sdk/pkg"
+const toolsModule = "github.com/kitsunium/sdk/pkg/v1/clock"
 
-// toolsPos is a position in another Go module of the build. The framework and
-// the SDK are one Go module (ADR 0162), so the test binary links no second
-// one: for the test, the directory pkg/ is a Go module of its own,
-// github.com/kitsunium/sdk/pkg — as it was before ADR 0162 —, and the position
-// is clock.NewManualClock's, in a file under that directory — kit's
-// facade_gen.go since ADR 0166, so the tests name the file the position is
-// in rather than spelling one.
+// toolsPos is a position in another Go module of the build: since ADR 0171
+// pkg/v1/clock is a Go module of its own, github.com/kitsunium/sdk/pkg/v1/clock,
+// and the position is clock.NewManualClock's, in a file at that module's root —
+// kit's facade_gen.go since ADR 0166, so the tests name the file the position
+// is in rather than spelling one. anotherGoModule still names it, for a build
+// whose information lists no dependency (a test binary built in the workspace).
 func toolsPos(t *testing.T) pos {
 	t.Helper()
 	anotherGoModule(t, toolsModule)
@@ -87,7 +86,7 @@ func TestAModuleRefusesAForeignDeclaration(t *testing.T) {
 	for _, d := range de.Diagnostics {
 		said = append(said, d.Message)
 	}
-	want := "tools.desk/store/foreign is declared on tools.desk, a service of module tools, from outside its Go module github.com/kitsunium/sdk/pkg"
+	want := "tools.desk/store/foreign is declared on tools.desk, a service of module tools, from outside its Go module github.com/kitsunium/sdk/pkg/v1/clock"
 	if len(said) != 1 || !strings.HasPrefix(said[0], want) {
 		t.Errorf("the start said %q, want only %q", said, want)
 	}
@@ -117,8 +116,8 @@ func TestAModuleRefusesAForeignPasswordPolicy(t *testing.T) {
 		t.Fatalf("Start = %v, want the foreign policy refused", err)
 	}
 	mod, _ := goModuleOf(accounts.decl.pkg())
-	want := fmt.Sprintf("tools.desk/store/accounts, declared at %s/v1/clock/%s:%d, of module tools, "+
-		"is given a password policy from outside its Go module github.com/kitsunium/sdk/pkg:", mod.id, filepath.Base(accounts.decl.file()), accounts.decl.line())
+	want := fmt.Sprintf("tools.desk/store/accounts, declared at %s/%s:%d, of module tools, "+
+		"is given a password policy from outside its Go module github.com/kitsunium/sdk/pkg/v1/clock:", mod.id, filepath.Base(accounts.decl.file()), accounts.decl.line())
 	if len(de.Diagnostics) != 1 || !strings.HasPrefix(de.Diagnostics[0].Message, want) {
 		t.Fatalf("the start said %+v, want only %q", de.Diagnostics, want)
 	}
@@ -162,7 +161,7 @@ func TestAModulesSourceIsServedFromItsGoModule(t *testing.T) {
 	}()
 	src := app.Graph().ModuleOf("tools").Source
 	mod, _ := goModuleOf(home.pkg())
-	if want := (model.Source{File: "v1/clock/" + filepath.Base(home.file()), Line: home.line(), GoModule: mod.id}); src == nil || *src != want {
+	if want := (model.Source{File: filepath.Base(home.file()), Line: home.line(), GoModule: mod.id}); src == nil || *src != want {
 		t.Fatalf("the module's source: %+v, want %+v", src, want)
 	}
 	servesOnlyWhatTheGraphNames(t, app, mod.id, src.File)
@@ -186,7 +185,7 @@ func TestALibrarysSourceIsServedFromItsGoModule(t *testing.T) {
 	}()
 	src := app.Graph().Node("lib").Source
 	mod, _ := goModuleOf(home.pkg())
-	if want := (model.Source{File: "v1/clock/" + filepath.Base(home.file()), Line: home.line(), GoModule: mod.id}); src == nil || *src != want {
+	if want := (model.Source{File: filepath.Base(home.file()), Line: home.line(), GoModule: mod.id}); src == nil || *src != want {
 		t.Fatalf("the library's source: %+v, want %+v", src, want)
 	}
 	servesOnlyWhatTheGraphNames(t, app, mod.id, src.File)

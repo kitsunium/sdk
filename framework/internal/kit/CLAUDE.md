@@ -449,7 +449,7 @@ secret's name in its store, the start and stop order, a mount's binding and
 every refusal; `module_internal_test.go` the refusal of a foreign
 declaration and of a product's password policy on a module's store — the
 module's own taken —, and a module's source and a library's served from
-their own Go module (a declaration that says it is `github.com/kitsunium/sdk/pkg`'s);
+their own Go module (`pkg/v1/clock`'s, a Go module of its own since ADR 0171);
 `introspect_internal_test.go` the source endpoint's read — a regular file
 within the bound, never a link at its name, nor one swapped in between the
 look and the open —, and `introspect_unix_internal_test.go` a named pipe
