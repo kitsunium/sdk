@@ -1,0 +1,8 @@
+# gazelle:prefix github.com/kitsunium/sdk/internal
+
+# internal is a Go module of its own (ADR 0171): the kernel, core and service layers, one module because a domain's core and service halves are two subtrees.
+# This directory holds no package; the file marks the module root as a Bazel
+# package so gazelle's go_deps extension can load //internal:go.mod, which go.work
+# names.
+
+package(default_visibility = ["//visibility:public"])

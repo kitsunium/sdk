@@ -597,14 +597,14 @@ BEFORE ?= baseline
 AFTER ?= $(WAVE)
 profile:
 	@mkdir -p .bench/profiles/$(WAVE)
-	cd pkg && GOWORK=off go test -run='^$$' -bench=. -benchmem \
+	cd pkg/v1/data && GOWORK=off go test -run='^$$' -bench=. -benchmem \
 	  -count=$${COUNT:-10} -benchtime=$${BENCHTIME:-5s} \
 	  -cpu=1,2,4,8,16 \
 	  -cpuprofile=$(CURDIR)/.bench/profiles/$(WAVE)/cpu.out \
 	  -memprofile=$(CURDIR)/.bench/profiles/$(WAVE)/mem.out \
 	  -blockprofile=$(CURDIR)/.bench/profiles/$(WAVE)/block.out \
 	  -mutexprofile=$(CURDIR)/.bench/profiles/$(WAVE)/mutex.out \
-	  ./v1/data/codec/... \
+	  ./codec/... \
 	  | tee $(CURDIR)/.bench/profiles/$(WAVE)/bench.txt
 	@echo "→ .bench/profiles/$(WAVE)/ {cpu,mem,block,mutex}.out + bench.txt"
 

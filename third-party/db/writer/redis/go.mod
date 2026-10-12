@@ -3,7 +3,7 @@ module github.com/kitsunium/sdk/third-party/db/writer/redis
 go 1.27.2
 
 require (
-	github.com/kitsunium/sdk v0.0.0-00010101000000-000000000000
+	github.com/kitsunium/sdk/internal v0.0.0-00010101000000-000000000000
 	github.com/redis/go-redis/v9 v9.22.0
 )
 
@@ -14,3 +14,5 @@ require (
 )
 
 replace github.com/kitsunium/sdk => ../../../..
+
+replace github.com/kitsunium/sdk/internal => ../../../../internal

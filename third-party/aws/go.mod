@@ -7,7 +7,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs v1.82.3
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.107.3
 	github.com/aws/smithy-go v1.27.8
-	github.com/kitsunium/sdk v0.0.0-00010101000000-000000000000
+	github.com/kitsunium/sdk/internal v0.0.0-00010101000000-000000000000
 )
 
 require (
@@ -21,4 +21,4 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.19.39 // indirect
 )
 
-replace github.com/kitsunium/sdk => ../..
+replace github.com/kitsunium/sdk/internal => ../../internal
