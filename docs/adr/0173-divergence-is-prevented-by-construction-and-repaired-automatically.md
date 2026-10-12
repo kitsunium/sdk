@@ -1,6 +1,6 @@
 # ADR 0173 — divergence of replicated state: prevented by construction, detected at fixed indexes, repaired automatically
 
-- **Status**: Proposed — split from ADR 0152 by the owner's decision Q12; its own challenge is pending; ADR 0152's R6 offer recorded, not yet reconciled
+- **Status**: Proposed. Split from ADR 0152 by the owner's decision Q12. Its own challenge is pending. ADR 0152's R7 offer is recorded and not yet reconciled. Numbered 0173 because 0160 went to another decision and 0168 to 0172 are taken or claimed, and cited by title until it merges
 - **Date**: 2026-10-03
 - **Deciders**: SDK maintainers
 - **Depends on**: [ADR 0152](0152-a-write-is-committed-when-a-majority-holds-it-on-disk.md) (the consensus domain whose state this ADR protects)
@@ -38,7 +38,7 @@ state the state machine owns, depends on no node-local precondition, and is
 called in log order on one goroutine (ADR 0152 D3).
 
 It also exposes the extension points this ADR needs (ADR 0152, section
-"Divergence prevention: ADR 0160"):
+"Divergence prevention: ADR 0173"):
 - `Entry.Version`;
 - the entry kinds reserved for check and digest entries;
 - the checksum chain;
@@ -361,7 +361,7 @@ func (n *Node) ClearDivergence(ctx context.Context, op Operator, alarm AlarmID, 
 ### D8 — Errors and metrics (moved from ADR 0152 D12 and D13)
 
 These codes keep their serials in the `0.2.57.*` range that ADR 0152
-allocates to `internal/core/consensus`. ADR 0152 marks them reserved for
+allocates to `internal/core/app/consensus`. ADR 0152 marks them reserved for
 this ADR.
 
 | Code | Reason | Meaning |
@@ -438,43 +438,84 @@ None. Nothing is implemented yet.
 
 - Every open objection below, as the input of this ADR's own challenge.
 
-## Contract from 0152 (as of ADR 0152's R6 version)
+## Contract from 0152 (as of ADR 0152's R7 version)
 
-ADR 0152's final round (R6) changed what it offers this ADR. This section
+ADR 0152's rounds R6 and R7 changed what it offers this ADR. This section
 records that offer. No other change is applied to this ADR: reconciling its
 decisions with the offer is part of its own challenge.
 
-- **Activation gate (0152 R6-04).** This ADR is a cluster capability,
-  activated all or nothing by `RaiseClusterVersion`. A reserved range of
-  entry kinds is `VERSION_UNSUPPORTED` until that version is raised. After
-  the raise, this ADR applies those entries only beyond the gate index, so a
-  node running ADR 0152 alone never meets one before the gate.
-- **Messages (0152 R6-04).** `CheckIndex` and `RootHash` are no longer in
-  ADR 0152's `Message`. This ADR introduces them in `Message` version 2.
-- **Snapshot metadata (0152 R6-04).** `SnapshotMeta` has a reserved alarm
-  field, which ADR 0152 carries without interpreting it.
-- **Internal hook points (0152 R6-04)**, internal to the engine:
-  - a per-node gate on three permissions: may campaign, may serve reads, may
-    acknowledge;
-  - batch boundaries imposed at given indexes;
-  - self-proposed control entries, their origin stamped from TLS;
-  - a floor on log retention;
-  - state replacement through `Restore`;
-  - a pre-vote gate slot at step 4 of ADR 0152's start sequence.
-- **Start rule (0152 R6-04).** Nothing beyond checksums blocks loading or
-  replay. Only this ADR, through the gate slot, may delay the vote.
-- **Replay before voting (0152 R6-04).** `forgejo cluster inspect --replay`
-  is an addition of this ADR, not part of ADR 0152's full-stop runbook.
-- **Chain refusals (0152 R6-05).** ADR 0152 now keeps a minimal deposition
-  rule itself: after N identical chain refusals at one index (N = 3 by
-  default, provisional), a follower stops answering that leader's heartbeats
-  for the term. Point 6 of D3 above predates that rule. Reconciling the two
-  is an open item.
-- **Snapshots (0152 R6-01, R6-02).** ADR 0152 retains the latest TWO
-  complete snapshots, and keeps the log back to the older one. A transfer in
-  flight defers the next cut and pins compaction. The disk reservation is
-  four snapshot slots, about 5.3 GiB. D4 above, written when ADR 0152 kept
-  one snapshot, reads against this offer.
+**Numbers and paths (0152 R7-00d, R7-01).** This ADR is 0173. The TLS
+sibling of ADR 0152 is 0174, reserved. ADR 0160 is now *every service has a
+core, and a code keeps its value when its declaration moves*, not this ADR.
+The domain lives at `internal/core/app/consensus`,
+`internal/service/app/consensus` and `pkg/v1/app/consensus`, and is designed
+in `design/app/consensus.yaml`. Every path above that reads
+`internal/core/consensus` or `pkg/v1/consensus` reads against these.
+
+**Code ownership (0152 R7-04, R7-00e).**
+- This ADR's codes are declared in the SAME package,
+  `internal/core/app/consensus`, and in the same design file, because a
+  range has one owner (ADR 0035). kit writes them (ADR 0164).
+- The determinism checker of D5 is not a `pkg/v1` path. If it is a module,
+  it is an auxiliary module listed under `auxiliary:` in `design/sdk.yaml`,
+  outside `go.work`, stdlib-only, with its own `CLAUDE.md`, as
+  `tools/sdkguard` is. D5's `pkg/v1/consensus/detcheck` reads against this.
+
+**Activation gate (0152 R6-04).** This ADR is a cluster capability,
+activated all or nothing by `RaiseClusterVersion`. A reserved range of entry
+kinds is `VERSION_UNSUPPORTED` until that version is raised. After the
+raise, this ADR applies those entries only beyond the gate index, so a node
+running ADR 0152 alone never meets one before the gate.
+
+**Messages are encoded frames (0152 R6-04, R7-05).** ADR 0152's core
+`Message` is a plain value with no field of this ADR. The transport carries
+ENCODED frames and the TLS-authenticated peer, and the service's
+`AppendMessage` and `ParseMessage` own the layout. This ADR adds
+`CheckIndex` and `RootHash` as fields of version 2 of the frame layout,
+encoded and parsed by those service codecs. A v1 node refuses a v2 frame at
+version negotiation.
+
+**Snapshot metadata (0152 R6-04).** `SnapshotMeta` has a reserved alarm
+field, which ADR 0152 carries without interpreting it. Its codec is the
+service's too (0152 R7-05).
+
+**Internal hook points (0152 R6-04, R7-38)**, internal to the engine:
+- a per-node gate on three permissions: may campaign, may serve reads, may
+  acknowledge.
+- batch boundaries imposed at given indexes.
+- self-proposed control entries, their origin stamped from TLS.
+- a floor on log retention.
+- **a snapshot pin, `pin(id string) (unpin func(), err error)` (R7-38).**
+  ADR 0152's retention never evicts a pinned snapshot. A pin holds one of
+  the two retained slots. When both are pinned, the next cut waits for an
+  unpin, and the log still raises the no-space alarm at `LogReserveBytes`.
+  The two anchors of D4 above are held through this pin.
+- state replacement through `Restore`.
+- a pre-vote gate slot at step 4 of ADR 0152's start sequence.
+
+**Start rule (0152 R6-04).** Nothing beyond checksums blocks loading or
+replay. Only this ADR, through the gate slot, may delay the vote.
+
+**Replay before voting (0152 R6-04).** `forgejo cluster inspect --replay`
+is an addition of this ADR, not part of ADR 0152's full-stop runbook.
+
+**Chain refusals (0152 R6-05, R7-19).** ADR 0152 keeps a minimal
+deposition rule itself: after N identical chain refusals at one index (N = 3
+by default, provisional), a follower stops answering that leader's
+heartbeats for the term. Since R7, one refusing follower of three does not
+depose the leader: it is reported through `Health` and an alert. Point 6 of
+D3 above predates both. Reconciling them is an open item.
+
+**Snapshots (0152 R6-01, R6-02, R7-07, R7-18).** ADR 0152 retains the latest
+TWO complete snapshots, and keeps the log back to the older one. A transfer
+in flight defers the next cut and pins compaction. The disk reservation is
+four snapshot slots, about 5.3 GiB. The `SnapshotStore` port now has `List`,
+`Open`, `Remove` and `Create`, with `Latest` a convenience. A node whose two
+snapshots both fail asks for one and may not campaign. D4 above, written
+when ADR 0152 kept one snapshot, reads against this offer.
+
+**Snapshot codecs (0152 R7-06).** The v1 codec is a stdlib
+`BoundedDecompressor`, flate or gzip. zstd is not a v1 codec.
 
 ## Open objections from the 0152 challenge
 
