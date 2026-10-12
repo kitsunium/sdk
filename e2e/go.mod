@@ -1,6 +1,6 @@
 module github.com/kitsunium/sdk/e2e
 
-go 1.27.1
+go 1.27.2
 
 replace github.com/kitsunium/sdk/third-party/db/writer/clickhouse => ../third-party/db/writer/clickhouse
 
