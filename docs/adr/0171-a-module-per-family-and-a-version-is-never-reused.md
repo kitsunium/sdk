@@ -304,6 +304,24 @@ tree holds no `pkg/` — or at the version the same release gives the root,
 when that release is the first. A family cannot be cut before that tag
 exists or is cut with it.
 
+**Bazel holds the split, measured on a spike before it was made**: three
+modules (`internal`, `pkg/v1/errs`, `pkg/v1/clock`) added to `go.work`, each
+with a `replace` onto its directory, the root requiring them. `go_deps.
+from_file(go_work)` read them once each module that requires another has a
+`go.sum` — an empty one, which `go mod tidy` keeps — and `internal/` a
+`BUILD.bazel` marking the module root, as the vendor modules have; `bazel mod
+tidy` added one `use_repo` entry per new module (as it lists
+`com_github_kitsunium_sdk` today) and left `MODULE.bazel.lock` byte for byte;
+`bazel run //:gazelle` changed no `BUILD.bazel`, because every label still
+resolves inside the one Bazel repository by import path; `bazel build //...`
+(1 108 targets), the `errs` audit and `check-layer-deps.sh` passed unchanged.
+What does not survive the split is the per-module `GOWORK=off` build of a
+module whose go.mod lacks a `replace` for every repository module in its
+closure — a `replace` in a dependency's go.mod is ignored — so every go.mod
+carries one per module it requires, directly or not, and the release drops
+them all (`rewrite_publishable`). `kit check` runs the `modules` rule and, as
+expected, refuses `docs/api` until `make api` writes one file per module.
+
 **The root keeps the framework and is not deprecated.** A deprecation is the
 whole module path's, read from its latest go.mod, and the root still holds
 `framework/`; marking it would tell every framework consumer to leave a module
