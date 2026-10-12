@@ -305,7 +305,7 @@ func (e *docEngine[T]) after(ctx context.Context, err error, key string, deleted
 	if fn == nil {
 		return
 	}
-	if !hold(ctx, heldEffect{release: func() error { fn(key); return nil }, inside: true}) {
+	if !hold(ctx, heldEffect{release: func(context.Context) error { fn(key); return nil }, inside: true}) {
 		fn(key)
 	}
 }

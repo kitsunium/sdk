@@ -144,8 +144,8 @@ func (c *Command[C, R]) put(ctx context.Context, q *commandQueue, key string, en
 		}
 		return nil
 	}
-	release := func() error {
-		err := queue(withoutUnit(context.WithoutCancel(ctx)))
+	release := func(rctx context.Context) error {
+		err := queue(context.WithoutCancel(rctx))
 		if err != nil {
 			q.release(key)
 		}

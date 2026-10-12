@@ -278,8 +278,8 @@ func (s *StoreService[T]) notify(ctx context.Context, key string, deleted bool) 
 		if w.ownWrite(ctx) {
 			continue
 		}
-		release := func() error {
-			w.notice(withoutUnit(ctx), s.id, key, deleted)
+		release := func(rctx context.Context) error {
+			w.notice(rctx, s.id, key, deleted)
 			return nil
 		}
 		if !hold(ctx, heldEffect{node: w.id, release: release}) {

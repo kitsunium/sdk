@@ -255,14 +255,14 @@ func (m *Mailer) enqueue(ctx context.Context, msg mail.Message) (string, error) 
 	if unitOf(ctx) != nil {
 		// Minted now, kept by the mail once the transaction commits.
 		id := NewID("mail")
-		release := func() error {
+		release := func(rctx context.Context) error {
 			m.mu.Lock()
 			spool := m.spool
 			m.mu.Unlock()
 			if spool == nil {
 				return Unavailable(fmt.Sprintf("mailer %q is not running", m.name))
 			}
-			return m.spooled(spool.SendWithID(withoutUnit(context.WithoutCancel(ctx)), id, msg))
+			return m.spooled(spool.SendWithID(context.WithoutCancel(rctx), id, msg))
 		}
 		if hold(ctx, heldEffect{node: m.id, release: release}) {
 			markSpan(ctx, m.id, "held", "commit")
