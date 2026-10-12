@@ -5,52 +5,9 @@ import (
 	"time"
 )
 
-// ManualClock is a [Timed] whose instant moves ONLY when the caller moves it,
-// with [ManualClock.Advance] or [ManualClock.Set]. Every wait it hands out —
-// After, NewTimer, NewTicker, Sleep — is due at an absolute instant on this
-// clock, and fires exactly when the caller drives the clock past that instant.
-// No wall-clock time passes, so a test asserts cadence and ordering instead of
-// sleeping and hoping.
-//
-// It is a concrete struct, not an interface, for the same reason
-// recycler.Pool and snapshot.Value are: there is one implementation, and a
-// single-impl interface would be over-abstraction. Always used behind the
-// pointer returned by [NewManualClock] — the embedded mutex and cond must not
-// be copied.
-//
-// Safe for concurrent use: every field is guarded by mu, and each wait's
-// channel is created once at registration and never reassigned.
-//
-// Two hazards, both inherent to a clock that only a caller can move:
-//
-//   - [ManualClock.Sleep] blocks until ANOTHER goroutine advances the clock.
-//     A test that sleeps on its own goroutine with nobody to advance hangs
-//     until the test binary's timeout. Sleep on the code under test, advance
-//     from the test.
-//   - Advance wakes a waiter but does not schedule it. When the assertion
-//     depends on the woken goroutine having run, synchronise on something the
-//     goroutine itself signals; [ManualClock.BlockUntil] closes the mirror
-//     race (advancing before the goroutine has registered its wait).
-type ManualClock struct {
-	// mu guards every field below and is the lock cond is built on. It is an
-	// RWMutex so the read-only accessors do not serialise a test's readers
-	// against each other while a driving goroutine is between advances.
-	mu sync.RWMutex
-	// cond is broadcast whenever the wait set changes, so BlockUntil wakes.
-	cond *sync.Cond
-	// now is the clock's current instant.
-	now time.Time
-	// waits holds every armed wait, in registration order.
-	waits []*manualWait
-	// seq numbers registrations so waits due at the same instant fire in a
-	// deterministic order (earliest registration first).
-	seq uint64
-}
-
-// NewManualClock returns a ManualClock reading start. Any instant is legal —
-// before the Unix epoch, after 2038, in any location — which is the point:
-// unlike testing/synctest's bubble clock, the origin is the caller's choice.
-func NewManualClock(start time.Time) *ManualClock {
+// newManualClock is NewManualClock's body: decl_gen.go writes NewManualClock, from the
+// design, as one call of it.
+func newManualClock(start time.Time) *ManualClock {
 	//: build first, then wire the cond to this instance's write lock.
 	mc := &ManualClock{now: start}
 	//: cond and mu must refer to the same lock or BlockUntil deadlocks.
@@ -83,9 +40,9 @@ func (m *ManualClock) After(d time.Duration) <-chan time.Time {
 	return m.NewTimer(d).C()
 }
 
-// NewTimer returns a one-shot [Timer] due d from the clock's current instant.
-// A non-positive d is already elapsed and fires before NewTimer returns.
-func (m *ManualClock) NewTimer(d time.Duration) Timer {
+// newTimer is NewTimer's body: decl_gen.go writes ManualClock.NewTimer, from the
+// design, as one call of it.
+func (m *ManualClock) newTimer(d time.Duration) Timer {
 	//: a zero period marks the wait as one-shot.
 	return &manualTimer{clk: m, w: m.register(d, 0)}
 }
@@ -99,9 +56,9 @@ func (m *ManualClock) NewTicker(d time.Duration) Ticker {
 	return &manualTicker{clk: m, w: m.register(d, d)}
 }
 
-// Sleep blocks the calling goroutine until d has elapsed on this clock — which
-// means until another goroutine advances it. A non-positive d returns at once.
-func (m *ManualClock) Sleep(d time.Duration) {
+// sleep is Sleep's body: decl_gen.go writes ManualClock.Sleep, from the
+// design, as one call of it.
+func (m *ManualClock) sleep(d time.Duration) {
 	//: a sleep is a wait nobody can cancel; block on the timer's channel.
 	<-m.After(d)
 }

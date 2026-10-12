@@ -5,16 +5,14 @@ package(default_visibility = ["//internal/kernel:kernel_consumers"])
 go_library(
     name = "clock",
     srcs = [
-        "clock.go",
         "clock_compliance.go",
+        "decl_gen.go",
         "doc.go",
         "manual.go",
         "manual_ticker.go",
         "manual_timer.go",
         "manual_wait.go",
         "system.go",
-        "ticker.go",
-        "timer.go",
         "waiter.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/kernel/clock",

@@ -148,7 +148,7 @@ type Clock interface {
 ```
 
 <a name="Clock.Now"></a>
-### func \(Clock\) [Now](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/clock/clock.go>)
+### func \(Clock\) [Now](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/clock/decl_gen.go>)
 
 ```go
 func (Clock) Now() time.Time
@@ -157,7 +157,7 @@ func (Clock) Now() time.Time
 Now returns the current instant.
 
 <a name="Clock.Since"></a>
-### func \(Clock\) [Since](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/clock/clock.go>)
+### func \(Clock\) [Since](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/clock/decl_gen.go>)
 
 ```go
 func (Clock) Since(t time.Time) time.Duration
@@ -228,7 +228,7 @@ func (*ManualClock) NewTicker(d time.Duration) Ticker
 NewTicker returns a repeating [Ticker](#Ticker) of period d, panicking on a non-positive d with the same message [System](#System) uses.
 
 <a name="ManualClock.NewTimer"></a>
-### func \(ManualClock\) [NewTimer](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/clock/manual.go>)
+### func \(ManualClock\) [NewTimer](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/clock/decl_gen.go>)
 
 ```go
 func (*ManualClock) NewTimer(d time.Duration) Timer
@@ -273,7 +273,7 @@ func (*ManualClock) Since(t time.Time) time.Duration
 Since returns the duration between t and the clock's current instant. It can be negative when t is in the clock's future, exactly like time.Since.
 
 <a name="ManualClock.Sleep"></a>
-### func \(ManualClock\) [Sleep](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/clock/manual.go>)
+### func \(ManualClock\) [Sleep](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/clock/decl_gen.go>)
 
 ```go
 func (*ManualClock) Sleep(d time.Duration)
@@ -312,7 +312,7 @@ type Ticker interface {
 ```
 
 <a name="Ticker.C"></a>
-### func \(Ticker\) [C](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/clock/ticker.go>)
+### func \(Ticker\) [C](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/clock/decl_gen.go>)
 
 ```go
 func (Ticker) C() <-chan time.Time
@@ -321,7 +321,7 @@ func (Ticker) C() <-chan time.Time
 C returns the channel on which each tick instant is delivered. The same channel is returned by every call; it is never closed.
 
 <a name="Ticker.Reset"></a>
-### func \(Ticker\) [Reset](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/clock/ticker.go>)
+### func \(Ticker\) [Reset](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/clock/decl_gen.go>)
 
 ```go
 func (Ticker) Reset(d time.Duration)
@@ -330,7 +330,7 @@ func (Ticker) Reset(d time.Duration)
 Reset halts the Ticker and restarts it with period d: no tick from before the call is received after it, and the next arrives once d has elapsed. It PANICS on a non-positive d; see the package comment.
 
 <a name="Ticker.Stop"></a>
-### func \(Ticker\) [Stop](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/clock/ticker.go>)
+### func \(Ticker\) [Stop](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/clock/decl_gen.go>)
 
 ```go
 func (Ticker) Stop()
@@ -386,7 +386,7 @@ type Timer interface {
 ```
 
 <a name="Timer.C"></a>
-### func \(Timer\) [C](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/clock/timer.go>)
+### func \(Timer\) [C](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/clock/decl_gen.go>)
 
 ```go
 func (Timer) C() <-chan time.Time
@@ -395,7 +395,7 @@ func (Timer) C() <-chan time.Time
 C returns the channel on which the fire instant is delivered. The same channel is returned by every call; it is never closed.
 
 <a name="Timer.Reset"></a>
-### func \(Timer\) [Reset](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/clock/timer.go>)
+### func \(Timer\) [Reset](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/clock/decl_gen.go>)
 
 ```go
 func (Timer) Reset(d time.Duration) bool
@@ -404,7 +404,7 @@ func (Timer) Reset(d time.Duration) bool
 Reset re-arms the Timer to fire d from the clock's current instant and reports whether it was still armed. After Reset returns, no value from a previous arming is left pending on C. A non-positive d fires at once.
 
 <a name="Timer.Stop"></a>
-### func \(Timer\) [Stop](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/clock/timer.go>)
+### func \(Timer\) [Stop](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/clock/decl_gen.go>)
 
 ```go
 func (Timer) Stop() bool
@@ -443,7 +443,7 @@ type Waiter interface {
 ```
 
 <a name="Waiter.After"></a>
-### func \(Waiter\) [After](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/clock/waiter.go>)
+### func \(Waiter\) [After](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/clock/decl_gen.go>)
 
 ```go
 func (Waiter) After(d time.Duration) <-chan time.Time
@@ -452,7 +452,7 @@ func (Waiter) After(d time.Duration) <-chan time.Time
 After returns a channel that delivers the fire instant once d has elapsed. A non-positive d delivers at once.
 
 <a name="Waiter.NewTicker"></a>
-### func \(Waiter\) [NewTicker](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/clock/waiter.go>)
+### func \(Waiter\) [NewTicker](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/clock/decl_gen.go>)
 
 ```go
 func (Waiter) NewTicker(d time.Duration) Ticker
@@ -461,7 +461,7 @@ func (Waiter) NewTicker(d time.Duration) Ticker
 NewTicker returns a repeating [Ticker](#Ticker) of period d. It PANICS on a non-positive d; see the package comment.
 
 <a name="Waiter.NewTimer"></a>
-### func \(Waiter\) [NewTimer](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/clock/waiter.go>)
+### func \(Waiter\) [NewTimer](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/clock/decl_gen.go>)
 
 ```go
 func (Waiter) NewTimer(d time.Duration) Timer
@@ -470,7 +470,7 @@ func (Waiter) NewTimer(d time.Duration) Timer
 NewTimer returns a one-shot [Timer](#Timer) due d from now. A non-positive d fires at once.
 
 <a name="Waiter.Sleep"></a>
-### func \(Waiter\) [Sleep](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/clock/waiter.go>)
+### func \(Waiter\) [Sleep](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/clock/decl_gen.go>)
 
 ```go
 func (Waiter) Sleep(d time.Duration)
