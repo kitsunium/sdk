@@ -1,6 +1,6 @@
 module github.com/kitsunium/sdk
 
-go 1.27.1
+go 1.27.2
 
 // The SDK is this one module (ADR 0162): the kernel, core and service layers
 // under internal/, the public packages under pkg/v1/ and the framework under

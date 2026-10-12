@@ -1,6 +1,6 @@
 module github.com/kitsunium/sdk/third-party/db/writer/clickhouse
 
-go 1.27.1
+go 1.27.2
 
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.48.0
