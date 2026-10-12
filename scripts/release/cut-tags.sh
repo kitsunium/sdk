@@ -441,7 +441,7 @@ sdk_replaces_of() {
 # release gives the root when its tree holds one; empty when neither exists,
 # which rewrite_publishable refuses for a module that needs it. Read from the
 # tags, never remembered, so it is the same answer for every later release.
-root_floor() {
+root_floor_tagged() {
   local t
   while IFS= read -r t; do
     [ -z "$t" ] && continue
@@ -450,6 +450,15 @@ root_floor() {
       return 0
     fi
   done < <(stable_tags 'v*' is_valid_tag | version_sort)
+}
+
+root_floor() {
+  local tagged=""
+  tagged="$(root_floor_tagged)"
+  if [ -n "$tagged" ]; then
+    echo "$tagged"
+    return 0
+  fi
   if [ -n "${NEXT_VERSION[.]+set}" ] && [ -f internal/go.mod ]; then
     echo "${NEXT_VERSION[.]}"
   fi
@@ -518,9 +527,29 @@ rewrite_publishable() {
     [ -z "$dep" ] && continue
     edits+=(-dropreplace="$dep")
   done < <(sdk_replaces_of "$gomod")
+  # The split's tombstones, required by the internal module (ADR 0171 §7): a
+  # build that still lists …/internal/{kernel,core,service}@v0.17.0 — a go.mod
+  # from the …/pkg era — is lifted by minimum version selection to their
+  # tombstones, which hold no package, the moment it requires the internal
+  # module. A cycle of modules, which Go accepts: each tombstone requires this
+  # module back.
+  if [ "$self" = internal ] && [ -n "${SPLIT_FLOOR:-}" ]; then
+    for dep in "${SPLIT_TOMBSTONES[@]}"; do edits+=(-require="$SDK_MODULE/$dep@$SPLIT_FLOOR"); done
+  fi
   if [ "${#edits[@]}" -gt 0 ]; then
     go mod edit "${edits[@]}" "$gomod"
   fi
+}
+
+# is_tombstone_requirement <path> <version> — 0 when <path>@<version> is a
+# retired module at its tombstone: one this release cuts, or one a tag holds.
+# A requirement of one is the opposite of the ambiguous import a requirement of
+# a retired module is refused for: it lifts a build to a version with no
+# package.
+is_tombstone_requirement() {
+  local dir="${1#"$SDK_MODULE"/}" ver="$2"
+  if [ -n "${TOMB_SEM[$dir]+set}" ] && [ "${TOMB_SEM[$dir]}" = "$ver" ]; then return 0; fi
+  is_valid_tombstone_tag "$dir/$ver" && git rev-parse -q --verify "refs/tags/$dir/$ver" >/dev/null
 }
 
 # assert_publishable <go.mod> — fail if the file no longer parses, if an
@@ -545,7 +574,7 @@ assert_publishable() {
   fi
   while read -r path version; do
     [ -z "$path" ] && continue
-    if is_retired_module "$path"; then
+    if is_retired_module "$path" && ! is_tombstone_requirement "$path" "$version"; then
       echo "cut-tags: $gomod requires $path, a module ADR 0162 retired" >&2
       return 1
     fi
@@ -584,9 +613,27 @@ module_changed() {
 }
 
 # TOMBSTONES are the module directories whose tombstone the first root tag cuts
-# (ADR 0162): the two retired modules a consumer imported. Not internal/*: Go's
-# internal/ rule kept every importer outside the repository out of them.
+# (ADR 0162): the two retired modules a consumer imported.
 TOMBSTONES=(pkg framework)
+
+# SPLIT_TOMBSTONES are the module paths the split cuts a tombstone of (ADR
+# 0171 §7), at SPLIT_TOMBSTONE_VERSION, in the release whose root first holds
+# internal/go.mod: the three internal modules ADR 0162 retired at v0.17.0.
+# Nobody outside the repository imports them, but a consumer's build still
+# RESOLVES them: an import of github.com/kitsunium/sdk/internal/kernel/errs that
+# no module of the build provides goes to the module with the longest path whose
+# latest version provides it, which is …/internal/kernel@v0.17.0 — and a
+# `go get -u ./...` from a monolithic root lands there and builds, silently,
+# against the old internals (measured on a file proxy). Their tombstone is a
+# go.mod requiring the internal module at this release's version and no package.
+SPLIT_TOMBSTONES=(internal/kernel internal/core internal/service)
+SPLIT_TOMBSTONE_VERSION=v0.18.0
+
+# The tombstones this release cuts, in order, and for each its tag's version
+# (TOMB_SEM), the module its go.mod requires (TOMB_TARGET) and at which version
+# (TOMB_TARGET_VER) — filled once the versions are known.
+TOMB_DIRS=()
+declare -A TOMB_SEM=() TOMB_TARGET=() TOMB_TARGET_VER=()
 
 # nested_modules <dir> — the modules go.work names beneath <dir>, one per line:
 # modules of their own — a vendor's, a pkg family's —, released by their own
@@ -604,7 +651,7 @@ sdk_go_directive() {
   go mod edit -json go.mod | jq -r '.Go // empty'
 }
 
-# tombstone_deprecation <sem> — the notice a tombstone's go.mod carries on its
+# tombstone_deprecation <dir> — the notice a tombstone's go.mod carries on its
 # module directive (ADR 0162): where the module's packages went, and the
 # command ADR 0162 §Consumer migration documents to move a go.mod there. Go
 # reads a module's deprecation from its latest go.mod — the tombstone's, for
@@ -613,8 +660,17 @@ sdk_go_directive() {
 # and none of it past 500 bytes (ShortMessage, cmd/go/internal/modload, Go
 # 1.27.1); assert_tombstone holds both.
 tombstone_deprecation() {
-  printf 'moved into %s at %s, import paths unchanged; migrate with: go get %s@%s %s/internal/kernel@none && go mod tidy' \
-    "$SDK_MODULE" "$1" "$SDK_MODULE" "$1" "$SDK_MODULE"
+  local dir="$1"
+  case "$dir" in
+    internal/*)
+      printf 'moved into %s/internal (ADR 0171), which no consumer imports; update with: go get %s@latest && go mod tidy' \
+        "$SDK_MODULE" "$SDK_MODULE"
+      ;;
+    *)
+      printf 'moved into %s at %s, import paths unchanged; migrate with: go get %s@%s %s/internal/kernel@none && go mod tidy' \
+        "$SDK_MODULE" "${TOMB_TARGET_VER[$dir]}" "$SDK_MODULE" "${TOMB_TARGET_VER[$dir]}" "$SDK_MODULE"
+      ;;
+  esac
 }
 
 # tombstone_gomod <dir> <sem> <out> — write to <out> the go.mod of the tombstone
@@ -629,8 +685,8 @@ tombstone_gomod() {
     echo "cut-tags: the SDK's go.mod has no go directive for the tombstone of $dir to carry" >&2
     return 1
   fi
-  printf '// Deprecated: %s\nmodule %s\n' "$(tombstone_deprecation "$sem")" "$SDK_MODULE/$dir" >"$out" || return 1
-  go mod edit -go="$goline" -require="$SDK_MODULE@$sem" "$out"
+  printf '// Deprecated: %s\nmodule %s\n' "$(tombstone_deprecation "$dir")" "$SDK_MODULE/$dir" >"$out" || return 1
+  go mod edit -go="$goline" -require="${TOMB_TARGET[$dir]}@${TOMB_TARGET_VER[$dir]}" "$out"
 }
 
 # assert_tombstone <go.mod> <dir> <sem> — fail unless <go.mod> is the
@@ -641,7 +697,7 @@ tombstone_gomod() {
 assert_tombstone() {
   local gomod="$1" dir="$2" sem="$3" json="" goline="" notice="" bytes=0
   goline="$(sdk_go_directive)" || return 1
-  notice="$(tombstone_deprecation "$sem")"
+  notice="$(tombstone_deprecation "$dir")"
   bytes="$(printf '%s' "$notice" | wc -c)"
   if [[ "$notice" == *$'\n'* ]] || [ "$((bytes))" -gt 500 ]; then
     echo "cut-tags: the deprecation notice of the tombstone of $dir is not one line of at most 500 bytes — go get would not print it whole" >&2
@@ -655,12 +711,12 @@ assert_tombstone() {
     echo "cut-tags: the tombstone go.mod of $dir does not deprecate $SDK_MODULE/$dir with the migration notice, as Go reads it: '$(jq -r '.Module.Deprecated // ""' <<<"$json")'" >&2
     return 1
   fi
-  if ! jq -e --arg m "$SDK_MODULE/$dir" --arg sdk "$SDK_MODULE" --arg v "$sem" --arg go "$goline" '
+  if ! jq -e --arg m "$SDK_MODULE/$dir" --arg sdk "${TOMB_TARGET[$dir]}" --arg v "${TOMB_TARGET_VER[$dir]}" --arg go "$goline" '
       .Module.Path == $m and .Go == $go and .Toolchain == null
       and ((.Require // []) | length == 1 and .[0].Path == $sdk and .[0].Version == $v)
       and ([.Replace, .Exclude, .Retract, .Tool, .Ignore, .Godebug] | map((. // []) | length) | add == 0)' \
     >/dev/null <<<"$json"; then
-    echo "cut-tags: the tombstone go.mod of $dir is not 'module $SDK_MODULE/$dir; go $goline; require $SDK_MODULE $sem' alone" >&2
+    echo "cut-tags: the tombstone go.mod of $dir is not 'module $SDK_MODULE/$dir; go $goline; require ${TOMB_TARGET[$dir]} ${TOMB_TARGET_VER[$dir]}' alone" >&2
     return 1
   fi
 }
@@ -703,7 +759,7 @@ tombstone_commit() {
   GIT_INDEX_FILE="$tmp/index" git update-index --add --cacheinfo "100644,$blob,$dir/go.mod" || return 1
   tree="$(GIT_INDEX_FILE="$tmp/index" git write-tree)" || return 1
   git commit-tree "$tree" -p "$relc" \
-    -m "release $dir/$sem — tombstone of $SDK_MODULE/$dir: a go.mod that requires $SDK_MODULE $sem, and no package (ADR 0162)" || return 1
+    -m "release $dir/$sem — tombstone of $SDK_MODULE/$dir: a go.mod that requires ${TOMB_TARGET[$dir]} ${TOMB_TARGET_VER[$dir]}, and no package (ADR 0162, ADR 0171)" || return 1
   rm -rf "${tmp:?}"
 }
 
@@ -765,10 +821,9 @@ publish_release() {
   local d t
   local -a tags=() tombs=()
   for d in "$@"; do tags+=("${NEXT_TAG[$d]}"); done
-  # The tombstones go last: on the first root tag after the pkg history alone.
-  if [ "$tombstone" -eq 1 ]; then
-    for d in "${TOMBSTONES[@]}"; do tombs+=("$d/$root_sem"); done
-  fi
+  # The tombstones go last: on the first root tag after the pkg history, and
+  # on the split's release.
+  for d in ${TOMB_DIRS[@]+"${TOMB_DIRS[@]}"}; do tombs+=("$d/${TOMB_SEM[$d]}"); done
 
   # Validate every tag before touching the repo, each against the shape of its
   # family — lib/tag-format.sh —, and refuse a major past 1: bare module paths
@@ -829,14 +884,15 @@ publish_release() {
       if [ "$shown" -eq 0 ]; then
         echo "  (no vendor module changed: the SDK's go.mod is published as it is)"
       fi
-      if [ "$tombstone" -eq 1 ]; then
+      if [ "${#TOMB_DIRS[@]}" -gt 0 ]; then
         local dry
         dry="$(mktemp -d)"
-        echo "DRY-RUN: tombstones of the retired modules for $root_sem (ADR 0162), each a go.mod alone on a child of the release commit:"
-        for d in "${TOMBSTONES[@]}"; do
-          tombstone_gomod "$d" "$root_sem" "$dry/$d.mod"
-          assert_tombstone "$dry/$d.mod" "$d" "$root_sem"
-          echo "  --- $d/go.mod ($d/$root_sem) ---"
+        echo "DRY-RUN: tombstones of the retired modules (ADR 0162, ADR 0171), each a go.mod alone on a child of the release commit:"
+        for d in "${TOMB_DIRS[@]}"; do
+          mkdir -p "$(dirname "$dry/$d.mod")"
+          tombstone_gomod "$d" "${TOMB_SEM[$d]}" "$dry/$d.mod"
+          assert_tombstone "$dry/$d.mod" "$d" "${TOMB_SEM[$d]}"
+          echo "  --- $d/go.mod ($d/${TOMB_SEM[$d]}) ---"
           sed '/./s/^/    /' "$dry/$d.mod"
           kept="$(nested_modules "$d" | tr '\n' ' ')"
           if [ -n "$kept" ]; then
@@ -891,14 +947,12 @@ publish_release() {
       # Each tombstone on its own child of the release commit, checked before
       # it is tagged; then ONE atomic push, so no moment exists where one tag of
       # the release is published and another is not (ADR 0162).
-      if [ "$tombstone" -eq 1 ]; then
-        local tc
-        for d in "${TOMBSTONES[@]}"; do
-          tc="$(tombstone_commit "$relc" "$d" "$root_sem")"
-          assert_tombstone_tree "$tc" "$relc" "$d"
-          git tag -a "$d/$root_sem" -m "release $d/$root_sem — tombstone of $SDK_MODULE/$d (ADR 0162)" "$tc"
-        done
-      fi
+      local tc
+      for d in ${TOMB_DIRS[@]+"${TOMB_DIRS[@]}"}; do
+        tc="$(tombstone_commit "$relc" "$d" "${TOMB_SEM[$d]}")"
+        assert_tombstone_tree "$tc" "$relc" "$d"
+        git tag -a "$d/${TOMB_SEM[$d]}" -m "release $d/${TOMB_SEM[$d]} — tombstone of $SDK_MODULE/$d (ADR 0162, ADR 0171)" "$tc"
+      done
       if [ "$NO_PUSH" -eq 1 ]; then
         echo "NO-PUSH: tagged ${tags[*]}${tombs[*]+ ${tombs[*]}} on $relc in this clone; nothing was pushed" >&2
       else
@@ -1049,10 +1103,40 @@ done
 # The root's floor (root_floor), once the root's own next version is known.
 ROOT_FLOOR="$(root_floor)"
 
-tombstone_list=()
-if [ "$tombstone" -eq 1 ]; then
-  for d in "${TOMBSTONES[@]}"; do tombstone_list+=("$d/$root_sem"); done
+# The split's release (ADR 0171 §7): the root is cut, no root tag yet holds
+# internal/go.mod, and this tree does. It cuts the tombstones of the three
+# internal modules ADR 0162 retired, requiring the internal module it tags.
+split=0
+if [ -n "${NEXT_VERSION[.]+set}" ] && [ -z "$(root_floor_tagged)" ] && [ -f internal/go.mod ]; then
+  split=1
 fi
+
+if [ "$tombstone" -eq 1 ]; then
+  for d in "${TOMBSTONES[@]}"; do
+    TOMB_DIRS+=("$d")
+    TOMB_SEM[$d]="$root_sem" TOMB_TARGET[$d]="$SDK_MODULE" TOMB_TARGET_VER[$d]="$root_sem"
+  done
+fi
+if [ "$split" -eq 1 ]; then
+  if [ -z "${NEXT_VERSION[internal]+set}" ]; then
+    echo "cut-tags: the split's release cuts the root without the internal module — its tombstones of internal/{kernel,core,service} require the internal module this release tags (ADR 0171 §7)" >&2
+    exit 1
+  fi
+  for d in "${SPLIT_TOMBSTONES[@]}"; do
+    TOMB_DIRS+=("$d")
+    TOMB_SEM[$d]="$SPLIT_TOMBSTONE_VERSION" TOMB_TARGET[$d]="$SDK_MODULE/internal" TOMB_TARGET_VER[$d]="${NEXT_VERSION[internal]}"
+  done
+fi
+
+# The version internal requires the split's tombstones at: this release's,
+# or the tag a release before it cut.
+SPLIT_FLOOR=""
+if [ "$split" -eq 1 ] || git rev-parse -q --verify "refs/tags/${SPLIT_TOMBSTONES[0]}/$SPLIT_TOMBSTONE_VERSION" >/dev/null; then
+  SPLIT_FLOOR="$SPLIT_TOMBSTONE_VERSION"
+fi
+
+tombstone_list=()
+for d in ${TOMB_DIRS[@]+"${TOMB_DIRS[@]}"}; do tombstone_list+=("$d/${TOMB_SEM[$d]}"); done
 
 # The first root tag moves every consumer from …/pkg to the SDK module (ADR
 # 0162): a change a consumer must act on, which v0 says with a minor at least,
@@ -1072,11 +1156,11 @@ fi
 # hold, so the automatic run that holds the first root tag reports it already.
 # A tag the module proxy has fetched is that version for good, so nothing here
 # moves or replaces one: a person decides what it is.
-if [ "$tombstone" -eq 1 ]; then
-  for d in "${TOMBSTONES[@]}"; do
-    if git rev-parse -q --verify "refs/tags/$d/$root_sem" >/dev/null; then
-      at="$(git rev-parse --short "refs/tags/$d/$root_sem^{}" 2>/dev/null || echo '?')"
-      echo "cut-tags: $d/$root_sem already exists, at $at — the tombstone of $SDK_MODULE/$d is cut on this release's own commit, so that tag names another; refusing to publish $root_sem (ADR 0162)" >&2
+if [ "${#TOMB_DIRS[@]}" -gt 0 ]; then
+  for d in "${TOMB_DIRS[@]}"; do
+    if git rev-parse -q --verify "refs/tags/$d/${TOMB_SEM[$d]}" >/dev/null; then
+      at="$(git rev-parse --short "refs/tags/$d/${TOMB_SEM[$d]}^{}" 2>/dev/null || echo '?')"
+      echo "cut-tags: $d/${TOMB_SEM[$d]} already exists, at $at — the tombstone of $SDK_MODULE/$d is cut on this release's own commit, so that tag names another; refusing to publish (ADR 0162, ADR 0171)" >&2
       echo "cut-tags:   find out who cut it and whether the module proxy has fetched it before anything else is tagged; nothing was published." >&2
       exit 1
     fi
@@ -1099,6 +1183,9 @@ if [ "$first" -eq 1 ] && [ "$DRY_RUN" -eq 0 ] && [ "$ALLOW_BOOTSTRAP" -eq 0 ]; t
 fi
 if [ "$first" -eq 1 ] && [ -n "$root_last" ]; then
   echo "cut-tags: $root_sem is the SDK module's first tag; it continues $root_last (ADR 0162)" >&2
+fi
+if [ "$split" -eq 1 ]; then
+  echo "cut-tags: internal/{kernel,core,service}/$SPLIT_TOMBSTONE_VERSION are tombstones: the last version of the three internal modules ADR 0162 retired, which requires $SDK_MODULE/internal ${NEXT_VERSION[internal]} and provides no package, so a build resolving an internal package goes to the internal module, never to v0.17.0 (ADR 0171 §7)" >&2
 fi
 if [ "$tombstone" -eq 1 ]; then
   echo "cut-tags: pkg/$root_sem and framework/$root_sem are tombstones: the last version of $SDK_MODULE/pkg and $SDK_MODULE/framework, which requires $root_sem, provides no package and deprecates its module with the migration command, so an import of either path resolves to the SDK module and go get names the move (ADR 0162)" >&2

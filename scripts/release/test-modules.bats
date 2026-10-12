@@ -307,7 +307,7 @@ monolith() {
   monolith
   run bash -c "echo sdk | '$CT' --dry-run --bump=minor"
   [ "$status" -eq 0 ]
-  [ "$(would_tag)" = "v0.20.0 internal/v0.1.0 pkg/v1/data/v0.1.0 pkg/v1/net/v0.1.0" ]
+  [ "$(would_tag)" = "v0.20.0 internal/v0.1.0 pkg/v1/data/v0.1.0 pkg/v1/net/v0.1.0 internal/kernel/v0.18.0 internal/core/v0.18.0 internal/service/v0.18.0" ]
   for m in internal pkg/v1/data pkg/v1/net; do
     block="$(awk -v m="--- $m/go.mod ---" '$0 ~ m { on = 1; next } /--- / { on = 0 } on' <<<"$output")"
     [[ "$block" == *"github.com/kitsunium/sdk v0.20.0"* ]]
@@ -327,6 +327,29 @@ monolith() {
   [[ "$(would_tag)" == *"third-party/aws/v0.20.0"* ]]
   block="$(awk '/--- third-party\/aws\/go.mod ---/ { on = 1; next } /--- / { on = 0 } on' <<<"$output")"
   [[ "$block" == *"github.com/kitsunium/sdk v0.20.0"* ]]
+}
+
+# B1: after the split a `go get -u` from a monolithic root resolved an
+# internal package to …/internal/kernel@v0.17.0, the longest path that still
+# provided it. The split's release cuts a tombstone of each: a go.mod alone,
+# requiring the internal module it tags, in the same atomic push.
+@test "the split's release cuts the tombstones of the three internal modules, in its push" {
+  need_toolchain
+  monolith
+  run bash -c "echo sdk | '$CT' --bump=minor --allow-bootstrap 2>&1"
+  [ "$status" -eq 0 ]
+  for m in kernel core service; do
+    [[ "$(remote_tags)" == *"internal/$m/v0.18.0"* ]]
+    [ "$(g ls-tree -r --name-only "internal/$m/v0.18.0" -- "internal/$m/")" = "internal/$m/go.mod" ]
+    g show "internal/$m/v0.18.0:internal/$m/go.mod" >"$BATS_TEST_TMPDIR/t.mod"
+    [ "$(go mod edit -json "$BATS_TEST_TMPDIR/t.mod" | jq -c '[.Module.Path, (.Require | map(.Path + "@" + .Version))]')" = \
+      "[\"github.com/kitsunium/sdk/internal/$m\",[\"github.com/kitsunium/sdk/internal@v0.1.0\"]]" ]
+    [[ "$(go mod edit -json "$BATS_TEST_TMPDIR/t.mod" | jq -r .Module.Deprecated)" == *"go get github.com/kitsunium/sdk@latest && go mod tidy"* ]]
+    [ "$(g rev-parse "internal/$m/v0.18.0^{commit}^1")" = "$(g rev-parse 'v0.20.0^{commit}')" ]
+    # and the internal module requires each tombstone back, so a build that
+    # still lists the retired module is lifted to it (a cycle Go accepts).
+    [[ "$(g show 'internal/v0.1.0:internal/go.mod')" == *"github.com/kitsunium/sdk/internal/$m v0.18.0"* ]]
+  done
 }
 
 # A family cut before any root holds the split has no floor to require: it

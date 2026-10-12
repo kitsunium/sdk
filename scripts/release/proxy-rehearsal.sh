@@ -212,6 +212,27 @@ consume() {
   ) >"$WORK/$name.log" 2>&1
 }
 
+# upgrade_all <name> <root-version> <import> — a consumer pinned to the root at
+# <root-version>, importing <import>, built there first, then
+# `go get -u ./...`, `go mod tidy` and `go build`; $WORK/<name>.mods lists the
+# build's modules and $WORK/<name>.pkgs each dependency package with its module.
+upgrade_all() {
+  local name="$1" root="$2" imp="$3" c
+  c="$WORK/$name"
+  mkdir -p "$c"
+  printf 'module example.com/%s\n\ngo 1.21\n\nrequire github.com/kitsunium/sdk %s\n' "$name" "$root" >"$c/go.mod"
+  printf 'package main\n\nimport _ "%s"\n\nfunc main() {}\n' "$imp" >"$c/main.go"
+  (
+    cd "$c"
+    export GOWORK=off GOFLAGS=-mod=mod GOTOOLCHAIN=local GOPROXY="file://$PROXY" \
+      GONOSUMDB='*' GONOSUMCHECK=1 GOSUMDB=off GOPATH="$WORK/gopath" GOMODCACHE="$WORK/gopath/pkg/mod" \
+      GOCACHE="$WORK/gocache"
+    go mod tidy && go build ./... && go get -u ./... && go mod tidy && go build ./... &&
+      go list -m all >"$WORK/$name.mods" &&
+      go list -deps -f '{{if .Module}}{{.ImportPath}} {{.Module.Path}}{{end}}' ./... >"$WORK/$name.pkgs"
+  ) >"$WORK/$name.log" 2>&1
+}
+
 module_src() {
   mkdir -p "$1"
   printf '%s' "$2" >"$1/go.mod"
@@ -295,6 +316,21 @@ manifest() {
     [ "$dir" = . ] || src="$src/$dir"
     proxy_add "$module" "$version" "$src"
   done < <(jq -r '.modules[] | [.dir, .module, .version] | @tsv' "$MANIFEST")
+  # The tombstones, each zipped from its own tag — a child of the release
+  # commit, its directory reduced to a go.mod.
+  while IFS= read -r tag; do
+    [ -z "$tag" ] && continue
+    dir="${tag%/v*}"
+    src="$WORK/src/tomb_$(tr '/' '_' <<<"$dir")"
+    mkdir -p "$src"
+    git -C "$here/../.." archive "$tag" "$dir" | tar -x -C "$src"
+    proxy_add "github.com/kitsunium/sdk/$dir" "${tag##*/}" "$src/$dir"
+  done < <(jq -r '.tombstones[]?' "$MANIFEST")
+  # What the proxy already serves of the modules ADR 0162 retired: the build a
+  # consumer of a monolithic root resolves an internal package against.
+  for dir in internal/kernel internal/core internal/service; do
+    proxy_fetch "github.com/kitsunium/sdk/$dir" v0.17.0
+  done
   while IFS= read -r dir; do
     [ -z "$dir" ] && continue
     version="$(jq -r --arg d "$dir" '.modules[] | select(.dir == $d) | .version' "$MANIFEST")"
@@ -323,6 +359,27 @@ manifest() {
     fi
     echo "ok: pinned to v0.19.7, adding $dir@$version builds — the root lifted to $floor, go mod tidy clean"
   done <<<"$families"
+  # B1: a consumer of the monolithic root that upgrades everything. Before the
+  # split's tombstones it resolved internal/kernel/errs to the longest path that
+  # still provided it, …/internal/kernel@v0.17.0, and built silently against
+  # the old internals; it must end on the internal module the release cut.
+  if ! upgrade_all upgrade v0.19.7 github.com/kitsunium/sdk/pkg/v1/errs; then
+    echo "proxy-rehearsal: pinned to v0.19.7, 'go get -u ./...' did not build:" >&2
+    sed 's/^/  /' "$WORK/upgrade.log" >&2
+    return 1
+  fi
+  if grep -E 'kitsunium/sdk/internal/(kernel|core|service) v0\.1[0-7]\.' "$WORK/upgrade.mods" >/dev/null; then
+    echo "proxy-rehearsal: after 'go get -u ./...' from v0.19.7 the build still selects a retired internal module:" >&2
+    sed 's/^/  /' "$WORK/upgrade.mods" >&2
+    return 1
+  fi
+  if ! grep -E '^github\.com/kitsunium/sdk/internal/kernel/errs github\.com/kitsunium/sdk/internal$' "$WORK/upgrade.pkgs" >/dev/null; then
+    echo "proxy-rehearsal: after 'go get -u ./...' internal/kernel/errs does not come from the internal module:" >&2
+    sed 's/^/  /' "$WORK/upgrade.pkgs" >&2
+    return 1
+  fi
+  echo "ok: pinned to v0.19.7, 'go get -u ./...' builds on the internal module — no retired internal module selected"
+
   # The control, on the real modules: the first family re-published without
   # the floor must meet the ambiguous import the floor exists to prevent.
   dir="$(head -n1 <<<"$families")"

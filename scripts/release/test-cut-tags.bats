@@ -757,13 +757,13 @@ check_tombstone() {
   [ "$(remote_tags)" = "pkg/v0.17.0 pkg/v0.18.0" ]
 }
 
-@test "lib: is_valid_tombstone_tag accepts pkg and framework, and nothing else" {
+@test "lib: is_valid_tombstone_tag accepts pkg, framework and the three internal modules, and nothing else" {
   source "$LIB"
-  for t in pkg/v0.18.0 framework/v0.18.0 framework/v1.0.0; do
+  for t in pkg/v0.18.0 framework/v0.18.0 framework/v1.0.0 internal/kernel/v0.18.0 internal/core/v0.18.0 internal/service/v0.18.0; do
     run is_valid_tombstone_tag "$t"
     [ "$status" -eq 0 ]
   done
-  for t in v0.18.0 internal/core/v0.18.0 framework/connectors/postgres/v0.18.0 pkg/v0.18.0-rc.1 pkg/v2.0.0 third-party/aws/v0.18.0; do
+  for t in v0.18.0 internal/v0.18.0 internal/kernel/x/v0.18.0 internal/core/v0.18.0-rc.1 framework/connectors/postgres/v0.18.0 pkg/v0.18.0-rc.1 pkg/v2.0.0 third-party/aws/v0.18.0; do
     run is_valid_tombstone_tag "$t"
     [ "$status" -ne 0 ]
   done

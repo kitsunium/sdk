@@ -12,6 +12,7 @@ import {
   selectReleases,
   changelogRefSpec,
   isValidModuleTag,
+  isTombstoneTag,
   LOCAL_RELEASE,
 } from "./tag-format.mjs";
 
@@ -269,4 +270,13 @@ test("a module tag of ADR 0171 is a release tag and no docs version", () => {
     versions.flatMap((v) => v.releases.map((r) => r.tag)),
     ["v0.19.7"],
   );
+});
+
+test("isTombstoneTag mirrors the shell's tombstone shape, the split's three included", () => {
+  for (const t of ["pkg/v0.18.0", "framework/v0.18.0", "internal/kernel/v0.18.0", "internal/core/v0.18.0", "internal/service/v0.18.0"]) {
+    assert.equal(isTombstoneTag(t), true, t);
+  }
+  for (const t of ["v0.18.0", "internal/v0.18.0", "internal/kernel/x/v0.18.0", "internal/core/v0.18.0-rc.1", "pkg/v1/data/v0.1.0", "pkg/v2.0.0", "framework/connectors/postgres/v0.18.0"]) {
+    assert.equal(isTombstoneTag(t), false, t);
+  }
 });

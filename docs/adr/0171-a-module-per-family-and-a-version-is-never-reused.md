@@ -324,6 +324,19 @@ carries one per module it requires, directly or not, and the release drops
 them all (`rewrite_publishable`). `kit check` runs the `modules` rule and, as
 expected, refuses `docs/api` until `make api` writes one file per module.
 
+**The split cuts the tombstones of the three internal modules** ADR 0162
+retired: `internal/{kernel,core,service}/v0.18.0`, above their published
+v0.17.0, each a go.mod alone requiring `…/internal` at the split's version, in
+the split's atomic push. No consumer imports them, but a build resolves an
+internal package through them: a consumer of v0.19.7 running `go get -u ./...`
+after the split found `internal/kernel/errs` in no module of its build, and
+Go took the longest path whose latest version still provided it —
+`…/internal/kernel@v0.17.0` —, building silently against the old internals
+(found by an independent review, reproduced on the file proxy, green with the
+tombstones). The internal module's published go.mod requires the three
+tombstones back, a cycle of modules Go accepts, so a build that still lists one
+at v0.17.0 is lifted to its empty tombstone.
+
 **The root keeps the framework and is not deprecated.** A deprecation is the
 whole module path's, read from its latest go.mod, and the root still holds
 `framework/`; marking it would tell every framework consumer to leave a module

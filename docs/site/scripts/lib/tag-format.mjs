@@ -61,6 +61,17 @@ export const FAMILY_TAG_REGEX =
 export const INTERNAL_TAG_REGEX =
   /^internal\/v[01]\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$/;
 
+// The tombstones' tags, mirrored from TOMBSTONE_TAG_REGEX in
+// scripts/release/lib/tag-format.sh: pkg/vX.Y.Z and framework/vX.Y.Z (ADR
+// 0162), internal/{kernel,core,service}/vX.Y.Z (ADR 0171 §7) — a go.mod and no
+// package each, never a docs version.
+export const TOMBSTONE_TAG_REGEX =
+  /^(?:pkg|framework|internal\/(?:kernel|core|service))\/v[01]\.[0-9]+\.[0-9]+$/;
+
+export function isTombstoneTag(tag) {
+  return typeof tag === "string" && TOMBSTONE_TAG_REGEX.test(tag);
+}
+
 export function isValidModuleTag(tag) {
   return (
     typeof tag === "string" &&

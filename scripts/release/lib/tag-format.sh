@@ -153,12 +153,13 @@ is_module_dir() {
   is_valid_release_tag "$(module_tag_prefix "$1")v0.0.0"
 }
 
-# The tombstones' tags (ADR 0162): `pkg/vX.Y.Z` and `framework/vX.Y.Z`, the
+# The tombstones' tags: `pkg/vX.Y.Z` and `framework/vX.Y.Z` (ADR 0162), the
 # last version of the two retired modules a consumer imported, cut at the first
-# root tag's version and never again. No pre-release: the first root tag is a
-# minor bumped from pkg's history, never one. Never `internal/<mod>/…`: no
-# consumer imports those modules, so no import resolves to them.
-TOMBSTONE_TAG_REGEX='^(pkg|framework)/v[01]\.[0-9]+\.[0-9]+$'
+# root tag's version and never again; and `internal/{kernel,core,service}/vX.Y.Z`
+# (ADR 0171 §7), cut by the split's release — no consumer imports those
+# modules, but a build resolving an internal package reached them. No
+# pre-release: neither is ever one.
+TOMBSTONE_TAG_REGEX='^(pkg|framework|internal/(kernel|core|service))/v[01]\.[0-9]+\.[0-9]+$'
 
 # is_valid_tombstone_tag <tag> — a tombstone's shape. Exits 0 on match.
 is_valid_tombstone_tag() {
