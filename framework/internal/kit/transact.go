@@ -435,14 +435,14 @@ func atEnd(ctx context.Context, fn func()) bool {
 // stands.
 func (t *txn) let(held []heldEffect) {
 	for _, e := range held {
-		if err := letOne(e, t.releasing(e.made)); err != nil && t.app != nil {
+		if err := letOne(t.releasing(e.made), e); err != nil && t.app != nil {
 			t.app.problem(e.node, say("transaction.effect", "node", e.node, "detail", describeText(err)))
 		}
 	}
 }
 
 // letOne releases one effect with ctx, a panic said as its failure.
-func letOne(e heldEffect, ctx context.Context) (err error) {
+func letOne(ctx context.Context, e heldEffect) (err error) {
 	defer func() {
 		if p := recover(); p != nil {
 			err = Unavailable(fmt.Sprintf("an effect held until the commit panicked: %v", clip(fmt.Sprint(p))))

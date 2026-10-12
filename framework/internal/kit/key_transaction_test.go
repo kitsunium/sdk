@@ -203,7 +203,9 @@ func TestAKeyedCommandsEffectsLeaveAtTheOuterCommit(t *testing.T) {
 }
 
 // Until the outer commit nothing leaves: the keyed command's publish and its
-// hook wait for it, while the keyed run itself is over.
+// hook wait for it, while the keyed run itself is over. The transaction runs
+// in a goroutine, held open by release, and reports on ran, which the test
+// reads before it returns.
 func TestAKeyedCommandsEffectsWaitForTheOuterCommit(t *testing.T) {
 	d := newDesk()
 	runDesk(t, d, kit.InMemory())
@@ -276,9 +278,9 @@ func TestARolledBackDecisionDropsTheKeyedCommandsEffects(t *testing.T) {
 func TestDecisionsOnOneKeyAtOnce(t *testing.T) {
 	d := newDesk()
 	runDesk(t, d, kit.InMemory())
-	const n = 8
+	const decisions int = 8
 	var wg sync.WaitGroup
-	for i := range n {
+	for i := range decisions {
 		wg.Go(func() {
 			in := decision{Dossiers: []dossier{{ID: "c" + string(rune('a'+i)), Folder: "shared"}}}
 			if _, err := d.decide.Dispatch(t.Context(), in); err != nil {
@@ -287,7 +289,7 @@ func TestDecisionsOnOneKeyAtOnce(t *testing.T) {
 		})
 	}
 	wg.Wait()
-	for _, h := range d.hooks(t, n) {
+	for _, h := range d.hooks(t, decisions) {
 		if h.err != nil {
 			t.Errorf("the hook of %s ran with a context already ended: %v", h.id, h.err)
 		}
@@ -296,13 +298,15 @@ func TestDecisionsOnOneKeyAtOnce(t *testing.T) {
 		t.Errorf("one key ran %d times at once", most)
 	}
 	eventually(t, "every decision's effects", func() bool {
-		return len(d.heardIssued.list()) == n && len(d.heardHooked.list()) == n
+		return len(d.heardIssued.list()) == decisions && len(d.heardHooked.list()) == decisions
 	})
 }
 
 // The loss of a keyed run's lease still reaches its handler, inside a
 // transaction too: its context ends with the keepalive's cause, its error
-// rolls its savepoint back, and what it held is dropped.
+// rolls its savepoint back, and what it held is dropped. The decision is
+// dispatched from a goroutine that reports on ran, which the test reads once
+// the lease is lost.
 func TestALostLeaseStillEndsTheKeyedRun(t *testing.T) {
 	d := newDesk()
 	d.linger = make(chan error, 1)
