@@ -477,8 +477,20 @@ rewrite_publishable() {
   # A connector requires the root directly, for the framework. Written
   # here and never in the working tree: the root requires them back, and kit
   # refuses that cycle in the design. ROOT_FLOOR is computed once (root_floor).
+  local floor=0
   case "$self" in
-    internal | pkg/v1/* | third-party/*)
+    internal | pkg/v1/*) floor=1 ;;
+    third-party/*)
+      # A vendor module needs it when it reaches the split's packages through
+      # internal or a family rather than through the root itself — every
+      # vendor since ADR 0171, none of ADR 0162's, which required the root.
+      if sdk_requires_of "$gomod" | awk -v m="$SDK_MODULE" '$0 == m "/internal" || index($0, m "/pkg/v1/") == 1 { f = 1 } $0 == m { r = 1 } END { exit !(f && !r) }'; then
+        floor=1
+      fi
+      ;;
+  esac
+  case "$floor" in
+    1)
       if [ -z "${ROOT_FLOOR:-}" ]; then
         echo "cut-tags: $gomod needs the root's floor (ADR 0171 §7), and no root tag holds the split nor does this release cut one — cut the root with it" >&2
         return 1
