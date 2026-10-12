@@ -1,8 +1,8 @@
 # ADR 0152 — consensus domain (`consensus`): a write is committed when a majority holds it on disk, and the log is compacted from the first version
 
-- **Status**: Proposed. State: **rewritten-unreviewed (R7)**. Review run 3, round 1 (overall round 7) is applied. No reviewer has read the R7 version.
+- **Status**: Proposed. State: **rewritten-unreviewed (R8)**. Review run 3, rounds 1 and 2 (overall rounds 7 and 8) are applied. No reviewer has read the R8 version.
 - **Date**: 2026-10-02
-- **Revised**: 2026-10-12 (R7, see *Revision history*)
+- **Revised**: 2026-10-12 (R7), 2026-10-13 (R8), see *Revision history*
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0052](0052-sdk-lock-domain.md) (fencing, and the guarantee a lock does NOT make — this domain is the first in the SDK that can make it across machines), [ADR 0056](0056-sdk-vfs-domain.md) (publication by rename, and the streaming writer it deferred), [ADR 0090](0090-a-port-named-in-public-must-be-implementable-in-public.md) (the clock port every timer here runs on), [ADR 0029](0029-sdk-net-domain.md) (the stream connection port and the TLS identity the transport rides), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (frozen ports, siblings), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (clamp or refuse), [ADR 0011](0011-kernel-snapshot-primitive.md) (withdrawn as the snapshot tool, D3, R1-14), [ADR 0068](0068-layer-firewall-is-a-checked-graph.md) (the layers), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (which layer owns a type), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) / [ADR 0035](0035-pp-range-ownership-enforcement.md) (the code ranges), [ADR 0120](0120-a-state-machine-keeps-an-agenda-not-a-sweep.md) (a different "state machine" — see D3), [ADR 0148](0148-a-private-socket-is-gated-by-its-directory-and-the-kernel-names-the-peer.md) (the first consumer's proposal socket, D19); **Split into** [ADR 0173, *divergence of replicated state: prevented by construction, detected at fixed indexes, repaired automatically*](0173-divergence-is-prevented-by-construction-and-repaired-automatically.md) (divergence prevention and automatic repair, Q12). The number 0173 is reserved and the ADR is cited by its title until it merges (R7-00d, R7-03). **Depends on** the TLS sibling ADR of D4, number 0174 reserved, which must be Accepted before this one (R3-17). The pre-handshake admission sibling in `net/server` (R7-26) is folded into it (R7-00d). **Follows** the SDK reorganisation and the design rules: [ADR 0154](0154-the-sdks-principles-are-one-charter-and-an-incidents-rule-lives-with-its-code.md) (the charter), [ADR 0155](0155-every-layer-groups-its-packages-by-family-and-a-path-may-move-while-v0.md) (the `app` family), [ADR 0156](0156-the-public-module-links-the-standard-library-and-nothing-else.md) (stdlib only), [ADR 0157](0157-one-module-per-vendor-released-with-the-sdk.md) (zstd stays in its vendor module), [ADR 0158](0158-distribution-mechanisms-are-the-frameworks-not-the-sdks.md) (no distribution mechanism here), [ADR 0159](0159-the-kernel-holds-what-the-domains-rewrote-and-is-published-by-nature.md) (the kernel), [ADR 0160](0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md) (every service has a core, codes declared in the core, a wire format lives in the service), [ADR 0161](0161-an-untyped-error-fails-the-build.md) (typed errors), [ADR 0162](0162-the-sdk-is-one-module-and-a-release-is-one-tag.md) (one module, one tag), [ADR 0163](0163-the-sdk-is-designed-by-its-diagram-and-kit-writes-only-data-and-test-pins.md) (the design file), [ADR 0164](0164-an-error-code-is-the-designs-and-kit-writes-it.md) (codes), [ADR 0165](0165-a-performance-contract-is-the-designs-kit-measures-what-the-compiler-decides-and-a-test-holds-the-rest.md) (budgets), [ADR 0166](0166-a-facade-is-the-designs-and-a-forwarders-form-is-measured.md) (the facade), [ADR 0167](0167-a-doc-comment-is-the-designs-and-a-readme-is-written-from-docs-api.md) (doc comments), [ADR 0168](0168-a-declaration-is-the-designs-and-a-body-is-the-codes.md) (declarations and bodies), [ADR 0169](0169-the-sdk-is-rebuilt-from-its-design-in-a-copy-and-a-generation-is-held-to-the-whole-inline-set.md) (rebuilt from the design) (R7-01). **First consumer's deployment** (outside this repository): making.codes ADR 0006 and ADR 0015 (D20, R7-46)
 
@@ -99,8 +99,8 @@ R7-00b). One algorithm ships, Raft, and there is **no registry**.
 Every operation, online or offline, is a Go function. A product that embeds
 the domain owns its process, its command line, its administration interface,
 its authorization and its audit. For the first consumer, that product is
-Forgejo itself (Q5, Q6, Q7, D17, D19). No `framework/consensus` module ships
-in v1, because Forgejo is not a kit application.
+Forgejo itself (Q5, Q6, Q7, D17, D19). No `framework/consensus` package or module ships
+in v1, because Forgejo is not a kit application (R8-37).
 
 ### D1 — The name says the capability, the constructor says the algorithm
 
@@ -353,8 +353,8 @@ offers:
   - **a snapshot pin (R7-38):** `pin(id string) (unpin func(), err error)`,
     internal to the engine. Retention (D7) never evicts a pinned snapshot.
     A pin holds one of the two retained slots of D14. When both retained
-    snapshots are pinned, the next cut waits for an unpin, as it waits for a
-    transfer in flight (R6-01), and `Health` reports the wait. The log
+    snapshots are pinned, the next cut is written into the cut slot and
+    replaces the oldest pin only once validated (D7, R8-22). The log
     still never passes `LogReserveBytes`: reaching it raises the no-space
     alarm (D17).
   - state replacement through `Restore`;
@@ -398,7 +398,7 @@ type LogStore interface {
 	// record batch. Sync makes everything appended so far durable.
 	Append(entries []Entry, hs *HardState) error
 	Sync() error
-	TruncateSuffix(from uint64) error      // LOGICAL: a record that supersedes from on (R7-12)
+	TruncateSuffix(from uint64) error      // writes ONE durable truncate record, nothing else (R7-12, R8-01, R8-03)
 	CompactPrefix(through uint64) error    // drop what a snapshot covers
 	HardState() (HardState, error)
 	Stamp() (Stamp, error)                 // ClusterID, NodeID, Incarnation (D8)
@@ -416,18 +416,26 @@ type SnapshotHandle interface { // pinned until Close (R3-16)
 	Close() error
 }
 type SnapshotStore interface { // R7-07
-	Create(id string, meta SnapshotMeta) (SnapshotSink, error) // a spool is bound to its snapshot id
-	List() ([]SnapshotMeta, error)                             // complete snapshots, newest first
-	Open(id string) (SnapshotHandle, error)                    // pinned until Close
-	Remove(id string) error                                    // refused while a handle is open
+	// Create opens the spool of id. When a spool of that id already exists,
+	// it is returned with the ENCODED offset durably spooled so far (R8-21).
+	Create(id string, meta SnapshotMeta) (sink SnapshotSink, spooled int64, err error)
+	List() ([]SnapshotMeta, error)          // complete snapshots, newest first
+	Open(id string) (SnapshotHandle, error) // pinned until Close
+	Remove(id string) error                 // refused while a handle is open
 }
-// Latest is a convenience over List and Open: the newest snapshot that opens (R7-07).
-func Latest(s SnapshotStore) (SnapshotHandle, error)
+// Latest, a convenience over List and Open, is a service function
+// re-exported by the facade, not a port method (R7-07, R8-36).
 
-type AuthenticatedPeer struct { // stamped from the TLS identity, never from a frame (R7-05)
+// AuthenticatedPeer is what the TLS handshake proved, never what a frame
+// claims (R7-05). The certificate proves the slot and the key. The ID and the
+// incarnation are the member the transport admitted on that key's SPKI
+// (R8-07). A peer that is not yet a member, during a JOIN, has ID 0 and only
+// its Slot and SPKI set (R8-09).
+type AuthenticatedPeer struct {
 	ID          NodeID
 	Incarnation Incarnation
-	Slot        string // the slot the certificate's URI SAN names (R7-41)
+	Slot        string   // the slot the certificate's URI SAN names (R7-41)
+	SPKI        [32]byte // SHA-256 of the certificate's SubjectPublicKeyInfo (R8-07)
 }
 type Transport interface {
 	// Send hands over an ENCODED frame (AppendMessage). It never blocks and
@@ -438,16 +446,29 @@ type Transport interface {
 	Stream(ctx context.Context, offer InstallOffer, open func(offset int64) (io.ReadCloser, error)) error
 	// deliver gets the encoded frame and the peer TLS authenticated. frame is
 	// valid until deliver returns. The engine copies what it keeps.
-	Bind(group GroupID, deliver func(from AuthenticatedPeer, frame []byte), install func(InstallRequest) error) error
+	// offer is answered on the event loop, which alone knows the term, the
+	// leader and the commit index (R8-21).
+	Bind(group GroupID,
+		deliver func(from AuthenticatedPeer, frame []byte),
+		offer func(from AuthenticatedPeer, o InstallOffer) InstallAccept,
+		install func(InstallRequest) error) error
 	SetMembership(group GroupID, admitted []Member) // per group; the transport computes the union (R2-31)
 }
 type UnreachableReporter interface { Unreachable(func(NodeID)) } // sibling (R1-11)
+// Joiner is the sibling a custom transport implements to carry a JOIN (R8-09).
+// The shipped transport implements it.
+type Joiner interface { Join(ctx context.Context, cfg JoinConfig) (Position, error) }
+// JoinAuthorizer is the PRODUCT's port. A member calls it before it turns a
+// JOIN into an AddLearner. It decides whether the slot's previous member is
+// fenced, which only the product can know, and returns the Operator to record
+// (R8-09).
+type JoinAuthorizer interface { Authorize(ctx context.Context, r JoinRequest) (Operator, error) }
 
 // The install handshake (R7-08), on the snapshot connection.
 type InstallOffer struct { // sender to receiver
 	Term       uint64
-	SnapshotID string
-	Meta       SnapshotMeta // index, term, encoded and decoded sizes, chunk size, SHA-256, codec id
+	SnapshotID string       // equal to Meta.ID (R8-21)
+	Meta       SnapshotMeta // ID, index, term, encoded and decoded sizes, chunk size, SHA-256, codec id
 }
 type InstallAccept struct { // receiver to sender
 	SnapshotID string
@@ -455,12 +476,26 @@ type InstallAccept struct { // receiver to sender
 	Refused    errs.Code // zero, or why: SNAPSHOT_TOO_LARGE, a stale term, an id already held (idempotent success)
 }
 type InstallRequest struct { // what the transport hands the engine once bytes flow
+	Ctx        context.Context // ends with the connection (R8-37)
 	From       AuthenticatedPeer
 	Offer      InstallOffer
 	Offset     int64     // the accepted offset
 	Body       io.Reader // the encoded stream from Offset, ending with the connection
 }
 ```
+
+**Snapshot ports, completed (R8-21).**
+- `SnapshotMeta` carries its `ID`, so a spool, an offer and a handle name the
+  same snapshot.
+- The receiver's resume point comes from the store: `Create` on an existing
+  spool returns it with its durably spooled offset.
+- **Chunk framing.** Each encoded chunk is `encoded length (u32) | decoded
+  length (u32) | CRC-32C of the encoded bytes (u32) | bytes`, little-endian.
+  The sink checks each chunk's CRC as it arrives, and the engine checks the
+  SHA-256 over the decoded stream at `Commit`.
+- `InstallOffer` and `InstallAccept` are core VALUES. Their wire encoding is
+  private to the shipped transport. A custom transport chooses its own and
+  calls the `offer` callback with the decoded values.
 
 **The install flow is an offer, an accept, then a stream (R7-08).** The
 leader sends `InstallOffer`. The receiver checks the term, the leader, its own
@@ -486,8 +521,9 @@ breaks the connection mid-stream and resumes it.
   actor of D5b.
 - **The step function never does I/O.** It reads an in-memory view of the
   unsynced and recent entries (D6, recent-entries window). A read below that
-  window is an asynchronous fetch through the storage actor, whose result
-  comes back as an event.
+  window is an asynchronous fetch on a READER goroutine of its own, never the
+  storage actor, whose queue holds writes only. Its result comes back as an
+  event (R8-06).
 - `Entry.Data` is immutable once appended: the store and the engine never
   write into it, and a caller that hands bytes to `Propose` gives up
   ownership of them. Bytes returned by `Entries` stay valid until the caller
@@ -515,7 +551,8 @@ power loss.
 **The shipped log** is a directory of segment files, each record
 `length | CRC-32C | version | batch sequence | end-of-batch flag | term |
 index | kind | body checksum | previous header checksum | payload`,
-little-endian (the batch fields are R7-12's, and the entry checksum chain is below),
+little-endian (the batch fields are R7-12's, the record kinds R8-01's, and
+the entry checksum chain is below),
 written with `write(2)` into the current segment and made durable once per
 batch. **The hard state is a record of the log, from raft-sql-poc.** The
 first draft kept term and vote in a separate file published by rename, which
@@ -556,9 +593,10 @@ vote or resurrecting an entry a later record truncated (`storage.js:35-37`,
 **Durability, as the kernel gives it (R1-09, R7-22).** On Linux,
 `segment_linux.go` calls `fdatasync(2)`. `fallocate(2)` stays OFF: segments
 are zero-filled. If it is adopted later, recovery must know unwritten extents,
-which read as zeros although nothing was written there. Elsewhere,
-`os.File.Sync` is the fallback, and it is stated as the weaker or slower path
-it is on each platform. A segment has a fixed size, 64 MiB (provisional),
+which read as zeros although nothing was written there. On darwin,
+`os.File.Sync` issues `F_FULLFSYNC`, which is stronger than `fdatasync`, and
+slower (R8-06). Elsewhere, `os.File.Sync` is the fallback, and it is stated
+as the weaker or slower path it is on each platform. A segment has a fixed size, 64 MiB (provisional),
 zero-filled at creation, so a `fdatasync` never has a file size to publish. The lifecycle is crash-consistent
 and spelled out:
 
@@ -617,36 +655,60 @@ watermark. A zeroed sector before the watermark is damage to synced data,
 and is quarantined.
 
 **The sync watermark is implicit in the write order, and batches are numbered
-(R5-02, R6-03, R7-12).** Round 5 wrote an explicit watermark record. R6
-replaced it with the ordering the storage actor already keeps: it writes
-batch k, syncs it, and only then writes batch k+1. R7 makes that ordering
-readable on disk.
+(R5-02, R6-03, R7-12, R8-01 to R8-04).** Round 5 wrote an explicit watermark
+record. R6 replaced it with the ordering the storage actor already keeps: it
+writes batch k, syncs it, and only then writes batch k+1. R7 made that
+ordering readable on disk. R8 writes the recovery as one procedure, because
+R7's rules contradicted each other.
 - **Every record header carries its batch sequence number and an
   end-of-batch flag.** Without them a record cannot say which batch it
-  belongs to, and the implicit form does not hold. R6-03 is kept ONLY with
-  these fields.
+  belongs to, and the implicit form does not hold.
 - **Proof:** any valid record of batch k+1 proves that batch k was synced.
-- **The ambiguous window is the HIGHEST batch present on disk.** Under the
-  declared crash-only model, that batch may never have been synced, and so
-  was never acknowledged, because acknowledgement follows the sync (D5b). Any
-  damage inside it truncates it. Damage in any LOWER batch is corruption, and
-  is quarantined.
-- **Truncation is logical (R7-12).** `TruncateSuffix(from)` writes a record
-  that supersedes every entry at and after `from`. On recovery, a later
-  record with a lower index supersedes what came before it, and the checksum
-  chain continues from the entry before `from`.
-- **What follows a truncation or a zero record is zeroed (R7-12).** After a
-  truncation, or when the scan stops at a zero record, the rest of the segment
-  is zeroed and synced before any new record is written, as etcd's
-  `ZeroToEnd` does (`wal.go:505`, `wal.go:562-570`). Otherwise an older,
-  longer record beyond a shorter overwrite could be read as live after a
-  crash.
+- **Truncation is an explicit record (R8-01).** `TruncateSuffix(from)` writes
+  ONE record of kind `truncate`, carrying `from`, in the current batch, made
+  durable by that batch's sync. That record is its only effect. It rewrites
+  nothing and zeroes nothing (R8-03).
+- **Continuity is judged on the EFFECTIVE log (R8-01).** Recovery applies
+  every truncate record in order, then checks the indexes. A record whose
+  index is lower than its predecessor's is valid only when a truncate record
+  with `from` equal to that index precedes it. Any other lower index is
+  `LOG_CORRUPT`. A simulator case truncates across a segment boundary, then
+  restarts.
+- **The decision procedure (R8-02).** Recovery scans every segment and
+  classifies before it changes anything.
+  1. A HOLE is a short read, a zero header, or a record whose CRC fails.
+  2. A hole is a **torn tail** when both hold: the record before it belongs
+     to the highest batch present, or ends a batch with its end-of-batch
+     flag. And every valid record after it carries that highest batch
+     sequence.
+  3. A torn tail must also look like a tear: zeroed 4 KiB sectors, or a
+     record cut short by the end of what was written. A complete record
+     with a bad CRC is NOT a tear, even in the highest batch.
+  4. A torn tail is truncated at the hole. Every other hole is quarantined:
+     a valid record of a lower batch after it, a bad CRC that is not a tear
+     pattern, a gap in the effective indexes.
+  The reason for point 3: in the highest batch, an acknowledged record can
+  exist once that batch's sync returned. A rule that truncated any damage
+  there would delete acknowledged data (codex, R8-02).
+- **Zeroing only after classification, only for a torn tail (R8-03).** When
+  step 4 truncates a torn tail, recovery zeroes the rest of that segment and
+  syncs it, as etcd's `ZeroToEnd` does (`wal.go:505`, `wal.go:562-570`),
+  before any new record is written. Any other outcome writes the quarantine
+  marker FIRST, and modifies nothing. The hot path never zeroes: only
+  recovery does, and only one tail. A mutation that zeroes before
+  classifying must fail.
+- **A batch never straddles a rotation (R8-04).** Rotation happens only
+  between batches, after the previous batch's sync-done. The seal record of
+  segment N is written and synced in N before the first write to N+1. A
+  crash test at rotation persists a random subset of the unsynced pages.
 - **Nothing else changes.** D5b's sync-done still means "data durable", and
   D16 keeps one `fsync` per side.
 - *Tests:* crashes between a batch's write, its sync, the next batch's write
   and the acknowledgement, in every order the kernel allows. A shorter
   overwrite, then a crash. A crash that persists a RANDOM SUBSET of the
-  unsynced 4 KiB pages and 512 B sectors, not only a prefix (R7-12).
+  unsynced 4 KiB pages and 512 B sectors, not only a prefix (R7-12). A bad
+  CRC on a complete record of the highest batch, which must quarantine
+  (R8-02).
 - **Fallback, stated in advance:** if the batch fields are not adopted, or
   review shows the implicit form unsafe, the explicit watermark record of
   round 5 comes back, and D16 is rewritten with two `fsync` per batch.
@@ -696,26 +758,39 @@ a failed `fsync` it records the error and never syncs again
 (`storage.js:489-495`), so every later acknowledgement waits forever. That is
 safe and silent. Here the node stops and says so.
 
-**After `STORAGE_FAILED`, the next open trusts nothing after the last
-successful sync (R7-14).** The page cache may still hold pages the device
-never wrote, and an ordinary read would return them. So the next open does
-one of three things, in this order of preference. It re-reads that tail with
-`O_DIRECT` and re-syncs it. Or it copies the trusted prefix into a fresh,
-synced segment. Or it refuses to start until the machine reboots. The stop
-marker of R7-44 enforces the last. A test fails `fdatasync`, then restarts
-the node.
+**After `STORAGE_FAILED`, the node refuses to start until the machine
+reboots (R7-14, R8-05).** The page cache may still hold pages the device
+never wrote, and an ordinary read would return them. R7 offered three
+remedies. R8 keeps one rule.
+- `STORAGE_FAILED` writes a marker in the DATA directory, holding the
+  kernel's `/proc/sys/kernel/random/boot_id` and the offset of the last
+  fully synced batch.
+- `NewRaft` refuses to start while the marker's `boot_id` equals the
+  current one. After a reboot the page cache is gone, and the node starts.
+- The `O_DIRECT` re-read is dropped. On these nodes the data directory sits
+  on a buffered loop device over the LUKS image, so `O_DIRECT` on the file
+  does not bypass every cache.
+- Copying the trusted prefix into a fresh, synced segment is allowed, after
+  the reboot. The prefix ends at the last fully synced batch the marker
+  records.
+- `Config.RuntimeDir` is withdrawn.
+A test fails `fdatasync`, restarts in the same boot and is refused, then
+restarts with another `boot_id` and starts.
 
-**Each stop has its own exit code and its own marker (R7-14, R7-44).**
-`StopReason.ExitCode()` maps each reason to a distinct sysexits value, as
-`app/lock` does: `STORAGE_FAILED` 74, `LOG_QUARANTINED` 65,
-`STATE_MACHINE_FAILED` 70, `VERSION_UNSUPPORTED` 76, any other stop 1.
-- `STORAGE_FAILED` writes its marker in `Config.RuntimeDir`, a tmpfs such as
-  `/run`. A reboot clears it, and the reboot also drops the page cache.
+**Each stop has its own exit code and its own marker (R7-14, R7-44, R8-35).**
+The exit codes are declared on the sentinels in the design file, with
+`errs.WithExitCode`, as `app/lock` does. `StopReason.ExitCode()` returns
+`errs.ExitCodeOf` of the stop's error. Final stops:
+`STORAGE_FAILED` 74, `LOG_QUARANTINED` 65, `STATE_MACHINE_FAILED` 69,
+`VERSION_UNSUPPORTED` 76. A stop that a restart may cure, such as a lost
+quorum at `Close`, exits 75 (`EX_TEMPFAIL`). None uses 70, the errs default,
+so a code without an option never looks like a consensus stop.
+- `STORAGE_FAILED` writes the marker above.
 - `STATE_MACHINE_FAILED`, `LOG_QUARANTINED` and `VERSION_UNSUPPORTED` write a
   persistent marker in the data directory, which only an operator clears.
-- `NewRaft` refuses to start while any marker is present. A supervisor's
+- `NewRaft` refuses to start while a marker applies. A supervisor's
   exit-code filter is not enough: Nomad's `restart` block has none.
-- The consumer guide sets `RestartPreventExitStatus=74 65 70 76` under
+- The consumer guide sets `RestartPreventExitStatus=74 65 69 76` under
   systemd, and a crash-loop alert (D13).
 
 **Not on `vfs`.** The `vfs` write half is frozen at whole-file verbs plus
@@ -764,9 +839,16 @@ R2-21).**
   is `PEER_REJECTED`.
   - The `NodeID` is a random 64-bit value drawn at `Init`. One that collides
     with the replicated retired set is refused and redrawn.
-  - The `AddLearner` entry binds the `NodeID` to its slot, its stamp and its
-    incarnation. Admission checks that the certificate's slot equals the
-    member's slot, and the handshake checks the incarnation.
+  - The `AddLearner` entry binds the `NodeID` to its slot, its stamp, its
+    incarnation and **its key (R8-07)**: the SHA-256 of the SubjectPublicKeyInfo
+    of the TLS key the host generated. Admission checks that the
+    certificate's slot equals the member's slot AND that its SPKI equals the
+    member's pinned SPKI. The handshake checks the incarnation.
+  - **Renewal reuses the key (R8-07).** A renewed certificate carries the
+    same key, so the pin holds. A second `NodeID` of the same slot, during a
+    replacement, is admitted only under its own pinned key. A certificate for
+    the slot with another key is `PEER_REJECTED`, even when it is valid. A
+    mutation that admits a claimed ID under another key must fail.
   - The dialer checks the listener's SAN, and the listener checks the
     dialer's. A wrong cluster or slot is `PEER_REJECTED`.
   - The transport takes its own cluster and slot from its own certificate's
@@ -800,7 +882,8 @@ engine pushes each group's admitted members and their addresses through
 its groups.
 The static map given at construction is only a seed for the first contact.
 A `Remove` that commits cuts that node's connections and refuses its
-handshakes from then on. The POC learned that draining a machine is not
+handshakes from then on. Admission is keyed on the member's pinned SPKI as
+well as its slot (R8-07). The POC learned that draining a machine is not
 removing it: with a credential every machine shared, a removed machine could
 come back (README bug 8). Its fix revokes the removed machine's key on every
 peer (`shard.js:796-803`, `transport.js:110-120`). Here a `NodeID` is never
@@ -845,22 +928,35 @@ The event loop never waits on storage or on a socket (D5b). A test measures
 heartbeat latency while the data pipe is saturated and the disk is slow
 (D15).
 
-**A pre-admission JOIN, the one frame a non-member may send (R7-42).** A
-node that holds a valid certificate for a slot but is not yet a member may
-open ONE control connection to any member. Its only accepted frame is
-`JOIN{ClusterID, NodeID, Incarnation, slot}`, the stamp and nothing else.
-- The member answers `JOIN_ACK{Position}` once it has turned the request into
-  an `AddLearner` with the `Operator` `automation:<slot>/<allocation>`, or
-  `JOIN_REFUSED` with a reason, then closes the connection.
-- It is accepted only for a slot whose previous member is FENCED (D19,
-  R7-40). A slot whose voter is still live is refused, and raises the
-  `WipeAndRejoin` alarm instead of a silent rejoin.
+**A pre-admission JOIN, the one frame a non-member may send (R7-42, R8-09).**
+A node that holds a valid certificate for a slot but is not yet a member may
+open ONE control connection to any member.
+- **Frame kinds (R8-09).** `JOIN{ClusterID, NodeID, Incarnation, slot}` from
+  the joiner. `JOIN_ACK{Position}` or `JOIN_REFUSED{code}` from the member.
+  Nothing else is accepted from a non-member.
+- **The slot comes from the certificate.** A `JOIN` whose slot differs from
+  the certificate's is `JOIN_REFUSED`. The SPKI comes from the handshake.
+  The transport hands the engine an `AuthenticatedPeer` with ID 0, the slot
+  and the SPKI.
+- **The product decides the fence.** The member calls
+  `Config.JoinAuthorizer.Authorize` with the `JoinRequest`. Only the product
+  knows whether the slot's previous member is fenced, from Nomad and its own
+  state (D19). It returns the `Operator`, built ONLY from authenticated
+  parts: `automation:<slot>/<SPKI prefix>/<new NodeID>`. With no authorizer,
+  every `JOIN` is refused.
+- The member then proposes the `AddLearner`, with the pinned SPKI, and
+  answers `JOIN_ACK` once it is appended.
+- **Checked against every member of the slot (R8-11).** A slot that still
+  has a live member, voter or learner, is refused, and raises the
+  `WipeAndRejoin` alarm.
 - It is rate-limited to one per slot per election timeout, counted, and
   logged at `Warn`.
 - It never promotes. `Promote` still needs the `PromoteLag` gate and the
   object coverage of D17.
-- Its frame layout and its control-frame cap are part of the v1 wire format
-  (D14, D18).
+- **Published surface (R8-09).** `Join(ctx, JoinConfig)` on the shipped
+  transport. The `Joiner` sibling for a custom transport. The
+  `JoinAuthorizer` port for the product. All of them are in
+  `design/app/consensus.yaml`.
 
 **Batching on the wire, from raft-sql-poc.** Every frame queued for a peer
 on one connection during one turn of its sender leaves in one write
@@ -991,10 +1087,13 @@ Goroutines, each with a bounded queue:
 `Status` is published through an `atomic.Pointer` after each turn, so reading
 it never takes a lock the loop holds.
 
-**Shutdown (R2-38).** `Close` and `HardClose` are idempotent, and both return
-only after every goroutine above has exited. The storage actor owns the final
-`fdatasync`: on `Close` it syncs what it holds before it exits. On
-`HardClose` it stops without syncing, which is what a crash test needs.
+**Shutdown (R2-38, R8-37).** `Close` and `HardClose` are idempotent. `Close`
+returns only after every goroutine above has exited. The storage actor owns
+the final `fdatasync`: on `Close` it syncs what it holds before it exits.
+`HardClose` stops without syncing, which is what a crash test needs, and
+returns within `HardCloseTimeout` even when a goroutine is stuck in
+`fdatasync`. That goroutine is abandoned, counted, and the directory lock
+stays held until the process exits (D14).
 
 ### D6 — Replication: pipelined, batched with no linger timer, leader writes in parallel
 
@@ -1060,9 +1159,12 @@ only after every goroutine above has exited. The storage actor owns the final
 **Forwarded proposals have a submission identity (R1-13).** A follower
 forwards a proposal to the leader over the data connection, with a
 submission id made of the follower's `NodeID`, its incarnation and a
-sequence number. **The sequence never repeats across restarts (R7-23):** its
-high 32 bits are a random epoch drawn at each start of the node, and its low
-32 bits count within that epoch. A leader that still holds an answer for an
+sequence number. **The sequence never repeats across restarts (R7-23,
+R8-37):** its high 32 bits are a random epoch drawn at each start of the
+node, and its low 32 bits count within that epoch. Two starts of one node
+draw the same epoch with probability 2^-32 per pair, and the incarnation in
+the id already separates two lives of one directory. A product that cannot
+accept that probability persists a counter range instead. A leader that still holds an answer for an
 id from before the restart can never match it to a new submission. The follower tracks each submission through four states:
 
 1. **unsent** — not written to the connection;
@@ -1234,6 +1336,11 @@ written.
 - **Retention:** the previous snapshot is kept until the new one is durable,
   so a crash during publication leaves one valid snapshot. A snapshot that
   ADR 0173 has pinned is never evicted (D3, R7-38).
+- **Rotation with two pinned anchors (R8-22).** When both retained
+  snapshots are pinned, a candidate is still written, into the slot
+  reserved for a cut. Once ADR 0173 validates it, the candidate atomically
+  takes over the OLDEST anchor's pin, and only then is that old anchor
+  removed. The four-slot bound of D14 holds throughout.
 - **Compression, from raft-sql-poc, bounded (R7-06, R7-00b).** The snapshot
   stream passes through `Config.SnapshotCodec`, typed
   `transform.BoundedDecompressor`, the core port whose `DecompressBounded`
@@ -1398,18 +1505,22 @@ one term — once before the loss, once after — and elect two leaders.
   history is refused. The simulator crashes each founder after each phase.
   `NewRaft` never bootstraps: a running server only opens what an offline tool
   has founded or initialised.
-- **`Init` prepares a joining node offline (R3-02, R7-41).** `Init(dataDir,
-  cluster, slot)` draws a random `NodeID` (redrawn on a collision with the
-  retired set it is given), writes a joining stamp and returns the
-  `NodeID` and the incarnation, which the operator, or the `JOIN` of D4,
-  gives to `AddLearner` (D17). It refuses an id that a live peer reports with
-  another incarnation, or as retired (R7-34).
+- **`Init` prepares a joining node, purely offline (R3-02, R7-41, R8-10).**
+  `Init(dataDir, cluster, slot)` draws a random `NodeID`, writes a joining
+  stamp and returns the `NodeID` and the incarnation, which the operator, or
+  the `JOIN` of D4, gives to `AddLearner` (D17). It contacts no peer and
+  takes no retired list. The cluster refuses a reused or retired id at
+  `JOIN` or `AddLearner`, with `JOIN_REFUSED` or `NODE_ID_RETIRED`. Only
+  then may `Redraw` draw a new id, and only while the stamp is still joining
+  and the log is empty.
 
 **Leadership transfer.** `TransferLeadership(ctx, to)` stops accepting
 proposals, brings `to` up to date, and sends it `TimeoutNow`. `to` campaigns
 at once, its vote requests flagged so D5's live-leader refusal does not
-apply. **The flag is valid for one campaign only (R7-17):** a voter honours it
-only when the request's term equals `TimeoutNow`'s term plus one. A later
+apply. **The flag is valid for one campaign only (R7-17, R8-37):** it
+carries the issuer and the issuer's term. A voter honours it only when the
+issuer is the leader it knows for that term, and the request's term equals
+that term plus one. A later
 campaign of the same node, at any other term, carries no flag. A mutation
 that honours the flag at another term must fail. It
 fails with `TRANSFER_FAILED` after one election timeout and the old leader
@@ -1497,7 +1608,8 @@ committed before the call, and returns the applied index:
   Nothing on that path goes through `UTC`, `In` or `Round`, which strip
   Go's monotonic reading. The driver records each loop turn's latency
   (`consensus_loop_turn_seconds`, D13). **A turn longer than the drift budget
-  drops the lease** for the rest of the term: a Forgejo garbage-collection
+  drops the lease** for the rest of the term. The drift budget is
+  `ElectionTimeoutMin × MaxClockDrift` (R8-37): a Forgejo garbage-collection
   pause, in the same process, is exactly that.
 
   The lease is used only when the leader has applied its commit index and
@@ -1743,7 +1855,8 @@ preconditions, certificate expiry under its threshold, the smallest peer
 snapshot limit approached (R2-30), and **`Stopped` with its `StopReason`**
 when the node has stopped itself (R2-28). A `LeadershipWatcher` sibling
 notifies leadership changes, so the product does not poll for them. **Each
-`Watch` call returns its OWN channel (R7-11).** It has capacity one and holds
+`Watch(ctx)` call returns its OWN channel (R7-11), unsubscribed and closed
+when `ctx` ends (R8-36).** It has capacity one and holds
 the latest value: the loop replaces an unread value without blocking. Every
 channel is closed on `Close` (R3-19). Through `trace` (ADR 0051): one span
 per `Propose` from submission to local apply, with events at append, commit
@@ -1765,7 +1878,7 @@ type (
 	LogIdentity    = coreconsensus.LogIdentity // ClusterID + log epoch + lineage (R2-09, R3-01)
 	GroupID        = coreconsensus.GroupID
 	Position       = coreconsensus.Position    // struct{ Term, Index uint64 }
-	Entry          = coreconsensus.Entry       // Position, Kind, Version, BodySum, ChainSum, Data []byte (immutable) (R4-21)
+	Entry          = coreconsensus.Entry       // Position, Kind, Version, BodySum, ChainSum, Data []byte (immutable) (R4-21), and its Token is set in memory by the engine, never encoded in the log (R8-36)
 	Token          = coreconsensus.Token       // comparable {Cluster, Epoch, Term, Index} (R4-27, R5-14), 41 bytes encoded, D14 (R7-09)
 	EntryKind      = coreconsensus.EntryKind
 	HardState      = coreconsensus.HardState
@@ -1774,15 +1887,20 @@ type (
 	AuthenticatedPeer = coreconsensus.AuthenticatedPeer // R7-05
 	InstallOffer   = coreconsensus.InstallOffer  // R7-08
 	InstallAccept  = coreconsensus.InstallAccept // R7-08
-	StopReason     = coreconsensus.StopReason    // with ExitCode() (R7-14)
+	StopReason     = coreconsensus.StopReason    // ExitCode() returns errs.ExitCodeOf (R7-14, R8-35)
+	JoinConfig     = coreconsensus.JoinConfig    // the member addresses to try, the stamp, the deadline (R8-09)
+	JoinRequest    = coreconsensus.JoinRequest   // slot and SPKI from TLS, the new NodeID and incarnation (R8-09)
+	Joiner         = coreconsensus.Joiner        // sibling for custom transports (R8-09)
+	JoinAuthorizer = coreconsensus.JoinAuthorizer // the product's port (R8-09)
+	FencedAttestation = coreconsensus.FencedAttestation // {old voter, method, witness receipt} (R8-20, R8-36)
 	SnapshotMeta   = coreconsensus.SnapshotMeta
 	SnapshotSink   = coreconsensus.SnapshotSink
 	InstallRequest = coreconsensus.InstallRequest
 	TimingContract = coreconsensus.TimingContract
 	Versions       = coreconsensus.Versions
-	Member         = coreconsensus.Member     // ID, Incarnation, Address, Voter, Joining
+	Member         = coreconsensus.Member     // ID, Incarnation, Slot, SPKI, Address, Voter, Joining (R8-07, R8-36)
 	Membership     = coreconsensus.Membership // the members at a Position, the retired IDs
-	Operator       = coreconsensus.Operator   // opaque id, printable ASCII 0x21-0x7E, at most 64 bytes, no personal data (R2-36, R3-24, R7-27)
+	Operator       = coreconsensus.Operator   // opaque id, printable ASCII 0x21-0x7E, at most 128 bytes, no personal data (R2-36, R3-24, R7-27, R8-09)
 	SnapshotHandle = coreconsensus.SnapshotHandle // R3-16
 	Status         = coreconsensus.Status     // Role, Term, Leader, Commit, Applied, versions (R2-32)
 
@@ -1796,7 +1914,7 @@ type (
 	SnapshotStore        = coreconsensus.SnapshotStore
 	Transport            = coreconsensus.Transport
 	UnreachableReporter  = coreconsensus.UnreachableReporter
-	LeadershipWatcher    = coreconsensus.LeadershipWatcher // Watch() <-chan Status (R2-28)
+	LeadershipWatcher    = coreconsensus.LeadershipWatcher // Watch(ctx) <-chan Status, unsubscribed when ctx ends (R2-28, R8-36)
 
 	Health     = svcconsensus.Health   // includes Stopped, StopReason
 	ReadMode   = svcconsensus.ReadMode // ReadIndex (zero value) | ReadLease
@@ -1845,7 +1963,7 @@ type Config struct { // svcconsensus.Config, shown for its fields; every bound i
 	SnapshotCodec       transform.BoundedDecompressor // core/data/transform port, flate by default, id recorded (R7-06)
 	SnapshotPausesApply bool                 // the state machine cannot cut cheaply (R2-34)
 	MinVoters           int                  // Remove refused below it (R7-27)
-	RuntimeDir          string               // a tmpfs, for the STORAGE_FAILED marker (R7-44)
+	JoinAuthorizer      JoinAuthorizer       // the product's fence decision for a JOIN (R8-09)
 	HardCloseTimeout    time.Duration        // HardClose returns within it (R7-11)
 	Reads               ReadMode
 	PreferredLeaders    []NodeID
@@ -1883,13 +2001,16 @@ func (d DataDir) Snapshots() SnapshotStore
 func (d DataDir) Close() error // idempotent
 
 // Offline, on a stopped node, called by the product's own commands (D17).
-func Init(d DataDir, cluster ClusterID, slot string, retired []NodeID) (NodeID, Incarnation, error) // random NodeID, joining stamp, idempotent (R3-02, R4-29, R7-41)
+func Init(d DataDir, cluster ClusterID, slot string) (NodeID, Incarnation, error) // offline only, random NodeID, joining stamp, idempotent (R3-02, R4-29, R7-41, R8-10)
+func Redraw(d DataDir) (NodeID, error) // only while the stamp is joining and the log is empty, after a JOIN_REFUSED for a reused or retired id (R8-10)
 func Recover(d DataDir, newCluster ClusterID, members []Member, opt RecoverOptions) error
 func RestoreSnapshot(d DataDir, r io.Reader, newCluster ClusterID, members []Member, opt RestoreOptions) (SnapshotMeta, error) // runs without a Node (R3-15)
 func Inspect(d DataDir) (Report, error) // read-only
 func ClearQuarantine(d DataDir, exit QuarantineExit, op Operator) error // wipe-and-rejoin, or truncate-and-stay-silent (R3-09)
 
-func NewTCPTransport(cfg TransportConfig) (Transport, error)
+func NewTCPTransport(cfg TransportConfig) (Transport, error) // also a Joiner (R8-09)
+func Latest(s SnapshotStore) (SnapshotHandle, error)        // the service's, re-exported (R8-36)
+func Lane(frame []byte) (FrameLane, error)                     // control or data, from the frozen header (R8-36)
 func NewMemoryLog() LogStore // tests
 func LeaderHint(err error) (NodeID, bool) // from the error's field, a decimal string (R7-10)
 func TokenOf(err error) (Token, bool)     // from the error's field, hex of the 41-byte encoding (R7-10)
@@ -1934,6 +2055,15 @@ func (n *Node) HardClose() error                // stops now, no transfer, no fi
 `uint64`, big-endian: 41 bytes. A parser refuses another length or version.
 A `ClusterID` is 16 bytes everywhere it is encoded.
 
+**Methods are the design's (R8-36).** `Node` and `DataDir` are service
+types declared in the design file with `decl: true`, and their methods are
+listed there, so `surface: closed` holds them (ADR 0168).
+
+**`Lane` and the frozen header (R8-36).** `Lane(frame)` reads only the
+frame header, frozen in D18, and says whether the frame belongs on the
+control or the data connection. A custom transport uses it to keep votes
+off the data pipe.
+
 **`HardClose` is bounded (R7-11).** It returns within `HardCloseTimeout`
 (default 5 s). It does not join a goroutine stuck in `fdatasync`: that
 goroutine is abandoned and counted, and the data-directory lock stays held
@@ -1975,7 +2105,7 @@ transport. The cross-field rules are checked after defaults are applied
 | `LogReserveBytes` | log | 256 MiB | clamp; refuse if ≥ `MaxLogBytes` |
 | `SnapshotCodec` | engine | flate | must be a `BoundedDecompressor`, recorded in `SnapshotMeta` (R7-06) |
 | `MinVoters` | engine | 3 | clamp, and refuse above the founding voter count at `Bootstrap` (R7-27) |
-| `RuntimeDir` | engine | none | refuse empty, and refuse a directory on the data directory's filesystem (R7-44) |
+| `JoinAuthorizer` | engine | none | without it, every JOIN is refused (R8-09) |
 | `HardCloseTimeout` | engine | 5 s | clamp (R7-11) |
 | `PromoteLag` | engine | 1 024 | clamp |
 | `MaxFrameBytes` | transport | 16 MiB | clamp; refuse if < `MaxBatchBytes` + header |
@@ -2020,7 +2150,8 @@ transport. The cross-field rules are checked after defaults are applied
 - **A state machine held in memory (R3-29, R4-18).** When the state machine
   is not durable, as for the first consumer (Q9), the budget is: the engine,
   plus the measured table, its tombstones, the decoding buffers and the
-  snapshot versions retained by open views. ADR 0173 adds a second table
+  snapshot versions retained by open views, plus the first consumer's
+  capped event queue (D19, R8-23). ADR 0173 adds a second table
   while a repair runs.
 - **The start sequence is fixed (R4-18, R5-01):**
   1. open the data directory under its lock;
@@ -2220,7 +2351,10 @@ acknowledgement, and count. It got 300 of 300 acknowledged writes back in
 simulation, and 622 of 622 over encrypted TCP to disk (`storage.js:601-615`).
 
 **Benchmarks and budgets (R7-00c, ADR 0165).** The allocation budgets below
-go into `design/sdk.yaml`'s `budgets:`, each with its fixture, and kit
+go into `design/sdk.yaml`'s `budgets:`, each naming its `fn:` (the step
+function's `Step`, the record and frame codecs, `Node.Propose`) and its
+fixture (R8-36). The three-node `Propose` row runs in the simulator under
+`synctest`, over the in-memory doubles, and kit
 measures them in the race-off lane (`tools/alloc-lane-targets.txt`, rule 12).
 The absolute numbers of D16, `fdatasync` p99, commit p99 and entries per
 second, are NEVER design budgets. They go into a hand-run `BENCH.md` (rule 9)
@@ -2271,6 +2405,12 @@ The first draft assumed 1–3 ms. That assumption is withdrawn until measured.
 - A `Barrier` served from a follower includes that follower's RTT to the
   leader.
 - A segment is 64 MiB (D4).
+- **Backfill time per node** is measured on the real repositories, because
+  it sets the tolerance-0 window of a replacement and of a planned reinstall
+  (D17, R8-32).
+- **Dispatcher throughput (R8-28).** Events are applied to SQL in batches,
+  one SQL transaction per batch. The target is to keep up with the
+  sustained commit rate above with a lag under 5 s at p99, provisional.
 
 Commit latency from a leader is `max(fsync_leader, RTT_nearest + fsync_peer)`
 plus processing:
@@ -2332,13 +2472,19 @@ the node's by construction (R4-29, R5-12): `forgejo cluster bootstrap`,
 `snapshot save`, `reproject`, `quarantine clear`, `objects
 verify|backfill` and `reconcile` (R6-09). On Nomad, each offline subcommand
 runs as a batch job pinned to the slot's host volume, with the server's
-allocation stopped (R7-34).
+allocation stopped (R7-34). **Every offline subcommand ALSO runs outside
+Nomad (R8-18):** `docker run --network host -v <slot volume>` from the
+pinned image, the allocation stopped. The `Recover` and restore runbooks use
+that path. **No runbook depends on Nomad's quorum**: the Nomad servers are
+these same three VPS.
 
 **Online administration stays web-only (Q14, R7-32).** There is no online
 CLI. Forgejo's site administration is the only online surface. **The
 residual risk is stated:** when the site administration is unavailable, no
 online operation can be called, not even `TransferLeadership` or
-`ClearNoSpace`. The cluster keeps committing, and the offline subcommands
+`ClearNoSpace`. The cluster keeps committing ordinary proposals unless the
+no-space alarm is raised, in which case it refuses them until the alarm is
+cleared, which needs the administration (R8-33). The offline subcommands
 still work on a stopped node. The break-glass local administrator of the
 recovery runbook is the way back into the administration.
 
@@ -2385,27 +2531,41 @@ node, under the directory lock.
     node, and the method that FENCED it. **Only methods that stop the old
     majority from serving count (R5-11):**
     - stopped, or powered off;
-    - cut from the edge (Traefik and Cloudflare) AND from each other.
+    - cut by nftables from the two homes' access and the WireGuard access,
+      AND from each other. There is no Traefik or Cloudflare edge in front
+      of the management (R8-33).
     Certificate revocation is not a method: the TLS sibling ADR does not
     check revocation. It becomes one only if that ADR adds revocation
     checking. The attestation is written into the audit record.
-  - **A fence must outlive a power cycle (R7-24).** "Stopped" and "powered
-    off" count only together with at least one DURABLE fence, because two
-    old voters that boot again are a majority of the old cluster:
-    - the consensus intermediate of `pki-consensus` is rotated, so the new
-      cluster refuses every old leaf and the old nodes cannot renew. This
-      alone does not stop two old nodes that still trust each other.
-    - a superseded-lineage key, `consensus/<old cluster id>/superseded` in
-      Consul's KV, which the product reads at start BEFORE it opens the data
-      directory, and which makes it refuse to start. When Consul does not
-      answer, the node starts, so this fence never stands alone.
-    - the old data directories made unbootable by configuration management:
-      Ansible writes a persistent stop marker (R7-44) into each.
-    The runbook applies the second and the third, and the first whenever an
-    old node could still reach Vault. The old nodes are also cut from
-    PostgreSQL (their `pg_hba` entries and role) and from Garage (their
-    keys). A test restarts the old pair after `Recover`, and it must be
-    refused.
+  - **A fence must outlive a power cycle: the witness (Q17, R7-24, R8-20).**
+    "Stopped" and "powered off" count only with a DURABLE fence, because two
+    old voters that boot again are a majority of the old cluster.
+    - **The authority is a witness on the NAS.** Both NAS (making.codes ADR
+      0010 and ADR 0015) hold a record of superseded lineages. A unit on
+      each VPS, ordered BEFORE `nomad.service`, queries it at boot. It
+      refuses to start Nomad, and so Forgejo, when the node's lineage is
+      declared superseded.
+    - **It fails CLOSED.** When no NAS answers, the unit refuses. The VPS
+      already depend on the NAS at boot, through Tang for LUKS, so this adds
+      no new dependency, only a second question to the same place.
+    - **Recover writes the superseded lineage to the witness BEFORE the
+      survivor serves.** `RecoverOptions.FencedAttestation` carries the
+      witness's receipt for each old voter, and `Recover` refuses without
+      one (`RECOVER_REFUSED`).
+    - The Consul key `consensus/<old cluster id>/superseded` stays as a
+      SECOND, non-authoritative signal, read by the product before it opens
+      the data directory.
+    - The consensus intermediate of `pki-consensus` is rotated whenever an
+      old node could still reach Vault, so old leaves cannot renew.
+    - Ansible writes a persistent stop marker (R7-44) into each old data
+      directory it reaches.
+    The old nodes are also cut from PostgreSQL (their `pg_hba` entries and
+    role) and from Garage (their keys). **The test "old pair restarted after
+    `Recover` is refused" runs with the old pair's Consul in MAJORITY**, so
+    it proves the witness, not the Consul key.
+  - **Consul ACL (R8-14).** Only the operator token may write
+    `consensus/*/superseded`. The product's token reads it. Forgejo's Nomad
+    token is read-only: `node:read`, and `read-job` on its own job.
   - The replacement machine is kept stopped until `Recover` has run.
   - It refuses while any seed of the old cluster still answers. A force
     option overrides that refusal, and the override is logged. **"Answers" is
@@ -2431,14 +2591,16 @@ node, under the directory lock.
   - **What it costs, stated:** the chosen node's whole log tail becomes
     committed, entries no majority ever held included. Writes acknowledged
     by the old majority and held only on the lost nodes are lost.
-  - **Runbook order (R3-04, R7-25, R7-31):** Vault first, by its own
-    lost-quorum procedure (the `peers.json` recovery of its integrated
-    storage), then the certificates, then PostgreSQL under Patroni, then
-    LDAP, then `Recover`, then Forgejo, then the site administration. Each step needs the ones before it: certificates for new
-    node IDs need Vault, and Forgejo's administration needs its database and
-    its directory. When LDAP or the database is not back yet, a break-glass
-    local administrator (`forgejo admin user create`) gets the operator into
-    the site administration.
+  - **Runbook order (R3-04, R7-25, R7-31, R8-18, R8-33):** Vault, then
+    Consul, then Nomad, each by its own lost-quorum procedure (the
+    `peers.json` recovery of their Raft storage). Then the certificates,
+    then PostgreSQL under Patroni, then `Recover`, then Forgejo, then the
+    site administration. Each step needs the ones before it: certificates
+    for new node IDs need Vault, and Forgejo's administration needs its
+    database. When the database or the administration IdP is not back yet,
+    a break-glass local administrator (`forgejo admin user create`) gets the
+    operator into the site administration. `Recover` itself runs through
+    the `docker run` path, never through Nomad.
 - **`RestoreSnapshot` from a backup (R2-26, R3-15).**
   - It is run on EVERY node of the new cluster, with the identical snapshot,
     the same new `ClusterID` and the same member list. Every node gets a new
@@ -2535,7 +2697,7 @@ node, under the directory lock.
   that holds the LUKS image, and the repositories. The alarm watches `statfs`
   on each one. The LUKS image is fully allocated (`fallocate` of the image
   file, which R7-22 does not forbid since it is not the log) and sized from a
-  written budget that counts every co-tenant. The object channel refuses a
+  written budget that counts every co-tenant (D20, R8-31). The object channel refuses a
   push before any filesystem reaches its reserve. Quotas are optional:
   `statfs` and the reservations are sufficient, and the guide says so.
 
@@ -2559,25 +2721,49 @@ node, under the directory lock.
     atomically, so a reload never pairs a new certificate with an old key.
   - Renewal starts at two thirds of the lifetime, with a per-node jitter. A
     test checks that the three nodes' `NotAfter` values differ.
+  - **The renewer is named (R8-13).** It runs in process. It calls
+    `pki-consensus/sign/<slot>` with a CSR made from the host key, so the key
+    never leaves the host volume. It authenticates with the allocation's
+    workload JWT, fetched again before the JWT's TTL ends. The role is set
+    with `require_cn=false`, since the certificate carries a URI SAN only.
+    That setting is to be verified on the Vault version deployed.
   - A restart never needs Vault while the certificate is valid. Only a new
     key needs a new certificate, which happens when an allocation starts on
     an empty host volume (D19).
   - A break-glass certificate per slot, issued from the intermediate, is
     held offline.
-- **Key compromise (R2-36, R7-25).** Revoke the slot's Vault auth and
-  role first, so the stolen key cannot be renewed. `Remove` the compromised
-  node, then add the machine back under a NEW `NodeID` with a new key and
-  certificate. A retired ID is
+- **Key compromise, executable with three voters (R2-36, R7-25, R8-12).**
+  1. Fence the credential at once: the members deny the compromised SPKI,
+     through a membership entry that withdraws its pin (R8-07), and the
+     slot's Vault auth and role are revoked so the key cannot be renewed.
+     The node is now out of the quorum, and `failure_tolerance` is 0.
+  2. Add the replacement as a learner under a NEW `NodeID` and a new key,
+     backfill its objects, promote it, then `Remove` the old ID. The window
+     at tolerance 0 lasts from step 1 to the promotion.
+  3. If no quorum is available for step 1, the alternative is the forced
+     path of `Recover`, with the witness fence, and it is stated as such. A retired ID is
   refused forever (D8). The incarnation is an identifier, not a secret, and
   rotating it proves nothing.
 - **Two replacement runbooks, both add before they remove (R7-27, R7-40).**
   - A DEAD node: once it is FENCED (D19), add a new `NodeID` as a learner,
     backfill its objects, verify them, promote, then remove the old one.
     Round 2's "remove it first" is withdrawn: it would go below `MinVoters`.
-    With one voter dead, `consensus_failure_tolerance` is 0 before and
-    during the change, and every live voter must acknowledge each step.
+    **The gate, stated (R8-38).** The backfill happens while the new node is
+    a LEARNER, so the majority is still 2 of 3 and the two live voters form
+    it. The four-voter window lasts from the commit of `Promote` to the
+    commit of `Remove`. In it the majority is 3 of 4, so every live voter
+    must acknowledge each step. `consensus_failure_tolerance` is 0 from the
+    death to the end of the window. That is the gate for a dead voter. The
+    `failure_tolerance >= 1` gate of R7-40 applies to the LIVE replacement.
   - A LIVE node: add the new one as a learner, catch up, promote, transfer
     leadership away from the old one if it leads, remove the old one.
+  - **A planned reinstall (R8-32).** making.codes ADR 0015 reinstalls a VPS
+    to update its system. Before the drain, `forgejo cluster objects verify`
+    runs on the two voters that stay, so they alone hold every object the
+    table names. The node is then drained, reinstalled and replaced as a
+    DEAD node. The window at tolerance 0 is stated: from the drain to the
+    `Remove` commit. Its length is dominated by the backfill time per node,
+    which D16 measures.
   `consensus.failure_tolerance` tells the operator, before each step, how many
   voters can still fail. **Before `Promote` and before `Remove`, the procedure
   verifies durable OBJECT coverage on the prospective membership (R3-13):** a
@@ -2599,6 +2785,10 @@ Every persisted or transmitted structure carries a version (R1-22, R2-16):
 The rules:
 - **Handshake.** Each side announces the protocol range it speaks. The
   connection uses the highest common version, or is refused.
+- **The frame header is frozen (R8-36).** `length (u32) | version (u8) |
+  type (u8) | group (u64)`, little-endian, the same in every protocol version.
+  `Lane` reads it, so a transport routes a frame of a version it does not
+  parse.
 - **Payload versions are announced and replicated (R2-16, R3-11).** Every
   member — voters, learners and joining nodes — announces the range of payload
   versions its state machine supports, and the snapshot codecs it can read.
@@ -2710,6 +2900,11 @@ being used soundly.
     that touches this repository is projected". When nothing is pending for a
     repository, its watermark advances to the applied index. A
     read-after-write waits on this watermark, not on `WaitApplied`.
+  - **It also waits for the SQL cursor (R8-24).** A page that reads SQL
+    derived from the write, a branch list or a pull request, waits until the
+    dispatcher's cursor has passed the write's position. When that wait
+    times out, the answer says the page may be behind, and never serves it
+    as current.
   - The projector retries when another git process holds a ref lock.
   - **Certifying a watermark is serialised with git's own transactions
     (R3-12).** A native git transaction can publish a ref after the projector
@@ -2852,8 +3047,9 @@ being used soundly.
   (R7-27):**
   - a cluster-operator permission, distinct from site administrator.
   - no REST route and no API-token path to any D17 operation.
-  - a step-up authentication through Authelia's second factor before each
-    D17 operation, implemented and tested in Forgejo.
+  - a step-up authentication through the administration IdP of making.codes
+    ADR 0014 (Authentik, WebAuthn) before each D17 operation, implemented
+    and tested in Forgejo (R8-33).
   - the `Operator` taken from the authenticated principal BEFORE any API
     sudo is applied, so an impersonated user is never the recorded operator. The subcommands of the
   `forgejo` binary are every one D17 lists (R5-12): `cluster bootstrap
@@ -2931,14 +3127,42 @@ being used soundly.
   - `Apply` records, in the table, a small deterministic event per ref
     update: repository, ref, old and new SHA, revision, pusher id, and the
     time carried IN the entry, never read from a clock.
-  - ONE dispatcher, on the leader, runs the post-receive work for each event,
-    idempotently, keyed by its log position.
+  - ONE dispatcher, on the CURRENT leader, runs the post-receive work for
+    each event, idempotently, keyed by its log position. On gaining
+    leadership it rebuilds its delivery queue from the table's events past
+    the cursor (R8-25).
+  - **It waits for the leader's projection (R8-27).** The dispatcher
+    handles an event only once the leader's watermark for that repository
+    has reached it, so the SQL it writes never names a ref Git lacks.
+  - **Events are batched (R8-28):** many events per SQL transaction.
+  - **The cursor is (lineage, position) (R8-29)**, committed in the SAME SQL
+    transaction as the work it covers, as a compare-and-set on the previous
+    value (R8-25). At a lineage change, after `Recover` or a restore, the
+    cursor of the old lineage is closed, reconcile runs, and the cursor
+    restarts at the new lineage's first position.
   - A webhook's `hook_task.uuid` is derived from (lineage, position, hook
-    id), so a replay after a failover creates no second task.
-  - A SQL cursor, "last processed position", is committed in the SAME SQL
-    transaction as the work it covers.
+    id), so a replay after a failover creates no second task. **This needs a
+    Forgejo patch**, since Forgejo draws that uuid at random today (R8-25).
   - Branch rows carry the log revision, and an update applies only when its
     revision is newer.
+  - **Event lifecycle (R8-23).** An event stays in the table until an ACK
+    entry trims it. The dispatcher proposes that entry with the cursor it
+    READ BACK from SQL after the commit is durable on the synchronous
+    standby. Trimming lags that cursor by a configured margin, and never
+    passes the cursor of the last backup. The queue is capped in bytes,
+    counted in D14's memory budget. At the cap, pushes are refused before
+    their ref entry is proposed, and a metric and an alert say so.
+  - **Unconsumed events pin their objects (R8-27).** The old and new SHAs of
+    every event not yet trimmed are pinned against gc.
+  - An alert fires when the dispatcher's lag passes its target (D16, R8-28).
+  - **Reconcile waits for projection (R8-26).** `reconcile --apply` acts on a
+    repository only once its watermark has reached the table. Otherwise the
+    repository is deferred to the next pass.
+- **Forgejo's database and ADR 0014's (R8-30).** making.codes ADR 0014
+  proposes PostgreSQL 18 under Patroni on the same three nodes, for
+  Authentik. Forgejo uses the SAME Patroni cluster, as a separate database
+  and role. Its memory counts in the same per-node budget, beside ADR
+  0014's 1.2 to 2 GiB estimate, and the co-tenant budget of D20 says so.
 - **PostgreSQL under Patroni on Consul is a prerequisite (Q15, R7-31).**
   Failover is automatic and picks the replica with the highest LSN. The
   primary may move to FRA or RBX. The guide gives the matrix of a
@@ -2958,82 +3182,124 @@ being used soundly.
   The dispatcher of R7-29 waits for the database, and the consensus does
   not.
 
-#### Deployment on Nomad (Q13, R7-34, R7-39 to R7-43, R7-45)
+#### Deployment on Nomad (Q13, Q16, R7-34, R7-39 to R7-43, R7-45, R8-08, R8-11, R8-15 to R8-19)
 
-The owner's decision Q13 runs Forgejo as ONE Nomad job across the three
-datacenters. R7-39 to R7-43 harden it, and replace the parts of R7-34 they
-contradict.
+The owner's decision Q13 runs Forgejo as ONE Nomad job across the three VPS.
+R7-39 to R7-43 hardened it, and R8 corrects what did not hold on the real
+Nomad and Vault.
 
-- **One job, three task groups (R7-41).** One group per datacenter (WAW,
-  FRA, RBX), each with a `datacenter` constraint and its own `host_volume`.
-  Each group is a SLOT. R7-34's single group with `count = 3` and
-  `distinct_property` is replaced by this hard placement.
-- **Nomad never moves a member by itself (R7-40).** `disconnect { replace =
-  false }`, `reschedule { attempts = 0 }`, and `stop_after_client_disconnect`
-  shorter than the R7-39 delay.
-- **Keys and certificates (R7-41).** The private key is generated on the
-  host, inside the host volume, and never enters Nomad Variables. Only the
-  certificate is issued, by the slot's Vault role, through Nomad's workload
-  identity (JWT `bound_claims` on the job and the datacenter). Whether those
-  claims can carry more than job and datacenter is not verified.
-- **"Empty" is not "new" (R7-39).** An allocation initialises a fresh node
-  ONLY when all three hold:
-  - a provisioning marker, written by Ansible on the REAL mount, exists.
+- **One job, three task groups, each pinned to a node (R7-41, R8-08).** The
+  three VPS are ONE Nomad datacenter, `mngt-dc1`, and a client declares its
+  own datacenter, so the datacenter is never used for identity or
+  placement. Each group is pinned on `${node.unique.id}` of its VPS, has its
+  own `host_volume`, and runs a distinctly named task: `forgejo-waw`,
+  `forgejo-fra`, `forgejo-rbx`. Each group is a SLOT.
+- **Nomad never moves a member by itself (R7-40, R8-15).**
+  - `reschedule { attempts = 0, unlimited = false }`.
+  - `disconnect { replace = false }`. `stop_on_client_after` is NOT set.
+    The Nomad servers are these same three VPS, so a server outage the
+    runbooks allow, a full stop for an upgrade, would otherwise stop
+    Forgejo on every client. Without it, a disconnected client keeps its
+    allocation running, and the consensus decides, not Nomad. The R7-39
+    silence delay is therefore measured by the consensus leader alone.
+  - An alert fires when a slot stays without a running allocation longer
+    than that delay.
+- **A slot on a replacement VPS (R8-16).** With `replace = false`, Nomad
+  places nothing by itself. The runbook purges the old node
+  (`nomad node purge`), updates the group's `${node.unique.id}` pin to the
+  new node, and submits the job. The group is then placed on the new node.
+  This step is proven in a lab before v1.
+- **Keys and certificates (R7-41, R8-08).** The private key is generated on
+  the host, inside the host volume, and never enters Nomad Variables. Only
+  the certificate is issued, by the slot's Vault role, through a separate
+  JWT auth mount `jwt-consensus`. Each slot's role binds the default
+  workload-identity claims `nomad_job_id` and `nomad_task` exactly, for
+  example `forgejo` and `forgejo-waw`. The datacenter claim is never bound.
+  D20 adds the matching check to `scripts/workload-jobs.test.sh` and a lab
+  replay of the two defects of making.codes ADR 0005's revision of
+  2026-10-01.
+- **"Empty" is not "new" (R7-39, R8-34).** An allocation initialises a fresh
+  node ONLY when all three hold:
+  - a provisioning marker exists on the REAL mount, holding a value Ansible
+    wrote: the LUKS volume's UUID and its creation time, checked against the
+    UUID in the LUKS header.
   - `/opt/secure` is a mountpoint, so the LUKS volume is open.
-  - the leader reports the slot's old ID silent for at least N minutes
-    (N to be fixed with the `stop_after_client_disconnect` above).
-  Otherwise it refuses, reports `Health` unready, and alerts. The Nomad
-  client starts after the LUKS mount.
+  - the leader reports the slot's old ID silent for at least N minutes.
+  The marker is necessary, not sufficient: it proves the volume is the one
+  Ansible prepared, not that its previous member is fenced. Otherwise the
+  node refuses, reports `Health` unready, and alerts. The Nomad client
+  starts after the LUKS mount.
 - **The join path only joins (R7-42, R7-43).** The new node runs `Init`,
   then sends the `JOIN` of D4 to any member. No member answering means wait
   and report unready, never `Bootstrap`. `Bootstrap` stays the explicit
   two-phase step of D8, run as a one-shot batch job. `Recover` is never
   reached from automation.
-- **Replacing a member is ordered, and one at a time (R7-40).**
-  - The old ID is removed automatically only when it is FENCED: silent for
-    the stated time, AND drained or purged from Nomad, or attested by an
-    operator. "Rescheduled" is never a fence.
+- **The fence decision is Forgejo's (R8-09).** Forgejo's `JoinAuthorizer`
+  reads Nomad, with its read-only token (D17), to decide that the slot's
+  previous member is fenced: silent for the stated time, AND drained or
+  purged from Nomad, or attested by an operator. "Rescheduled" is never a
+  fence.
+- **Replacing a member is ordered, and one at a time (R7-40, R8-11).**
   - Order: `AddLearner` new, backfill objects, verify them, `Promote`,
-    `Remove` old.
+    `Remove` old (D17, R8-38).
   - One replacement at a time, cluster-wide, held by a replicated marker.
+    **The marker has an owner and an exit (R8-11):** it names the learner
+    it was taken for, and it expires when that learner is fenced. A dead
+    learner is removed by automation FIRST, before a new one is added.
   - Never forced. A strict-reconfiguration refusal is surfaced, never
     retried around.
-  - R7-40 asks for `failure_tolerance >= 1` before an automatic
-    replacement. With three voters and one dead, the tolerance is 0, so that
-    gate as written forbids the dead-voter case Q13 automates. This version
-    applies the gate to the LIVE replacement and, for a dead voter, requires
-    instead that every other voter acknowledges each step. **Flagged for the
-    next round.**
-  - A slot that still has a live voter and an empty data directory raises
+  - A slot that still has a live member and an empty data directory raises
     the `WipeAndRejoin` alarm, and never rejoins silently.
-- **A returning allocation with a retired ID** wipes its directory and
-  rejoins as a new node, through the same path.
-- **The update gate (R7-45).** A rolling update waits until the node reports
-  `Health` ready, AND the cluster's `failure_tolerance` is at least 1, AND
-  this node acknowledges the leader. The node exposes that gate read-only, as
-  a Consul check. A learner is never ready. `auto_revert` is OFF for any
-  release that raises the payload version, and on for the others.
-- **Placement of the job (R7-46).** Forgejo runs on the management VPS in
-  network mode `host`, bound to `wireguard_ip`. That needs making.codes ADR
-  0006 amended, since its management domain holds no applicative service.
-  making.codes ADR 0015 already places "Forgejo and its equivalents" on the
-  management. The amendment cites it.
+- **A returning allocation with a retired ID (R8-11)** wipes its directory
+  only under the R7-39 conditions AND a quorum-confirmed answer that its ID
+  is retired. It RENAMES the directory to a dated name, kept N days, and
+  never deletes it. It then rejoins as a new node.
+- **Rolling update, one job, site by site (Q16, R8-19).**
+  - A rollout script changes the image of ONE group, submits the job, and
+    waits for that slot's Consul gate: caught up, promoted, and
+    `failure_tolerance >= 1`. Then it moves to the next site.
+  - Nomad restarts only the group whose task changed.
+  - Each group's `update` block has `max_parallel = 1`. `auto_revert` is OFF
+    for any release that raises the payload version, and on for the others.
+  - **Nomad does not order groups**, so the script is the guarantee, not
+    the job file. The script is proven in a lab before v1.
+  - The gate is read-only and is the R7-45 one: the node reports `Health`
+    ready, the cluster's `failure_tolerance` is at least 1, and this node
+    acknowledges the leader. A learner is never ready.
+- **Stop timeout (R8-17).** The job's `kill_timeout` covers a transfer plus
+  `GRACEFUL_HAMMER_TIME` (R7-37). The clients' `max_kill_timeout` is raised
+  in `nomad.hcl.j2` to at least that, and a test asserts `kill_timeout <=
+  max_kill_timeout`.
+- **Placement of the job (R7-46, R8-31).** Forgejo runs on the management VPS
+  in network mode `host`, bound to `wireguard_ip`. That needs making.codes
+  ADR 0006 amended, since its management domain holds no applicative
+  service. making.codes ADR 0015 already places "Forgejo and its
+  equivalents" on the management, but its P5 (an OS update is a reinstall)
+  and its sentence on a single Forgejo instance must be amended beside ADR
+  0006.
 
-### D20 — Infrastructure prerequisites, in making.codes (R7-25, R7-28, R7-31, R7-34, R7-39, R7-41, R7-46)
+### D20 — Infrastructure prerequisites, in making.codes (R7-25, R7-28, R7-31, R7-34, R7-39, R7-41, R7-46, R8-08, R8-14, R8-17, R8-20, R8-31)
 
 None of these exists today. Each lives in the making.codes repository, in a
 change of its own, and this ADR does not pretend otherwise. The first
 consumer may not start before all of them are in place.
 
-| Prerequisite | Where it lives in making.codes | State on 2026-10-12 |
+| Prerequisite | Where it lives in making.codes | State on 2026-10-13 |
 |---|---|---|
 | PostgreSQL under Patroni, Consul as its DCS, automatic failover to the highest LSN | a Patroni role under `domains/management/ansible/roles/`, joined to the Consul cluster | absent: no Patroni role exists |
 | Vault mount `pki-consensus` with its own intermediate, ONE role and policy per slot with exact `allowed_uri_sans` | `domains/management/ansible/playbooks/post-bootstrap.yml`, beside the existing PKI tasks, and the task list of `scripts/lab-vault-from-zero.sh` | absent |
-| A JWT auth role per slot, bound to the job and the datacenter | the same playbook | absent |
+| A JWT auth role per slot, bound to the job id and the task name, never the datacenter | the same playbook | absent (R8-08) |
 | nftables input rule: consensus and object ports from member addresses only | `domains/management/ansible/roles/common/templates/nftables.conf.j2` | absent |
 | the listeners' address, `wireguard_ip`, on `wg2` after the migration | `domains/management/ansible/inventory/group_vars/all/networks.yml` (the networks by tier) | the migration is written and not converged, `wg0` today |
-| the provisioning marker on the real mount, and the Nomad client ordered after the LUKS mount (`/opt/secure`) | the `luks` and `nomad` roles | absent |
-| the Nomad job, three task groups, one per datacenter, a host volume each | a new `domains/management/jobs/` directory (none exists), or the management repository of making.codes ADR 0015 | absent |
+| the provisioning marker on the real mount, holding the LUKS UUID and its creation time, and the Nomad client ordered after the LUKS mount (`/opt/secure`) | the `luks` and `nomad` roles | absent (R8-34) |
+| the Nomad job, three task groups, each pinned on `${node.unique.id}`, distinct task names, a host volume each | a new `domains/management/jobs/` directory (none exists), or the management repository of making.codes ADR 0015 | absent |
+| a separate JWT auth mount `jwt-consensus`, roles binding `nomad_job_id` and `nomad_task` | `post-bootstrap.yml`, and a check in `scripts/workload-jobs.test.sh`, with a lab replay of ADR 0005's two defects of 2026-10-01 | absent (R8-08) |
+| `max_kill_timeout` raised on the three clients | `domains/management/ansible/roles/nomad/templates/nomad.hcl.j2` | absent: the template does not set it (R8-17) |
+| the Recover witness on both NAS, and the boot unit before `nomad.service` that queries it and fails closed | the NAS seed (making.codes ADR 0015) and the `common` or `nomad` role | absent (R8-20) |
+| Consul ACL: operator-only write on `consensus/*/superseded`, product read, a read-only Nomad token for Forgejo | `post-bootstrap.yml` and `domains/management/policies/` | absent (R8-14) |
+| the LUKS image fully allocated, resized from a written co-tenant budget: every forge repository, consensus 5.3 GiB, PostgreSQL, Garage, Consul, Vault, Nomad | the `luks` role and a written budget beside it | absent (R8-31) |
+| a metrics scraper, a rule evaluator and an alert channel reachable from the management | none exists today. The alerts of D13 have nowhere to run | absent (R8-31) |
+| making.codes ADR 0015 amended: P5 and its single-instance Forgejo sentence | `docs/adr/0015-nas-graine-et-domaines-pilotes.md`, beside the ADR 0006 amendment | not written (R8-31) |
 | the management domain allowed to run Forgejo | an amendment of making.codes ADR 0006, citing ADR 0015 | not written |
 | the backup order PostgreSQL, ref snapshot, repositories | the `backup` role | absent. The role backs up Consul, Vault and Nomad today |
 | the ports, proposed 7480 (consensus) and 7481 (objects) | the nftables rule and the job | to be checked against the port matrix in that change |
@@ -3072,8 +3338,11 @@ consumer may not start before all of them are in place.
 - **The first consumer needs infrastructure that does not exist yet (D20).**
 - **Administration is any-node (Q8, R3-03).** No product has to find the
   leader to administer the cluster.
-- **This version is rewritten and not yet reviewed (R7).** The history is
-  in *Revision history*. No reviewer has read the R7 version.
+- **This version is rewritten and not yet reviewed (R8).** The history is
+  in *Revision history*. No reviewer has read the R8 version.
+- **A restart after a Recover depends on the NAS (Q17, R8-20).** The boot
+  unit fails closed when no NAS answers, as LUKS already does through
+  Tang.
 - The root `CLAUDE.md` domain list, the design file, the two ranges of
   `design/sdk.yaml` and what kit writes from them change in the implementing
   change set, not in this one.
@@ -3183,7 +3452,7 @@ write rate that is not a bottleneck, and D11 keeps the wire and API open.
 | R5 | review run 2, round 2 | divergence split into ADR 0173 (Q12), snapshots back to the core model, sync watermark, restart gc barrier, git transaction tracking, symbolic refs in the table, mandatory backup reconciliation |
 | R6 | review run 2, round 3 | two retained snapshots, the implicit sync watermark, ADR 0173 activated all or nothing by the cluster version |
 | R7 | review run 3, round 1 (overall round 7), 2026-10-12 | **State: rewritten-unreviewed.** Aligned with the SDK after its reorganisation: the `app` family paths, one design file, codes in the core, one module, stdlib bounded codecs, budgets in the design and absolute targets in `BENCH.md` (R7-00a to R7-00f, R7-01 to R7-11). Storage: numbered batches, logical truncation and zeroing, the commit clamped to the synced index, distrust after a failed sync, stop markers and exit codes, `fallocate` off (R7-12 to R7-14, R7-22, R7-44). Safety: `ENTRY_SUPERSEDED` only on a committed conflict, the election restriction, the one-campaign transfer flag, the leader's vote refusal, instants for the lease, submission ids across restarts, the "need snapshot" path (R7-15 to R7-21, R7-23). Recover fenced durably, Vault per slot, the pre-handshake admission sibling, `MinVoters`, listeners on the management address (R7-24 to R7-28). The first consumer: SQL as a log consumer, the backup order, Patroni, a replicator independent of the database, every filesystem watched, the Nomad deployment of Q13 with slots, `JOIN` and fenced replacement, D/F conflicts, two-phase bootstrap, alerts and limits, snapshot pins (R7-29 to R7-43, R7-45, R7-46). Infrastructure prerequisites listed in D20. The companion renumbered 0173, the TLS sibling 0174 reserved, the admission hook folded into it |
-
+| R8 | review run 3, round 2 (overall round 8), 2026-10-13 | **State: rewritten-unreviewed.** Log recovery as one procedure: explicit truncate records, the effective log, a torn tail only in the highest batch and only with a tear pattern, zeroing only after classification, no batch across a rotation, the `STORAGE_FAILED` marker keyed on `boot_id` (R8-01 to R8-06). Identity: the member's key pinned by SPKI, slots pinned on Nomad node ids and bound by `nomad_job_id` and `nomad_task`, a published JOIN surface with the product's `JoinAuthorizer`, `Init` offline with `Redraw`, the replacement marker's owner and exit, an executable key-compromise runbook, the renewer, Consul ACLs (R8-07 to R8-14). Nomad: reschedule and disconnect corrected, the slot on a replacement VPS, `max_kill_timeout`, offline subcommands outside Nomad, the rolling script of Q16 (R8-15 to R8-19). The Recover fence is a witness on the NAS that fails closed (Q17, R8-20). Snapshot ports completed and rotation with pinned anchors (R8-21, R8-22). The SQL event lifecycle, its cursor and its batches (R8-23 to R8-30). Infrastructure rows and stale making.codes facts (R8-31 to R8-34). Exit codes through `errs.WithExitCode`, API and editorial fixes, the dead-voter gate stated (R8-35 to R8-38) |
 
 ## raft-sql-poc (owner's prior Raft)
 

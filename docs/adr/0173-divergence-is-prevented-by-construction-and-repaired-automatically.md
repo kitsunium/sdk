@@ -1,6 +1,6 @@
 # ADR 0173 — divergence of replicated state: prevented by construction, detected at fixed indexes, repaired automatically
 
-- **Status**: Proposed. Split from ADR 0152 by the owner's decision Q12. Its own challenge is pending. ADR 0152's R7 offer is recorded and not yet reconciled. Numbered 0173 because 0160 went to another decision and 0168 to 0172 are taken or claimed, and cited by title until it merges
+- **Status**: Proposed. Split from ADR 0152 by the owner's decision Q12. Its own challenge is pending. ADR 0152's R8 offer is recorded and not yet reconciled. Numbered 0173 because 0160 went to another decision and 0168 to 0172 are taken or claimed, and cited by title until it merges
 - **Date**: 2026-10-03
 - **Deciders**: SDK maintainers
 - **Depends on**: [ADR 0152](0152-a-write-is-committed-when-a-majority-holds-it-on-disk.md) (the consensus domain whose state this ADR protects)
@@ -438,9 +438,9 @@ None. Nothing is implemented yet.
 
 - Every open objection below, as the input of this ADR's own challenge.
 
-## Contract from 0152 (as of ADR 0152's R7 version)
+## Contract from 0152 (as of ADR 0152's R8 version)
 
-ADR 0152's rounds R6 and R7 changed what it offers this ADR. This section
+ADR 0152's rounds R6, R7 and R8 changed what it offers this ADR. This section
 records that offer. No other change is applied to this ADR: reconciling its
 decisions with the offer is part of its own challenge.
 
@@ -487,8 +487,11 @@ service's too (0152 R7-05).
 - a floor on log retention.
 - **a snapshot pin, `pin(id string) (unpin func(), err error)` (R7-38).**
   ADR 0152's retention never evicts a pinned snapshot. A pin holds one of
-  the two retained slots. When both are pinned, the next cut waits for an
-  unpin, and the log still raises the no-space alarm at `LogReserveBytes`.
+  the two retained slots. **When both are pinned (R8-22),** the next cut is
+  written into the slot reserved for a cut. Once this ADR validates it, it
+  atomically takes over the OLDEST anchor's pin, and only then is that
+  anchor removed. The log still raises the no-space alarm at
+  `LogReserveBytes`.
   The two anchors of D4 above are held through this pin.
 - state replacement through `Restore`.
 - a pre-vote gate slot at step 4 of ADR 0152's start sequence.
@@ -510,7 +513,9 @@ D3 above predates both. Reconciling them is an open item.
 TWO complete snapshots, and keeps the log back to the older one. A transfer
 in flight defers the next cut and pins compaction. The disk reservation is
 four snapshot slots, about 5.3 GiB. The `SnapshotStore` port now has `List`,
-`Open`, `Remove` and `Create`, with `Latest` a convenience. A node whose two
+`Open`, `Remove` and `Create`, which returns an existing spool with its
+offset (R8-21). `Latest` is a service function. `SnapshotMeta` carries its
+`ID`, and each encoded chunk carries its own CRC-32C (R8-21). A node whose two
 snapshots both fail asks for one and may not campaign. D4 above, written
 when ADR 0152 kept one snapshot, reads against this offer.
 
