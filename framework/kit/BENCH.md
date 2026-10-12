@@ -7,10 +7,9 @@ about 5.1–5.4 ms, p99 6–8 ms; an empty Go program takes 2.0 ms on the same
 box. Of the ~3 ms between them, package initialisation is about 0.7 ms
 (`GODEBUG=inittrace=1`); the rest is the binary — 20.6 MB, 11.6 MB of it code
 reachable only from `App.Main`, which costs ~75 page faults and ~0.2 ms by
-being linked at all.** Differences under ~0.15 ms are not measurable here:
-the same source built from another directory, or with `-trimpath`, runs
-0.1–0.3 ms apart (§Controls), because what a fresh process pays is mostly
-the pages it touches, and the layout decides which.
+being linked at all.** Differences under ~0.2 ms are not measurable here:
+the same bytes exec'd from two paths ran 0.19 ms apart (§Controls), because
+what a fresh process pays is mostly the pages it touches.
 
 Before kit's catalogues were loaded lazily and in linear time, the same
 probe took 37 ms: the package's init checked every French key against a
@@ -31,7 +30,7 @@ a warm process pays for the run itself: 0.14 ms.
 | Architecture       | amd64 |
 | Go toolchain       | go1.27.2 linux/amd64 |
 | Git branch         | `fix/sdk-release-lock` |
-| Git commit         | `132abe86` + the #276 change (pre-commit) |
+| Git commit         | `c3f9f517` |
 | Date               | 2026-10-12 |
 
 ## Results
@@ -54,30 +53,32 @@ Three runs of 200 execs each, twice, alternating the tree before ADR 0172
 | `BenchmarkAFreshProcessRunsADefaultCommand` | after | 5 192 653 | 5 140 | 6 519 |
 | `BenchmarkAFreshProcessRunsADefaultCommand` | after | 5 234 346 | 5 138 | 6 512 |
 
-The benchmark alone does not separate the two trees. Prebuilt binaries
-exec'd in ten alternated rounds of 300 (median of the rounds' p50) do:
+The benchmark alone does not separate the two trees, and neither does
+anything finer on this machine. `kit startup` (kitsunium/platform#80) builds
+both trees `-trimpath` and measures a third binary beside them — the working
+tree's, copied byte for byte — so the noise floor is printed with the delta.
+Three runs of `kit startup -base b02d9574 -rounds 8 -runs 200
+./kit/testdata/cliprobe`:
 
-| Binary | deps | inits | init median | wall p50 | CPU p50 |
-|---|---|---|---|---|---|
-| empty Go program | — | — | — | 1.99 ms | 2.15 ms |
-| cliprobe before ADR 0172 | 369 | 188 | 1.18 ms | 5.07–5.11 ms | 5.90–5.96 ms |
-| cliprobe after ADR 0172 | 364 | 184 | 1.12 ms | 5.05 ms | 5.87–5.88 ms |
-| cliprobe after #276 | 364 | 183 | 1.05 ms | 4.84–4.89 ms | 5.65–5.69 ms |
+| Run | deps | inits | init ms (base → tree) | wall p50 ms (base → tree) | delta | noise (control − tree) |
+|---|---|---|---|---|---|---|
+| 1 | 369 → 364 | 188 → 183 | 1.230 → 1.187 | 5.180 → 5.348 | +0.168 | +0.009 |
+| 2 | 369 → 364 | 188 → 183 | 1.294 → 1.261 | 5.377 → 5.407 | +0.031 | −0.016 |
+| 3 | 369 → 364 | 188 → 183 | 1.233 → 1.240 | 5.102 → 5.200 | +0.098 | +0.054 |
 
-(init median: the median of 200 alternated runs of the sum of
-`inittrace`'s clock, which includes the trace's own writes.)
+What ADR 0172 and the #276 change remove is countable — five packages,
+five package initialisations, 88 KB, a hostname read, a regexp compile, a
+build-information parse, a `runtime.FuncForPC` per declaration — and below
+what a fresh process's wall time resolves here: the rounds of one binary
+spread over 0.3–0.7 ms, and the delta moves between runs by more than it
+measures.
 
 ## Controls
 
-The same source, `132abe86`, as a two-role binary (a client CLI role, a
-daemon role with a listener and two jobs — a status line's shape), ten
-alternated rounds of 300:
-
-| Build | wall p50 | CPU p50 |
-|---|---|---|
-| built from one directory | 4.81–4.93 ms | 5.63–5.69 ms |
-| built from another directory | 4.73 ms | 5.57 ms |
-| built with `-trimpath` | 4.62–4.64 ms | 5.43 ms |
-
-A change smaller than these gaps is judged by what it removes — packages
-initialised, work done at the start — not by a wall time.
+Identical bytes are not identical runs. The working tree's cliprobe built
+`-trimpath` from two directories gives the same file byte for byte; exec'd
+in eight alternated rounds of 300, the two copies measured 4.73 and 4.92 ms.
+Without `-trimpath` the build directory is part of the binary, and the same
+source built from two directories differs by as much again. A change
+smaller than ~0.2 ms is judged by what it removes — packages initialised,
+work done at the start — never by a wall time on this machine.

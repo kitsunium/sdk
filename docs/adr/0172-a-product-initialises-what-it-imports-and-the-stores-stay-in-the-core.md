@@ -121,10 +121,14 @@ whose binary declares none of a subsystem and measures the difference.
 ## Consequences / Semantics
 
 - `go list -deps ./framework/kit/testdata/cliprobe`: 369 → 364 (−7, +2: the
-  two `buildinfo` packages). Packages with an init: 188 → 184. Initialisation,
-  the minimum of 40 runs: 0.885 → 0.699 ms; wall p50 5.10 → 4.99 ms and CPU
-  p50 5.91 → 5.83 ms, medians of ten rounds of 300 execs, alternated. The
-  binary loses 92 KB.
+  two `buildinfo` packages). Packages with an init: 188 → 184. The binary
+  loses 92 KB. The wall time does not resolve it: built `-trimpath` and
+  measured beside a byte-for-byte control (`kit startup`,
+  kitsunium/platform#80), the delta stays inside what separates identical
+  bytes exec'd from two paths — 0.19 ms on this machine
+  (`framework/kit/BENCH.md` §Controls). A first measurement without
+  `-trimpath` read 5.10 → 4.99 ms and is withdrawn: the build directory is
+  part of such a binary.
 - A serving app's runtime graph is unchanged: `framework/kit/server` is
   already imported by every product that serves the graph.
 - `serverkit` now imports `pkg/v1/proc/process`; a product that serves HTTP
