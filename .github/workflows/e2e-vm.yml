@@ -54,13 +54,22 @@ env:
 jobs:
   e2e:
     runs-on: kitsunium-runner
-    timeout-minutes: 25
+    # The cap must exceed the sum of the bounds INSIDE the job, or a run that
+    # hits them is cancelled before it prints what they exist to print (#118:
+    # debian-systemd and fedora-systemd were cancelled at 25 with nothing in
+    # the log). Upper bounds, step by step: rollback 2 min, the lease 5, SSH 10
+    # (windows-11's window below), compile 3, the conformance binary's checks
+    # each under harness.CheckTimeout, and ten suites under -test.timeout=3m —
+    # 30 min if every one of them hung. 55 covers that with room; a healthy
+    # leg finishes in about 5 (openbsd, measured on run 29972089570).
+    timeout-minutes: 55
     strategy:
       fail-fast: false
       max-parallel: 4
       matrix:
         include:
           # name : Proxmox test VMID (template+100) : GOOS/GOARCH : SSH user : exe suffix
+          # ssh_wait (seconds, default 300): how long "Wait for SSH" polls.
           - {
               name: debian-systemd,
               vmid: 204,
@@ -116,6 +125,11 @@ jobs:
               goarch: amd64,
               user: kodflow,
               ext: ".exe",
+              # A cold boot of Windows 11 from the base snapshot, then sshd
+              # starting as a service, overran 300s on run 29972089570 with
+              # the IP already leased (#118). The step below still says
+              # whether port 22 is open or closed when 600s is not enough.
+              ssh_wait: 600,
             }
     name: ${{ matrix.name }}
     steps:
@@ -236,14 +250,16 @@ jobs:
       # means no sshd is listening; open means sshd runs and refuses us, which
       # is a key or account problem.
       - name: Wait for SSH
+        env:
+          SSH_WAIT: ${{ matrix.ssh_wait || 300 }}
         run: |
           IP=${{ steps.ip.outputs.ip }}
           last=""
-          for i in $(seq 1 60); do
+          for i in $(seq 1 $((SSH_WAIT / 5))); do
             if last=$(ssh ${SSH_OPTS} ${{ matrix.user }}@"$IP" true 2>&1); then exit 0; fi
             sleep 5
           done
-          echo "::error::SSH never came up after 300s on ${{ matrix.name }} ($IP)"
+          echo "::error::SSH never came up after ${SSH_WAIT}s on ${{ matrix.name }} ($IP)"
           echo "last ssh error: ${last:-<none>}"
           if timeout 5 bash -c "exec 3<>/dev/tcp/$IP/22" 2>/dev/null; then
             echo "::error::port 22 is OPEN on $IP: sshd runs and refuses this runner — check the key and the account '${{ matrix.user }}' in the base snapshot"
