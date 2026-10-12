@@ -15,13 +15,19 @@ import (
 // pkg/v1/proc/process. Go runs the initialisation of every package a binary
 // imports, used or not, so the import graph is what decides.
 //
-// It lists the graph with the go command, and skips without one — under
-// Bazel's sandbox. Its gate is CI's test-386 job, which runs go test over
-// every module with the toolchain on PATH (rule 12).
+// It lists the graph with the go command, and skips without one or under
+// Bazel, whose sandbox holds no module. Its gate is CI's test-386 job, which
+// runs go test over every module with the toolchain on PATH (rule 12).
 func TestTheFacadeImportsNoOptInSubsystem(t *testing.T) {
 	goTool, err := exec.LookPath("go")
 	if err != nil {
 		t.Skip("no go toolchain to list the import graph")
+	}
+	// Under Bazel the sandbox holds the test's runfiles and no module, even
+	// where the runner put a toolchain on PATH: the go command has nothing to
+	// list there.
+	if os.Getenv("TEST_SRCDIR") != "" {
+		t.Skip("under Bazel: no module to list")
 	}
 	list := exec.Command(goTool, "list", "-deps", "github.com/kitsunium/sdk/framework/kit")
 	list.Env = append(os.Environ(), "GOWORK=off")
