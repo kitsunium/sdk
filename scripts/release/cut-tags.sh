@@ -80,6 +80,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 . "$here/lib/release-modules.sh"
 
 DRY_RUN=0
+NO_PUSH=0
 ALLOW_BOOTSTRAP=0
 RANGE=""
 BUMP=""
@@ -87,6 +88,7 @@ MANIFEST=""
 for arg in "$@"; do
   case "$arg" in
     --dry-run) DRY_RUN=1 ;;
+    --no-push) NO_PUSH=1 ;;
     --allow-bootstrap) ALLOW_BOOTSTRAP=1 ;;
     --range=*) RANGE="${arg#--range=}" ;;
     --bump=*) BUMP="${arg#--bump=}" ;;
@@ -98,7 +100,7 @@ one directory per line, '.' the SDK module; or 'sdk', the SDK module and every
 other module that changed since its own last tag), and publish the next tag of
 each, at its OWN version (ADR 0171).
 
-Usage: $0 [--dry-run] [--allow-bootstrap] [--range=<rev>..HEAD]
+Usage: $0 [--dry-run | --no-push] [--allow-bootstrap] [--range=<rev>..HEAD]
           [--bump=patch|minor|major] [--manifest=<file>] < modules.txt
 
 Each module's size is the largest 'release:patch|minor|major' label on the
@@ -112,6 +114,13 @@ over the one range given.
 --manifest writes release-manifest.json there: the release's identity (its
 first tag), every module tagged with its version, previous tag and size, the
 tombstones, and the commits (ADR 0171). Written by a dry run too.
+
+--no-push does everything a publishing run does — the prune-fetch, the
+release commit, every tag, the exact-ref check on origin and the manifest —
+except the push: the release commit and the tags stay in this clone, for a
+rehearsal against a file proxy (proxy-rehearsal.sh --manifest). Run it in a
+throwaway clone; a later publishing run's prune-fetch drops tags origin does not
+hold.
 
 --bump states the size of the whole range and asks GitHub nothing. It is the
 recovery path for a refused release: SDK Release's workflow_dispatch input
@@ -133,6 +142,13 @@ EOF
       ;;
   esac
 done
+
+# --dry-run and --no-push are two answers to "what happens to the tags": none
+# are made, or they are made and kept here. Both is a caller's mistake.
+if [ "$DRY_RUN" -eq 1 ] && [ "$NO_PUSH" -eq 1 ]; then
+  echo "cut-tags: --dry-run and --no-push exclude each other" >&2
+  exit 64
+fi
 
 # A --bump that is not a size is a typo, and a typo on the one flag that
 # overrides every label must not read as "patch". Refused before anything runs.
@@ -419,6 +435,26 @@ sdk_replaces_of() {
     jq -r --arg m "$SDK_MODULE" '.Replace // [] | .[].Old.Path | select(. == $m or startswith($m + "/"))'
 }
 
+# root_floor — the version every family and internal require the root at (ADR
+# 0171 §7): the lowest root tag `vX.Y.Z` whose tree holds internal/go.mod — the
+# first root that no longer provides internal/ nor pkg/ —, else the version this
+# release gives the root when its tree holds one; empty when neither exists,
+# which rewrite_publishable refuses for a module that needs it. Read from the
+# tags, never remembered, so it is the same answer for every later release.
+root_floor() {
+  local t
+  while IFS= read -r t; do
+    [ -z "$t" ] && continue
+    if git cat-file -e "$t^{commit}:internal/go.mod" 2>/dev/null; then
+      echo "v$(version_from_tag "$t")"
+      return 0
+    fi
+  done < <(stable_tags 'v*' is_valid_tag | version_sort)
+  if [ -n "${NEXT_VERSION[.]+set}" ] && [ -f internal/go.mod ]; then
+    echo "${NEXT_VERSION[.]}"
+  fi
+}
+
 # rewrite_publishable <go.mod> — drop every SDK-repository `replace` and pin
 # every SDK-repository `require`: a module this release tags at the version it
 # is tagged at (NEXT_VERSION); any other module at its own last tag. A
@@ -427,8 +463,24 @@ sdk_replaces_of() {
 # own version since ADR 0171, so the version is looked up per requirement —
 # never "the release's", which no longer exists.
 rewrite_publishable() {
-  local gomod="$1" dep dir lt
+  local gomod="$1" dep dir lt self
   local -a edits=()
+  self="$(dirname "$gomod")"
+  # The floor of ADR 0171 §3 and §7: internal and every pkg family require the
+  # root at the first version that holds neither pkg/ nor internal/, so that a
+  # consumer pinned to a monolithic root who adds one is lifted past it by
+  # minimum version selection instead of meeting an ambiguous import. Written
+  # here and never in the working tree: the root requires them back, and kit
+  # refuses that cycle in the design. ROOT_FLOOR is computed once (root_floor).
+  case "$self" in
+    internal | pkg/v1/*)
+      if [ -z "${ROOT_FLOOR:-}" ]; then
+        echo "cut-tags: $gomod needs the root's floor (ADR 0171 §7), and no root tag holds the split nor does this release cut one — cut the root with it" >&2
+        return 1
+      fi
+      edits+=(-require="$SDK_MODULE@$ROOT_FLOOR")
+      ;;
+  esac
   while IFS= read -r dep; do
     [ -z "$dep" ] && continue
     if is_retired_module "$dep"; then
@@ -740,10 +792,10 @@ publish_release() {
   (
     set -e
     cd "$wt"
-    # The SDK's own go.mod is checked whether or not it is tagged: it is the
-    # module every other one requires, and a retired requirement in it is the
-    # ambiguous import ADR 0162 exists to prevent.
-    assert_publishable go.mod
+    # Each go.mod this release tags is checked once rewritten. The root's is no
+    # longer checked when the root is not tagged: since ADR 0171 it requires
+    # the families and internal through a local replace like every module, and
+    # an untagged module's go.mod is published by no tag of this release.
     for d in "$@"; do
       rewrite_publishable "$d/go.mod"
       assert_publishable "$d/go.mod"
@@ -830,7 +882,11 @@ publish_release() {
           git tag -a "$d/$root_sem" -m "release $d/$root_sem — tombstone of $SDK_MODULE/$d (ADR 0162)" "$tc"
         done
       fi
-      git push --atomic origin "${tags[@]}" ${tombs[@]+"${tombs[@]}"}
+      if [ "$NO_PUSH" -eq 1 ]; then
+        echo "NO-PUSH: tagged ${tags[*]}${tombs[*]+ ${tombs[*]}} on $relc in this clone; nothing was pushed" >&2
+      else
+        git push --atomic origin "${tags[@]}" ${tombs[@]+"${tombs[@]}"}
+      fi
     fi
   )
   rc=$?
@@ -846,7 +902,10 @@ publish_release() {
 # module path, tag, version, the tag it follows and the size that took it
 # there —, `tombstones` the tombstones, `commit` the main commit it was cut
 # from and `release_commit` the commit every tag names (empty in a dry run,
-# which writes the manifest of the release it would cut).
+# which writes the manifest of the release it would cut), `pushed` whether the
+# tags reached origin (false in a dry run and with --no-push) and `root_floor`
+# the root version written into internal's and every family's go.mod (ADR 0171
+# §7; empty while no root holds the split).
 write_manifest() {
   local file="$1" d rows="[]" relc="" primary="${NEXT_TAG[${selected[0]}]}"
   for d in "${selected[@]}"; do
@@ -859,7 +918,9 @@ write_manifest() {
   fi
   jq -n --arg release "$primary" --arg commit "$(git rev-parse HEAD)" --arg relc "$relc" \
     --argjson dry "$([ "$DRY_RUN" -eq 1 ] && echo true || echo false)" --argjson modules "$rows" \
-    '{schema: 1, release: $release, dry_run: $dry, commit: $commit, release_commit: $relc,
+    --argjson pushed "$([ "$DRY_RUN" -eq 0 ] && [ "$NO_PUSH" -eq 0 ] && echo true || echo false)" \
+    --arg floor "${ROOT_FLOOR:-}" \
+    '{schema: 1, release: $release, dry_run: $dry, pushed: $pushed, root_floor: $floor, commit: $commit, release_commit: $relc,
       modules: $modules, tombstones: $ARGS.positional}' \
     --args ${tombstone_list[@]+"${tombstone_list[@]}"} >"$file"
 }
@@ -967,6 +1028,9 @@ for d in "${selected[@]}"; do
     root_last="$last"
   fi
 done
+
+# The root's floor (root_floor), once the root's own next version is known.
+ROOT_FLOOR="$(root_floor)"
 
 tombstone_list=()
 if [ "$tombstone" -eq 1 ]; then

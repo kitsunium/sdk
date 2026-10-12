@@ -30,7 +30,12 @@
 #                        fetched from $REHEARSAL_UPSTREAM (default
 #                        https://proxy.golang.org); then, for each family module
 #                        of the manifest, a consumer pinned to v0.19.7 that
-#                        imports one of its packages and `go get`s it. Exit 3
+#                        imports one of its packages and `go get`s it: it must
+#                        build, the root lifted from v0.19.7 to the manifest's
+#                        root_floor, the tidied go.mod naming no monolithic
+#                        root; and, as the control, the first family
+#                        re-published without the floor must fail with an
+#                        ambiguous import. Exit 3
 #                        when the manifest names no family module: until the
 #                        split of ADR 0171 lands there is nothing of that shape
 #                        to rehearse, and an empty rehearsal is no pass.
@@ -53,7 +58,7 @@ for arg in "$@"; do
     --manifest=*) MODE=manifest; MANIFEST="${arg#--manifest=}" ;;
     --ref=*) REF="${arg#--ref=}" ;;
     -h | --help)
-      sed -n '2,41p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -177,7 +182,9 @@ proxy_fetch() {
   d="$PROXY/$m/@v"
   mkdir -p "$d"
   for ext in info mod zip; do
-    curl -fsS --max-time 60 -o "$d/$version.$ext" "$UPSTREAM/$m/@v/$version.$ext" || {
+    # -L: proxy.golang.org answers a zip with a 302 to its storage; without
+    # following it the zip is the redirect's empty body (measured).
+    curl -fsSL --max-time 60 -o "$d/$version.$ext" "$UPSTREAM/$m/@v/$version.$ext" || {
       echo "proxy-rehearsal: could not fetch $module@$version.$ext from $UPSTREAM" >&2
       return 1
     }
@@ -265,7 +272,7 @@ fixture() {
 }
 
 manifest() {
-  local families dir module tag version src pkg n=0
+  local families dir module version src pkg floor n=0
   if [ ! -r "$MANIFEST" ] || [ -z "$REF" ]; then
     echo "proxy-rehearsal: --manifest needs a readable file and --ref=<release commit>" >&2
     return 64
@@ -273,6 +280,11 @@ manifest() {
   families="$(jq -r '.modules[] | select(.dir | startswith("pkg/v1/")) | .dir' "$MANIFEST")"
   if [ -z "$families" ]; then
     echo "proxy-rehearsal: the manifest names no pkg family module — nothing of ADR 0171's shape to rehearse until the split lands" >&2
+    return 3
+  fi
+  floor="$(jq -r '.root_floor // ""' "$MANIFEST")"
+  if [ -z "$floor" ]; then
+    echo "proxy-rehearsal: the manifest names no root_floor — cut-tags.sh writes the floor once a root holds the split (ADR 0171 §7)" >&2
     return 3
   fi
   proxy_fetch github.com/kitsunium/sdk v0.19.7
@@ -288,14 +300,51 @@ manifest() {
     version="$(jq -r --arg d "$dir" '.modules[] | select(.dir == $d) | .version' "$MANIFEST")"
     pkg="$(git -C "$here/../.." ls-tree -r --name-only "$REF" -- "$dir" | awk -F/ '/\.go$/ && !/_test\.go$/ { sub(/\/[^\/]*$/, ""); print; exit }')"
     n=$((n + 1))
-    if consume "family$n" v0.19.7 "github.com/kitsunium/sdk/$pkg" "github.com/kitsunium/sdk/$dir@$version"; then
-      echo "ok: pinned to v0.19.7, adding $dir@$version builds"
-    else
+    if ! consume "family$n" v0.19.7 "github.com/kitsunium/sdk/$pkg" "github.com/kitsunium/sdk/$dir@$version"; then
       echo "proxy-rehearsal: pinned to v0.19.7, adding $dir@$version did not build:" >&2
       sed 's/^/  /' "$WORK/family$n.log" >&2
       return 1
     fi
+    # The mechanism, not just the outcome: go get lifted the root past the
+    # monolith to the floor the release wrote, and the tidied go.mod keeps no
+    # monolithic root.
+    case "$(cat "$WORK/family$n.log")" in
+      *"upgraded github.com/kitsunium/sdk v0.19.7 => $floor"*) ;;
+      *)
+        echo "proxy-rehearsal: $dir@$version built, but go get did not lift the root from v0.19.7 to $floor:" >&2
+        sed 's/^/  /' "$WORK/family$n.log" >&2
+        return 1
+        ;;
+    esac
+    if awk '$1 == "github.com/kitsunium/sdk" && $2 ~ /^v0\.(18|19)\./ { found = 1 } END { exit !found }' "$WORK/family$n/go.mod"; then
+      echo "proxy-rehearsal: after go mod tidy, family$n still requires a monolithic root:" >&2
+      sed 's/^/  /' "$WORK/family$n/go.mod" >&2
+      return 1
+    fi
+    echo "ok: pinned to v0.19.7, adding $dir@$version builds — the root lifted to $floor, go mod tidy clean"
   done <<<"$families"
+  # The control, on the real modules: the first family re-published without
+  # the floor must meet the ambiguous import the floor exists to prevent.
+  dir="$(head -n1 <<<"$families")"
+  module="$(jq -r --arg d "$dir" '.modules[] | select(.dir == $d) | .module' "$MANIFEST")"
+  pkg="$(git -C "$here/../.." ls-tree -r --name-only "$REF" -- "$dir" | awk -F/ '/\.go$/ && !/_test\.go$/ { sub(/\/[^\/]*$/, ""); print; exit }')"
+  src="$WORK/src/control"
+  mkdir -p "$src"
+  git -C "$here/../.." archive "$REF" "$dir" | tar -x -C "$src"
+  (cd "$src/$dir" && GOWORK=off GOFLAGS= GOTOOLCHAIN=local go mod edit -droprequire=github.com/kitsunium/sdk go.mod)
+  proxy_add "$module" v0.0.1-control "$src/$dir"
+  if consume control v0.19.7 "github.com/kitsunium/sdk/$pkg" "$module@v0.0.1-control"; then
+    echo "proxy-rehearsal: the control built — $dir without the floor should meet an ambiguous import; the rehearsal cannot see the failure it exists for" >&2
+    return 1
+  fi
+  case "$(cat "$WORK/control.log")" in
+    *"ambiguous import"*) echo "ok: the control — $dir without the floor — fails with an ambiguous import, as it must" ;;
+    *)
+      echo "proxy-rehearsal: the control failed, but not with an ambiguous import:" >&2
+      sed 's/^/  /' "$WORK/control.log" >&2
+      return 1
+      ;;
+  esac
 }
 
 rc=0

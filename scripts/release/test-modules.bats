@@ -163,12 +163,12 @@ remote_tags() {
   released
   change pkg/v1/data/data.go "fix(data): one"
   run bash -c "'$CB' | '$CT' --dry-run"
-  [[ "$output" == *"require github.com/kitsunium/sdk/internal v0.1.0"* ]]
+  [[ "$output" == *"github.com/kitsunium/sdk/internal v0.1.0"* ]]
   change internal/kernel/x/x.go "fix(x): one"
   run bash -c "'$CB' | '$CT' --dry-run"
   [ "$status" -eq 0 ]
   [ "$(would_tag)" = "internal/v0.1.1 pkg/v1/data/v0.1.1" ]
-  [[ "$output" == *"require github.com/kitsunium/sdk/internal v0.1.1"* ]]
+  [[ "$output" == *"github.com/kitsunium/sdk/internal v0.1.1"* ]]
   [[ "$output" != *"=> ../"* ]]
 }
 
@@ -278,6 +278,88 @@ SHIM
   run bash -c "'$CB' | '$CT' 2>/dev/null"
   [ "$status" -eq 0 ]
   [ "$output" = "v0.19.8" ]
+}
+
+# ── the floor on the root (ADR 0171 §7) ─────────────────────────────────────
+
+# monolith — the published history before the split: the root at v0.19.7 on a
+# tree where internal/ and the families hold no go.mod (they were the root's
+# packages), the vendor at v0.19.6; and origin, holding them. No module of the
+# split has a tag yet.
+monolith() {
+  local tree rel idx="$BATS_TEST_TMPDIR/index"
+  GIT_INDEX_FILE="$idx" g read-tree HEAD
+  GIT_INDEX_FILE="$idx" g rm -q --cached internal/go.mod pkg/v1/data/go.mod pkg/v1/net/go.mod
+  tree="$(GIT_INDEX_FILE="$idx" g write-tree)"
+  rel="$(g commit-tree "$tree" -p "$(g rev-parse HEAD)" -m "release v0.19.7")"
+  g tag -a v0.19.7 -m v0.19.7 "$rel"
+  g tag -a third-party/aws/v0.19.6 -m third-party/aws/v0.19.6 "$rel"
+  g init -q --bare "$BATS_TEST_TMPDIR/origin.git"
+  g remote add origin "$BATS_TEST_TMPDIR/origin.git"
+  g push -q origin --tags
+}
+
+# The first split release: internal and each family require the root at the
+# version the same release gives it, the first that holds neither pkg/ nor
+# internal/ — a consumer pinned to v0.19.7 who adds a family is lifted to it.
+@test "the first split release has internal and every family require the root it cuts" {
+  need_toolchain
+  monolith
+  run bash -c "echo sdk | '$CT' --dry-run --bump=minor"
+  [ "$status" -eq 0 ]
+  [ "$(would_tag)" = "v0.20.0 internal/v0.1.0 pkg/v1/data/v0.1.0 pkg/v1/net/v0.1.0" ]
+  for m in internal pkg/v1/data pkg/v1/net; do
+    block="$(awk -v m="--- $m/go.mod ---" '$0 ~ m { on = 1; next } /--- / { on = 0 } on' <<<"$output")"
+    [[ "$block" == *"github.com/kitsunium/sdk v0.20.0"* ]]
+  done
+}
+
+# A family cut before any root holds the split has no floor to require: it
+# would publish a module a consumer on v0.19.7 cannot add. Refused, naming why.
+@test "a family cut while no root holds the split is refused" {
+  need_toolchain
+  monolith
+  run bash -c "printf 'internal\npkg/v1/data\n' | '$CT' --dry-run --bump=patch"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"needs the root's floor (ADR 0171 §7)"* ]]
+  [[ "$output" != *"would tag"* ]]
+}
+
+# Once a root holds the split, the floor is that root for good — a later
+# family release does not follow the root's newer versions.
+@test "a later release keeps the floor at the first root that held the split" {
+  need_toolchain
+  released
+  rel="$(g commit-tree "HEAD^{tree}" -p "$(g rev-parse HEAD)" -m "release v0.19.9")"
+  g tag -a v0.19.9 -m v0.19.9 "$rel"
+  change pkg/v1/data/data.go "fix(data): one"
+  run bash -c "printf 'pkg/v1/data\n' | '$CT' --dry-run --bump=patch"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"github.com/kitsunium/sdk v0.19.7"* ]]
+  [[ "$output" != *"github.com/kitsunium/sdk v0.19.9"* ]]
+}
+
+# --no-push is the rehearsal's cut: the release commit and every tag made, the
+# exact-ref check run, the manifest written — and origin left as it was.
+@test "--no-push tags the release commit here and pushes nothing" {
+  need_toolchain
+  released
+  change pkg/v1/data/data.go "fix(data): one"
+  before="$(remote_tags)"
+  m="$BATS_TEST_TMPDIR/release-manifest.json"
+  run bash -c "'$CB' | '$CT' --no-push --manifest='$m'"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"NO-PUSH: tagged pkg/v1/data/v0.1.1"* ]]
+  [ "$(remote_tags)" = "$before" ]
+  [ "$(g rev-parse 'pkg/v1/data/v0.1.1^{commit}^1')" = "$(g rev-parse HEAD)" ]
+  [ "$(jq -r '.pushed' "$m")" = "false" ]
+  [ "$(jq -r '.dry_run' "$m")" = "false" ]
+  [ "$(jq -r '.root_floor' "$m")" = "v0.19.7" ]
+  [ "$(jq -r '.release_commit' "$m")" = "$(g rev-parse 'pkg/v1/data/v0.1.1^{commit}')" ]
+  g show 'pkg/v1/data/v0.1.1:pkg/v1/data/go.mod' >"$BATS_TEST_TMPDIR/data.mod"
+  [[ "$(cat "$BATS_TEST_TMPDIR/data.mod")" == *"github.com/kitsunium/sdk v0.19.7"* ]]
+  run bash -c "echo sdk | '$CT' --dry-run --no-push"
+  [ "$status" -eq 64 ]
 }
 
 # ── the manifest ────────────────────────────────────────────────────────────
