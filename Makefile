@@ -1,4 +1,4 @@
-.PHONY: help build test test-framework lint guard bench cover docs docs-check docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare ci-gates-check release-scripts-check pre-commit-check lint-check lint-ktn-check ci-scripts-check vuln-install vuln-check doclinks api api-check regen
+.PHONY: help build test test-framework lint guard bench cover docs docs-check docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare ci-gates-check release-scripts-check pre-commit-check lint-check lint-ktn-check ci-scripts-check vuln-install vuln-check doclinks api api-check regen from-zero kit-coverage
 
 # `make` with no args prints the help. No aliases — every target on its own.
 .DEFAULT_GOAL := help
@@ -37,6 +37,8 @@ help: ## Print this help (default goal).
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "docs-readme"  "$(DIM)write every pkg/ and framework/ README.md from docs/api (see ADR 0167)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "api"          "$(DIM)write docs/api — every exported symbol, read from the code on the 12 cells — then error-codes and gazelle$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "regen"        "$(DIM)delete every kit-generated file, kit gen + make api, require zero diff (local: needs the pinned kit)$(RST)"
+	@printf "  $(GREEN)%-7s$(RST)  %s\n" "from-zero"    "$(DIM)in a temporary copy: delete every kit-generated file, kit gen -stubs + compile, kit gen + make api, require zero diff (local)$(RST)"
+	@printf "  $(GREEN)%-7s$(RST)  %s\n" "kit-coverage" "$(DIM)per package, the exported declarations kit writes vs written by hand (a report, not a gate; local)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "profile"      "$(DIM)capture cpu+mem+block+mutex pprof for codec bench (WAVE=<slug>)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "benchstat-diff" "$(DIM)compare two captured waves with mannwhitney p-values (BEFORE / AFTER)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "sdk-bench"        "$(DIM)run every internal/kernel/**/*_bench_test.go → .bench.out (COUNT=N)$(RST)"
@@ -255,6 +257,29 @@ api-check:
 # `lint-check` nor a CI gate — `api-check` is CI's hold on the same files.
 regen:
 	bash scripts/regen.sh
+
+# `from-zero` rebuilds the SDK from design/ alone in a TEMPORARY COPY of the
+# tree, never the working tree (scripts/from-zero.sh; ADR 0169): it copies every
+# file git tracks or would track, deletes every file carrying kit's generated
+# header and kit's section of tools/alloc-lane-targets.txt, runs `kit gen
+# -stubs` and requires every module of the census to compile (go build + go vet)
+# from the design and the hand-written bodies alone — reporting, per package,
+# the stubs written where a body is missing, 0 where every body exists —, then
+# `kit gen` and `make api`, and fails on any file added, missing or changed
+# against the working tree. Unlike `regen` it runs over uncommitted work. Local
+# only, like `regen`: it needs the pinned kit, and runs bazel in the copy.
+from-zero:
+	bash scripts/from-zero.sh
+
+# `kit-coverage` prints, per package, how many exported declarations kit
+# writes — decl_gen.go's types and wrappers, facade_gen.go's re-exports,
+# codes_gen.go's sentinels, design_gen.go's ports — against those written by
+# hand, the total, and the ten packages with the most still written by hand
+# (scripts/kit-coverage.sh over `kit design coverage`; ADR 0169). The honest
+# measure of "the SDK rebuilt by kit". A report, never a gate: it exits 0
+# whatever it counts. Local only: it needs the pinned kit.
+kit-coverage:
+	bash scripts/kit-coverage.sh
 
 # `guard` runs tools/sdkguard over the SDK's own tree, in two passes.
 #

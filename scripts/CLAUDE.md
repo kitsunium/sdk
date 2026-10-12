@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-05T12:00:00Z -->
+<!-- updated: 2026-10-05T14:00:00Z -->
 # scripts/
 
 ## Purpose
@@ -20,6 +20,9 @@ here is a Go package.
 | `ci-scripts-test.sh`, `pre-commit-test.sh` | run the BATS suites of `ci/` and `pre-commit/` |
 | `cross-platform-audit.sh` | the local twin of `bazel-ci.yml`'s `cross-build`: every module of the census built and vetted (tests included) for every cell of `ci/platforms.sh`, printed as a matrix; needs bash 4 |
 | `regen.sh` | `make regen`: refuses unless `kit` is on PATH at `design/sdk.yaml`'s `project.kit.version` the tree has no tracked change and no untracked file carries the header; deletes exactly the tracked files whose first line is kit's generated header (`tools/genindex/digests.go`'s `kitHeader`) and clears the `# BEGIN kit gen` … `# END kit gen` section of `tools/alloc-lane-targets.txt`, runs `kit gen` then `make api`, and fails on any `git diff` or any file it adds that git does not track. Local only — it needs kit, which CI does not have; bash 3.2 and BSD tools like the guards |
+| `from-zero.sh` | `make from-zero` (ADR 0169): in a temporary copy of every file git tracks or would track — never the working tree —, deletes every file whose first line is kit's header and kit's lane section as `regen.sh` does, runs `kit gen -stubs` and requires every module of the copy — every `go.mod` it holds, untracked ones included, testdata left out as the census leaves it — to `go build` and `go vet`, counting the stubs per package, then `kit gen` and `make api`, and fails on any file added (git's ignore rules applied), missing or changed against the working tree; `FROM_ZERO_KEEP=1` keeps the copy. Local only; bash 3.2 and BSD tools |
+| `kit-coverage.sh` | `make kit-coverage` (ADR 0169): `kit design coverage`'s table, then the ten packages with the most exported declarations written by hand; a report, exit 0 |
+| `kit-pinned.sh` | sourced, never run: what `regen.sh`, `from-zero.sh` and `kit-coverage.sh` share so the three decide alike — `kit_pinned NAME` refuses unless `kit` on PATH is `design/sdk.yaml`'s `project.kit.version` (setting `KIT_PINNED`), `KIT_HEADER` the first line of every file kit generates, `kit_clear_section FILE` kit's `# BEGIN kit gen` section of the allocation lane removed (ADR 0169) |
 | `gen-error-codes.sh` | writes `docs/error-codes.yaml` from `docs/api` (`make error-codes`, which `make api` runs): `tools/genindex -write-error-codes`, every errs.Code constant a package declares |
 
 ## The cells are one table
