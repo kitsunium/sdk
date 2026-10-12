@@ -1,0 +1,361 @@
+#!/usr/bin/env bats
+# BATS tests for the release of several modules (ADR 0170): compute-bumps.sh
+# naming each module that changed since its OWN last tag, cut-tags.sh sizing
+# and tagging each at its OWN version — a label on one module's merge moves
+# that module only —, the vendors tagged only when they changed (#295), the
+# guards around the push (`git fetch --prune --prune-tags` first, EACH exact
+# ref checked on origin before anything is tagged), the release-manifest.json
+# that gives a release its identity, and the shell defects found on the way.
+#
+# The layout is the target's: the SDK module at the root, one shared
+# `internal` module, two pkg families and one vendor module, each requiring
+# what it imports through a local replace, as go.work's modules do.
+
+load test-helpers
+
+g() { git -c core.hooksPath="$NOHOOKS" "$@"; }
+
+need_toolchain() {
+  if ! command -v go >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then skip "go/jq absent"; fi
+}
+
+# gomod <dir> <require…> — a go.mod for the module in <dir>, requiring each
+# module of this repository named (by directory, `.` the root) through a local
+# replace, as the workspace does.
+gomod() {
+  local dir="$1" path rel dep dpath
+  shift
+  if [ "$dir" = "." ]; then path="github.com/kitsunium/sdk"; else path="github.com/kitsunium/sdk/$dir"; fi
+  rel="$(sed -E 's#[^/]+#..#g' <<<"$dir")"
+  {
+    printf 'module %s\n\ngo 1.27\n' "$path"
+    for dep in "$@"; do
+      if [ "$dep" = "." ]; then dpath="github.com/kitsunium/sdk"; else dpath="github.com/kitsunium/sdk/$dep"; fi
+      printf '\nrequire %s v0.0.0-00010101000000-000000000000\n\nreplace %s => %s/%s\n' "$dpath" "$dpath" "$rel" "$dep"
+    done
+  } >"$dir/go.mod"
+}
+
+setup() {
+  NOHOOKS="$BATS_TEST_TMPDIR/nohooks"
+  mkdir -p "$NOHOOKS"
+  REPO="$BATS_TEST_TMPDIR/repo"
+  mkdir -p "$REPO"
+  cd "$REPO"
+  g init -q -b main
+  g config user.email "ci@example.invalid"
+  g config user.name "ci"
+  mkdir -p framework/kit internal/kernel/x pkg/v1/data pkg/v1/net third-party/aws
+  printf 'module github.com/kitsunium/sdk\n\ngo 1.27\n' >go.mod
+  gomod internal
+  gomod pkg/v1/data internal
+  gomod pkg/v1/net internal
+  gomod third-party/aws .
+  echo "package kit" >framework/kit/kit.go
+  echo "package x" >internal/kernel/x/x.go
+  echo "package data" >pkg/v1/data/data.go
+  echo "package net" >pkg/v1/net/net.go
+  echo "package aws" >third-party/aws/aws.go
+  printf 'go 1.27\n\nuse (\n\t.\n\t./internal\n\t./pkg/v1/data\n\t./pkg/v1/net\n\t./third-party/aws\n)\n' >go.work
+  g add -A
+  g commit -q --no-verify -m "the layout of ADR 0170"
+  CB="$BATS_TEST_DIRNAME/compute-bumps.sh"
+  CT="$BATS_TEST_DIRNAME/cut-tags.sh"
+  install_gh_stub
+}
+
+# released — one release commit, a detached child of HEAD, carrying the tags of
+# a published history: the root at v0.19.7 and the vendor at v0.19.6 (the
+# floors of ADR 0170), the split modules at v0.1.0; and origin, holding them.
+released() {
+  local rel
+  rel="$(g commit-tree "HEAD^{tree}" -p "$(g rev-parse HEAD)" -m "release")"
+  for t in v0.19.7 third-party/aws/v0.19.6 internal/v0.1.0 pkg/v1/data/v0.1.0 pkg/v1/net/v0.1.0; do
+    g tag -a "$t" -m "$t" "$rel"
+  done
+  g init -q --bare "$BATS_TEST_TMPDIR/origin.git"
+  g remote add origin "$BATS_TEST_TMPDIR/origin.git"
+  g push -q origin --tags
+}
+
+# change <file> <message> — one first-parent commit touching <file>.
+change() {
+  echo "// $RANDOM" >>"$1"
+  g commit -aq --no-verify -m "$2"
+}
+
+would_tag() {
+  awk -F'would tag: ' '/would tag: / { print $2 }' <<<"$output"
+}
+
+remote_tags() {
+  g ls-remote --tags --refs origin | awk '{ sub(/^refs\/tags\//, "", $2); print $2 }' | LC_ALL=C sort | paste -sd' ' -
+}
+
+# ── which modules ───────────────────────────────────────────────────────────
+
+@test "compute-bumps names the one module that changed, not the SDK module" {
+  released
+  change pkg/v1/data/data.go "fix(data): one"
+  run "$CB"
+  [ "$status" -eq 0 ]
+  [ "$output" = "pkg/v1/data" ]
+}
+
+@test "each module is measured from its own last tag" {
+  released
+  change pkg/v1/net/net.go "fix(net): one"
+  rel="$(g commit-tree "HEAD^{tree}" -p "$(g rev-parse HEAD)" -m "release net")"
+  g tag pkg/v1/net/v0.1.1 "$rel"
+  change pkg/v1/data/data.go "fix(data): one"
+  run "$CB"
+  [ "$output" = "pkg/v1/data" ]
+}
+
+# ── how big, per module ─────────────────────────────────────────────────────
+
+# The defect a module per family exists to end: one label moving everything.
+@test "a label on one family's merge sizes that family, and only it" {
+  need_toolchain
+  released
+  change pkg/v1/data/data.go "feat(data): new API"
+  label_pr 301 release:minor
+  change pkg/v1/net/net.go "fix(net): a fix"
+  label_pr 302
+  run bash -c "'$CB' | '$CT' --dry-run"
+  [ "$status" -eq 0 ]
+  [ "$(would_tag)" = "pkg/v1/data/v0.2.0 pkg/v1/net/v0.1.1" ]
+  [[ "$output" == *"--- pkg/v1/data/go.mod ---"* ]]
+  [[ "$output" == *"size minor for pkg/v1/data — label release:minor on #301"* ]]
+  [[ "$output" == *"size patch for pkg/v1/net"* ]]
+}
+
+@test "a merge touching two families sizes both from one lookup" {
+  need_toolchain
+  released
+  echo "// a" >>pkg/v1/data/data.go
+  echo "// b" >>pkg/v1/net/net.go
+  g commit -aq --no-verify -m "feat: both"
+  label_pr 303 release:minor
+  run bash -c "'$CB' | '$CT' --dry-run"
+  [ "$status" -eq 0 ]
+  [ "$(would_tag)" = "pkg/v1/data/v0.2.0 pkg/v1/net/v0.2.0" ]
+  [ "$(gh_calls)" -eq 1 ]
+}
+
+# Each module continues its own numbering: the vendor at v0.19.6 is cut at
+# v0.19.7 although the root's v0.19.7 exists — another module's tag.
+@test "a module's version continues its own last tag" {
+  need_toolchain
+  released
+  change third-party/aws/aws.go "fix(aws): one"
+  run bash -c "'$CB' | '$CT' --dry-run"
+  [ "$status" -eq 0 ]
+  [ "$(would_tag)" = "third-party/aws/v0.19.7" ]
+  # Its go.mod pins the SDK module at the SDK's own last tag.
+  [[ "$output" == *"require github.com/kitsunium/sdk v0.19.7"* ]]
+}
+
+# A family that requires the internal module pins it at the version THIS
+# release tags it at, or at its own last tag when it is not released.
+@test "a family pins the internal module at its new version, or at its last tag" {
+  need_toolchain
+  released
+  change pkg/v1/data/data.go "fix(data): one"
+  run bash -c "'$CB' | '$CT' --dry-run"
+  [[ "$output" == *"require github.com/kitsunium/sdk/internal v0.1.0"* ]]
+  change internal/kernel/x/x.go "fix(x): one"
+  run bash -c "'$CB' | '$CT' --dry-run"
+  [ "$status" -eq 0 ]
+  [ "$(would_tag)" = "internal/v0.1.1 pkg/v1/data/v0.1.1" ]
+  [[ "$output" == *"require github.com/kitsunium/sdk/internal v0.1.1"* ]]
+  [[ "$output" != *"=> ../"* ]]
+}
+
+# #295: v0.19.0 tagged every vendor module; under `sdk` (ADR 0162's release)
+# one whose only change is a test keeps its tag.
+@test "the sdk token tags a vendor module only when it changed (#295)" {
+  need_toolchain
+  released
+  echo "package aws" >third-party/aws/aws_gen_test.go
+  g add -A
+  g commit -q --no-verify -m "test(aws): the generated pins"
+  change pkg/v1/data/data.go "fix(data): one"
+  run bash -c "echo sdk | '$CT' --dry-run"
+  [ "$status" -eq 0 ]
+  [ "$(would_tag)" = "v0.19.8 pkg/v1/data/v0.1.1" ]
+  [[ "$output" == *"third-party/aws unchanged since third-party/aws/v0.19.6 — keeps it"* ]]
+}
+
+@test "a token naming no module of go.work is refused" {
+  run bash -c "echo pkg/v1/nope | '$CT' --dry-run"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unexpected bump token 'pkg/v1/nope'"* ]]
+}
+
+@test "release_modules accepts the layout's modules and refuses a retired one" {
+  run bash -c ". '$BATS_TEST_DIRNAME/lib/tag-format.sh'; . '$BATS_TEST_DIRNAME/lib/release-modules.sh'; release_modules"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '.\ninternal\npkg/v1/data\npkg/v1/net\nthird-party/aws')" ]
+  printf 'go 1.27\n\nuse (\n\t.\n\t./internal/core\n)\n' >go.work
+  run bash -c ". '$BATS_TEST_DIRNAME/lib/tag-format.sh'; . '$BATS_TEST_DIRNAME/lib/release-modules.sh'; release_modules"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"uses internal/core, which no release can tag"* ]]
+}
+
+# ── the push ────────────────────────────────────────────────────────────────
+
+@test "a release pushes every module's tag in one atomic push, on one release commit" {
+  need_toolchain
+  released
+  change pkg/v1/data/data.go "fix(data): one"
+  change third-party/aws/aws.go "fix(aws): one"
+  head="$(g rev-parse HEAD)"
+  run bash -c "'$CB' | '$CT' 2>/dev/null"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf 'pkg/v1/data/v0.1.1\nthird-party/aws/v0.19.7')" ]
+  [ "$(g rev-parse 'pkg/v1/data/v0.1.1^{commit}')" = "$(g rev-parse 'third-party/aws/v0.19.7^{commit}')" ]
+  [ "$(g rev-parse 'pkg/v1/data/v0.1.1^{commit}^1')" = "$head" ]
+  [[ "$(remote_tags)" == *"pkg/v1/data/v0.1.1"*"third-party/aws/v0.19.7"* ]]
+}
+
+# The tags this run reads are origin's: a tag origin does not hold is pruned
+# before it can be read as a module's last release.
+@test "the cut fetches with --prune-tags first, so a stray local tag is no base" {
+  need_toolchain
+  released
+  rel="$(g commit-tree "HEAD^{tree}" -p "$(g rev-parse HEAD)" -m "stray")"
+  g tag pkg/v1/data/v0.9.0 "$rel"
+  change pkg/v1/data/data.go "fix(data): one"
+  run bash -c "'$CB' | '$CT' 2>&1"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pkg/v1/data/v0.1.0 -> pkg/v1/data/v0.1.1"* ]]
+  [ -z "$(g tag -l pkg/v1/data/v0.9.0)" ]
+}
+
+# race_shim — a `git` in front of the real one that, on the first `ls-remote`
+# the cut runs, tags pkg/v1/data/v0.1.1 on origin as another run would have,
+# AFTER the fetch and BEFORE the push.
+race_shim() {
+  local real
+  real="$(command -v git)"
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  cat >"$BATS_TEST_TMPDIR/bin/git" <<SHIM
+#!/usr/bin/env bash
+if [ "\$1" = ls-remote ] && [ ! -e "$BATS_TEST_TMPDIR/raced" ]; then
+  : >"$BATS_TEST_TMPDIR/raced"
+  "$real" --git-dir="$BATS_TEST_TMPDIR/origin.git" tag $1 "\$("$real" --git-dir="$BATS_TEST_TMPDIR/origin.git" rev-parse v0.19.7^{commit})"
+fi
+exec "$real" "\$@"
+SHIM
+  chmod +x "$BATS_TEST_TMPDIR/bin/git"
+  export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
+}
+
+@test "a tag of the release that origin acquired after the fetch aborts the push (exit 2)" {
+  need_toolchain
+  released
+  change pkg/v1/data/data.go "fix(data): one"
+  n_before="$(g ls-remote --tags --refs origin | awk 'END { print NR }')"
+  race_shim pkg/v1/data/v0.1.1
+  run bash -c "'$CB' | '$CT'"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"race detected — origin already holds pkg/v1/data/v0.1.1"* ]]
+  [[ "$output" == *"nothing was published"* ]]
+  # Origin holds the other run's tag and nothing of this one.
+  [ "$(g ls-remote --tags --refs origin | awk 'END { print NR }')" -eq $((n_before + 1)) ]
+  [ -z "$(g tag -l pkg/v1/data/v0.1.1)" ]
+}
+
+# ls-remote matches a pattern against a ref's TAIL: a tag whose name ends in
+# the release's tag is no race. Origin holds pin/v0.19.8, which a pattern
+# `v0.19.8` would answer.
+@test "the race guard compares exact refs, not a tail" {
+  need_toolchain
+  released
+  g --git-dir="$BATS_TEST_TMPDIR/origin.git" tag pin/v0.19.8 "$(g rev-parse 'v0.19.7^{commit}')"
+  change framework/kit/kit.go "fix(kit): one"
+  run bash -c "'$CB' | '$CT' 2>/dev/null"
+  [ "$status" -eq 0 ]
+  [ "$output" = "v0.19.8" ]
+}
+
+# ── the manifest ────────────────────────────────────────────────────────────
+
+@test "--manifest writes the release's identity, in a dry run and for real" {
+  need_toolchain
+  released
+  change pkg/v1/data/data.go "feat(data): one"
+  label_pr 310 release:minor
+  change third-party/aws/aws.go "fix(aws): one"
+  m="$BATS_TEST_TMPDIR/release-manifest.json"
+  run bash -c "'$CB' | '$CT' --dry-run --manifest='$m'"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.release' "$m")" = "pkg/v1/data/v0.2.0" ]
+  [ "$(jq -r '.dry_run' "$m")" = "true" ]
+  [ "$(jq -r '.release_commit' "$m")" = "" ]
+  [ "$(jq -c '[.modules[] | [.dir, .module, .tag, .version, .previous, .size]]' "$m")" = \
+    '[["pkg/v1/data","github.com/kitsunium/sdk/pkg/v1/data","pkg/v1/data/v0.2.0","v0.2.0","pkg/v1/data/v0.1.0","minor"],["third-party/aws","github.com/kitsunium/sdk/third-party/aws","third-party/aws/v0.19.7","v0.19.7","third-party/aws/v0.19.6","patch"]]' ]
+  [ "$(jq -c '.tombstones' "$m")" = "[]" ]
+  run bash -c "'$CB' | '$CT' --manifest='$m' 2>/dev/null"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.dry_run' "$m")" = "false" ]
+  [ "$(jq -r '.commit' "$m")" = "$(g rev-parse HEAD)" ]
+  [ "$(jq -r '.release_commit' "$m")" = "$(g rev-parse 'pkg/v1/data/v0.2.0^{commit}')" ]
+}
+
+# ── defects found on the way ────────────────────────────────────────────────
+
+# cut-tags.sh:207 fed `git log` to the classifier through a process
+# substitution, whose failure nothing saw: a commit whose paths git could not
+# read counted as one that touched nothing, and its label was dropped. The
+# shim fails the per-commit read (a diff against the first parent since the
+# per-module scope).
+@test "a commit whose paths git cannot read refuses the size, never reads as untouched" {
+  need_toolchain
+  released
+  change pkg/v1/data/data.go "feat(data): one"
+  label_pr 320 release:minor
+  real="$(command -v git)"
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  cat >"$BATS_TEST_TMPDIR/bin/git" <<SHIM
+#!/usr/bin/env bash
+if [ "\$1" = diff ] && [ "\$2" = --name-only ]; then echo "fatal: bad object" >&2; exit 128; fi
+exec "$real" "\$@"
+SHIM
+  chmod +x "$BATS_TEST_TMPDIR/bin/git"
+  run bash -c "echo pkg/v1/data | PATH='$BATS_TEST_TMPDIR/bin:$PATH' '$CT' --dry-run"
+  [ "$status" -eq 65 ]
+  [[ "$output" == *"could not be read — refusing to size this release"* ]]
+  [[ "$output" != *"would tag"* ]]
+}
+
+# compute-bumps.sh iterated its path list through an unquoted array expansion
+# under nullglob; the paths now go through `while read`. A path carrying a
+# space or a glob character is one path, and counts.
+@test "a path with a space or a glob character is one path that counts" {
+  released
+  printf 'package data\n' >'pkg/v1/data/a [b] *.go'
+  g add -A
+  g commit -q --no-verify -m "feat(data): an odd name"
+  run "$CB" --explain
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"module pkg/v1/data: changed paths: 1 (1 could carry"* ]]
+  [[ "$output" == *$'\npkg/v1/data'* ]]
+}
+
+# tag-format.sh:351 cut the root commits with `| head -n1` under pipefail; a
+# history with several roots is answered by its first one, and never fails.
+@test "release_base answers a history with several root commits" {
+  g checkout -q --orphan other
+  g rm -rqf .
+  echo x >other.txt
+  g add other.txt
+  g commit -q --no-verify -m "an unrelated root"
+  g checkout -q main
+  g merge -q --no-ff --no-edit --allow-unrelated-histories other >/dev/null
+  run bash -c ". '$BATS_TEST_DIRNAME/lib/tag-format.sh'; release_base"
+  [ "$status" -eq 0 ]
+  [ -n "$output" ]
+  [[ "$(g rev-list --max-parents=0 HEAD)" == *"$output"* ]]
+}

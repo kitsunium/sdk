@@ -16,12 +16,13 @@ maintainer's label). The tree's general rules are in `scripts/CLAUDE.md`.
 
 | File | What it does | Run by |
 |---|---|---|
-| `compute-bumps.sh` | prints the one token `sdk` when a release is due, from the paths changed since the last release tag: `pkg/**`, `framework/**` outside a connector, or the root `go.mod`, `LICENSE` or `README.md` (rule 1 — the SDK module); `third-party/**` or `framework/connectors/**` (rule 1c — a vendor module); `internal/**` only when its Bazel reverse dependencies reach `//pkg/...`, `//framework/...` or `//third-party/...` (rule 2). Maintainer-only files are filtered out first (`lib/release-scope.sh`). `--explain` writes the verdict and its reason to stderr; `--require-bazel` refuses to decide rule 2 without Bazel | `sdk-release.yml`; `make release-dry-run` with `--dry-run` |
-| `cut-tags.sh` | reads the token on stdin (`sdk`; `pkg`, `framework`, `third-party` and `vN` still mean it), sizes the release from the `release:*` labels of the merged pull requests in the range (or `--bump`), and computes the version from the newest `vX.Y.Z` — or, before the first, the newest `pkg/vX.Y.Z`. Tags the SDK module `vX.Y.Z` and, at the same version, each vendor module `go.work` names that changed since the first parent of its own last tag (or has none), its `go.mod` rewritten to require the SDK at the release with no `replace`, on a detached release commit — empty when nothing is rewritten; when the base is a `pkg/` tag, also `pkg/vX.Y.Z` and `framework/vX.Y.Z`, the tombstones, each on a child of that commit; re-reads the latest tag before the push and aborts on drift, and pushes every tag in one `--atomic` push. stdout: the SDK's tag, then the vendor tags, then the tombstones | `sdk-release.yml`; `make release-dry-run` with `--dry-run` |
+| `compute-bumps.sh` | prints, one per line, the directory of every module `go.work` names (`lib/release-modules.sh`) that changed since its OWN last tag — `.` the SDK module at the root, `pkg/v1/<family>`, `internal`, `third-party/<path>`, `framework/connectors/<engine>` (ADR 0170) —, each measured from the first parent of its own last tag (a module never tagged: from the empty tree) over its own directory, the modules nested in it left out. The root releases on a path under `pkg/` or `framework/` of its own, its `go.mod`, `LICENSE` or `README.md`, or a vendor directory no module claims (rule 1), and on an `internal/` change only when its Bazel reverse dependencies reach `//pkg/...`, `//framework/...` or `//third-party/...` (rule 2); any other module on any path of it that counts (rule 1m). Maintainer-only files — and since ADR 0170 `*_test.go` and `testdata/` (#295) — are filtered out first (`lib/release-scope.sh`). `--explain` writes, per module, the range, the rule and the verdict to stderr; `--require-bazel` refuses to decide rule 2 without Bazel; `--range` measures every module over one range | `sdk-release.yml`; `make release-dry-run` with `--dry-run` |
+| `cut-tags.sh` | reads the modules on stdin (compute-bumps.sh's directories; `sdk` — and `pkg`, `framework`, `third-party`, `vN` — is the SDK module plus every module that changed since its own last tag, measured here; a directory `go.work` does not name is refused). Publishing, it first runs `git fetch --prune --prune-tags origin`. Each module's version continues its OWN last tag, sized by the largest `release:*` label on the merged pull requests behind the first-parent commits of ITS range that changed a path of it (one GitHub lookup per commit, cached across modules), or by `--bump` for every module; a module never tagged starts at `v0.1.0`. The root keeps ADR 0162's rules: it continues the newest `pkg/vX.Y.Z` before its first tag, which is held (exit 3) without `--allow-bootstrap`, refused as a patch (exit 65), and cuts the tombstones `pkg/vX.Y.Z` and `framework/vX.Y.Z`. Every module tagged gets a go.mod requiring each module of the repository at the version this release tags it at, or at its own last tag, with no `replace`, on ONE detached release commit — empty when nothing is rewritten; every module's last tag is re-read before the publication and EACH exact ref checked on origin right before tagging (`remote_tags_present`, exit 2 on a race); one `--atomic` push. `--manifest=<file>` writes `release-manifest.json` (the release's identity — its first tag —, each module's directory, path, tag, version, previous tag and size, the tombstones, the commits), in a dry run too. stdout: the tags, in `go.work`'s order (the SDK's first when cut), then the tombstones | `sdk-release.yml`; `make release-dry-run` with `--dry-run` |
 | `check-pr-size.sh` | `--pr=<number>`: the size the squash of that pull request would publish, over every commit of the branch; exit 1 with the reason and the fix when no label decides it, 2 when GitHub cannot be read, 64 on bad usage | `release-size.yml`, on every push and label change of a pull request |
 | `release-notes.sh` | `classify`, `count` or `notes` over the tag list cut-tags.sh printed: each tag's family by `lib/tag-format.sh`'s anchored shapes (sdk, vendor, tombstone), refusing a tag none accepts and an empty list; `notes` is the Markdown of the one GitHub release | `sdk-release.yml` (the published-tag count, the release notes) |
-| `lib/` | the shared rules — see `lib/CLAUDE.md` | sourced by the three scripts above |
+| `lib/` | the shared rules — see `lib/CLAUDE.md` | sourced by the scripts above |
 | `test-compute-bumps.bats`, `test-cut-tags.bats`, `test-check-pr-size.bats` | the regression suites: each builds a throwaway repository and asserts the tag the scripts compute — and the publish path pushes to a bare repository the test owns, so the release commit and the tags on it are asserted too, the tombstones' trees and go.mods among them — byte for byte, and the deprecation notice as Go reads it —, and a `git` shim (`log_pushes`) counts the pushes a release makes; GitHub is a stub (`test-helpers.bash`) that runs the caller's own `jq` filter over fixtures and logs every call | `release-scripts-test.sh` |
+| `test-modules.bats` | the release of several modules over the layout of ADR 0170 (the root, `internal`, two families, a vendor): compute-bumps naming the one module that changed, each from its own tag; a label on one family's merge sizing that family only, one lookup for a merge touching two; each version continuing its own tag; a family pinning `internal` at its new version or its last tag; `sdk` keeping a vendor whose only change is a test (#295); the atomic push on one release commit; the prune-fetch dropping a stray local tag; the exact-ref race guard (a git shim tags origin between the fetch and the push) and its immunity to a tail match; the manifest in a dry run and for real; a commit whose paths git cannot read refusing the size (cut-tags.sh:207); an odd path counting once; `release_base` over several root commits | `release-scripts-test.sh` |
 | `test-tag-format.bats` | the module shapes of ADR 0170 (`pkg/v1/<family>/vX.Y.Z`, `internal/vX.Y.Z`) anchored at both ends, neither pkg's history nor a tombstone; `module_tag_dir`, `is_module_dir`, `latest_module_tag` reading one module's tags exactly; `remote_tags_present` against a bare remote holding annotated tags (full refs, no `^{}`) and one it cannot read | `release-scripts-test.sh` |
 | `test-release-workflow.bats` | what `sdk-release.yml` decides around the scripts, read from the file: the job's `if` needs `RELEASE_ENABLED == 'true'` for an automatic run, `dry_run` defaults to true, a real dispatch is refused while locked, the dry run passes `--dry-run` and gates the publishing steps; and `release-notes.sh`'s classification | `release-scripts-test.sh` |
 | `test-helpers.bash` | `install_gh_stub` and the fixtures' helpers, loaded with `load test-helpers`; `.bash` so the runner's `*.bats` glob never runs it alone | — |
@@ -34,16 +35,18 @@ maintainer's label). The tree's general rules are in `scripts/CLAUDE.md`.
   the merged pull request decides; a `Release-bump:` line in the message is only
   read so that one asking for more than a patch with no label to decide it is
   refused loudly, before anything is published (#217, #224).
-- **One module, one tag; a vendor module when it changed** (ADR 0162). Every
-  release tags the SDK module `vX.Y.Z`; a module `go.work` names beside it
-  (`lib/tag-format.sh` `vendor_modules`, which refuses `./pkg`, `./framework`
-  or an `internal/` directory back in the workspace) is tagged `<dir>/vX.Y.Z`
-  only when a file of it a consumer sees changed since the commit its own last
-  tag was cut from, or when it has never been tagged. A module that keeps its
-  tag keeps a go.mod requiring the SDK release it was cut with. Its own
-  directory is all that is measured: an `internal/` fix the module uses cuts a
-  release (rule 2 counts `//third-party/...`) but does not re-tag it, and its
-  consumer takes the fix by requiring the newer SDK release.
+- **A module per release question, at its own version** (ADR 0170, amending
+  ADR 0162). Every module `go.work` names (`lib/release-modules.sh`
+  `release_modules`, which refuses `./pkg`, `./framework` and a layer of
+  `internal/`) is measured from the first parent of its OWN last tag, over its
+  own directory with the modules nested in it left out, and released only when
+  a path of it that counts changed — so a family's change does not tag the
+  root, and a vendor whose only change is a test keeps its tag (#295). It is
+  sized by the merges that changed IT: a label on one family's pull request
+  moves that family alone. Its version continues its own last tag; a module
+  never tagged starts at `v0.1.0`, which only a path the proxy has never served
+  may do (`check-version-floor.sh`). A module that keeps its tag keeps a go.mod
+  requiring the versions it was cut with.
 - **The first root tag is held while its base is a `pkg/vX.Y.Z` tag.** Until a
   `vX.Y.Z` above the pkg history exists, the version continues the newest
   `pkg/vX.Y.Z` (v0.17.0 → v0.18.0 for a minor), and the cut is held — exit 3 —
@@ -89,7 +92,20 @@ maintainer's label). The tree's general rules are in `scripts/CLAUDE.md`.
   `set -e` and its status is read after it: under `( … ) || rc=$?` bash ignored
   errexit inside, and a refused go.mod was released anyway.
 - **The range walk is `--first-parent`**, so a commit a merge brought in never
-  sizes a release, and a merge's own paths are read with `-m --first-parent`.
+  sizes a release, and each commit's paths are a DIFF against its first parent
+  (`commit_touches_module`): `git log -1 <sha> -- <path>` answers the newest
+  commit at or below <sha> that touched the path, which sized a family by
+  another family's merge (seen red first).
+- **The tags read are origin's, and each one pushed is checked there.** A
+  publishing run fetches with `--prune --prune-tags` before it reads a tag,
+  and checks every exact ref of the release on origin right before it tags:
+  `ls-remote` matches a pattern against a ref's tail, so the comparison is on
+  full refs (`remote_tags_present`). A git that fails anywhere on that path is
+  a refusal, never "nothing changed" or "nobody tagged it".
+- **A release has an identity: its manifest.** `release-manifest.json` names
+  the first tag (the one GitHub release), every module and version, the
+  tombstones and the commits; the workflow refuses a run whose pushed tags it
+  does not name.
 - **No `grep -q`, no `grep -c`, no pipeline into an early-exiting reader**: the
   SIGPIPE shape has cost this repository a release twice (ADR 0085).
 - **A defect here produces a plausible version, not an error**, so each fix

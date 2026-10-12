@@ -461,7 +461,13 @@ release_base() {
   if [ "$(git rev-list --count HEAD 2>/dev/null || echo 0)" -le 1 ]; then
     return 0
   fi
-  git rev-list --max-parents=0 HEAD | head -n1
+  # Captured, then cut to its first line: `git rev-list … | head -n1` lets head
+  # exit on the first line while git is still writing, and under pipefail a
+  # repository with several roots (a merged unrelated history) reads git's
+  # SIGPIPE as a failure of the whole function.
+  local roots=""
+  roots="$(git rev-list --max-parents=0 HEAD)" || return 1
+  echo "${roots%%$'\n'*}"
 }
 
 # tag_base <tag> — the commit <tag> was cut FROM: its first parent, for the

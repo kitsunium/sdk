@@ -37,13 +37,14 @@
 #   BUILD.bazel NO. Build metadata for a build system the consumer does not run;
 #             `go build` never reads it. Excluded since before ADR 0089.
 #
-# Nothing else is excluded, and in particular NOT `*_test.go` / `testdata/**`.
-# That is issue #220 and it is deliberately still open here: a consumer does not
-# run its dependencies' tests, so the argument is the same, but the scope call
-# ("can an exported test helper be imported?") is a maintainer's to make, and
-# ADR 0089 measured that widening it changes how real past releases were SIZED.
-# When it is made, it is ONE line in rs_maintainer_only() and it reaches both
-# halves at once. That is the whole point of this file.
+#   *_test.go, testdata/** NO, since ADR 0170 (#220, #295). Go compiles neither
+#             into a consumer's build — a dependency's tests are not built, and
+#             no exported helper lives in a _test.go file, which another package
+#             cannot import. Counted, a change to kit's generated pins alone
+#             re-tagged all thirteen vendor modules at v0.19.0 (#295); with a
+#             module per family it would re-tag every family a test touches.
+#             It was ONE line in rs_maintainer_only(), and it reaches both
+#             halves at once — the whole point of this file.
 #
 # What the docs portal loses, stated rather than discovered later: `**/BENCH.md`
 # is copied out of the release tag too, so a benchmark re-measurement now waits
@@ -77,6 +78,13 @@ function rs_basename(p,   n) { n = p; sub(/^.*\//, "", n); return n }
 function rs_maintainer_only(p,   n) {
   n = rs_basename(p)
   if (n == "BUILD.bazel") return 1
+  # A test file and a fixture are never compiled into a consumer build: Go
+  # leaves the _test.go files and the testdata/ trees of a dependency out of
+  # it. Counted, they re-tagged all thirteen vendor modules at v0.19.0 for a
+  # change of their generated pins alone (#295), and under ADR 0170 they would
+  # re-tag every family a test touches (#220, closed there).
+  if (n ~ /_test\.go$/) return 1
+  if (p ~ /(^|\/)testdata\//) return 1
   # Case-insensitive on both halves: a COVERAGE.MD must be excluded, and a
   # Readme.md must NOT be — misjudging the second under-counts, which is a
   # release that never gets cut, the worse of the two errors.

@@ -119,3 +119,28 @@ step() {
   run bash "$NOTES" notes "$LIST"
   [ "$status" -eq 1 ]
 }
+
+# ADR 0170: a release need not carry the SDK module.
+@test "release-notes: a release of one family alone says the SDK module keeps its tag" {
+  printf 'pkg/v1/data/v0.2.0\n' >"$LIST"
+  run bash "$NOTES" notes "$LIST"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"did not change: it keeps its last tag"* ]]
+  [[ "$output" == *'- `pkg/v1/data/v0.2.0` — `github.com/kitsunium/sdk/pkg/v1/data`'* ]]
+  [[ "$output" != *'at ``'* ]]
+}
+
+# One GitHub release per run, on the manifest's release, the manifest attached
+# and the published tags held to it.
+@test "the workflow cuts with --manifest, checks it, and attaches it to the one release" {
+  body="$(step "Cut and push tags")"
+  [[ "$body" == *'--manifest=/tmp/release-manifest.json'* ]]
+  body="$(step "Verify the computed release was actually published")"
+  [[ "$body" == *'release-manifest.json'* ]]
+  [[ "$body" == *'the manifest does not name the tags pushed'* ]]
+  body="$(step "Create the GitHub release")"
+  [[ "$body" == *'primary="$(jq -r '"'"'.release'"'"' /tmp/release-manifest.json)"'* ]]
+  [[ "$body" == *'gh release create "$primary" /tmp/release-manifest.json'* ]]
+  run grep -c 'gh release create' "$WF"
+  [ "$output" = "1" ]
+}

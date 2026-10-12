@@ -6,12 +6,16 @@ name: SDK Release
 # sizes anything: the squash message is composed from contributor text, so it
 # could both bury a maintainer's request (#217) and set the size itself (#224).
 #
-# WHAT is released is ONE tag on the SDK module, vX.Y.Z — the repository root,
-# which holds internal/, pkg/ and framework/ (ADR 0162) — and, at the same
-# X.Y.Z, the tag of each module that requires a vendor (third-party/*,
-# framework/connectors/*, read from go.work) whose files changed since its own
-# last tag. One GitHub release is made, for the SDK's tag; its notes list the
-# vendor tags the release cut. compute-bumps.sh emits the one token "sdk".
+# WHAT is released is every module go.work names that changed since its OWN
+# last tag (ADR 0170, amending ADR 0162): the SDK module at the root (vX.Y.Z),
+# a pkg family (pkg/v1/<family>/vX.Y.Z), the shared internal module
+# (internal/vX.Y.Z) and each module that requires a vendor (third-party/*,
+# framework/connectors/*), each at its OWN version, sized by the labels of the
+# merges that touched it. compute-bumps.sh prints one module directory per
+# line; cut-tags.sh tags them on one release commit in one atomic push and
+# writes release-manifest.json, the release's identity. ONE GitHub release is
+# made, on the first tag cut-tags.sh printed, with the manifest attached and
+# every tag in its notes.
 # The SDK module's first release — v0.18.0, after pkg/v0.17.0 — also cuts, in
 # the same atomic push and never again, the tombstones pkg/v0.18.0 and
 # framework/v0.18.0: the last version of each retired module, a go.mod that
@@ -89,7 +93,7 @@ on:
   workflow_dispatch:
     inputs:
       force_bumps:
-        description: 'Force the release token "sdk": one tag on the SDK module, and each vendor module that changed since its own tag — ADR 0162. "pkg", "framework" and "third-party" mean the same (empty = use compute-bumps.sh output).'
+        description: 'Force the modules to release, space-separated: "." (the SDK module) or a module directory go.work names (pkg/v1/data, internal, third-party/aws…); "sdk" is the SDK module plus every module that changed since its own tag — ADR 0170 (empty = use compute-bumps.sh output).'
         required: false
         default: ""
       bump:
@@ -244,7 +248,10 @@ jobs:
             # No `|| true` on the filter either: a force input that matches
             # nothing is a typo, and publishing nothing because of a typo is
             # the outcome this whole file now refuses to call a success.
-            printf '%s\n' "$FORCE_BUMPS" | tr ' ' '\n' | grep -E '^(sdk|pkg|framework|third-party|v[0-9]+)$' > "$majors"
+            # A token is a module directory or a legacy word; cut-tags.sh
+            # refuses one go.work does not name. The filter only keeps the
+            # characters a directory may spell.
+            printf '%s\n' "$FORCE_BUMPS" | tr ' ' '\n' | grep -E '^[A-Za-z0-9._/-]+$' > "$majors"
             reason="forced by workflow_dispatch: $(tr '\n' ' ' < "$majors")"
           else
             # No `|| true`: compute-bumps.sh exits 0 on a legitimate no-op
@@ -330,6 +337,9 @@ jobs:
           # A plain redirect rather than `2> >(tee …)`: a process substitution
           # is not waited for, and the summary step could read a file its tee
           # had not finished writing.
+          # --manifest: release-manifest.json, the release's identity (ADR
+          # 0170) — written by the dry run too, as the release it would cut.
+          args+=(--manifest=/tmp/release-manifest.json)
           printf '%s\n' "$MAJORS" | bash scripts/release/cut-tags.sh ${args[@]+"${args[@]}"} 2>/tmp/cut.err | tee /tmp/cut.log
           rc=${PIPESTATUS[1]}
           cat /tmp/cut.err >&2
@@ -352,48 +362,38 @@ jobs:
         #
         # Reads the tag list cut-tags.sh wrote rather than re-deriving it: the
         # question is "did the publication happen", and only its own output can
-        # answer that. Missing file, empty file and a file whose first line is
-        # not the SDK's vX.Y.Z are all failures; none of them is a release.
+        # answer that. A missing or empty list, a tag no anchored shape of
+        # lib/tag-format.sh accepts (release-notes.sh refuses it), a missing
+        # manifest, or a manifest that does not name exactly the tags pushed
+        # are all failures; none of them is a release.
         if: steps.compute.outputs.majors != '' && steps.cut.outputs.held != 'true' && env.DRY_RUN != 'true'
         env:
           MAJORS: ${{ steps.compute.outputs.majors }}
         run: |
           set -euo pipefail
-          if [ ! -f /tmp/cut.log ]; then
-            echo "::error::cut-tags.sh produced no output file for bump '$MAJORS' — nothing was published"
+          if [ ! -s /tmp/cut.log ]; then
+            echo "::error::cut-tags.sh published no tag for '$MAJORS'"
             exit 1
           fi
-          sdk_tag="$(awk 'NF { print; exit }' /tmp/cut.log)"
-          published=0
-          while IFS= read -r tag; do
-            [ -z "$tag" ] && continue
-            case "$tag" in
-              v[01].*) published=$((published + 1)) ;;
-            esac
-          done < /tmp/cut.log
-          case "$sdk_tag" in
-            v[01].*) ;;
-            *) published=0 ;;
-          esac
-          if [ "$published" -ne 1 ]; then
-            echo "::error::bump '$MAJORS' was computed but the SDK's tag was not published as the first and only vX.Y.Z (found $published)"
-            echo "cut-tags.sh output was:" >&2
-            cat /tmp/cut.log >&2
-            exit 1
-          fi
-          # Every tag classified by lib/tag-format.sh's anchored shapes — the
-          # ones cut-tags.sh validated before it pushed —, never by a prefix:
-          # a prefix match read a module tag under pkg/ as a tombstone. A tag
-          # no shape accepts fails the step.
           counts="$(bash scripts/release/release-notes.sh count /tmp/cut.log)"
-          echo "::notice::published $sdk_tag — $counts"
+          if [ ! -s /tmp/release-manifest.json ]; then
+            echo "::error::cut-tags.sh wrote no release-manifest.json"
+            exit 1
+          fi
+          pushed="$(awk 'NF' /tmp/cut.log | LC_ALL=C sort)"
+          listed="$(jq -r '(.modules[].tag), (.tombstones[])' /tmp/release-manifest.json | LC_ALL=C sort)"
+          if [ "$pushed" != "$listed" ]; then
+            echo "::error::the manifest does not name the tags pushed"
+            diff <(echo "$pushed") <(echo "$listed") >&2 || true
+            exit 1
+          fi
+          echo "::notice::published $(jq -r '.release' /tmp/release-manifest.json) — $counts"
 
       - name: Create the GitHub release
-        # ONE release, for the SDK's tag (ADR 0162) — not one per module, which
-        # made eighteen for a lockstep release. The vendor tags the release cut
-        # are listed in its notes, ahead of the notes GitHub generates; a vendor
-        # module that did not change is said to keep its last tag; the
-        # tombstones of the first release are listed apart. The notes are
+        # ONE release per run (ADR 0162, ADR 0170) — not one per module, which
+        # made eighteen for a lockstep release. Every tag the run cut is listed
+        # in its notes, ahead of the notes GitHub generates, and the manifest is
+        # attached; the tombstones of the first release are listed apart. The notes are
         # scripts/release/release-notes.sh's, which classifies each tag by the
         # anchored shapes of lib/tag-format.sh and refuses one it does not know.
         if: steps.compute.outputs.majors != '' && steps.cut.outputs.held != 'true' && env.DRY_RUN != 'true'
@@ -401,10 +401,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          sdk_tag="$(awk 'NF { print; exit }' /tmp/cut.log)"
+          # ONE release per run (ADR 0170), on the manifest's `release` — the
+          # first tag cut-tags.sh printed, the SDK's when it was cut — with the
+          # manifest attached, so the release names every module and version.
+          primary="$(jq -r '.release' /tmp/release-manifest.json)"
           bash scripts/release/release-notes.sh notes /tmp/cut.log > /tmp/release-notes.md
           # --notes, which gh documents as PREPENDED to the generated notes.
-          gh release create "$sdk_tag" --generate-notes --verify-tag --title "$sdk_tag" --notes "$(cat /tmp/release-notes.md)"
+          gh release create "$primary" /tmp/release-manifest.json --generate-notes --verify-tag --title "$primary" --notes "$(cat /tmp/release-notes.md)"
 
       - name: Emit release summary artifact
         # No longer gated on a bump having been computed. A run that published
@@ -459,6 +462,12 @@ jobs:
               echo
               echo "\`\`\`"
               awk '/^DRY-RUN: would tag:/' /tmp/cut.log 2>/dev/null || echo "(none)"
+              echo "\`\`\`"
+              echo
+              echo "The manifest it would write:"
+              echo
+              echo "\`\`\`json"
+              cat /tmp/release-manifest.json 2>/dev/null || echo "(none)"
               echo "\`\`\`"
               echo
               echo "A real cut is a dispatch with dry_run=false, and needs the"

@@ -484,10 +484,9 @@ docs-dev:
 	cd docs/site && npm install --silent && DOCS_BASE=/ npm run dev
 
 # `release-dry-run` previews the auto-bump pipeline without pushing
-# any tag. compute-bumps.sh emits the token `sdk` when a release is
-# due; cut-tags.sh shows the release it would cut — the SDK module's
-# vX.Y.Z and the tag of each vendor module that changed since its own
-# (ADR 0162). Explicit /bin/bash because the SDK shell is zsh and the
+# any tag. compute-bumps.sh prints the directory of every module that
+# changed since its own last tag (`.` the SDK module); cut-tags.sh shows
+# the tag it would cut for each, at each module's own version (ADR 0170). Explicit /bin/bash because the SDK shell is zsh and the
 # release scripts use bash-only patterns (associative arrays,
 # `< <(...)` process substitution). See ADR 0007 §Bump semantics.
 #
@@ -518,7 +517,7 @@ release-dry-run:
 	if [ ! -s /tmp/sdk-release-majors.txt ]; then \
 		echo "no release is due"; \
 	else \
-		echo "release token:"; cat /tmp/sdk-release-majors.txt; echo; \
+		echo "modules to release:"; cat /tmp/sdk-release-majors.txt; echo; \
 		/bin/bash scripts/release/cut-tags.sh --dry-run $(if $(BUMP),--bump=$(BUMP),) < /tmp/sdk-release-majors.txt; \
 	fi
 
