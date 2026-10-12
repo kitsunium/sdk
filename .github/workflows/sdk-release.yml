@@ -280,6 +280,17 @@ jobs:
             echo "reason=$reason"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Check the version floor
+        # ADR 0171 §2: no module path is tagged at or below the highest version
+        # proxy.golang.org lists for it. cut-tags.sh cuts the next version above
+        # each module's last tag HERE, so the floor holds when no module's last
+        # tag here is below the proxy's, and no module never tagged here is a
+        # path the proxy already serves — which this asks the proxy, not the
+        # clone. A proxy that cannot answer fails the step: "never published"
+        # is the one reading that would let a v0.1.0 through.
+        if: steps.compute.outputs.majors != ''
+        run: bash scripts/release/check-version-floor.sh
+
       - name: Cut and push tags
         id: cut
         if: steps.compute.outputs.majors != ''

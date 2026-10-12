@@ -144,3 +144,14 @@ step() {
   run grep -c 'gh release create' "$WF"
   [ "$output" = "1" ]
 }
+
+# ADR 0171 §2: the floor is asked of the proxy before anything is cut, in a dry
+# run too.
+@test "the workflow checks the version floor before the cut" {
+  body="$(step "Check the version floor")"
+  [[ "$body" == *'bash scripts/release/check-version-floor.sh'* ]]
+  [[ "$body" != *'DRY_RUN'* ]]
+  floor_line="$(grep -n 'name: Check the version floor' "$WF" | cut -d: -f1)"
+  cut_line="$(grep -n 'name: Cut and push tags' "$WF" | cut -d: -f1)"
+  [ "$floor_line" -lt "$cut_line" ]
+}
