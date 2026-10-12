@@ -33,9 +33,12 @@ func TestParseBuildThroughTheFacade(t *testing.T) {
 // converts nothing (ADR 0172).
 func TestTheTypesAreProcess(t *testing.T) {
 	t.Parallel()
-	var info process.BuildInfo = buildinfo.ParseBuild(&debug.BuildInfo{Main: debug.Module{Path: "example.com/app"}})
-	var mod process.Module = info.Main
+	mod := mainOf(buildinfo.ParseBuild(&debug.BuildInfo{Main: debug.Module{Path: "example.com/app"}}))
 	if mod.Path != "example.com/app" {
 		t.Errorf("Main = %+v", mod)
 	}
 }
+
+// mainOf takes the build as pkg/v1/proc/process names it: a value of this
+// package's type compiles here only because the two are one type.
+func mainOf(info process.BuildInfo) process.Module { return info.Main }

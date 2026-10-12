@@ -30,7 +30,7 @@ func TestTheFacadeImportsNoOptInSubsystem(t *testing.T) {
 		t.Fatalf("go list -deps framework/kit: %v", err)
 	}
 	deps := make(map[string]bool)
-	for _, p := range strings.Fields(string(out)) {
+	for p := range strings.FieldsSeq(string(out)) {
 		deps[p] = true
 	}
 	if !deps["github.com/kitsunium/sdk/framework/internal/kit"] {
