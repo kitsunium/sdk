@@ -67,12 +67,13 @@ type Node struct {
 	watchMu  sync.Mutex
 	watchers map[chan coreconsensus.Status]struct{}
 
-	stopMu     sync.Mutex
-	stopReason *coreconsensus.StopReason
-	stopped    atomic.Bool
-	closeOnce  sync.Once
-	wg         sync.WaitGroup
-	loopDone   chan struct{}
+	stopMu      sync.Mutex
+	stopReason  *coreconsensus.StopReason
+	stopped     atomic.Bool
+	closeOnce   sync.Once
+	releaseOnce sync.Once
+	wg          sync.WaitGroup
+	loopDone    chan struct{}
 
 	droppedFrom atomic.Int64
 	// trustFrom is set by the package's own tests only: the engine then
@@ -139,6 +140,27 @@ func NewRaft(cfg Config) (*Node, error) {
 	if err != nil {
 		return nil, err
 	}
+	if a, ok := cfg.Log.(dirHolder); ok {
+		if err := a.acquire(); err != nil {
+			return nil, err
+		}
+		n, err := newRaft(cfg)
+		if err != nil {
+			a.release()
+		}
+		return n, err
+	}
+	return newRaft(cfg)
+}
+
+// dirHolder is the shipped log's hold on its data directory: a DataDir
+// refuses offline work and Close while a Node holds it (D11, R3-18).
+type dirHolder interface {
+	acquire() error
+	release()
+}
+
+func newRaft(cfg Config) (*Node, error) {
 	if mc, ok := cfg.Log.(interface{ checkMarkers() error }); ok {
 		if err := mc.checkMarkers(); err != nil {
 			return nil, err
@@ -690,7 +712,16 @@ func (n *Node) Close(ctx context.Context) error {
 	n.am.Lock()
 	n.acond.Broadcast()
 	n.am.Unlock()
+	n.releaseDir()
 	return nil
+}
+
+func (n *Node) releaseDir() {
+	n.releaseOnce.Do(func() {
+		if a, ok := n.cfg.Log.(dirHolder); ok {
+			a.release()
+		}
+	})
 }
 
 // handOff transfers leadership to the most caught-up voter, best effort.
@@ -728,7 +759,10 @@ func (n *Node) HardClose() error {
 	defer t.Stop()
 	select {
 	case <-done:
+		n.releaseDir()
 	case <-t.C():
+		// A goroutine stuck in fdatasync is abandoned, and the directory
+		// stays held until the process exits (R7-11).
 	}
 	n.am.Lock()
 	n.acond.Broadcast()

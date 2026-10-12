@@ -1,0 +1,928 @@
+package consensus
+
+import (
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"hash/crc32"
+	"io"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
+
+	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
+)
+
+// The shipped log (D4) is a directory of fixed-size, zero-filled segment
+// files. Every record is 8-byte aligned:
+//
+//	length u32 | crc u32 | version u8 | kind u8 | end u8 | 0 u8 | batch u64 |
+//	term u64 | index u64 | entry kind u8 | 0 0 0 | entry version u32 |
+//	body sum u32 | chain u32 | payload | zero padding
+//
+// little-endian; length counts the bytes after the crc field, padding
+// excluded, and the crc is the CRC-32C of those bytes. Records are written
+// in batches: every record of a batch carries its sequence number, the last
+// one the end-of-batch flag, and batch k+1 is written only after batch k was
+// synced, so any valid record of batch k+1 proves batch k durable
+// (R7-12, R8-01 to R8-04).
+const (
+	recHeader    = 8
+	recFixed     = 44
+	recVersion   = 1
+	recEntry     = 1
+	recHardState = 2
+	recTruncate  = 3
+	recCheckpt   = 4
+	recSeal      = 5
+	recCompact   = 6
+	recCommit    = 7
+
+	// sealReserve keeps room for the seal record at a segment's end.
+	sealReserve = 64
+
+	// DefaultSegmentBytes is a segment's fixed size (provisional).
+	DefaultSegmentBytes = 64 << 20
+)
+
+func align8(n int) int { return (n + 7) &^ 7 }
+
+type record struct {
+	kind   uint8
+	end    bool
+	batch  uint64
+	term   uint64
+	index  uint64
+	ekind  uint8
+	ever   uint32
+	body   uint32
+	chain  uint32
+	data   []byte
+	off    int64 // offset in its segment
+	length int   // aligned length on disk
+}
+
+func appendRecord(dst []byte, r *record) []byte {
+	start := len(dst)
+	dst = binary.LittleEndian.AppendUint32(dst, uint32(recFixed+len(r.data)))
+	dst = binary.LittleEndian.AppendUint32(dst, 0)
+	dst = append(dst, recVersion, r.kind, boolByte(r.end), 0)
+	dst = binary.LittleEndian.AppendUint64(dst, r.batch)
+	dst = binary.LittleEndian.AppendUint64(dst, r.term)
+	dst = binary.LittleEndian.AppendUint64(dst, r.index)
+	dst = append(dst, r.ekind, 0, 0, 0)
+	dst = binary.LittleEndian.AppendUint32(dst, r.ever)
+	dst = binary.LittleEndian.AppendUint32(dst, r.body)
+	dst = binary.LittleEndian.AppendUint32(dst, r.chain)
+	dst = append(dst, r.data...)
+	sealRecord(dst[start:])
+	for (len(dst)-start)%8 != 0 {
+		dst = append(dst, 0)
+	}
+	return dst
+}
+
+func boolByte(v bool) byte {
+	if v {
+		return 1
+	}
+	return 0
+}
+
+// sealRecord recomputes a record's crc over its body.
+func sealRecord(b []byte) {
+	n := binary.LittleEndian.Uint32(b)
+	binary.LittleEndian.PutUint32(b[4:], crc32.Checksum(b[recHeader:recHeader+int(n)], castagnoli))
+}
+
+// parseRecord decodes the record at b[0:]; ok is false for a hole: a short
+// read, a zero header, a length out of range or a crc that fails.
+func parseRecord(b []byte) (r record, ok bool) {
+	if len(b) < recHeader+recFixed {
+		return r, false
+	}
+	n := int(binary.LittleEndian.Uint32(b))
+	if n < recFixed || recHeader+n > len(b) {
+		return r, false
+	}
+	body := b[recHeader : recHeader+n]
+	if crc32.Checksum(body, castagnoli) != binary.LittleEndian.Uint32(b[4:]) || body[0] != recVersion {
+		return r, false
+	}
+	r = record{kind: body[1], end: body[2] != 0,
+		batch: binary.LittleEndian.Uint64(body[4:]), term: binary.LittleEndian.Uint64(body[12:]),
+		index: binary.LittleEndian.Uint64(body[20:]), ekind: body[28],
+		ever: binary.LittleEndian.Uint32(body[32:]), body: binary.LittleEndian.Uint32(body[36:]),
+		chain: binary.LittleEndian.Uint32(body[40:]), data: body[recFixed:], length: align8(recHeader + n)}
+	return r, true
+}
+
+// checkpoint is the record that opens every segment: the hard state, the
+// effective last entry before it, the compaction point and the next batch.
+type checkpoint struct {
+	hs            coreconsensus.HardState
+	prevIndex     uint64
+	prevTerm      uint64
+	compact       uint64
+	compactTerm   uint64
+	nextBatchSeq  uint64
+	sealedPrevLen uint64
+}
+
+func (c checkpoint) encode() []byte {
+	b := make([]byte, 0, 64)
+	b = binary.LittleEndian.AppendUint64(b, c.hs.Term)
+	b = binary.LittleEndian.AppendUint64(b, uint64(c.hs.Vote))
+	b = binary.LittleEndian.AppendUint64(b, c.hs.Commit)
+	b = binary.LittleEndian.AppendUint64(b, c.prevIndex)
+	b = binary.LittleEndian.AppendUint64(b, c.prevTerm)
+	b = binary.LittleEndian.AppendUint64(b, c.compact)
+	b = binary.LittleEndian.AppendUint64(b, c.compactTerm)
+	return binary.LittleEndian.AppendUint64(b, c.nextBatchSeq)
+}
+
+func decodeCheckpoint(b []byte) (checkpoint, bool) {
+	if len(b) != 64 {
+		return checkpoint{}, false
+	}
+	u := func(i int) uint64 { return binary.LittleEndian.Uint64(b[8*i:]) }
+	return checkpoint{hs: coreconsensus.HardState{Term: u(0), Vote: coreconsensus.NodeID(u(1)), Commit: u(2)},
+		prevIndex: u(3), prevTerm: u(4), compact: u(5), compactTerm: u(6), nextBatchSeq: u(7)}, true
+}
+
+func encodeHS(hs coreconsensus.HardState) []byte {
+	b := binary.LittleEndian.AppendUint64(nil, hs.Term)
+	b = binary.LittleEndian.AppendUint64(b, uint64(hs.Vote))
+	return binary.LittleEndian.AppendUint64(b, hs.Commit)
+}
+
+// slot locates one retained entry: on disk once synced, in memory before.
+type slot struct {
+	seg  uint64
+	off  int64
+	term uint64
+	mem  *coreconsensus.Entry
+}
+
+type segment struct {
+	n    uint64
+	f    *os.File
+	size int64
+}
+
+// FileLog is the shipped segmented LogStore. One writer, many readers;
+// appended entries are readable before they are synced (D4).
+type FileLog struct {
+	dir      string
+	segBytes int64
+
+	mu          sync.RWMutex
+	segs        []*segment
+	off         int64
+	batch       uint64
+	pending     []byte
+	pendingLast int // offset in pending of the last record, -1 for none
+	first       uint64
+	slots       []slot
+	prevTerm    uint64 // term of first-1
+	hs          coreconsensus.HardState
+	compact     uint64
+	compactTerm uint64
+	stamp       coreconsensus.Stamp
+	// dur is the state the synced records describe: a rotation's checkpoint
+	// is written from it, never from the pending batch it precedes.
+	dur    checkpoint
+	failed error
+	refuse error
+	dd     *dataDir
+}
+
+func segName(n uint64) string { return fmt.Sprintf("seg-%016x", n) }
+
+func (l *FileLog) logDir() string { return filepath.Join(l.dir, "log") }
+
+func quarantined(seg uint64, off int64, why string) error {
+	return origin(coreconsensus.LogQuarantined, errs.String("segment", segName(seg)),
+		errs.Int64("offset", off), errs.String("why", why))
+}
+
+// openFileLog opens, and recovers, the log of a data directory. A damaged
+// log is quarantined: the marker is written FIRST and nothing is modified
+// (D4).
+func openFileLog(dd *dataDir, segBytes int64) (*FileLog, error) {
+	if segBytes <= 0 {
+		segBytes = DefaultSegmentBytes
+	}
+	l := &FileLog{dir: dd.dir, segBytes: segBytes, dd: dd, first: 1, pendingLast: -1}
+	if err := os.MkdirAll(l.logDir(), 0o700); err != nil {
+		return nil, storageFailed("mkdir", err)
+	}
+	st, err := readStamp(dd.dir)
+	if err != nil {
+		return nil, err
+	}
+	l.stamp = st
+	if q, err := os.ReadFile(filepath.Join(dd.dir, markerQuarantine)); err == nil {
+		l.refuse = origin(coreconsensus.LogQuarantined, errs.String("marker", strings.TrimSpace(string(q))))
+		return l, nil
+	}
+	if err := l.recover(); err != nil {
+		if errs.HasCode(err, coreconsensus.CodeLogQuarantined) {
+			l.refuse = err
+			return l, nil
+		}
+		return nil, err
+	}
+	return l, nil
+}
+
+// recover runs the written recovery procedure (D4, R8-02, R9-01, R9-03):
+// scan every segment, classify every hole, and only then change anything.
+func (l *FileLog) recover() error {
+	names, err := os.ReadDir(l.logDir())
+	if err != nil {
+		return storageFailed("readdir", err)
+	}
+	var nums []uint64
+	for _, e := range names {
+		name := e.Name()
+		if strings.HasSuffix(name, ".tmp") {
+			// Only an INCOMPLETE .tmp is deleted: it never reached its
+			// rename (R2-05).
+			if err := os.Remove(filepath.Join(l.logDir(), name)); err != nil {
+				return storageFailed("remove tmp", err)
+			}
+			continue
+		}
+		var n uint64
+		if _, err := fmt.Sscanf(name, "seg-%016x", &n); err == nil && name == segName(n) {
+			nums = append(nums, n)
+		}
+	}
+	slices.Sort(nums)
+	if len(nums) == 0 {
+		return l.createSegment(1, checkpoint{nextBatchSeq: 1})
+	}
+	type scanned struct {
+		n       uint64
+		data    []byte
+		recs    []record
+		hole    int64 // -1 when none
+		sealed  bool
+		trimmed int64 // truncation point decided for the last segment, -1 none
+	}
+	segs := make([]*scanned, len(nums))
+	for i, n := range nums {
+		b, err := os.ReadFile(filepath.Join(l.logDir(), segName(n)))
+		if err != nil {
+			return storageFailed("read segment", err)
+		}
+		s := &scanned{n: n, data: b, hole: -1, trimmed: -1}
+		segs[i] = s
+		limit := int64(len(b))
+		var off int64
+		for off < limit {
+			r, ok := parseRecord(b[off:limit])
+			if !ok {
+				s.hole = off
+				break
+			}
+			r.off = off
+			s.recs = append(s.recs, r)
+			off += int64(r.length)
+			if r.kind == recSeal {
+				// A sealed segment is read up to its sealed length (R9-02).
+				s.sealed = true
+				break
+			}
+		}
+		if len(s.recs) == 0 || s.recs[0].kind != recCheckpt {
+			// A published segment whose checkpoint is invalid is corruption,
+			// not an interrupted rotation (R3-08).
+			return l.quarantine(n, 0, "invalid checkpoint")
+		}
+		if i < len(nums)-1 && !s.sealed {
+			return l.quarantine(n, s.hole, "hole in a sealed segment")
+		}
+	}
+	// Batch sequences are contiguous across the whole log (R9-01).
+	var prev *record
+	for _, s := range segs {
+		for i := range s.recs {
+			r := &s.recs[i]
+			if prev != nil && r.batch != prev.batch && !(r.batch == prev.batch+1 && prev.end) {
+				return l.quarantine(s.n, r.off, "batch sequence")
+			}
+			prev = r
+		}
+	}
+	last := segs[len(segs)-1]
+	if last.hole >= 0 {
+		trim, why := classifyTail(last.data, last.recs, last.hole)
+		if trim < 0 {
+			return l.quarantine(last.n, last.hole, why)
+		}
+		// Drop the records of the torn batch, then zero the rest of the
+		// segment and sync it before any new record (R8-03).
+		k := len(last.recs)
+		for k > 0 && last.recs[k-1].off >= trim {
+			k--
+		}
+		last.recs = last.recs[:k]
+		last.trimmed = trim
+	}
+	// Build the effective log: apply truncate records in order, then judge
+	// continuity on the result (R8-01).
+	for si, s := range segs {
+		cp, ok := decodeCheckpoint(s.recs[0].data)
+		if !ok {
+			return l.quarantine(s.n, 0, "checkpoint payload")
+		}
+		if si == 0 {
+			l.hs = cp.hs
+			l.compact, l.compactTerm = cp.compact, cp.compactTerm
+			l.first = cp.prevIndex + 1
+			l.prevTerm = cp.prevTerm
+		} else if want := l.first + uint64(len(l.slots)) - 1; cp.prevIndex != want {
+			return l.quarantine(s.n, 0, "checkpoint does not continue the log")
+		} else {
+			// A checkpoint is written at activation with the CURRENT hard
+			// state: it is the newest when read in order.
+			l.hs = cp.hs
+			if cp.compact > l.compact {
+				l.compact, l.compactTerm = cp.compact, cp.compactTerm
+			}
+		}
+		for _, r := range s.recs[1:] {
+			switch r.kind {
+			case recEntry:
+				want := l.first + uint64(len(l.slots))
+				if r.index != want {
+					return l.quarantine(s.n, r.off, "index out of sequence")
+				}
+				l.slots = append(l.slots, slot{seg: s.n, off: r.off, term: r.term})
+			case recTruncate:
+				switch {
+				case r.index >= l.first && r.index <= l.first+uint64(len(l.slots)):
+					l.slots = l.slots[:r.index-l.first]
+				case r.index < l.first:
+					// It truncates into a dropped segment: the entries it
+					// removes are gone with it, and a later compact record
+					// covers what follows.
+					l.first, l.slots, l.prevTerm = r.index, nil, 0
+				}
+			case recHardState:
+				if len(r.data) == 24 {
+					l.hs = coreconsensus.HardState{Term: binary.LittleEndian.Uint64(r.data),
+						Vote: coreconsensus.NodeID(binary.LittleEndian.Uint64(r.data[8:])), Commit: binary.LittleEndian.Uint64(r.data[16:])}
+				}
+			case recCommit:
+				l.hs.Commit = max(l.hs.Commit, r.index)
+			case recCompact:
+				l.compact, l.compactTerm = max(l.compact, r.index), r.term
+			}
+			l.batch = r.batch
+		}
+		if s.recs[0].batch > l.batch {
+			l.batch = s.recs[0].batch
+		}
+	}
+	if l.compact >= l.first {
+		drop := min(l.compact-l.first+1, uint64(len(l.slots)))
+		if drop > 0 {
+			l.prevTerm = l.slots[drop-1].term
+		}
+		l.slots = l.slots[drop:]
+		l.first = l.compact + 1
+		if drop == 0 {
+			l.prevTerm = l.compactTerm
+		}
+	}
+	for _, s := range segs {
+		f, err := os.OpenFile(filepath.Join(l.logDir(), segName(s.n)), os.O_RDWR, 0)
+		if err != nil {
+			return storageFailed("open segment", err)
+		}
+		l.segs = append(l.segs, &segment{n: s.n, f: f, size: int64(len(s.data))})
+	}
+	tail := l.segs[len(l.segs)-1]
+	switch {
+	case last.trimmed >= 0:
+		l.off = last.trimmed
+		if !allZero(last.data[l.off:]) {
+			if err := zeroFrom(tail.f, l.off, tail.size); err != nil {
+				return storageFailed("zero tail", err)
+			}
+		}
+	case len(last.recs) > 0:
+		lr := last.recs[len(last.recs)-1]
+		l.off = lr.off + int64(lr.length)
+	}
+	l.batch++
+	l.markDurable()
+	if last.sealed {
+		// Crash after the seal and before the next segment's rename.
+		return l.rotate(0)
+	}
+	return nil
+}
+
+// classifyTail is step 2 to 4 of the decision procedure (R8-02, R9-01,
+// R9-03): it returns where to truncate a torn tail, or -1 and why the hole
+// is quarantined.
+func classifyTail(b []byte, recs []record, hole int64) (int64, string) {
+	rb := recs[len(recs)-1]
+	// Every valid record after the hole, at 8-byte boundaries.
+	var after []record
+	for off := align8(int(hole) + 8); off+recHeader+recFixed <= len(b); off += 8 {
+		if r, ok := parseRecord(b[off:]); ok {
+			r.off = int64(off)
+			after = append(after, r)
+			off += r.length - 8
+		}
+	}
+	// The batch the hole sits in: rb's, unless rb ended its batch.
+	torn := rb.batch
+	if rb.end {
+		torn = rb.batch + 1
+	}
+	for _, r := range after {
+		if r.batch != torn {
+			// A valid record of another batch after a hole: never a tear
+			// (R9-01).
+			return -1, "valid record of another batch after a hole"
+		}
+		if r.end {
+			// The torn batch's end record IS valid: it may have been
+			// acknowledged, and damage inside it is quarantined (R9-03).
+			return -1, "damage inside a batch whose end record is valid"
+		}
+	}
+	if torn == rb.batch {
+		// rb's batch never completed: drop all of it, it was never synced
+		// and never acknowledged.
+		start := rb.off
+		for i := len(recs) - 1; i >= 0 && recs[i].batch == torn; i-- {
+			start = recs[i].off
+		}
+		if recs[0].batch == torn && start == recs[0].off {
+			return -1, "torn checkpoint"
+		}
+		return start, ""
+	}
+	return hole, ""
+}
+
+func allZero(b []byte) bool {
+	for _, x := range b {
+		if x != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func zeroFrom(f *os.File, off, size int64) error {
+	if off >= size {
+		return datasync(f)
+	}
+	zero := make([]byte, min(size-off, 1<<20))
+	for p := off; p < size; {
+		n := min(int64(len(zero)), size-p)
+		if _, err := f.WriteAt(zero[:n], p); err != nil {
+			return err
+		}
+		p += n
+	}
+	return datasync(f)
+}
+
+// quarantine writes and syncs the marker FIRST and modifies nothing else.
+func (l *FileLog) quarantine(seg uint64, off int64, why string) error {
+	qerr := quarantined(seg, off, why)
+	line := fmt.Sprintf("%s %d %s\n", segName(seg), off, why)
+	if err := writeFileSync(filepath.Join(l.dir, markerQuarantine), []byte(line)); err != nil {
+		return storageFailed("quarantine marker", err)
+	}
+	return qerr
+}
+
+// createSegment publishes segment n: zero-filled tmp, checkpoint, fsync,
+// rename, fsync of the directory (D4 lifecycle steps 1 to 3).
+func (l *FileLog) createSegment(n uint64, cp checkpoint) error {
+	size := l.segBytes
+	cpRec := appendRecord(nil, &record{kind: recCheckpt, end: true, batch: cp.nextBatchSeq, data: cp.encode()})
+	tmp := filepath.Join(l.logDir(), segName(n)+".tmp")
+	f, err := os.OpenFile(tmp, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return storageFailed("create segment", err)
+	}
+	if err := zeroFrom(f, 0, size); err != nil {
+		f.Close()
+		return storageFailed("zero-fill", err)
+	}
+	if _, err := f.WriteAt(cpRec, 0); err != nil {
+		f.Close()
+		return storageFailed("checkpoint", err)
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return storageFailed("sync segment", err)
+	}
+	final := filepath.Join(l.logDir(), segName(n))
+	if err := os.Rename(tmp, final); err != nil {
+		f.Close()
+		return storageFailed("rename segment", err)
+	}
+	if err := syncDir(l.logDir()); err != nil {
+		f.Close()
+		return storageFailed("sync dir", err)
+	}
+	l.segs = append(l.segs, &segment{n: n, f: f, size: size})
+	l.off = int64(len(cpRec))
+	l.batch = cp.nextBatchSeq + 1
+	return nil
+}
+
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
+}
+
+func writeFileSync(path string, data []byte) error {
+	tmp := path + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	return syncDir(filepath.Dir(path))
+}
+
+// rotate seals the current segment in its own synced batch, then publishes
+// the next one with the CURRENT hard state. It runs between batches only
+// (R8-04). need is the size of the batch that did not fit.
+func (l *FileLog) rotate(need int) error {
+	cur := l.segs[len(l.segs)-1]
+	seal := appendRecord(nil, &record{kind: recSeal, end: true, batch: l.batch, index: uint64(l.off)})
+	if l.off+int64(len(seal)) <= cur.size {
+		if _, err := cur.f.WriteAt(seal, l.off); err != nil {
+			return storageFailed("seal", err)
+		}
+		if err := datasync(cur.f); err != nil {
+			return storageFailed("sync seal", err)
+		}
+		l.batch++
+	}
+	cp := l.dur
+	cp.nextBatchSeq = l.batch
+	saved := l.segBytes
+	if int64(need)+1024+sealReserve > l.segBytes {
+		l.segBytes = int64(align8(need)) + 1024 + sealReserve
+	}
+	err := l.createSegment(cur.n+1, cp)
+	l.segBytes = saved
+	return err
+}
+
+func (l *FileLog) termLocked(i uint64) uint64 {
+	switch {
+	case i == l.first-1:
+		return l.prevTerm
+	case i < l.first || i >= l.first+uint64(len(l.slots)):
+		return 0
+	}
+	return l.slots[i-l.first].term
+}
+
+func (l *FileLog) usable() error {
+	if l.refuse != nil {
+		return l.refuse
+	}
+	return l.failed
+}
+
+// ---- LogReader ----
+
+// Entries implements LogReader.
+func (l *FileLog) Entries(lo, hi uint64, maxBytes int, dst []coreconsensus.Entry) ([]coreconsensus.Entry, error) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	if err := l.usable(); err != nil {
+		return dst, err
+	}
+	if lo < l.first {
+		return dst, compacted(lo, l.first)
+	}
+	if hi > l.first+uint64(len(l.slots)) {
+		return dst, storageFailed("entries", errImpossible)
+	}
+	size := 0
+	for i := lo; i < hi; i++ {
+		s := l.slots[i-l.first]
+		var e coreconsensus.Entry
+		if s.mem != nil {
+			e = *s.mem
+		} else {
+			var err error
+			if e, err = l.readEntry(s); err != nil {
+				return dst, err
+			}
+		}
+		size += len(e.Data)
+		if i > lo && size > maxBytes {
+			break
+		}
+		dst = append(dst, e)
+	}
+	return dst, nil
+}
+
+func (l *FileLog) readEntry(s slot) (coreconsensus.Entry, error) {
+	var seg *segment
+	for _, x := range l.segs {
+		if x.n == s.seg {
+			seg = x
+		}
+	}
+	if seg == nil {
+		return coreconsensus.Entry{}, storageFailed("read", errImpossible)
+	}
+	var h [recHeader]byte
+	if _, err := seg.f.ReadAt(h[:], s.off); err != nil {
+		return coreconsensus.Entry{}, storageFailed("read", err)
+	}
+	n := int(binary.LittleEndian.Uint32(h[:]))
+	b := make([]byte, recHeader+n)
+	if _, err := seg.f.ReadAt(b, s.off); err != nil && !errors.Is(err, io.EOF) {
+		return coreconsensus.Entry{}, storageFailed("read", err)
+	}
+	r, ok := parseRecord(b)
+	if !ok || r.kind != recEntry {
+		// A log that cannot be read cannot be trusted to agree with itself.
+		return coreconsensus.Entry{}, origin(coreconsensus.LogCorrupt, errs.String("segment", segName(s.seg)), errs.Int64("offset", s.off))
+	}
+	return coreconsensus.Entry{Position: coreconsensus.Position{Term: r.term, Index: r.index},
+		Kind: coreconsensus.EntryKind(r.ekind), Version: r.ever, BodySum: r.body, ChainSum: r.chain, Data: r.data}, nil
+}
+
+// Term implements LogReader.
+func (l *FileLog) Term(index uint64) (uint64, error) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	switch {
+	case index == l.first-1:
+		return l.prevTerm, nil
+	case index < l.first:
+		return 0, compacted(index, l.first)
+	case index >= l.first+uint64(len(l.slots)):
+		return 0, storageFailed("term", errImpossible)
+	}
+	return l.slots[index-l.first].term, nil
+}
+
+// Bounds implements LogReader; a refused log is empty.
+func (l *FileLog) Bounds() (first, last uint64) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	if l.refuse != nil {
+		return 1, 0
+	}
+	return l.first, l.first + uint64(len(l.slots)) - 1
+}
+
+// ---- LogStore ----
+
+func (l *FileLog) add(r *record) {
+	l.pendingLast = len(l.pending)
+	l.pending = appendRecord(l.pending, r)
+}
+
+// Append implements LogStore: entries and the hard state in ONE batch.
+func (l *FileLog) Append(entries []coreconsensus.Entry, hs *coreconsensus.HardState) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if err := l.usable(); err != nil {
+		return err
+	}
+	for i := range entries {
+		e := entries[i]
+		if e.Position.Index != l.first+uint64(len(l.slots)) {
+			return storageFailed("append", errImpossible)
+		}
+		l.add(&record{kind: recEntry, batch: l.batch, term: e.Position.Term, index: e.Position.Index,
+			ekind: uint8(e.Kind), ever: e.Version, body: e.BodySum, chain: e.ChainSum, data: e.Data})
+		l.slots = append(l.slots, slot{term: e.Position.Term, mem: &e})
+	}
+	if hs != nil {
+		l.add(&record{kind: recHardState, batch: l.batch, data: encodeHS(*hs)})
+		l.hs = *hs
+	}
+	return nil
+}
+
+// Sync implements LogStore: the pending batch is written, its last record
+// flagged end-of-batch, and made durable by one fdatasync. A failure is
+// final: the log refuses every later call (D4, fsyncgate).
+func (l *FileLog) Sync() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if err := l.usable(); err != nil {
+		return err
+	}
+	if len(l.pending) == 0 {
+		return nil
+	}
+	l.pending[l.pendingLast+recHeader+2] = 1
+	sealRecord(l.pending[l.pendingLast:])
+	cur := l.segs[len(l.segs)-1]
+	if l.off+int64(len(l.pending))+sealReserve > cur.size {
+		// Rotation happens only between batches (R8-04): restamp the batch
+		// with the sequence the new segment expects.
+		if err := l.rotate(len(l.pending)); err != nil {
+			l.failed = err
+			return err
+		}
+		l.restamp(l.batch)
+		cur = l.segs[len(l.segs)-1]
+	}
+	if _, err := cur.f.WriteAt(l.pending, l.off); err != nil {
+		l.failed = storageFailed("write", err)
+		return l.failed
+	}
+	if err := datasync(cur.f); err != nil {
+		l.failed = storageFailed("fdatasync", err)
+		return l.failed
+	}
+	// Re-locate the entries the batch carried.
+	var off int64
+	for off < int64(len(l.pending)) {
+		r, _ := parseRecord(l.pending[off:])
+		if r.kind == recEntry && r.index >= l.first && r.index < l.first+uint64(len(l.slots)) {
+			s := &l.slots[r.index-l.first]
+			if s.mem != nil && s.term == r.term {
+				s.seg, s.off, s.mem = cur.n, l.off+off, nil
+			}
+		}
+		off += int64(r.length)
+	}
+	l.off += int64(len(l.pending))
+	l.markDurable()
+	l.pending = l.pending[:0]
+	l.pendingLast = -1
+	l.batch++
+	return l.dropSegmentsLocked()
+}
+
+func (l *FileLog) markDurable() {
+	last := l.first + uint64(len(l.slots)) - 1
+	l.dur = checkpoint{hs: l.hs, prevIndex: last, prevTerm: l.termLocked(last), compact: l.compact, compactTerm: l.compactTerm}
+}
+
+// restamp rewrites the batch sequence of every pending record.
+func (l *FileLog) restamp(batch uint64) {
+	var off int
+	for off < len(l.pending) {
+		binary.LittleEndian.PutUint64(l.pending[off+recHeader+4:], batch)
+		sealRecord(l.pending[off:])
+		n := int(binary.LittleEndian.Uint32(l.pending[off:]))
+		off += align8(recHeader + n)
+	}
+}
+
+// TruncateSuffix implements LogStore: ONE truncate record, nothing else
+// (R7-12, R8-01, R8-03).
+func (l *FileLog) TruncateSuffix(from uint64) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if err := l.usable(); err != nil {
+		return err
+	}
+	if from < l.first {
+		from = l.first
+	}
+	if from >= l.first+uint64(len(l.slots)) {
+		return nil
+	}
+	l.add(&record{kind: recTruncate, batch: l.batch, index: from})
+	l.slots = l.slots[:from-l.first]
+	return nil
+}
+
+// CompactPrefix implements LogStore: a compact record, then whole segments
+// whose entries the next checkpoint already supersedes are deleted, as a
+// prefix, with a directory fsync after the unlinks (D4 step 6).
+func (l *FileLog) CompactPrefix(through uint64) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if err := l.usable(); err != nil {
+		return err
+	}
+	if through < l.first {
+		return nil
+	}
+	last := l.first + uint64(len(l.slots)) - 1
+	t := l.termLocked(through)
+	l.add(&record{kind: recCompact, batch: l.batch, index: through, term: t})
+	if through >= last {
+		l.slots = nil
+	} else {
+		l.slots = slices.Clone(l.slots[through-l.first+1:])
+	}
+	l.first, l.prevTerm = through+1, t
+	l.compact, l.compactTerm = through, t
+	return nil
+}
+
+// dropSegments deletes the prefix of sealed segments whose every entry is
+// at or below the compaction point. It runs after a sync, so the compact
+// record and the next checkpoint are durable first.
+func (l *FileLog) dropSegmentsLocked() error {
+	removed := false
+	for len(l.segs) > 1 {
+		next := l.segs[1]
+		b := make([]byte, recHeader+recFixed+64)
+		if _, err := next.f.ReadAt(b, 0); err != nil {
+			return storageFailed("read checkpoint", err)
+		}
+		r, ok := parseRecord(b)
+		if !ok {
+			break
+		}
+		cp, ok := decodeCheckpoint(r.data)
+		if !ok || cp.prevIndex > l.compact {
+			break
+		}
+		for _, s := range l.slots {
+			if s.seg == l.segs[0].n {
+				return nil
+			}
+		}
+		_ = l.segs[0].f.Close()
+		if err := os.Remove(filepath.Join(l.logDir(), segName(l.segs[0].n))); err != nil {
+			return storageFailed("remove segment", err)
+		}
+		l.segs = l.segs[1:]
+		removed = true
+	}
+	if removed {
+		return syncDir(l.logDir())
+	}
+	return nil
+}
+
+// HardState implements LogStore.
+func (l *FileLog) HardState() (coreconsensus.HardState, error) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.hs, l.usable()
+}
+
+// Stamp implements LogStore.
+func (l *FileLog) Stamp() (coreconsensus.Stamp, error) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.stamp, nil
+}
+
+// WriteStamp implements LogStore: durable on return.
+func (l *FileLog) WriteStamp(s coreconsensus.Stamp) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if err := writeStamp(l.dir, s); err != nil {
+		return storageFailed("stamp", err)
+	}
+	l.stamp = s
+	return nil
+}
+
+// Close implements LogStore; the DataDir closes it.
+func (l *FileLog) Close() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, s := range l.segs {
+		_ = s.f.Close()
+	}
+	l.segs = nil
+	return nil
+}

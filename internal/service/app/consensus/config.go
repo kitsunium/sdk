@@ -154,7 +154,7 @@ func (c Config) withDefaults() (Config, error) {
 		c.HardCloseTimeout = 5 * time.Second
 	}
 	if c.SnapshotCodec == nil {
-		c.SnapshotCodec = svctransform.FlateCompressor.(coretransform.BoundedDecompressor)
+		c.SnapshotCodec = defaultCodec()
 	}
 	switch {
 	case c.Machine == nil:
@@ -204,4 +204,8 @@ func (c Config) withDefaults() (Config, error) {
 // bounds (D14).
 func (c Config) MemoryBudget(peers int) int64 {
 	return c.MaxPendingBytes + c.MaxApplyLagBytes + c.RecentEntriesBytes + int64(peers)*int64(c.MaxInflightBytes)
+}
+
+func defaultCodec() coretransform.BoundedDecompressor {
+	return svctransform.FlateCompressor.(coretransform.BoundedDecompressor)
 }
