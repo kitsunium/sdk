@@ -1,0 +1,198 @@
+package consensus
+
+import (
+	"context"
+	"io"
+
+	"github.com/kitsunium/sdk/internal/kernel/errs"
+)
+
+// Replicated is the consumer's port, and the only algorithm-neutral one:
+// propose a command, wait for a linearizable read point, wait for a position,
+// read the node's status. FROZEN under ADR 0039.
+type Replicated interface {
+	// Propose replicates data and returns, once the entry is applied
+	// locally, its lineage-scoped token and the value Apply returned.
+	// NOT_LEADER means certainly not appended; OUTCOME_UNKNOWN means it may
+	// still commit, and the caller must read the state before deciding.
+	Propose(ctx context.Context, data []byte) (Token, any, error)
+	// Barrier returns once the local state machine reflects every write
+	// committed before the call, with the token of the applied index.
+	Barrier(ctx context.Context) (Token, error)
+	// WaitApplied returns once the local node has applied t. A token of
+	// another lineage is LINEAGE_MISMATCH.
+	WaitApplied(ctx context.Context, t Token) error
+	// Status returns the node's view after its last turn.
+	Status() Status
+}
+
+// StateMachine is the caller's replicated program. Apply is a PURE transition
+// of state the state machine owns: no side effect outside that state, no
+// precondition that can differ between nodes. It is called for every committed
+// command, in log order, on one goroutine, and must be deterministic. A
+// refusal is an answer carried in the result; an Apply that cannot complete
+// must panic, and the node stops with STATE_MACHINE_FAILED — the entry IS
+// committed. FROZEN under ADR 0039.
+type StateMachine interface {
+	// Apply applies one committed command and returns its result, delivered
+	// to the Propose that created it on the node that created it.
+	Apply(e Entry) any
+	// Snapshot captures a point-in-time view of the state, cheaply: it is
+	// called on the apply goroutine.
+	Snapshot() (Snapshot, error)
+	// Restore replaces the state with a snapshot's. It is serialised with
+	// Apply.
+	Restore(r io.Reader, meta SnapshotMeta) error
+}
+
+// Snapshot is a point-in-time view a StateMachine captured. WriteTo runs on
+// the snapshot goroutine while Apply continues; Release frees the view.
+type Snapshot interface {
+	// WriteTo writes the view's state.
+	WriteTo(w io.Writer) (int64, error)
+	// Release frees the view.
+	Release()
+}
+
+// DurableStateMachine is the sibling of a state machine that keeps its state
+// on disk: it persists the applied position atomically with the state that
+// entry produced, and the engine resumes after it.
+type DurableStateMachine interface {
+	StateMachine
+	// AppliedPosition returns the log identity and the position of the last
+	// entry whose effects are durable.
+	AppliedPosition() (LogIdentity, Position, error)
+}
+
+// BatchingStateMachine is the sibling of a state machine that applies
+// committed commands in batches, one result slot per entry.
+type BatchingStateMachine interface {
+	StateMachine
+	// ApplyBatch applies es in order and writes each result into results.
+	ApplyBatch(es []Entry, results []any)
+}
+
+// LogReader reads the log. Expected outcomes are answers, not failures: an
+// index below the first retained one is COMPACTED.
+type LogReader interface {
+	// Entries returns entries in [lo, hi), at most maxBytes, and always at
+	// least one entry when lo < hi, even above maxBytes. lo below first is
+	// COMPACTED.
+	Entries(lo, hi uint64, maxBytes int, dst []Entry) ([]Entry, error)
+	// Term answers for first-1 too, from the term kept at compaction.
+	Term(index uint64) (uint64, error)
+	// Bounds of an empty log after a snapshot at s are (s+1, s).
+	Bounds() (first, last uint64)
+}
+
+// LogStore is the durable log. Term, vote and entries travel in one Append
+// and become durable under one Sync; readers see appended entries before they
+// are synced. One writer, many readers. When Sync and WriteStamp return nil,
+// what they cover survives a power loss: the safety of the whole domain rests
+// on it. FROZEN under ADR 0039.
+type LogStore interface {
+	LogReader
+	// Append buffers entries and, when hs is not nil, a hard state, in ONE
+	// record batch.
+	Append(entries []Entry, hs *HardState) error
+	// Sync makes everything appended so far durable.
+	Sync() error
+	// TruncateSuffix writes ONE durable truncate record removing every entry
+	// from index from on, and nothing else.
+	TruncateSuffix(from uint64) error
+	// CompactPrefix drops what a snapshot covers, through index through.
+	CompactPrefix(through uint64) error
+	// HardState returns the last hard state appended.
+	HardState() (HardState, error)
+	// Stamp returns the directory's stamp.
+	Stamp() (Stamp, error)
+	// WriteStamp writes the stamp, durable on return.
+	WriteStamp(Stamp) error
+	// Close releases the store.
+	Close() error
+}
+
+// SnapshotSink receives the ENCODED chunks of one snapshot and checks each
+// chunk's integrity as it arrives.
+type SnapshotSink interface {
+	io.Writer
+	// Commit publishes the snapshot; final carries the SHA-256 the engine
+	// computed over the DECODED stream.
+	Commit(final SnapshotMeta) error
+	// Abort drops the spool.
+	Abort() error
+}
+
+// SnapshotHandle is a published snapshot, pinned until Close.
+type SnapshotHandle interface {
+	io.ReaderAt
+	// Meta describes the snapshot.
+	Meta() SnapshotMeta
+	// Close unpins it.
+	Close() error
+}
+
+// SnapshotStore holds snapshots. FROZEN under ADR 0039.
+type SnapshotStore interface {
+	// Create opens the spool of id. When a spool of that id exists, it is
+	// returned with the ENCODED offset durably spooled so far.
+	Create(id string, meta SnapshotMeta) (sink SnapshotSink, spooled int64, err error)
+	// List returns the complete snapshots, newest first.
+	List() ([]SnapshotMeta, error)
+	// Open pins a snapshot until the handle is closed.
+	Open(id string) (SnapshotHandle, error)
+	// Remove deletes a snapshot; refused while a handle is open.
+	Remove(id string) error
+}
+
+// Transport carries ENCODED frames between the nodes of a group. FROZEN under
+// ADR 0039.
+type Transport interface {
+	// Send hands over an encoded frame. It never blocks and may drop; the
+	// transport owns frame after the call.
+	Send(to NodeID, frame []byte)
+	// Stream sends a snapshot from the offset the receiver accepted; open
+	// returns a reader at an encoded offset on a chunk boundary, which
+	// Stream closes.
+	Stream(ctx context.Context, to NodeID, offer InstallOffer, open func(offset int64) (io.ReadCloser, error)) error
+	// Bind registers the group's callbacks. deliver gets the frame and the
+	// peer TLS authenticated, valid until deliver returns; offer is answered
+	// on the event loop; join is answered off it, under a deadline.
+	Bind(group GroupID,
+		deliver func(from AuthenticatedPeer, frame []byte),
+		offer func(from AuthenticatedPeer, o InstallOffer) InstallAccept,
+		install func(InstallRequest) error,
+		join func(ctx context.Context, from AuthenticatedPeer, r JoinRequest) (Position, errs.Code)) error
+	// SetMembership pushes the group's admitted members; the transport
+	// computes the union over its groups.
+	SetMembership(group GroupID, admitted []Member)
+}
+
+// UnreachableReporter is the sibling of a transport that reports a peer it
+// could not reach, so that the leader moves its progress to probe.
+type UnreachableReporter interface {
+	// Unreachable registers the callback.
+	Unreachable(func(NodeID))
+}
+
+// Joiner is the sibling a transport implements to carry a pre-admission JOIN.
+type Joiner interface {
+	// Join sends the JOIN and returns the position its AddLearner was
+	// appended at.
+	Join(ctx context.Context, cfg JoinConfig) (Position, error)
+}
+
+// JoinAuthorizer is the PRODUCT's port: a member calls it before it turns a
+// JOIN into an AddLearner. It decides whether the slot's previous member is
+// fenced, which only the product can know, and returns the Operator to record.
+type JoinAuthorizer interface {
+	// Authorize accepts or refuses the request.
+	Authorize(ctx context.Context, r JoinRequest) (Operator, error)
+}
+
+// LeadershipWatcher is the sibling of a node that notifies leadership changes.
+type LeadershipWatcher interface {
+	// Watch returns its OWN channel, of capacity one, holding the latest
+	// status; it is unsubscribed and closed when ctx ends or the node closes.
+	Watch(ctx context.Context) <-chan Status
+}
