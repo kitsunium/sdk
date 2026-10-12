@@ -81,7 +81,7 @@ teardown() { rm -rf "$REPO"; }
 # never occurs in production.
 #
 # When the test has an origin, the tags go there too: a run that publishes
-# fetches with --prune-tags first (ADR 0170), so a tag origin does not hold is
+# fetches with --prune-tags first (ADR 0171), so a tag origin does not hold is
 # not a tag the release reads — exactly as in CI, where every tag is origin's.
 tag_release() {
   local rel t
@@ -170,7 +170,7 @@ change_vendor() {
 # pushes somewhere this test owns.
 #
 # Every tag the fixture already holds goes there first: the run fetches with
-# --prune-tags before it reads one (ADR 0170).
+# --prune-tags before it reads one (ADR 0171).
 publish_remote() {
   g init -q --bare "$BATS_TEST_TMPDIR/origin.git"
   g remote add origin "$BATS_TEST_TMPDIR/origin.git"
@@ -465,7 +465,7 @@ check_tombstone() {
 }
 
 # A module never tagged is a path no release has published, and starts at
-# v0.1.0 — the only path allowed to (ADR 0170), whatever the SDK's version.
+# v0.1.0 — the only path allowed to (ADR 0171), whatever the SDK's version.
 @test "a vendor module that was never tagged is tagged at v0.1.0" {
   need_toolchain
   add_vendors

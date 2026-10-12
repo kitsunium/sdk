@@ -3,7 +3,7 @@
 # one per line, the directory of every module go.work names that changed, since
 # its OWN last tag, in a path that can carry a consumer-visible change — `.` for
 # the SDK module at the root (ADR 0162), `pkg/v1/<family>` for a pkg family,
-# `internal` for the shared internal module (ADR 0170), `third-party/<path>` and
+# `internal` for the shared internal module (ADR 0171), `third-party/<path>` and
 # `framework/connectors/<engine>` for a module that requires a vendor (ADR 0157,
 # ADR 0147, ADR 0158). HOW BIG each release is, and its tag, is cut-tags.sh's
 # question, asked per module too.
@@ -15,7 +15,7 @@
 # release at all (#295). A module never tagged is measured from the empty tree:
 # it is released when it holds anything that counts.
 #
-# Decision matrix (ADR 0007, ADR 0162, ADR 0170), per module:
+# Decision matrix (ADR 0007, ADR 0162, ADR 0171), per module:
 #   a module other than the root: any path of it that counts      -> <dir> (rule 1m)
 #   the root: a path under pkg/ or framework/ (outside a module),
 #     the root go.mod, LICENSE or README.md, or a third-party/ or
@@ -28,12 +28,12 @@
 #   nothing that counts                                            -> emit nothing (exit 0)
 #
 # Maintainer-only metadata — every *.md but README.md, every BUILD.bazel, and
-# since ADR 0170 every *_test.go and testdata/ path, which no consumer's build
+# since ADR 0171 every *_test.go and testdata/ path, which no consumer's build
 # compiles (#295, #220) — is dropped from each module's path list BEFORE any rule
 # sees it, by the one predicate in lib/release-scope.sh (ADR 0089).
 #
 # Output: one module directory per line, `.` first, or nothing. Stable contract
-# — consumed by cut-tags.sh and CI. (Before ADR 0170 it emitted the one token
+# — consumed by cut-tags.sh and CI. (Before ADR 0171 it emitted the one token
 # `sdk`, the root plus every vendor module that changed; cut-tags.sh still reads
 # it, and `pkg`, `framework`, `third-party` and `vN` before it, that way.)
 

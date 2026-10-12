@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/release/cut-tags.sh — read on stdin the modules to release (from
 # compute-bumps.sh: one directory per line, `.` the SDK module), compute the
-# next version of EACH, and publish them as one release (ADR 0170, amending
+# next version of EACH, and publish them as one release (ADR 0171, amending
 # ADR 0162):
 #
 #   - each module go.work names is tagged at its OWN version: `vX.Y.Z` for the
@@ -96,7 +96,7 @@ for arg in "$@"; do
 cut-tags.sh — read on stdin the modules to release (compute-bumps.sh's output:
 one directory per line, '.' the SDK module; or 'sdk', the SDK module and every
 other module that changed since its own last tag), and publish the next tag of
-each, at its OWN version (ADR 0170).
+each, at its OWN version (ADR 0171).
 
 Usage: $0 [--dry-run] [--allow-bootstrap] [--range=<rev>..HEAD]
           [--bump=patch|minor|major] [--manifest=<file>] < modules.txt
@@ -104,14 +104,14 @@ Usage: $0 [--dry-run] [--allow-bootstrap] [--range=<rev>..HEAD]
 Each module's size is the largest 'release:patch|minor|major' label on the
 merged pull requests behind the first-parent commits of ITS range — from the
 first parent of its own last tag — that changed a path of it which could cut a
-release (ADR 0135, ADR 0170); no label is a patch. A commit whose message asks
+release (ADR 0135, ADR 0171); no label is a patch. A commit whose message asks
 for more than a patch in a 'Release-bump:' line, with no label to decide it, is
 refused. A module never tagged starts at v0.1.0. --range sizes every module
 over the one range given.
 
 --manifest writes release-manifest.json there: the release's identity (its
 first tag), every module tagged with its version, previous tag and size, the
-tombstones, and the commits (ADR 0170). Written by a dry run too.
+tombstones, and the commits (ADR 0171). Written by a dry run too.
 
 --bump states the size of the whole range and asks GitHub nothing. It is the
 recovery path for a refused release: SDK Release's workflow_dispatch input
@@ -163,7 +163,7 @@ mapfile -t modules <<<"$module_list"
 #
 #   <dir>   the module in <dir> — `.` the SDK module at the root, or any other
 #           module go.work names — and that module only (compute-bumps.sh's
-#           output since ADR 0170: each module it found changed);
+#           output since ADR 0171: each module it found changed);
 #   sdk     the SDK module AND every other module that changed since its own
 #           last tag or was never tagged — what one release was under ADR 0162,
 #           measured here. `pkg`, `framework`, `third-party` and the older `vN`
@@ -214,7 +214,7 @@ declare -A PR_INFO=()
 # caches survive from one module to the next (a command substitution is a
 # subshell).
 #
-# Why per module (ADR 0170): a label is a maintainer's decision about ONE merge,
+# Why per module (ADR 0171): a label is a maintainer's decision about ONE merge,
 # and that merge changed some modules and not others. Read for the whole range
 # at once, a `release:minor` on a pull request touching pkg/v1/data would have
 # moved every module the release cut — the lockstep a module per family exists
@@ -424,7 +424,7 @@ sdk_replaces_of() {
 # is tagged at (NEXT_VERSION); any other module at its own last tag. A
 # requirement of a module ADR 0162 retired, or of a module that has no tag and
 # gets none, is refused: there is no version to pin it to. Each module has its
-# own version since ADR 0170, so the version is looked up per requirement —
+# own version since ADR 0171, so the version is looked up per requirement —
 # never "the release's", which no longer exists.
 rewrite_publishable() {
   local gomod="$1" dep dir lt
@@ -840,7 +840,7 @@ publish_release() {
 }
 
 # write_manifest <file> — release-manifest.json: what gives "a release" its
-# identity now that it is several modules at several versions (ADR 0170). Its
+# identity now that it is several modules at several versions (ADR 0171). Its
 # `release` is the first tag stdout prints, the one the workflow makes the
 # single GitHub release of; `modules` lists every module tagged — directory,
 # module path, tag, version, the tag it follows and the size that took it
@@ -918,7 +918,7 @@ done
 # Each module's version: the next after its own last tag, sized from the merges
 # that touched IT (range_size), or --bump for every module, or v0.1.0 for a
 # module never tagged — a path no release has published, which is the only path
-# allowed to start there (ADR 0170; check-version-floor.sh holds that against
+# allowed to start there (ADR 0171; check-version-floor.sh holds that against
 # the proxy). The root keeps ADR 0162's rules: it continues pkg's history, and
 # its first tag after it is held and never a patch.
 first=0

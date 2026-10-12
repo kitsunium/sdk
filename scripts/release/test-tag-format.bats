@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# BATS tests for lib/tag-format.sh's module shapes (ADR 0170): a module per pkg
+# BATS tests for lib/tag-format.sh's module shapes (ADR 0171): a module per pkg
 # family, `pkg/v1/<family>/vX.Y.Z`, and one shared internal module,
 # `internal/vX.Y.Z` — anchored at both ends, so no selection by glob or prefix
 # reads one as pkg's history or as a tombstone —, the module a tag belongs to,

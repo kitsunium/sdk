@@ -48,7 +48,7 @@ export function isValidTag(tag) {
   return typeof tag === "string" && TAG_REGEX.test(tag);
 }
 
-// The module shapes of ADR 0170's layout, mirrored from FAMILY_TAG_REGEX and
+// The module shapes of ADR 0171's layout, mirrored from FAMILY_TAG_REGEX and
 // INTERNAL_TAG_REGEX in scripts/release/lib/tag-format.sh: a pkg family's
 // module, pkg/v1/<family>/vX.Y.Z, and the shared internal module,
 // internal/vX.Y.Z. Anchored at both ends, like every shape here. They are

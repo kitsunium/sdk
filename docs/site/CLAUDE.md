@@ -135,7 +135,7 @@ tags are no release of their own, and neither is the tombstone `pkg/v0.18.0`
 beside `v0.18.0` (ADR 0162), which `dropTombstones` leaves out. Each tagged release is snapshotted via
 `git worktree`. `scripts/lib/tag-format.mjs` is the JS mirror of
 `scripts/release/lib/tag-format.sh` (same TAG_REGEX — edit together, ADR 0007
-§1). The module shapes of ADR 0170 — `pkg/v1/<family>/vX.Y.Z`,
+§1). The module shapes of ADR 0171 — `pkg/v1/<family>/vX.Y.Z`,
 `internal/vX.Y.Z` — are mirrored as `FAMILY_TAG_REGEX` and `INTERNAL_TAG_REGEX`
 (`isValidModuleTag`): release tags, but no docs version, so `parseTag` refuses
 them and a GitHub release they carry is skipped. Tag-format + version-defaulting logic is unit-tested (`npm test`).

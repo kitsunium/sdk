@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # scripts/release/lib/release-modules.sh — the modules a release may tag, and
-# what each of them changed since its own last tag (ADR 0170). Sourced by
+# what each of them changed since its own last tag (ADR 0171). Sourced by
 # compute-bumps.sh, which decides WHICH modules release, and cut-tags.sh, which
 # sizes and tags each of them — after lib/tag-format.sh and
 # lib/release-scope.sh, whose functions it calls.
@@ -62,7 +62,7 @@ release_modules() {
     return 1
   fi
   if [ -n "$bad" ]; then
-    echo "release_modules: $work uses $bad, which no release can tag — a module lives at the root, under pkg/v1/<family>, at internal, under third-party/ or under framework/connectors/ (ADR 0170); pkg, framework and a layer of internal are retired (ADR 0162)" >&2
+    echo "release_modules: $work uses $bad, which no release can tag — a module lives at the root, under pkg/v1/<family>, at internal, under third-party/ or under framework/connectors/ (ADR 0171); pkg, framework and a layer of internal are retired (ADR 0162)" >&2
     return 1
   fi
   echo "."

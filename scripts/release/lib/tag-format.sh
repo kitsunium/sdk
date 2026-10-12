@@ -26,7 +26,7 @@
 # a go.mod that requires the SDK module and holds no package (ADR 0162). A
 # tombstone is no release of pkg's packages, and the history reads it as none.
 #
-# ADR 0170 adds the two shapes of the target layout — a module per pkg family
+# ADR 0171 adds the two shapes of the target layout — a module per pkg family
 # and one shared internal module — so the scripts can cut them before the code
 # is split:
 #
@@ -86,7 +86,7 @@ is_valid_vendor_tag() {
   is_valid_third_party_tag "$1" || is_valid_connector_tag "$1"
 }
 
-# A pkg family's module (ADR 0170): `pkg/v1/<family>/vX.Y.Z`, the module
+# A pkg family's module (ADR 0171): `pkg/v1/<family>/vX.Y.Z`, the module
 # github.com/kitsunium/sdk/pkg/v1/<family>. One lowercase path component, as the
 # directories under pkg/v1/ are named; a component that is itself a major
 # (`v2`) is refused by is_valid_family_tag, since `pkg/v1/v2/…` would read as a
@@ -101,7 +101,7 @@ is_valid_family_tag() {
   [[ ! "$f" =~ ^v[0-9]+$ ]]
 }
 
-# The shared internal module (ADR 0170): `internal/vX.Y.Z`, the module
+# The shared internal module (ADR 0171): `internal/vX.Y.Z`, the module
 # github.com/kitsunium/sdk/internal. Never `internal/<layer>/vX.Y.Z` — the
 # per-layer modules ADR 0162 retired —: one module holds every layer.
 INTERNAL_TAG_REGEX='^internal/v[01]\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$'
@@ -111,7 +111,7 @@ is_valid_internal_tag() {
   [[ "$1" =~ $INTERNAL_TAG_REGEX ]]
 }
 
-# is_valid_module_tag <tag> — a module of ADR 0170's split: a family or the
+# is_valid_module_tag <tag> — a module of ADR 0171's split: a family or the
 # internal module.
 is_valid_module_tag() {
   is_valid_family_tag "$1" || is_valid_internal_tag "$1"

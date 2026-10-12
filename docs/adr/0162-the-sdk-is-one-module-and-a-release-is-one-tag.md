@@ -1,6 +1,7 @@
 # ADR 0162 — the SDK is one module, and a release is one tag
 
 - **Status**: Accepted
+- **Amended by**: [ADR 0171](0171-a-module-per-family-and-a-version-is-never-reused.md) — §1 a module per pkg family and one internal module; §3 the root's next release holds no `pkg/` or `internal/` and retracts the monolithic roots; §4 base, size and tag per module, and a manifest
 - **Date**: 2026-10-03
 - **Deciders**: SDK maintainers (the owner's decision of 2026-10-03; on the tombstones of §3, of 2026-10-04)
 - **Supersedes**: [ADR 0001](0001-sdk-go-multimodule-layout.md) — its module split. The four layers it drew stand, as directories of one module.

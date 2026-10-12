@@ -120,7 +120,7 @@ step() {
   [ "$status" -eq 1 ]
 }
 
-# ADR 0170: a release need not carry the SDK module.
+# ADR 0171: a release need not carry the SDK module.
 @test "release-notes: a release of one family alone says the SDK module keeps its tag" {
   printf 'pkg/v1/data/v0.2.0\n' >"$LIST"
   run bash "$NOTES" notes "$LIST"

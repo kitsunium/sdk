@@ -3,7 +3,7 @@
 # the assertions are reproducible offline. No Bazel needed — when bazel is
 # absent the internal/* path falls back to a no-op (compute-bumps gracefully
 # skips the rdeps step). The SDK module is at the root (ADR 0162), and the
-# script emits the directory of each module that changed (ADR 0170), `.` for
+# script emits the directory of each module that changed (ADR 0171), `.` for
 # the SDK module.
 
 # Every commit here is --no-verify. The fixtures are throwaway repositories, but
@@ -41,7 +41,7 @@ module github.com/kitsunium/sdk
 
 go 1.27
 EOF
-  # The modules a release may tag are go.work's (ADR 0170): here the SDK
+  # The modules a release may tag are go.work's (ADR 0171): here the SDK
   # module alone, until a case adds another.
   printf 'go 1.27\n\nuse .\n' >go.work
   : > pkg/v1/doc.go
@@ -552,7 +552,7 @@ STUB
   [[ "$output" == *$'\n.'* ]]
 }
 
-# ADR 0170: a module go.work names is measured on its own, so a change to a
+# ADR 0171: a module go.work names is measured on its own, so a change to a
 # connector releases the connector and NOT the SDK module.
 @test "a change to a connector module emits the connector alone" {
   mkdir -p framework/connectors/postgres
@@ -610,7 +610,7 @@ STUB
 # A vendor module is a module of its own, released with the SDK: a change to
 # one releases the SDK, and cut-tags.sh tags the module because it changed.
 
-@test "a change under a vendor module emits that module alone (ADR 0170)" {
+@test "a change under a vendor module emits that module alone (ADR 0171)" {
   mkdir -p third-party/aws/writer/s3
   printf 'module github.com/kitsunium/sdk/third-party/aws\n\ngo 1.27\n' > third-party/aws/go.mod
   printf 'go 1.27\n\nuse (\n\t.\n\t./third-party/aws\n)\n' > go.work
@@ -656,7 +656,7 @@ STUB
   [ "$output" = "third-party/aws" ]
 }
 
-# ADR 0170: a pkg family and the shared internal module are modules of their
+# ADR 0171: a pkg family and the shared internal module are modules of their
 # own; each releases on its own change, and the SDK module does not.
 @test "a family module and the internal module release on their own changes" {
   mkdir -p pkg/v1/data internal/kernel/x

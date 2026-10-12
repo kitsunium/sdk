@@ -81,7 +81,7 @@ notes() {
   modules="$(awk '$1 == "module" { print $2 }' <<<"$out")"
   vendors="$(awk '$1 == "vendor" { print $2 }' <<<"$out")"
   tombs="$(awk '$1 == "tombstone" { print $2 }' <<<"$out")"
-  # Each module is released on its own since ADR 0170, so a release need not
+  # Each module is released on its own since ADR 0171, so a release need not
   # carry the SDK module: then it says so, rather than naming an empty tag.
   if [ -n "$sdk" ]; then
     echo "The SDK module \`$SDK_MODULE\` at \`$sdk\`."
@@ -90,7 +90,7 @@ notes() {
   fi
   echo
   if [ -n "$modules" ]; then
-    echo "Modules of the SDK's layout tagged by this release (ADR 0170):"
+    echo "Modules of the SDK's layout tagged by this release (ADR 0171):"
     echo
     while IFS= read -r t; do
       echo "- \`$t\` — \`$SDK_MODULE/${t%/v*}\`"

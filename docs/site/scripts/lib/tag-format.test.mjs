@@ -235,7 +235,7 @@ test("selectReleases keeps the releases named, and a default for each major", ()
   assert.deepEqual(selectReleases(versions, ["9.9.9"]), []);
 });
 
-test("a module tag of ADR 0170 is a release tag and no docs version", () => {
+test("a module tag of ADR 0171 is a release tag and no docs version", () => {
   for (const t of [
     "pkg/v1/data/v0.1.0",
     "pkg/v1/app/v1.2.3",

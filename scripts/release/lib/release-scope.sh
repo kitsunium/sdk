@@ -37,7 +37,7 @@
 #   BUILD.bazel NO. Build metadata for a build system the consumer does not run;
 #             `go build` never reads it. Excluded since before ADR 0089.
 #
-#   *_test.go, testdata/** NO, since ADR 0170 (#220, #295). Go compiles neither
+#   *_test.go, testdata/** NO, since ADR 0171 (#220, #295). Go compiles neither
 #             into a consumer's build — a dependency's tests are not built, and
 #             no exported helper lives in a _test.go file, which another package
 #             cannot import. Counted, a change to kit's generated pins alone
@@ -81,7 +81,7 @@ function rs_maintainer_only(p,   n) {
   # A test file and a fixture are never compiled into a consumer build: Go
   # leaves the _test.go files and the testdata/ trees of a dependency out of
   # it. Counted, they re-tagged all thirteen vendor modules at v0.19.0 for a
-  # change of their generated pins alone (#295), and under ADR 0170 they would
+  # change of their generated pins alone (#295), and under ADR 0171 they would
   # re-tag every family a test touches (#220, closed there).
   if (n ~ /_test\.go$/) return 1
   if (p ~ /(^|\/)testdata\//) return 1

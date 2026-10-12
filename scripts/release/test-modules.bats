@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# BATS tests for the release of several modules (ADR 0170): compute-bumps.sh
+# BATS tests for the release of several modules (ADR 0171): compute-bumps.sh
 # naming each module that changed since its OWN last tag, cut-tags.sh sizing
 # and tagging each at its OWN version — a label on one module's merge moves
 # that module only —, the vendors tagged only when they changed (#295), the
@@ -58,7 +58,7 @@ setup() {
   echo "package aws" >third-party/aws/aws.go
   printf 'go 1.27\n\nuse (\n\t.\n\t./internal\n\t./pkg/v1/data\n\t./pkg/v1/net\n\t./third-party/aws\n)\n' >go.work
   g add -A
-  g commit -q --no-verify -m "the layout of ADR 0170"
+  g commit -q --no-verify -m "the layout of ADR 0171"
   CB="$BATS_TEST_DIRNAME/compute-bumps.sh"
   CT="$BATS_TEST_DIRNAME/cut-tags.sh"
   install_gh_stub
@@ -66,7 +66,7 @@ setup() {
 
 # released — one release commit, a detached child of HEAD, carrying the tags of
 # a published history: the root at v0.19.7 and the vendor at v0.19.6 (the
-# floors of ADR 0170), the split modules at v0.1.0; and origin, holding them.
+# floors of ADR 0171), the split modules at v0.1.0; and origin, holding them.
 released() {
   local rel
   rel="$(g commit-tree "HEAD^{tree}" -p "$(g rev-parse HEAD)" -m "release")"

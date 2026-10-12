@@ -486,7 +486,7 @@ docs-dev:
 # `release-dry-run` previews the auto-bump pipeline without pushing
 # any tag. compute-bumps.sh prints the directory of every module that
 # changed since its own last tag (`.` the SDK module); cut-tags.sh shows
-# the tag it would cut for each, at each module's own version (ADR 0170). Explicit /bin/bash because the SDK shell is zsh and the
+# the tag it would cut for each, at each module's own version (ADR 0171). Explicit /bin/bash because the SDK shell is zsh and the
 # release scripts use bash-only patterns (associative arrays,
 # `< <(...)` process substitution). See ADR 0007 §Bump semantics.
 #
