@@ -21,7 +21,13 @@ name: Cross-platform runtime tests (real kernels, no lab)
 # in one run, not stop at the first divergence.
 
 on:
+  # Every branch and every tag but `pin/**`: a pin tag marks a commit for a
+  # consumer of the design (#296) and builds nothing, and pushing two of them
+  # ran this lane twice for nothing. `branches` is spelled out because a push
+  # trigger that names a tag filter alone runs for no branch at all.
   push:
+    branches: ['**']
+    tags-ignore: ['pin/**']
   workflow_dispatch:
 
 permissions:

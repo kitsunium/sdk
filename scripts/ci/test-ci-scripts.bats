@@ -141,6 +141,45 @@ job_body() {
   [ "$output" != "0" ]
 }
 
+# push_block <workflow> — the lines of the `push:` trigger under `on:`, nothing
+# when the workflow has none. `push:` alone and `push:` with filters both print
+# the header, so a caller can tell "no push trigger" from "an unfiltered one".
+push_block() {
+  awk '
+    /^on:/                       { inon = 1; next }
+    inon && /^[^ #]/             { inon = 0 }
+    inon && /^  push:/           { grab = 1; print; next }
+    grab && /^  [A-Za-z_-]+:/    { grab = 0 }
+    grab                         { print }
+  ' "$1"
+}
+
+# #296: a `pin/*` tag is a marker on a commit, never a build. A workflow whose
+# `push` trigger reaches tags ran twice for the two pin tags pushed in W1. A push
+# trigger reaches tags when it has no ref filter at all, or a tags filter; it
+# must then ignore `pin/**`. And a `tags-ignore` with no `branches` filter would
+# stop every BRANCH push — GitHub runs a push event only for the ref kinds a
+# filter names once any is named — so the branches are spelled out beside it.
+# Red against e2e-cross.yml's bare `push:`.
+@test "lanes: no push trigger runs for a pin/* tag, and none stops running for branches" {
+  local wf block
+  for wf in "$REPO_ROOT"/.github/workflows/*.yml; do
+    block="$(push_block "$wf")"
+    [ -n "$block" ] || continue
+    if [[ "$block" != *"branches"* && "$block" != *"tags"* ]]; then
+      echo "$(basename "$wf"): its push trigger has no ref filter, so a pin/* tag runs it" >&2
+      return 1
+    fi
+    if [[ "$block" == *"tags-ignore"* ]]; then
+      [[ "$block" == *"'pin/**'"* ]] || { echo "$(basename "$wf"): tags-ignore leaves pin/** in" >&2; return 1; }
+      [[ "$block" == *"branches:"* ]] || { echo "$(basename "$wf"): tags-ignore without branches stops every branch push" >&2; return 1; }
+    elif [[ "$block" == *"tags:"* ]]; then
+      echo "$(basename "$wf"): a tags filter must exclude pin/** — use tags-ignore" >&2
+      return 1
+    fi
+  done
+}
+
 # ── platforms.sh ────────────────────────────────────────────────────────────
 
 # The cells are one table: the script prints it, genindex reads its
