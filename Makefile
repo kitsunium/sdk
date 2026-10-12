@@ -92,9 +92,18 @@ test-framework:
 # the same source of truth; check-alloc-lane-coverage.sh fails the build if a
 # `!race` test exists in a package absent from that list. Run this locally
 # before touching a codec, kernel or logger hot path's allocation profile.
-ALLOC_TARGETS = $(shell sed -e 's/#.*//' -e '/^[[:space:]]*$$/d' tools/alloc-lane-targets.txt)
+#
+# The `#` that starts a comment in the list is spelled $(HASH): GNU make 3.81,
+# the one macOS ships, reads a literal `#` inside $(shell …) as the start of a
+# makefile comment and stops at "unterminated call to function `shell'" (issue
+# #294). printf's octal escape is the same byte on every make. And a list that
+# comes back empty — a missing file, a sed that matched everything — stops the
+# lane instead of running `bazel test --config=alloc` over nothing.
+HASH := $(shell printf '\043')
+ALLOC_TARGETS = $(shell sed -e 's/$(HASH).*//' -e '/^[[:space:]]*$$/d' tools/alloc-lane-targets.txt)
 
 test-alloc:
+	$(if $(ALLOC_TARGETS),,$(error test-alloc: tools/alloc-lane-targets.txt names no target — the race-off lane would run nothing))
 	bazel test --config=alloc $(ALLOC_TARGETS)
 
 # `lint` is the read-only counterpart of `build`: same checks, but it
