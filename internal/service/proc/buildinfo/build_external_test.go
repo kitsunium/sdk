@@ -1,11 +1,11 @@
-package self_test
+package buildinfo_test
 
 import (
 	"runtime/debug"
 	"testing"
 	"time"
 
-	"github.com/kitsunium/sdk/internal/service/proc/self"
+	"github.com/kitsunium/sdk/internal/service/proc/buildinfo"
 )
 
 // Module paths the fixtures describe.
@@ -42,35 +42,35 @@ func TestParseBuild(t *testing.T) {
 			{Key: "vcs.modified", Value: "false"},
 		},
 	}
-	build := self.ParseBuild(info)
+	build := buildinfo.ParseBuild(info)
 	if build.GoVersion != "go1.27.1" || build.Path != appPath+"/cmd/app" || len(build.Deps) != 5 {
 		t.Fatalf("build = %+v, want the toolchain, the main package and five dependencies", build)
 	}
 	type tc struct {
 		path string
-		want self.ModuleValue
+		want buildinfo.ModuleValue
 	}
 	tests := []tc{
 		{
 			//: the stamp's full revision beats the pseudo-version's prefix, and
 			//: "+dirty" is Modified even when the stamp says false.
 			path: appPath,
-			want: self.ModuleValue{
+			want: buildinfo.ModuleValue{
 				Path: appPath, Revision: "8cf38860b6efa4146621893cc88085d66794a25c",
 				Time: stampTime, Local: true, Modified: true,
 			},
 		},
-		{path: frameworkMod, want: self.ModuleValue{Path: frameworkMod, Dir: "/src/framework", Local: true}},
-		{path: sdkMod, want: self.ModuleValue{Path: sdkMod, Version: "v0.4.6"}},
+		{path: frameworkMod, want: buildinfo.ModuleValue{Path: frameworkMod, Dir: "/src/framework", Local: true}},
+		{path: sdkMod, want: buildinfo.ModuleValue{Path: sdkMod, Version: "v0.4.6"}},
 		{
 			path: "example.com/pseudo",
-			want: self.ModuleValue{
+			want: buildinfo.ModuleValue{
 				Path: "example.com/pseudo", Revision: "23e4c32e7484",
 				Time: time.Date(2026, 9, 24, 10, 2, 34, 0, time.UTC),
 			},
 		},
-		{path: "example.com/forked", want: self.ModuleValue{Path: "example.com/forked", Version: "v1.0.1", Replacement: "example.com/fork"}},
-		{path: "example.com/workspace", want: self.ModuleValue{Path: "example.com/workspace", Local: true}},
+		{path: "example.com/forked", want: buildinfo.ModuleValue{Path: "example.com/forked", Version: "v1.0.1", Replacement: "example.com/fork"}},
+		{path: "example.com/workspace", want: buildinfo.ModuleValue{Path: "example.com/workspace", Local: true}},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -99,19 +99,19 @@ func TestParseBuild(t *testing.T) {
 // records as "(devel)".
 func TestParseBuildReadsAReleaseAndABuildOutsideVersionControl(t *testing.T) {
 	t.Parallel()
-	release := self.ParseBuild(&debug.BuildInfo{Main: debug.Module{Path: appPath, Version: "v1.2.3"}})
-	if release.Main != (self.ModuleValue{Path: appPath, Version: "v1.2.3"}) {
+	release := buildinfo.ParseBuild(&debug.BuildInfo{Main: debug.Module{Path: appPath, Version: "v1.2.3"}})
+	if release.Main != (buildinfo.ModuleValue{Path: appPath, Version: "v1.2.3"}) {
 		t.Errorf("an installed release reads %+v", release.Main)
 	}
-	devel := self.ParseBuild(&debug.BuildInfo{Main: debug.Module{Path: appPath, Version: "(devel)"}})
-	if devel.Main != (self.ModuleValue{Path: appPath, Local: true}) {
+	devel := buildinfo.ParseBuild(&debug.BuildInfo{Main: debug.Module{Path: appPath, Version: "(devel)"}})
+	if devel.Main != (buildinfo.ModuleValue{Path: appPath, Local: true}) {
 		t.Errorf("a build outside version control reads %+v", devel.Main)
 	}
-	dirtyRelease := self.ParseBuild(&debug.BuildInfo{Main: debug.Module{Path: appPath, Version: "v1.2.3+dirty"}})
+	dirtyRelease := buildinfo.ParseBuild(&debug.BuildInfo{Main: debug.Module{Path: appPath, Version: "v1.2.3+dirty"}})
 	if dirtyRelease.Main.Version != "v1.2.3" || !dirtyRelease.Main.Modified {
 		t.Errorf("a modified tree at a tag reads %+v", dirtyRelease.Main)
 	}
-	if empty := self.ParseBuild(nil); empty.Main != (self.ModuleValue{}) || empty.Deps != nil {
+	if empty := buildinfo.ParseBuild(nil); empty.Main != (buildinfo.ModuleValue{}) || empty.Deps != nil {
 		t.Errorf("ParseBuild(nil) = %+v, want the zero value", empty)
 	}
 }
@@ -122,10 +122,10 @@ func TestParseBuildReadsAReleaseAndABuildOutsideVersionControl(t *testing.T) {
 // is no time, so Time stays zero rather than being guessed.
 func TestParseBuildKeepsTheRevisionOfAStampThatIsNoInstant(t *testing.T) {
 	t.Parallel()
-	build := self.ParseBuild(&debug.BuildInfo{Main: debug.Module{
+	build := buildinfo.ParseBuild(&debug.BuildInfo{Main: debug.Module{
 		Path: appPath, Version: "v0.0.0-20261399000000-abcdefabcdef",
 	}})
-	if want := (self.ModuleValue{Path: appPath, Revision: "abcdefabcdef"}); build.Main != want {
+	if want := (buildinfo.ModuleValue{Path: appPath, Revision: "abcdefabcdef"}); build.Main != want {
 		t.Errorf("a pseudo-version whose stamp is no instant reads\n  %+v\nwant\n  %+v", build.Main, want)
 	}
 }
@@ -135,7 +135,7 @@ func TestParseBuildKeepsTheRevisionOfAStampThatIsNoInstant(t *testing.T) {
 func TestReadBuildAgreesWithTheToolchain(t *testing.T) {
 	t.Parallel()
 	info, embedded := debug.ReadBuildInfo()
-	build, read := self.ReadBuild()
+	build, read := buildinfo.ReadBuild()
 	if read != embedded {
 		t.Fatalf("ReadBuild reported %v, the toolchain %v", read, embedded)
 	}

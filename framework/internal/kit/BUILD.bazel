@@ -89,7 +89,6 @@ go_library(
         "privacycmd.go",
         "privacycmd_print.go",
         "privacycmd_seal.go",
-        "process.go",
         "profile.go",
         "query.go",
         "queued.go",
@@ -189,8 +188,8 @@ go_library(
         "//pkg/v1/observe/metrics",
         "//pkg/v1/observe/trace",
         "//pkg/v1/proc",
+        "//pkg/v1/proc/buildinfo",
         "//pkg/v1/proc/ipc",
-        "//pkg/v1/proc/process",
         "//pkg/v1/proc/signal",
         "//pkg/v1/security/authz",
         "//pkg/v1/security/redact",
@@ -327,6 +326,7 @@ go_test(
     tags = ["manual"],  # keep
     deps = [
         "//framework/git",
+        "//framework/internal/kit/plug",
         "//framework/kit/config/toml",
         "//framework/kit/config/yaml",
         "//framework/kit/server",

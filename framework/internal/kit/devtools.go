@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strconv"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 )
 
@@ -56,9 +57,28 @@ func (a *App) goTracked(fn func()) bool {
 
 // The process ---------------------------------------------------------------
 
-// serveProcess answers GET /_kit/api/process: a fresh sample, for polling.
+// serveProcess answers GET /_kit/api/process: a fresh sample, for polling;
+// 404 when no sampler is plugged in — a product that did not import
+// framework/kit/server, which serves no route anyway.
 func (a *App) serveProcess(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, sampleProcess())
+	p := processSample()
+	if p == nil {
+		http.NotFound(w, r)
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
+}
+
+// processSample is a sample of the running process from the sampler
+// framework/kit/server plugs in (plug.SampleProcess), nil without one: kit
+// itself imports neither runtime/metrics nor the SDK's process package, whose
+// initialisation a CLI or a daemon would pay for nothing (ADR 0172).
+func processSample() *model.Process {
+	sample := plug.SampleProcess.Load()
+	if sample == nil {
+		return nil
+	}
+	return (*sample)()
 }
 
 // Controls ------------------------------------------------------------------

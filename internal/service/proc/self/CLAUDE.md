@@ -2,24 +2,25 @@
 
 ## Purpose
 
-What the running process can say about ITSELF (ADR 0100): the build it came
-from (`build.go`) and its runtime state (`stats.go`, `cputime_*.go`). Every
-other `proc` package acts on another process — spawns, signals, reaps, limits a
-child; this one only reads, and only the process it runs in. Public facade:
-`pkg/v1/proc/process` (`Self`, `Build`, `ParseBuild`, and the `Stats` /
-`Distribution` / `BuildInfo` / `Module` aliases).
+What the running process is DOING (ADR 0100): its runtime state (`stats.go`,
+`cputime_*.go`). Every other `proc` package acts on another process — spawns,
+signals, reaps, limits a child; this one only reads, and only the process it
+runs in. Public facade: `pkg/v1/proc/process` (`Self`, and the `Stats` /
+`Distribution` aliases).
 
-Stdlib plus `internal/kernel/semver`, which recognises a pseudo-version and
-reads its revision and time — the kernel primitive that replaced
-`golang.org/x/mod/module` here (ADR 0156 §4), so this package reaches no module
-outside the SDK.
+What the binary was BUILT from was here too and is now
+`internal/service/proc/buildinfo` (ADR 0172): reading a build must not import
+`runtime/metrics`, whose initialisation every process importing it pays at
+start — about 0.03 ms of a status line's every render, for a figure it never
+reads.
+
+Stdlib only.
 
 ## Contents
 
 | File | Role |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
-| `build.go` | `BuildValue` + `Module(path)`, `ModuleValue`, `ReadBuild`, `ParseBuild`, and the three readings of a recorded version (`fromVersion`, `mainModule`, `dependency`) |
 | `stats.go` | `StatsValue`, `DistributionValue` + `Count` / `Quantile`, `ReadStats`, the runtime/metrics names, `lastGC`, `runtimeCPU` |
 | `cputime_unix.go` | `cpuTime` from `getrusage(RUSAGE_SELF)` — user plus system, every thread |
 | `cputime_other.go` | `cpuTime` as the runtime's estimate, flagged — Windows, Plan 9, wasm |
@@ -33,23 +34,6 @@ outside the SDK.
   toolchain does not export, a platform without `getrusage` — none is a fault a
   caller can act on. Each is a zero field, a `false`, or `CPUEstimated`, and
   each field's comment says which.
-- **A recorded version conflates three things; `ModuleValue` separates them.**
-  A RELEASE (`Version`), a COMMIT (`Revision`, `Time` — what a pseudo-version
-  and the main module's `vcs.*` stamp name), and a DIRECTORY (`Local`, `Dir` —
-  a directory replacement, a workspace module, a main module built in its own
-  tree). The downstream copy this replaces reported a pseudo-version as "no
-  version" and lost the commit it named, and left a workspace module neither
-  versioned nor local; both are now told. The main module's stamp beats its
-  pseudo-version (a full revision against a twelve-character prefix, exact time
-  against a second-granular copy), and `+dirty` — which Go 1.24 appends —
-  becomes `Modified` instead of staying in the version string. A pseudo-version
-  whose stamp is no instant (a thirteenth month) is still a commit: its
-  revision is kept and its time left zero, never guessed.
-- **Measured, not assumed: what the toolchain records.** In workspace mode a
-  directory replacement is recorded relative to the WORKSPACE root, not to the
-  main module (`../lib` in `go.mod` read back as `./lib`), and a workspace
-  module is recorded as `(devel)` with no directory at all. `Dir`'s comment
-  says both.
 - **Everything cumulative, on purpose.** The runtime's histograms count since
   the process started, so a p99 read here is over the process's life. A window
   is two snapshots subtracted; a snapshot that reset the runtime's counters
@@ -70,10 +54,8 @@ outside the SDK.
 - Add an error return. A caller has nothing to do with "this platform has no
   getrusage" except read the flag.
 - Reset or window the runtime's counters here. Subtract two snapshots.
-- Parse pseudo-versions here. `kernel/semver` owns the grammar — the three
-  shapes and their build metadata — and its suite holds it to the toolchain's
-  own pattern on every near miss; a second reading in this package would be
-  the hand-written pattern ADR 0100 refused.
+- Read the build here. It is `internal/service/proc/buildinfo`'s, apart from
+  `runtime/metrics` on purpose (ADR 0172).
 
 ## Verification
 

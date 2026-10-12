@@ -11,7 +11,7 @@ import (
 
 	"github.com/kitsunium/sdk/framework/git"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/proc/process"
+	"github.com/kitsunium/sdk/pkg/v1/proc/buildinfo"
 )
 
 // sdkModule is the module a build's kit and SDK are read from, besides the
@@ -63,12 +63,12 @@ var (
 	})
 	// parsedBuild is readBuild as the SDK reads it, parsed once; nil when the
 	// binary carries no build information.
-	parsedBuild = sync.OnceValue(func() *process.BuildInfo {
+	parsedBuild = sync.OnceValue(func() *buildinfo.BuildInfo {
 		bi := readBuild()
 		if bi == nil {
 			return nil
 		}
-		return new(process.ParseBuild(bi))
+		return new(buildinfo.ParseBuild(bi))
 	})
 	// productionBuild is the build as a production run describes it — no
 	// question to git —, described once for the process; every app gets its
@@ -104,7 +104,7 @@ type gitAnswer struct {
 }
 
 // buildOf describes what the running binary was built from, as the SDK reads
-// it (process.ParseBuild): the product's own module with the VCS stamp Go
+// it (buildinfo.ParseBuild): the product's own module with the VCS stamp Go
 // records, and the version of the SDK module, which holds kit (ADR 0162) — so
 // Kit and SDK say the same module at the same version. A module built from a
 // local directory — a workspace, a replace — has no version; with git (dev
@@ -113,7 +113,7 @@ func buildOf(bi *debug.BuildInfo, head gitHead) *model.Build {
 	if bi == nil {
 		return nil
 	}
-	info := process.ParseBuild(bi)
+	info := buildinfo.ParseBuild(bi)
 	b := &model.Build{
 		Product: versionOf(&info.Main, nil),
 		Kit:     model.ModuleVersion{Module: sdkModule},
@@ -133,7 +133,7 @@ func buildOf(bi *debug.BuildInfo, head gitHead) *model.Build {
 // versionOf says one module as the model does: its release, or the commit it
 // came from — which git tells, when head is given, for a directory the
 // toolchain does not stamp.
-func versionOf(m *process.Module, head gitHead) model.ModuleVersion {
+func versionOf(m *buildinfo.Module, head gitHead) model.ModuleVersion {
 	v := model.ModuleVersion{Module: m.Path, Version: m.Version, Revision: m.Revision, Modified: m.Modified, Local: m.Local}
 	at := m.Time
 	if m.Local && head != nil && filepath.IsAbs(m.Dir) {

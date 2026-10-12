@@ -145,8 +145,8 @@ internal/
                            vfs — os.Root-confined FS + memory FS + atomic
                              publish)
                    proc   (the family — ADR 0155; a directory, no Go code:
-                           cgroup, childwait, exec, memlimit, reaper,
-                           rlimit, self, signal — process supervision,
+                           buildinfo, cgroup, childwait, exec, memlimit,
+                           reaper, rlimit, self, signal — process supervision,
                            ADR 0016; internal/rlim — the syscall.Rlimit
                            constructor exec and rlimit share;
                            systemd/{listen, notify} — socket activation and
@@ -257,7 +257,9 @@ pkg/
     ├── proc/      (the capability preflight at the family's root — ADR 0016, ADR 0144;
     │                 its facades are its children — a child never links its parent,
     │                 ADR 0155: process/ — spawn, wait, stop, and the process itself,
-    │                 Self and Build — ADR 0100; signal/, reaper/, rlimit/, cgroup/;
+    │                 Self and Build — ADR 0100; buildinfo/ — Build alone, without
+    │                 runtime/metrics or the spawn engine — ADR 0172;
+    │                 signal/, reaper/, rlimit/, cgroup/;
     │                 memlimit/ — the cap already bounding this process — ADR 0075;
     │                 systemd/{notify, listen}/ — sd_notify and socket activation;
     │                 ipc/ — a private socket, the peer the kernel names — ADR 0148;
@@ -582,5 +584,6 @@ The full digest of every ADR — what it decided, what it amends, its status —
 - ADR 0168 — a declaration is the design's, and a body is the code's — `docs/adr/0168-a-declaration-is-the-designs-and-a-body-is-the-codes.md`
 - ADR 0169 — the SDK is rebuilt from its design in a copy, and a generation is held to the whole inline set — `docs/adr/0169-the-sdk-is-rebuilt-from-its-design-in-a-copy-and-a-generation-is-held-to-the-whole-inline-set.md`
 - ADR 0171 — a module per pkg family, one shared internal module, and a published version is never reused — `docs/adr/0171-a-module-per-family-and-a-version-is-never-reused.md`
+- ADR 0172 — a product initialises what it imports, and the stores stay in the core — `docs/adr/0172-a-product-initialises-what-it-imports-and-the-stores-stay-in-the-core.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`

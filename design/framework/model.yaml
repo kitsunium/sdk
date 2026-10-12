@@ -6862,7 +6862,10 @@ packages:
               name: History
               tag: json:"history,omitempty"
               type: "[]PhaseChangeEvent"
-            - doc: Process is the Go process, sampled when the graph was built.
+            - doc: |-
+                Process is the Go process, sampled when the graph was built; nil when
+                the product imports no framework/kit/server, which plugs the sampler
+                in (ADR 0172).
               name: Process
               tag: json:"process,omitempty"
               type: "*ProcessSpec"

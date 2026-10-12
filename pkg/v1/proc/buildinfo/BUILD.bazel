@@ -1,0 +1,33 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "buildinfo",
+    srcs = [
+        "doc.go",
+        "facade_gen.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/proc/buildinfo",
+    visibility = ["//visibility:public"],
+    deps = ["//internal/service/proc/buildinfo"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":buildinfo",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "buildinfo_test",
+    srcs = [
+        "api_gen_test.go",
+        "buildinfo_external_test.go",
+    ],
+    deps = [
+        ":buildinfo",
+        "//internal/service/proc/buildinfo",
+        "//pkg/v1/proc/process",
+    ],
+)

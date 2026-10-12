@@ -14,6 +14,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//internal/core/proc",
+        "//internal/service/proc/buildinfo",
         "//internal/service/proc/exec",
         "//internal/service/proc/self",
     ],
@@ -39,6 +40,7 @@ go_test(
         ":process",
         "//internal/core/proc",
         "//internal/kernel/errs",
+        "//internal/service/proc/buildinfo",
         "//internal/service/proc/self",
     ],
 )

@@ -2,18 +2,20 @@
 # framework/internal/kit/plug — where kit's opt-in subsystems plug in
 
 The hooks kit reads and a subsystem package sets as it is imported: the HTTP
-engine and the frontends' file server (`serverkit`, set by
-`framework/kit/server`), the Studio's event stream and profiler
+engine, the frontends' file server and the process sampler (`serverkit`, set
+by `framework/kit/server`), the Studio's event stream and profiler
 (`studiokit`, set by `framework/kit/studio`). kit imports none of the SDK
 packages behind them — `pkg/v1/net/server`, `net/static`, `net/sse`,
-`profiling` —, so a product that does not import a subsystem neither links
-nor initialises them.
+`profiling`, `proc/process` (and through it `runtime/metrics` and the spawn
+engine, ADR 0172) —, so a product that does not import a subsystem neither
+links nor initialises them; `framework/kit`'s `TestTheFacadeImportsNoOptInSubsystem`
+holds the graph to it.
 
 ## Contents
 
 | File | Holds |
 |---|---|
-| `plug.go` | the hooks (`NewHTTPServer`, `NewStaticFiles`, `OpenEventStream`, `StudioProfiler`), what they take and return (`HTTPConfig`, `HTTPState`, `HTTPServer`, `EventStream`, `ProfilerConfig`, `SourceFunc`), the pprof labels kit and the profiler share (`LabelNode`, `LabelLoop`) |
+| `plug.go` | the hooks (`NewHTTPServer`, `NewStaticFiles`, `SampleProcess`, `OpenEventStream`, `StudioProfiler`), what they take and return (`HTTPConfig`, `HTTPState`, `HTTPServer`, `EventStream`, `ProfilerConfig`, `SourceFunc`), the pprof labels kit and the profiler share (`LabelNode`, `LabelLoop`) |
 | `README.md` | written by `tools/genindex` from `docs/api` (`make docs-readme`, ADR 0167) |
 
 ## Rules
@@ -24,5 +26,5 @@ nor initialises them.
 ## Verify
 
 ```sh
-cd framework && GOWORK=off go vet ./internal/kit/plug/ && GOWORK=off go list -deps ./internal/kit/ | grep -E 'pkg/v1/(server|profiling)' ; test $? -eq 1
+cd framework && GOWORK=off go vet ./internal/kit/plug/ && GOWORK=off go list -deps ./internal/kit/ | grep -E 'pkg/v1/(net/server|net/static|net/sse|observe/profiling|proc/process)$|^runtime/metrics$' ; test $? -eq 1
 ```

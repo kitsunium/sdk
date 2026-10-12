@@ -78,14 +78,14 @@
       "name": "plug",
       "dir": "framework/internal/kit/plug",
       "layer": "framework",
-      "doc": "Package plug is where kit's opt-in subsystems plug in: the HTTP engine and\nthe frontends' file server (framework/kit/server), the Studio's event\nstream and its profiler (framework/kit/studio). kit reads what they\nregistered through the hooks declared here, and imports none of the SDK\npackages behind them: a product that does not import a subsystem neither\nlinks nor initialises its packages.\n\nThe package imports the standard library and the framework's model only,\nso that kit and every subsystem can import it.\n"
+      "doc": "Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the\nfrontends' file server and the process sampler of the runtime graph\n(framework/kit/server), the Studio's event stream and its profiler\n(framework/kit/studio). kit reads what they\nregistered through the hooks declared here, and imports none of the SDK\npackages behind them: a product that does not import a subsystem neither\nlinks nor initialises its packages.\n\nThe package imports the standard library and the framework's model only,\nso that kit and every subsystem can import it.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/framework/internal/kit/serverkit",
       "name": "serverkit",
       "dir": "framework/internal/kit/serverkit",
       "layer": "framework",
-      "doc": "Package serverkit is what framework/kit/server plugs into kit: the HTTP\nengine an app in the server profile serves on (the SDK's net/server) and the\nfrontends' file server (the SDK's net/static). kit imports neither: a\ndaemon or a CLI neither links nor initialises them.\n\nPackage serverkit — the compile-time proof that the engine is kit's.\n"
+      "doc": "Package serverkit is what framework/kit/server plugs into kit: the HTTP\nengine an app in the server profile serves on (the SDK's net/server), the\nfrontends' file server (the SDK's net/static), and the process sampler of\nthe runtime graph a serving app answers (the SDK's proc/process, and through\nit runtime/metrics and the spawn engine). kit imports none of them: a\ndaemon or a CLI neither links nor initialises them (ADR 0172).\n\nPackage serverkit — the compile-time proof that the engine is kit's.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/framework/internal/kit/studiokit",
@@ -148,7 +148,7 @@
       "name": "server",
       "dir": "framework/kit/server",
       "layer": "framework",
-      "doc": "Package server makes a kit app in the server profile — the default — serve\nHTTP: its endpoints, its frontends and its health probes, on the SDK's\nserver engine. A product that serves HTTP imports it:\n\n\timport _ \"github.com/kitsunium/sdk/framework/kit/server\"\n\nA daemon or a CLI does not, and links none of the engine. A server that\ndoes not import it is refused at the start, naming the import.\n"
+      "doc": "Package server makes a kit app in the server profile — the default — serve\nHTTP: its endpoints, its frontends and its health probes, on the SDK's\nserver engine. A product that serves HTTP imports it:\n\n\timport _ \"github.com/kitsunium/sdk/framework/kit/server\"\n\nA daemon or a CLI does not, and links none of the engine. A server that\ndoes not import it is refused at the start, naming the import.\n\nIt also plugs in the process sampler — the SDK's runtime metrics, which the\nruntime graph a serving app answers carries (ADR 0172). Without this\npackage the graph has no process, and the program initialises neither\nruntime/metrics nor the SDK's process package.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/framework/kit/storetest",
@@ -1601,6 +1601,14 @@
       "doc": "Package trace — the Tracer's configuration: producing Resource,\ninstrumentation Scope, sampling policy, span destination and clock.\n\nPackage trace — the OTLP/HTTP emitter: the exporter that POSTs an encoded\nbatch to a collector. The transport itself — endpoint refusal, the default\nclient and its own pool, the bounded reads, the classification — is the one\nboth signals share (internal/service/observe/internal/otlp); what is this signal's is\nthe path, the vocabulary every verdict is named in, and the encoder.\n\nPackage trace — OTLP/JSON encoder: SpansValue to the bytes an OTLP receiver\naccepts, implemented from the specification with encoding/json.\n\nPackage trace — the outbound HTTP middleware.\n\nPackage trace — the inbound HTTP middleware.\n\nPackage trace — minting the two identifiers.\n\nPackage trace — the span an unsampled trace gets.\n\nPackage trace — the numeric rendering a refused sampling ratio is reported with.\nThe OTLP encoder's own renderings (a double, a decimal-string 64-bit\ninteger) are the ones both signals share, in internal/service/observe/internal/otlp.\n\nPackage trace — the one member of a collector's answer that is this signal's\nown: the count an ExportTraceServiceResponse reports rejected.\n\nPackage trace — the OTLP payload tree: a Go mirror of\nopentelemetry/proto/{collector/trace,trace}/v1, restricted to the fields this\nSDK produces. The common/v1 and resource/v1 messages it embeds — KeyValue,\nAnyValue, Resource, InstrumentationScope — and the proto3-JSON scalars are\nthe ones both signals share, in internal/service/observe/internal/otlp.\n\nField ORDER inside each struct is the schema's FIELD-NUMBER order, not a\nreading order: encoding/json emits struct fields as declared, and deriving the\norder from the document is what makes the expected bytes in the tests\ncheckable against the .proto field by field.\n\nThe visible evidence that the order came from the schema rather than from\ntaste is otlpSpan, which puts `flags` LAST — after `status` — because it is\nfield 16 and status is 15, even though every .proto listing shows `flags`\nbeside `parent_span_id` where it reads naturally. The same tell exists in the\nmetrics mirror, where `attributes` sits after the value because it is field 7.\n\nEvery field this SDK does not produce is ABSENT rather than always-empty\n(rule 5): schemaUrl, droppedAttributesCount, droppedEventsCount and\ndroppedLinksCount here, and a scope's attributes in the shared Scope.\n\nPackage trace — the OTLP/HTTP exporter's configuration.\n\nPackage trace — propagation across a process boundary: the two W3C headers\nwritten into, and read out of, a coretrace.Carrier. The port and the span\ncontext are internal/core/observe/trace's; reading and writing the headers\nis this engine's mechanism (ADR 0160 §4).\n\nPackage trace — recording an error on a span.\n\nPackage trace — the in-memory span destination.\n\nPackage trace — the in-memory recorder's configuration.\n\nPackage trace — the three samplers, and the fraction that is refused.\n\nPackage trace — the live, recording span.\n\nPackage trace — the traceparent header: parsing it, and writing it back. The\nspan context it carries is a value of internal/core/observe/trace; reading\nand writing the header is this engine's mechanism (ADR 0160 §4).\n\nPackage trace is the concrete tracing implementation behind\ninternal/core/observe/trace: a Tracer, three samplers, an in-memory recorder, the\nOTLP/JSON encoder and the OTLP/HTTP emitter — all from the OpenTelemetry and\nW3C specifications, importing nothing from go.opentelemetry.io. See ADR 0051.\n\nPackage trace — the tracestate header read into a list. The list and the\ngrammar of its members are internal/core/observe/trace's StateValue; reading\nthe header — its commas, its optional whitespace, its \"=\" — is this engine's\nmechanism (ADR 0160 §4).\n"
     },
     {
+      "path": "github.com/kitsunium/sdk/internal/service/proc/buildinfo",
+      "name": "buildinfo",
+      "dir": "internal/service/proc/buildinfo",
+      "layer": "service",
+      "family": "proc",
+      "doc": "Package buildinfo is what the running binary was built from, read from the\nbuild information the Go toolchain embedded in it.\n\nIt only reads, and only the binary it runs in — or a debug.BuildInfo handed\nto ParseBuild. It is a package of its own, apart from\ninternal/service/proc/self's runtime metrics, so that a program which only\nasks what it was built from never imports runtime/metrics, whose\ninitialisation every process importing it pays at start (ADR 0172). Nothing\nhere can fail in a way a caller could act on, so nothing returns an error: a\nbinary built without module support reads as false.\n"
+    },
+    {
       "path": "github.com/kitsunium/sdk/internal/service/proc/cgroup",
       "name": "cgroup",
       "dir": "internal/service/proc/cgroup",
@@ -1670,7 +1678,7 @@
       "dir": "internal/service/proc/self",
       "layer": "service",
       "family": "proc",
-      "doc": "Package self is what the running process can say about itself: what it was\nbuilt from (build.go) and what it is doing right now (stats.go).\n\nThe rest of the proc domain acts on OTHER processes — it spawns, signals,\nreaps and limits children. This package only reads, and only the process it\nruns in: the build information the Go toolchain embedded in the binary, the\nGo runtime's own metrics, and the kernel's account of the CPU time used.\nNothing here can fail in a way a caller could act on, so nothing returns an\nerror: an absent answer is a zero field or a false, and the doc comment of\neach field says which.\n\nPackage self — the CPU time the process used, where the kernel's count is\nnot at hand.\n\nPackage self — the CPU time the process used, as the kernel counts it.\n\nPackage self — the running process's runtime state, read from the Go\nruntime's own metrics and the kernel's CPU accounting.\n"
+      "doc": "Package self is what the running process is doing right now: the Go\nruntime's own metrics and the kernel's account of the CPU time used.\n\nThe rest of the proc domain acts on OTHER processes — it spawns, signals,\nreaps and limits children. This package only reads, and only the process it\nruns in. What the binary was built from is internal/service/proc/buildinfo's,\na package of its own so that reading a build never imports runtime/metrics\n(ADR 0172). Nothing here can fail in a way a caller could act on, so nothing\nreturns an error: an absent answer is a zero field or a false, and the doc\ncomment of each field says which.\n\nPackage self — the CPU time the process used, where the kernel's count is\nnot at hand.\n\nPackage self — the CPU time the process used, as the kernel counts it.\n\nPackage self — the running process's runtime state, read from the Go\nruntime's own metrics and the kernel's CPU accounting.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/internal/service/proc/signal",
@@ -2319,6 +2327,14 @@
       "layer": "public",
       "family": "proc",
       "doc": "Package proc is the capability-preflight facade for the process-supervision\ndomain. Some proc primitives have no native, secure mechanic on every OS\n(cgroup is Linux/Windows-only, rlimit/sd_notify are Unix-only, …); the SDK\nhonours those gaps by returning the typed [UnsupportedPlatform] error and\nNEVER panicking on its own. This package lets a CONSUMER instead choose to\nfail fast at its own startup — the idiomatic Go MustX pattern\n([regexp.MustCompile] / [text/template.Must]): the library offers the panic,\nit never imposes it.\n\n# Why preflight instead of recover\n\nA process supervisor (a PID1) cannot rely on a recover() in its hot path: an\nunrecovered panic in pid 1 orphans every supervised service, and a panic that\ncrosses a CGO/FFI boundary is undefined behaviour. The safe pattern is to\nreject an unsupported configuration up front — assert the required\ncapabilities once, at startup, then route only to capabilities that\n[Supported] reports present.\n\n\tfunc main() {\n\t\t// crash-at-launch, clearly, if this host cannot supervise at all:\n\t\tproc.MustSupport(proc.CapProcessSpawn, proc.CapReaper)\n\t\tos.Exit(run())\n\t}\n\n\t// elsewhere, branch instead of crash for an optional capability:\n\tif proc.Supported(proc.CapCgroup) {\n\t\t// confine via cgroup / Job Object\n\t}\n\n# Capability × platform matrix\n\n\tCapability           linux darwin windows freebsd openbsd netbsd dragonfly illumos solaris\n\tCapProcessSpawn        ✅     ✅     ✅      ✅      ✅      ✅      ✅        ✅      ✅\n\tCapSignalRelay         ✅     ✅     ✅      ✅      ✅      ✅      ✅        ✅      ✅\n\tCapReaper              ✅     ✅     ✅¹     ✅      ✅      ✅      ✅        ✅⁴     ✅⁴\n\tCapCgroup              ✅     ❌     ✅²     ❌      ❌      ❌      ❌        ❌      ❌\n\tCapRlimit              ✅     ✅     ❌³     ✅      ✅      ✅      ✅        ✅      ✅\n\tCapUmaskNiceOOM        ✅     ✅     ❌      ✅      ✅      ✅      ✅        ✅      ✅\n\tCapSdNotify            ✅     ✅     ❌      ✅      ✅      ✅      ✅        ✅      ✅\n\tCapSocketActivation    ✅     ✅     ❌      ✅      ✅      ✅      ✅        ✅      ✅\n\n¹ Windows has no zombies; the reaper is a correct no-op there. ² Windows\ncgroup is the Job Object backend. ³ the Unix setrlimit-on-self model has no\nWindows analogue; Windows resource limits are applied through the cgroup\n(Job Object) container or at spawn via the process Spec, not a standalone rlimit.\n⁴ illumos and Solaris have no reparent-here facility, like darwin, OpenBSD\nand NetBSD: SetChildSubreaper returns [UnsupportedPlatform]. Their reaper\nalso sweeps once a second, because the Go runtime forks every child there\nwith FORK_NOSIGCHLD and its exit posts no SIGCHLD. Both columns are proven\non OmniOS r151054 and Oracle Solaris 11.4 (amd64) by the SDK's\ncross-platform runtime lane.\n\n[Supported] consults runtime.GOOS only — it is the platform-level matrix, not\na runtime probe. A capability that is native on the GOOS may still be\nunavailable at runtime (e.g. cgroup present but not delegated); use the\nper-facade probe for that (e.g. cgroup.Available()).\n"
+    },
+    {
+      "path": "github.com/kitsunium/sdk/pkg/v1/proc/buildinfo",
+      "name": "buildinfo",
+      "dir": "pkg/v1/proc/buildinfo",
+      "layer": "public",
+      "family": "proc",
+      "doc": "Package buildinfo is what the running binary was built from: the toolchain,\nthe main package, the main module with its version-control stamp, and every\ndependency followed through its replacement.\n\n\tbuild, ok := buildinfo.Build()\n\tsdk, found := build.Module(\"github.com/kitsunium/sdk\")\n\t// sdk.Version is a release (\"v0.4.6\"), or \"\" with sdk.Revision/sdk.Time\n\t// for a pseudo-version, or \"\" with sdk.Local for a directory.\n\nA module's recorded version conflates three things, and [Module] keeps them\napart: a RELEASE in Version, a COMMIT in Revision and Time (a pseudo-version\nnames one, and so does the main module's version-control stamp), and a\nDIRECTORY in Local and Dir (a replace, a workspace module). Nothing here fails:\na binary built without module support reads as false.\n\nThe same values are re-exported by pkg/v1/proc/process, beside the spawning of\nchildren and the process's runtime statistics. This package is the reading\nalone, so that a program asking only what it was built from imports neither\nthe spawn engine nor runtime/metrics, whose initialisation every process\nimporting them pays at start (ADR 0172).\n"
     },
     {
       "path": "github.com/kitsunium/sdk/pkg/v1/proc/cgroup",
@@ -10798,6 +10814,17 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.SampleProcess",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "SampleProcess",
+      "spelled": "atomic.Pointer[func() *model.Process]",
+      "canonical": "sync/atomic.Pointer[func() *github.com/kitsunium/sdk/framework/model.Process]",
+      "doc": "SampleProcess samples the running process — its heap, goroutines,\ncollections and CPU time — for the runtime graph a serving app answers;\nnil until framework/kit/server is imported, and the graph then carries\nno process (ADR 0172).\n",
+      "file": "framework/internal/kit/plug/plug.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.SourceFunc",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
@@ -10826,7 +10853,7 @@
       "name": "Enable",
       "spelled": "func()",
       "canonical": "func()",
-      "doc": "Enable plugs the HTTP engine and the frontends' file server into kit.\n",
+      "doc": "Enable plugs the HTTP engine, the frontends' file server and the process\nsampler into kit.\n",
       "file": "framework/internal/kit/serverkit/serverkit.go",
       "layer": "framework"
     },
@@ -27487,7 +27514,7 @@
           "name": "Process",
           "type": "*ProcessSpec",
           "tag": "json:\"process,omitempty\"",
-          "doc": "Process is the Go process, sampled when the graph was built.\n"
+          "doc": "Process is the Go process, sampled when the graph was built; nil when\nthe product imports no framework/kit/server, which plugs the sampler\nin (ADR 0172).\n"
         },
         {
           "name": "HTTP",
@@ -83113,6 +83140,131 @@
       "family": "observe"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/proc/buildinfo.BuildValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/proc/buildinfo",
+      "name": "BuildValue",
+      "spelled": "struct{GoVersion string; Path string; Main ModuleValue; Deps []ModuleValue}",
+      "canonical": "struct{GoVersion string; Path string; Main github.com/kitsunium/sdk/internal/service/proc/buildinfo.ModuleValue; Deps []github.com/kitsunium/sdk/internal/service/proc/buildinfo.ModuleValue}",
+      "fields": [
+        {
+          "name": "GoVersion",
+          "type": "string",
+          "doc": "GoVersion is the toolchain that built the binary, e.g. \"go1.27.1\".\n"
+        },
+        {
+          "name": "Path",
+          "type": "string",
+          "doc": "Path is the import path of the main package, e.g.\n\"github.com/acme/app/cmd/server\".\n"
+        },
+        {
+          "name": "Main",
+          "type": "ModuleValue",
+          "doc": "Main is the main module.\n"
+        },
+        {
+          "name": "Deps",
+          "type": "[]ModuleValue",
+          "doc": "Deps are the dependencies linked into the binary, in the order the\ntoolchain recorded them.\n"
+        }
+      ],
+      "doc": "BuildValue is what the running binary was built from: the toolchain, the\nmain package, the main module with its version-control stamp, and every\ndependency with the replacement it was built through.\n\nIt is the engine's own value (ADR 0074): no port in the proc domain speaks\nit, and it describes one mechanism's reading of runtime/debug.\n",
+      "file": "internal/service/proc/buildinfo/build.go",
+      "layer": "service",
+      "family": "proc"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/proc/buildinfo.(*BuildValue).Module",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/proc/buildinfo",
+      "name": "Module",
+      "recv": "BuildValue",
+      "spelled": "func(path string) (found ModuleValue, ok bool)",
+      "canonical": "func(path string) (found github.com/kitsunium/sdk/internal/service/proc/buildinfo.ModuleValue, ok bool)",
+      "doc": "Module returns the module whose path is path — the main module or one of\nthe dependencies — and whether the build contains it.\n",
+      "file": "internal/service/proc/buildinfo/build.go",
+      "layer": "service",
+      "family": "proc"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/proc/buildinfo.ModuleValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/proc/buildinfo",
+      "name": "ModuleValue",
+      "spelled": "struct{Time time.Time; Path string; Version string; Revision string; Dir string; Replacement string; Local bool; Modified bool}",
+      "canonical": "struct{Time time.Time; Path string; Version string; Revision string; Dir string; Replacement string; Local bool; Modified bool}",
+      "fields": [
+        {
+          "name": "Time",
+          "type": "time.Time",
+          "doc": "Time is the commit's time, when known: the main module's vcs.time\nstamp, or the timestamp a pseudo-version carries. Zero otherwise.\n"
+        },
+        {
+          "name": "Path",
+          "type": "string",
+          "doc": "Path is the module path the build required, e.g.\n\"github.com/kitsunium/sdk\".\n"
+        },
+        {
+          "name": "Version",
+          "type": "string",
+          "doc": "Version is the released version the code came from, e.g. \"v0.4.6\", or\n\"\" when there is none to tell: a pseudo-version (a commit, in Revision),\na module built from a local directory, or a main module built without\none. A \"+dirty\" suffix is not kept here; it is what Modified says.\n"
+        },
+        {
+          "name": "Revision",
+          "type": "string",
+          "doc": "Revision is the version-control commit the code came from, when known:\nthe main module's vcs.revision stamp (a full object name), or the\ncommit a pseudo-version names (its twelve-character prefix).\n"
+        },
+        {
+          "name": "Dir",
+          "type": "string",
+          "doc": "Dir is the directory a replace directive pointed the module at, as the\ntoolchain recorded it — relative to the main module, or to the\nworkspace root in workspace mode — or \"\" when it was not replaced by a\ndirectory. A workspace module is Local with no Dir: the toolchain does\nnot record where it was.\n"
+        },
+        {
+          "name": "Replacement",
+          "type": "string",
+          "doc": "Replacement is the module path a replace directive substituted, when it\nsubstituted another module rather than a directory; Version is then\nthat module's.\n"
+        },
+        {
+          "name": "Local",
+          "type": "bool",
+          "doc": "Local reports that the code came from a directory on the build machine\nrather than from a published version: a directory replacement, a\nworkspace module, or a main module built inside its own source tree.\n"
+        },
+        {
+          "name": "Modified",
+          "type": "bool",
+          "doc": "Modified reports that the build included uncommitted changes: the main\nmodule's vcs.modified stamp, or the \"+dirty\" its version carried. The\ntoolchain records nothing of the kind for a dependency.\n"
+        }
+      ],
+      "doc": "ModuleValue is one module of the running binary, described by the code\nthat was actually built for it.\n\nIts fields separate the three things a recorded version conflates: a\nRELEASE (Version), a COMMIT (Revision and Time), and a DIRECTORY on the\nbuild machine (Local and Dir). A pseudo-version names a commit rather than\na release, so it fills Revision and Time and leaves Version empty; a module\nbuilt from a directory has no version to tell at all.\n",
+      "file": "internal/service/proc/buildinfo/build.go",
+      "layer": "service",
+      "family": "proc"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/proc/buildinfo.ParseBuild",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/proc/buildinfo",
+      "name": "ParseBuild",
+      "spelled": "func(info *debug.BuildInfo) BuildValue",
+      "canonical": "func(info *runtime/debug.BuildInfo) github.com/kitsunium/sdk/internal/service/proc/buildinfo.BuildValue",
+      "doc": "ParseBuild describes the build info. It is what ReadBuild uses on the\nrunning binary, exported for a BuildInfo from elsewhere — one a test builds\nby hand, or debug.ParseBuildInfo's reading of another binary's `go version\n-m` output. A nil info describes nothing.\n",
+      "file": "internal/service/proc/buildinfo/build.go",
+      "layer": "service",
+      "family": "proc"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/proc/buildinfo.ReadBuild",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/proc/buildinfo",
+      "name": "ReadBuild",
+      "spelled": "func() (build BuildValue, ok bool)",
+      "canonical": "func() (build github.com/kitsunium/sdk/internal/service/proc/buildinfo.BuildValue, ok bool)",
+      "doc": "ReadBuild describes the running binary. It reports false when the binary\ncarries no build information — one built without module support — and\nnever fails otherwise.\n",
+      "file": "internal/service/proc/buildinfo/build.go",
+      "layer": "service",
+      "family": "proc"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/proc/cgroup.Available",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/proc/cgroup",
@@ -83767,53 +83919,6 @@
       "family": "proc"
     },
     {
-      "id": "go:github.com/kitsunium/sdk/internal/service/proc/self.BuildValue",
-      "kind": "type",
-      "package": "github.com/kitsunium/sdk/internal/service/proc/self",
-      "name": "BuildValue",
-      "spelled": "struct{GoVersion string; Path string; Main ModuleValue; Deps []ModuleValue}",
-      "canonical": "struct{GoVersion string; Path string; Main github.com/kitsunium/sdk/internal/service/proc/self.ModuleValue; Deps []github.com/kitsunium/sdk/internal/service/proc/self.ModuleValue}",
-      "fields": [
-        {
-          "name": "GoVersion",
-          "type": "string",
-          "doc": "GoVersion is the toolchain that built the binary, e.g. \"go1.27.1\".\n"
-        },
-        {
-          "name": "Path",
-          "type": "string",
-          "doc": "Path is the import path of the main package, e.g.\n\"github.com/acme/app/cmd/server\".\n"
-        },
-        {
-          "name": "Main",
-          "type": "ModuleValue",
-          "doc": "Main is the main module.\n"
-        },
-        {
-          "name": "Deps",
-          "type": "[]ModuleValue",
-          "doc": "Deps are the dependencies linked into the binary, in the order the\ntoolchain recorded them.\n"
-        }
-      ],
-      "doc": "BuildValue is what the running binary was built from: the toolchain, the\nmain package, the main module with its version-control stamp, and every\ndependency with the replacement it was built through.\n\nIt is the engine's own value (ADR 0074): no port in the proc domain speaks\nit, and it describes one mechanism's reading of runtime/debug.\n",
-      "file": "internal/service/proc/self/build.go",
-      "layer": "service",
-      "family": "proc"
-    },
-    {
-      "id": "go:github.com/kitsunium/sdk/internal/service/proc/self.(*BuildValue).Module",
-      "kind": "method",
-      "package": "github.com/kitsunium/sdk/internal/service/proc/self",
-      "name": "Module",
-      "recv": "BuildValue",
-      "spelled": "func(path string) (found ModuleValue, ok bool)",
-      "canonical": "func(path string) (found github.com/kitsunium/sdk/internal/service/proc/self.ModuleValue, ok bool)",
-      "doc": "Module returns the module whose path is path — the main module or one of\nthe dependencies — and whether the build contains it.\n",
-      "file": "internal/service/proc/self/build.go",
-      "layer": "service",
-      "family": "proc"
-    },
-    {
       "id": "go:github.com/kitsunium/sdk/internal/service/proc/self.DistributionValue",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/proc/self",
@@ -83860,84 +83965,6 @@
       "canonical": "func(q float64) time.Duration",
       "doc": "Quantile returns the q-th quantile of the distribution, q in [0, 1]: the\nUPPER bound of the bucket where the cumulative count reaches q of the total\n— an upper estimate, which is the honest reading of a bucketed histogram.\nq outside [0, 1] is clamped, NaN is read as 0, and an empty distribution is\nzero. A bucket whose upper bound is infinite answers with its lower bound.\n",
       "file": "internal/service/proc/self/stats.go",
-      "layer": "service",
-      "family": "proc"
-    },
-    {
-      "id": "go:github.com/kitsunium/sdk/internal/service/proc/self.ModuleValue",
-      "kind": "type",
-      "package": "github.com/kitsunium/sdk/internal/service/proc/self",
-      "name": "ModuleValue",
-      "spelled": "struct{Time time.Time; Path string; Version string; Revision string; Dir string; Replacement string; Local bool; Modified bool}",
-      "canonical": "struct{Time time.Time; Path string; Version string; Revision string; Dir string; Replacement string; Local bool; Modified bool}",
-      "fields": [
-        {
-          "name": "Time",
-          "type": "time.Time",
-          "doc": "Time is the commit's time, when known: the main module's vcs.time\nstamp, or the timestamp a pseudo-version carries. Zero otherwise.\n"
-        },
-        {
-          "name": "Path",
-          "type": "string",
-          "doc": "Path is the module path the build required, e.g.\n\"github.com/kitsunium/sdk\".\n"
-        },
-        {
-          "name": "Version",
-          "type": "string",
-          "doc": "Version is the released version the code came from, e.g. \"v0.4.6\", or\n\"\" when there is none to tell: a pseudo-version (a commit, in Revision),\na module built from a local directory, or a main module built without\none. A \"+dirty\" suffix is not kept here; it is what Modified says.\n"
-        },
-        {
-          "name": "Revision",
-          "type": "string",
-          "doc": "Revision is the version-control commit the code came from, when known:\nthe main module's vcs.revision stamp (a full object name), or the\ncommit a pseudo-version names (its twelve-character prefix).\n"
-        },
-        {
-          "name": "Dir",
-          "type": "string",
-          "doc": "Dir is the directory a replace directive pointed the module at, as the\ntoolchain recorded it — relative to the main module, or to the\nworkspace root in workspace mode — or \"\" when it was not replaced by a\ndirectory. A workspace module is Local with no Dir: the toolchain does\nnot record where it was.\n"
-        },
-        {
-          "name": "Replacement",
-          "type": "string",
-          "doc": "Replacement is the module path a replace directive substituted, when it\nsubstituted another module rather than a directory; Version is then\nthat module's.\n"
-        },
-        {
-          "name": "Local",
-          "type": "bool",
-          "doc": "Local reports that the code came from a directory on the build machine\nrather than from a published version: a directory replacement, a\nworkspace module, or a main module built inside its own source tree.\n"
-        },
-        {
-          "name": "Modified",
-          "type": "bool",
-          "doc": "Modified reports that the build included uncommitted changes: the main\nmodule's vcs.modified stamp, or the \"+dirty\" its version carried. The\ntoolchain records nothing of the kind for a dependency.\n"
-        }
-      ],
-      "doc": "ModuleValue is one module of the running binary, described by the code\nthat was actually built for it.\n\nIts fields separate the three things a recorded version conflates: a\nRELEASE (Version), a COMMIT (Revision and Time), and a DIRECTORY on the\nbuild machine (Local and Dir). A pseudo-version names a commit rather than\na release, so it fills Revision and Time and leaves Version empty; a module\nbuilt from a directory has no version to tell at all.\n",
-      "file": "internal/service/proc/self/build.go",
-      "layer": "service",
-      "family": "proc"
-    },
-    {
-      "id": "go:github.com/kitsunium/sdk/internal/service/proc/self.ParseBuild",
-      "kind": "func",
-      "package": "github.com/kitsunium/sdk/internal/service/proc/self",
-      "name": "ParseBuild",
-      "spelled": "func(info *debug.BuildInfo) BuildValue",
-      "canonical": "func(info *runtime/debug.BuildInfo) github.com/kitsunium/sdk/internal/service/proc/self.BuildValue",
-      "doc": "ParseBuild describes the build info. It is what ReadBuild uses on the\nrunning binary, exported for a BuildInfo from elsewhere — one a test builds\nby hand, or debug.ParseBuildInfo's reading of another binary's `go version\n-m` output. A nil info describes nothing.\n",
-      "file": "internal/service/proc/self/build.go",
-      "layer": "service",
-      "family": "proc"
-    },
-    {
-      "id": "go:github.com/kitsunium/sdk/internal/service/proc/self.ReadBuild",
-      "kind": "func",
-      "package": "github.com/kitsunium/sdk/internal/service/proc/self",
-      "name": "ReadBuild",
-      "spelled": "func() (build BuildValue, ok bool)",
-      "canonical": "func() (build github.com/kitsunium/sdk/internal/service/proc/self.BuildValue, ok bool)",
-      "doc": "ReadBuild describes the running binary. It reports false when the binary\ncarries no build information — one built without module support — and\nnever fails otherwise.\n",
-      "file": "internal/service/proc/self/build.go",
       "layer": "service",
       "family": "proc"
     },
@@ -109356,6 +109383,56 @@
       "family": "proc"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/proc/buildinfo.Build",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/proc/buildinfo",
+      "name": "Build",
+      "spelled": "func() (info BuildInfo, ok bool)",
+      "canonical": "func() (info github.com/kitsunium/sdk/pkg/v1/proc/buildinfo.BuildInfo, ok bool)",
+      "doc": "Build describes what the running binary was built from, and reports false\nwhen the binary carries no build information.\n",
+      "file": "pkg/v1/proc/buildinfo/facade_gen.go",
+      "layer": "public",
+      "family": "proc"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/proc/buildinfo.BuildInfo",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/proc/buildinfo",
+      "name": "BuildInfo",
+      "spelled": "svcbuild.BuildValue",
+      "canonical": "github.com/kitsunium/sdk/internal/service/proc/buildinfo.BuildValue",
+      "owner": "go:github.com/kitsunium/sdk/internal/service/proc/buildinfo.BuildValue",
+      "doc": "BuildInfo is what the running binary was built from: the toolchain, the\nmain package, the main module with its version-control stamp, and every\ndependency followed through its replacement. It is an alias of the service\nvalue, and the same type as pkg/v1/proc/process.BuildInfo.\n",
+      "file": "pkg/v1/proc/buildinfo/facade_gen.go",
+      "layer": "public",
+      "family": "proc"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/proc/buildinfo.Module",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/proc/buildinfo",
+      "name": "Module",
+      "spelled": "svcbuild.ModuleValue",
+      "canonical": "github.com/kitsunium/sdk/internal/service/proc/buildinfo.ModuleValue",
+      "owner": "go:github.com/kitsunium/sdk/internal/service/proc/buildinfo.ModuleValue",
+      "doc": "Module is one module of the running binary, with its release, its commit\nand its local directory told apart. It is an alias of the service value,\nand the same type as pkg/v1/proc/process.Module.\n",
+      "file": "pkg/v1/proc/buildinfo/facade_gen.go",
+      "layer": "public",
+      "family": "proc"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/proc/buildinfo.ParseBuild",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/proc/buildinfo",
+      "name": "ParseBuild",
+      "spelled": "func(info *debug.BuildInfo) BuildInfo",
+      "canonical": "func(info *runtime/debug.BuildInfo) github.com/kitsunium/sdk/pkg/v1/proc/buildinfo.BuildInfo",
+      "doc": "ParseBuild describes a BuildInfo from elsewhere — one a test builds by\nhand, or debug.ParseBuildInfo's reading of another binary — exactly as\nBuild describes the running one.\n",
+      "file": "pkg/v1/proc/buildinfo/facade_gen.go",
+      "layer": "public",
+      "family": "proc"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/proc/cgroup.Available",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/pkg/v1/proc/cgroup",
@@ -109806,9 +109883,9 @@
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/proc/process",
       "name": "BuildInfo",
-      "spelled": "svcself.BuildValue",
-      "canonical": "github.com/kitsunium/sdk/internal/service/proc/self.BuildValue",
-      "owner": "go:github.com/kitsunium/sdk/internal/service/proc/self.BuildValue",
+      "spelled": "svcbuild.BuildValue",
+      "canonical": "github.com/kitsunium/sdk/internal/service/proc/buildinfo.BuildValue",
+      "owner": "go:github.com/kitsunium/sdk/internal/service/proc/buildinfo.BuildValue",
       "doc": "BuildInfo is what the running binary was built from: the toolchain, the\nmain package, the main module with its version-control stamp, and every\ndependency followed through its replacement. It is an alias of the service\nvalue.\n",
       "file": "pkg/v1/proc/process/facade_gen.go",
       "layer": "public",
@@ -109858,9 +109935,9 @@
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/proc/process",
       "name": "Module",
-      "spelled": "svcself.ModuleValue",
-      "canonical": "github.com/kitsunium/sdk/internal/service/proc/self.ModuleValue",
-      "owner": "go:github.com/kitsunium/sdk/internal/service/proc/self.ModuleValue",
+      "spelled": "svcbuild.ModuleValue",
+      "canonical": "github.com/kitsunium/sdk/internal/service/proc/buildinfo.ModuleValue",
+      "owner": "go:github.com/kitsunium/sdk/internal/service/proc/buildinfo.ModuleValue",
       "doc": "Module is one module of the running binary, with its release, its commit\nand its local directory told apart. It is an alias of the service value.\n",
       "file": "pkg/v1/proc/process/facade_gen.go",
       "layer": "public",
