@@ -1,8 +1,8 @@
 # ADR 0152 — consensus domain (`consensus`): a write is committed when a majority holds it on disk, and the log is compacted from the first version
 
-- **Status**: Proposed. State: **rewritten-unreviewed (R8)**. Review run 3, rounds 1 and 2 (overall rounds 7 and 8) are applied. No reviewer has read the R8 version.
+- **Status**: Proposed. State: **rewritten after the final round (R9), not re-reviewed**. Review run 3, rounds 1 to 3 (overall rounds 7 to 9) are applied. Round 3 was the last of the run: every panelist answered "nothing blocks" on R8, and R9 applies its objections without a further review round.
 - **Date**: 2026-10-02
-- **Revised**: 2026-10-12 (R7), 2026-10-13 (R8), see *Revision history*
+- **Revised**: 2026-10-12 (R7), 2026-10-13 (R8 and R9), see *Revision history*
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0052](0052-sdk-lock-domain.md) (fencing, and the guarantee a lock does NOT make — this domain is the first in the SDK that can make it across machines), [ADR 0056](0056-sdk-vfs-domain.md) (publication by rename, and the streaming writer it deferred), [ADR 0090](0090-a-port-named-in-public-must-be-implementable-in-public.md) (the clock port every timer here runs on), [ADR 0029](0029-sdk-net-domain.md) (the stream connection port and the TLS identity the transport rides), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (frozen ports, siblings), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (clamp or refuse), [ADR 0011](0011-kernel-snapshot-primitive.md) (withdrawn as the snapshot tool, D3, R1-14), [ADR 0068](0068-layer-firewall-is-a-checked-graph.md) (the layers), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (which layer owns a type), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) / [ADR 0035](0035-pp-range-ownership-enforcement.md) (the code ranges), [ADR 0120](0120-a-state-machine-keeps-an-agenda-not-a-sweep.md) (a different "state machine" — see D3), [ADR 0148](0148-a-private-socket-is-gated-by-its-directory-and-the-kernel-names-the-peer.md) (the first consumer's proposal socket, D19); **Split into** [ADR 0173, *divergence of replicated state: prevented by construction, detected at fixed indexes, repaired automatically*](0173-divergence-is-prevented-by-construction-and-repaired-automatically.md) (divergence prevention and automatic repair, Q12). The number 0173 is reserved and the ADR is cited by its title until it merges (R7-00d, R7-03). **Depends on** the TLS sibling ADR of D4, number 0174 reserved, which must be Accepted before this one (R3-17). The pre-handshake admission sibling in `net/server` (R7-26) is folded into it (R7-00d). **Follows** the SDK reorganisation and the design rules: [ADR 0154](0154-the-sdks-principles-are-one-charter-and-an-incidents-rule-lives-with-its-code.md) (the charter), [ADR 0155](0155-every-layer-groups-its-packages-by-family-and-a-path-may-move-while-v0.md) (the `app` family), [ADR 0156](0156-the-public-module-links-the-standard-library-and-nothing-else.md) (stdlib only), [ADR 0157](0157-one-module-per-vendor-released-with-the-sdk.md) (zstd stays in its vendor module), [ADR 0158](0158-distribution-mechanisms-are-the-frameworks-not-the-sdks.md) (no distribution mechanism here), [ADR 0159](0159-the-kernel-holds-what-the-domains-rewrote-and-is-published-by-nature.md) (the kernel), [ADR 0160](0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md) (every service has a core, codes declared in the core, a wire format lives in the service), [ADR 0161](0161-an-untyped-error-fails-the-build.md) (typed errors), [ADR 0162](0162-the-sdk-is-one-module-and-a-release-is-one-tag.md) (one module, one tag), [ADR 0163](0163-the-sdk-is-designed-by-its-diagram-and-kit-writes-only-data-and-test-pins.md) (the design file), [ADR 0164](0164-an-error-code-is-the-designs-and-kit-writes-it.md) (codes), [ADR 0165](0165-a-performance-contract-is-the-designs-kit-measures-what-the-compiler-decides-and-a-test-holds-the-rest.md) (budgets), [ADR 0166](0166-a-facade-is-the-designs-and-a-forwarders-form-is-measured.md) (the facade), [ADR 0167](0167-a-doc-comment-is-the-designs-and-a-readme-is-written-from-docs-api.md) (doc comments), [ADR 0168](0168-a-declaration-is-the-designs-and-a-body-is-the-codes.md) (declarations and bodies), [ADR 0169](0169-the-sdk-is-rebuilt-from-its-design-in-a-copy-and-a-generation-is-held-to-the-whole-inline-set.md) (rebuilt from the design) (R7-01). **First consumer's deployment** (outside this repository): making.codes ADR 0006 and ADR 0015 (D20, R7-46)
 
@@ -451,7 +451,11 @@ type Transport interface {
 	Bind(group GroupID,
 		deliver func(from AuthenticatedPeer, frame []byte),
 		offer func(from AuthenticatedPeer, o InstallOffer) InstallAccept,
-		install func(InstallRequest) error) error
+		install func(InstallRequest) error,
+		// join is answered OFF the event loop, under a deadline, because
+		// it calls the product's JoinAuthorizer. The transport writes the
+		// answer on the same connection (R9-06).
+		join func(ctx context.Context, from AuthenticatedPeer, r JoinRequest) (Position, errs.Code)) error
 	SetMembership(group GroupID, admitted []Member) // per group; the transport computes the union (R2-31)
 }
 type UnreachableReporter interface { Unreachable(func(NodeID)) } // sibling (R1-11)
@@ -615,12 +619,13 @@ and spelled out:
   interrupted rotation. It is quarantined. Round 2's reading, "no valid
   checkpoint means an interrupted rotation", was only true before the rename,
   and the rename is now after the checkpoint's sync.
-- **A zero record header ends the data of a segment only if everything after
-  it in that segment is zeros AND no later segment exists.** Otherwise a
-  zeroed sector in the middle of synced data would be read as the end of the
-  log. That is `LOG_CORRUPT` and quarantine.
-- Indexes are continuous across segments. A gap or an overlap between one
-  segment's last index and the next one's first is `LOG_CORRUPT`.
+- **A sealed segment is read up to its sealed length (R9-02).** Its
+  activation record names that length. Bytes beyond it are ignored.
+- **Continuity is judged only on the effective log (R8-01, R9-02)**, after
+  the truncate records are applied, never on raw indexes.
+- **A zero header at the end of a segment that is not the last** is
+  classified by the decision procedure below, like any other hole. R7's
+  separate rule for it is withdrawn.
 - The simulator zeroes a synced header sector in the middle of a segment. It
   tests a corrupt checkpoint separately from a crash before publication.
 
@@ -644,8 +649,8 @@ record at the tail is corruption of acknowledged data, not a torn write. Only
 two shapes are truncated:
 
 - a short read, where the file ends inside a record;
-- a torn record whose damaged bytes are zeroed 4 KiB sectors, the signature
-  of an interrupted write on the devices this targets.
+- a torn record of the highest, unfinished batch, as the decision procedure
+  below defines it (R8-02, R9-03).
 
 **The tear model is stated (R4-02).** The supported model is crash-only: power
 loss or a process crash, not a device that rewrites old sectors. A zeroed
@@ -681,9 +686,24 @@ R7's rules contradicted each other.
      to the highest batch present, or ends a batch with its end-of-batch
      flag. And every valid record after it carries that highest batch
      sequence.
-  3. A torn tail must also look like a tear: zeroed 4 KiB sectors, or a
-     record cut short by the end of what was written. A complete record
-     with a bad CRC is NOT a tear, even in the highest batch.
+     **Batch sequences are contiguous (R9-01).** A hole after batch b
+     followed by batch b+2, or by any batch other than b or b+1, is
+     quarantined, never truncated. A test zeroes the header of batch k,
+     which holds one acknowledged entry, writes a batch k+1 that holds only
+     a hard state, and must see a quarantine.
+  3. **Whether the highest batch completed decides what damage means
+     (R9-03).** The tear signature is checked per 512 B chunk.
+     - When the highest batch's end-of-batch record is NOT valid, that batch
+       never completed, so it was never synced and never acknowledged. Any
+       damage inside it, zeros or garbage, is a tear. Garbage is what a torn
+       write through dm-crypt leaves.
+     - When its end-of-batch record IS valid, the batch may have been
+       acknowledged. A bad CRC inside it is quarantined, never truncated.
+     - **The residual, stated:** a device that persists the end record but
+       not an earlier chunk of the same batch, while reporting the sync, is
+       outside the crash-only model. That case is quarantined, so it loses
+       availability, never data.
+     A crash test runs through dm-crypt, as the nodes do.
   4. A torn tail is truncated at the hole. Every other hole is quarantined:
      a valid record of a lower batch after it, a bad CRC that is not a tear
      pattern, a gap in the effective indexes.
@@ -762,11 +782,19 @@ safe and silent. Here the node stops and says so.
 reboots (R7-14, R8-05).** The page cache may still hold pages the device
 never wrote, and an ordinary read would return them. R7 offered three
 remedies. R8 keeps one rule.
-- `STORAGE_FAILED` writes a marker in the DATA directory, holding the
-  kernel's `/proc/sys/kernel/random/boot_id` and the offset of the last
-  fully synced batch.
-- `NewRaft` refuses to start while the marker's `boot_id` equals the
-  current one. After a reboot the page cache is gone, and the node starts.
+- `STORAGE_FAILED` writes its marker in TWO places (R9-05): the data
+  directory, and a boot-scoped tmpfs path. Each holds the kernel's
+  `/proc/sys/kernel/random/boot_id` and the offset of the last fully synced
+  batch.
+- `NewRaft` refuses to start while EITHER marker carries the current
+  `boot_id`. After a reboot the page cache is gone, and the node starts.
+- When neither marker can be written, the node exits with a distinct code,
+  73, which the guide adds to `RestartPreventExitStatus`.
+- **The guarantee under Nomad** is that at least one marker survives the
+  allocation's restart: the data directory is the host volume, and the
+  tmpfs path is on the host.
+- **Fail closed before any mutation.** After a storage failure, nothing
+  writes to the log or the snapshots until the marker check has passed.
 - The `O_DIRECT` re-read is dropped. On these nodes the data directory sits
   on a buffered loop device over the LUKS image, so `O_DIRECT` on the file
   does not bypass every cache.
@@ -782,7 +810,8 @@ The exit codes are declared on the sentinels in the design file, with
 `errs.WithExitCode`, as `app/lock` does. `StopReason.ExitCode()` returns
 `errs.ExitCodeOf` of the stop's error. Final stops:
 `STORAGE_FAILED` 74, `LOG_QUARANTINED` 65, `STATE_MACHINE_FAILED` 69,
-`VERSION_UNSUPPORTED` 76. A stop that a restart may cure, such as a lost
+`VERSION_UNSUPPORTED` 76, and 73 when no `STORAGE_FAILED` marker could be
+written (R9-05). A stop that a restart may cure, such as a lost
 quorum at `Close`, exits 75 (`EX_TEMPFAIL`). None uses 70, the errs default,
 so a code without an option never looks like a consensus stop.
 - `STORAGE_FAILED` writes the marker above.
@@ -790,7 +819,7 @@ so a code without an option never looks like a consensus stop.
   persistent marker in the data directory, which only an operator clears.
 - `NewRaft` refuses to start while a marker applies. A supervisor's
   exit-code filter is not enough: Nomad's `restart` block has none.
-- The consumer guide sets `RestartPreventExitStatus=74 65 69 76` under
+- The consumer guide sets `RestartPreventExitStatus=74 65 69 76 73` under
   systemd, and a crash-loop alert (D13).
 
 **Not on `vfs`.** The `vfs` write half is frozen at whole-file verbs plus
@@ -1164,7 +1193,10 @@ R8-37):** its high 32 bits are a random epoch drawn at each start of the
 node, and its low 32 bits count within that epoch. Two starts of one node
 draw the same epoch with probability 2^-32 per pair, and the incarnation in
 the id already separates two lives of one directory. A product that cannot
-accept that probability persists a counter range instead. A leader that still holds an answer for an
+accept that probability persists a counter range instead. **Before the low
+32 bits run out, the node reserves a fresh persisted range or draws a new
+epoch (R9-17).** A test exhausts the counter while the leader still retains
+an old answer, and the next submission must not match it. A leader that still holds an answer for an
 id from before the restart can never match it to a new submission. The follower tracks each submission through four states:
 
 1. **unsent** — not written to the connection;
@@ -1483,8 +1515,11 @@ one term — once before the loss, once after — and elect two leaders.
   transport.
 - **Bootstrap (R2-24, R7-36, R7-43).** It is an explicit call in two phases.
   First `Init` runs on every founding node and prints its
-  `NodeID:Incarnation:address`. Then `Bootstrap` runs on every founding node
-  with the IDENTICAL list `--members id:inc:addr,...`. A RUNNING server
+  `NodeID:Incarnation:slot:SPKI:address` (R9-04). Then `Bootstrap` runs on every founding node
+  with the IDENTICAL list `--members id:inc:slot:spki:addr,...`.
+  **`Bootstrap`, `Recover` and `RestoreSnapshot` require a non-zero SPKI for
+  every member (R9-04).** An empty pin is refused, so no member is ever
+  admitted on its slot alone. A RUNNING server
   answers bootstrap probes, so a founder can tell "already founded with this
   list" from "unreachable". Automation never bootstraps: the join path only
   joins (D19). Bootstrap runs as a one-shot batch job, by an operator.
@@ -1892,7 +1927,7 @@ type (
 	JoinRequest    = coreconsensus.JoinRequest   // slot and SPKI from TLS, the new NodeID and incarnation (R8-09)
 	Joiner         = coreconsensus.Joiner        // sibling for custom transports (R8-09)
 	JoinAuthorizer = coreconsensus.JoinAuthorizer // the product's port (R8-09)
-	FencedAttestation = coreconsensus.FencedAttestation // {old voter, method, witness receipt} (R8-20, R8-36)
+	FencedAttestation = coreconsensus.FencedAttestation // {old voter, method, one signed receipt per NAS} (R8-20, R8-36, R9-09)
 	SnapshotMeta   = coreconsensus.SnapshotMeta
 	SnapshotSink   = coreconsensus.SnapshotSink
 	InstallRequest = coreconsensus.InstallRequest
@@ -1925,7 +1960,7 @@ type (
 	Report     = svcconsensus.Report
 	DataDir    = svcconsensus.DataDir
 	QuarantineExit = svcconsensus.QuarantineExit // WipeAndRejoin | TruncateAndStaySilent (R3-09)
-	RecoverOptions = svcconsensus.RecoverOptions // Force, Confirm, Operator, Joining, FencedAttestation (R2-25, R3-02, R4-04)
+	RecoverOptions = svcconsensus.RecoverOptions // Force, Confirm, Operator, Joining, FencedAttestation, WitnessKeys (R2-25, R3-02, R4-04, R9-08)
 	RestoreOptions = svcconsensus.RestoreOptions // Expected (non-zero), Confirm, Operator, MaxEncoded, MaxDecoded, Codecs (R3-15)
 	AlarmID        = coreconsensus.AlarmID       // the index that raised an alarm (R4-06)
 	Precondition   = coreconsensus.Precondition  // {LogIdentity, AlarmID or contract/version generation}; from Health/Status (R6-10)
@@ -2034,6 +2069,7 @@ func (n *Node) AddLearner(ctx context.Context, op Operator, m Member) error
 func (n *Node) Promote(ctx context.Context, op Operator, id NodeID) error
 func (n *Node) Remove(ctx context.Context, op Operator, id NodeID) error
 func (n *Node) UpdateAddress(ctx context.Context, op Operator, id NodeID, addr string) error
+func (n *Node) DenyPin(ctx context.Context, op Operator, id NodeID) error // withdraws the member's SPKI pin (R9-18)
 func (n *Node) TransferLeadership(ctx context.Context, op Operator, to NodeID) error
 // Each clearing or raising operation names what it acts on, as a
 // lineage-scoped Precondition that Health and Status return and that the
@@ -2059,9 +2095,10 @@ A `ClusterID` is 16 bytes everywhere it is encoded.
 types declared in the design file with `decl: true`, and their methods are
 listed there, so `surface: closed` holds them (ADR 0168).
 
-**`Lane` and the frozen header (R8-36).** `Lane(frame)` reads only the
-frame header, frozen in D18, and says whether the frame belongs on the
-control or the data connection. A custom transport uses it to keep votes
+**`Lane` and the frozen header (R8-36, R9-07).** `Lane(frame)` reads only
+the frame header, frozen in D18, and says whether the frame belongs on the
+control or the data connection. The lane is carried in the high bits of
+`type`, so a frame type a newer version adds still routes. A custom transport uses it to keep votes
 off the data pipe.
 
 **`HardClose` is bounded (R7-11).** It returns within `HardCloseTimeout`
@@ -2474,7 +2511,9 @@ verify|backfill` and `reconcile` (R6-09). On Nomad, each offline subcommand
 runs as a batch job pinned to the slot's host volume, with the server's
 allocation stopped (R7-34). **Every offline subcommand ALSO runs outside
 Nomad (R8-18):** `docker run --network host -v <slot volume>` from the
-pinned image, the allocation stopped. The `Recover` and restore runbooks use
+pinned image, the allocation stopped. **That image is cached on each node by
+digest, and also kept in the CI's zot and on the NAS (R9-20)**, never only
+in the forge it serves, which may be the thing being recovered. The `Recover` and restore runbooks use
 that path. **No runbook depends on Nomad's quorum**: the Nomad servers are
 these same three VPS.
 
@@ -2540,18 +2579,32 @@ node, under the directory lock.
   - **A fence must outlive a power cycle: the witness (Q17, R7-24, R8-20).**
     "Stopped" and "powered off" count only with a DURABLE fence, because two
     old voters that boot again are a majority of the old cluster.
-    - **The authority is a witness on the NAS.** Both NAS (making.codes ADR
-      0010 and ADR 0015) hold a record of superseded lineages. A unit on
-      each VPS, ordered BEFORE `nomad.service`, queries it at boot. It
-      refuses to start Nomad, and so Forgejo, when the node's lineage is
-      declared superseded.
-    - **It fails CLOSED.** When no NAS answers, the unit refuses. The VPS
-      already depend on the NAS at boot, through Tang for LUKS, so this adds
-      no new dependency, only a second question to the same place.
-    - **Recover writes the superseded lineage to the witness BEFORE the
-      survivor serves.** `RecoverOptions.FencedAttestation` carries the
-      witness's receipt for each old voter, and `Recover` refuses without
-      one (`RECOVER_REFUSED`).
+    - **The authority is a witness on the NAS (Q17, Q19).** Both NAS
+      (making.codes ADR 0010 and ADR 0015) hold a record of superseded
+      lineages, and each answers with a SIGNED statement.
+    - **What it blocks is Forgejo only (Q20, R9-11).** The check runs in the
+      product before `OpenDataDir`, and as a prestart task of each of the
+      three Forgejo groups. Nomad, Consul and Vault start normally. R8's
+      unit before `nomad.service` is withdrawn.
+    - **Both NAS are asked, and it fails CLOSED (R9-09).** The check refuses
+      when ANY answering NAS says the lineage is superseded. It passes only
+      when at least one NAS answers "clear" and none says otherwise. With no
+      answer, it refuses. An operator may override it at boot, and the
+      override is logged. The override secret is held in 1Password, like
+      the LUKS recovery passphrase.
+    - **Receipts are signed (R9-08).** A receipt is an Ed25519 signature by
+      the NAS's witness key over (old cluster id, new cluster id, voter).
+      `RecoverOptions.WitnessKeys` holds the two public keys, and `Recover`
+      verifies every receipt with the standard library.
+    - **Recover writes first, and needs both NAS (R9-09).** The superseded
+      lineage is written to BOTH witnesses BEFORE the survivor serves.
+      `RecoverOptions.FencedAttestation` carries, for each old voter, a
+      receipt from each NAS, and `Recover` refuses with one missing
+      (`RECOVER_REFUSED`).
+    - **Who writes and who reads (Q19, R9-10).** Only the operator writes a
+      superseded lineage, on the NAS, from the homes. The VPS only read,
+      over WireGuard, through a dated, read-only exception of the network
+      matrix, management to backup on the witness port (D20).
     - The Consul key `consensus/<old cluster id>/superseded` stays as a
       SECOND, non-authoritative signal, read by the product before it opens
       the data directory.
@@ -2726,24 +2779,33 @@ node, under the directory lock.
     never leaves the host volume. It authenticates with the allocation's
     workload JWT, fetched again before the JWT's TTL ends. The role is set
     with `require_cn=false`, since the certificate carries a URI SAN only.
-    That setting is to be verified on the Vault version deployed.
+    **That setting is lab-gated (R9-21)**, like the JWT claims and the slot
+    placement: it is proven in the lab on the Vault version deployed before
+    v1.
   - A restart never needs Vault while the certificate is valid. Only a new
     key needs a new certificate, which happens when an allocation starts on
     an empty host volume (D19).
-  - A break-glass certificate per slot, issued from the intermediate, is
-    held offline.
+  - **A break-glass certificate per slot, over the PINNED key (R9-04).** At
+    `Init`, the node writes a CSR from its host key. The certificate issued
+    from that CSR is stored offline, and issued again at every replacement,
+    since a new member has a new key. A certificate over another key would
+    be refused by the pin. A test stops Vault, lets the certificate expire,
+    installs the break-glass one, and the node is admitted.
 - **Key compromise, executable with three voters (R2-36, R7-25, R8-12).**
-  1. Fence the credential at once: the members deny the compromised SPKI,
-     through a membership entry that withdraws its pin (R8-07), and the
-     slot's Vault auth and role are revoked so the key cannot be renewed.
-     The node is now out of the quorum, and `failure_tolerance` is 0.
+  1. Fence the credential at once, through `DenyPin(ctx, op, id)` (R9-18).
+     It is an authenticated, replicated membership entry that withdraws the
+     member's SPKI pin (R8-07). When it applies, every node closes that
+     member's connections and refuses its handshakes and any `JOIN` under
+     that key. The slot's Vault auth and role are revoked, so the key cannot
+     be renewed. **The old voter still counts in the quorum until it is
+     removed**: it can no longer acknowledge, so `failure_tolerance` is 0.
   2. Add the replacement as a learner under a NEW `NodeID` and a new key,
      backfill its objects, promote it, then `Remove` the old ID. The window
      at tolerance 0 lasts from step 1 to the promotion.
   3. If no quorum is available for step 1, the alternative is the forced
-     path of `Recover`, with the witness fence, and it is stated as such. A retired ID is
-  refused forever (D8). The incarnation is an identifier, not a secret, and
-  rotating it proves nothing.
+     path of `Recover`, with the witness fence, and it is stated as such.
+  A retired ID is refused forever (D8). The incarnation is an identifier, not
+  a secret, and rotating it proves nothing.
 - **Two replacement runbooks, both add before they remove (R7-27, R7-40).**
   - A DEAD node: once it is FENCED (D19), add a new `NodeID` as a learner,
     backfill its objects, verify them, promote, then remove the old one.
@@ -2785,10 +2847,11 @@ Every persisted or transmitted structure carries a version (R1-22, R2-16):
 The rules:
 - **Handshake.** Each side announces the protocol range it speaks. The
   connection uses the highest common version, or is refused.
-- **The frame header is frozen (R8-36).** `length (u32) | version (u8) |
-  type (u8) | group (u64)`, little-endian, the same in every protocol version.
-  `Lane` reads it, so a transport routes a frame of a version it does not
-  parse.
+- **The frame header is frozen (R8-36, R9-07).** `length (u32) | version
+  (u8) | type (u8) | group (u64)`, little-endian, the same in every protocol
+  version. The two high bits of `type` are the lane: `00` control, `01`
+  data, `10` snapshot, `11` reserved. `Lane` reads them, so a transport
+  routes a frame of a type or a version it does not parse.
 - **Payload versions are announced and replicated (R2-16, R3-11).** Every
   member — voters, learners and joining nodes — announces the range of payload
   versions its state machine supports, and the snapshot codecs it can read.
@@ -3139,7 +3202,10 @@ being used soundly.
     transaction as the work it covers, as a compare-and-set on the previous
     value (R8-25). At a lineage change, after `Recover` or a restore, the
     cursor of the old lineage is closed, reconcile runs, and the cursor
-    restarts at the new lineage's first position.
+    restarts at the new lineage's first position. **Before the switch, the
+    retained predecessor events are drained from their saved cursor
+    (R9-19)**, under their original identities. A test runs `Recover` with a
+    predecessor event not yet dispatched, and exactly one SQL task results.
   - A webhook's `hook_task.uuid` is derived from (lineage, position, hook
     id), so a replay after a failover creates no second task. **This needs a
     Forgejo patch**, since Forgejo draws that uuid at random today (R8-25).
@@ -3149,20 +3215,41 @@ being used soundly.
     entry trims it. The dispatcher proposes that entry with the cursor it
     READ BACK from SQL after the commit is durable on the synchronous
     standby. Trimming lags that cursor by a configured margin, and never
-    passes the cursor of the last backup. The queue is capped in bytes,
+    passes the cursor of the last backup. **The PostgreSQL backup records its
+    cursor in a row the replicator reads (R9-14).** When that backup lags
+    beyond a bound, trimming proceeds anyway. The manifest then marks the
+    backup "not replayable", and restoring it requires reconcile in its
+    non-regenerable mode. The alert fires on that lag bound, before the queue
+    cap is near. The queue is capped in bytes,
     counted in D14's memory budget. At the cap, pushes are refused before
     their ref entry is proposed, and a metric and an alert say so.
   - **Unconsumed events pin their objects (R8-27).** The old and new SHAs of
     every event not yet trimmed are pinned against gc.
   - An alert fires when the dispatcher's lag passes its target (D16, R8-28).
+  - **Which post-receive step runs where (R9-15).**
+
+    | Step | Where |
+    |---|---|
+    | permission and protected-branch checks, push options parsing, AGit's pull request creation and the URL it prints | synchronous, at the hook, before the ref entry is proposed |
+    | branch rows, push actions, webhooks, CI triggers, pull request updates and their merge checks | the log consumer |
+
+    When a step runs in the consumer, the event carries what it needs: the
+    push options, the trigger, and the pull request id. AGit's pull request
+    URL is printed at the hook from the id it reserved there. Forgejo's
+    `Merge()` waits for the cursor of its OWN event before it answers.
   - **Reconcile waits for projection (R8-26).** `reconcile --apply` acts on a
     repository only once its watermark has reached the table. Otherwise the
     repository is deferred to the next pass.
-- **Forgejo's database and ADR 0014's (R8-30).** making.codes ADR 0014
-  proposes PostgreSQL 18 under Patroni on the same three nodes, for
-  Authentik. Forgejo uses the SAME Patroni cluster, as a separate database
-  and role. Its memory counts in the same per-node budget, beside ADR
-  0014's 1.2 to 2 GiB estimate, and the co-tenant budget of D20 says so.
+- **Forgejo's database and ADR 0014's (Q18, R8-30, R9-16).** making.codes
+  ADR 0014 proposes PostgreSQL 18 under Patroni on the same three nodes, for
+  Authentik. By the owner's decision Q18, Forgejo uses the SAME Patroni
+  cluster, with its own database and role. Its memory counts in the same
+  per-node budget, beside ADR 0014's 1.2 to 2 GiB estimate.
+  - Forgejo's backups are per database: `pg_dump -d forgejo`. A
+    cluster-wide restore is a separate disaster case, because it rewinds
+    Authentik too.
+  - Each role has a `CONNECTION LIMIT`, Forgejo's migrations set a
+    `lock_timeout`, and the shared connection budget is written in D20.
 - **PostgreSQL under Patroni on Consul is a prerequisite (Q15, R7-31).**
   Failover is automatic and picks the replica with the highest LSN. The
   primary may move to FRA or RBX. The guide gives the matrix of a
@@ -3213,8 +3300,10 @@ Nomad and Vault.
   the host, inside the host volume, and never enters Nomad Variables. Only
   the certificate is issued, by the slot's Vault role, through a separate
   JWT auth mount `jwt-consensus`. Each slot's role binds the default
-  workload-identity claims `nomad_job_id` and `nomad_task` exactly, for
-  example `forgejo` and `forgejo-waw`. The datacenter claim is never bound.
+  workload-identity claims `nomad_namespace`, `nomad_job_id` and
+  `nomad_task` exactly, for example `forgejo` and `forgejo-waw` (R9-13). Each
+  role sets its own `user_claim`, so the three slots never share a Vault
+  entity alias. The datacenter claim is never bound.
   D20 adds the matching check to `scripts/workload-jobs.test.sh` and a lab
   replay of the two defects of making.codes ADR 0005's revision of
   2026-10-01.
@@ -3254,15 +3343,22 @@ Nomad and Vault.
   only under the R7-39 conditions AND a quorum-confirmed answer that its ID
   is retired. It RENAMES the directory to a dated name, kept N days, and
   never deletes it. It then rejoins as a new node.
-- **Rolling update, one job, site by site (Q16, R8-19).**
-  - A rollout script changes the image of ONE group, submits the job, and
+- **Rolling update, one job, site by site (Q16, R8-19, R9-12).**
+  - **No generic submitter touches this job.** The job carries `meta {
+    rollout = "script" }`, and every generic submitter, the management's
+    `pull` role and the NAS executor, refuses a job that carries it. The
+    jobs test checks the refusal.
+  - A rollout script changes the image of ONE group. It runs `nomad job
+    plan`, and refuses unless exactly one group shows a destructive update
+    and the others none. It submits with `-check-index` from that plan, then
     waits for that slot's Consul gate: caught up, promoted, and
     `failure_tolerance >= 1`. Then it moves to the next site.
   - Nomad restarts only the group whose task changed.
   - Each group's `update` block has `max_parallel = 1`. `auto_revert` is OFF
     for any release that raises the payload version, and on for the others.
   - **Nomad does not order groups**, so the script is the guarantee, not
-    the job file. The script is proven in a lab before v1.
+    the job file. The script, its plan check included, is proven in a lab
+    before v1.
   - The gate is read-only and is the R7-45 one: the node reports `Health`
     ready, the cluster's `failure_tolerance` is at least 1, and this node
     acknowledges the leader. A learner is never ready.
@@ -3278,7 +3374,7 @@ Nomad and Vault.
   and its sentence on a single Forgejo instance must be amended beside ADR
   0006.
 
-### D20 — Infrastructure prerequisites, in making.codes (R7-25, R7-28, R7-31, R7-34, R7-39, R7-41, R7-46, R8-08, R8-14, R8-17, R8-20, R8-31)
+### D20 — Infrastructure prerequisites, in making.codes (R7-25, R7-28, R7-31, R7-34, R7-39, R7-41, R7-46, R8-08, R8-14, R8-17, R8-20, R8-31, R9-10, R9-12, R9-13, R9-16, R9-20)
 
 None of these exists today. Each lives in the making.codes repository, in a
 change of its own, and this ADR does not pretend otherwise. The first
@@ -3293,9 +3389,14 @@ consumer may not start before all of them are in place.
 | the listeners' address, `wireguard_ip`, on `wg2` after the migration | `domains/management/ansible/inventory/group_vars/all/networks.yml` (the networks by tier) | the migration is written and not converged, `wg0` today |
 | the provisioning marker on the real mount, holding the LUKS UUID and its creation time, and the Nomad client ordered after the LUKS mount (`/opt/secure`) | the `luks` and `nomad` roles | absent (R8-34) |
 | the Nomad job, three task groups, each pinned on `${node.unique.id}`, distinct task names, a host volume each | a new `domains/management/jobs/` directory (none exists), or the management repository of making.codes ADR 0015 | absent |
-| a separate JWT auth mount `jwt-consensus`, roles binding `nomad_job_id` and `nomad_task` | `post-bootstrap.yml`, and a check in `scripts/workload-jobs.test.sh`, with a lab replay of ADR 0005's two defects of 2026-10-01 | absent (R8-08) |
+| a separate JWT auth mount `jwt-consensus`, roles binding `nomad_namespace`, `nomad_job_id` and `nomad_task`, a `user_claim` per slot (R9-13) | `post-bootstrap.yml`, and a check in `scripts/workload-jobs.test.sh`, with a lab replay of ADR 0005's two defects of 2026-10-01 | absent (R8-08) |
 | `max_kill_timeout` raised on the three clients | `domains/management/ansible/roles/nomad/templates/nomad.hcl.j2` | absent: the template does not set it (R8-17) |
-| the Recover witness on both NAS, and the boot unit before `nomad.service` that queries it and fails closed | the NAS seed (making.codes ADR 0015) and the `common` or `nomad` role | absent (R8-20) |
+| the Recover witness on both NAS, each with an Ed25519 witness key, written only by the operator from the homes | the NAS seed (making.codes ADR 0015) | absent (R8-20, R9-08) |
+| a dated, READ-ONLY exception of the network matrix: management to backup on the witness port, over WireGuard | `group_vars/all/networks.yml` (`networks_flows`, `temporary:` with its date) and making.codes ADR 0006 and ADR 0010 revised in the same change (Q19) | absent (R9-10) |
+| the Forgejo groups' prestart witness check, and the boot override held in 1Password | the job, and a 1Password item beside the LUKS recovery passphrase | absent (R9-09, R9-11) |
+| the `pull` role and the NAS executor refuse a job with `meta.rollout = "script"`, checked by the jobs test | the `pull` role, the NAS executor, `scripts/workload-jobs.test.sh` | absent (R9-12) |
+| the shared PostgreSQL connection budget, a `CONNECTION LIMIT` per role | the Patroni role | absent (R9-16) |
+| the Forgejo image by digest on each node, in the CI's zot and on the NAS | the job and the NAS seed | absent (R9-20) |
 | Consul ACL: operator-only write on `consensus/*/superseded`, product read, a read-only Nomad token for Forgejo | `post-bootstrap.yml` and `domains/management/policies/` | absent (R8-14) |
 | the LUKS image fully allocated, resized from a written co-tenant budget: every forge repository, consensus 5.3 GiB, PostgreSQL, Garage, Consul, Vault, Nomad | the `luks` role and a written budget beside it | absent (R8-31) |
 | a metrics scraper, a rule evaluator and an alert channel reachable from the management | none exists today. The alerts of D13 have nowhere to run | absent (R8-31) |
@@ -3338,11 +3439,14 @@ consumer may not start before all of them are in place.
 - **The first consumer needs infrastructure that does not exist yet (D20).**
 - **Administration is any-node (Q8, R3-03).** No product has to find the
   leader to administer the cluster.
-- **This version is rewritten and not yet reviewed (R8).** The history is
-  in *Revision history*. No reviewer has read the R8 version.
-- **A restart after a Recover depends on the NAS (Q17, R8-20).** The boot
-  unit fails closed when no NAS answers, as LUKS already does through
-  Tang.
+- **This version is rewritten after the final round, and not re-reviewed
+  (R9).** Review run 3 reached its cap of three rounds. On R8, every
+  panelist answered "nothing blocks" but one external reviewer, whose
+  blocking point R9-01 answers. R9 applies that round's objections, and no
+  reviewer has read R9. The history is in *Revision history*.
+- **Forgejo's start after a Recover depends on the NAS (Q17, Q20, R8-20,
+  R9-11).** Its witness check fails closed when no NAS answers, as LUKS
+  already does through Tang. Nomad, Consul and Vault do not wait on it.
 - The root `CLAUDE.md` domain list, the design file, the two ranges of
   `design/sdk.yaml` and what kit writes from them change in the implementing
   change set, not in this one.
@@ -3453,6 +3557,7 @@ write rate that is not a bottleneck, and D11 keeps the wire and API open.
 | R6 | review run 2, round 3 | two retained snapshots, the implicit sync watermark, ADR 0173 activated all or nothing by the cluster version |
 | R7 | review run 3, round 1 (overall round 7), 2026-10-12 | **State: rewritten-unreviewed.** Aligned with the SDK after its reorganisation: the `app` family paths, one design file, codes in the core, one module, stdlib bounded codecs, budgets in the design and absolute targets in `BENCH.md` (R7-00a to R7-00f, R7-01 to R7-11). Storage: numbered batches, logical truncation and zeroing, the commit clamped to the synced index, distrust after a failed sync, stop markers and exit codes, `fallocate` off (R7-12 to R7-14, R7-22, R7-44). Safety: `ENTRY_SUPERSEDED` only on a committed conflict, the election restriction, the one-campaign transfer flag, the leader's vote refusal, instants for the lease, submission ids across restarts, the "need snapshot" path (R7-15 to R7-21, R7-23). Recover fenced durably, Vault per slot, the pre-handshake admission sibling, `MinVoters`, listeners on the management address (R7-24 to R7-28). The first consumer: SQL as a log consumer, the backup order, Patroni, a replicator independent of the database, every filesystem watched, the Nomad deployment of Q13 with slots, `JOIN` and fenced replacement, D/F conflicts, two-phase bootstrap, alerts and limits, snapshot pins (R7-29 to R7-43, R7-45, R7-46). Infrastructure prerequisites listed in D20. The companion renumbered 0173, the TLS sibling 0174 reserved, the admission hook folded into it |
 | R8 | review run 3, round 2 (overall round 8), 2026-10-13 | **State: rewritten-unreviewed.** Log recovery as one procedure: explicit truncate records, the effective log, a torn tail only in the highest batch and only with a tear pattern, zeroing only after classification, no batch across a rotation, the `STORAGE_FAILED` marker keyed on `boot_id` (R8-01 to R8-06). Identity: the member's key pinned by SPKI, slots pinned on Nomad node ids and bound by `nomad_job_id` and `nomad_task`, a published JOIN surface with the product's `JoinAuthorizer`, `Init` offline with `Redraw`, the replacement marker's owner and exit, an executable key-compromise runbook, the renewer, Consul ACLs (R8-07 to R8-14). Nomad: reschedule and disconnect corrected, the slot on a replacement VPS, `max_kill_timeout`, offline subcommands outside Nomad, the rolling script of Q16 (R8-15 to R8-19). The Recover fence is a witness on the NAS that fails closed (Q17, R8-20). Snapshot ports completed and rotation with pinned anchors (R8-21, R8-22). The SQL event lifecycle, its cursor and its batches (R8-23 to R8-30). Infrastructure rows and stale making.codes facts (R8-31 to R8-34). Exit codes through `errs.WithExitCode`, API and editorial fixes, the dead-voter gate stated (R8-35 to R8-38) |
+| R9 | review run 3, round 3 (final, overall round 9), 2026-10-13 | **State: rewritten after the final round, not re-reviewed.** Batch sequences contiguous, stale recovery rules withdrawn, tears judged on the highest batch's end record per 512 B chunk (R9-01 to R9-03). SPKI required at every founding and recovery, break-glass certificates over the pinned key, `STORAGE_FAILED` markers in two places, a `join` callback off the event loop, the lane in the frame type's high bits (R9-04 to R9-07). The witness: signed receipts from both NAS, a check that blocks Forgejo only and fails closed, reached through a dated read-only matrix exception (Q18, Q19, Q20, R9-08 to R9-11). The job kept from generic submitters and rolled with a plan check, Vault roles bound by namespace with a claim per slot (R9-12, R9-13). The SQL boundary: backup cursor, step table, per-database dumps, predecessor events drained (R9-14 to R9-16, R9-19). Submission counter exhaustion, `DenyPin`, the image outside the forge, `require_cn` lab-gated (R9-17, R9-18, R9-20, R9-21) |
 
 ## raft-sql-poc (owner's prior Raft)
 
