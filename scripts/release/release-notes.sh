@@ -36,6 +36,8 @@ tag_kind() {
     echo tombstone
   elif is_valid_tag "$1"; then
     echo sdk
+  elif is_valid_module_tag "$1"; then
+    echo module
   elif is_valid_vendor_tag "$1"; then
     echo vendor
   else
@@ -69,17 +71,26 @@ classify() {
 count() {
   local out
   out="$(classify "$1")" || return 1
-  awk '{ n[$1]++ } END { printf "sdk=%d vendor=%d tombstone=%d\n", n["sdk"], n["vendor"], n["tombstone"] }' <<<"$out"
+  awk '{ n[$1]++ } END { printf "sdk=%d module=%d vendor=%d tombstone=%d\n", n["sdk"], n["module"], n["vendor"], n["tombstone"] }' <<<"$out"
 }
 
 notes() {
-  local out sdk vendors tombs t
+  local out sdk modules vendors tombs t
   out="$(classify "$1")" || return 1
   sdk="$(awk '$1 == "sdk" { print $2 }' <<<"$out")"
+  modules="$(awk '$1 == "module" { print $2 }' <<<"$out")"
   vendors="$(awk '$1 == "vendor" { print $2 }' <<<"$out")"
   tombs="$(awk '$1 == "tombstone" { print $2 }' <<<"$out")"
   echo "The SDK module \`$SDK_MODULE\` at \`$sdk\`."
   echo
+  if [ -n "$modules" ]; then
+    echo "Modules of the SDK's layout tagged by this release (ADR 0170):"
+    echo
+    while IFS= read -r t; do
+      echo "- \`$t\` — \`$SDK_MODULE/${t%/v*}\`"
+    done <<<"$modules"
+    echo
+  fi
   if [ -n "$vendors" ]; then
     echo "Modules that require a vendor, tagged by this release because they changed:"
     echo

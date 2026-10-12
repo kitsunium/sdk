@@ -88,9 +88,13 @@ step() {
 }
 
 @test "release-notes: a module tag under pkg/ is never a tombstone" {
-  printf 'v0.20.0\npkg/v1/data/v0.1.0\n' >"$LIST"
+  printf 'v0.20.0\npkg/v1/data/v0.1.0\ninternal/v0.1.0\n' >"$LIST"
   run bash "$NOTES" classify "$LIST"
-  [[ "$output" != *"tombstone pkg/v1/data/v0.1.0"* ]]
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf 'sdk v0.20.0\nmodule pkg/v1/data/v0.1.0\nmodule internal/v0.1.0')" ]
+  run bash "$NOTES" notes "$LIST"
+  [[ "$output" == *'- `pkg/v1/data/v0.1.0` — `github.com/kitsunium/sdk/pkg/v1/data`'* ]]
+  [[ "$output" != *"holds no package"* ]]
 }
 
 @test "release-notes: the tombstones and the vendor tags are told apart" {
@@ -99,7 +103,7 @@ step() {
   [ "$status" -eq 0 ]
   [ "$output" = "$(printf 'sdk v0.18.0\nvendor third-party/aws/v0.18.0\ntombstone pkg/v0.18.0\ntombstone framework/v0.18.0')" ]
   run bash "$NOTES" count "$LIST"
-  [ "$output" = "sdk=1 vendor=1 tombstone=2" ]
+  [ "$output" = "sdk=1 module=0 vendor=1 tombstone=2" ]
   run bash "$NOTES" notes "$LIST"
   [ "$status" -eq 0 ]
   [[ "$output" == *'- `third-party/aws/v0.18.0` — `github.com/kitsunium/sdk/third-party/aws`'* ]]

@@ -11,6 +11,7 @@ import {
   stitchVersions,
   selectReleases,
   changelogRefSpec,
+  isValidModuleTag,
   LOCAL_RELEASE,
 } from "./tag-format.mjs";
 
@@ -232,4 +233,40 @@ test("selectReleases keeps the releases named, and a default for each major", ()
     ],
   );
   assert.deepEqual(selectReleases(versions, ["9.9.9"]), []);
+});
+
+test("a module tag of ADR 0170 is a release tag and no docs version", () => {
+  for (const t of [
+    "pkg/v1/data/v0.1.0",
+    "pkg/v1/app/v1.2.3",
+    "internal/v0.1.0",
+    "internal/v1.0.0-rc.1",
+  ]) {
+    assert.equal(isValidModuleTag(t), true, t);
+    assert.equal(parseTag(t), null, t);
+  }
+  for (const t of [
+    "pkg/v1/v2/v0.1.0",
+    "pkg/v1/Data/v0.1.0",
+    "pkg/v1/data/v2.0.0",
+    "pkg/v1/data/sub/v0.1.0",
+    "internal/core/v0.1.0",
+    "xinternal/v0.1.0",
+    "pkg/v0.18.0",
+    "v0.19.7",
+  ]) {
+    assert.equal(isValidModuleTag(t), false, t);
+  }
+  //: a GitHub release carried by a module tag is skipped, and the root's
+  //: releases are listed as before — the module tag is not the tombstone of
+  //: a pkg history it shares no shape with.
+  const versions = buildVersionsJson([
+    ghRelease("v0.19.7"),
+    ghRelease("pkg/v1/data/v0.1.0"),
+    ghRelease("internal/v0.1.0"),
+  ]);
+  assert.deepEqual(
+    versions.flatMap((v) => v.releases.map((r) => r.tag)),
+    ["v0.19.7"],
+  );
 });

@@ -25,6 +25,17 @@
 # again at its version, as tombstones: the last version of each retired module,
 # a go.mod that requires the SDK module and holds no package (ADR 0162). A
 # tombstone is no release of pkg's packages, and the history reads it as none.
+#
+# ADR 0170 adds the two shapes of the target layout — a module per pkg family
+# and one shared internal module — so the scripts can cut them before the code
+# is split:
+#
+#     pkg/v1/<family>/v<X>.<Y>.<Z>          e.g. pkg/v1/data/v0.1.0
+#     internal/v<X>.<Y>.<Z>                 e.g. internal/v0.1.0
+#
+# Every shape is ANCHORED at both ends, and every selection goes through one:
+# a glob (`pkg/v*`) or a prefix match reads pkg/v1/data/v0.1.0 as pkg's
+# history or as a tombstone.
 
 set -euo pipefail
 
@@ -75,10 +86,71 @@ is_valid_vendor_tag() {
   is_valid_third_party_tag "$1" || is_valid_connector_tag "$1"
 }
 
-# is_valid_release_tag <tag> — any tag a release cuts: the SDK's or a vendor
-# module's. A tombstone is not one: only the first root tag cuts it.
+# A pkg family's module (ADR 0170): `pkg/v1/<family>/vX.Y.Z`, the module
+# github.com/kitsunium/sdk/pkg/v1/<family>. One lowercase path component, as the
+# directories under pkg/v1/ are named; a component that is itself a major
+# (`v2`) is refused by is_valid_family_tag, since `pkg/v1/v2/…` would read as a
+# family nested in a major, which no family is.
+FAMILY_TAG_REGEX='^pkg/v1/[a-z][a-z0-9]*/v[01]\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$'
+
+# is_valid_family_tag <tag> — a pkg family module's shape. Exits 0 on match.
+is_valid_family_tag() {
+  [[ "$1" =~ $FAMILY_TAG_REGEX ]] || return 1
+  local f="${1#pkg/v1/}"
+  f="${f%%/*}"
+  [[ ! "$f" =~ ^v[0-9]+$ ]]
+}
+
+# The shared internal module (ADR 0170): `internal/vX.Y.Z`, the module
+# github.com/kitsunium/sdk/internal. Never `internal/<layer>/vX.Y.Z` — the
+# per-layer modules ADR 0162 retired —: one module holds every layer.
+INTERNAL_TAG_REGEX='^internal/v[01]\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$'
+
+# is_valid_internal_tag <tag> — the internal module's shape. Exits 0 on match.
+is_valid_internal_tag() {
+  [[ "$1" =~ $INTERNAL_TAG_REGEX ]]
+}
+
+# is_valid_module_tag <tag> — a module of ADR 0170's split: a family or the
+# internal module.
+is_valid_module_tag() {
+  is_valid_family_tag "$1" || is_valid_internal_tag "$1"
+}
+
+# is_valid_release_tag <tag> — any tag a release cuts: the SDK's, a family's,
+# the internal module's or a vendor module's. A tombstone is not one: only the
+# first root tag cuts it.
 is_valid_release_tag() {
-  is_valid_tag "$1" || is_valid_vendor_tag "$1"
+  is_valid_tag "$1" || is_valid_module_tag "$1" || is_valid_vendor_tag "$1"
+}
+
+# module_tag_dir <tag> — the directory of the module a release tag belongs to:
+# `.` for the SDK's `vX.Y.Z`, the path before `/vX.Y.Z` for every other shape.
+# Exit 1 on a tag no release cuts — a tombstone included —, so a caller never
+# derives a module from a tag the release does not know.
+module_tag_dir() {
+  is_valid_release_tag "$1" || return 1
+  if is_valid_tag "$1"; then
+    echo "."
+  else
+    echo "${1%/v*}"
+  fi
+}
+
+# module_tag_prefix <dir> — what precedes `vX.Y.Z` in the tags of the module in
+# <dir>: nothing for the root `.`, `<dir>/` otherwise.
+module_tag_prefix() {
+  if [ "$1" = "." ]; then
+    echo ""
+  else
+    echo "$1/"
+  fi
+}
+
+# is_module_dir <dir> — a directory a release may tag: the root, a pkg family,
+# the internal module or a vendor module, spelled as its tag prefix must be.
+is_module_dir() {
+  is_valid_release_tag "$(module_tag_prefix "$1")v0.0.0"
 }
 
 # The tombstones' tags (ADR 0162): `pkg/vX.Y.Z` and `framework/vX.Y.Z`, the
@@ -292,17 +364,58 @@ latest_release_tag() {
   fi
 }
 
-# latest_vendor_tag <dir> — the highest stable tag of the module in <dir>
-# (`<dir>/vX.Y.Z`); empty when it has never been tagged. A tag whose prefix is
-# not exactly <dir> is not the module's, whatever the glob matched.
-latest_vendor_tag() {
+# latest_module_tag <dir> — the highest stable tag of the module in <dir>
+# (`<dir>/vX.Y.Z`; for the root `.`, latest_release_tag's answer); empty when it
+# has never been tagged. The glob only narrows `git tag -l`: a tag counts when
+# its shape is a release tag's AND its module is exactly <dir> — so
+# pkg/v1/datax/v0.1.0 is not pkg/v1/data's, and a tag of a module nested in
+# <dir> is not <dir>'s.
+latest_module_tag() {
   local dir="$1"
-  stable_tags "$dir/v*" is_valid_vendor_tag |
+  if [ "$dir" = "." ]; then
+    latest_release_tag
+    return
+  fi
+  stable_tags "$dir/v*" is_valid_release_tag |
     while IFS= read -r t; do
-      if [ "${t%/v*}" = "$dir" ]; then echo "$t"; fi
+      if [ "$(module_tag_dir "$t")" = "$dir" ]; then echo "$t"; fi
     done |
     version_sort |
     tail -n1
+}
+
+# latest_vendor_tag <dir> — latest_module_tag, under the name the vendor
+# modules' callers know.
+latest_vendor_tag() {
+  latest_module_tag "$1"
+}
+
+# remote_tags_present <remote> <tag…> — the <tag>s that exist on <remote>, one
+# per line, in the order given. Each is compared with the FULL ref the remote
+# lists: `git ls-remote` matches a pattern against the TAIL of a ref, so asking
+# for `v0.1.0` also answers `refs/tags/pkg/v1/data/v0.1.0`, and only an exact
+# comparison says whether THIS tag exists. `--refs` and the filter both drop the
+# peeled `<ref>^{}` lines an annotated tag adds, which would otherwise list it
+# twice. Exit 2 when the remote cannot be read — never an empty answer, which
+# would read as "nobody tagged it".
+remote_tags_present() {
+  local remote="$1" out="" rc=0 t ref _sha
+  shift
+  [ "$#" -gt 0 ] || return 0
+  out="$(git ls-remote --tags --refs "$remote")" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "remote_tags_present: git ls-remote $remote failed (exit $rc)" >&2
+    return 2
+  fi
+  for t in "$@"; do
+    while IFS=$'\t' read -r _sha ref; do
+      case "$ref" in *'^{}') continue ;; esac
+      if [ "$ref" = "refs/tags/$t" ]; then
+        echo "$t"
+        break
+      fi
+    done <<<"$out"
+  done
 }
 
 # The commit the last release was cut FROM — the baseline that BOTH halves of a

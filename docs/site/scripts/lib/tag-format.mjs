@@ -48,6 +48,26 @@ export function isValidTag(tag) {
   return typeof tag === "string" && TAG_REGEX.test(tag);
 }
 
+// The module shapes of ADR 0170's layout, mirrored from FAMILY_TAG_REGEX and
+// INTERNAL_TAG_REGEX in scripts/release/lib/tag-format.sh: a pkg family's
+// module, pkg/v1/<family>/vX.Y.Z, and the shared internal module,
+// internal/vX.Y.Z. Anchored at both ends, like every shape here. They are
+// RELEASE tags but no docs version: the dropdown lists the SDK's releases, so
+// parseTag refuses them and a GitHub release carried by one is skipped, never
+// misread as pkg's history or as a tombstone. A family named like a major
+// (pkg/v1/v2/…) is refused, as the shell refuses it.
+export const FAMILY_TAG_REGEX =
+  /^pkg\/v1\/(?!v[0-9]+\/)[a-z][a-z0-9]*\/v[01]\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$/;
+export const INTERNAL_TAG_REGEX =
+  /^internal\/v[01]\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$/;
+
+export function isValidModuleTag(tag) {
+  return (
+    typeof tag === "string" &&
+    (FAMILY_TAG_REGEX.test(tag) || INTERNAL_TAG_REGEX.test(tag))
+  );
+}
+
 export function parseTag(tag) {
   if (!isValidTag(tag)) return null;
   const segs = tag.split("/");
