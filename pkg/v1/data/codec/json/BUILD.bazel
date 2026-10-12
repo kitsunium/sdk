@@ -32,9 +32,10 @@ go_test(
     ],
     deps = [
         ":json",
+        "//internal/core/app/config",
         "//internal/core/data/codec",
         "//internal/kernel/errs",
-        "//pkg/v1/app/config",
+        "//internal/service/app/config",
         "//pkg/v1/errs",
     ],
 )

@@ -1,15 +1,25 @@
 package config_test
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 
 	"github.com/kitsunium/sdk/pkg/v1/app/config"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
+	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 
 	_ "github.com/kitsunium/sdk/pkg/v1/data/codec" // register the formats the file sources read
 )
+
+// facadeSecret is the value hunted for in every rendering of TestAConfigurationFieldNeverLeaks.
+const facadeSecret string = "facade-secret-8c1d77"
 
 type conf struct {
 	Name string `json:"name"`
@@ -229,5 +239,57 @@ func TestFSSourceThroughTheFacade(t *testing.T) {
 	var absent conf
 	if err := config.Load(&absent, config.FSSource(files, "yaml", "config/production.yaml")); !errs.HasCode(err, code) {
 		t.Errorf("an absent embedded file = %v, want SourceFailed", err)
+	}
+}
+
+// appConfig is what a consumer writes: a configuration struct with a secret
+// field beside ordinary ones.
+type appConfig struct {
+	Port     int          `json:"port"`
+	Database secret.Value `json:"database_url"`
+}
+
+// TestAConfigurationFieldNeverLeaks is the consumer's view of the domain: a
+// secret decoded by config.Load, printed, dumped and logged, and revealed only
+// where the program asks for it.
+func TestAConfigurationFieldNeverLeaks(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "app.json")
+	document := `{"port": 8080, "database_url": "` + facadeSecret + `"}`
+	if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	var cfg appConfig
+	if err := config.Load(&cfg, config.FileSource("json", path)); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Database.RevealString() != facadeSecret || cfg.Port != 8080 {
+		t.Fatalf("Load decoded (%d, %q)", cfg.Port, cfg.Database.RevealString())
+	}
+	var logged bytes.Buffer
+	lg, err := logger.NewText(logger.Config{Writer: &logged})
+	if err != nil {
+		t.Fatalf("NewText: %v", err)
+	}
+	logger.Info(t.Context(), lg, "loaded", logger.Any("config", cfg), logger.String("database", cfg.Database.String()))
+	dumped, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	renderings := map[string]string{
+		"%+v":        fmt.Sprintf("%+v", cfg),
+		"%#v":        fmt.Sprintf("%#v", cfg),
+		"json":       string(dumped),
+		"the logger": logged.String(),
+	}
+	for name, rendered := range renderings {
+		if strings.Contains(rendered, facadeSecret) {
+			t.Errorf("%s leaked the secret: %s", name, rendered)
+		}
+	}
+	//: and the dump cannot be loaded back as if it were a configuration.
+	var reloaded appConfig
+	if err := json.Unmarshal(dumped, &reloaded); !errs.HasCode(err, secret.ValueRefused.Code()) {
+		t.Errorf("reloading a dump = %v, want ValueRefused", err)
 	}
 }

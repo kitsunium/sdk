@@ -34,8 +34,6 @@ go_test(
     deps = [
         ":errs",
         "//internal/kernel/errs",
-        "//pkg/v1/app/mail",
-        "//pkg/v1/observe/logger",
     ],
 )
 

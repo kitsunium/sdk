@@ -1,6 +1,6 @@
 # ADR 0171 — a module per pkg family, one shared internal module, and a published version is never reused
 
-- **Status**: Accepted (the scripts and the release lock are built; the code split itself is the next change, in the order of §6)
+- **Status**: Accepted (the scripts and the release lock are built; §7 measures the split and breaks its cycles; the code split itself is the next change, in the order of §6)
 - **Date**: 2026-10-12
 - **Deciders**: SDK maintainers (the owner's decisions of 2026-10-12, recorded after one round of review)
 - **Amends**: [ADR 0162](0162-the-sdk-is-one-module-and-a-release-is-one-tag.md) (§1 the SDK is one module; §3 tombstones; §4 what a release computes and tags), [ADR 0007](0007-sdk-release-and-versioning.md) (§1 the tag shapes; §2 the size is per module; §4 what a release tags), [ADR 0009](0009-pkg-public-module-resolvability.md) (resolvability is checked per module, and a version is checked against the proxy before it is cut), [ADR 0017](0017-pkg-bare-module-path.md) (the public surface is one module per family under `pkg/v1/`, not the bare `…/pkg`), [ADR 0147](0147-the-framework-is-a-module-of-the-sdk-above-pkg.md) (§9 a connector is a module released on its own), [ADR 0156](0156-the-public-module-links-the-standard-library-and-nothing-else.md) (§1 the rule holds for each family module), [ADR 0157](0157-one-module-per-vendor-released-with-the-sdk.md) (§3 a vendor module is tagged at its own version, only when it changed)
@@ -177,6 +177,139 @@ held by pinning, never by an import: no module of this repository requires
 
 Until step 1 exists, this repository does not split its code: the scripts and
 the lock of §4 and §5 are what ships first.
+
+### 7. The split, as measured
+
+Step 1 of §6 exists: kit `v0.1.0-rc.8`, the version `design/sdk.yaml` pins,
+reads a library's `modules:` (platform ADR 0011) — each module by the
+directory of its go.mod and the modules it may require, every cycle of those
+requirements refused when the design is read, and `kit check` holding every
+go.mod, its require directives and every import, a test's included, to them.
+
+**The graph, measured on 2026-10-12** — every package of the workspace, its
+imports, its test imports and its external test imports, the union over ten
+cells (`linux`, `windows`, `darwin`, `freebsd`, `openbsd`, `netbsd`,
+`illumos`, `solaris`, `js`, `wasip1`), each package mapped to the module that
+would hold it:
+
+```sh
+for os in linux windows darwin freebsd openbsd netbsd illumos solaris; do
+  GOOS=$os go list -e -f \
+    '{{.ImportPath}}|{{join .Imports " "}}|{{join .TestImports " "}}|{{join .XTestImports " "}}' ./...
+done | sort -u   # then: internal/** → internal, pkg/v1/<f>/** → pkg/v1/<f>, framework/** → .
+```
+
+| module | packages | production imports of another module |
+|---|---|---|
+| `internal` (kernel 18, core 72, service 104) | 194 | none |
+| `pkg/v1/data` | 28 | `internal` 76, `errs` 1 |
+| `pkg/v1/app` | 15 | `internal` 39 |
+| `pkg/v1/proc` | 11 | `internal` 38, `errs` 1 |
+| `pkg/v1/crypto` | 7 | `internal` 20 |
+| `pkg/v1/concur` | 6 | `internal` 6, `clock` 1 |
+| `pkg/v1/net` | 6 | `internal` 12 |
+| `pkg/v1/observe` | 6 | `internal` 28 |
+| `pkg/v1/security` | 5 | `internal` 16, `errs` 2, `crypto` 1 |
+| `pkg/v1/collections` | 2 | `internal` 2 |
+| `pkg/v1/clock`, `pkg/v1/errs` | 1 each | `internal` 1 |
+| `.` — the framework | 25 | `internal` 15 and ten families |
+
+**The production graph has no cycle.** Five imports cross from one family to
+another (`concur → clock`, `data → errs`, `proc → errs`, `security → errs`,
+`security → crypto`); everything else a family imports is `internal`.
+
+**The tests made one strongly connected component of eight families** —
+`app`, `clock`, `crypto`, `data`, `errs`, `observe`, `proc`, `security` —
+through six cycles, each of them test-only: `errs ↔ app` and `errs ↔
+observe` (an `errs` suite drew its typed failures from `observe/logger` and
+`app/mail`), `app ↔ data` (four codec suites read their format through
+`app/config`), `app ↔ security` (`security/secret`'s suite loaded a
+configuration), `observe ↔ security` (`slogbridge`'s suite rendered a
+`secret.Value`) and `clock ↔ app/data/security` (ADR 0090's nine
+configurations). A cycle of modules releases in lockstep (§1), and kit refuses
+one, so each was **broken, none merged** — the direction kept is the one the
+production code already has, and a test moves up to the module that may see
+both sides or names the engine its facade forwards to:
+
+| suite | was in | now |
+|---|---|---|
+| `TestV1ErrsEndToEnd`, `TestHasAnyCode_AndHasAnyReason` | `pkg/v1/errs` | `pkg/v1/observe/logger` (the failure is the logger's own code, `1.1.0.1`) |
+| `TestFieldsOfReadsTheClauseAnEmitterAttached` | `pkg/v1/errs` | `pkg/v1/app/mail` |
+| ADR 0090's three cross-family tests and their doubles | `pkg/v1/clock` | `pkg/v1/app/scheduler` — still public names only |
+| `TestAConfigurationFieldNeverLeaks` | `pkg/v1/security/secret` | `pkg/v1/app/config` |
+| `TestASecretRendersItsPlaceholderThroughSlog` | `slogbridge` | stays; names `secret.Value` through `internal/core/security/secret`, the type the facade aliases (`log/slog` is `slogbridge`'s alone, ADR 0032) |
+| `TestItReadsItsFormatThroughTheRegistry` (json, bson, toml, yaml) | `pkg/v1/data/codec/*` | stays; reads through `internal/service/app/config`, the engine `pkg/v1/app/config` forwards to — so each suite still links its one codec |
+
+After it the graph — tests included — is a DAG, in this order:
+`errs`, `clock` < `collections`, `crypto`, `net`, `proc`, `concur` <
+`observe` < `data` < `security` < `app` < `.`. **Nothing is merged**: no
+strongly connected component of more than one module is left.
+
+**The modules.** Twelve where the SDK module was — `internal` and the
+eleven families — plus the root, which keeps the framework (§1), and the
+thirteen vendor and connector modules (ADR 0157, 0147). A module's
+`requires:` is every module of the repository its go.mod names, because the
+go command lists in a go.mod every module that provides a package to its
+build and its tests, and kit holds every require directive to the design
+(platform ADR 0011 §5):
+
+```yaml
+modules:
+  - dir: .
+    requires: [internal, pkg/v1/app, pkg/v1/clock, pkg/v1/concur, pkg/v1/crypto,
+               pkg/v1/data, pkg/v1/errs, pkg/v1/net, pkg/v1/observe, pkg/v1/proc,
+               pkg/v1/security]
+  - dir: internal
+  - dir: pkg/v1/errs
+    requires: [internal]
+  - dir: pkg/v1/clock
+    requires: [internal]
+  - dir: pkg/v1/collections
+    requires: [internal, pkg/v1/errs]
+  - dir: pkg/v1/concur
+    requires: [internal, pkg/v1/clock, pkg/v1/errs]
+  - dir: pkg/v1/crypto
+    requires: [internal, pkg/v1/errs]
+  - dir: pkg/v1/net
+    requires: [internal]
+  - dir: pkg/v1/proc
+    requires: [internal, pkg/v1/errs]
+  - dir: pkg/v1/observe
+    requires: [internal, pkg/v1/clock, pkg/v1/errs]
+  - dir: pkg/v1/data
+    requires: [internal, pkg/v1/clock, pkg/v1/errs, pkg/v1/proc]
+  - dir: pkg/v1/security
+    requires: [internal, pkg/v1/clock, pkg/v1/crypto, pkg/v1/errs,
+               pkg/v1/observe, pkg/v1/proc]
+  - dir: pkg/v1/app
+    requires: [internal, pkg/v1/clock, pkg/v1/crypto, pkg/v1/data,
+               pkg/v1/errs, pkg/v1/observe, pkg/v1/proc, pkg/v1/security]
+  # the nine third-party modules: [internal]; the four connectors: the root,
+  # the families they import and their closure — as their go.mod lists them.
+```
+
+`errs` and `clock` hold one package each and are kept apart all the same:
+they are what every other family requires, so folding either into a larger
+module would make a fix there move every family that requires it.
+
+**The floor of §3 is written by the release, not by the tree.** §3 has every
+family and `internal` require the root at the first version that holds
+neither `pkg/` nor `internal/`, and the root requires them back because the
+framework imports them — a cycle kit refuses, and one with no import in it:
+the family requires the root only so that minimum version selection lifts a
+consumer off a monolithic root. So the working tree's go.mods do not carry
+it, and `cut-tags.sh` writes it into the published go.mod of `internal` and
+of every family, beside the versions it pins, at the root's earliest tag whose
+tree holds no `pkg/` — or at the version the same release gives the root,
+when that release is the first. A family cannot be cut before that tag
+exists or is cut with it.
+
+**The root keeps the framework and is not deprecated.** A deprecation is the
+whole module path's, read from its latest go.mod, and the root still holds
+`framework/`; marking it would tell every framework consumer to leave a module
+they are meant to stay on. What tells a consumer on a monolithic root where
+the packages went is the retraction's rationale, which `go get` and
+`go list -m -u` print beside the retracted version.
 
 ## Consequences / Semantics
 

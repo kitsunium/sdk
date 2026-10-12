@@ -36,6 +36,7 @@ go_test(
         "//internal/service/app/config",
         "//pkg/v1/data/codec",
         "//pkg/v1/errs",
+        "//pkg/v1/observe/logger",
         "//pkg/v1/security/secret",
     ],
 )

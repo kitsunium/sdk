@@ -28,13 +28,5 @@ go_test(
     deps = [
         ":clock",
         "//internal/kernel/clock",
-        "//pkg/v1/app/health",
-        "//pkg/v1/app/lifecycle",
-        "//pkg/v1/app/lock",
-        "//pkg/v1/app/scheduler",
-        "//pkg/v1/data/cache",
-        "//pkg/v1/data/queue",
-        "//pkg/v1/data/sql",
-        "//pkg/v1/security/session",
     ],
 )
