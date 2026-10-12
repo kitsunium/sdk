@@ -148,3 +148,22 @@ func TestACopiedBuildSharesNothing(t *testing.T) {
 		t.Error("a copy of no build is one")
 	}
 }
+
+// A production run describes its build when something reads it, never at the
+// start: a CLI command, or a daemon nobody asks, does not parse the binary's
+// build information on every run (#276).
+func TestAProductionBuildIsDescribedWhenRead(t *testing.T) {
+	a := NewApp("lazy-build", NewService("lazy-build", "A product.")).With(InMemory(), Env(EnvProduction), Logs(io.Discard))
+	if err := a.resolve(); err != nil {
+		t.Fatal(err)
+	}
+	if a.build.described() {
+		t.Fatal("the start described the build before anything read it")
+	}
+	if a.Graph().App.Build == nil {
+		t.Fatal("a production app describes no build: the test binary carries build information")
+	}
+	if !a.build.described() {
+		t.Error("the graph read a build that was never described")
+	}
+}

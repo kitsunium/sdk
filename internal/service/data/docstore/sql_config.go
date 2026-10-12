@@ -2,7 +2,6 @@ package docstore
 
 import (
 	"context"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -47,13 +46,31 @@ const versionsTableTag string = "vs"
 // store moves between them unchanged.
 const reservedTablePrefix string = "sqlite_"
 
-// tablePattern is the only shape a table name may take. It is interpolated
-// into every statement — an identifier cannot be a bound parameter — so this
-// pattern is the whole defence against an injection. Lower case, because
-// PostgreSQL folds an unquoted name to it and MySQL's case sensitivity follows
-// the server's filesystem: a name that differs only by case would be one table
-// on one engine and two on another.
-var tablePattern = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
+// isTableName reports whether name has the only shape a table name may take,
+// `^[a-z_][a-z0-9_]*$`. It is interpolated into every statement — an
+// identifier cannot be a bound parameter — so this shape is the whole defence
+// against an injection. Lower case, because PostgreSQL folds an unquoted name
+// to it and MySQL's case sensitivity follows the server's filesystem: a name
+// that differs only by case would be one table on one engine and two on
+// another. Written out rather than a regular expression compiled at the
+// package's initialisation, which every program importing the store paid at
+// start (#276); its test holds it to the expression.
+func isTableName(name string) bool {
+	//: a name is at least one byte.
+	if name == "" {
+		return false
+	}
+	//: every byte a lower-case letter or an underscore, a digit after the first.
+	for i := range len(name) {
+		c := name[i]
+		//: letters and the underscore anywhere, digits but first.
+		if (c < 'a' || c > 'z') && c != '_' && (i == 0 || c < '0' || c > '9') {
+			return false
+		}
+	}
+	//: the whole name has the shape.
+	return true
+}
 
 // SQLConfig configures [OpenSQL]. Key, Transactor, Dialect and Table are
 // required. The secondary indexes are OpenSQL's other arguments, declared
@@ -200,7 +217,7 @@ func validateTransactor(tm coresql.Transactor) (txParts, error) {
 // or that another store's derived table could collide with.
 func validateTable(table string) error {
 	//: the shape, which is the injection defence.
-	if !tablePattern.MatchString(table) {
+	if !isTableName(table) {
 		//: StoreMisconfigured; the name is the caller's own configuration.
 		return kerrs.Wrap(coredocstore.StoreMisconfigured, kerrs.WrapParams{},
 			kerrs.String("setting", "Table"), kerrs.String("problem", "not a lower-case SQL identifier"), kerrs.String("table", table))

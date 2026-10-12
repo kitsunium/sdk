@@ -216,6 +216,7 @@ go_test(
         "architecture_test.go",
         "auth_test.go",
         "bench_test.go",
+        "body_internal_test.go",
         "boot_test.go",
         "build_internal_test.go",
         "classify_internal_test.go",

@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kitsunium/sdk/framework/git"
@@ -214,6 +215,61 @@ func describeBuild(dev bool, getenv func(string) string) (*model.Build, *model.D
 	}
 	return buildOf(readBuild(), cachedHeadAt), devBuildOf(getenv)
 }
+
+// buildDescription is an app's build, described once, at its first read
+// (#276): a run that never reads it — a CLI command, a daemon nobody asks —
+// never parses the binary's build information, which every redraw of a
+// status line would otherwise pay. In dev it is described at the start, so
+// asking git about the local modules stays the start's cost, where kit dev
+// measures it. A nil description describes nothing.
+type buildDescription struct {
+	once     sync.Once
+	done     atomic.Bool
+	isDev    bool
+	getenv   func(string) string
+	build    *model.Build
+	devBuild *model.DevBuild
+}
+
+// newBuildDescription is the build of an app in dev or not, described now in
+// dev and at the first read otherwise.
+func newBuildDescription(dev bool, getenv func(string) string) *buildDescription {
+	d := &buildDescription{isDev: dev, getenv: getenv}
+	if dev {
+		d.describe()
+	}
+	return d
+}
+
+// describe runs describeBuild once.
+func (d *buildDescription) describe() {
+	d.once.Do(func() {
+		d.build, d.devBuild = describeBuild(d.isDev, d.getenv)
+		d.done.Store(true)
+	})
+}
+
+// product is what the binary was built from; nil when it carries no build
+// information, or for a nil description.
+func (d *buildDescription) product() *model.Build {
+	if d == nil {
+		return nil
+	}
+	d.describe()
+	return d.build
+}
+
+// dev is what kit dev said about the build it launched; nil outside dev.
+func (d *buildDescription) dev() *model.DevBuild {
+	if d == nil {
+		return nil
+	}
+	d.describe()
+	return d.devBuild
+}
+
+// described reports whether the build was described yet.
+func (d *buildDescription) described() bool { return d != nil && d.done.Load() }
 
 // moduleBuild is the Go module that holds package pkg, as the build says
 // it: its release, or the commit it came from — git's answer, in dev, for a
