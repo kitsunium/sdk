@@ -466,14 +466,19 @@ rewrite_publishable() {
   local gomod="$1" dep dir lt self
   local -a edits=()
   self="$(dirname "$gomod")"
-  # The floor of ADR 0171 §3 and §7: internal and every pkg family require the
-  # root at the first version that holds neither pkg/ nor internal/, so that a
-  # consumer pinned to a monolithic root who adds one is lifted past it by
-  # minimum version selection instead of meeting an ambiguous import. Written
+  # The floor of ADR 0171 §3 and §7: internal, every pkg family and every
+  # third-party module — each imports packages a monolithic root also holds —
+  # require the root at the first version that holds neither pkg/ nor
+  # internal/, so that a consumer pinned to a monolithic root who adds one is
+  # lifted past it by minimum version selection instead of meeting an
+  # ambiguous import. Each needs its own: graph pruning reads a dependency's
+  # requirements one level down, so internal's floor does not reach a
+  # consumer of a module that requires internal (the rehearsal's control).
+  # A connector requires the root directly, for the framework. Written
   # here and never in the working tree: the root requires them back, and kit
   # refuses that cycle in the design. ROOT_FLOOR is computed once (root_floor).
   case "$self" in
-    internal | pkg/v1/*)
+    internal | pkg/v1/* | third-party/*)
       if [ -z "${ROOT_FLOOR:-}" ]; then
         echo "cut-tags: $gomod needs the root's floor (ADR 0171 §7), and no root tag holds the split nor does this release cut one — cut the root with it" >&2
         return 1

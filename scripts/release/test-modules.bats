@@ -314,6 +314,21 @@ monolith() {
   done
 }
 
+# A vendor module imports internal's packages, which a monolithic root holds
+# too: it carries the floor as a family does.
+@test "a vendor module released with the split requires the root it cuts" {
+  need_toolchain
+  gomod third-party/aws internal
+  g commit -aq --no-verify -m "aws requires internal, as the split's vendors do"
+  monolith
+  change third-party/aws/aws.go "fix(aws): one"
+  run bash -c "echo sdk | '$CT' --dry-run --bump=minor"
+  [ "$status" -eq 0 ]
+  [[ "$(would_tag)" == *"third-party/aws/v0.20.0"* ]]
+  block="$(awk '/--- third-party\/aws\/go.mod ---/ { on = 1; next } /--- / { on = 0 } on' <<<"$output")"
+  [[ "$block" == *"github.com/kitsunium/sdk v0.20.0"* ]]
+}
+
 # A family cut before any root holds the split has no floor to require: it
 # would publish a module a consumer on v0.19.7 cannot add. Refused, naming why.
 @test "a family cut while no root holds the split is refused" {

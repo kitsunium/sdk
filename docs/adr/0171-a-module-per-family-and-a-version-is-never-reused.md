@@ -298,8 +298,10 @@ neither `pkg/` nor `internal/`, and the root requires them back because the
 framework imports them — a cycle kit refuses, and one with no import in it:
 the family requires the root only so that minimum version selection lifts a
 consumer off a monolithic root. So the working tree's go.mods do not carry
-it, and `cut-tags.sh` writes it into the published go.mod of `internal` and
-of every family, beside the versions it pins, at the root's earliest tag whose
+it, and `cut-tags.sh` writes it into the published go.mod of `internal`, of
+every family and of every `third-party/` module — each imports packages a
+monolithic root also held; a connector requires the root directly —, beside
+the versions it pins, at the root's earliest tag whose
 tree holds no `pkg/` — or at the version the same release gives the root,
 when that release is the first. A family cannot be cut before that tag
 exists or is cut with it.
