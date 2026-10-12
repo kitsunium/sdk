@@ -21,7 +21,12 @@ the build it came from.
 - **Stdio re-exports** (`facade_gen.go` since ADR 0166; `stdio.go`, which held them, is gone, and the package comment is `doc.go`'s since ADR 0167): `StdioMode` and `StdioInherit` /
   `StdioNull` / `StdioCapture`, so a consumer sets `Spec.Stdio` — and captures
   a child's output into any `io.Writer` — with public names only.
-  `TestCaptureAndBareNamesThroughTheFacade` is that consumer.
+  `TestCaptureAndBareNamesThroughTheFacade` is that consumer. It writes the
+  program it runs under `syscall.ForkLock` (`writeExecutable`): a sibling
+  test forking while the file was open for writing kept a copy of the
+  descriptor until its own exec, and `execve` refused the probe with
+  `ETXTBSY` — 15 runs in 300, issue #269. The SDK reported that refusal
+  correctly; the race was the test's.
 
 ## Surface
 

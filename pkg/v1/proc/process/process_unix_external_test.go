@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -88,9 +89,7 @@ func TestCaptureAndBareNamesThroughTheFacade(t *testing.T) {
 	t.Parallel()
 	probeDir := t.TempDir()
 	probe := filepath.Join(probeDir, "kprobe-facade")
-	if err := os.WriteFile(probe, []byte("#!/bin/sh\nprintf from-spec-env\n"), 0o755); err != nil {
-		t.Fatalf("write probe: %v", err)
-	}
+	writeExecutable(t, probe, "#!/bin/sh\nprintf from-spec-env\n")
 	type tc struct {
 		name    string
 		spec    process.Spec
@@ -141,6 +140,32 @@ func TestCaptureAndBareNamesThroughTheFacade(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)
 		})
+	}
+}
+
+// writeExecutable writes a program this test binary then executes, under
+// syscall.ForkLock.
+//
+// Without the lock the case that runs it failed about one run in twenty
+// (issue #269, 15 of 300 here) with SPAWN_FAILED wrapping ETXTBSY: execve
+// refuses a file any process holds open for WRITING, and a sibling test
+// forking while os.WriteFile had the probe open gave its child a copy of that
+// descriptor until the child's own exec closed it — close-on-exec acts at
+// the exec, not at the fork (golang/go#22315). Nothing was wrong with the
+// runner's PATH, the name's resolution through Spec.Env or the spawn: the
+// SDK reports the kernel's refusal as it should. Only a fork of THIS process
+// can inherit the descriptor, and every one takes syscall.ForkLock for
+// writing — the lock's own documentation prescribes the read side around a
+// descriptor's life — so none can happen while the file is open. os/exec's
+// own test retries on ETXTBSY instead; the lock removes the race rather than
+// waiting it out.
+func writeExecutable(t *testing.T, path, content string) {
+	t.Helper()
+	syscall.ForkLock.RLock()
+	err := os.WriteFile(path, []byte(content), 0o755)
+	syscall.ForkLock.RUnlock()
+	if err != nil {
+		t.Fatalf("write %s: %v", path, err)
 	}
 }
 
