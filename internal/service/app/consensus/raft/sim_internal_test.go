@@ -92,6 +92,7 @@ type simOptions struct {
 	crashRate float64 // crashes per second across the cluster, drawn every 100 ms
 	mut       mutation
 	lease     bool
+	recent    int64
 }
 
 type sim struct {
@@ -112,6 +113,7 @@ type sim struct {
 	timing    core.TimingContract
 	nextCrash time.Time
 	forwarded map[[2]uint64]core.Message
+	fetches   int
 }
 
 func rtt(a, b core.NodeID) time.Duration {
@@ -171,7 +173,7 @@ func newSim(opt simOptions) *sim {
 func (s *sim) cfg(id core.NodeID) Config {
 	return Config{ID: id, Group: 1, Seed: s.opt.seed*31 + uint64(id), Timing: s.timing,
 		MaxInflight: 16, MaxInflightBytes: 1 << 20, MaxBatchBytes: 64 << 10, MinVoters: 1,
-		PromoteLag: 64, Lease: s.opt.lease, CanVote: true, MaxChainRefusals: 3, mut: s.opt.mut}
+		PromoteLag: 64, Lease: s.opt.lease, CanVote: true, MaxChainRefusals: 3, mut: s.opt.mut, RecentEntriesBytes: s.opt.recent}
 }
 
 func (s *sim) start(n *simNode) {
@@ -232,6 +234,23 @@ func (s *sim) process(n *simNode) {
 			n.lastDone = at
 			n.writes = append(n.writes, simWrite{rd: rd, doneAt: at})
 			s.push(&event{at: at, kind: evStorage, node: n.id, life: n.life})
+		}
+		for _, f := range rd.Fetch {
+			// The store read, as the driver's reader goroutine does it: the
+			// durable entries, from the disk model.
+			var out []core.Entry
+			compacted := false
+			for i := f.Lo; i < f.Hi && i <= uint64(len(n.ents)); i++ {
+				out = append(out, n.ents[i-1])
+				if len(out) >= 64 {
+					break
+				}
+			}
+			if f.Lo > uint64(len(n.ents)) {
+				out = nil
+			}
+			s.fetches++
+			n.r.Fetched(f.To, f.Lo, out, compacted)
 		}
 		for _, m := range rd.Forwarded {
 			s.forwarded[[2]uint64{uint64(n.id), m.Context}] = m

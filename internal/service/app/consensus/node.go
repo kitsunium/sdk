@@ -31,6 +31,8 @@ type Node struct {
 	propc  chan *proposal
 	execc  chan func()
 	storec chan storeDone
+	fetchq *fifo[raft.FetchRequest]
+	fetchc chan fetchDone
 	stopc  chan struct{}
 	hard   atomic.Bool
 
@@ -197,7 +199,7 @@ func newRaft(cfg Config) (*Node, error) {
 		cfg: cfg, clk: cfg.Clock, ident: st.Log, stamp: st,
 		inCtrl: make(chan coreconsensus.Message, 4096), inData: make(chan coreconsensus.Message, 4096),
 		propc: make(chan *proposal, 4096), execc: make(chan func(), 1024), storec: make(chan storeDone, 1024),
-		stopc: make(chan struct{}), sq: newFifo[storeReq](), aq: newFifo[applyItem](),
+		stopc: make(chan struct{}), sq: newFifo[storeReq](), fetchq: newFifo[raft.FetchRequest](), fetchc: make(chan fetchDone, 64), aq: newFifo[applyItem](),
 		waiters: map[uint64]*proposal{}, results: map[uint64]applyResult{},
 		forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]bool{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
 		watchers: map[chan coreconsensus.Status]struct{}{}, subEpoch: newSubEpoch(), loopDone: make(chan struct{}),
@@ -216,7 +218,7 @@ func newRaft(cfg Config) (*Node, error) {
 		ID: st.ID, Group: cfg.Group, Log: st.Log, Seed: seed, Timing: cfg.InitialTiming,
 		MaxInflight: cfg.MaxInflight, MaxInflightBytes: cfg.MaxInflightBytes, MaxBatchBytes: cfg.MaxBatchBytes,
 		MinVoters: cfg.MinVoters, PromoteLag: cfg.PromoteLag, Lease: cfg.Reads == ReadLease,
-		CanVote: n.canVote, MaxChainRefusals: 3, NoTable: n.noTable,
+		CanVote: n.canVote, MaxChainRefusals: 3, NoTable: n.noTable, RecentEntriesBytes: cfg.RecentEntriesBytes,
 	}, start)
 	n.publish()
 	if ur, ok := cfg.Transport.(coreconsensus.UnreachableReporter); ok {
@@ -233,7 +235,8 @@ func newRaft(cfg Config) (*Node, error) {
 	if err := cfg.Transport.Bind(cfg.Group, n.deliver, n.offer, n.install, n.join); err != nil {
 		return nil, err
 	}
-	n.wg.Add(3)
+	n.wg.Add(4)
+	go n.reader()
 	go n.storageActor()
 	go n.applyLoop()
 	go n.loop()
@@ -413,6 +416,8 @@ func (n *Node) loop() {
 			n.handleProposals(props)
 		case f := <-n.execc:
 			f()
+		case f := <-n.fetchc:
+			n.r.Fetched(f.req.To, f.req.Lo, f.ents, f.compacted)
 		}
 		// Control first: a flood of entries never starves a vote (D4).
 	ctrl:
@@ -479,6 +484,9 @@ func (n *Node) handleReady() {
 		}
 		if len(rd.Apply) > 0 {
 			n.aq.push(applyItem{entries: rd.Apply})
+		}
+		for _, f := range rd.Fetch {
+			n.fetchq.push(f)
 		}
 		for _, to := range rd.SendSnapshot {
 			n.sendSnapshot(to)
@@ -602,6 +610,50 @@ func (n *Node) publish() {
 		}
 	}
 	n.watchMu.Unlock()
+}
+
+type fetchDone struct {
+	req       raft.FetchRequest
+	ents      []coreconsensus.Entry
+	compacted bool
+}
+
+// reader serves the step function's reads below its in-memory window, on
+// its own goroutine, never the storage actor's, whose queue holds writes
+// only (D4, R8-06).
+func (n *Node) reader() {
+	defer n.wg.Done()
+	var reqs []raft.FetchRequest
+	for {
+		select {
+		case <-n.fetchq.signal:
+		case <-n.stopc:
+			return
+		}
+		reqs = n.fetchq.take(reqs)
+		for _, f := range reqs {
+			d := fetchDone{req: f}
+			ents, err := n.cfg.Log.Entries(f.Lo, f.Hi, n.cfg.MaxBatchBytes, nil)
+			switch {
+			case errs.HasCode(err, coreconsensus.CodeCompacted):
+				d.compacted = true
+			case err != nil:
+				// An impossible answer stops the node: a log that cannot be
+				// read cannot be trusted to agree with itself (D4).
+				n.stop(err, true)
+				return
+			}
+			for i := range ents {
+				ents[i].Data = bytes.Clone(ents[i].Data)
+			}
+			d.ents = ents
+			select {
+			case n.fetchc <- d:
+			case <-n.stopc:
+				return
+			}
+		}
+	}
 }
 
 // ---- storage actor ----

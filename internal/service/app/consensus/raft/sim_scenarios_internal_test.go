@@ -248,3 +248,48 @@ func TestSimTransferForwardedFromFollower(t *testing.T) {
 		}
 	}
 }
+
+// RecentEntriesBytes bounds the payloads in memory: a peer that falls
+// behind is fed from the store, and safety and progress hold.
+func TestSimBoundedRecentEntries(t *testing.T) {
+	fetches := 0
+	defer func() {
+		if !t.Failed() && fetches == 0 {
+			t.Error("no peer was ever fed from the store")
+		}
+	}()
+	for _, seed := range seeds(t, 30) {
+		s := newSim(simOptions{seed: seed, drop: 0.02, crashRate: 0.3, recent: 512})
+		for k := 0; k < 4 && s.err == nil; k++ {
+			if k%2 == 0 {
+				s.partition([]core.NodeID{core.NodeID(k%3 + 1)}, nil)
+			} else {
+				s.heal()
+			}
+			s.run(s.after(4*time.Second), true)
+		}
+		s.heal()
+		s.opt.crashRate, s.opt.drop = 0, 0
+		for _, id := range s.ids {
+			if !s.nodes[id].alive {
+				s.start(s.nodes[id])
+			}
+		}
+		s.run(s.after(8*time.Second), true)
+		if s.err != nil {
+			t.Fatalf("seed %d: %v", seed, s.err)
+		}
+		want := s.maxCommit()
+		s.run(s.after(3*time.Second), false)
+		fetches += s.fetches
+		for _, id := range s.ids {
+			n := s.nodes[id]
+			if got := n.r.Status().Commit; got < want {
+				t.Fatalf("seed %d: node %d stuck at %d < %d", seed, id, got, want)
+			}
+			if n.r.log.window > 512+64 && n.r.log.evicted < min(n.r.log.applied, n.r.log.stable) {
+				t.Fatalf("seed %d: node %d holds %d payload bytes", seed, id, n.r.log.window)
+			}
+		}
+	}
+}

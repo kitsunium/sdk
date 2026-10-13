@@ -151,10 +151,52 @@ func (r *Raft) sendAppend(to core.NodeID, sendIfEmpty bool) {
 		r.rd.SendSnapshot = append(r.rd.SendSnapshot, to)
 		return
 	}
+	if pr.next <= r.log.evicted && pr.next <= r.log.lastIndex() {
+		// The payloads were evicted: the driver reads them off the loop.
+		pr.fetching = true
+		r.rd.Fetch = append(r.rd.Fetch, FetchRequest{To: to, Lo: pr.next, Hi: min(r.log.evicted, r.log.lastIndex()) + 1})
+		return
+	}
 	ents := r.log.slice(pr.next, r.log.lastIndex()+1, r.cfg.MaxBatchBytes)
 	if len(ents) == 0 && !sendIfEmpty {
 		return
 	}
+	r.sendEntries(pr, to, prev, prevTerm, ents)
+}
+
+// Fetched hands back entries read for a peer. Anything stale — another
+// role, another next, a term the log no longer has at that index — is
+// dropped, and a compacted read moves the peer to the snapshot path.
+func (r *Raft) Fetched(to core.NodeID, lo uint64, ents []core.Entry, compacted bool) {
+	pr := r.prs[to]
+	if pr == nil || !pr.fetching {
+		return
+	}
+	pr.fetching = false
+	if r.role != core.RoleLeader || pr.next != lo || pr.state == stateSnapshot {
+		r.sendAppend(to, false)
+		return
+	}
+	if compacted {
+		pr.becomeSnapshot(r.log.snapIndex)
+		r.rd.SendSnapshot = append(r.rd.SendSnapshot, to)
+		return
+	}
+	for i := range ents {
+		if t, ok := r.log.term(ents[i].Position.Index); !ok || t != ents[i].Position.Term || ents[i].Position.Index != lo+uint64(i) {
+			r.sendAppend(to, false)
+			return
+		}
+	}
+	prevTerm, ok := r.log.term(lo - 1)
+	if !ok || len(ents) == 0 {
+		r.sendAppend(to, false)
+		return
+	}
+	r.sendEntries(pr, to, lo-1, prevTerm, ents)
+}
+
+func (r *Raft) sendEntries(pr *progress, to core.NodeID, prev, prevTerm uint64, ents []core.Entry) {
 	m := core.Message{Kind: core.MsgApp, To: to, Index: prev, LogTerm: prevTerm, Entries: ents, Commit: r.log.committed}
 	r.send(m)
 	switch pr.state {
@@ -683,6 +725,7 @@ func (r *Raft) InstallSnapshot(meta core.SnapshotMeta) {
 			r.truncateFrom(r.log.snapIndex + 1)
 		}
 		r.log.ents = nil
+		r.log.window, r.log.evicted = 0, idx
 		r.log.snapIndex, r.log.snapTerm, r.log.snapChain = idx, t, meta.ChainTip
 		r.log.stable = max(r.log.stable, idx)
 		r.confs = nil

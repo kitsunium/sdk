@@ -15,6 +15,11 @@ type memLog struct {
 	committed uint64
 	stable    uint64
 	applied   uint64
+	// evicted is the highest index whose payload was dropped from memory;
+	// its metadata stays. window counts the payload bytes still resident
+	// above it (D6, RecentEntriesBytes).
+	evicted uint64
+	window  int64
 }
 
 func (l *memLog) lastIndex() uint64 { return l.snapIndex + uint64(len(l.ents)) }
@@ -72,8 +77,36 @@ func (l *memLog) slice(lo, hi uint64, maxBytes int) []core.Entry {
 	return src[:n:n]
 }
 
+// resident sums the payload bytes held for (from, to].
+func (l *memLog) resident(from, to uint64) int64 {
+	var n int64
+	for i := max(from, l.evicted, l.snapIndex) + 1; i <= to && i <= l.lastIndex(); i++ {
+		n += int64(len(l.at(i).Data))
+	}
+	return n
+}
+
+// evict drops payloads, oldest first, while the window is above limit,
+// never above through: only applied and durable entries are dropped, so
+// Apply never needs the disk and a lagging peer is fed by a fetch.
+func (l *memLog) evict(limit int64, through uint64) {
+	if limit <= 0 {
+		return
+	}
+	l.evicted = max(l.evicted, l.snapIndex)
+	for l.window > limit && l.evicted < through && l.evicted < l.lastIndex() {
+		e := l.at(l.evicted + 1)
+		l.window -= int64(len(e.Data))
+		e.Data = nil
+		l.evicted++
+	}
+}
+
 // truncateFrom drops every entry from index i on.
 func (l *memLog) truncateFrom(i uint64) {
+	if i <= l.lastIndex() {
+		l.window -= l.resident(i-1, l.lastIndex())
+	}
 	if i <= l.snapIndex {
 		l.ents = l.ents[:0]
 		return
@@ -91,6 +124,7 @@ func (l *memLog) compactTo(i, t uint64, chain uint32) {
 	if i <= l.snapIndex {
 		return
 	}
+	l.window -= l.resident(l.snapIndex, min(i, l.lastIndex()))
 	if i < l.lastIndex() {
 		keep := l.ents[i-l.snapIndex:]
 		l.ents = append(make([]core.Entry, 0, len(keep)), keep...)
@@ -98,6 +132,10 @@ func (l *memLog) compactTo(i, t uint64, chain uint32) {
 		l.ents = nil
 	}
 	l.snapIndex, l.snapTerm, l.snapChain = i, t, chain
+	l.evicted = max(l.evicted, i)
+	if l.window < 0 {
+		l.window = 0
+	}
 	if l.stable < i {
 		l.stable = i
 	}

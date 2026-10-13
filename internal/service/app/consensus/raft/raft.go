@@ -43,6 +43,9 @@ type Config struct {
 	// NoTable is set while the node holds no usable snapshot: it votes and
 	// stores the log but never campaigns, and asks for a snapshot (R7-18).
 	NoTable bool
+	// RecentEntriesBytes bounds the payloads held in memory; 0 holds them
+	// all. Older ones are fetched from the store when a peer needs them.
+	RecentEntriesBytes int64
 	// mut is set by the package's own tests only.
 	mut mutation
 }
@@ -105,8 +108,17 @@ type Ready struct {
 	// Compact drops the log's prefix through that index, which a durable
 	// snapshot covers.
 	Compact uint64
+	// Fetch asks the driver to read entries the step function no longer
+	// holds, off the event loop, and hand them back with Fetched.
+	Fetch []FetchRequest
 	// Membership is set when the admitted set changed.
 	Membership []core.Member
+}
+
+// FetchRequest asks for the entries [Lo, Hi) of the store for a peer.
+type FetchRequest struct {
+	To     core.NodeID
+	Lo, Hi uint64
 }
 
 // NeedsWrite reports whether the Ready asks the storage actor for anything.
@@ -224,6 +236,7 @@ func New(cfg Config, st Start) *Raft {
 			continue
 		}
 		r.log.ents = append(r.log.ents, e)
+		r.log.window += int64(len(e.Data))
 		r.noteAppended(&e)
 	}
 	r.log.stable = r.log.lastIndex()
@@ -348,7 +361,7 @@ func (r *Raft) SnapshotIndex() uint64 { return r.log.snapIndex }
 
 // Entry returns the entry at i, if the step function holds it.
 func (r *Raft) Entry(i uint64) (core.Entry, bool) {
-	if i <= r.log.snapIndex || i > r.log.lastIndex() {
+	if i <= r.log.snapIndex || i > r.log.lastIndex() || i <= r.log.evicted {
 		return core.Entry{}, false
 	}
 	return *r.log.at(i), true
@@ -430,7 +443,7 @@ func (r *Raft) HasReady() bool {
 	}
 	return rd.TruncateFrom != 0 || rd.Compact != 0 || len(rd.Entries) != 0 || len(rd.Messages) != 0 || len(rd.AfterSync) != 0 ||
 		len(rd.SendSnapshot) != 0 || len(rd.ReadStates) != 0 || len(rd.Forwarded) != 0 ||
-		len(rd.Transfers) != 0 || rd.Membership != nil
+		len(rd.Transfers) != 0 || rd.Membership != nil || len(rd.Fetch) != 0
 }
 
 // Ready returns the work of the turns since the last call and resets it.
@@ -456,6 +469,7 @@ func (r *Raft) Ready() Ready {
 		rd.Apply = slices.Clone(r.log.ents[r.log.applied-r.log.snapIndex : hi-r.log.snapIndex])
 		r.log.applied = hi
 	}
+	r.log.evict(r.cfg.RecentEntriesBytes, min(r.log.applied, r.log.stable))
 	if rd.NeedsWrite() {
 		r.seq++
 		rd.Seq = r.seq
@@ -611,6 +625,7 @@ func (r *Raft) truncateFrom(i uint64) {
 func (r *Raft) appendEntries(es []core.Entry) {
 	for i := range es {
 		r.log.ents = append(r.log.ents, es[i])
+		r.log.window += int64(len(es[i].Data))
 		r.rd.Entries = append(r.rd.Entries, es[i])
 		r.noteAppended(&r.log.ents[len(r.log.ents)-1])
 	}

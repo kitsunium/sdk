@@ -107,6 +107,8 @@ type cluster struct {
 	nodes   []*testNode
 	members []coreconsensus.Member
 	every   uint64
+	recent  int64
+	size    int
 }
 
 func testTimingFast() coreconsensus.TimingContract {
@@ -118,7 +120,7 @@ func (c *cluster) config(tn *testNode) Config {
 	return Config{Cluster: c.cid, Machine: tn.sm, Durability: DurabilityVolatile, Log: tn.log, Snapshots: tn.snaps,
 		Transport: c.net.Transport(tn.id), InitialTiming: testTimingFast(), MaxSnapshotBytes: 1 << 30,
 		SnapshotEveryBytes: 1 << 20, MaxLogBytes: 1 << 30, LogReserveBytes: 1 << 20, MinVoters: 1,
-		SnapshotEvery: c.every, SnapshotTrailing: 4, JoinAuthorizer: allowJoin{}}
+		SnapshotEvery: c.every, SnapshotTrailing: 4, JoinAuthorizer: allowJoin{}, RecentEntriesBytes: c.recent}
 }
 
 type allowJoin struct{}
@@ -128,7 +130,14 @@ func (allowJoin) Authorize(_ context.Context, r coreconsensus.JoinRequest) (core
 }
 
 func newCluster(t *testing.T, size int, every uint64) *cluster {
-	c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{1, 2, 3}, every: every}
+	return newClusterWith(t, &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{1, 2, 3}, every: every, size: size})
+}
+
+func newClusterWith(t *testing.T, c *cluster) *cluster {
+	size := c.size
+	if size == 0 {
+		size = 3
+	}
 	for i := 0; i < size; i++ {
 		tn := &testNode{log: NewMemoryLog(), snaps: NewMemorySnapshots(), sm: newKV()}
 		id, inc, err := InitLog(tn.log, c.cid, fmt.Sprintf("slot-%d", i))
@@ -612,5 +621,29 @@ func TestClusterNodeWithoutAValidSnapshotAsksForAnInstall(t *testing.T) {
 	}
 	if v, _ := f.sm.get("k129"); v != "129" {
 		t.Fatalf("no catch-up after the install: k129=%q", v)
+	}
+}
+
+// With a small RecentEntriesBytes, a follower that comes back far behind is
+// fed from the leader's store, not from its memory.
+func TestClusterLaggingFollowerFedFromTheStore(t *testing.T) {
+	c := newClusterWith(t, &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{4}, recent: 1024})
+	l := c.leader(5 * time.Second)
+	var f *testNode
+	for _, tn := range c.nodes {
+		if tn != l {
+			f = tn
+			break
+		}
+	}
+	c.kill(f)
+	var tok coreconsensus.Token
+	for i := 0; i < 300; i++ {
+		tok = propose(t, l.node, fmt.Sprintf("key-%d=%0100d", i, i))
+	}
+	c.start(f)
+	c.waitApplied(tok.Index, 10*time.Second)
+	if v, _ := f.sm.get("key-7"); v != fmt.Sprintf("%0100d", 7) {
+		t.Fatalf("lagging follower: key-7=%q", v)
 	}
 }

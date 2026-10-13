@@ -36,6 +36,9 @@ type progress struct {
 	// peer whose match did not move across two answers while appends are in
 	// flight lost one, and is probed again.
 	hbMatch uint64
+	// fetching pauses the peer while the driver reads entries the step
+	// function evicted.
+	fetching bool
 }
 
 func (p *progress) reset(next uint64) {
@@ -93,6 +96,9 @@ func (p *progress) add(last uint64, size int) {
 
 // paused reports whether the leader must not send more to the peer now.
 func (p *progress) paused(maxInflight, maxBytes int) bool {
+	if p.fetching {
+		return true
+	}
 	switch p.state {
 	case stateProbe:
 		return p.probeSent
