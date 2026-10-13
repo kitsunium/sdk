@@ -281,7 +281,7 @@ func ReceiptMessage(old, next coreconsensus.ClusterID, voter coreconsensus.NodeI
 // cluster id that records its predecessor and the last index it kept, and a
 // forced configuration. Every old voter left out must be attested fenced by
 // every witness; without witness keys it fails closed.
-func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt RecoverOptions) error {
+func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RecoverOptions) error {
 	if err := d.offline(); err != nil {
 		return err
 	}
@@ -290,7 +290,7 @@ func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsen
 		return recoverRefused("quarantined log")
 	}
 	stamp := flog.stamp
-	if err := checkRecover(&stamp, newCluster, &opt); err != nil {
+	if err := checkRecover(&stamp, newCluster, opt); err != nil {
 		return err
 	}
 	if err := checkRecoverMembers(&stamp, members); err != nil {
@@ -306,7 +306,7 @@ func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsen
 	if err != nil {
 		return err
 	}
-	if err := checkFenced(old.Voters(), members, &opt, stamp.Log.Cluster, newCluster); err != nil {
+	if err := checkFenced(old.Voters(), members, opt, stamp.Log.Cluster, newCluster); err != nil {
 		return err
 	}
 	if err := d.audit(opt.Operator, "recover "+newCluster.String()); err != nil {
@@ -499,16 +499,16 @@ type RestoreOptions struct {
 
 // RestoreSnapshot starts a new history from a saved snapshot on an empty,
 // joining directory, without a Node (R3-15).
-func RestoreSnapshot(d DataDir, r io.Reader, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt RestoreOptions) (coreconsensus.SnapshotMetaValue, error) {
+func RestoreSnapshot(d DataDir, r io.Reader, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RestoreOptions) (coreconsensus.SnapshotMetaValue, error) {
 	if err := d.offline(); err != nil {
 		return coreconsensus.SnapshotMetaValue{}, err
 	}
 	flog := d.d.log
 	stamp := flog.stamp
-	if err := checkRestore(flog, &stamp, newCluster, members, &opt); err != nil {
+	if err := checkRestore(flog, &stamp, newCluster, members, opt); err != nil {
 		return coreconsensus.SnapshotMetaValue{}, err
 	}
-	codec := restoreCodec(&opt)
+	codec := restoreCodec(opt)
 	if err := d.audit(opt.Operator, "restore-snapshot "+newCluster.String()); err != nil {
 		return coreconsensus.SnapshotMetaValue{}, err
 	}

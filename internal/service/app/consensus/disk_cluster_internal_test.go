@@ -77,7 +77,7 @@ func TestDiskClusterSurvivesFullRestart(t *testing.T) {
 	}
 	for _, dn := range nodes {
 		dn.sm = newKV()
-		if err := Bootstrap(context.Background(), diskConfig(c, dn), members); err != nil {
+		if err := Bootstrap(context.Background(), new(diskConfig(c, dn)), members); err != nil {
 			t.Fatal(err)
 		}
 		if err := dn.dd.Close(); err != nil {

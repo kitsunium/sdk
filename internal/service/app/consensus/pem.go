@@ -50,14 +50,17 @@ func (p *PEMIdentity) ReloadFailures() int { return int(p.id.ReloadFailures()) }
 
 // NewTCPTransportFromPEM builds the shipped transport from PEM files, over
 // the reloadable identity, its roots included.
-func NewTCPTransportFromPEM(certFile, keyFile, caFile string, cfg TransportConfig) (*TCPTransport, error) {
+//
+// cfg is read, never written: the identity and the defaults go into a copy.
+func NewTCPTransportFromPEM(certFile, keyFile, caFile string, cfgIn *TransportConfig) (*TCPTransport, error) {
 	p, err := NewPEMIdentity(certFile, keyFile, caFile)
 	if err != nil {
 		return nil, err
 	}
+	cfg := *cfgIn
 	cfg.Certificate, cfg.GetCertificate, cfg.Roots = nil, p.GetCertificate, p.Roots()
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
-	return newTCPTransport(cfg, p.id)
+	return newTCPTransport(&cfg, p.id)
 }

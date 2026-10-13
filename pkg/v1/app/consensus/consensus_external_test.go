@@ -96,7 +96,7 @@ func TestFacadeThreeNodesInMemory(t *testing.T) {
 			Log: p.log, Snapshots: p.snaps, Transport: consensus.NewMemoryTransport(net, p.id), InitialTiming: timing,
 			MaxSnapshotBytes: 1 << 30, MaxLogBytes: 1 << 30, MinVoters: 3,
 		}
-		if err := consensus.Bootstrap(context.Background(), cfg, members); err != nil {
+		if err := consensus.Bootstrap(context.Background(), &cfg, members); err != nil {
 			t.Fatal(err)
 		}
 		n, err := consensus.NewNode(cfg)

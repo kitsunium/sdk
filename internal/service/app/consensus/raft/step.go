@@ -457,7 +457,7 @@ func (r *Raft) rebaseOnCommit(m *core.MessageValue) bool {
 func (r *Raft) dropUnknownKinds(m *core.MessageValue) {
 	for k := range m.Entries {
 		if e := &m.Entries[k]; !e.Kind.Known() {
-			r.rd.Unsupported = UnsupportedEntry{Index: e.Position.Index, Kind: e.Kind}
+			r.rd.Unsupported = UnsupportedEntryValue{Index: e.Position.Index, Kind: e.Kind}
 			m.Entries = m.Entries[:k]
 			break
 		}

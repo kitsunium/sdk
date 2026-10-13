@@ -52,7 +52,7 @@ func TestACutWhoseSyncFailsStopsTheNode(t *testing.T) {
 				MaxLogBytes: 1 << 30, LogReserveBytes: 1 << 20, MinVoters: 1, SnapshotEvery: 2,
 				SnapshotTrailing: 1, JoinAuthorizer: allowJoin{}, SnapshotPausesApply: pauses,
 			}
-			if err := Bootstrap(context.Background(), cfg, members); err != nil {
+			if err := Bootstrap(context.Background(), &cfg, members); err != nil {
 				t.Fatal(err)
 			}
 			n, err := NewNode(cfg)

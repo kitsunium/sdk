@@ -1954,7 +1954,7 @@ packages:
             name: Precondition
             out:
               - type: PreconditionSpec
-            recv: value
+            recv: pointer
         name: StatusValue
         struct:
           fields:
@@ -2172,10 +2172,10 @@ packages:
           runs it with the IDENTICAL list (D8, R2-24, R3-02, R9-04). It never runs
           inside NewNode.
         in:
-          - name: _
+          - name: ctx
             type: context.Context
           - name: cfg
-            type: Config
+            type: "*Config"
           - name: members
             type: "[]coreconsensus.MemberValue"
         name: Bootstrap
@@ -2344,7 +2344,7 @@ packages:
           - name: members
             type: "[]coreconsensus.MemberValue"
           - name: opt
-            type: RecoverOptions
+            type: "*RecoverOptions"
         name: Recover
         out:
           - type: error
@@ -2361,7 +2361,7 @@ packages:
           - name: members
             type: "[]coreconsensus.MemberValue"
           - name: opt
-            type: RestoreOptions
+            type: "*RestoreOptions"
         name: RestoreSnapshot
         out:
           - type: coreconsensus.SnapshotMetaValue
@@ -2400,13 +2400,15 @@ packages:
       - doc: |-
           NewTCPTransportFromPEM builds the shipped transport from PEM files, over
           the reloadable identity, its roots included.
+
+          cfg is read, never written: the identity and the defaults go into a copy.
         in:
           - name: certFile
           - name: keyFile
           - name: caFile
             type: string
-          - name: cfg
-            type: TransportConfig
+          - name: cfgIn
+            type: "*TransportConfig"
         name: NewTCPTransportFromPEM
         out:
           - type: "*TCPTransport"
@@ -2439,10 +2441,12 @@ packages:
           - type: "[32]byte"
       - doc: |-
           NewTCPTransport validates the configuration, reads the cluster and slot
-          from the certificate, and listens (D4, R3-24).
+          from the certificate, and listens (D4, R3-24). It launches the background
+          accept goroutine, which Close stops with every connection goroutine. cfg
+          is read, never written: the defaults are applied to a copy.
         in:
           - name: cfg
-            type: TransportConfig
+            type: "*TransportConfig"
         name: NewTCPTransport
         out:
           - type: "*TCPTransport"
@@ -2571,7 +2575,7 @@ packages:
             name: MemoryBudget
             out:
               - type: int64
-            recv: value
+            recv: pointer
         name: Config
         struct:
           fields:
@@ -3479,9 +3483,9 @@ packages:
       - doc: NewRaft builds the step function over the loaded state.
         in:
           - name: cfg
-            type: Config
+            type: "*Config"
           - name: st
-            type: StartState
+            type: "*StartState"
         name: NewRaft
         out:
           - type: "*Raft"
@@ -3682,11 +3686,11 @@ packages:
                 Unsupported names an entry whose kind this version does not know:
                 the driver stops the node with VERSION_UNSUPPORTED.
               name: Unsupported
-              type: UnsupportedEntry
+              type: UnsupportedEntryValue
       - doc: |-
-          UnsupportedEntry is an entry a leader sent that this version cannot
+          UnsupportedEntryValue is an entry a leader sent that this version cannot
           apply; Index is 0 when there is none.
-        name: UnsupportedEntry
+        name: UnsupportedEntryValue
         struct:
           fields:
             - name: Index
@@ -4257,7 +4261,7 @@ packages:
       A write is committed when a majority holds it on disk.
 
       	id, inc, _ := consensus.Init(dir, cluster, "fra")      // offline, every founder
-      	_ = consensus.Bootstrap(ctx, cfg, members)              // offline, identical list
+      	_ = consensus.Bootstrap(ctx, &cfg, members)             // offline, identical list
       	node, _ := consensus.NewNode(cfg)                       // never bootstraps
       	tok, result, err := node.Propose(ctx, command)
 
@@ -4518,7 +4522,7 @@ packages:
             - name: members
               type: "[]MemberValue"
             - name: opt
-              type: RecoverOptions
+              type: "*RecoverOptions"
           name: Recover
           out:
             - type: error
@@ -4547,7 +4551,7 @@ packages:
             - name: members
               type: "[]MemberValue"
             - name: opt
-              type: RestoreOptions
+              type: "*RestoreOptions"
           name: RestoreSnapshot
           out:
             - type: SnapshotMetaValue
@@ -4557,7 +4561,7 @@ packages:
           forward: svcconsensus.NewTCPTransport
           in:
             - name: cfg
-              type: TransportConfig
+              type: "*TransportConfig"
           name: NewTCPTransport
           out:
             - type: "*TCPTransport"
@@ -4573,7 +4577,7 @@ packages:
             - name: caFile
               type: string
             - name: cfg
-              type: TransportConfig
+              type: "*TransportConfig"
           name: NewTCPTransportFromPEM
           out:
             - type: "*TCPTransport"
@@ -4777,7 +4781,7 @@ packages:
             - name: ctx
               type: context.Context
             - name: cfg
-              type: Config
+              type: "*Config"
             - name: members
               type: "[]MemberValue"
           name: Bootstrap

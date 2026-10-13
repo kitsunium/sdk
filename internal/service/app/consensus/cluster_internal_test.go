@@ -170,11 +170,11 @@ func newClusterWith(t *testing.T, c *cluster) *cluster {
 		})
 	}
 	for _, tn := range c.nodes {
-		if err := Bootstrap(context.Background(), c.config(tn), c.members); err != nil {
+		if err := Bootstrap(context.Background(), new(c.config(tn)), c.members); err != nil {
 			t.Fatal(err)
 		}
 		// Rerunning with the identical list is an idempotent success.
-		if err := Bootstrap(context.Background(), c.config(tn), c.members); err != nil {
+		if err := Bootstrap(context.Background(), new(c.config(tn)), c.members); err != nil {
 			t.Fatal(err)
 		}
 	}

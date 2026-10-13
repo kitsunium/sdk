@@ -221,7 +221,7 @@ func (s *sim) start(n *simNode) {
 	n.checked = 0
 	cfg := s.cfg(n.id)
 	cfg.NoTable = n.noTable
-	n.r = NewRaft(cfg, StartState{HardState: n.hs, Snapshot: n.base, Entries: slices.Clone(n.ents), Applied: n.base.Position.Index, Now: s.clock(n)})
+	n.r = NewRaft(&cfg, &StartState{HardState: n.hs, Snapshot: n.base, Entries: slices.Clone(n.ents), Applied: n.base.Position.Index, Now: s.clock(n)})
 	s.push(&event{at: s.now.Add(time.Duration(s.rng.Int64N(int64(10 * time.Millisecond)))), kind: evTick, node: n.id, life: n.life})
 }
 

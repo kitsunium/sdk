@@ -126,14 +126,19 @@ func byID(members []coreconsensus.MemberValue) []coreconsensus.MemberValue {
 // founding configuration as entry 1, then the member stamp. Every founder
 // runs it with the IDENTICAL list (D8, R2-24, R3-02, R9-04). It never runs
 // inside NewNode.
-func Bootstrap(_ context.Context, cfg Config, members []coreconsensus.MemberValue) error {
+func Bootstrap(ctx context.Context, cfg *Config, members []coreconsensus.MemberValue) error {
+	// Every phase below is a durable write: a caller that gave up before the
+	// first one gets its own cancellation back, and nothing is written.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if cfg.Log == nil {
 		return misconfigured("Log", "nil")
 	}
 	if err := checkFounders(members, cfg.MinVoters); err != nil {
 		return err
 	}
-	stamp, err := founderStamp(&cfg)
+	stamp, err := founderStamp(cfg)
 	if err != nil {
 		return err
 	}
@@ -144,7 +149,7 @@ func Bootstrap(_ context.Context, cfg Config, members []coreconsensus.MemberValu
 	if done, err := advanceFounding(cfg.Log, &stamp, digest); done || err != nil {
 		return err
 	}
-	if err := writeFoundingEntry(&cfg, members); err != nil {
+	if err := writeFoundingEntry(cfg, members); err != nil {
 		return err
 	}
 	stamp.State = coreconsensus.StampMember

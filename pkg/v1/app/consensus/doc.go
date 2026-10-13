@@ -3,7 +3,7 @@
 // A write is committed when a majority holds it on disk.
 //
 //	id, inc, _ := consensus.Init(dir, cluster, "fra")      // offline, every founder
-//	_ = consensus.Bootstrap(ctx, cfg, members)              // offline, identical list
+//	_ = consensus.Bootstrap(ctx, &cfg, members)             // offline, identical list
 //	node, _ := consensus.NewNode(cfg)                       // never bootstraps
 //	tok, result, err := node.Propose(ctx, command)
 //

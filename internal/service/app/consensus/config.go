@@ -288,7 +288,7 @@ func refuseDurability(c *Config) error {
 
 // MemoryBudget is the node's memory budget with two peers, the sum of its
 // bounds (D14).
-func (c Config) MemoryBudget(peers int) int64 {
+func (c *Config) MemoryBudget(peers int) int64 {
 	return c.MaxPendingBytes + c.MaxApplyLagBytes + c.RecentEntriesBytes + int64(peers)*int64(c.MaxInflightBytes)
 }
 

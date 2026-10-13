@@ -254,14 +254,14 @@ func newRaft(cfg Config) (*Node, error) {
 	if seed == 0 {
 		seed = newSubEpoch() | uint64(stamp.ID)
 	}
-	n.r = raft.NewRaft(raft.Config{
+	n.r = raft.NewRaft(&raft.Config{
 		ID: stamp.ID, Group: cfg.Group, Log: stamp.Log, Seed: seed, Timing: cfg.InitialTiming,
 		MaxInflight: cfg.MaxInflight, MaxInflightBytes: cfg.MaxInflightBytes, MaxBatchBytes: cfg.MaxBatchBytes,
 		MinVoters: cfg.MinVoters, PromoteLag: cfg.PromoteLag, Lease: cfg.Reads == ReadLease,
 		CanVote: n.canVote, MaxChainRefusals: maxChainRefusals, NoTable: n.noTable, RecentEntriesBytes: cfg.RecentEntriesBytes,
 		SilentTerm: silentTerm, SilentIndex: silentIndex,
 		MaxEntryBytes: cfg.MaxEntryBytes, MaxForwardBytes: cfg.MaxPendingBytes,
-	}, start)
+	}, &start)
 	n.publish()
 	if err := n.bindTransport(); err != nil {
 		return nil, err

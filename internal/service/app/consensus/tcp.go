@@ -240,19 +240,22 @@ func clampDuration(v *time.Duration, d time.Duration) {
 }
 
 // NewTCPTransport validates the configuration, reads the cluster and slot
-// from the certificate, and listens (D4, R3-24).
-func NewTCPTransport(cfg TransportConfig) (*TCPTransport, error) {
-	if err := cfg.validate(); err != nil {
+// from the certificate, and listens (D4, R3-24). It launches the background
+// accept goroutine, which Close stops with every connection goroutine. cfg
+// is read, never written: the defaults are applied to a copy.
+func NewTCPTransport(cfg *TransportConfig) (*TCPTransport, error) {
+	c := *cfg
+	if err := c.validate(); err != nil {
 		return nil, err
 	}
-	return newTCPTransport(cfg, nil)
+	return newTCPTransport(&c, nil)
 }
 
 // newTCPTransport builds the transport over id, or over the configuration's
 // certificate source and roots when id is nil, then listens and launches
 // the background accept goroutine, counted in t.wg, which ends when Close
 // closes the listener.
-func newTCPTransport(cfg TransportConfig, id *tlsid.Identity) (*TCPTransport, error) {
+func newTCPTransport(cfg *TransportConfig, id *tlsid.Identity) (*TCPTransport, error) {
 	if id == nil {
 		get := cfg.GetCertificate
 		if get == nil {
@@ -273,7 +276,7 @@ func newTCPTransport(cfg TransportConfig, id *tlsid.Identity) (*TCPTransport, er
 		return nil, transportMisconfigured("Certificate", "URI SAN")
 	}
 	t := &TCPTransport{
-		cfg: cfg, id: id, cluster: cid, slot: slot,
+		cfg: *cfg, id: id, cluster: cid, slot: slot,
 		members: map[coreconsensus.GroupID][]coreconsensus.MemberValue{}, byID: map[coreconsensus.NodeID]coreconsensus.MemberValue{},
 		bySPKI: map[[32]byte]coreconsensus.MemberValue{}, out: map[outKey]*peerConn{}, in: map[net.Conn][32]byte{}, raw: map[net.Conn]struct{}{}, admission: server.NewAdmission(server.AdmissionConfig{PerAddress: cfg.MaxUnauthenticatedPerIP, Reserved: cfg.ReservedMemberSlots}), peerExpiry: map[coreconsensus.NodeID]time.Time{},
 		done: make(chan struct{}),

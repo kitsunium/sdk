@@ -10,7 +10,7 @@ Package consensus is the public facade of the SDK's consensus domain (ADR 0152):
 
 ```
 id, inc, _ := consensus.Init(dir, cluster, "fra")      // offline, every founder
-_ = consensus.Bootstrap(ctx, cfg, members)              // offline, identical list
+_ = consensus.Bootstrap(ctx, &cfg, members)             // offline, identical list
 node, _ := consensus.NewNode(cfg)                       // never bootstraps
 tok, result, err := node.Propose(ctx, command)
 ```
@@ -34,7 +34,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 - [func AppendMessage\(dst \[\]byte, m \*MessageValue\) \[\]byte](<#AppendMessage>)
 - [func AppendSnapshotMeta\(dst \[\]byte, m \*SnapshotMetaValue\) \[\]byte](<#AppendSnapshotMeta>)
 - [func AppendToken\(dst \[\]byte, t TokenValue\) \[\]byte](<#AppendToken>)
-- [func Bootstrap\(ctx context.Context, cfg Config, members \[\]MemberValue\) error](<#Bootstrap>)
+- [func Bootstrap\(ctx context.Context, cfg \*Config, members \[\]MemberValue\) error](<#Bootstrap>)
 - [func ClearQuarantine\(d DataDir, exit QuarantineExit, op Operator\) error](<#ClearQuarantine>)
 - [func Init\(d DataDir, cluster ClusterID, slot string\) \(NodeID, Incarnation, error\)](<#Init>)
 - [func InitLog\(log LogStore, cluster ClusterID, slot string\) \(NodeID, Incarnation, error\)](<#InitLog>)
@@ -52,17 +52,17 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 - [func NewMemoryTransport\(n \*MemoryNetwork, id NodeID\) \*MemoryTransport](<#NewMemoryTransport>)
 - [func NewNode\(cfg Config\) \(\*Node, error\)](<#NewNode>)
 - [func NewPEMIdentity\(certFile string, keyFile string, caFile string\) \(\*PEMIdentity, error\)](<#NewPEMIdentity>)
-- [func NewTCPTransport\(cfg TransportConfig\) \(\*TCPTransport, error\)](<#NewTCPTransport>)
-- [func NewTCPTransportFromPEM\(certFile string, keyFile string, caFile string, cfg TransportConfig\) \(\*TCPTransport, error\)](<#NewTCPTransportFromPEM>)
+- [func NewTCPTransport\(cfg \*TransportConfig\) \(\*TCPTransport, error\)](<#NewTCPTransport>)
+- [func NewTCPTransportFromPEM\(certFile string, keyFile string, caFile string, cfg \*TransportConfig\) \(\*TCPTransport, error\)](<#NewTCPTransportFromPEM>)
 - [func ParseMessage\(frame \[\]byte, m \*MessageValue\) error](<#ParseMessage>)
 - [func ParseSnapshotMeta\(b \[\]byte, m \*SnapshotMetaValue\) error](<#ParseSnapshotMeta>)
 - [func ParseToken\(b \[\]byte\) \(TokenValue, error\)](<#ParseToken>)
 - [func ProposeAs\[R any\]\(ctx context.Context, r Replicated, data \[\]byte\) \(TokenValue, R, error\)](<#ProposeAs>)
 - [func ReceiptMessage\(old ClusterID, next ClusterID, voter NodeID\) \[\]byte](<#ReceiptMessage>)
-- [func Recover\(d DataDir, newCluster ClusterID, members \[\]MemberValue, opt RecoverOptions\) error](<#Recover>)
+- [func Recover\(d DataDir, newCluster ClusterID, members \[\]MemberValue, opt \*RecoverOptions\) error](<#Recover>)
 - [func Redraw\(d DataDir\) \(NodeID, error\)](<#Redraw>)
 - [func RedrawLog\(log LogStore\) \(NodeID, error\)](<#RedrawLog>)
-- [func RestoreSnapshot\(d DataDir, r io.Reader, newCluster ClusterID, members \[\]MemberValue, opt RestoreOptions\) \(SnapshotMetaValue, error\)](<#RestoreSnapshot>)
+- [func RestoreSnapshot\(d DataDir, r io.Reader, newCluster ClusterID, members \[\]MemberValue, opt \*RestoreOptions\) \(SnapshotMetaValue, error\)](<#RestoreSnapshot>)
 - [func SAN\(cluster ClusterID, slot string\) \*url.URL](<#SAN>)
 - [func SPKIOf\(c \*x509.Certificate\) \[32\]byte](<#SPKIOf>)
 - [func TimingDefaults\(\) TimingContractSpec](<#TimingDefaults>)
@@ -75,7 +75,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
   - [func \(ClusterID\) IsZero\(\) bool](<#ClusterID.IsZero>)
   - [func \(ClusterID\) String\(\) string](<#ClusterID.String>)
 - [type Config](<#Config>)
-  - [func \(Config\) MemoryBudget\(peers int\) int64](<#Config.MemoryBudget>)
+  - [func \(\*Config\) MemoryBudget\(peers int\) int64](<#Config.MemoryBudget>)
 - [type DataDir](<#DataDir>)
   - [func \(DataDir\) Close\(\) error](<#DataDir.Close>)
   - [func \(DataDir\) Dir\(\) string](<#DataDir.Dir>)
@@ -229,7 +229,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
   - [func \(StateMachine\) Restore\(r io.Reader, meta SnapshotMetaValue\) error](<#StateMachine.Restore>)
   - [func \(StateMachine\) Snapshot\(\) \(Snapshot, error\)](<#StateMachine.Snapshot>)
 - [type StatusValue](<#StatusValue>)
-  - [func \(StatusValue\) Precondition\(\) PreconditionSpec](<#StatusValue.Precondition>)
+  - [func \(\*StatusValue\) Precondition\(\) PreconditionSpec](<#StatusValue.Precondition>)
 - [type StopReasonValue](<#StopReasonValue>)
   - [func \(StopReasonValue\) ExitCode\(\) int](<#StopReasonValue.ExitCode>)
 - [type TCPTransport](<#TCPTransport>)
@@ -1056,7 +1056,7 @@ AppendToken appends the 41-byte encoding of t.
 ## func [Bootstrap](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 ```go
-func Bootstrap(ctx context.Context, cfg Config, members []MemberValue) error
+func Bootstrap(ctx context.Context, cfg *Config, members []MemberValue) error
 ```
 
 Bootstrap founds a cluster on one founding node, with the IDENTICAL member list on every founder. Idempotent and resumable.
@@ -1218,7 +1218,7 @@ NewPEMIdentity reads a node identity from PEM files; its Roots method is the CA 
 ## func [NewTCPTransport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 ```go
-func NewTCPTransport(cfg TransportConfig) (*TCPTransport, error)
+func NewTCPTransport(cfg *TransportConfig) (*TCPTransport, error)
 ```
 
 NewTCPTransport builds the shipped mTLS transport; it is also a Joiner.
@@ -1227,7 +1227,7 @@ NewTCPTransport builds the shipped mTLS transport; it is also a Joiner.
 ## func [NewTCPTransportFromPEM](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 ```go
-func NewTCPTransportFromPEM(certFile string, keyFile string, caFile string, cfg TransportConfig) (*TCPTransport, error)
+func NewTCPTransportFromPEM(certFile string, keyFile string, caFile string, cfg *TransportConfig) (*TCPTransport, error)
 ```
 
 NewTCPTransportFromPEM builds it from a certificate, a key and the consensus CA, as PEM files reloaded in place on renewal.
@@ -1281,7 +1281,7 @@ ReceiptMessage returns the bytes a witness signs to attest a fenced voter.
 ## func [Recover](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 ```go
-func Recover(d DataDir, newCluster ClusterID, members []MemberValue, opt RecoverOptions) error
+func Recover(d DataDir, newCluster ClusterID, members []MemberValue, opt *RecoverOptions) error
 ```
 
 Recover starts a new history from this node's committed log, every old voter left out attested fenced by every witness.
@@ -1308,7 +1308,7 @@ RedrawLog draws a new id on an empty joining log.
 ## func [RestoreSnapshot](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 ```go
-func RestoreSnapshot(d DataDir, r io.Reader, newCluster ClusterID, members []MemberValue, opt RestoreOptions) (SnapshotMetaValue, error)
+func RestoreSnapshot(d DataDir, r io.Reader, newCluster ClusterID, members []MemberValue, opt *RestoreOptions) (SnapshotMetaValue, error)
 ```
 
 RestoreSnapshot starts a new history from a saved snapshot, offline.
@@ -1526,7 +1526,7 @@ type Config struct {
 ### func \(Config\) [MemoryBudget](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/config.go>)
 
 ```go
-func (Config) MemoryBudget(peers int) int64
+func (*Config) MemoryBudget(peers int) int64
 ```
 
 MemoryBudget is the node's memory budget with two peers, the sum of its bounds (D14).
@@ -3688,7 +3688,7 @@ type StatusValue struct {
 ### func \(StatusValue\) [Precondition](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/status.go>)
 
 ```go
-func (StatusValue) Precondition() PreconditionSpec
+func (*StatusValue) Precondition() PreconditionSpec
 ```
 
 Precondition returns the precondition an operation clearing the current alarm, or replacing the current contract, would carry.

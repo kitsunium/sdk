@@ -119,7 +119,7 @@ func TestFacadeThreeNodesOverPEMAndDataDirs(t *testing.T) {
 		}
 		p.dd = dd
 		tr, err := consensus.NewTCPTransportFromPEM(filepath.Join(p.dir, "cert.pem"), filepath.Join(p.dir, "key.pem"), caFile,
-			consensus.TransportConfig{ListenAddress: "127.0.0.1:0"})
+			&consensus.TransportConfig{ListenAddress: "127.0.0.1:0"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -142,7 +142,7 @@ func TestFacadeThreeNodesOverPEMAndDataDirs(t *testing.T) {
 			},
 			MaxSnapshotBytes: 1 << 30, MaxLogBytes: 1 << 30,
 		}
-		if err := consensus.Bootstrap(context.Background(), p.cfg, members); err != nil {
+		if err := consensus.Bootstrap(context.Background(), &p.cfg, members); err != nil {
 			t.Fatal(err)
 		}
 		n, err := consensus.NewNode(p.cfg)

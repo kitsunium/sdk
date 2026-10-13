@@ -144,12 +144,12 @@ type ReadyValue struct {
 	Membership []core.MemberValue
 	// Unsupported names an entry whose kind this version does not know:
 	// the driver stops the node with VERSION_UNSUPPORTED.
-	Unsupported UnsupportedEntry
+	Unsupported UnsupportedEntryValue
 }
 
-// UnsupportedEntry is an entry a leader sent that this version cannot
+// UnsupportedEntryValue is an entry a leader sent that this version cannot
 // apply; Index is 0 when there is none.
-type UnsupportedEntry struct {
+type UnsupportedEntryValue struct {
 	Index uint64
 	Kind  core.EntryKind
 }
@@ -262,9 +262,9 @@ type Raft struct {
 }
 
 // NewRaft builds the step function over the loaded state.
-func NewRaft(cfg Config, st StartState) *Raft {
+func NewRaft(cfg *Config, st *StartState) *Raft {
 	node := &Raft{
-		cfg:    cfg,
+		cfg:    *cfg,
 		mut:    cfg.mut,
 		rng:    rand.New(rand.NewPCG(cfg.Seed, uint64(cfg.ID))),
 		id:     cfg.ID,
@@ -838,7 +838,7 @@ func (r *Raft) commitTimingContract(admin *wire.AdminValue) {
 func (r *Raft) commitClusterVersion(i uint64, admin *wire.AdminValue) bool {
 	if admin.ClusterVersion > ProtocolMax {
 		// Unknown means stop (D18, review M3).
-		r.rd.Unsupported = UnsupportedEntry{Index: i, Kind: core.EntryClusterVersion}
+		r.rd.Unsupported = UnsupportedEntryValue{Index: i, Kind: core.EntryClusterVersion}
 		return true
 	}
 	if admin.Pre.Generation == r.clusterGen && admin.ClusterVersion > r.clusterVer {

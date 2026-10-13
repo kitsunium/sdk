@@ -5914,7 +5914,7 @@
       "family": "app"
     },
     {
-      "id": "go:github.com/kitsunium/sdk/internal/core/app/consensus.StatusValue.Precondition",
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/consensus.(*StatusValue).Precondition",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
       "name": "Precondition",
@@ -44133,8 +44133,8 @@
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
       "name": "Bootstrap",
-      "spelled": "func(_ context.Context, cfg Config, members []coreconsensus.MemberValue) error",
-      "canonical": "func(_ context.Context, cfg github.com/kitsunium/sdk/internal/service/app/consensus.Config, members []github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue) error",
+      "spelled": "func(ctx context.Context, cfg *Config, members []coreconsensus.MemberValue) error",
+      "canonical": "func(ctx context.Context, cfg *github.com/kitsunium/sdk/internal/service/app/consensus.Config, members []github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue) error",
       "doc": "Bootstrap founds a cluster on one founding node's log, in phases that are\neach idempotent: a bootstrap-pending stamp naming the founding list, the\nfounding configuration as entry 1, then the member stamp. Every founder\nruns it with the IDENTICAL list (D8, R2-24, R3-02, R9-04). It never runs\ninside NewNode.\n",
       "file": "service/app/consensus/bootstrap.go",
       "layer": "service",
@@ -44324,7 +44324,7 @@
       "family": "app"
     },
     {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.Config.MemoryBudget",
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.(*Config).MemoryBudget",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
       "name": "MemoryBudget",
@@ -45141,9 +45141,9 @@
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
       "name": "NewTCPTransport",
-      "spelled": "func(cfg TransportConfig) (*TCPTransport, error)",
-      "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/app/consensus.TransportConfig) (*github.com/kitsunium/sdk/internal/service/app/consensus.TCPTransport, error)",
-      "doc": "NewTCPTransport validates the configuration, reads the cluster and slot\nfrom the certificate, and listens (D4, R3-24).\n",
+      "spelled": "func(cfg *TransportConfig) (*TCPTransport, error)",
+      "canonical": "func(cfg *github.com/kitsunium/sdk/internal/service/app/consensus.TransportConfig) (*github.com/kitsunium/sdk/internal/service/app/consensus.TCPTransport, error)",
+      "doc": "NewTCPTransport validates the configuration, reads the cluster and slot\nfrom the certificate, and listens (D4, R3-24). It launches the background\naccept goroutine, which Close stops with every connection goroutine. cfg\nis read, never written: the defaults are applied to a copy.\n",
       "file": "service/app/consensus/tcp.go",
       "layer": "service",
       "family": "app"
@@ -45153,9 +45153,9 @@
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
       "name": "NewTCPTransportFromPEM",
-      "spelled": "func(certFile string, keyFile string, caFile string, cfg TransportConfig) (*TCPTransport, error)",
-      "canonical": "func(certFile string, keyFile string, caFile string, cfg github.com/kitsunium/sdk/internal/service/app/consensus.TransportConfig) (*github.com/kitsunium/sdk/internal/service/app/consensus.TCPTransport, error)",
-      "doc": "NewTCPTransportFromPEM builds the shipped transport from PEM files, over\nthe reloadable identity, its roots included.\n",
+      "spelled": "func(certFile string, keyFile string, caFile string, cfgIn *TransportConfig) (*TCPTransport, error)",
+      "canonical": "func(certFile string, keyFile string, caFile string, cfgIn *github.com/kitsunium/sdk/internal/service/app/consensus.TransportConfig) (*github.com/kitsunium/sdk/internal/service/app/consensus.TCPTransport, error)",
+      "doc": "NewTCPTransportFromPEM builds the shipped transport from PEM files, over\nthe reloadable identity, its roots included.\n\ncfg is read, never written: the identity and the defaults go into a copy.\n",
       "file": "service/app/consensus/pem.go",
       "layer": "service",
       "family": "app"
@@ -45630,8 +45630,8 @@
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
       "name": "Recover",
-      "spelled": "func(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt RecoverOptions) error",
-      "canonical": "func(d github.com/kitsunium/sdk/internal/service/app/consensus.DataDir, newCluster github.com/kitsunium/sdk/internal/core/app/consensus.ClusterID, members []github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue, opt github.com/kitsunium/sdk/internal/service/app/consensus.RecoverOptions) error",
+      "spelled": "func(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RecoverOptions) error",
+      "canonical": "func(d github.com/kitsunium/sdk/internal/service/app/consensus.DataDir, newCluster github.com/kitsunium/sdk/internal/core/app/consensus.ClusterID, members []github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue, opt *github.com/kitsunium/sdk/internal/service/app/consensus.RecoverOptions) error",
       "doc": "Recover starts a NEW history from this node's committed log: a new\ncluster id that records its predecessor and the last index it kept, and a\nforced configuration. Every old voter left out must be attested fenced by\nevery witness; without witness keys it fails closed.\n",
       "file": "service/app/consensus/offline.go",
       "layer": "service",
@@ -45786,8 +45786,8 @@
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
       "name": "RestoreSnapshot",
-      "spelled": "func(d DataDir, r io.Reader, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt RestoreOptions) (coreconsensus.SnapshotMetaValue, error)",
-      "canonical": "func(d github.com/kitsunium/sdk/internal/service/app/consensus.DataDir, r io.Reader, newCluster github.com/kitsunium/sdk/internal/core/app/consensus.ClusterID, members []github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue, opt github.com/kitsunium/sdk/internal/service/app/consensus.RestoreOptions) (github.com/kitsunium/sdk/internal/core/app/consensus.SnapshotMetaValue, error)",
+      "spelled": "func(d DataDir, r io.Reader, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RestoreOptions) (coreconsensus.SnapshotMetaValue, error)",
+      "canonical": "func(d github.com/kitsunium/sdk/internal/service/app/consensus.DataDir, r io.Reader, newCluster github.com/kitsunium/sdk/internal/core/app/consensus.ClusterID, members []github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue, opt *github.com/kitsunium/sdk/internal/service/app/consensus.RestoreOptions) (github.com/kitsunium/sdk/internal/core/app/consensus.SnapshotMetaValue, error)",
       "doc": "RestoreSnapshot starts a new history from a saved snapshot on an empty,\njoining directory, without a Node (R3-15).\n",
       "file": "service/app/consensus/offline.go",
       "layer": "service",
@@ -46289,8 +46289,8 @@
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
       "name": "NewRaft",
-      "spelled": "func(cfg Config, st StartState) *Raft",
-      "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/app/consensus/raft.Config, st github.com/kitsunium/sdk/internal/service/app/consensus/raft.StartState) *github.com/kitsunium/sdk/internal/service/app/consensus/raft.Raft",
+      "spelled": "func(cfg *Config, st *StartState) *Raft",
+      "canonical": "func(cfg *github.com/kitsunium/sdk/internal/service/app/consensus/raft.Config, st *github.com/kitsunium/sdk/internal/service/app/consensus/raft.StartState) *github.com/kitsunium/sdk/internal/service/app/consensus/raft.Raft",
       "doc": "NewRaft builds the step function over the loaded state.\n",
       "file": "service/app/consensus/raft/raft.go",
       "layer": "service",
@@ -46818,8 +46818,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
       "name": "ReadyValue",
-      "spelled": "struct{Seq uint64; HardState *core.HardState; Commit uint64; TruncateFrom uint64; Entries []core.EntryValue; Messages []core.MessageValue; AfterSync []core.MessageValue; Apply []core.EntryValue; SendSnapshot []core.NodeID; ReadStates []ReadState; Forwarded []core.MessageValue; Transfers []TransferResult; Compact uint64; SilenceEnded bool; Fetch []FetchSpec; Membership []core.MemberValue; Unsupported UnsupportedEntry}",
-      "canonical": "struct{Seq uint64; HardState *github.com/kitsunium/sdk/internal/core/app/consensus.HardState; Commit uint64; TruncateFrom uint64; Entries []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue; Messages []github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue; AfterSync []github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue; Apply []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue; SendSnapshot []github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; ReadStates []github.com/kitsunium/sdk/internal/service/app/consensus/raft.ReadState; Forwarded []github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue; Transfers []github.com/kitsunium/sdk/internal/service/app/consensus/raft.TransferResult; Compact uint64; SilenceEnded bool; Fetch []github.com/kitsunium/sdk/internal/service/app/consensus/raft.FetchSpec; Membership []github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue; Unsupported github.com/kitsunium/sdk/internal/service/app/consensus/raft.UnsupportedEntry}",
+      "spelled": "struct{Seq uint64; HardState *core.HardState; Commit uint64; TruncateFrom uint64; Entries []core.EntryValue; Messages []core.MessageValue; AfterSync []core.MessageValue; Apply []core.EntryValue; SendSnapshot []core.NodeID; ReadStates []ReadState; Forwarded []core.MessageValue; Transfers []TransferResult; Compact uint64; SilenceEnded bool; Fetch []FetchSpec; Membership []core.MemberValue; Unsupported UnsupportedEntryValue}",
+      "canonical": "struct{Seq uint64; HardState *github.com/kitsunium/sdk/internal/core/app/consensus.HardState; Commit uint64; TruncateFrom uint64; Entries []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue; Messages []github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue; AfterSync []github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue; Apply []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue; SendSnapshot []github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; ReadStates []github.com/kitsunium/sdk/internal/service/app/consensus/raft.ReadState; Forwarded []github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue; Transfers []github.com/kitsunium/sdk/internal/service/app/consensus/raft.TransferResult; Compact uint64; SilenceEnded bool; Fetch []github.com/kitsunium/sdk/internal/service/app/consensus/raft.FetchSpec; Membership []github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue; Unsupported github.com/kitsunium/sdk/internal/service/app/consensus/raft.UnsupportedEntryValue}",
       "fields": [
         {
           "name": "Seq",
@@ -46903,7 +46903,7 @@
         },
         {
           "name": "Unsupported",
-          "type": "UnsupportedEntry",
+          "type": "UnsupportedEntryValue",
           "doc": "Unsupported names an entry whose kind this version does not know:\nthe driver stops the node with VERSION_UNSUPPORTED.\n"
         }
       ],
@@ -47053,10 +47053,10 @@
       "family": "app"
     },
     {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.UnsupportedEntry",
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.UnsupportedEntryValue",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
-      "name": "UnsupportedEntry",
+      "name": "UnsupportedEntryValue",
       "spelled": "struct{Index uint64; Kind core.EntryKind}",
       "canonical": "struct{Index uint64; Kind github.com/kitsunium/sdk/internal/core/app/consensus.EntryKind}",
       "fields": [
@@ -47069,7 +47069,7 @@
           "type": "core.EntryKind"
         }
       ],
-      "doc": "UnsupportedEntry is an entry a leader sent that this version cannot\napply; Index is 0 when there is none.\n",
+      "doc": "UnsupportedEntryValue is an entry a leader sent that this version cannot\napply; Index is 0 when there is none.\n",
       "file": "service/app/consensus/raft/raft.go",
       "layer": "service",
       "family": "app"

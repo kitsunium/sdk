@@ -94,7 +94,7 @@ func (tn *tcpNode) listen(t *testing.T, ca *testCA) {
 	if addr == "" {
 		addr = "127.0.0.1:0"
 	}
-	tr, err := NewTCPTransport(TransportConfig{Certificate: tn.cert, Roots: ca.pool, ListenAddress: addr})
+	tr, err := NewTCPTransport(&TransportConfig{Certificate: tn.cert, Roots: ca.pool, ListenAddress: addr})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func newTCPCluster(t *testing.T) (*testCA, coreconsensus.ClusterID, []*tcpNode) 
 	}
 	for _, tn := range ns {
 		tn.sm = newKV()
-		if err := Bootstrap(context.Background(), tcpConfig(cid, tn), members); err != nil {
+		if err := Bootstrap(context.Background(), new(tcpConfig(cid, tn)), members); err != nil {
 			t.Fatal(err)
 		}
 		tn.start(t, cid)
@@ -252,14 +252,14 @@ func TestTCPRefusesAnUnpinnedKeyAndAnotherCluster(t *testing.T) {
 	// A non-canonical SAN is refused at construction.
 	bad := &url.URL{Scheme: "kitsunium-consensus", Host: cid.String(), Path: "/slot/x/"}
 	c, _ := ca.issue(t, bad, nil)
-	if _, err := NewTCPTransport(TransportConfig{Certificate: c, Roots: ca.pool, ListenAddress: "127.0.0.1:0"}); !errors.Is(err, coreconsensus.TransportMisconfigured) {
+	if _, err := NewTCPTransport(&TransportConfig{Certificate: c, Roots: ca.pool, ListenAddress: "127.0.0.1:0"}); !errors.Is(err, coreconsensus.TransportMisconfigured) {
 		t.Fatalf("non-canonical SAN: %v", err)
 	}
 	// Session tickets stay off (R7-26).
 	if !target.tr.id.ServerConfig(nil).SessionTicketsDisabled || !target.tr.id.ClientConfig(nil).SessionTicketsDisabled {
 		t.Fatal("session tickets enabled")
 	}
-	if _, err := NewTCPTransport(TransportConfig{Certificate: c, Roots: ca.pool, ListenAddress: "127.0.0.1:0", HandshakeTimeout: 2 * time.Second}); !errors.Is(err, coreconsensus.TransportMisconfigured) {
+	if _, err := NewTCPTransport(&TransportConfig{Certificate: c, Roots: ca.pool, ListenAddress: "127.0.0.1:0", HandshakeTimeout: 2 * time.Second}); !errors.Is(err, coreconsensus.TransportMisconfigured) {
 		t.Fatalf("handshake timeout above 1 s: %v", err)
 	}
 }
@@ -328,7 +328,7 @@ func TestTCPCapsUnauthenticatedConnectionsPerAddress(t *testing.T) {
 	ca := newTestCA(t)
 	cid := coreconsensus.ClusterID{0xab}
 	cert, _ := ca.issue(t, SAN(cid, "a"), nil)
-	tr, err := NewTCPTransport(TransportConfig{
+	tr, err := NewTCPTransport(&TransportConfig{
 		Certificate: cert, Roots: ca.pool, ListenAddress: "127.0.0.1:0",
 		MaxUnauthenticatedPerIP: 2, ReservedMemberSlots: 5,
 	})

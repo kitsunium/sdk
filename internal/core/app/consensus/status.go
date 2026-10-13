@@ -95,7 +95,7 @@ type VersionsValue struct {
 
 // Precondition returns the precondition an operation clearing the current
 // alarm, or replacing the current contract, would carry.
-func (s StatusValue) Precondition() PreconditionSpec {
+func (s *StatusValue) Precondition() PreconditionSpec {
 	return PreconditionSpec{Log: s.Log, Alarm: s.NoSpace, Generation: s.Timing.Generation}
 }
 

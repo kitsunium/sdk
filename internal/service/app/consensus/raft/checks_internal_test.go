@@ -57,11 +57,11 @@ type testState struct {
 
 func newTest(id core.NodeID, st testState, mut mutation, lease bool) *Raft {
 	term, commit, ents := st.term, st.commit, st.ents
-	cfg := Config{
+	cfg := &Config{
 		ID: id, Group: 1, Seed: 1, Timing: testTiming(), MaxInflight: 8, MaxInflightBytes: 1 << 20,
 		MaxBatchBytes: 1 << 16, MinVoters: 1, PromoteLag: 16, Lease: lease, CanVote: true, MaxChainRefusals: 3, mut: mut,
 	}
-	return NewRaft(cfg, StartState{
+	return NewRaft(cfg, &StartState{
 		HardState: core.HardState{Term: term, Commit: commit},
 		Snapshot:  core.SnapshotMetaValue{Membership: testConf(1, 2, 3)},
 		Entries:   ents,
@@ -165,11 +165,11 @@ func checkAckVerifiedPrefix(mut mutation) error {
 // the prefix up to the snapshot only, so the leader must not count the
 // suffix (review H1, the InstallSnapshot twin of checkAckVerifiedPrefix).
 func checkSnapshotAckIndex(mut mutation) error {
-	cfg := Config{
+	cfg := &Config{
 		ID: 2, Group: 1, Seed: 1, Timing: testTiming(), MaxInflight: 8, MaxInflightBytes: 1 << 20,
 		MaxBatchBytes: 1 << 16, MinVoters: 1, PromoteLag: 16, CanVote: true, MaxChainRefusals: 3, NoTable: true, mut: mut,
 	}
-	f := NewRaft(cfg, StartState{
+	f := NewRaft(cfg, &StartState{
 		HardState: core.HardState{Term: 3},
 		Snapshot:  core.SnapshotMetaValue{Membership: testConf(1, 2, 3)},
 		Entries:   chainEntries(0, 1, 1, 1, 1, 2, 2),
@@ -523,11 +523,11 @@ func TestSimulatorCatchesAckBeforeSync(t *testing.T) {
 // leader of a term at least its own rewrote its log past the truncation
 // point and committed an entry of its term.
 func TestSilentNodeStaysSilentUntilTheConditionHolds(t *testing.T) {
-	cfg := Config{
+	cfg := &Config{
 		ID: 2, Group: 1, Seed: 1, Timing: testTiming(), MaxInflight: 8, MaxInflightBytes: 1 << 20,
 		MaxBatchBytes: 1 << 16, MinVoters: 1, PromoteLag: 16, CanVote: true, SilentTerm: 3, SilentIndex: 2,
 	}
-	f := NewRaft(cfg, StartState{
+	f := NewRaft(cfg, &StartState{
 		HardState: core.HardState{Term: 3}, Snapshot: core.SnapshotMetaValue{Membership: testConf(1, 2, 3)},
 		Entries: chainEntries(0, 1, 1), Now: t0,
 	})
@@ -703,13 +703,13 @@ func TestAddLearnerRefusesAKeyAMemberHolds(t *testing.T) {
 // node acknowledged, committed ones included, and leave its commit above
 // its log. The simulator's snapshot schedule found it (seed 3).
 func checkNoTableBase(mut mutation) error {
-	cfg := Config{
+	cfg := &Config{
 		ID: 2, Group: 1, Seed: 1, Timing: testTiming(), MaxInflight: 8, MaxInflightBytes: 1 << 20,
 		MaxBatchBytes: 1 << 16, MinVoters: 1, PromoteLag: 16, CanVote: true, MaxChainRefusals: 3, NoTable: true, mut: mut,
 	}
 	all := chainEntries(0, 1, 1, 1, 1, 1, 1, 1)
 	base := core.SnapshotMetaValue{Position: core.PositionValue{Term: 1, Index: 4}, ChainTip: all[3].ChainSum, Membership: testConf(1, 2, 3)}
-	f := NewRaft(cfg, StartState{HardState: core.HardState{Term: 1, Commit: 6}, Snapshot: base, Entries: all[4:], Applied: 4, Now: t0})
+	f := NewRaft(cfg, &StartState{HardState: core.HardState{Term: 1, Commit: 6}, Snapshot: base, Entries: all[4:], Applied: 4, Now: t0})
 	f.lead, f.term = 1, 1
 	old := core.SnapshotMetaValue{Position: core.PositionValue{Term: 1, Index: 2}, ChainTip: all[1].ChainSum, Membership: testConf(1, 2, 3)}
 	if code := f.CheckOffer(1, core.InstallOfferValue{Term: 1, Meta: old}, true); code == 0 || code == core.CodeAdminPreconditionFailed {
