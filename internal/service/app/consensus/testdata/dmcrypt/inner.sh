@@ -44,6 +44,7 @@ for i in $(seq 1 "$iters"); do
 	# Every third iteration stops the writer right after a rotation's seal
 	# and cuts there (review H2); the others cut at a random instant.
 	atseal=0
+	noseal=0
 	[ "$negative" = 1 ] || [ $((i % 3)) != 0 ] || atseal=1
 	DMCRYPT_ACK_BEFORE_SYNC="$negative" DMCRYPT_STOP_AT_SEAL="$atseal" \
 		/work/consensus.test -test.run '^TestDMCryptWriter$' >/tmp/acked.log 2>&1 &
@@ -53,7 +54,9 @@ for i in $(seq 1 "$iters"); do
 			grep -q '^SEALED' /tmp/acked.log 2>/dev/null && break
 			sleep 0.05
 		done
-		grep -q '^SEALED' /tmp/acked.log || { echo "CRASH $i no rotation reached"; }
+		# A seal-cut iteration that never reached a seal did not test the
+		# seal: it fails rather than passing as a random cut.
+		grep -q '^SEALED' /tmp/acked.log || { echo "CRASH $i no rotation reached"; noseal=1; }
 	else
 		# Let it reopen the log and acknowledge, then cut at a random instant.
 		for _ in $(seq 1 200); do
@@ -77,11 +80,11 @@ for i in $(seq 1 "$iters"); do
 	dmsetup load kcons-cut --table "$linear"
 	dmsetup resume kcons-cut
 	mount /dev/mapper/kcons-cut /mnt
-	if line="$(DMCRYPT_ACKED="$acked" /work/consensus.test -test.run '^TestDMCryptVerify$' -test.count=1 2>&1)"; then
+	if line="$(DMCRYPT_ACKED="$acked" /work/consensus.test -test.run '^TestDMCryptVerify$' -test.count=1 2>&1)" && [ "$noseal" = 0 ]; then
 		echo "CRASH $i at_seal=$atseal $(echo "$line" | grep '^VERIFY')"
 		pass=$((pass + 1))
 	else
-		echo "CRASH $i FAILED at_seal=$atseal acked=$acked"
+		echo "CRASH $i FAILED at_seal=$atseal no_seal=$noseal acked=$acked"
 		echo "$line" | tail -5
 	fi
 done
