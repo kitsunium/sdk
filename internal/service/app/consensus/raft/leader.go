@@ -459,6 +459,10 @@ func (r *Raft) nextConf(a wire.Admin) (core.Membership, errs.Code) {
 		if _, ok := cur.Member(nm.ID); ok {
 			return cur, codeMembershipInvalid
 		}
+		if slices.ContainsFunc(cur.Members, func(m core.Member) bool { return m.SPKI == nm.SPKI }) {
+			// One key, one member: the transport admits by key (review M5).
+			return cur, codeMembershipInvalid
+		}
 		if !r.quorumActive(r.now, r.voteWindow) {
 			return cur, codeMembershipInvalid
 		}

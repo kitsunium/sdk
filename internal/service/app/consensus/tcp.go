@@ -598,13 +598,23 @@ func (t *TCPTransport) SetMembership(group coreconsensus.GroupID, admitted []cor
 	t.members[group] = append([]coreconsensus.Member(nil), admitted...)
 	byID := map[coreconsensus.NodeID]coreconsensus.Member{}
 	bySPKI := map[[32]byte]coreconsensus.Member{}
+	shared := map[[32]byte]bool{}
 	for _, ms := range t.members {
 		for _, m := range ms {
 			byID[m.ID] = m
-			if m.SPKI != ([32]byte{}) {
-				bySPKI[m.SPKI] = m
+			if m.SPKI == ([32]byte{}) {
+				continue
 			}
+			if o, ok := bySPKI[m.SPKI]; ok && o.ID != m.ID {
+				// Two members under one key: a connection could speak for
+				// either, so the key admits neither (review M5).
+				shared[m.SPKI] = true
+			}
+			bySPKI[m.SPKI] = m
 		}
+	}
+	for k := range shared {
+		delete(bySPKI, k)
 	}
 	t.byID, t.bySPKI = byID, bySPKI
 	addrs := make([]string, 0, len(byID))

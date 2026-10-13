@@ -884,6 +884,11 @@ R2-21).**
     replacement, is admitted only under its own pinned key. A certificate for
     the slot with another key is `PEER_REJECTED`, even when it is valid. A
     mutation that admits a claimed ID under another key must fail.
+  - **One key, one member (review of PR #301, M5).** `AddLearner`,
+    `Bootstrap`, `Recover` and `RestoreSnapshot` refuse a member whose key
+    another member already holds, and a transport given two members under
+    one key admits that key for neither: admission goes by key, so two
+    members under one key could speak as each other.
   - The dialer checks the listener's SAN, and the listener checks the
     dialer's. A wrong cluster or slot is `PEER_REJECTED`.
   - The transport takes its own cluster and slot from its own certificate's

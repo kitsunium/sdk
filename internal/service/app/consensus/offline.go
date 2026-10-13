@@ -189,6 +189,9 @@ func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsen
 			self = m.Incarnation == st.Incarnation
 		}
 	}
+	if sharedKey(members) {
+		return refused("two members under one key")
+	}
 	if !self {
 		return refused("this node is not a voter of the new members")
 	}
@@ -324,6 +327,9 @@ func RestoreSnapshot(d DataDir, r io.Reader, newCluster coreconsensus.ClusterID,
 		if m.SPKI == ([32]byte{}) {
 			return refused("a member without an SPKI pin")
 		}
+	}
+	if sharedKey(members) {
+		return refused("two members under one key")
 	}
 	codec := opt.Codec
 	if codec == nil {

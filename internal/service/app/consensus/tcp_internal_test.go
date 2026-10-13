@@ -426,3 +426,23 @@ func TestJoinReasonOfAnSDKErrorIsItsPublicMessage(t *testing.T) {
 		t.Fatal("blank text made a reason")
 	}
 }
+
+// A key two members share admits neither: the transport could not tell
+// which member a connection speaks for (review M5).
+func TestTCPAdmitsNoKeyTwoMembersShare(t *testing.T) {
+	ca := newTestCA(t)
+	cid := coreconsensus.ClusterID{0xc0, 0xff, 0xee}
+	tn := &tcpNode{slot: "site-0"}
+	tn.cert, tn.spki = ca.issue(t, SAN(cid, tn.slot), nil)
+	tn.listen(t, ca)
+	defer tn.tr.Close()
+	shared := [32]byte{7}
+	tn.tr.SetMembership(1, []coreconsensus.Member{{ID: 1, SPKI: shared}, {ID: 2, SPKI: shared}, {ID: 3, SPKI: [32]byte{3}}})
+	tn.tr.mu.Lock()
+	_, admitted := tn.tr.bySPKI[shared]
+	_, other := tn.tr.bySPKI[[32]byte{3}]
+	tn.tr.mu.Unlock()
+	if admitted || !other {
+		t.Fatalf("shared key admitted=%v, distinct key admitted=%v", admitted, other)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	core "github.com/kitsunium/sdk/internal/core/app/consensus"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
 
@@ -655,5 +656,33 @@ func TestClusterVersionAboveTheProtocolIsRefused(t *testing.T) {
 	}
 	if f.clusterVer > ProtocolMax {
 		t.Fatalf("cluster version raised to %d", f.clusterVer)
+	}
+}
+
+// A learner whose key a member already holds is refused: the transport
+// admits a connection by its key and would let it speak as that member
+// (review M5).
+func TestAddLearnerRefusesAKeyAMemberHolds(t *testing.T) {
+	r := leaderOf(2, 0, nil, 0, false)
+	rd := r.Ready()
+	r.StorageDone(rd.Seq, r.log.lastIndex(), r.term)
+	for _, id := range []core.NodeID{2, 3} {
+		ack := msg(core.MsgAppResp, id, 1, r.term)
+		ack.Index = r.log.lastIndex()
+		r.Step(r.now, ack)
+	}
+	if r.log.committed != r.log.lastIndex() {
+		t.Fatalf("setup: no-op not committed (%d/%d)", r.log.committed, r.log.lastIndex())
+	}
+	add := func(nm core.Member) errs.Code {
+		data := wire.AppendAdmin(nil, &wire.Admin{Change: wire.ChangeAddLearner, Membership: core.Membership{Members: []core.Member{nm}}})
+		_, code := r.Propose(r.now, []core.Entry{{Kind: core.EntryMembership, BodySum: wire.BodySum(data), Data: data}})
+		return code
+	}
+	if code := add(core.Member{ID: 9, SPKI: [32]byte{2}}); code != core.CodeMembershipInvalid {
+		t.Fatalf("a learner under member 2's key: %v", code)
+	}
+	if code := add(core.Member{ID: 9, SPKI: [32]byte{9}}); code != 0 {
+		t.Fatalf("a learner under its own key: %v", code)
 	}
 }

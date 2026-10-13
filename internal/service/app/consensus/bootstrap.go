@@ -134,6 +134,9 @@ func Bootstrap(_ context.Context, cfg Config, members []coreconsensus.Member) er
 		}
 		seen[m.ID] = true
 	}
+	if sharedKey(members) {
+		return origin(coreconsensus.BootstrapRefused, errs.String("why", "two members under one key"))
+	}
 	voters := 0
 	for _, m := range members {
 		if m.Voter {
@@ -309,4 +312,21 @@ func (n *Node) Health() Health {
 	h.Ready = !h.Stopped && h.HasLeader && st.Applied >= st.Commit &&
 		(h.ChainRefusals == 0 || h.ChainRefusalLeader != st.Leader)
 	return h
+}
+
+// sharedKey reports whether two members are pinned to one key. The
+// transport admits a connection by its key: two members under one key
+// could speak as each other (review M5).
+func sharedKey(members []coreconsensus.Member) bool {
+	seen := make(map[[32]byte]bool, len(members))
+	for _, m := range members {
+		if m.SPKI == ([32]byte{}) {
+			continue
+		}
+		if seen[m.SPKI] {
+			return true
+		}
+		seen[m.SPKI] = true
+	}
+	return false
 }
