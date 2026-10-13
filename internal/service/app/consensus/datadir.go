@@ -1,6 +1,7 @@
 package consensus
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
@@ -18,11 +19,24 @@ import (
 )
 
 const (
-	fileLock         = "LOCK"
-	fileStamp        = "STAMP"
+	// fileLock is the file whose flock excludes a second process (D11).
+	fileLock = "LOCK"
+	// fileStamp holds the node's identity and its log's lineage.
+	fileStamp = "STAMP"
+	// markerQuarantine is written FIRST when recovery finds damage it may not
+	// repair; while it exists the log refuses every call (D4).
 	markerQuarantine = "QUARANTINE"
+	// markerStopPrefix starts the name of every stop marker, the reason
+	// following it: a start is refused while one applies (D4, R9-05).
 	markerStopPrefix = "STOP-"
-	fileAudit        = "AUDIT"
+
+	// stampVersion is the first byte of an encoded stamp; a stamp of another
+	// version is unreadable, never guessed at.
+	stampVersion byte = 1
+	// stampFixed is the stamp's length before its slot and its CRC: version
+	// 1, cluster 16, epoch 8, predecessor 16, predecessor epoch 8, kept
+	// index 8, id 8, incarnation 16, state 1, founding 32, slot length 1.
+	stampFixed int = 1 + 16 + 8 + 16 + 8 + 8 + 8 + 16 + 1 + 32 + 1
 )
 
 // DataDirOptions tunes OpenDataDirWith.
@@ -81,6 +95,9 @@ func OpenDataDirWith(dir string, opts DataDirOptions) (DataDir, error) {
 	return DataDir{d: d}, nil
 }
 
+// open opens the log, then the snapshots; when the snapshots fail the log
+// just opened is closed again, so a failed open holds nothing but the lock
+// its caller releases.
 func (d *dataDir) open() error {
 	l, err := openFileLog(d, d.opts.SegmentBytes)
 	if err != nil {
@@ -130,23 +147,9 @@ func (d DataDir) Close() error {
 	return err
 }
 
-// offline guards an offline operation: refused while a live Node holds the
-// directory (D11).
-func (d DataDir) offline() error {
-	if d.d == nil {
-		return misconfigured("DataDir", "zero")
-	}
-	d.d.mu.Lock()
-	defer d.d.mu.Unlock()
-	switch {
-	case d.d.closed:
-		return origin(coreconsensus.NodeStopped, errs.String("why", "data directory closed"))
-	case d.d.inUse:
-		return origin(coreconsensus.DataDirInUse, errs.String("dir", d.d.dir))
-	}
-	return nil
-}
-
+// acquire marks the data directory held by a Node, refusing DATA_DIR_IN_USE
+// while another Node holds it or it was closed; a log opened without a
+// DataDir holds nothing and always succeeds.
 func (l *FileLog) acquire() error {
 	if l.dd == nil {
 		return nil
@@ -160,6 +163,8 @@ func (l *FileLog) acquire() error {
 	return nil
 }
 
+// release ends the hold acquire took, so the directory may be closed or
+// operated on offline again.
 func (l *FileLog) release() {
 	if l.dd == nil {
 		return
@@ -171,8 +176,8 @@ func (l *FileLog) release() {
 
 // ---- stamp ----
 
-const stampVersion = 1
-
+// encodeStamp is the stamp's on-disk form: the fixed fields, the slot
+// prefixed by its length, and a CRC-32C of everything before it.
 func encodeStamp(s coreconsensus.Stamp) []byte {
 	b := []byte{stampVersion}
 	b = append(b, s.Log.Cluster[:]...)
@@ -189,10 +194,12 @@ func encodeStamp(s coreconsensus.Stamp) []byte {
 	return binary.LittleEndian.AppendUint32(b, crc32.Checksum(b, castagnoli))
 }
 
+// decodeStamp parses encodeStamp's form; ok is false for another version, a
+// short stamp, a CRC that fails, a state this version does not define, or a
+// slot length that disagrees with the bytes left.
 func decodeStamp(b []byte) (coreconsensus.Stamp, bool) {
 	var s coreconsensus.Stamp
-	const fixed = 1 + 16 + 8 + 16 + 8 + 8 + 8 + 16 + 1 + 32 + 1
-	if len(b) < fixed+4 || b[0] != stampVersion {
+	if len(b) < stampFixed+4 || b[0] != stampVersion {
 		return s, false
 	}
 	body := b[:len(b)-4]
@@ -201,19 +208,19 @@ func decodeStamp(b []byte) (coreconsensus.Stamp, bool) {
 	}
 	p := 1
 	copy(s.Log.Cluster[:], body[p:])
-	p += 16
+	p += len(s.Log.Cluster)
 	s.Log.Epoch = binary.LittleEndian.Uint64(body[p:])
-	p += 8
+	p += u64Bytes
 	copy(s.Log.Predecessor[:], body[p:])
-	p += 16
+	p += len(s.Log.Predecessor)
 	s.Log.PredecessorEpoch = binary.LittleEndian.Uint64(body[p:])
-	p += 8
+	p += u64Bytes
 	s.Log.KeptIndex = binary.LittleEndian.Uint64(body[p:])
-	p += 8
+	p += u64Bytes
 	s.ID = coreconsensus.NodeID(binary.LittleEndian.Uint64(body[p:]))
-	p += 8
+	p += u64Bytes
 	copy(s.Incarnation[:], body[p:])
-	p += 16
+	p += len(s.Incarnation)
 	s.State = coreconsensus.StampState(body[p])
 	if s.State < coreconsensus.StampJoining || s.State > coreconsensus.StampMember {
 		// A state this version does not define is a corrupt or a newer
@@ -222,7 +229,7 @@ func decodeStamp(b []byte) (coreconsensus.Stamp, bool) {
 	}
 	p++
 	copy(s.Founding[:], body[p:])
-	p += 32
+	p += len(s.Founding)
 	n := int(body[p])
 	p++
 	if p+n != len(body) {
@@ -232,6 +239,9 @@ func decodeStamp(b []byte) (coreconsensus.Stamp, bool) {
 	return s, true
 }
 
+// readStamp reads the stamp of dir: none yet is the zero stamp, a read that
+// fails is a STORAGE_FAILED, and a stamp that cannot be decoded is
+// DATA_DIR_MISMATCH, since nothing in it can be trusted to name this node.
 func readStamp(dir string) (coreconsensus.Stamp, error) {
 	b, err := os.ReadFile(filepath.Join(dir, fileStamp))
 	if errors.Is(err, os.ErrNotExist) {
@@ -247,12 +257,16 @@ func readStamp(dir string) (coreconsensus.Stamp, error) {
 	return s, nil
 }
 
+// writeStamp replaces the stamp of dir atomically and durably.
 func writeStamp(dir string, s coreconsensus.Stamp) error {
 	return writeFileSync(filepath.Join(dir, fileStamp), encodeStamp(s))
 }
 
 // ---- stop markers (D4, R7-14, R8-05, R9-05) ----
 
+// runtimeMarker is the boot-scoped path of the log's marker for reason,
+// named by a digest of the data directory so two directories on one host
+// never share a marker.
 func (l *FileLog) runtimeMarker(reason string) string {
 	sum := sha256.Sum256([]byte(l.dir))
 	return filepath.Join(l.runDir, hex.EncodeToString(sum[:8])+"-"+reason)
@@ -283,6 +297,7 @@ func (l *FileLog) markStopEach(code errs.Code, detail string) (dirErr, runErr er
 	return dirErr, runErr
 }
 
+// reasonOf is the reason a stop marker's name carries for code.
 func reasonOf(code errs.Code) string {
 	switch code {
 	case coreconsensus.CodeStorageFailed:
@@ -293,8 +308,11 @@ func reasonOf(code errs.Code) string {
 		return "VERSION_UNSUPPORTED"
 	case coreconsensus.CodeLogQuarantined:
 		return "LOG_QUARANTINED"
+	default:
+		// Any other final stop still leaves a marker an operator must clear;
+		// it is named generically rather than not written.
+		return "STOPPED"
 	}
-	return "STOPPED"
 }
 
 // checkMarkers refuses a start while a marker applies (D4): a
@@ -308,14 +326,8 @@ func (l *FileLog) checkMarkers() error {
 	if err != nil {
 		return storageFailed("markers", err)
 	}
-	boot := "boot=" + bootID() + "\n"
-	paths := []string{l.runtimeMarker("STORAGE_FAILED")}
-	for _, e := range ents {
-		if strings.HasPrefix(e.Name(), markerStopPrefix) && !strings.HasSuffix(e.Name(), ".tmp") {
-			paths = append(paths, filepath.Join(l.dir, e.Name()))
-		}
-	}
-	for _, p := range paths {
+	boot := []byte("boot=" + bootID() + "\n")
+	for _, p := range l.markerPaths(ents) {
 		b, err := os.ReadFile(p)
 		if errors.Is(err, os.ErrNotExist) {
 			// No marker there: the boot-scoped one is absent on every start
@@ -327,34 +339,31 @@ func (l *FileLog) checkMarkers() error {
 			// reason is unknown, never an absent one: the start is refused.
 			return storageFailed("read stop marker", err)
 		}
-		if strings.HasSuffix(p, "STORAGE_FAILED") && !strings.HasPrefix(string(b), boot) {
+		if strings.HasSuffix(p, "STORAGE_FAILED") && !bytes.HasPrefix(b, boot) {
 			// Another boot: the page cache that may have lied is gone.
 			continue
 		}
-		return origin(coreconsensus.StopMarkerPresent, errs.String("marker", filepath.Base(p)),
-			errs.String("detail", strings.TrimSpace(string(b))))
+		return stopMarkerPresent(p, b)
 	}
 	return nil
 }
 
-// audit appends one line to the operator audit file and syncs it before the
-// operation it records runs. Its Close is part of the write: a failure there
-// is a storage failure like the sync's, never a detail dropped at return.
-func (d DataDir) audit(op coreconsensus.Operator, what string) (err error) {
-	f, err := os.OpenFile(filepath.Join(d.d.dir, fileAudit), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-	if err != nil {
-		return storageFailed("audit", err)
-	}
-	defer func() {
-		if cerr := f.Close(); cerr != nil && err == nil {
-			err = storageFailed("audit", cerr)
+// stopMarkerPresent is the STOP_MARKER_PRESENT of the marker at path, its
+// trimmed content as the detail an operator reads before clearing it.
+func stopMarkerPresent(path string, content []byte) error {
+	return origin(coreconsensus.StopMarkerPresent, errs.String("marker", filepath.Base(path)),
+		errs.String("detail", strings.TrimSpace(string(content))))
+}
+
+// markerPaths is every place a stop marker of this log may be: the
+// boot-scoped STORAGE_FAILED marker first, then each published STOP- file of
+// the data directory listing ents, a half-written .tmp excluded.
+func (l *FileLog) markerPaths(ents []os.DirEntry) []string {
+	paths := []string{l.runtimeMarker("STORAGE_FAILED")}
+	for _, e := range ents {
+		if strings.HasPrefix(e.Name(), markerStopPrefix) && !strings.HasSuffix(e.Name(), ".tmp") {
+			paths = append(paths, filepath.Join(l.dir, e.Name()))
 		}
-	}()
-	if _, err := fmt.Fprintf(f, "%s %s\n", op, what); err != nil {
-		return storageFailed("audit", err)
 	}
-	if err := f.Sync(); err != nil {
-		return storageFailed("audit", err)
-	}
-	return nil
+	return paths
 }

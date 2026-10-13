@@ -17,8 +17,65 @@ import (
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
 
+const (
+	// WipeAndRejoin wipes the directory; the operator then Removes the old
+	// NodeID and Inits under a NEW one (R4-03). A voter's incarnation is
+	// never swapped in place.
+	WipeAndRejoin QuarantineExit = iota + 1
+	// TruncateAndStaySilent truncates at the damage and persists a silence
+	// condition (R4-03).
+	TruncateAndStaySilent
+)
+
+const (
+	// fileSilent holds the persisted silence condition: the highest term the
+	// truncated log ever named and the index the silence lasts until (R4-03).
+	fileSilent = "SILENT"
+	// fileAudit is the append-only record of every offline operation.
+	fileAudit = "AUDIT"
+)
+
 // The offline functions work on the shipped layout, and only on it (D17,
 // R2-33), on a stopped node: each refuses a DataDir a live Node holds.
+
+// offline guards an offline operation: refused while a live Node holds the
+// directory (D11).
+func (d DataDir) offline() error {
+	if d.d == nil {
+		return misconfigured("DataDir", "zero")
+	}
+	d.d.mu.Lock()
+	defer d.d.mu.Unlock()
+	switch {
+	case d.d.closed:
+		return origin(coreconsensus.NodeStopped, errs.String("why", "data directory closed"))
+	case d.d.inUse:
+		return origin(coreconsensus.DataDirInUse, errs.String("dir", d.d.dir))
+	}
+	return nil
+}
+
+// audit appends one line to the operator audit file and syncs it before the
+// operation it records runs. Its Close is part of the write: a failure there
+// is a storage failure like the sync's, never a detail dropped at return.
+func (d DataDir) audit(op coreconsensus.Operator, what string) (err error) {
+	f, err := os.OpenFile(filepath.Join(d.d.dir, fileAudit), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return storageFailed("audit", err)
+	}
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = storageFailed("audit", cerr)
+		}
+	}()
+	if _, err := fmt.Fprintf(f, "%s %s\n", op, what); err != nil {
+		return storageFailed("audit", err)
+	}
+	if err := f.Sync(); err != nil {
+		return storageFailed("audit", err)
+	}
+	return nil
+}
 
 // Init prepares a joining node purely offline: a random NodeID, a joining
 // stamp, and the pair the operator or the JOIN gives to AddLearner. It is
@@ -57,15 +114,11 @@ func Inspect(d DataDir) (Report, error) {
 	}
 	l := d.d.log
 	r := Report{Stamp: l.stamp}
-	q, err := os.ReadFile(filepath.Join(d.d.dir, markerQuarantine))
-	switch {
-	case err == nil:
-		r.Quarantine = strings.TrimSpace(string(q))
-	case !errors.Is(err, os.ErrNotExist):
-		// A report that could not read the marker must not read as a
-		// directory with no quarantine.
-		return Report{}, storageFailed("inspect quarantine", err)
+	q, err := readQuarantineMarker(d.d.dir)
+	if err != nil {
+		return Report{}, err
 	}
+	r.Quarantine = q
 	if l.refuse == nil {
 		// The hard state as the log last held it, read even after a failed
 		// write: Inspect reports what is there, and the directory a failed
@@ -80,30 +133,45 @@ func Inspect(d DataDir) (Report, error) {
 	if r.Snapshots, err = d.d.snaps.List(); err != nil {
 		return Report{}, err
 	}
-	ents, err := os.ReadDir(d.d.dir)
-	if err != nil {
-		return Report{}, storageFailed("inspect markers", err)
-	}
-	for _, e := range ents {
-		if strings.HasPrefix(e.Name(), markerStopPrefix) && !strings.HasSuffix(e.Name(), ".tmp") {
-			r.Markers = append(r.Markers, e.Name())
-		}
+	if r.Markers, err = stopMarkers(d.d.dir); err != nil {
+		return Report{}, err
 	}
 	return r, nil
 }
 
+// readQuarantineMarker is the quarantine marker of dir, trimmed, or "" when
+// there is none. A marker that could not be read is a STORAGE_FAILED: a
+// report must not read as a directory with no quarantine.
+func readQuarantineMarker(dir string) (string, error) {
+	q, err := os.ReadFile(filepath.Join(dir, markerQuarantine))
+	switch {
+	case err == nil:
+		return strings.TrimSpace(string(q)), nil
+	case errors.Is(err, os.ErrNotExist):
+		return "", nil
+	default:
+		return "", storageFailed("inspect quarantine", err)
+	}
+}
+
+// stopMarkers names the stop markers of dir, nil when there is none; a .tmp
+// is a marker whose write never completed, and is not one.
+func stopMarkers(dir string) ([]string, error) {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, storageFailed("inspect markers", err)
+	}
+	var markers []string
+	for _, e := range ents {
+		if strings.HasPrefix(e.Name(), markerStopPrefix) && !strings.HasSuffix(e.Name(), ".tmp") {
+			markers = append(markers, e.Name())
+		}
+	}
+	return markers, nil
+}
+
 // QuarantineExit is one of the two exits ClearQuarantine allows (R3-09).
 type QuarantineExit uint8
-
-const (
-	// WipeAndRejoin wipes the directory; the operator then Removes the old
-	// NodeID and Inits under a NEW one (R4-03). A voter's incarnation is
-	// never swapped in place.
-	WipeAndRejoin QuarantineExit = iota + 1
-	// TruncateAndStaySilent truncates at the damage and persists a silence
-	// condition (R4-03).
-	TruncateAndStaySilent
-)
 
 // ClearQuarantine clears a quarantined, or stopped, directory through one of
 // the two exits. There is no third exit that keeps the damaged node voting.
@@ -116,6 +184,7 @@ func ClearQuarantine(d DataDir, exit QuarantineExit, op coreconsensus.Operator) 
 	}
 	switch exit {
 	case WipeAndRejoin:
+		return d.wipeAndRejoin(op)
 	case TruncateAndStaySilent:
 		if err := d.audit(op, "clear-quarantine truncate-and-stay-silent"); err != nil {
 			return err
@@ -124,19 +193,51 @@ func ClearQuarantine(d DataDir, exit QuarantineExit, op coreconsensus.Operator) 
 	default:
 		return misconfigured("exit", "unknown")
 	}
+}
+
+// wipeAndRejoin is the WipeAndRejoin exit: audited first, then the log is
+// closed, its stores, stamp and markers are deleted, the directory synced,
+// and the directory reopened empty.
+func (d DataDir) wipeAndRejoin(op coreconsensus.Operator) error {
 	if err := d.audit(op, "clear-quarantine wipe-and-rejoin"); err != nil {
 		return err
 	}
 	if err := d.d.log.Close(); err != nil {
 		return err
 	}
+	if err := d.removeStores(); err != nil {
+		return err
+	}
+	if err := d.removeStampAndMarkers(); err != nil {
+		return err
+	}
+	// The boot-scoped marker exists only after a storage failure of this
+	// boot; one that cannot be removed would refuse the next start anyway,
+	// so the wipe says so now.
+	if err := os.Remove(d.d.log.runtimeMarker("STORAGE_FAILED")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return storageFailed("wipe", err)
+	}
+	if err := syncDir(d.d.dir); err != nil {
+		return storageFailed("wipe", err)
+	}
+	return d.d.open()
+}
+
+// removeStores deletes the log and the snapshots, whole.
+func (d DataDir) removeStores() error {
 	for _, name := range []string{"log", "snap"} {
 		if err := os.RemoveAll(filepath.Join(d.d.dir, name)); err != nil {
 			return storageFailed("wipe", err)
 		}
 	}
-	// A directory that could not be listed keeps its stamp and its markers:
-	// the wipe fails here rather than reopen a directory it did not clear.
+	return nil
+}
+
+// removeStampAndMarkers deletes the stamp, the quarantine marker and every
+// stop marker. A directory that could not be listed keeps its stamp and its
+// markers: the wipe fails here rather than reopen a directory it did not
+// clear.
+func (d DataDir) removeStampAndMarkers() error {
 	ents, err := os.ReadDir(d.d.dir)
 	if err != nil {
 		return storageFailed("wipe", err)
@@ -149,16 +250,7 @@ func ClearQuarantine(d DataDir, exit QuarantineExit, op coreconsensus.Operator) 
 			}
 		}
 	}
-	// The boot-scoped marker exists only after a storage failure of this
-	// boot; one that cannot be removed would refuse the next start anyway,
-	// so the wipe says so now.
-	if err := os.Remove(d.d.log.runtimeMarker("STORAGE_FAILED")); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return storageFailed("wipe", err)
-	}
-	if err := syncDir(d.d.dir); err != nil {
-		return storageFailed("wipe", err)
-	}
-	return d.d.open()
+	return nil
 }
 
 // RecoverOptions are Recover's preconditions (R2-25, R3-02, R4-04, R9-08).
@@ -193,112 +285,172 @@ func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsen
 	if err := d.offline(); err != nil {
 		return err
 	}
-	l := d.d.log
-	refused := func(why string) error { return origin(coreconsensus.RecoverRefused, errs.String("why", why)) }
-	if l.refuse != nil {
-		return refused("quarantined log")
+	flog := d.d.log
+	if flog.refuse != nil {
+		return recoverRefused("quarantined log")
 	}
-	st := l.stamp
-	switch {
-	case !opt.Operator.Valid():
-		return refused("operator")
-	case opt.Confirm != newCluster.String():
-		return refused("confirmation does not name the new cluster")
-	case newCluster.IsZero() || newCluster == st.Log.Cluster:
-		return refused("the new cluster must be new")
-	case st.State != coreconsensus.StampMember:
-		return refused("not a member directory")
-	case len(opt.WitnessKeys) == 0:
-		return refused("no witness key")
+	stamp := flog.stamp
+	if err := checkRecover(&stamp, newCluster, &opt); err != nil {
+		return err
 	}
-	self := false
-	for _, m := range members {
-		if m.SPKI == ([32]byte{}) || m.ID == 0 {
-			return refused("a member without an SPKI pin")
-		}
-		if m.ID == st.ID && m.Voter {
-			self = m.Incarnation == st.Incarnation
-		}
+	if err := checkRecoverMembers(&stamp, members); err != nil {
+		return err
 	}
-	if sharedKey(members) {
-		return refused("two members under one key")
-	}
-	if !self {
-		return refused("this node is not a voter of the new members")
-	}
-	hs, err := l.HardState()
+	hard, err := flog.HardState()
 	if err != nil {
 		return err
 	}
 	// The old configuration decides which voters must be attested fenced:
 	// one that could not be read fails Recover closed, never open.
-	old, err := lastMembership(l, d.d.snaps, hs.Commit)
+	old, err := lastMembership(flog, d.d.snaps, hard.Commit)
 	if err != nil {
 		return err
 	}
-	for _, v := range old.Voters() {
+	if err := checkFenced(old.Voters(), members, &opt, stamp.Log.Cluster, newCluster); err != nil {
+		return err
+	}
+	if err := d.audit(opt.Operator, "recover "+newCluster.String()); err != nil {
+		return err
+	}
+	if err := d.appendForced(&hard, members, &old, opt.Operator); err != nil {
+		return err
+	}
+	stamp.Log = coreconsensus.LogIdentity{
+		Cluster: newCluster, Epoch: 1, Predecessor: stamp.Log.Cluster,
+		PredecessorEpoch: stamp.Log.Epoch, KeptIndex: hard.Commit,
+	}
+	return flog.WriteStamp(stamp)
+}
+
+// recoverRefused is Recover's refusal, its reason in the why field.
+func recoverRefused(why string) error {
+	return origin(coreconsensus.RecoverRefused, errs.String("why", why))
+}
+
+// isZeroDigest reports whether d is the all-zero digest, which no real
+// SPKI pin or snapshot hash is.
+func isZeroDigest(d [32]byte) bool {
+	var zero [32]byte
+	return d == zero
+}
+
+// checkRecover refuses a Recover whose preconditions fail, in a fixed order
+// so the reason given is always the first that applies.
+func checkRecover(stamp *coreconsensus.Stamp, newCluster coreconsensus.ClusterID, opt *RecoverOptions) error {
+	switch {
+	case !opt.Operator.Valid():
+		return recoverRefused("operator")
+	case opt.Confirm != newCluster.String():
+		return recoverRefused("confirmation does not name the new cluster")
+	case newCluster.IsZero() || newCluster == stamp.Log.Cluster:
+		return recoverRefused("the new cluster must be new")
+	case stamp.State != coreconsensus.StampMember:
+		return recoverRefused("not a member directory")
+	case len(opt.WitnessKeys) == 0:
+		return recoverRefused("no witness key")
+	}
+	return nil
+}
+
+// checkRecoverMembers refuses new members that are not all pinned, or
+// among which this node, at its incarnation, is not a voter.
+func checkRecoverMembers(stamp *coreconsensus.Stamp, members []coreconsensus.Member) error {
+	self := false
+	for _, m := range members {
+		if isZeroDigest(m.SPKI) || m.ID == 0 {
+			return recoverRefused("a member without an SPKI pin")
+		}
+		if m.ID == stamp.ID && m.Voter {
+			self = m.Incarnation == stamp.Incarnation
+		}
+	}
+	if sharedKey(members) {
+		return recoverRefused("two members under one key")
+	}
+	if !self {
+		return recoverRefused("this node is not a voter of the new members")
+	}
+	return nil
+}
+
+// checkFenced refuses a Recover that leaves out an old voter without a
+// fence receipt from EVERY witness for it.
+func checkFenced(voters []coreconsensus.NodeID, members []coreconsensus.Member, opt *RecoverOptions, oldCluster, newCluster coreconsensus.ClusterID) error {
+	for _, v := range voters {
 		if slices.ContainsFunc(members, func(m coreconsensus.Member) bool { return m.ID == v }) {
 			continue
 		}
 		i := slices.IndexFunc(opt.Fenced, func(a coreconsensus.FencedAttestation) bool { return a.Voter == v })
 		if i < 0 {
-			return refused("an old voter is not attested fenced")
+			return recoverRefused("an old voter is not attested fenced")
 		}
-		a := opt.Fenced[i]
-		msg := receiptMessage(st.Log.Cluster, newCluster, v)
-		for _, k := range opt.WitnessKeys {
-			if !slices.ContainsFunc(a.Receipts, func(sig []byte) bool { return ed25519.Verify(k, msg, sig) }) {
-				return refused("a witness did not sign the fence of an old voter")
-			}
+		msg := receiptMessage(oldCluster, newCluster, v)
+		if !signedByEvery(opt.WitnessKeys, opt.Fenced[i].Receipts, msg) {
+			return recoverRefused("a witness did not sign the fence of an old voter")
 		}
 	}
-	if err := d.audit(opt.Operator, "recover "+newCluster.String()); err != nil {
+	return nil
+}
+
+// signedByEvery reports whether every key signed msg in one of receipts.
+func signedByEvery(keys []ed25519.PublicKey, receipts [][]byte, msg []byte) bool {
+	for _, k := range keys {
+		if !slices.ContainsFunc(receipts, func(sig []byte) bool { return ed25519.Verify(k, msg, sig) }) {
+			return false
+		}
+	}
+	return true
+}
+
+// appendForced cuts the log back to its commit and appends, synced, the
+// forced configuration entry of the new history, chained to the entry it
+// follows and one term past any the log knew.
+func (d DataDir) appendForced(hard *coreconsensus.HardState, members []coreconsensus.Member, old *coreconsensus.Membership, operator coreconsensus.Operator) error {
+	flog := d.d.log
+	commit := hard.Commit
+	first, last := flog.Bounds()
+	if last > commit {
+		if err := flog.TruncateSuffix(commit + 1); err != nil {
+			return err
+		}
+	}
+	chain, termAt, err := d.chainAt(commit, first)
+	if err != nil {
 		return err
 	}
-	commit := hs.Commit
-	first, last := l.Bounds()
-	if last > commit {
-		if err := l.TruncateSuffix(commit + 1); err != nil {
-			return err
-		}
-	}
-	var chain uint32
-	var termAt uint64
-	if commit >= first {
-		es, err := l.Entries(commit, commit+1, 1, nil)
-		if err != nil {
-			return err
-		}
-		chain, termAt = es[0].ChainSum, es[0].Position.Term
-	} else {
-		metas, err := d.d.snaps.List()
-		if err != nil {
-			return err
-		}
-		if len(metas) > 0 && metas[0].Position.Index == commit {
-			chain, termAt = metas[0].ChainTip, metas[0].Position.Term
-		}
-	}
-	term := max(hs.Term, termAt) + 1
+	term := max(hard.Term, termAt) + 1
 	conf := coreconsensus.Membership{Members: byID(members), Retired: old.Retired}
-	data := wire.AppendAdmin(nil, &wire.Admin{Operator: string(opt.Operator), Change: wire.ChangeForced, Membership: conf})
+	data := wire.AppendAdmin(nil, &wire.Admin{Operator: string(operator), Change: wire.ChangeForced, Membership: conf})
 	e := coreconsensus.Entry{
 		Position: coreconsensus.Position{Term: term, Index: commit + 1}, Kind: coreconsensus.EntryMembership,
 		BodySum: wire.BodySum(data), Data: data,
 	}
 	e.ChainSum = wire.ChainSum(chain, &e)
-	nhs := coreconsensus.HardState{Term: term, Commit: commit + 1}
-	if err := l.Append([]coreconsensus.Entry{e}, &nhs); err != nil {
+	if err := flog.Append([]coreconsensus.Entry{e}, &coreconsensus.HardState{Term: term, Commit: commit + 1}); err != nil {
 		return err
 	}
-	if err := l.Sync(); err != nil {
-		return err
+	return flog.Sync()
+}
+
+// chainAt is the chain sum and term of the committed entry commit: from the
+// log when it still holds it, else from the newest snapshot when that one
+// ends exactly there, else zero.
+func (d DataDir) chainAt(commit, first uint64) (uint32, uint64, error) {
+	if commit >= first {
+		es, err := d.d.log.Entries(commit, commit+1, 1, nil)
+		if err != nil {
+			return 0, 0, err
+		}
+		return es[0].ChainSum, es[0].Position.Term, nil
 	}
-	st.Log = coreconsensus.LogIdentity{
-		Cluster: newCluster, Epoch: 1, Predecessor: st.Log.Cluster,
-		PredecessorEpoch: st.Log.Epoch, KeptIndex: commit,
+	metas, err := d.d.snaps.List()
+	if err != nil {
+		return 0, 0, err
 	}
-	return l.WriteStamp(st)
+	if len(metas) > 0 && metas[0].Position.Index == commit {
+		return metas[0].ChainTip, metas[0].Position.Term, nil
+	}
+	return 0, 0, nil
 }
 
 // lastMembership is the configuration committed at index, from the log or
@@ -351,105 +503,176 @@ func RestoreSnapshot(d DataDir, r io.Reader, newCluster coreconsensus.ClusterID,
 	if err := d.offline(); err != nil {
 		return coreconsensus.SnapshotMeta{}, err
 	}
-	refused := func(why string) (coreconsensus.SnapshotMeta, error) {
-		return coreconsensus.SnapshotMeta{}, origin(coreconsensus.RestoreRefused, errs.String("why", why))
+	flog := d.d.log
+	stamp := flog.stamp
+	if err := checkRestore(flog, &stamp, newCluster, members, &opt); err != nil {
+		return coreconsensus.SnapshotMeta{}, err
 	}
-	l := d.d.log
-	st := l.stamp
-	exp := opt.Expected
-	first, last := l.Bounds()
-	switch {
-	case l.refuse != nil:
-		return refused("quarantined log")
-	case !opt.Operator.Valid():
-		return refused("operator")
-	case opt.Confirm != newCluster.String() || newCluster.IsZero():
-		return refused("confirmation does not name the new cluster")
-	case exp.ID == "" || exp.Position.Index == 0 || exp.SHA256 == ([32]byte{}):
-		return refused("expected metadata is zero")
-	case st.State != coreconsensus.StampJoining || last >= first:
-		return refused("not an empty joining directory")
-	case opt.MaxEncoded <= 0 || opt.MaxDecoded <= 0 || exp.EncodedSize > opt.MaxEncoded || exp.DecodedSize > opt.MaxDecoded:
-		return refused("size bounds")
-	}
-	if !slices.ContainsFunc(members, func(m coreconsensus.Member) bool {
-		return m.ID == st.ID && m.Voter && m.Incarnation == st.Incarnation
-	}) {
-		return refused("this node is not a voter of the new members")
-	}
-	for _, m := range members {
-		if m.SPKI == ([32]byte{}) {
-			return refused("a member without an SPKI pin")
-		}
-	}
-	if sharedKey(members) {
-		return refused("two members under one key")
-	}
-	codec := opt.Codec
-	if codec == nil {
-		codec = defaultCodec()
-	}
+	codec := restoreCodec(&opt)
 	if err := d.audit(opt.Operator, "restore-snapshot "+newCluster.String()); err != nil {
 		return coreconsensus.SnapshotMeta{}, err
 	}
-	nl := coreconsensus.LogIdentity{
+	meta := restoredMeta(&opt.Expected, newCluster, members)
+	if err := d.spoolRestored(r, &meta); err != nil {
+		return coreconsensus.SnapshotMeta{}, err
+	}
+	if err := d.verifyRestored(&meta, codec, opt.MaxDecoded); err != nil {
+		return coreconsensus.SnapshotMeta{}, err
+	}
+	if err := flog.restartAt(&meta); err != nil {
+		return coreconsensus.SnapshotMeta{}, err
+	}
+	stamp.Log, stamp.State = meta.Log, coreconsensus.StampMember
+	if err := flog.WriteStamp(stamp); err != nil {
+		return coreconsensus.SnapshotMeta{}, err
+	}
+	return meta, nil
+}
+
+// restoreRefused is RestoreSnapshot's refusal, its reason in the why field.
+func restoreRefused(why string) error {
+	return origin(coreconsensus.RestoreRefused, errs.String("why", why))
+}
+
+// checkRestore refuses a RestoreSnapshot whose preconditions fail, in a
+// fixed order so the reason given is always the first that applies: the
+// target, then the bounds, then the members.
+func checkRestore(flog *FileLog, stamp *coreconsensus.Stamp, newCluster coreconsensus.ClusterID, members []coreconsensus.Member, opt *RestoreOptions) error {
+	if err := checkRestoreTarget(flog, newCluster, opt); err != nil {
+		return err
+	}
+	if err := checkRestoreBounds(flog, stamp, opt); err != nil {
+		return err
+	}
+	return checkRestoreMembers(stamp, members)
+}
+
+// restoreCodec is the codec the restored chunks are decoded with: the
+// caller's, else the default, flate.
+func restoreCodec(opt *RestoreOptions) coretransform.BoundedDecompressor {
+	if opt.Codec == nil {
+		return defaultCodec()
+	}
+	return opt.Codec
+}
+
+// checkRestoreTarget is the first half of RestoreSnapshot's preconditions,
+// checked in a fixed order with checkRestoreBounds after it, so the reason
+// given is always the first that applies.
+func checkRestoreTarget(flog *FileLog, newCluster coreconsensus.ClusterID, opt *RestoreOptions) error {
+	exp := &opt.Expected
+	switch {
+	case flog.refuse != nil:
+		return restoreRefused("quarantined log")
+	case !opt.Operator.Valid():
+		return restoreRefused("operator")
+	case opt.Confirm != newCluster.String() || newCluster.IsZero():
+		return restoreRefused("confirmation does not name the new cluster")
+	case exp.ID == "" || exp.Position.Index == 0 || isZeroDigest(exp.SHA256):
+		return restoreRefused("expected metadata is zero")
+	}
+	return nil
+}
+
+// checkRestoreBounds is the second half of RestoreSnapshot's preconditions:
+// an empty joining directory, and a snapshot within the bounds the caller
+// set, both of which must be set.
+func checkRestoreBounds(flog *FileLog, stamp *coreconsensus.Stamp, opt *RestoreOptions) error {
+	exp := &opt.Expected
+	first, last := flog.Bounds()
+	switch {
+	case stamp.State != coreconsensus.StampJoining || last >= first:
+		return restoreRefused("not an empty joining directory")
+	case opt.MaxEncoded <= 0 || opt.MaxDecoded <= 0 || exp.EncodedSize > opt.MaxEncoded || exp.DecodedSize > opt.MaxDecoded:
+		return restoreRefused("size bounds")
+	}
+	return nil
+}
+
+// checkRestoreMembers refuses new members among which this node, at its
+// incarnation, is not a voter, or of which one is not pinned.
+func checkRestoreMembers(stamp *coreconsensus.Stamp, members []coreconsensus.Member) error {
+	if !slices.ContainsFunc(members, func(m coreconsensus.Member) bool {
+		return m.ID == stamp.ID && m.Voter && m.Incarnation == stamp.Incarnation
+	}) {
+		return restoreRefused("this node is not a voter of the new members")
+	}
+	for _, m := range members {
+		if isZeroDigest(m.SPKI) {
+			return restoreRefused("a member without an SPKI pin")
+		}
+	}
+	if sharedKey(members) {
+		return restoreRefused("two members under one key")
+	}
+	return nil
+}
+
+// restoredMeta is the metadata the restored snapshot is published under:
+// the expected one, in a new history that records the old cluster as its
+// predecessor and the snapshot's index as the last it kept, with the new
+// members.
+func restoredMeta(exp *coreconsensus.SnapshotMeta, newCluster coreconsensus.ClusterID, members []coreconsensus.Member) coreconsensus.SnapshotMeta {
+	meta := *exp
+	meta.Log = coreconsensus.LogIdentity{
 		Cluster: newCluster, Epoch: 1, Predecessor: exp.Log.Cluster,
 		PredecessorEpoch: exp.Log.Epoch, KeptIndex: exp.Position.Index,
 	}
-	meta := exp
-	meta.Log = nl
 	meta.Membership = coreconsensus.Membership{Index: exp.Position.Index, Members: slices.Clone(members), Retired: exp.Membership.Retired}
-	sink, off, err := d.d.snaps.Create(meta.ID, meta)
+	return meta
+}
+
+// spoolRestored copies exactly meta.EncodedSize bytes of r into a fresh
+// spool and commits it. A stream of any other length is refused and its
+// spool aborted, the abort's failure kept beside the refusal.
+func (d DataDir) spoolRestored(r io.Reader, meta *coreconsensus.SnapshotMeta) error {
+	sink, off, err := d.d.snaps.Create(meta.ID, *meta)
 	if err != nil {
-		return coreconsensus.SnapshotMeta{}, err
+		return err
 	}
 	if off != 0 {
 		// A stale spool of that id: discarded, or the fresh one would
 		// resume from it.
 		if err := sink.Abort(); err != nil {
-			return coreconsensus.SnapshotMeta{}, err
+			return err
 		}
-		if sink, _, err = d.d.snaps.Create(meta.ID, meta); err != nil {
-			return coreconsensus.SnapshotMeta{}, err
+		if sink, _, err = d.d.snaps.Create(meta.ID, *meta); err != nil {
+			return err
 		}
 	}
-	n, err := io.Copy(sink, io.LimitReader(r, exp.EncodedSize+1))
-	if err != nil || n != exp.EncodedSize {
-		m, rerr := refused("stream size")
-		return m, alsoFailed(rerr, "abort", sink.Abort())
+	n, err := io.Copy(sink, io.LimitReader(r, meta.EncodedSize+1))
+	if err != nil || n != meta.EncodedSize {
+		return alsoFailed(restoreRefused("stream size"), "abort", sink.Abort())
 	}
-	if err := sink.Commit(meta); err != nil {
-		return coreconsensus.SnapshotMeta{}, err
-	}
+	return sink.Commit(*meta)
+}
+
+// verifyRestored decodes the published copy and checks it against meta. A
+// copy that fails is unpublished, or the failure to do so is reported with
+// it; the handle's Close failure is reported only when the copy passed.
+func (d DataDir) verifyRestored(meta *coreconsensus.SnapshotMeta, codec coretransform.BoundedDecompressor, maxDecoded int64) error {
 	h, err := d.d.snaps.Open(meta.ID)
 	if err != nil {
-		return coreconsensus.SnapshotMeta{}, err
+		return err
 	}
-	verr := verifySnapshot(io.NewSectionReader(h, 0, meta.EncodedSize), meta, codec, opt.MaxDecoded)
+	verr := verifySnapshot(io.NewSectionReader(h, 0, meta.EncodedSize), *meta, codec, maxDecoded)
 	cerr := h.Close()
 	if verr != nil {
-		// The copy failed its checks: unpublished, or the failure to do
-		// so is reported with it.
-		return coreconsensus.SnapshotMeta{}, alsoFailed(verr, "remove", d.d.snaps.Remove(meta.ID))
+		return alsoFailed(verr, "remove", d.d.snaps.Remove(meta.ID))
 	}
-	if cerr != nil {
-		return coreconsensus.SnapshotMeta{}, cerr
-	}
+	return cerr
+}
+
+// restartAt makes the empty log start after the restored snapshot, with a
+// hard state one term past it, durably.
+func (l *FileLog) restartAt(meta *coreconsensus.SnapshotMeta) error {
 	if err := l.resetTo(meta.Position.Index, meta.Position.Term); err != nil {
-		return coreconsensus.SnapshotMeta{}, err
+		return err
 	}
-	hs := coreconsensus.HardState{Term: meta.Position.Term + 1, Commit: meta.Position.Index}
-	if err := l.Append(nil, &hs); err != nil {
-		return coreconsensus.SnapshotMeta{}, err
+	if err := l.Append(nil, &coreconsensus.HardState{Term: meta.Position.Term + 1, Commit: meta.Position.Index}); err != nil {
+		return err
 	}
-	if err := l.Sync(); err != nil {
-		return coreconsensus.SnapshotMeta{}, err
-	}
-	st.Log, st.State = nl, coreconsensus.StampMember
-	if err := l.WriteStamp(st); err != nil {
-		return coreconsensus.SnapshotMeta{}, err
-	}
-	return meta, nil
+	return l.Sync()
 }
 
 // resetTo makes an empty log start after (index, term).
@@ -465,8 +688,6 @@ func (l *FileLog) resetTo(index, term uint64) error {
 	return nil
 }
 
-const fileSilent = "SILENT"
-
 // truncateAndStaySilent truncates the log at the quarantined damage and
 // PERSISTS, before it returns, the silence condition: the highest term any
 // readable record of the log names, and the truncation point (R3-09,
@@ -474,19 +695,54 @@ const fileSilent = "SILENT"
 // down, no leader can exist and the node stays silent until the third
 // returns.
 func (d DataDir) truncateAndStaySilent() error {
+	segN, off, err := d.quarantinePoint()
+	if err != nil {
+		return err
+	}
+	logDir := filepath.Join(d.d.dir, "log")
+	maxTerm, err := truncateAtDamage(logDir, segN, off)
+	if err != nil {
+		return err
+	}
+	if err := syncDir(logDir); err != nil {
+		return storageFailed("truncate", err)
+	}
+	// The condition is durable BEFORE the marker goes: a crash in between
+	// leaves a silent node, never a voting one. Its index is filled in
+	// once the truncated log is read (0 means "the end of the log").
+	if err := writeFileSync(filepath.Join(d.d.dir, fileSilent), silenceRecord(maxTerm, 0)); err != nil {
+		return storageFailed("silence condition", err)
+	}
+	if err := os.Remove(filepath.Join(d.d.dir, markerQuarantine)); err != nil {
+		return storageFailed("clear marker", err)
+	}
+	return d.reopenSilenced(maxTerm)
+}
+
+// quarantinePoint reads where the quarantine marker places the damage. A
+// marker that is missing or unreadable refuses the exit: nothing else
+// records where the damage is, and the truncation must start exactly there.
+func (d DataDir) quarantinePoint() (uint64, int64, error) {
 	q, err := os.ReadFile(filepath.Join(d.d.dir, markerQuarantine))
 	if err != nil {
-		return origin(coreconsensus.RecoverRefused, errs.String("why", "no quarantine marker"))
+		return 0, 0, recoverRefused("no quarantine marker")
 	}
 	var segN uint64
 	var off int64
 	if _, err := fmt.Sscanf(string(q), "seg-%016x %d", &segN, &off); err != nil {
-		return origin(coreconsensus.RecoverRefused, errs.String("why", "unreadable quarantine marker"))
+		return 0, 0, recoverRefused("unreadable quarantine marker")
 	}
-	logDir := filepath.Join(d.d.dir, "log")
+	return segN, off, nil
+}
+
+// truncateAtDamage deletes every segment after segment segN, and segN too
+// when the damage is at its start, zeroes segN from off otherwise, and
+// returns the highest term of every readable record, read before anything
+// is changed: a vote the truncation drops is still never repeated.
+func truncateAtDamage(logDir string, segN uint64, off int64) (uint64, error) {
 	ents, err := os.ReadDir(logDir)
 	if err != nil {
-		return storageFailed("readdir", err)
+		return 0, storageFailed("readdir", err)
 	}
 	var maxTerm uint64
 	for _, e := range ents {
@@ -497,55 +753,89 @@ func (d DataDir) truncateAndStaySilent() error {
 		path := filepath.Join(logDir, e.Name())
 		b, err := os.ReadFile(path)
 		if err != nil {
-			return storageFailed("read segment", err)
+			return 0, storageFailed("read segment", err)
 		}
-		// The highest term of every readable record, before and after the
-		// damage: a vote the truncation drops is still never repeated.
-		for o := 0; o+recHeader+recFixed <= len(b); o += 8 {
-			if r, ok := parseRecord(b[o:]); ok {
-				maxTerm = max(maxTerm, r.term)
-				if r.kind == recHardState && len(r.data) == 24 {
-					maxTerm = max(maxTerm, binary.LittleEndian.Uint64(r.data))
-				}
-				if r.kind == recCheckpt {
-					if cp, ok := decodeCheckpoint(r.data); ok {
-						maxTerm = max(maxTerm, cp.hs.Term)
-					}
-				}
-				o += r.length - 8
-			}
-		}
-		switch {
-		case n > segN || (n == segN && off == 0):
-			if err := os.Remove(path); err != nil {
-				return storageFailed("truncate", err)
-			}
-		case n == segN:
-			f, err := os.OpenFile(path, os.O_RDWR, 0)
-			if err != nil {
-				return storageFailed("truncate", err)
-			}
-			err = zeroFrom(f, off, int64(len(b)))
-			if cerr := f.Close(); cerr != nil && err == nil {
-				err = cerr
-			}
-			if err != nil {
-				return storageFailed("truncate", err)
-			}
+		maxTerm = max(maxTerm, maxRecordTerm(b))
+		if err := truncateSegment(path, n, segN, off, int64(len(b))); err != nil {
+			return 0, err
 		}
 	}
-	if err := syncDir(logDir); err != nil {
+	return maxTerm, nil
+}
+
+// maxRecordTerm is the highest term any readable record of segment b names,
+// before and after any damage, scanning every record boundary.
+func maxRecordTerm(b []byte) uint64 {
+	var maxTerm uint64
+	for o := 0; o+recHeader+recFixed <= len(b); o += recAlign {
+		r, ok := parseRecord(b[o:])
+		if !ok {
+			continue
+		}
+		maxTerm = max(maxTerm, recordTerm(&r))
+		o += r.length - recAlign
+	}
+	return maxTerm
+}
+
+// recordTerm is the highest term r names: its own, and the one of the hard
+// state or checkpoint it carries.
+func recordTerm(r *record) uint64 {
+	term := r.term
+	if r.kind == recHardState && len(r.data) == hardStateLen {
+		term = max(term, binary.LittleEndian.Uint64(r.data))
+	}
+	if r.kind == recCheckpt {
+		if cp, ok := decodeCheckpoint(r.data); ok {
+			term = max(term, cp.hs.Term)
+		}
+	}
+	return term
+}
+
+// truncateSegment applies the truncation at (segN, off) to segment n of
+// size bytes at path: deleted when it lies wholly past the damage, zeroed
+// from off when the damage is inside it, untouched before it.
+func truncateSegment(path string, n, segN uint64, off, size int64) error {
+	switch {
+	case n > segN || (n == segN && off == 0):
+		if err := os.Remove(path); err != nil {
+			return storageFailed("truncate", err)
+		}
+	case n == segN:
+		return zeroSegmentFrom(path, off, size)
+	}
+	return nil
+}
+
+// zeroSegmentFrom zeroes and syncs the segment at path from off to size.
+// Its Close is part of the write: a failure there is reported like the
+// zeroing's.
+func zeroSegmentFrom(path string, off, size int64) (err error) {
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
 		return storageFailed("truncate", err)
 	}
-	// The condition is durable BEFORE the marker goes: a crash in between
-	// leaves a silent node, never a voting one. Its index is filled in
-	// once the truncated log is read (0 means "the end of the log").
-	if err := writeFileSync(filepath.Join(d.d.dir, fileSilent), binary.LittleEndian.AppendUint64(binary.LittleEndian.AppendUint64(nil, maxTerm), 0)); err != nil {
-		return storageFailed("silence condition", err)
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = storageFailed("truncate", cerr)
+		}
+	}()
+	if err := zeroFrom(f, off, size); err != nil {
+		return storageFailed("truncate", err)
 	}
-	if err := os.Remove(filepath.Join(d.d.dir, markerQuarantine)); err != nil {
-		return storageFailed("clear marker", err)
-	}
+	return nil
+}
+
+// silenceRecord is the silence condition's on-disk form: the term, then
+// the index the silence lasts until, 0 for "the end of the log".
+func silenceRecord(term, index uint64) []byte {
+	return binary.LittleEndian.AppendUint64(binary.LittleEndian.AppendUint64(nil, term), index)
+}
+
+// reopenSilenced reopens the truncated log and fills in the silence
+// condition's index, its end, durably.
+func (d DataDir) reopenSilenced(maxTerm uint64) error {
 	if err := d.d.log.Close(); err != nil {
 		return err
 	}
@@ -553,9 +843,7 @@ func (d DataDir) truncateAndStaySilent() error {
 		return err
 	}
 	_, last := d.d.log.Bounds()
-	b := binary.LittleEndian.AppendUint64(nil, maxTerm)
-	b = binary.LittleEndian.AppendUint64(b, last+1)
-	if err := writeFileSync(filepath.Join(d.d.dir, fileSilent), b); err != nil {
+	if err := writeFileSync(filepath.Join(d.d.dir, fileSilent), silenceRecord(maxTerm, last+1)); err != nil {
 		return storageFailed("silence condition", err)
 	}
 	return syncDir(d.d.dir)
@@ -581,8 +869,7 @@ func (l *FileLog) silence() (term, index uint64, err error) {
 	term, index = binary.LittleEndian.Uint64(b), binary.LittleEndian.Uint64(b[8:])
 	if index == 0 {
 		index = last + 1
-		nb := binary.LittleEndian.AppendUint64(binary.LittleEndian.AppendUint64(nil, term), index)
-		if err := writeFileSync(filepath.Join(l.dir, fileSilent), nb); err != nil {
+		if err := writeFileSync(filepath.Join(l.dir, fileSilent), silenceRecord(term, index)); err != nil {
 			return 0, 0, err
 		}
 	}
