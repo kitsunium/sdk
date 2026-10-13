@@ -46,6 +46,9 @@ go_test(
         "soak_internal_test.go",
     ],
     embed = [":raft"],
+    # The deterministic simulations take ~90 s under race and coverage
+    # as one target, and .bazelrc caps every target at 60 s (#126).
+    shard_count = 4,
     deps = [
         "//internal/core/app/consensus",
         "//internal/kernel/errs",

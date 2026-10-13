@@ -49,38 +49,45 @@ func TestSimElectsAndReplicates(t *testing.T) {
 }
 
 func TestSimSafetyUnderFaults(t *testing.T) {
+	// Each seed is its own simulation with no shared state, so the seeds run
+	// in parallel: the 60 of them are the test's strength and are all kept,
+	// while the wall time fits the 60 s per-target budget .bazelrc imposes,
+	// coverage instrumentation included.
 	for _, seed := range seeds(t, 60) {
-		s := newSim(simOptions{seed: seed, drop: 0.05, dup: 0.02, crashRate: 0.5, diskMax: 20 * time.Millisecond})
-		for k := 0; k < 6 && s.err == nil; k++ {
-			switch k % 3 {
-			case 0:
-				s.partition([]core.NodeID{1}, []core.NodeID{2, 3})
-			case 1:
-				s.partition([]core.NodeID{1, 2}, []core.NodeID{3})
-			default:
-				s.heal()
+		t.Run("seed="+strconv.FormatUint(seed, 10), func(t *testing.T) {
+			t.Parallel()
+			s := newSim(simOptions{seed: seed, drop: 0.05, dup: 0.02, crashRate: 0.5, diskMax: 20 * time.Millisecond})
+			for k := 0; k < 6 && s.err == nil; k++ {
+				switch k % 3 {
+				case 0:
+					s.partition([]core.NodeID{1}, []core.NodeID{2, 3})
+				case 1:
+					s.partition([]core.NodeID{1, 2}, []core.NodeID{3})
+				default:
+					s.heal()
+				}
+				s.run(s.after(5*time.Second), true)
 			}
-			s.run(s.after(5*time.Second), true)
-		}
-		if s.err != nil {
-			t.Fatalf("seed %d: %v", seed, s.err)
-		}
-		// Liveness after healing: no more faults, every node back.
-		s.heal()
-		s.opt.crashRate, s.opt.drop, s.opt.dup = 0, 0, 0
-		for _, id := range s.ids {
-			if !s.nodes[id].alive {
-				s.start(s.nodes[id])
+			if s.err != nil {
+				t.Fatalf("seed %d: %v", seed, s.err)
 			}
-		}
-		before := s.maxCommit()
-		s.run(s.after(10*time.Second), true)
-		if s.err != nil {
-			t.Fatalf("seed %d after heal: %v", seed, s.err)
-		}
-		if s.maxCommit() <= before {
-			t.Fatalf("seed %d: no progress after healing (commit %d)", seed, before)
-		}
+			// Liveness after healing: no more faults, every node back.
+			s.heal()
+			s.opt.crashRate, s.opt.drop, s.opt.dup = 0, 0, 0
+			for _, id := range s.ids {
+				if !s.nodes[id].alive {
+					s.start(s.nodes[id])
+				}
+			}
+			before := s.maxCommit()
+			s.run(s.after(10*time.Second), true)
+			if s.err != nil {
+				t.Fatalf("seed %d after heal: %v", seed, s.err)
+			}
+			if s.maxCommit() <= before {
+				t.Fatalf("seed %d: no progress after healing (commit %d)", seed, before)
+			}
+		})
 	}
 }
 
