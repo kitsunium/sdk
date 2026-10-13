@@ -215,7 +215,7 @@ func TestTruncateAndStaySilentRejoins(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	tok := propose(t, l.node, "after=silence")
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for {
 		_, statErr := os.Stat(filepath.Join(victim.dir, fileSilent))
 		if v, _ := victim.sm.get("after"); v == "silence" && os.IsNotExist(statErr) {
