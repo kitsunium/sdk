@@ -200,10 +200,10 @@ func newSubEpoch() uint64 {
 	return uint64(binary.LittleEndian.Uint32(b[:])) << 32
 }
 
-// NewRaft opens a node over what an offline tool founded or initialised. It
+// NewNode opens a node over what an offline tool founded or initialised. It
 // never bootstraps (D8). The start sequence is fixed (D14): the stamp, the
 // latest snapshot whose checksums pass, the log to its end, then serve.
-func NewRaft(cfg Config) (*Node, error) {
+func NewNode(cfg Config) (*Node, error) {
 	cfg, err := withDefaults(&cfg)
 	if err != nil {
 		return nil, err
@@ -228,7 +228,7 @@ type dirHolder interface {
 	release()
 }
 
-// newRaft opens the node once NewRaft holds the data directory: it checks
+// newRaft opens the node once NewNode holds the data directory: it checks
 // the stamp, loads the snapshot and the log, binds the transport, then
 // launches the node's four background goroutines (reader, storage actor,
 // apply, event loop). Each is counted in n.wg and ends once stopc closes,
@@ -254,7 +254,7 @@ func newRaft(cfg Config) (*Node, error) {
 	if seed == 0 {
 		seed = newSubEpoch() | uint64(stamp.ID)
 	}
-	n.r = raft.New(raft.Config{
+	n.r = raft.NewRaft(raft.Config{
 		ID: stamp.ID, Group: cfg.Group, Log: stamp.Log, Seed: seed, Timing: cfg.InitialTiming,
 		MaxInflight: cfg.MaxInflight, MaxInflightBytes: cfg.MaxInflightBytes, MaxBatchBytes: cfg.MaxBatchBytes,
 		MinVoters: cfg.MinVoters, PromoteLag: cfg.PromoteLag, Lease: cfg.Reads == ReadLease,

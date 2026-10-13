@@ -135,7 +135,7 @@ func testTimingFast() coreconsensus.TimingContractSpec {
 func (c *cluster) config(tn *testNode) Config {
 	return Config{
 		Cluster: c.cid, Machine: tn.sm, Durability: DurabilityVolatile, Log: tn.log, Snapshots: tn.snaps,
-		Transport: c.net.Transport(tn.id), InitialTiming: testTimingFast(), MaxSnapshotBytes: 1 << 30,
+		Transport: NewMemoryTransport(c.net, tn.id), InitialTiming: testTimingFast(), MaxSnapshotBytes: 1 << 30,
 		SnapshotEveryBytes: 1 << 20, MaxLogBytes: 1 << 30, LogReserveBytes: 1 << 20, MinVoters: 1,
 		SnapshotEvery: c.every, SnapshotTrailing: 4, JoinAuthorizer: allowJoin{}, RecentEntriesBytes: c.recent,
 	}
@@ -195,9 +195,9 @@ func newClusterWith(t *testing.T, c *cluster) *cluster {
 
 func (c *cluster) start(tn *testNode) {
 	tn.sm = newKV()
-	n, err := NewRaft(c.config(tn))
+	n, err := NewNode(c.config(tn))
 	if err != nil {
-		c.t.Fatalf("NewRaft %d: %v", tn.id, err)
+		c.t.Fatalf("NewNode %d: %v", tn.id, err)
 	}
 	tn.node = n
 }
@@ -207,7 +207,7 @@ func (c *cluster) kill(tn *testNode) {
 	if err := tn.node.HardClose(); err != nil {
 		c.t.Fatalf("hard close %d: %v", tn.id, err)
 	}
-	if err := c.net.Transport(tn.id).Close(); err != nil {
+	if err := NewMemoryTransport(c.net, tn.id).Close(); err != nil {
 		c.t.Fatalf("close transport %d: %v", tn.id, err)
 	}
 	tn.node = nil
@@ -398,7 +398,7 @@ func TestClusterMembershipThroughLearners(t *testing.T) {
 	c.nodes = append(c.nodes, tn)
 	c.start(tn)
 	st := must(tn.log.Stamp())(t)
-	if _, err := c.net.Transport(id).Join(ctx, coreconsensus.JoinConfig{Stamp: st, Address: "mem"}); err != nil {
+	if _, err := NewMemoryTransport(c.net, id).Join(ctx, coreconsensus.JoinConfig{Stamp: st, Address: "mem"}); err != nil {
 		t.Fatalf("join: %v", err)
 	}
 	tok := propose(t, l.node, "y=2")
@@ -726,7 +726,7 @@ func TestLongLoopTurnDropsTheLease(t *testing.T) {
 		}
 	}
 	for _, tn := range c.nodes {
-		if err := c.net.Transport(tn.id).Close(); err != nil {
+		if err := NewMemoryTransport(c.net, tn.id).Close(); err != nil {
 			t.Fatalf("close transport %d: %v", tn.id, err)
 		}
 		tn.sm = newKV()
@@ -738,7 +738,7 @@ func TestLongLoopTurnDropsTheLease(t *testing.T) {
 			Generation: 1, HeartbeatInterval: 50 * time.Millisecond,
 			ElectionTimeoutMin: time.Second, ElectionTimeoutMax: 2 * time.Second, MaxClockDrift: 0.05,
 		}
-		n, err := NewRaft(cfg)
+		n, err := NewNode(cfg)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -808,7 +808,7 @@ func TestApplyLagBackpressure(t *testing.T) {
 		if err := tn.node.HardClose(); err != nil {
 			t.Fatalf("hard close %d: %v", tn.id, err)
 		}
-		if err := c.net.Transport(tn.id).Close(); err != nil {
+		if err := NewMemoryTransport(c.net, tn.id).Close(); err != nil {
 			t.Fatalf("close transport %d: %v", tn.id, err)
 		}
 	}
@@ -817,7 +817,7 @@ func TestApplyLagBackpressure(t *testing.T) {
 		cfg := c.config(tn)
 		cfg.Machine = gatedKV{kv: tn.sm, gate: gate}
 		cfg.MaxApplyLagBytes = 2048
-		n, err := NewRaft(cfg)
+		n, err := NewNode(cfg)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1033,7 +1033,7 @@ func TestBatchLargerThanAFrameIsRefused(t *testing.T) {
 	c.kill(tn)
 	cfg := c.config(tn)
 	cfg.Transport = smallFrames{cfg.Transport}
-	if _, err := NewRaft(cfg); !errors.Is(err, coreconsensus.ConsensusMisconfigured) {
+	if _, err := NewNode(cfg); !errors.Is(err, coreconsensus.ConsensusMisconfigured) {
 		t.Fatalf("a batch above the frame limit: %v", err)
 	}
 }

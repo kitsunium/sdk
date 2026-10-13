@@ -261,8 +261,8 @@ type Raft struct {
 	hs  core.HardState
 }
 
-// New builds the step function over the loaded state.
-func New(cfg Config, st StartState) *Raft {
+// NewRaft builds the step function over the loaded state.
+func NewRaft(cfg Config, st StartState) *Raft {
 	node := &Raft{
 		cfg:    cfg,
 		mut:    cfg.mut,

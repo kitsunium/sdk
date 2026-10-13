@@ -457,7 +457,7 @@ func (d DataDir) chainAt(commit, first uint64) (uint32, uint64, error) {
 // the latest snapshot. A store that cannot answer fails it: a configuration
 // read from half the sources is an older one, and Recover would ask for the
 // fence of the wrong voters.
-func lastMembership(l *FileLog, snaps *FileSnapshots, index uint64) (coreconsensus.MembershipValue, error) {
+func lastMembership(l *fileLog, snaps *fileSnapshots, index uint64) (coreconsensus.MembershipValue, error) {
 	var m coreconsensus.MembershipValue
 	metas, err := snaps.List()
 	if err != nil {
@@ -537,7 +537,7 @@ func restoreRefused(why string) error {
 // checkRestore refuses a RestoreSnapshot whose preconditions fail, in a
 // fixed order so the reason given is always the first that applies: the
 // target, then the bounds, then the members.
-func checkRestore(flog *FileLog, stamp *coreconsensus.StampValue, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RestoreOptions) error {
+func checkRestore(flog *fileLog, stamp *coreconsensus.StampValue, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RestoreOptions) error {
 	if err := checkRestoreTarget(flog, newCluster, opt); err != nil {
 		return err
 	}
@@ -559,7 +559,7 @@ func restoreCodec(opt *RestoreOptions) coretransform.BoundedDecompressor {
 // checkRestoreTarget is the first half of RestoreSnapshot's preconditions,
 // checked in a fixed order with checkRestoreBounds after it, so the reason
 // given is always the first that applies.
-func checkRestoreTarget(flog *FileLog, newCluster coreconsensus.ClusterID, opt *RestoreOptions) error {
+func checkRestoreTarget(flog *fileLog, newCluster coreconsensus.ClusterID, opt *RestoreOptions) error {
 	exp := &opt.Expected
 	switch {
 	case flog.refuse != nil:
@@ -577,7 +577,7 @@ func checkRestoreTarget(flog *FileLog, newCluster coreconsensus.ClusterID, opt *
 // checkRestoreBounds is the second half of RestoreSnapshot's preconditions:
 // an empty joining directory, and a snapshot within the bounds the caller
 // set, both of which must be set.
-func checkRestoreBounds(flog *FileLog, stamp *coreconsensus.StampValue, opt *RestoreOptions) error {
+func checkRestoreBounds(flog *fileLog, stamp *coreconsensus.StampValue, opt *RestoreOptions) error {
 	exp := &opt.Expected
 	first, last := flog.Bounds()
 	switch {
@@ -665,7 +665,7 @@ func (d DataDir) verifyRestored(meta *coreconsensus.SnapshotMetaValue, codec cor
 
 // restartAt makes the empty log start after the restored snapshot, with a
 // hard state one term past it, durably.
-func (l *FileLog) restartAt(meta *coreconsensus.SnapshotMetaValue) error {
+func (l *fileLog) restartAt(meta *coreconsensus.SnapshotMetaValue) error {
 	if err := l.resetTo(meta.Position.Index, meta.Position.Term); err != nil {
 		return err
 	}
@@ -676,7 +676,7 @@ func (l *FileLog) restartAt(meta *coreconsensus.SnapshotMetaValue) error {
 }
 
 // resetTo makes an empty log start after (index, term).
-func (l *FileLog) resetTo(index, term uint64) error {
+func (l *fileLog) resetTo(index, term uint64) error {
 	l.wmu.Lock()
 	defer l.wmu.Unlock()
 	l.mu.Lock()
@@ -858,7 +858,7 @@ func (d DataDir) reopenSilenced(maxTerm uint64) error {
 // start (D4: a failed write stops it): a condition left at 0 would be filled
 // in again at the next start, from a log that may have grown since, and the
 // silence would end at another index than the one this start obeyed.
-func (l *FileLog) silence() (term, index uint64, unreadable, err error) {
+func (l *fileLog) silence() (term, index uint64, unreadable, err error) {
 	b, err := os.ReadFile(filepath.Join(l.dir, fileSilent))
 	if os.IsNotExist(err) {
 		return 0, 0, nil, nil
@@ -885,7 +885,7 @@ func (l *FileLog) silence() (term, index uint64, unreadable, err error) {
 const errSilenceLength cause = "silence condition of the wrong length"
 
 // endSilence removes the silence condition durably.
-func (l *FileLog) endSilence() error {
+func (l *fileLog) endSilence() error {
 	if err := os.Remove(filepath.Join(l.dir, fileSilent)); err != nil && !os.IsNotExist(err) {
 		return err
 	}

@@ -39,14 +39,14 @@ func TestAStorageStopSaysWhichMarkerItCouldNotWrite(t *testing.T) {
 	lg := &fakeLogger{}
 	cfg := Config{
 		Cluster: cid, Machine: newKV(), Durability: DurabilityVolatile, Log: d.Log(), Snapshots: d.Snapshots(),
-		Transport: NewMemoryNetwork().Transport(id), InitialTiming: testTimingFast(), MaxSnapshotBytes: 1 << 30,
+		Transport: NewMemoryTransport(NewMemoryNetwork(), id), InitialTiming: testTimingFast(), MaxSnapshotBytes: 1 << 30,
 		SnapshotEveryBytes: 1 << 20, MaxLogBytes: 1 << 30, LogReserveBytes: 1 << 20, MinVoters: 1, Logger: lg,
 	}
 	members := []coreconsensus.MemberValue{{ID: id, Incarnation: inc, Slot: "s0", SPKI: MemorySPKI(id), Voter: true}}
 	if err := Bootstrap(context.Background(), cfg, members); err != nil {
 		t.Fatal(err)
 	}
-	n, err := NewRaft(cfg)
+	n, err := NewNode(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

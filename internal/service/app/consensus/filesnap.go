@@ -14,11 +14,11 @@ import (
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
 
-// FileSnapshots is the shipped SnapshotStore: ADR 0056's publication rules
+// fileSnapshots is the shipped SnapshotStore: ADR 0056's publication rules
 // applied to a stream (D4). A snapshot is spooled to <id>.spool, synced,
 // renamed to <id>.snap, and published by its <id>.meta, written atomically
 // last; a .snap without its .meta is not a snapshot.
-type FileSnapshots struct {
+type fileSnapshots struct {
 	dir  string
 	mu   sync.Mutex
 	pins map[string]int
@@ -29,7 +29,7 @@ type FileSnapshots struct {
 // a snapshot's rename and its .meta leaves one, and it is neither a snapshot
 // nor resumable. A directory that cannot be created, listed or cleaned is a
 // STORAGE_FAILED, so a store never opens over a state it could not read.
-func newFileSnapshots(dir string) (*FileSnapshots, error) {
+func newFileSnapshots(dir string) (*fileSnapshots, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, storageFailed("mkdir", err)
 	}
@@ -50,7 +50,7 @@ func newFileSnapshots(dir string) (*FileSnapshots, error) {
 			}
 		}
 	}
-	return &FileSnapshots{dir: dir, pins: map[string]int{}}, nil
+	return &fileSnapshots{dir: dir, pins: map[string]int{}}, nil
 }
 
 // validID reports whether id may name a snapshot's files: non-empty,
@@ -61,7 +61,7 @@ func validID(id string) bool {
 }
 
 type fileSink struct {
-	s    *FileSnapshots
+	s    *fileSnapshots
 	id   string
 	f    *os.File
 	meta coreconsensus.SnapshotMetaValue
@@ -69,7 +69,7 @@ type fileSink struct {
 
 // Create implements SnapshotStore: an existing spool of that id resumes from
 // its last whole, checksummed chunk (R8-21).
-func (s *FileSnapshots) Create(id string, meta coreconsensus.SnapshotMetaValue) (coreconsensus.SnapshotSink, int64, error) {
+func (s *fileSnapshots) Create(id string, meta coreconsensus.SnapshotMetaValue) (coreconsensus.SnapshotSink, int64, error) {
 	if !validID(id) {
 		return nil, 0, origin(coreconsensus.FrameInvalid, errs.String("snapshot_id", id))
 	}
@@ -136,7 +136,7 @@ func (k *fileSink) Commit(final coreconsensus.SnapshotMetaValue) error {
 // interrupted, not a snapshot that failed. A .meta or a .snap that is there
 // but cannot be read is neither: it is an I/O failure, and it is reported,
 // so that a listing never reads a failing disk as "no snapshot".
-func (s *FileSnapshots) published(name string) (coreconsensus.SnapshotMetaValue, bool, error) {
+func (s *fileSnapshots) published(name string) (coreconsensus.SnapshotMetaValue, bool, error) {
 	var m coreconsensus.SnapshotMetaValue
 	if !strings.HasSuffix(name, ".meta") {
 		return m, false, nil
@@ -180,7 +180,7 @@ func (k *fileSink) Abort() error {
 }
 
 // List implements SnapshotStore: complete snapshots, newest first.
-func (s *FileSnapshots) List() ([]coreconsensus.SnapshotMetaValue, error) {
+func (s *fileSnapshots) List() ([]coreconsensus.SnapshotMetaValue, error) {
 	ents, err := os.ReadDir(s.dir)
 	if err != nil {
 		return nil, storageFailed("list snapshots", err)
@@ -209,7 +209,7 @@ func (s *FileSnapshots) List() ([]coreconsensus.SnapshotMetaValue, error) {
 
 type fileHandle struct {
 	*os.File
-	s    *FileSnapshots
+	s    *fileSnapshots
 	meta coreconsensus.SnapshotMetaValue
 	once sync.Once
 }
@@ -233,7 +233,7 @@ func (h *fileHandle) Close() error {
 }
 
 // Open implements SnapshotStore: pinned until Close.
-func (s *FileSnapshots) Open(id string) (coreconsensus.SnapshotHandle, error) {
+func (s *fileSnapshots) Open(id string) (coreconsensus.SnapshotHandle, error) {
 	if !validID(id) {
 		return nil, origin(coreconsensus.FrameInvalid, errs.String("snapshot_id", id))
 	}
@@ -259,7 +259,7 @@ func (s *FileSnapshots) Open(id string) (coreconsensus.SnapshotHandle, error) {
 
 // Remove implements SnapshotStore: refused while a handle is open. The meta
 // goes first, so a crash leaves no published snapshot without its bytes.
-func (s *FileSnapshots) Remove(id string) error {
+func (s *fileSnapshots) Remove(id string) error {
 	if !validID(id) {
 		return origin(coreconsensus.FrameInvalid, errs.String("snapshot_id", id))
 	}

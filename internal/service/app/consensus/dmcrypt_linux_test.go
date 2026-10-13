@@ -52,7 +52,7 @@ func pct(ds []time.Duration, p float64) time.Duration {
 // second one fsync per batch gives (D16: ≥ 10 000 entries/s of 256 B).
 func TestDMCryptBench(t *testing.T) {
 	dir := dmDir(t)
-	d, err := OpenDataDir(dir + "/bench")
+	d, err := NewDataDir(dir + "/bench")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestDMCryptBench(t *testing.T) {
 func TestDMCryptWriter(t *testing.T) {
 	dir := dmDir(t)
 	// Small segments so the cut often lands near a rotation.
-	d, err := OpenDataDirWith(dir+"/crash", DataDirOptions{SegmentBytes: 256 << 10})
+	d, err := NewDataDirWith(dir+"/crash", DataDirOptions{SegmentBytes: 256 << 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestDMCryptVerify(t *testing.T) {
 			d.Close()
 		}
 		var err error
-		if d, err = OpenDataDirWith(dir+"/crash", DataDirOptions{SegmentBytes: 256 << 10}); err != nil {
+		if d, err = NewDataDirWith(dir+"/crash", DataDirOptions{SegmentBytes: 256 << 10}); err != nil {
 			t.Fatalf("open %d: %v", pass, err)
 		}
 		if err := d.d.log.checkMarkers(); err != nil {

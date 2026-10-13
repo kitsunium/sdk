@@ -196,9 +196,9 @@ type segment struct {
 	size int64
 }
 
-// FileLog is the shipped segmented LogStore. One writer, many readers;
+// fileLog is the shipped segmented LogStore. One writer, many readers;
 // appended entries are readable before they are synced (D4).
-type FileLog struct {
+type fileLog struct {
 	dir      string
 	segBytes int64
 
@@ -248,7 +248,7 @@ type FileLog struct {
 func segName(n uint64) string { return fmt.Sprintf("seg-%016x", n) }
 
 // logDir is the directory holding the segments.
-func (l *FileLog) logDir() string { return filepath.Join(l.dir, "log") }
+func (l *fileLog) logDir() string { return filepath.Join(l.dir, "log") }
 
 // quarantined is the LOG_QUARANTINED of damage at off in segment seg.
 func quarantined(seg uint64, off int64, why string) error {
@@ -259,11 +259,11 @@ func quarantined(seg uint64, off int64, why string) error {
 // openFileLog opens, and recovers, the log of a data directory. A damaged
 // log is quarantined: the marker is written FIRST and nothing is modified
 // (D4).
-func openFileLog(dd *dataDir, segBytes int64) (*FileLog, error) {
+func openFileLog(dd *dataDir, segBytes int64) (*fileLog, error) {
 	if segBytes <= 0 {
 		segBytes = DefaultSegmentBytes
 	}
-	l := &FileLog{dir: dd.dir, segBytes: segBytes, dd: dd, first: 1, pendingLast: -1, runDir: runtimeMarkerDir()}
+	l := &fileLog{dir: dd.dir, segBytes: segBytes, dd: dd, first: 1, pendingLast: -1, runDir: runtimeMarkerDir()}
 	if err := os.MkdirAll(l.logDir(), 0o700); err != nil {
 		return nil, storageFailed("mkdir", err)
 	}
@@ -298,7 +298,7 @@ type scanned struct {
 
 // recover runs the written recovery procedure (D4, R8-02, R9-01, R9-03):
 // scan every segment, classify every hole, and only then change anything.
-func (l *FileLog) recover() error {
+func (l *fileLog) recover() error {
 	nums, err := l.segmentNumbers()
 	if err != nil {
 		return err
@@ -343,7 +343,7 @@ func (l *FileLog) recover() error {
 // segmentNumbers lists the published segments, sorted, deleting on the way
 // every .tmp: only an INCOMPLETE .tmp exists, one that never reached its
 // rename (R2-05). A name that is not exactly a segment's is ignored.
-func (l *FileLog) segmentNumbers() ([]uint64, error) {
+func (l *fileLog) segmentNumbers() ([]uint64, error) {
 	names, err := os.ReadDir(l.logDir())
 	if err != nil {
 		return nil, storageFailed("readdir", err)
@@ -369,7 +369,7 @@ func (l *FileLog) segmentNumbers() ([]uint64, error) {
 // scanSegments reads and parses every segment in order. A segment is judged
 // as soon as it is read, so the first damage found is the one quarantined,
 // and nothing after it is read.
-func (l *FileLog) scanSegments(nums []uint64) ([]*scanned, error) {
+func (l *fileLog) scanSegments(nums []uint64) ([]*scanned, error) {
 	segs := make([]*scanned, len(nums))
 	for i, n := range nums {
 		s, err := l.scanSegment(n)
@@ -392,7 +392,7 @@ func (l *FileLog) scanSegments(nums []uint64) ([]*scanned, error) {
 // scanSegment reads segment n and parses its records up to the first hole,
 // or through its seal: a sealed segment is read up to its sealed length
 // (R9-02).
-func (l *FileLog) scanSegment(n uint64) (*scanned, error) {
+func (l *fileLog) scanSegment(n uint64) (*scanned, error) {
 	b, err := os.ReadFile(filepath.Join(l.logDir(), segName(n)))
 	if err != nil {
 		return nil, storageFailed("read segment", err)
@@ -419,7 +419,7 @@ func (l *FileLog) scanSegment(n uint64) (*scanned, error) {
 
 // checkBatchSequence quarantines a log whose batch sequences are not
 // contiguous across the whole log (R9-01).
-func (l *FileLog) checkBatchSequence(segs []*scanned) error {
+func (l *fileLog) checkBatchSequence(segs []*scanned) error {
 	var prev *record
 	for _, s := range segs {
 		for i := range s.recs {
@@ -443,7 +443,7 @@ func continuesBatch(prev, r *record) bool {
 // is dropped from the records, its truncation point kept for positionTail
 // to zero and sync before any new record (R8-03); any other hole is
 // quarantined.
-func (l *FileLog) trimTornTail(last *scanned) error {
+func (l *fileLog) trimTornTail(last *scanned) error {
 	if last.hole < 0 {
 		return nil
 	}
@@ -464,7 +464,7 @@ func (l *FileLog) trimTornTail(last *scanned) error {
 // replay builds the effective log: it applies every segment's checkpoint
 // and records in order, truncate records included, and judges continuity
 // on the result (R8-01).
-func (l *FileLog) replay(segs []*scanned) error {
+func (l *fileLog) replay(segs []*scanned) error {
 	for si, s := range segs {
 		cp, ok := decodeCheckpoint(s.recs[0].data)
 		if !ok {
@@ -490,7 +490,7 @@ func (l *FileLog) replay(segs []*scanned) error {
 // segment's sets the log's start; every later one must continue the log,
 // and as it was written at activation with the CURRENT hard state, it is
 // the newest when read in order.
-func (l *FileLog) applyCheckpoint(first bool, seg uint64, cp *checkpoint) error {
+func (l *fileLog) applyCheckpoint(first bool, seg uint64, cp *checkpoint) error {
 	if first {
 		l.hs = cp.hs
 		l.compact, l.compactTerm = cp.compact, cp.compactTerm
@@ -511,7 +511,7 @@ func (l *FileLog) applyCheckpoint(first bool, seg uint64, cp *checkpoint) error 
 // applyRecord applies one record of segment seg to the log being rebuilt.
 // Only an entry out of sequence is refused; a record kind recovery does not
 // rebuild from changes nothing.
-func (l *FileLog) applyRecord(seg uint64, r *record) error {
+func (l *fileLog) applyRecord(seg uint64, r *record) error {
 	switch r.kind {
 	case recEntry:
 		if r.index != l.first+uint64(len(l.slots)) {
@@ -535,7 +535,7 @@ func (l *FileLog) applyRecord(seg uint64, r *record) error {
 // applyTruncate applies a truncate record at index. One that truncates into
 // a dropped segment removes entries that are gone with it, and a later
 // compact record covers what follows.
-func (l *FileLog) applyTruncate(index uint64) {
+func (l *fileLog) applyTruncate(index uint64) {
 	switch {
 	case index >= l.first && index <= l.first+uint64(len(l.slots)):
 		l.slots = l.slots[:index-l.first]
@@ -554,7 +554,7 @@ func decodeHS(b []byte) coreconsensus.HardState {
 
 // applyCompaction drops the retained entries the compaction point covers,
 // keeping the term of the last one dropped as the term before the log.
-func (l *FileLog) applyCompaction() {
+func (l *fileLog) applyCompaction() {
 	if l.compact < l.first {
 		return
 	}
@@ -572,7 +572,7 @@ func (l *FileLog) applyCompaction() {
 // openSegments opens every scanned segment for reading and writing, in
 // order. A segment that fails to open is a STORAGE_FAILED; those already
 // opened stay in l.segs for Close.
-func (l *FileLog) openSegments(segs []*scanned) error {
+func (l *fileLog) openSegments(segs []*scanned) error {
 	for _, s := range segs {
 		f, err := os.OpenFile(filepath.Join(l.logDir(), segName(s.n)), os.O_RDWR, 0)
 		if err != nil {
@@ -586,7 +586,7 @@ func (l *FileLog) openSegments(segs []*scanned) error {
 // positionTail sets the write offset in the last segment: at the torn
 // tail's truncation point, zeroing and syncing what lies past it unless it
 // is zero already, else right after the last valid record.
-func (l *FileLog) positionTail(last *scanned, tail *segment) error {
+func (l *fileLog) positionTail(last *scanned, tail *segment) error {
 	switch {
 	case last.trimmed >= 0:
 		l.off = last.trimmed
@@ -696,7 +696,7 @@ func zeroFrom(f *os.File, off, size int64) error {
 }
 
 // quarantine writes and syncs the marker FIRST and modifies nothing else.
-func (l *FileLog) quarantine(seg uint64, off int64, why string) error {
+func (l *fileLog) quarantine(seg uint64, off int64, why string) error {
 	qerr := quarantined(seg, off, why)
 	line := fmt.Sprintf("%s %d %s\n", segName(seg), off, why)
 	if err := writeFileSync(filepath.Join(l.dir, markerQuarantine), []byte(line)); err != nil {
@@ -707,7 +707,7 @@ func (l *FileLog) quarantine(seg uint64, off int64, why string) error {
 
 // createSegment publishes segment n: zero-filled tmp, checkpoint, fsync,
 // rename, fsync of the directory (D4 lifecycle steps 1 to 3).
-func (l *FileLog) createSegment(n uint64, cp *checkpoint) error {
+func (l *fileLog) createSegment(n uint64, cp *checkpoint) error {
 	size := l.segBytes
 	cpRec := appendRecord(nil, &record{kind: recCheckpt, end: true, batch: cp.nextBatchSeq, data: cp.encode()})
 	tmp := filepath.Join(l.logDir(), segName(n)+".tmp")
@@ -749,7 +749,7 @@ func (l *FileLog) createSegment(n uint64, cp *checkpoint) error {
 // segmentFile is the zero-filled .tmp of segment n at size: the prepared
 // one when it is that segment at that size, else one created and zeroed now,
 // on the writer's path, where a failure stops the log.
-func (l *FileLog) segmentFile(n uint64, size int64, tmp string) (*os.File, error) {
+func (l *fileLog) segmentFile(n uint64, size int64, tmp string) (*os.File, error) {
 	if f := l.takePrepared(n, size); f != nil {
 		return f, nil
 	}
@@ -787,7 +787,7 @@ type prepared struct {
 // or has failed, closing done as it returns: done is created here and
 // closed by that goroutine alone, exactly once, and takePrepared and Close
 // only ever wait on it.
-func (l *FileLog) prepare(n uint64, size int64) {
+func (l *fileLog) prepare(n uint64, size int64) {
 	done := make(chan struct{})
 	p := &prepared{n: n, size: size, done: done}
 	l.prep = p
@@ -813,7 +813,7 @@ func (l *FileLog) prepare(n uint64, size int64) {
 
 // takePrepared waits for the prepared segment n, when it is the one wanted
 // at that size; nil means prepare it now.
-func (l *FileLog) takePrepared(n uint64, size int64) *os.File {
+func (l *fileLog) takePrepared(n uint64, size int64) *os.File {
 	p := l.prep
 	l.prep = nil
 	if p == nil {
@@ -866,7 +866,7 @@ func writeSynced(path string, data []byte) (err error) {
 // rotate seals the current segment in its own synced batch, then publishes
 // the next one with the CURRENT hard state. It runs between batches only
 // (R8-04). need is the size of the batch that did not fit.
-func (l *FileLog) rotate(need int) error {
+func (l *fileLog) rotate(need int) error {
 	cur := l.segs[len(l.segs)-1]
 	seal := appendRecord(nil, &record{kind: recSeal, end: true, batch: l.batch, index: uint64(l.off)})
 	if l.off+int64(len(seal)) <= cur.size {
@@ -886,7 +886,7 @@ func (l *FileLog) rotate(need int) error {
 
 // publishNext publishes the segment after the current one, whose seal is
 // durable, with the CURRENT hard state and the next batch number.
-func (l *FileLog) publishNext(need int) error {
+func (l *fileLog) publishNext(need int) error {
 	cur := l.segs[len(l.segs)-1]
 	cp := l.dur
 	cp.nextBatchSeq = l.batch
@@ -901,7 +901,7 @@ func (l *FileLog) publishNext(need int) error {
 
 // termLocked is the term of entry i, the term before the log for first-1,
 // and 0 outside the log; the caller holds mu.
-func (l *FileLog) termLocked(i uint64) uint64 {
+func (l *fileLog) termLocked(i uint64) uint64 {
 	switch {
 	case i == l.first-1:
 		return l.prevTerm
@@ -913,7 +913,7 @@ func (l *FileLog) termLocked(i uint64) uint64 {
 
 // usable is why the log refuses a call: its quarantine first, then the
 // failure that stopped it, nil while it is healthy.
-func (l *FileLog) usable() error {
+func (l *fileLog) usable() error {
 	if l.refuse != nil {
 		return l.refuse
 	}
@@ -923,7 +923,7 @@ func (l *FileLog) usable() error {
 // ---- LogReader ----
 
 // Entries implements LogReader.
-func (l *FileLog) Entries(lo, hi uint64, maxBytes int, dst []coreconsensus.EntryValue) ([]coreconsensus.EntryValue, error) {
+func (l *fileLog) Entries(lo, hi uint64, maxBytes int, dst []coreconsensus.EntryValue) ([]coreconsensus.EntryValue, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	if err := l.usable(); err != nil {
@@ -959,7 +959,7 @@ func (l *FileLog) Entries(lo, hi uint64, maxBytes int, dst []coreconsensus.Entry
 // readEntry reads the synced entry s locates from its segment. A record
 // that does not parse as an entry there is LOG_CORRUPT: the log disagrees
 // with what it recorded.
-func (l *FileLog) readEntry(s slot) (coreconsensus.EntryValue, error) {
+func (l *fileLog) readEntry(s slot) (coreconsensus.EntryValue, error) {
 	var seg *segment
 	for _, x := range l.segs {
 		if x.n == s.seg {
@@ -990,7 +990,7 @@ func (l *FileLog) readEntry(s slot) (coreconsensus.EntryValue, error) {
 }
 
 // Term implements LogReader.
-func (l *FileLog) Term(index uint64) (uint64, error) {
+func (l *fileLog) Term(index uint64) (uint64, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	switch {
@@ -1005,7 +1005,7 @@ func (l *FileLog) Term(index uint64) (uint64, error) {
 }
 
 // Bounds implements LogReader; a refused log is empty.
-func (l *FileLog) Bounds() (first, last uint64) {
+func (l *fileLog) Bounds() (first, last uint64) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	if l.refuse != nil {
@@ -1018,13 +1018,13 @@ func (l *FileLog) Bounds() (first, last uint64) {
 
 // add appends r to the pending batch and remembers it as the batch's last
 // record, the one Sync flags end-of-batch.
-func (l *FileLog) add(r *record) {
+func (l *fileLog) add(r *record) {
 	l.pendingLast = len(l.pending)
 	l.pending = appendRecord(l.pending, r)
 }
 
 // Append implements LogStore: entries and the hard state in ONE batch.
-func (l *FileLog) Append(entries []coreconsensus.EntryValue, hs *coreconsensus.HardState) error {
+func (l *fileLog) Append(entries []coreconsensus.EntryValue, hs *coreconsensus.HardState) error {
 	l.wmu.Lock()
 	defer l.wmu.Unlock()
 	l.mu.Lock()
@@ -1053,7 +1053,7 @@ func (l *FileLog) Append(entries []coreconsensus.EntryValue, hs *coreconsensus.H
 // Sync implements LogStore: the pending batch is written, its last record
 // flagged end-of-batch, and made durable by one fdatasync. A failure is
 // final: the log refuses every later call (D4, fsyncgate).
-func (l *FileLog) Sync() error {
+func (l *fileLog) Sync() error {
 	l.wmu.Lock()
 	defer l.wmu.Unlock()
 	l.mu.Lock()
@@ -1105,7 +1105,7 @@ func (l *FileLog) Sync() error {
 // durable: its entries are read from disk from here on, the write offset
 // moves past it, and the next batch gets the next sequence number. The
 // caller holds mu.
-func (l *FileLog) settleBatch(seg uint64) {
+func (l *fileLog) settleBatch(seg uint64) {
 	l.relocate(seg)
 	l.off += int64(len(l.pending))
 	l.markDurable()
@@ -1117,7 +1117,7 @@ func (l *FileLog) settleBatch(seg uint64) {
 // relocate points every slot the pending batch carried at its record in
 // segment seg, now that the batch is synced there, and releases its
 // in-memory copy. A slot replaced since, by another term, is left alone.
-func (l *FileLog) relocate(seg uint64) {
+func (l *fileLog) relocate(seg uint64) {
 	var off int64
 	for off < int64(len(l.pending)) {
 		r, _ := parseRecord(l.pending[off:])
@@ -1133,13 +1133,13 @@ func (l *FileLog) relocate(seg uint64) {
 
 // markDurable records the state the synced records now describe, which a
 // rotation's checkpoint is written from.
-func (l *FileLog) markDurable() {
+func (l *fileLog) markDurable() {
 	last := l.first + uint64(len(l.slots)) - 1
 	l.dur = checkpoint{hs: l.hs, prevIndex: last, prevTerm: l.termLocked(last), compact: l.compact, compactTerm: l.compactTerm}
 }
 
 // restamp rewrites the batch sequence of every pending record.
-func (l *FileLog) restamp(batch uint64) {
+func (l *fileLog) restamp(batch uint64) {
 	var off int
 	for off < len(l.pending) {
 		binary.LittleEndian.PutUint64(l.pending[off+recHeader+4:], batch)
@@ -1151,7 +1151,7 @@ func (l *FileLog) restamp(batch uint64) {
 
 // TruncateSuffix implements LogStore: ONE truncate record, nothing else
 // (R7-12, R8-01, R8-03).
-func (l *FileLog) TruncateSuffix(from uint64) error {
+func (l *fileLog) TruncateSuffix(from uint64) error {
 	l.wmu.Lock()
 	defer l.wmu.Unlock()
 	l.mu.Lock()
@@ -1173,7 +1173,7 @@ func (l *FileLog) TruncateSuffix(from uint64) error {
 // CompactPrefix implements LogStore: a compact record, then whole segments
 // whose entries the next checkpoint already supersedes are deleted, as a
 // prefix, with a directory fsync after the unlinks (D4 step 6).
-func (l *FileLog) CompactPrefix(through uint64) error {
+func (l *fileLog) CompactPrefix(through uint64) error {
 	l.wmu.Lock()
 	defer l.wmu.Unlock()
 	l.mu.Lock()
@@ -1200,7 +1200,7 @@ func (l *FileLog) CompactPrefix(through uint64) error {
 // dropSegmentsLocked deletes the prefix of sealed segments whose every
 // entry is at or below the compaction point. It runs after a sync, so the
 // compact record and the next checkpoint are durable first.
-func (l *FileLog) dropSegmentsLocked() error {
+func (l *fileLog) dropSegmentsLocked() error {
 	removed := false
 	for len(l.segs) > 1 {
 		superseded, err := l.supersedes(l.segs[1])
@@ -1230,7 +1230,7 @@ func (l *FileLog) dropSegmentsLocked() error {
 // supersedes reports whether next's checkpoint starts at or below the
 // compaction point, so the segment before it holds nothing the log still
 // needs. A checkpoint that does not parse supersedes nothing.
-func (l *FileLog) supersedes(next *segment) (bool, error) {
+func (l *fileLog) supersedes(next *segment) (bool, error) {
 	b := make([]byte, recHeader+recFixed+checkpointLen)
 	if _, err := next.f.ReadAt(b, 0); err != nil {
 		return false, storageFailed("read checkpoint", err)
@@ -1245,7 +1245,7 @@ func (l *FileLog) supersedes(next *segment) (bool, error) {
 
 // retainsEntryIn reports whether a retained entry still lives in segment
 // seg.
-func (l *FileLog) retainsEntryIn(seg uint64) bool {
+func (l *fileLog) retainsEntryIn(seg uint64) bool {
 	for _, s := range l.slots {
 		if s.seg == seg {
 			return true
@@ -1256,7 +1256,7 @@ func (l *FileLog) retainsEntryIn(seg uint64) bool {
 
 // removeFirstSegment closes and unlinks the oldest segment; the caller
 // syncs the directory once every removal is done.
-func (l *FileLog) removeFirstSegment() error {
+func (l *fileLog) removeFirstSegment() error {
 	if err := l.segs[0].f.Close(); err != nil {
 		return storageFailed("close segment", err)
 	}
@@ -1268,21 +1268,21 @@ func (l *FileLog) removeFirstSegment() error {
 }
 
 // HardState implements LogStore.
-func (l *FileLog) HardState() (coreconsensus.HardState, error) {
+func (l *fileLog) HardState() (coreconsensus.HardState, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.hs, l.usable()
 }
 
 // Stamp implements LogStore.
-func (l *FileLog) Stamp() (coreconsensus.StampValue, error) {
+func (l *fileLog) Stamp() (coreconsensus.StampValue, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.stamp, nil
 }
 
 // WriteStamp implements LogStore: durable on return.
-func (l *FileLog) WriteStamp(s coreconsensus.StampValue) error {
+func (l *fileLog) WriteStamp(s coreconsensus.StampValue) error {
 	l.wmu.Lock()
 	defer l.wmu.Unlock()
 	l.mu.Lock()
@@ -1298,7 +1298,7 @@ func (l *FileLog) WriteStamp(s coreconsensus.StampValue) error {
 // whatever the one before it answered, and the first failure is reported: a
 // Close can be where a deferred write-back error surfaces, and a log that
 // swallowed it would report a clean shutdown of a disk that failed.
-func (l *FileLog) Close() error {
+func (l *fileLog) Close() error {
 	l.wmu.Lock()
 	defer l.wmu.Unlock()
 	l.mu.Lock()
@@ -1324,7 +1324,7 @@ func (l *FileLog) Close() error {
 
 // logStats reports the bytes the segments occupy, the free bytes of their
 // filesystem, and the torn tails truncated at open, for D13's gauges.
-func (l *FileLog) logStats() (bytes, free, tails int64) {
+func (l *fileLog) logStats() (bytes, free, tails int64) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	for _, s := range l.segs {

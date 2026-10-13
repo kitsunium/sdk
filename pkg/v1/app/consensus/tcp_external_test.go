@@ -113,7 +113,7 @@ func TestFacadeThreeNodesOverPEMAndDataDirs(t *testing.T) {
 		}
 		slot := fmt.Sprintf("site-%d", i)
 		spki := issue(t, p.dir, ca, caKey, consensus.SAN(cluster, slot))
-		dd, err := consensus.OpenDataDir(filepath.Join(p.dir, "data"))
+		dd, err := consensus.NewDataDir(filepath.Join(p.dir, "data"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -145,7 +145,7 @@ func TestFacadeThreeNodesOverPEMAndDataDirs(t *testing.T) {
 		if err := consensus.Bootstrap(context.Background(), p.cfg, members); err != nil {
 			t.Fatal(err)
 		}
-		n, err := consensus.NewRaft(p.cfg)
+		n, err := consensus.NewNode(p.cfg)
 		if err != nil {
 			t.Fatal(err)
 		}

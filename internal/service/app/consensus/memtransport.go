@@ -33,8 +33,10 @@ func NewMemoryNetwork() *MemoryNetwork {
 	return &MemoryNetwork{nodes: map[coreconsensus.NodeID]*MemoryTransport{}, cut: map[[2]coreconsensus.NodeID]bool{}}
 }
 
-// Transport returns the transport of id, creating it.
-func (n *MemoryNetwork) Transport(id coreconsensus.NodeID) *MemoryTransport {
+// NewMemoryTransport returns the end of the network n that node id sends and
+// receives through: created on the first call for that id, the same one on
+// every later call, so a node restarted on the network keeps its links.
+func NewMemoryTransport(n *MemoryNetwork, id coreconsensus.NodeID) *MemoryTransport {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if t, ok := n.nodes[id]; ok {

@@ -47,7 +47,7 @@ func TestACutWhoseSyncFailsStopsTheNode(t *testing.T) {
 			members := []coreconsensus.MemberValue{{ID: id, Incarnation: inc, Slot: "slot-0", SPKI: MemorySPKI(id), Voter: true}}
 			cfg := Config{
 				Cluster: cid, Machine: newKV(), Durability: DurabilityVolatile, Log: log,
-				Snapshots: syncFailingSnapshots{NewMemorySnapshots()}, Transport: net.Transport(id),
+				Snapshots: syncFailingSnapshots{NewMemorySnapshots()}, Transport: NewMemoryTransport(net, id),
 				InitialTiming: testTimingFast(), MaxSnapshotBytes: 1 << 30, SnapshotEveryBytes: 1 << 20,
 				MaxLogBytes: 1 << 30, LogReserveBytes: 1 << 20, MinVoters: 1, SnapshotEvery: 2,
 				SnapshotTrailing: 1, JoinAuthorizer: allowJoin{}, SnapshotPausesApply: pauses,
@@ -55,7 +55,7 @@ func TestACutWhoseSyncFailsStopsTheNode(t *testing.T) {
 			if err := Bootstrap(context.Background(), cfg, members); err != nil {
 				t.Fatal(err)
 			}
-			n, err := NewRaft(cfg)
+			n, err := NewNode(cfg)
 			if err != nil {
 				t.Fatal(err)
 			}

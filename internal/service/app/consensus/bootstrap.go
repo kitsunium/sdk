@@ -125,7 +125,7 @@ func byID(members []coreconsensus.MemberValue) []coreconsensus.MemberValue {
 // each idempotent: a bootstrap-pending stamp naming the founding list, the
 // founding configuration as entry 1, then the member stamp. Every founder
 // runs it with the IDENTICAL list (D8, R2-24, R3-02, R9-04). It never runs
-// inside NewRaft.
+// inside NewNode.
 func Bootstrap(_ context.Context, cfg Config, members []coreconsensus.MemberValue) error {
 	if cfg.Log == nil {
 		return misconfigured("Log", "nil")

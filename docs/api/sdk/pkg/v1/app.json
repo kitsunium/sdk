@@ -39,7 +39,7 @@
       "dir": "consensus",
       "layer": "public",
       "family": "app",
-      "doc": "Package consensus is the public facade of the SDK's consensus domain\n(ADR 0152): agreement of several machines on the order of their writes.\nA write is committed when a majority holds it on disk.\n\n\tid, inc, _ := consensus.Init(dir, cluster, \"fra\")      // offline, every founder\n\t_ = consensus.Bootstrap(ctx, cfg, members)              // offline, identical list\n\tnode, _ := consensus.NewRaft(cfg)                       // never bootstraps\n\ttok, result, err := node.Propose(ctx, command)\n\n# After OUTCOME_UNKNOWN, never retry blindly\n\nNOT_LEADER means the proposal was certainly NOT appended and is safe to\nretry. OUTCOME_UNKNOWN means it was appended, or possibly delivered, and the\nanswer was lost: it may still commit. Read the state through Barrier and\ndecide, or carry a per-key revision in the command, because a replayed\ncompare-and-swap is not harmless under ABA (D6, R1-04).\n\n# Reads\n\nBarrier returns once the local state machine reflects every write\ncommitted before the call: ReadIndex by default, confirmed by a heartbeat\nround started after the read arrived. ReadLease is opt-in and sound only\nunder the four conditions of D9; a leader paused after its lease check\nserves a stale read, which ReadIndex never does.\n\n# Apply is a pure transition\n\nStateMachine.Apply is called for every committed command, in log order, on\none goroutine, and must be deterministic. An Apply that cannot complete\nmust panic: the node stops with STATE_MACHINE_FAILED, and the entry IS\ncommitted.\n"
+      "doc": "Package consensus is the public facade of the SDK's consensus domain\n(ADR 0152): agreement of several machines on the order of their writes.\nA write is committed when a majority holds it on disk.\n\n\tid, inc, _ := consensus.Init(dir, cluster, \"fra\")      // offline, every founder\n\t_ = consensus.Bootstrap(ctx, cfg, members)              // offline, identical list\n\tnode, _ := consensus.NewNode(cfg)                       // never bootstraps\n\ttok, result, err := node.Propose(ctx, command)\n\n# After OUTCOME_UNKNOWN, never retry blindly\n\nNOT_LEADER means the proposal was certainly NOT appended and is safe to\nretry. OUTCOME_UNKNOWN means it was appended, or possibly delivered, and the\nanswer was lost: it may still commit. Read the state through Barrier and\ndecide, or carry a per-key revision in the command, because a replayed\ncompare-and-swap is not harmless under ABA (D6, R1-04).\n\n# Reads\n\nBarrier returns once the local state machine reflects every write\ncommitted before the call: ReadIndex by default, confirmed by a heartbeat\nround started after the read arrived. ReadLease is opt-in and sound only\nunder the four conditions of D9; a leader paused after its lease check\nserves a stale read, which ReadIndex never does.\n\n# Apply is a pure transition\n\nStateMachine.Apply is called for every committed command, in log order, on\none goroutine, and must be deterministic. An Apply that cannot complete\nmust panic: the node stops with STATE_MACHINE_FAILED, and the entry IS\ncommitted.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/pkg/v1/app/events",
@@ -1748,18 +1748,6 @@
       "family": "app"
     },
     {
-      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.LoadPEMIdentity",
-      "kind": "func",
-      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
-      "name": "LoadPEMIdentity",
-      "spelled": "func(certFile string, keyFile string, caFile string) (*PEMIdentity, *x509.CertPool, error)",
-      "canonical": "func(certFile string, keyFile string, caFile string) (*github.com/kitsunium/sdk/pkg/v1/app/consensus.PEMIdentity, *crypto/x509.CertPool, error)",
-      "doc": "LoadPEMIdentity reads a node identity and the CA pool from PEM files.\n",
-      "file": "consensus/facade_gen.go",
-      "layer": "public",
-      "family": "app"
-    },
-    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.LogCorrupt",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
@@ -2211,6 +2199,30 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.NewDataDir",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "NewDataDir",
+      "spelled": "func(dir string) (DataDir, error)",
+      "canonical": "func(dir string) (github.com/kitsunium/sdk/pkg/v1/app/consensus.DataDir, error)",
+      "doc": "NewDataDir takes the directory lock first, then recovers the log.\n",
+      "file": "consensus/facade_gen.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.NewDataDirWith",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "NewDataDirWith",
+      "spelled": "func(dir string, opts DataDirOptions) (DataDir, error)",
+      "canonical": "func(dir string, opts github.com/kitsunium/sdk/pkg/v1/app/consensus.DataDirOptions) (github.com/kitsunium/sdk/pkg/v1/app/consensus.DataDir, error)",
+      "doc": "NewDataDirWith is OpenDataDir with options.\n",
+      "file": "consensus/facade_gen.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.NewMemoryLog",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
@@ -2247,13 +2259,37 @@
       "family": "app"
     },
     {
-      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.NewRaft",
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.NewMemoryTransport",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
-      "name": "NewRaft",
+      "name": "NewMemoryTransport",
+      "spelled": "func(n *MemoryNetwork, id NodeID) *MemoryTransport",
+      "canonical": "func(n *github.com/kitsunium/sdk/pkg/v1/app/consensus.MemoryNetwork, id github.com/kitsunium/sdk/pkg/v1/app/consensus.NodeID) *github.com/kitsunium/sdk/pkg/v1/app/consensus.MemoryTransport",
+      "doc": "NewMemoryTransport returns the end of the network n that node id sends and\nreceives through, the same one on every call for that id.\n",
+      "file": "consensus/facade_gen.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.NewNode",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "NewNode",
       "spelled": "func(cfg Config) (*Node, error)",
       "canonical": "func(cfg github.com/kitsunium/sdk/pkg/v1/app/consensus.Config) (*github.com/kitsunium/sdk/pkg/v1/app/consensus.Node, error)",
-      "doc": "NewRaft opens a node over what Init and Bootstrap prepared. It never\nbootstraps.\n",
+      "doc": "NewNode opens a node over what Init and Bootstrap prepared. It never\nbootstraps.\n",
+      "file": "consensus/facade_gen.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.NewPEMIdentity",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "NewPEMIdentity",
+      "spelled": "func(certFile string, keyFile string, caFile string) (*PEMIdentity, error)",
+      "canonical": "func(certFile string, keyFile string, caFile string) (*github.com/kitsunium/sdk/pkg/v1/app/consensus.PEMIdentity, error)",
+      "doc": "NewPEMIdentity reads a node identity from PEM files; its Roots method is\nthe CA pool to pass as TransportConfig.Roots.\n",
       "file": "consensus/facade_gen.go",
       "layer": "public",
       "family": "app"
@@ -2376,30 +2412,6 @@
         "public": "This node is not the leader; the proposal was not appended"
       },
       "doc": "The sentinels a caller matches with errors.Is or errs.HasCode.\n",
-      "file": "consensus/facade_gen.go",
-      "layer": "public",
-      "family": "app"
-    },
-    {
-      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.OpenDataDir",
-      "kind": "func",
-      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
-      "name": "OpenDataDir",
-      "spelled": "func(dir string) (DataDir, error)",
-      "canonical": "func(dir string) (github.com/kitsunium/sdk/pkg/v1/app/consensus.DataDir, error)",
-      "doc": "OpenDataDir takes the directory lock first, then recovers the log.\n",
-      "file": "consensus/facade_gen.go",
-      "layer": "public",
-      "family": "app"
-    },
-    {
-      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.OpenDataDirWith",
-      "kind": "func",
-      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
-      "name": "OpenDataDirWith",
-      "spelled": "func(dir string, opts DataDirOptions) (DataDir, error)",
-      "canonical": "func(dir string, opts github.com/kitsunium/sdk/pkg/v1/app/consensus.DataDirOptions) (github.com/kitsunium/sdk/pkg/v1/app/consensus.DataDir, error)",
-      "doc": "OpenDataDirWith is OpenDataDir with options.\n",
       "file": "consensus/facade_gen.go",
       "layer": "public",
       "family": "app"

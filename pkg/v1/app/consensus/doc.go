@@ -4,7 +4,7 @@
 //
 //	id, inc, _ := consensus.Init(dir, cluster, "fra")      // offline, every founder
 //	_ = consensus.Bootstrap(ctx, cfg, members)              // offline, identical list
-//	node, _ := consensus.NewRaft(cfg)                       // never bootstraps
+//	node, _ := consensus.NewNode(cfg)                       // never bootstraps
 //	tok, result, err := node.Propose(ctx, command)
 //
 // # After OUTCOME_UNKNOWN, never retry blindly

@@ -104,7 +104,7 @@ func (tn *tcpNode) listen(t *testing.T, ca *testCA) {
 func (tn *tcpNode) start(t *testing.T, cid coreconsensus.ClusterID) {
 	t.Helper()
 	tn.sm = newKV()
-	n, err := NewRaft(tcpConfig(cid, tn))
+	n, err := NewNode(tcpConfig(cid, tn))
 	if err != nil {
 		t.Fatal(err)
 	}

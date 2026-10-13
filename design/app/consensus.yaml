@@ -2128,9 +2128,9 @@ packages:
       on it leaves, the apply goroutine, and snapshots cut, sent and installed in
       checksummed chunks.
 
-      A [Node] is built by [NewRaft] over a [Config]: a state machine, a log, a
+      A [Node] is built by [NewNode] over a [Config]: a state machine, a log, a
       snapshot store and a transport. The shipped storage is a [DataDir] — a
-      lock, a stamp, the segmented [FileLog], the [FileSnapshots] and the stop
+      lock, a stamp, the segmented [fileLog], the [fileSnapshots] and the stop
       markers — and the shipped transport is the mutual-TLS [TCPTransport];
       [MemoryLog], [MemorySnapshots] and [MemoryNetwork] stand in for them in
       tests.
@@ -2170,7 +2170,7 @@ packages:
           each idempotent: a bootstrap-pending stamp naming the founding list, the
           founding configuration as entry 1, then the member stamp. Every founder
           runs it with the IDENTICAL list (D8, R2-24, R3-02, R9-04). It never runs
-          inside NewRaft.
+          inside NewNode.
         in:
           - name: _
             type: context.Context
@@ -2186,22 +2186,22 @@ packages:
         out:
           - type: coreconsensus.TimingContractSpec
       - doc: |-
-          OpenDataDir takes the directory lock FIRST, then reads, scans and repairs
+          NewDataDir takes the directory lock FIRST, then reads, scans and repairs
           (D11). A second process fails at once with DATA_DIR_LOCKED.
         in:
           - name: dir
             type: string
-        name: OpenDataDir
+        name: NewDataDir
         out:
           - type: DataDir
           - type: error
-      - doc: OpenDataDirWith is OpenDataDir with options.
+      - doc: NewDataDirWith is NewDataDir with options.
         in:
           - name: dir
             type: string
           - name: opts
             type: DataDirOptions
-        name: OpenDataDirWith
+        name: NewDataDirWith
         out:
           - type: DataDir
           - type: error
@@ -2244,6 +2244,18 @@ packages:
         name: NewMemoryNetwork
         out:
           - type: "*MemoryNetwork"
+      - doc: |-
+          NewMemoryTransport returns the end of the network n that node id sends and
+          receives through: created on the first call for that id, the same one on
+          every later call, so a node restarted on the network keeps its links.
+        in:
+          - name: "n"
+            type: "*MemoryNetwork"
+          - name: id
+            type: coreconsensus.NodeID
+        name: NewMemoryTransport
+        out:
+          - type: "*MemoryTransport"
       - doc: MemorySPKI returns the key the memory transport authenticates id with.
         in:
           - name: id
@@ -2252,13 +2264,13 @@ packages:
         out:
           - type: "[32]byte"
       - doc: |-
-          NewRaft opens a node over what an offline tool founded or initialised. It
+          NewNode opens a node over what an offline tool founded or initialised. It
           never bootstraps (D8). The start sequence is fixed (D14): the stamp, the
           latest snapshot whose checksums pass, the log to its end, then serve.
         in:
           - name: cfg
             type: Config
-        name: NewRaft
+        name: NewNode
         out:
           - type: "*Node"
           - type: error
@@ -2374,17 +2386,16 @@ packages:
           - constraint: any
             name: R
       - doc: |-
-          LoadPEMIdentity reads the files once and returns the identity and the CA
-          pool to pass as TransportConfig.Roots.
+          NewPEMIdentity reads the files once and returns the identity; Roots is
+          the CA pool to pass as TransportConfig.Roots.
         in:
           - name: certFile
           - name: keyFile
           - name: caFile
             type: string
-        name: LoadPEMIdentity
+        name: NewPEMIdentity
         out:
           - type: "*PEMIdentity"
-          - type: "*x509.CertPool"
           - type: error
       - doc: |-
           NewTCPTransportFromPEM builds the shipped transport from PEM files, over
@@ -2651,7 +2662,7 @@ packages:
               type: coretrace.Tracer
             - name: Logger
               type: corelogger.Logger
-      - doc: DataDirOptions tunes OpenDataDirWith.
+      - doc: DataDirOptions tunes NewDataDirWith.
         name: DataDirOptions
         struct:
           fields:
@@ -2686,159 +2697,6 @@ packages:
               - type: error
             recv: value
         name: DataDir
-        struct:
-          unexported: true
-      - doc: |-
-          FileLog is the shipped segmented LogStore. One writer, many readers;
-          appended entries are readable before they are synced (D4).
-        methods:
-          - doc: Entries implements LogReader.
-            in:
-              - name: lo
-              - name: hi
-                type: uint64
-              - name: maxBytes
-                type: int
-              - name: dst
-                type: "[]coreconsensus.EntryValue"
-            name: Entries
-            out:
-              - type: "[]coreconsensus.EntryValue"
-              - type: error
-            recv: pointer
-          - doc: Term implements LogReader.
-            in:
-              - name: index
-                type: uint64
-            name: Term
-            out:
-              - type: uint64
-              - type: error
-            recv: pointer
-          - doc: Bounds implements LogReader; a refused log is empty.
-            name: Bounds
-            out:
-              - name: first
-              - name: last
-                type: uint64
-            recv: pointer
-          - doc: "Append implements LogStore: entries and the hard state in ONE batch."
-            in:
-              - name: entries
-                type: "[]coreconsensus.EntryValue"
-              - name: hs
-                type: "*coreconsensus.HardState"
-            name: Append
-            out:
-              - type: error
-            recv: pointer
-          - doc: |-
-              Sync implements LogStore: the pending batch is written, its last record
-              flagged end-of-batch, and made durable by one fdatasync. A failure is
-              final: the log refuses every later call (D4, fsyncgate).
-            name: Sync
-            out:
-              - type: error
-            recv: pointer
-          - doc: |-
-              TruncateSuffix implements LogStore: ONE truncate record, nothing else
-              (R7-12, R8-01, R8-03).
-            in:
-              - name: from
-                type: uint64
-            name: TruncateSuffix
-            out:
-              - type: error
-            recv: pointer
-          - doc: |-
-              CompactPrefix implements LogStore: a compact record, then whole segments
-              whose entries the next checkpoint already supersedes are deleted, as a
-              prefix, with a directory fsync after the unlinks (D4 step 6).
-            in:
-              - name: through
-                type: uint64
-            name: CompactPrefix
-            out:
-              - type: error
-            recv: pointer
-          - doc: HardState implements LogStore.
-            name: HardState
-            out:
-              - type: coreconsensus.HardState
-              - type: error
-            recv: pointer
-          - doc: Stamp implements LogStore.
-            name: Stamp
-            out:
-              - type: coreconsensus.StampValue
-              - type: error
-            recv: pointer
-          - doc: "WriteStamp implements LogStore: durable on return."
-            in:
-              - name: s
-                type: coreconsensus.StampValue
-            name: WriteStamp
-            out:
-              - type: error
-            recv: pointer
-          - doc: |-
-              Close implements LogStore; the DataDir closes it. Every segment is closed
-              whatever the one before it answered, and the first failure is reported: a
-              Close can be where a deferred write-back error surfaces, and a log that
-              swallowed it would report a clean shutdown of a disk that failed.
-            name: Close
-            out:
-              - type: error
-            recv: pointer
-        name: FileLog
-        struct:
-          unexported: true
-      - doc: |-
-          FileSnapshots is the shipped SnapshotStore: ADR 0056's publication rules
-          applied to a stream (D4). A snapshot is spooled to <id>.spool, synced,
-          renamed to <id>.snap, and published by its <id>.meta, written atomically
-          last; a .snap without its .meta is not a snapshot.
-        methods:
-          - doc: |-
-              Create implements SnapshotStore: an existing spool of that id resumes from
-              its last whole, checksummed chunk (R8-21).
-            in:
-              - name: id
-                type: string
-              - name: meta
-                type: coreconsensus.SnapshotMetaValue
-            name: Create
-            out:
-              - type: coreconsensus.SnapshotSink
-              - type: int64
-              - type: error
-            recv: pointer
-          - doc: "List implements SnapshotStore: complete snapshots, newest first."
-            name: List
-            out:
-              - type: "[]coreconsensus.SnapshotMetaValue"
-              - type: error
-            recv: pointer
-          - doc: "Open implements SnapshotStore: pinned until Close."
-            in:
-              - name: id
-                type: string
-            name: Open
-            out:
-              - type: coreconsensus.SnapshotHandle
-              - type: error
-            recv: pointer
-          - doc: |-
-              Remove implements SnapshotStore: refused while a handle is open. The meta
-              goes first, so a crash leaves no published snapshot without its bytes.
-            in:
-              - name: id
-                type: string
-            name: Remove
-            out:
-              - type: error
-            recv: pointer
-        name: FileSnapshots
         struct:
           unexported: true
       - doc: |-
@@ -2990,14 +2848,6 @@ packages:
           copied, delivered on per-lane queues that drop when full, and links can be
           cut in either direction.
         methods:
-          - doc: Transport returns the transport of id, creating it.
-            in:
-              - name: id
-                type: coreconsensus.NodeID
-            name: Transport
-            out:
-              - type: "*MemoryTransport"
-            recv: pointer
           - doc: Cut cuts, or restores, the link from a to b.
             in:
               - name: a
@@ -3392,6 +3242,13 @@ packages:
           to the trusted roots, so a rollover trusts the union.
         methods:
           - doc: |-
+              Roots returns the trusted CA pool the identity was read with, the union of
+              every CA file seen so far, to pass as TransportConfig.Roots.
+            name: Roots
+            out:
+              - type: "*x509.CertPool"
+            recv: pointer
+          - doc: |-
               GetCertificate returns the current certificate, reloading it in place when
               its files changed.
             name: GetCertificate
@@ -3619,13 +3476,13 @@ packages:
       [Raft.StorageDone], and the replies that depend on it leave in
       [ReadyValue.AfterSync], which the driver sends only once that write is durable.
     functions:
-      - doc: New builds the step function over the loaded state.
+      - doc: NewRaft builds the step function over the loaded state.
         in:
           - name: cfg
             type: Config
           - name: st
             type: StartState
-        name: New
+        name: NewRaft
         out:
           - type: "*Raft"
     imports:
@@ -4401,7 +4258,7 @@ packages:
 
       	id, inc, _ := consensus.Init(dir, cluster, "fra")      // offline, every founder
       	_ = consensus.Bootstrap(ctx, cfg, members)              // offline, identical list
-      	node, _ := consensus.NewRaft(cfg)                       // never bootstraps
+      	node, _ := consensus.NewNode(cfg)                       // never bootstraps
       	tok, result, err := node.Propose(ctx, command)
 
       # After OUTCOME_UNKNOWN, never retry blindly
@@ -4577,24 +4434,24 @@ packages:
             value: "2"
         doc: The two exits of ClearQuarantine.
       - func:
-          doc: OpenDataDir takes the directory lock first, then recovers the log.
-          forward: svcconsensus.OpenDataDir
+          doc: NewDataDir takes the directory lock first, then recovers the log.
+          forward: svcconsensus.NewDataDir
           in:
             - name: dir
               type: string
-          name: OpenDataDir
+          name: NewDataDir
           out:
             - type: DataDir
             - type: error
       - func:
-          doc: OpenDataDirWith is OpenDataDir with options.
-          forward: svcconsensus.OpenDataDirWith
+          doc: NewDataDirWith is OpenDataDir with options.
+          forward: svcconsensus.NewDataDirWith
           in:
             - name: dir
               type: string
             - name: opts
               type: DataDirOptions
-          name: OpenDataDirWith
+          name: NewDataDirWith
           out:
             - type: DataDir
             - type: error
@@ -4722,17 +4579,18 @@ packages:
             - type: "*TCPTransport"
             - type: error
       - func:
-          doc: LoadPEMIdentity reads a node identity and the CA pool from PEM files.
-          forward: svcconsensus.LoadPEMIdentity
+          doc: |-
+            NewPEMIdentity reads a node identity from PEM files; its Roots method is
+            the CA pool to pass as TransportConfig.Roots.
+          forward: svcconsensus.NewPEMIdentity
           in:
             - name: certFile
             - name: keyFile
             - name: caFile
               type: string
-          name: LoadPEMIdentity
+          name: NewPEMIdentity
           out:
             - type: "*PEMIdentity"
-            - type: "*x509.CertPool"
             - type: error
       - func:
           doc: SAN returns the canonical URI SAN a node certificate must carry.
@@ -4900,13 +4758,13 @@ packages:
         doc: The read modes and durabilities.
       - func:
           doc: |-
-            NewRaft opens a node over what Init and Bootstrap prepared. It never
+            NewNode opens a node over what Init and Bootstrap prepared. It never
             bootstraps.
-          forward: svcconsensus.NewRaft
+          forward: svcconsensus.NewNode
           in:
             - name: cfg
               type: Config
-          name: NewRaft
+          name: NewNode
           out:
             - type: "*Node"
             - type: error
@@ -5016,6 +4874,19 @@ packages:
           name: NewMemoryNetwork
           out:
             - type: "*MemoryNetwork"
+      - func:
+          doc: |-
+            NewMemoryTransport returns the end of the network n that node id sends and
+            receives through, the same one on every call for that id.
+          forward: svcconsensus.NewMemoryTransport
+          in:
+            - name: "n"
+              type: "*MemoryNetwork"
+            - name: id
+              type: NodeID
+          name: NewMemoryTransport
+          out:
+            - type: "*MemoryTransport"
       - func:
           doc: MemorySPKI is the key the memory transport authenticates a node with.
           forward: svcconsensus.MemorySPKI

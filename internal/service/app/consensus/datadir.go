@@ -39,7 +39,7 @@ const (
 	stampFixed int = 1 + 16 + 8 + 16 + 8 + 8 + 8 + 16 + 1 + 32 + 1
 )
 
-// DataDirOptions tunes OpenDataDirWith.
+// DataDirOptions tunes NewDataDirWith.
 type DataDirOptions struct {
 	// SegmentBytes is the fixed size of a log segment; 0 is 64 MiB.
 	SegmentBytes int64
@@ -50,8 +50,8 @@ type dataDir struct {
 	opts   DataDirOptions
 	mu     sync.Mutex
 	lockf  *os.File
-	log    *FileLog
-	snaps  *FileSnapshots
+	log    *fileLog
+	snaps  *fileSnapshots
 	closed bool
 	inUse  bool
 }
@@ -61,12 +61,12 @@ type dataDir struct {
 // share one lock and one Close (R4-29).
 type DataDir struct{ d *dataDir }
 
-// OpenDataDir takes the directory lock FIRST, then reads, scans and repairs
+// NewDataDir takes the directory lock FIRST, then reads, scans and repairs
 // (D11). A second process fails at once with DATA_DIR_LOCKED.
-func OpenDataDir(dir string) (DataDir, error) { return OpenDataDirWith(dir, DataDirOptions{}) }
+func NewDataDir(dir string) (DataDir, error) { return NewDataDirWith(dir, DataDirOptions{}) }
 
-// OpenDataDirWith is OpenDataDir with options.
-func OpenDataDirWith(dir string, opts DataDirOptions) (DataDir, error) {
+// NewDataDirWith is NewDataDir with options.
+func NewDataDirWith(dir string, opts DataDirOptions) (DataDir, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return DataDir{}, storageFailed("mkdir", err)
 	}
@@ -150,7 +150,7 @@ func (d DataDir) Close() error {
 // acquire marks the data directory held by a Node, refusing DATA_DIR_IN_USE
 // while another Node holds it or it was closed; a log opened without a
 // DataDir holds nothing and always succeeds.
-func (l *FileLog) acquire() error {
+func (l *fileLog) acquire() error {
 	if l.dd == nil {
 		return nil
 	}
@@ -165,7 +165,7 @@ func (l *FileLog) acquire() error {
 
 // release ends the hold acquire took, so the directory may be closed or
 // operated on offline again.
-func (l *FileLog) release() {
+func (l *fileLog) release() {
 	if l.dd == nil {
 		return
 	}
@@ -267,7 +267,7 @@ func writeStamp(dir string, s coreconsensus.StampValue) error {
 // runtimeMarker is the boot-scoped path of the log's marker for reason,
 // named by a digest of the data directory so two directories on one host
 // never share a marker.
-func (l *FileLog) runtimeMarker(reason string) string {
+func (l *fileLog) runtimeMarker(reason string) string {
 	sum := sha256.Sum256([]byte(l.dir))
 	return filepath.Join(l.runDir, hex.EncodeToString(sum[:8])+"-"+reason)
 }
@@ -278,7 +278,7 @@ func (l *FileLog) runtimeMarker(reason string) string {
 // the data directory's, and the boot-scoped one's (nil for a stop that writes no
 // boot-scoped marker). R9-05 lets a node stop with one marker of the two,
 // but not silently: the caller reports the place it could not write.
-func (l *FileLog) markStopEach(code errs.Code, detail string) (dirErr, runErr error) {
+func (l *fileLog) markStopEach(code errs.Code, detail string) (dirErr, runErr error) {
 	reason := reasonOf(code)
 	body := []byte(fmt.Sprintf("boot=%s\n%s\n", bootID(), detail))
 	dirErr = writeFileSync(filepath.Join(l.dir, markerStopPrefix+reason), body)
@@ -312,7 +312,7 @@ func reasonOf(code errs.Code) string {
 // checkMarkers refuses a start while a marker applies (D4): a
 // STORAGE_FAILED marker of the CURRENT boot in either place, or any other
 // stop marker, which only an operator clears.
-func (l *FileLog) checkMarkers() error {
+func (l *fileLog) checkMarkers() error {
 	if l.refuse != nil {
 		return l.refuse
 	}
@@ -352,7 +352,7 @@ func stopMarkerPresent(path string, content []byte) error {
 // markerPaths is every place a stop marker of this log may be: the
 // boot-scoped STORAGE_FAILED marker first, then each published STOP- file of
 // the data directory listing ents, a half-written .tmp excluded.
-func (l *FileLog) markerPaths(ents []os.DirEntry) []string {
+func (l *fileLog) markerPaths(ents []os.DirEntry) []string {
 	paths := []string{l.runtimeMarker("STORAGE_FAILED")}
 	for _, e := range ents {
 		if strings.HasPrefix(e.Name(), markerStopPrefix) && !strings.HasSuffix(e.Name(), ".tmp") {

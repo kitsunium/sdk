@@ -21,7 +21,7 @@ type diskNode struct {
 func diskConfig(c *cluster, dn *diskNode) Config {
 	return Config{
 		Cluster: c.cid, Machine: dn.sm, Durability: DurabilityVolatile, Log: dn.dd.Log(), Snapshots: dn.dd.Snapshots(),
-		Transport: c.net.Transport(dn.id), InitialTiming: testTimingDisk(), MaxSnapshotBytes: 1 << 30,
+		Transport: NewMemoryTransport(c.net, dn.id), InitialTiming: testTimingDisk(), MaxSnapshotBytes: 1 << 30,
 		SnapshotEveryBytes: 1 << 20, MaxLogBytes: 1 << 30, LogReserveBytes: 1 << 20, MinVoters: 3,
 		SnapshotEvery: 50, SnapshotTrailing: 10,
 	}
@@ -31,9 +31,9 @@ func (dn *diskNode) open(t *testing.T, c *cluster) {
 	t.Helper()
 	dn.dd = openDir(t, dn.dir, 16<<10)
 	dn.sm = newKV()
-	n, err := NewRaft(diskConfig(c, dn))
+	n, err := NewNode(diskConfig(c, dn))
 	if err != nil {
-		t.Fatalf("NewRaft: %v", err)
+		t.Fatalf("NewNode: %v", err)
 	}
 	dn.node = n
 }
@@ -47,7 +47,7 @@ func (dn *diskNode) crash(t *testing.T, c *cluster) {
 	if err := dn.node.HardClose(); err != nil {
 		t.Errorf("hard close %d: %v", dn.id, err)
 	}
-	if err := c.net.Transport(dn.id).Close(); err != nil {
+	if err := NewMemoryTransport(c.net, dn.id).Close(); err != nil {
 		t.Errorf("close transport %d: %v", dn.id, err)
 	}
 	if err := dn.dd.Close(); err != nil {

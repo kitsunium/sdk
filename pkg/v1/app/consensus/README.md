@@ -11,7 +11,7 @@ Package consensus is the public facade of the SDK's consensus domain (ADR 0152):
 ```
 id, inc, _ := consensus.Init(dir, cluster, "fra")      // offline, every founder
 _ = consensus.Bootstrap(ctx, cfg, members)              // offline, identical list
-node, _ := consensus.NewRaft(cfg)                       // never bootstraps
+node, _ := consensus.NewNode(cfg)                       // never bootstraps
 tok, result, err := node.Propose(ctx, command)
 ```
 
@@ -43,16 +43,17 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 - [func Lane\(frame \[\]byte\) \(FrameLane, error\)](<#Lane>)
 - [func Latest\(s SnapshotStore\) \(SnapshotHandle, error\)](<#Latest>)
 - [func LeaderHint\(err error\) \(NodeID, bool\)](<#LeaderHint>)
-- [func LoadPEMIdentity\(certFile string, keyFile string, caFile string\) \(\*PEMIdentity, \*x509.CertPool, error\)](<#LoadPEMIdentity>)
 - [func MemorySPKI\(id NodeID\) \[32\]byte](<#MemorySPKI>)
+- [func NewDataDir\(dir string\) \(DataDir, error\)](<#NewDataDir>)
+- [func NewDataDirWith\(dir string, opts DataDirOptions\) \(DataDir, error\)](<#NewDataDirWith>)
 - [func NewMemoryLog\(\) \*MemoryLog](<#NewMemoryLog>)
 - [func NewMemoryNetwork\(\) \*MemoryNetwork](<#NewMemoryNetwork>)
 - [func NewMemorySnapshots\(\) \*MemorySnapshots](<#NewMemorySnapshots>)
-- [func NewRaft\(cfg Config\) \(\*Node, error\)](<#NewRaft>)
+- [func NewMemoryTransport\(n \*MemoryNetwork, id NodeID\) \*MemoryTransport](<#NewMemoryTransport>)
+- [func NewNode\(cfg Config\) \(\*Node, error\)](<#NewNode>)
+- [func NewPEMIdentity\(certFile string, keyFile string, caFile string\) \(\*PEMIdentity, error\)](<#NewPEMIdentity>)
 - [func NewTCPTransport\(cfg TransportConfig\) \(\*TCPTransport, error\)](<#NewTCPTransport>)
 - [func NewTCPTransportFromPEM\(certFile string, keyFile string, caFile string, cfg TransportConfig\) \(\*TCPTransport, error\)](<#NewTCPTransportFromPEM>)
-- [func OpenDataDir\(dir string\) \(DataDir, error\)](<#OpenDataDir>)
-- [func OpenDataDirWith\(dir string, opts DataDirOptions\) \(DataDir, error\)](<#OpenDataDirWith>)
 - [func ParseMessage\(frame \[\]byte, m \*MessageValue\) error](<#ParseMessage>)
 - [func ParseSnapshotMeta\(b \[\]byte, m \*SnapshotMetaValue\) error](<#ParseSnapshotMeta>)
 - [func ParseToken\(b \[\]byte\) \(TokenValue, error\)](<#ParseToken>)
@@ -145,7 +146,6 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 - [type MemoryNetwork](<#MemoryNetwork>)
   - [func \(\*MemoryNetwork\) Cut\(a coreconsensus.NodeID, b coreconsensus.NodeID, cut bool\)](<#MemoryNetwork.Cut>)
   - [func \(\*MemoryNetwork\) Isolate\(id coreconsensus.NodeID, cut bool\)](<#MemoryNetwork.Isolate>)
-  - [func \(\*MemoryNetwork\) Transport\(id coreconsensus.NodeID\) \*MemoryTransport](<#MemoryNetwork.Transport>)
 - [type MemorySnapshots](<#MemorySnapshots>)
   - [func \(\*MemorySnapshots\) Create\(id string, meta coreconsensus.SnapshotMetaValue\) \(coreconsensus.SnapshotSink, int64, error\)](<#MemorySnapshots.Create>)
   - [func \(\*MemorySnapshots\) List\(\) \(\[\]coreconsensus.SnapshotMetaValue, error\)](<#MemorySnapshots.List>)
@@ -191,6 +191,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 - [type PEMIdentity](<#PEMIdentity>)
   - [func \(\*PEMIdentity\) GetCertificate\(\) \(\*tls.Certificate, error\)](<#PEMIdentity.GetCertificate>)
   - [func \(\*PEMIdentity\) ReloadFailures\(\) int](<#PEMIdentity.ReloadFailures>)
+  - [func \(\*PEMIdentity\) Roots\(\) \*x509.CertPool](<#PEMIdentity.Roots>)
 - [type PeerHealthValue](<#PeerHealthValue>)
 - [type PositionValue](<#PositionValue>)
 - [type PreconditionSpec](<#PreconditionSpec>)
@@ -1132,15 +1133,6 @@ func LeaderHint(err error) (NodeID, bool)
 
 LeaderHint reads the known leader from a NOT\_LEADER (R7-10).
 
-<a name="LoadPEMIdentity"></a>
-## func [LoadPEMIdentity](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
-
-```go
-func LoadPEMIdentity(certFile string, keyFile string, caFile string) (*PEMIdentity, *x509.CertPool, error)
-```
-
-LoadPEMIdentity reads a node identity and the CA pool from PEM files.
-
 <a name="MemorySPKI"></a>
 ## func [MemorySPKI](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
@@ -1149,6 +1141,24 @@ func MemorySPKI(id NodeID) [32]byte
 ```
 
 MemorySPKI is the key the memory transport authenticates a node with.
+
+<a name="NewDataDir"></a>
+## func [NewDataDir](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+
+```go
+func NewDataDir(dir string) (DataDir, error)
+```
+
+NewDataDir takes the directory lock first, then recovers the log.
+
+<a name="NewDataDirWith"></a>
+## func [NewDataDirWith](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+
+```go
+func NewDataDirWith(dir string, opts DataDirOptions) (DataDir, error)
+```
+
+NewDataDirWith is OpenDataDir with options.
 
 <a name="NewMemoryLog"></a>
 ## func [NewMemoryLog](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
@@ -1177,14 +1187,32 @@ func NewMemorySnapshots() *MemorySnapshots
 
 NewMemorySnapshots returns the in-memory SnapshotStore double.
 
-<a name="NewRaft"></a>
-## func [NewRaft](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+<a name="NewMemoryTransport"></a>
+## func [NewMemoryTransport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 ```go
-func NewRaft(cfg Config) (*Node, error)
+func NewMemoryTransport(n *MemoryNetwork, id NodeID) *MemoryTransport
 ```
 
-NewRaft opens a node over what Init and Bootstrap prepared. It never bootstraps.
+NewMemoryTransport returns the end of the network n that node id sends and receives through, the same one on every call for that id.
+
+<a name="NewNode"></a>
+## func [NewNode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+
+```go
+func NewNode(cfg Config) (*Node, error)
+```
+
+NewNode opens a node over what Init and Bootstrap prepared. It never bootstraps.
+
+<a name="NewPEMIdentity"></a>
+## func [NewPEMIdentity](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+
+```go
+func NewPEMIdentity(certFile string, keyFile string, caFile string) (*PEMIdentity, error)
+```
+
+NewPEMIdentity reads a node identity from PEM files; its Roots method is the CA pool to pass as TransportConfig.Roots.
 
 <a name="NewTCPTransport"></a>
 ## func [NewTCPTransport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
@@ -1203,24 +1231,6 @@ func NewTCPTransportFromPEM(certFile string, keyFile string, caFile string, cfg 
 ```
 
 NewTCPTransportFromPEM builds it from a certificate, a key and the consensus CA, as PEM files reloaded in place on renewal.
-
-<a name="OpenDataDir"></a>
-## func [OpenDataDir](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
-
-```go
-func OpenDataDir(dir string) (DataDir, error)
-```
-
-OpenDataDir takes the directory lock first, then recovers the log.
-
-<a name="OpenDataDirWith"></a>
-## func [OpenDataDirWith](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
-
-```go
-func OpenDataDirWith(dir string, opts DataDirOptions) (DataDir, error)
-```
-
-OpenDataDirWith is OpenDataDir with options.
 
 <a name="ParseMessage"></a>
 ## func [ParseMessage](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
@@ -2536,15 +2546,6 @@ func (*MemoryNetwork) Isolate(id coreconsensus.NodeID, cut bool)
 
 Isolate cuts, or restores, every link of id in both directions.
 
-<a name="MemoryNetwork.Transport"></a>
-### func \(MemoryNetwork\) [Transport](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/memtransport.go>)
-
-```go
-func (*MemoryNetwork) Transport(id coreconsensus.NodeID) *MemoryTransport
-```
-
-Transport returns the transport of id, creating it.
-
 <a name="MemorySnapshots"></a>
 ## type [MemorySnapshots](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
@@ -3042,6 +3043,15 @@ func (*PEMIdentity) ReloadFailures() int
 ```
 
 ReloadFailures counts the reloads refused so far.
+
+<a name="PEMIdentity.Roots"></a>
+### func \(PEMIdentity\) [Roots](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/pem.go>)
+
+```go
+func (*PEMIdentity) Roots() *x509.CertPool
+```
+
+Roots returns the trusted CA pool the identity was read with, the union of every CA file seen so far, to pass as TransportConfig.Roots.
 
 <a name="PeerHealthValue"></a>
 ## type [PeerHealthValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)

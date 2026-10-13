@@ -27,7 +27,7 @@ func ents(from, to, term uint64) []coreconsensus.EntryValue {
 
 func openDir(t *testing.T, dir string, seg int64) DataDir {
 	t.Helper()
-	d, err := OpenDataDirWith(dir, DataDirOptions{SegmentBytes: seg})
+	d, err := NewDataDirWith(dir, DataDirOptions{SegmentBytes: seg})
 	if err != nil {
 		t.Fatalf("open: %v %v", err, errs.FieldsOf(err))
 	}
@@ -274,7 +274,7 @@ func TestDataDirLockAndStopMarkers(t *testing.T) {
 	dir := t.TempDir()
 	d := openDir(t, dir, 1<<16)
 	defer d.Close()
-	if _, err := OpenDataDir(dir); !errors.Is(err, coreconsensus.DataDirLocked) {
+	if _, err := NewDataDir(dir); !errors.Is(err, coreconsensus.DataDirLocked) {
 		t.Fatalf("second open: %v", err)
 	}
 	l := d.d.log

@@ -4,9 +4,9 @@
 // on it leaves, the apply goroutine, and snapshots cut, sent and installed in
 // checksummed chunks.
 //
-// A [Node] is built by [NewRaft] over a [Config]: a state machine, a log, a
+// A [Node] is built by [NewNode] over a [Config]: a state machine, a log, a
 // snapshot store and a transport. The shipped storage is a [DataDir] — a
-// lock, a stamp, the segmented [FileLog], the [FileSnapshots] and the stop
+// lock, a stamp, the segmented [fileLog], the [fileSnapshots] and the stop
 // markers — and the shipped transport is the mutual-TLS [TCPTransport];
 // [MemoryLog], [MemorySnapshots] and [MemoryNetwork] stand in for them in
 // tests.

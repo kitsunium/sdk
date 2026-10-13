@@ -64,7 +64,7 @@ func TestObservability(t *testing.T) {
 		if err := tn.node.HardClose(); err != nil {
 			t.Fatalf("hard close %d: %v", tn.id, err)
 		}
-		if err := c.net.Transport(tn.id).Close(); err != nil {
+		if err := NewMemoryTransport(c.net, tn.id).Close(); err != nil {
 			t.Fatalf("close transport %d: %v", tn.id, err)
 		}
 	}
@@ -74,7 +74,7 @@ func TestObservability(t *testing.T) {
 		if i == 0 {
 			cfg.Meter, cfg.Tracer, cfg.Logger = meter, tr, lg
 		}
-		n, err := NewRaft(cfg)
+		n, err := NewNode(cfg)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -137,7 +137,7 @@ func TestResourceMetrics(t *testing.T) {
 	tn.sm = newKV()
 	cfg := tcpConfig(cid, tn)
 	cfg.Meter = meter
-	n, err := NewRaft(cfg)
+	n, err := NewNode(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestResourceMetrics(t *testing.T) {
 	dcfg := diskConfig(c, dn)
 	dm := svcmetrics.NewMeter()
 	dcfg.Meter = dm
-	if dn.node, err = NewRaft(dcfg); err != nil {
+	if dn.node, err = NewNode(dcfg); err != nil {
 		t.Fatal(err)
 	}
 	defer func() {

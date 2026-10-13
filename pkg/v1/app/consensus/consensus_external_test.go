@@ -93,13 +93,13 @@ func TestFacadeThreeNodesInMemory(t *testing.T) {
 	for _, p := range parts {
 		cfg := consensus.Config{
 			Cluster: cluster, Machine: &counter{}, Durability: consensus.DurabilityVolatile,
-			Log: p.log, Snapshots: p.snaps, Transport: net.Transport(p.id), InitialTiming: timing,
+			Log: p.log, Snapshots: p.snaps, Transport: consensus.NewMemoryTransport(net, p.id), InitialTiming: timing,
 			MaxSnapshotBytes: 1 << 30, MaxLogBytes: 1 << 30, MinVoters: 3,
 		}
 		if err := consensus.Bootstrap(context.Background(), cfg, members); err != nil {
 			t.Fatal(err)
 		}
-		n, err := consensus.NewRaft(cfg)
+		n, err := consensus.NewNode(cfg)
 		if err != nil {
 			t.Fatal(err)
 		}

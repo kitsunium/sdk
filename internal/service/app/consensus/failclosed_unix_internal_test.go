@@ -29,7 +29,7 @@ func TestADroppedSegmentIsSyncedWhenTheNextOneIsRetained(t *testing.T) {
 		t.Fatal(err)
 	}
 	const compacted uint64 = 10
-	l := &FileLog{dir: dir, compact: compacted}
+	l := &fileLog{dir: dir, compact: compacted}
 	for n := uint64(1); n <= 3; n++ {
 		// Every segment opens with a checkpoint at or below the compaction
 		// point: each one supersedes the segment before it.
@@ -83,7 +83,7 @@ func TestAnUnreadableStopMarkerRefusesTheStart(t *testing.T) {
 	if err := os.WriteFile(marker, []byte("boot=x\nseg 1\n"), 0o000); err != nil {
 		t.Fatal(err)
 	}
-	l := &FileLog{dir: dir, runDir: t.TempDir()}
+	l := &fileLog{dir: dir, runDir: t.TempDir()}
 	if err := l.checkMarkers(); err == nil {
 		t.Fatal("an unreadable stop marker let the node start")
 	}

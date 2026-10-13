@@ -116,7 +116,7 @@ func TestRecoverStartsANewHistoryFromOneNode(t *testing.T) {
 	keep.sm = newKV()
 	cfg := diskConfig(c, keep)
 	cfg.MinVoters = 1
-	n, err := NewRaft(cfg)
+	n, err := NewNode(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestRecoverStartsANewHistoryFromOneNode(t *testing.T) {
 	old.dd = openDir(t, old.dir, 16<<10)
 	defer old.dd.Close()
 	old.sm = newKV()
-	if _, err := NewRaft(diskConfig(c, old)); !errors.Is(err, coreconsensus.DataDirMismatch) {
+	if _, err := NewNode(diskConfig(c, old)); !errors.Is(err, coreconsensus.DataDirMismatch) {
 		t.Fatalf("old pair restarted under the new cluster: %v", err)
 	}
 }
@@ -224,7 +224,7 @@ func TestRestoreSnapshotIntoAnEmptyDirectory(t *testing.T) {
 	fresh.sm = newKV()
 	cfg := diskConfig(c, fresh)
 	cfg.MinVoters = 1
-	n, err := NewRaft(cfg)
+	n, err := NewNode(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +267,7 @@ func TestTruncateAndStaySilentRejoins(t *testing.T) {
 	}
 	victim.dd = openDir(t, victim.dir, 16<<10)
 	victim.sm = newKV()
-	if _, err := NewRaft(diskConfig(c, victim)); !errors.Is(err, coreconsensus.LogQuarantined) {
+	if _, err := NewNode(diskConfig(c, victim)); !errors.Is(err, coreconsensus.LogQuarantined) {
 		t.Fatalf("damaged log: %v", err)
 	}
 	if err := ClearQuarantine(victim.dd, TruncateAndStaySilent, "op:silent"); err != nil {
@@ -276,7 +276,7 @@ func TestTruncateAndStaySilentRejoins(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(victim.dir, fileSilent)); err != nil {
 		t.Fatal("no silence condition persisted")
 	}
-	n, err := NewRaft(diskConfig(c, victim))
+	n, err := NewNode(diskConfig(c, victim))
 	if err != nil {
 		t.Fatal(err)
 	}
