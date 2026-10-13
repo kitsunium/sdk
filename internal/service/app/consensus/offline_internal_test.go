@@ -226,7 +226,7 @@ func TestTruncateAndStaySilentRejoins(t *testing.T) {
 				if dn.node != nil {
 					var d string
 					dn.node.exec(func() {
-						d = dn.node.r.Debug() + func() string { a, b := dn.node.r.SilentDebug(); return fmt.Sprintf(" silent=%d/%d", a, b) }()
+						d = dn.node.r.Debug()
 					})
 					t.Logf("node %d: %s", dn.id, d)
 				}

@@ -9,8 +9,5 @@ func (r *Raft) Debug() string {
 	for id, pr := range r.prs {
 		s += fmt.Sprintf(" pr[%d]={match=%d next=%d state=%d probeSent=%v pend=%d infl=%d}", id, pr.match, pr.next, pr.state, pr.probeSent, pr.pendingSnapshot, len(pr.inflight))
 	}
-	return s
+	return s + fmt.Sprintf(" silent=%d/%d", r.cfg.SilentTerm, r.cfg.SilentIndex)
 }
-
-// SilentDebug returns the silence condition, for a failing test's log.
-func (r *Raft) SilentDebug() (uint64, uint64) { return r.cfg.SilentTerm, r.cfg.SilentIndex }
