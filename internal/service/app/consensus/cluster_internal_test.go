@@ -659,6 +659,10 @@ func TestLongLoopTurnDropsTheLease(t *testing.T) {
 		tn.sm = newKV()
 		cfg := c.config(tn)
 		cfg.Reads = ReadLease
+		// A 50 ms budget (1 s × 0.05): ordinary turns under -race stay
+		// below it, the 200 ms pause below does not.
+		cfg.InitialTiming = coreconsensus.TimingContract{Generation: 1, HeartbeatInterval: 50 * time.Millisecond,
+			ElectionTimeoutMin: time.Second, ElectionTimeoutMax: 2 * time.Second, MaxClockDrift: 0.05}
 		n, err := NewRaft(cfg)
 		if err != nil {
 			t.Fatal(err)
@@ -673,7 +677,7 @@ func TestLongLoopTurnDropsTheLease(t *testing.T) {
 		t.Fatal(err)
 	}
 	valid := false
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	for !valid && time.Now().Before(deadline) {
 		l.node.exec(func() { valid = l.node.r.LeaseValid(l.node.clk.Now()) })
 		time.Sleep(5 * time.Millisecond)
@@ -681,8 +685,7 @@ func TestLongLoopTurnDropsTheLease(t *testing.T) {
 	if !valid {
 		t.Fatal("setup: no lease")
 	}
-	// A pause of 20 ms is four times the 5 ms budget of 100 ms × 0.05.
-	l.node.exec(func() { time.Sleep(20 * time.Millisecond) })
+	l.node.exec(func() { time.Sleep(200 * time.Millisecond) })
 	l.node.exec(func() { valid = l.node.r.LeaseValid(l.node.clk.Now()) })
 	if valid || l.node.Health().LongTurns == 0 {
 		t.Fatalf("the lease survived a long turn (long turns %d)", l.node.Health().LongTurns)
