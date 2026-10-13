@@ -26,7 +26,8 @@ import (
 type PeerIdentity struct {
 	// Leaf is the peer's verified certificate.
 	Leaf *x509.Certificate
-	// Chain is the verified chain, leaf first.
+	// Chain is the verified chain, leaf first; empty when nothing verified
+	// it (see PeerOf).
 	Chain []*x509.Certificate
 	// SPKI is the SHA-256 of the leaf's SubjectPublicKeyInfo.
 	SPKI [32]byte
@@ -59,6 +60,7 @@ type Identity struct {
 	spki      [32]byte
 	san       string
 	stamp     time.Time
+	refusedAt time.Time
 	checked   time.Time
 	rootsSeen [][]byte
 }
@@ -179,11 +181,19 @@ func (id *Identity) reload() (*tls.Certificate, error) {
 		return id.cur, nil
 	}
 	c, leaf, err := readPair(id.files.CertFile, id.files.KeyFile)
+	pairOK := false
 	switch {
 	case err != nil, SPKI(leaf) != id.spki, sanOf(leaf) != id.san:
-		id.failures.Add(1)
+		// A refused pair is read again at the next look, even under the
+		// same mtime: its key may land within the same granularity as the
+		// certificate (review of PR #301, L3). It is counted once.
+		if !m.Equal(id.refusedAt) {
+			id.failures.Add(1)
+			id.refusedAt = m
+		}
 	default:
 		id.cur = c
+		pairOK = true
 	}
 	if pemRoots, err := os.ReadFile(id.files.RootsFile); err == nil && !seen(id.rootsSeen, pemRoots) {
 		pool := id.roots.Load().Clone()
@@ -194,7 +204,9 @@ func (id *Identity) reload() (*tls.Certificate, error) {
 			id.failures.Add(1)
 		}
 	}
-	id.stamp = m
+	if pairOK {
+		id.stamp = m
+	}
 	return id.cur, nil
 }
 
@@ -297,8 +309,9 @@ func (id *Identity) ClientConfig(check Verify) *tls.Config {
 	return c
 }
 
-// PeerOf returns the verified peer of a completed handshake, false before
-// one or without a peer certificate.
+// PeerOf returns the peer of a completed handshake, false before one or
+// without a peer certificate. Its Chain is set only when the standard
+// verifier ran; the identity's own check sees the chain it verified.
 func PeerOf(cs tls.ConnectionState) (PeerIdentity, bool) {
 	if !cs.HandshakeComplete || len(cs.PeerCertificates) == 0 {
 		return PeerIdentity{}, false
@@ -306,9 +319,10 @@ func PeerOf(cs tls.ConnectionState) (PeerIdentity, bool) {
 	leaf := cs.PeerCertificates[0]
 	p := PeerIdentity{Leaf: leaf, SPKI: SPKI(leaf), URIs: leaf.URIs, NotAfter: leaf.NotAfter}
 	if len(cs.VerifiedChains) > 0 {
+		// Under VerifyConnection the standard verifier does not run and
+		// this stays empty: the presented certificates are never handed
+		// back as the verified chain (review of PR #301, L1).
 		p.Chain = cs.VerifiedChains[0]
-	} else {
-		p.Chain = cs.PeerCertificates
 	}
 	return p, true
 }
