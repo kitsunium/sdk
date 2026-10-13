@@ -784,6 +784,12 @@ func (r *Raft) CheckOffer(from core.NodeID, o core.InstallOffer, needTable bool)
 	if o.Meta.Position.Index <= r.log.committed && !needTable {
 		return codePrecondition
 	}
+	if o.Meta.Position.Index < r.log.snapIndex && !r.mutated(mutInstallBelowBase) {
+		// Even with no table: a snapshot below the log's base would drop
+		// durable entries this node acknowledged, committed ones included.
+		// The leader cuts a newer one.
+		return core.CodeCompacted
+	}
 	return 0
 }
 
@@ -792,6 +798,9 @@ func (r *Raft) CheckOffer(from core.NodeID, o core.InstallOffer, needTable bool)
 // (D7).
 func (r *Raft) InstallSnapshot(meta core.SnapshotMeta) {
 	idx, t := meta.Position.Index, meta.Position.Term
+	if idx < r.log.snapIndex && !r.mutated(mutInstallBelowBase) {
+		return // CheckOffer refuses it: never move the base back
+	}
 	if r.log.matchTerm(idx, t) && idx <= r.log.lastIndex() {
 		r.log.compactTo(idx, t, meta.ChainTip)
 		n := 0

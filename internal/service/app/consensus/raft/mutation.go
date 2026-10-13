@@ -53,6 +53,9 @@ const (
 	// mutSnapshotAckLastIndex acknowledges a snapshot install at lastIndex,
 	// over a kept suffix nothing verified.
 	mutSnapshotAckLastIndex
+	// mutInstallBelowBase lets a node with no table install a snapshot
+	// below its log's base.
+	mutInstallBelowBase
 	// mutChainSkip appends an entry whose chain value does not match.
 	mutChainSkip
 )

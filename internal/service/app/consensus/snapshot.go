@@ -2,6 +2,7 @@ package consensus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -306,6 +307,11 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 		})
 		cancel()
 		_ = h.Close()
+		if errors.Is(err, coreconsensus.Compacted) {
+			// The peer's log starts past this snapshot: cut a newer one,
+			// which the next probe sends.
+			n.requestCut()
+		}
 		n.exec(func() {
 			delete(n.sending, to)
 			n.r.SnapshotDone(to, err == nil)

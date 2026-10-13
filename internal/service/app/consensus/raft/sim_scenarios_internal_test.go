@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"testing"
@@ -300,5 +301,80 @@ func TestSimBoundedRecentEntries(t *testing.T) {
 				t.Fatalf("seed %d: node %d holds %d payload bytes", seed, id, n.r.log.window)
 			}
 		}
+	}
+}
+
+// snapSim runs one seed of the snapshot schedule: snapshots every 16
+// entries, restarts that lose the snapshot's body half the time (no table,
+// log kept), crashes, drops and partitions (review of PR #301, H1).
+func snapSim(seed uint64, mut mutation) *sim {
+	s := newSim(simOptions{
+		seed: seed, drop: 0.05, dup: 0.02, crashRate: 1, diskMax: 20 * time.Millisecond,
+		snapEvery: 16, snapLoss: 0.5, mut: mut,
+	})
+	for k := 0; k < 6 && s.err == nil; k++ {
+		switch k % 3 {
+		case 0:
+			s.partition([]core.NodeID{core.NodeID(k%3 + 1)}, nil)
+		case 1:
+			s.partition([]core.NodeID{1, 2}, []core.NodeID{3})
+		default:
+			s.heal()
+		}
+		s.run(s.after(5*time.Second), true)
+	}
+	return s
+}
+
+func TestSimSnapshotsUnderFaults(t *testing.T) {
+	for _, seed := range seeds(t, 60) {
+		t.Run("seed="+strconv.FormatUint(seed, 10), func(t *testing.T) {
+			t.Parallel()
+			s := snapSim(seed, 0)
+			if s.err != nil {
+				t.Fatalf("seed %d: %v", seed, s.err)
+			}
+			s.heal()
+			s.opt.crashRate, s.opt.drop, s.opt.dup = 0, 0, 0
+			for _, id := range s.ids {
+				if !s.nodes[id].alive {
+					s.start(s.nodes[id])
+				}
+			}
+			s.run(s.after(10*time.Second), true)
+			if s.err != nil {
+				t.Fatalf("seed %d after heal: %v", seed, s.err)
+			}
+			// Every node is back to a table and caught up.
+			s.run(s.after(5*time.Second), false)
+			for _, id := range s.ids {
+				n := s.nodes[id]
+				if n.noTable || n.r.Status().Commit != s.maxCommit() {
+					t.Fatalf("seed %d: node %d noTable=%v commit %d of %d", seed, id, n.noTable, n.r.Status().Commit, s.maxCommit())
+				}
+			}
+		})
+	}
+}
+
+// The negative controls of the snapshot schedule: each bug it was built to
+// find must make some seed fail (review of PR #301, H1, and the older
+// install the schedule found).
+func TestSimSnapshotsCatchTheirBugs(t *testing.T) {
+	for name, m := range map[string]mutation{
+		"install below the log's base": mutInstallBelowBase,
+		"snapshot ack at lastIndex":    mutSnapshotAckLastIndex,
+	} {
+		caught := ""
+		for seed := uint64(1); seed <= 200 && caught == ""; seed++ {
+			if s := snapSim(seed, m); s.err != nil {
+				caught = fmt.Sprintf("seed %d: %v", seed, s.err)
+			}
+		}
+		if caught == "" {
+			t.Errorf("%s: no seed of 200 caught it", name)
+			continue
+		}
+		t.Logf("%s caught, %s", name, caught)
 	}
 }

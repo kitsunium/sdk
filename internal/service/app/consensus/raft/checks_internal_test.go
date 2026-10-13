@@ -424,6 +424,7 @@ var checks = map[string]func(mutation) error{
 	"commit within verified prefix": checkCommitVerifiedPrefix,
 	"ack the verified prefix":       checkAckVerifiedPrefix,
 	"snapshot ack index":            checkSnapshotAckIndex,
+	"no-table install base":         checkNoTableBase,
 	"figure 8":                      checkFigure8,
 	"vote restriction":              checkVoteRestriction,
 	"prevote restriction":           checkPreVoteRestriction,
@@ -461,6 +462,7 @@ func TestMutationsAreCaught(t *testing.T) {
 		"commit beyond verified prefix":   mutCommitBeyondVerified,
 		"acknowledging lastIndex":         mutAckLastIndex,
 		"snapshot ack at lastIndex":       mutSnapshotAckLastIndex,
+		"install below the log's base":    mutInstallBelowBase,
 		"older term committed by count":   mutCommitOldTermByCount,
 		"restriction dropped (vote)":      mutNoRestrictionVote,
 		"restriction dropped (prevote)":   mutNoRestrictionPreVote,
@@ -685,4 +687,28 @@ func TestAddLearnerRefusesAKeyAMemberHolds(t *testing.T) {
 	if code := add(core.Member{ID: 9, SPKI: [32]byte{9}}); code != 0 {
 		t.Fatalf("a learner under its own key: %v", code)
 	}
+}
+
+// checkNoTableBase: a node with no table still refuses a snapshot older
+// than its own log's base. Installing it would drop durable entries the
+// node acknowledged, committed ones included, and leave its commit above
+// its log. The simulator's snapshot schedule found it (seed 3).
+func checkNoTableBase(mut mutation) error {
+	cfg := Config{
+		ID: 2, Group: 1, Seed: 1, Timing: testTiming(), MaxInflight: 8, MaxInflightBytes: 1 << 20,
+		MaxBatchBytes: 1 << 16, MinVoters: 1, PromoteLag: 16, CanVote: true, MaxChainRefusals: 3, NoTable: true, mut: mut,
+	}
+	all := chainEntries(0, 1, 1, 1, 1, 1, 1, 1)
+	base := core.SnapshotMeta{Position: core.Position{Term: 1, Index: 4}, ChainTip: all[3].ChainSum, Membership: testConf(1, 2, 3)}
+	f := New(cfg, Start{HardState: core.HardState{Term: 1, Commit: 6}, Snapshot: base, Entries: all[4:], Applied: 4, Now: t0})
+	f.lead, f.term = 1, 1
+	old := core.SnapshotMeta{Position: core.Position{Term: 1, Index: 2}, ChainTip: all[1].ChainSum, Membership: testConf(1, 2, 3)}
+	if code := f.CheckOffer(1, core.InstallOffer{Term: 1, Meta: old}, true); code == 0 || code == core.CodeAdminPreconditionFailed {
+		return fmt.Errorf("an offer below the log's base was accepted (%v)", code)
+	}
+	f.InstallSnapshot(old)
+	if f.log.lastIndex() < 6 || f.log.committed > f.log.lastIndex() {
+		return fmt.Errorf("an older install dropped the log: last %d commit %d", f.log.lastIndex(), f.log.committed)
+	}
+	return nil
 }

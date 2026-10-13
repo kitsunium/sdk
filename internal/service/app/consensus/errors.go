@@ -73,6 +73,8 @@ func sentinelOf(c errs.Code) *errs.Error {
 		return coreconsensus.Overloaded
 	case coreconsensus.CodeEntryTooLarge:
 		return coreconsensus.EntryTooLarge
+	case coreconsensus.CodeCompacted:
+		return coreconsensus.Compacted
 	case coreconsensus.CodeFrameInvalid:
 		return coreconsensus.FrameInvalid
 	case coreconsensus.CodeSnapshotTooLarge:

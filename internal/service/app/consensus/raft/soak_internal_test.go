@@ -29,5 +29,9 @@ func TestSimSoak(t *testing.T) {
 		if s.err != nil {
 			t.Errorf("seed %d: %v", seed, s.err)
 		}
+		// The snapshot schedule: cuts, installs, restarts with no table.
+		if s := snapSim(seed, 0); s.err != nil {
+			t.Errorf("snapshots, seed %d: %v", seed, s.err)
+		}
 	}
 }

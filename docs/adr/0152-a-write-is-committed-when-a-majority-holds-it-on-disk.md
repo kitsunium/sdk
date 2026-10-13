@@ -1381,6 +1381,12 @@ is refused with `OVERLOADED`. Nothing is appended in either case.
     stamp and hard state written, restored. Recovery reads it and finishes or
     abandons the install. A crash at any step leaves either the old base or
     the new one, never a mix;
+  - **a node with no table is exempt from the freshness rule, never from
+    its own log (found by the simulator's snapshot schedule while fixing the
+    review of PR #301).** A snapshot below the base its log continues is
+    refused with `COMPACTED`, even with no table: installing it would drop
+    durable entries the node acknowledged, committed ones included, and
+    leave its commit above its log. The leader then cuts a newer snapshot;
   - the log suffix after the snapshot's index is kept only if the entry at
     the boundary has the snapshot's term and index. Otherwise the whole log is
     replaced. The install acknowledges the snapshot's index, never the end of
