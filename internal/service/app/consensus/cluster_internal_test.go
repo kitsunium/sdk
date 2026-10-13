@@ -1081,3 +1081,31 @@ func TestUnknownEntryKindInTheLogStopsTheNode(t *testing.T) {
 		t.Fatalf("stop reason: %+v", r)
 	}
 }
+
+// The tick follows the committed timing contract, not the one the node
+// started with: a faster contract keeps heartbeats within its fifth of the
+// election timeout (review of PR #301, L5).
+func TestTickFollowsTheCommittedContract(t *testing.T) {
+	c := newCluster(t, 3, 0)
+	l := c.leader(5 * time.Second)
+	propose(t, l.node, "a=1")
+	st := l.node.Status()
+	next := testTimingFast()
+	next.HeartbeatInterval = 5 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	pre := coreconsensus.Precondition{Log: l.node.ident, Generation: st.Timing.Generation}
+	if err := l.node.ProposeTimingContract(ctx, "op:test", pre, next); err != nil {
+		t.Fatal(err)
+	}
+	want := next.HeartbeatInterval / 5
+	deadline := time.Now().Add(5 * time.Second)
+	for _, tn := range c.nodes {
+		for time.Duration(tn.node.tickEvery.Load()) != want {
+			if time.Now().After(deadline) {
+				t.Fatalf("node %d ticks every %v, want %v", tn.id, time.Duration(tn.node.tickEvery.Load()), want)
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+}

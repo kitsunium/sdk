@@ -52,6 +52,8 @@ type Node struct {
 	keepResults int
 
 	pendingBytes atomic.Int64
+	// tickEvery is the loop's current tick, for the tests.
+	tickEvery atomic.Int64
 	// applyLag is the payload bytes handed to the apply goroutine and not
 	// yet applied: the gap between commit and applied (D6, R1-14).
 	applyLag atomic.Int64
@@ -422,7 +424,9 @@ func (n *Node) exec(f func()) bool {
 func (n *Node) loop() {
 	defer n.wg.Done()
 	defer close(n.loopDone)
-	tick := n.clk.NewTicker(n.tickInterval())
+	every := n.tickInterval()
+	n.tickEvery.Store(int64(every))
+	tick := n.clk.NewTicker(every)
 	defer tick.Stop()
 	var props []*proposal
 	for {
@@ -434,6 +438,13 @@ func (n *Node) loop() {
 		case <-tick.C():
 			turn = n.clk.Now()
 			n.r.Tick(n.clk.Now())
+			if d := n.tickInterval(); d != every {
+				// A committed contract changed the heartbeat (review of PR
+				// #301, L5).
+				every = d
+				n.tickEvery.Store(int64(d))
+				tick.Reset(d)
+			}
 			n.sweep()
 			n.observePeers()
 			n.observeResources()
@@ -536,8 +547,9 @@ func (n *Node) dropForward(ctx uint64) {
 	n.am.Unlock()
 }
 
+// tickInterval is a fifth of the committed contract's heartbeat.
 func (n *Node) tickInterval() time.Duration {
-	return max(n.cfg.InitialTiming.HeartbeatInterval/5, time.Millisecond)
+	return max(n.r.Status().Timing.HeartbeatInterval/5, time.Millisecond)
 }
 
 func (n *Node) handleReady() {
