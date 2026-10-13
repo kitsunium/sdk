@@ -84,7 +84,7 @@ func (a *App) journal(ctx context.Context, l *journalLine) error {
 	if l.subject != "" {
 		e.Subject = keys.subjectRef(l.subject)
 	}
-	release := func() error { return a.appendJournal(withoutUnit(context.WithoutCancel(ctx)), j, e) }
+	release := func(rctx context.Context) error { return a.appendJournal(context.WithoutCancel(rctx), j, e) }
 	if hold(ctx, heldEffect{node: j.id, release: release}) {
 		return nil
 	}

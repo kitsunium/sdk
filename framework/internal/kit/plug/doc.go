@@ -1,6 +1,7 @@
-// Package plug is where kit's opt-in subsystems plug in: the HTTP engine and
-// the frontends' file server (framework/kit/server), the Studio's event
-// stream and its profiler (framework/kit/studio). kit reads what they
+// Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the
+// frontends' file server and the process sampler of the runtime graph
+// (framework/kit/server), the Studio's event stream and its profiler
+// (framework/kit/studio). kit reads what they
 // registered through the hooks declared here, and imports none of the SDK
 // packages behind them: a product that does not import a subsystem neither
 // links nor initialises its packages.

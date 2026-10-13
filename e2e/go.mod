@@ -12,7 +12,13 @@ require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.48.0
 	github.com/go-sql-driver/mysql v1.10.0
 	github.com/jackc/pgx/v5 v5.11.0
-	github.com/kitsunium/sdk v0.0.0-00010101000000-000000000000
+	github.com/kitsunium/sdk/internal v0.0.0-00010101000000-000000000000
+	github.com/kitsunium/sdk/pkg/v1/clock v0.0.0-00010101000000-000000000000
+	github.com/kitsunium/sdk/pkg/v1/crypto v0.0.0-00010101000000-000000000000
+	github.com/kitsunium/sdk/pkg/v1/data v0.0.0-00010101000000-000000000000
+	github.com/kitsunium/sdk/pkg/v1/errs v0.0.0-00010101000000-000000000000
+	github.com/kitsunium/sdk/pkg/v1/observe v0.0.0-00010101000000-000000000000
+	github.com/kitsunium/sdk/pkg/v1/proc v0.0.0-00010101000000-000000000000
 	github.com/kitsunium/sdk/third-party/db/writer/clickhouse v0.1.16
 	github.com/kitsunium/sdk/third-party/db/writer/mysql v0.1.16
 	github.com/kitsunium/sdk/third-party/db/writer/redis v0.1.16
@@ -102,4 +108,16 @@ require (
 	modernc.org/memory v1.12.1 // indirect
 )
 
-replace github.com/kitsunium/sdk => ..
+replace github.com/kitsunium/sdk/internal => ../internal
+
+replace github.com/kitsunium/sdk/pkg/v1/clock => ../pkg/v1/clock
+
+replace github.com/kitsunium/sdk/pkg/v1/crypto => ../pkg/v1/crypto
+
+replace github.com/kitsunium/sdk/pkg/v1/data => ../pkg/v1/data
+
+replace github.com/kitsunium/sdk/pkg/v1/errs => ../pkg/v1/errs
+
+replace github.com/kitsunium/sdk/pkg/v1/observe => ../pkg/v1/observe
+
+replace github.com/kitsunium/sdk/pkg/v1/proc => ../pkg/v1/proc

@@ -263,3 +263,22 @@ func Test_defaultNode(t *testing.T) {
 		})
 	}
 }
+
+// Test_theDefaultNodeIsDerivedAtTheFirstID pins that the registered
+// generator reads the hostname at its first id, not at the package's
+// initialisation: every program importing the id domain — the framework's
+// kit, in every product — would otherwise read /proc/sys/kernel/hostname at
+// start for an id it may never mint.
+func Test_theDefaultNodeIsDerivedAtTheFirstID(t *testing.T) {
+	t.Parallel()
+	g := newDefaultSnowflake(&steppedClock{script: []int64{1}})
+	if !g.derive || g.node != 0 {
+		t.Fatalf("the node was derived at construction: derive=%v node=%d", g.derive, g.node)
+	}
+	if _, err := g.New(); err != nil {
+		t.Fatal(err)
+	}
+	if g.derive || g.node != defaultNode() {
+		t.Errorf("after the first id: derive=%v node=%d, want %d", g.derive, g.node, defaultNode())
+	}
+}

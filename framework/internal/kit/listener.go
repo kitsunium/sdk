@@ -108,9 +108,7 @@ func (s *Service) Listen(name, contract string, handler ListenHandler, opts ...L
 			o.listenerConfigure(&l.opts)
 		}
 	}
-	if p, _ := funcInfo(handler); p.file() != "" {
-		l.body = &p
-	}
+	l.body = bodyOf(handler)
 	s.add(l, true)
 	if problem, found := l.declarationProblem(); found {
 		s.problemSaid(l.decl, l.id, problem)

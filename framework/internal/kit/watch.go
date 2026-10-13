@@ -99,9 +99,7 @@ func (s *Service) Watch(name string, mark Mark, handler func(context.Context, Wr
 	}
 	w := &Watch{mark: mark, handler: handler, maxDeliver: o.maxDeliveries, parallelism: o.parallelism, ownStores: o.ownStores}
 	w.kind, w.name, w.decl = model.KindSubscription, name, callerPos()
-	if p, _ := funcInfo(handler); p.file() != "" {
-		w.body = &p
-	}
+	w.body = bodyOf(handler)
 	s.add(w, true)
 	switch {
 	case !slices.Contains(marks, mark):
@@ -278,8 +276,8 @@ func (s *StoreService[T]) notify(ctx context.Context, key string, deleted bool) 
 		if w.ownWrite(ctx) {
 			continue
 		}
-		release := func() error {
-			w.notice(withoutUnit(ctx), s.id, key, deleted)
+		release := func(rctx context.Context) error {
+			w.notice(rctx, s.id, key, deleted)
 			return nil
 		}
 		if !hold(ctx, heldEffect{node: w.id, release: release}) {

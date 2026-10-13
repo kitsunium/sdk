@@ -13,10 +13,10 @@ here is a Go package.
 | Path | What it is |
 |---|---|
 | `pre-commit/` | the guards `make lint` and `bazel-ci.yml` run (ADR 0153), each an executable `check-*.sh` that finds the repository root from its own path (eight also take the workspace path as their first argument); `test-pre-commit-guards.bats` pins them, and keeps them runnable on a Mac as shipped |
-| `release/` | `compute-bumps.sh` (WHETHER to release), `cut-tags.sh` (HOW BIG, from `release:*` labels — ADR 0135), `check-pr-size.sh`, their BATS suites (`test-*.bats` over `test-helpers.bash`, run by `release-scripts-test.sh`) and `lib/` (`tag-format.sh`, `release-scope.sh`, `release-size.sh`); also `test-sync-versions.mjs.test.js`, a Node test of `docs/site/scripts/lib/tag-format.mjs` that no lane runs — `docs/site`'s `npm test` globs `scripts/lib/*.test.mjs` only |
+| `release/` | `compute-bumps.sh` (WHICH modules release, each since its own tag — ADR 0171), `cut-tags.sh` (HOW BIG each is, from the `release:*` labels of the merges that touched it — ADR 0135 —, and the tags and manifest), `release-notes.sh`, `check-pr-size.sh`, their BATS suites (`test-*.bats` over `test-helpers.bash`, run by `release-scripts-test.sh`) and `lib/` (`tag-format.sh`, `release-scope.sh`, `release-size.sh`, `release-modules.sh`); also `test-sync-versions.mjs.test.js`, a Node test of `docs/site/scripts/lib/tag-format.mjs` that no lane runs — `docs/site`'s `npm test` globs `scripts/lib/*.test.mjs` only |
 | `ci/` | `go-modules.sh`, the module census every module-looping lane reads (ADR 0137); `platforms.sh`, the twelve GOOS/GOARCH cells as one table; and `vuln-check.sh`, the govulncheck gate over the census (ADR 0136) |
 | `check-layer-deps.sh` | the layer firewall on the build graph: seven `bazel query` expressions that must be empty (ADR 0068; the last three are the framework's, ADR 0147) |
-| `ci-gates-check.sh` | a listed gate must have a `make` target, be `.PHONY`, and be invoked by `bazel-ci.yml` — by a step of its own, or by the recipe of a listed gate CI runs (`lint-check` runs `api-check`); a listed guard (`GUARDS`: the `bash` checks `make lint` runs) must exist, be a `run:` step of the `bazel` job and a line of the `lint` recipe (ADR 0088); its BATS cases are in `ci/test-ci-scripts.bats` |
+| `ci-gates-check.sh` | a listed gate must have a `make` target, be `.PHONY`, and be invoked by `bazel-ci.yml` — by a step of its own, or by the recipe of a listed gate CI runs (`lint-check` runs `api-check`); a listed guard (`GUARDS`: the `bash` checks `make lint` runs) must exist, be a `run:` step of the `bazel` job and a line of the `lint` recipe (ADR 0088); and every gate and guard must run in a job whose failure fails the required `bazel` check — `bazel` itself, or a job it `needs:`, whose result it checks and which cannot skip it (`!cancelled()`), else `NOT BLOCKING` unless listed in `ADVISORY` with its reason (#236); its BATS cases are in `ci/test-ci-scripts.bats` |
 | `ci-scripts-test.sh`, `pre-commit-test.sh` | run the BATS suites of `ci/` and `pre-commit/` |
 | `cross-platform-audit.sh` | the local twin of `bazel-ci.yml`'s `cross-build`: every module of the census built and vetted (tests included) for every cell of `ci/platforms.sh`, printed as a matrix; needs bash 4 |
 | `regen.sh` | `make regen`: refuses unless `kit` is on PATH at `design/sdk.yaml`'s `project.kit.version` the tree has no tracked change and no untracked file carries the header; deletes exactly the tracked files whose first line is kit's generated header (`tools/genindex/digests.go`'s `kitHeader`) and clears the `# BEGIN kit gen` … `# END kit gen` section of `tools/alloc-lane-targets.txt`, runs `kit gen` then `make api`, and fails on any `git diff` or any file it adds that git does not track. Local only — it needs kit, which CI does not have; bash 3.2 and BSD tools like the guards |
@@ -63,13 +63,40 @@ Superseded by ADR 0154 (the charter); ADR 0088 stays as the incident's record, a
   `run:` commands rather than its text, and lists itself; a guard `make lint`
   runs is listed in its `GUARDS` the same way, in the commit that wires it.
 - **`bats` is a prerequisite on `PATH`, never fetched** (exit 127 naming the
-  install routes); gates needing neither Bazel nor Go run in `shell-gates`.
+  install routes); gates needing neither Bazel nor Go run in `shell-gates`,
+  which blocks a merge only because the required `bazel` job needs it and
+  fails on its result — `ci-gates-check.sh` holds that link (#236).
 - **A fixture's git commands disable hooks at command-line precedence**, so a
   host's `core.hooksPath` never reaches a test; every test is seen red against
   the defect it guards before it is accepted.
 - *Lesson*: the 32 BATS tests guarding release sizing ran in no lane, and each
   defect they cover produced a plausible version rather than an error. (Its
   hook gate went with ADR 0153.)
+
+## ktn-linter in CI (#236)
+
+`make lint` runs `ktn-linter`, and CI runs it only where it can do so safely:
+
+- **Built from source, never from a release** (`make lint-ktn-install`): a
+  release binary carries the vendor's licence anchor and needs a licence on
+  the machine; a source build leaves it empty, which upstream documents as the
+  maintainers' mode. The Makefile pins `KTN_LINTER_COMMIT` (the commit of tag
+  v1.45.4) and `KTN_LINTER_VERSION`; the target refuses another commit, a dirty
+  checkout, or a binary reporting another version.
+- **The source is private** (`kodflow/ktn-linter`): `secrets.GITHUB_TOKEN`
+  cannot read it, so the `bazel` job fetches the pinned commit with a
+  `KTN_LINTER_TOKEN` secret (Contents:read on that repository), in a step that
+  does nothing else; the build and the lint run without it.
+- **Without the secret the three steps are skipped with a warning** — an unset
+  secret, a fork pull request or a Dependabot one. That is why `lint-ktn-check`
+  is NOT in `ci-gates-check.sh`'s `GATES`: a step a missing secret can skip is
+  not a gate, and the manifest must not certify one. Measured 2026-10-12: the
+  repository has no `KTN_LINTER_TOKEN`. Setting it and adding `lint-ktn-check`
+  to `GATES` is one commit; a fork pull request would still skip, so making the
+  linter blocking for those needs a public source or a `pull_request_target`
+  design, which this lane deliberately does not use.
+- **What runs unconditionally** is `make lint-check` (gofumpt, sdkguard,
+  doclinks, api-check) and the guards of `GUARDS`, all in the required job.
 
 ## Rules from ADR 0137
 

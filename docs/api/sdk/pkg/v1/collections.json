@@ -1,0 +1,143 @@
+{
+  "format": "sdk.api/v1",
+  "module": "github.com/kitsunium/sdk/pkg/v1/collections",
+  "dir": "pkg/v1/collections",
+  "cells": [
+    "linux/amd64",
+    "linux/arm64",
+    "linux/386",
+    "linux/arm",
+    "darwin/arm64",
+    "windows/amd64",
+    "freebsd/amd64",
+    "openbsd/amd64",
+    "netbsd/amd64",
+    "dragonfly/amd64",
+    "illumos/amd64",
+    "solaris/amd64"
+  ],
+  "packages": [
+    {
+      "path": "github.com/kitsunium/sdk/pkg/v1/collections/heap",
+      "name": "heap",
+      "dir": "heap",
+      "layer": "public",
+      "family": "collections",
+      "doc": "Package heap is a binary heap of any element type, ordered by a comparison\nyou give it: Push in O(log n), Pop the element that sorts first in\nO(log n), Peek at it in O(1).\n\n\tdue := heap.New(func(a, b Timer) int { return a.At.Compare(b.At) })\n\tdue.Push(Timer{At: later})\n\tdue.Push(Timer{At: sooner})\n\tnext, ok := due.Pop() // the sooner one\n\nIt is the priority queue the SDK's state machine keeps its agenda in, and\nits in-memory queue broker its lease expiries, published as an alias of that\nkernel package (ADR 0159 §4).\n\n# When to use it\n\nWhenever the next element to handle is the smallest by some order — the\ntimer due soonest, the job with the highest priority, the k largest values\nof a stream. container/heap provides the algorithm, over five methods a\ncaller writes on a named slice type, with Push taking any and Pop returning\nany: the same boilerplate at every use, every element boxed on the way in\nand type-asserted on the way out. Here the cost is one comparison function\nat construction, and nothing at the call site.\n\n# Order\n\nThe comparison follows the cmp.Compare and slices.SortFunc convention:\nnegative when a sorts before b, zero when they tie, positive otherwise. The\nelement that sorts FIRST is at the top, so cmp.Compare[int] gives a min-heap\nand the same function with its arguments swapped a max-heap. Elements that\ntie pop in no particular order — a binary heap is not stable.\n\n# Empty is an answer\n\nPop and Peek on an empty heap return the zero value and false: emptiness is\nan ordinary state of a queue. A nil comparison panics at [New] — there is no\norder to invent for an arbitrary type.\n\n# Concurrency\n\nA Heap is NOT safe for concurrent use. That is deliberate: a lock inside\nwould be paid by every caller, including the many that keep a heap inside a\nstructure they already lock. The caller picks the lock, or needs none.\n"
+    },
+    {
+      "path": "github.com/kitsunium/sdk/pkg/v1/collections/ring",
+      "name": "ring",
+      "dir": "ring",
+      "layer": "public",
+      "family": "collections",
+      "doc": "Package ring is a bounded, lock-free queue for exactly ONE producer and\nexactly ONE consumer: a fixed number of slots, a write that refuses when they\nare full, and a read that refuses when they are empty — neither ever blocks.\n\n\tq, err := ring.New[Record](1024)\n\n\t// The producer's goroutine — and only that one — writes.\n\tif err := q.TryWrite(rec); errors.Is(err, ring.Full) {\n\t    dropped++ // the caller's policy: drop, retry, or block upstream\n\t}\n\n\t// The consumer's goroutine — and only that one — reads.\n\trec, err := q.TryRead()\n\tif errors.Is(err, ring.Empty) {\n\t    // nothing yet: wait on a signal, never spin\n\t}\n\nIt is the buffer behind the SDK's asynchronous logger, published as an alias\nof that kernel package (ADR 0159 §4).\n\n# When to use it\n\nBetween one goroutine that produces on a hot path and one that consumes, when\na full buffer must be an answer rather than a wait — a log record or a metric\nthat the producer would rather drop than stall for. Two atomic loads and a\nstore per operation, no lock and no allocation: an error is one of three\nsentinels, never built on the fly.\n\nFor anything else a buffered channel is the right tool: it blocks, it wakes\nthe reader, and it takes any number of producers and consumers.\n\n# One producer, one consumer — a precondition, not a hint\n\nEXACTLY ONE goroutine may call TryWrite at a time, and EXACTLY ONE may call\nTryRead. Concurrent producers, or concurrent consumers, corrupt the queue:\nserialise them upstream, as the SDK's async logger does with a mutex. A\nmulti-producer mode is planned beside this one (ADR 0159 §2); publishing\n[Queue] froze its four methods, so that mode arrives as another constructor\nand never as a change to them.\n\n# Errors\n\n[Full] answers a TryWrite on a full ring, [Empty] a TryRead on an empty one,\nand [CapZero] a [New] with a capacity that is not positive. Each is a fixed\nvalue, matched with errors.Is or the SDK's errs.HasCode.\n"
+    }
+  ],
+  "symbols": [
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/collections/heap.Heap",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/collections/heap",
+      "name": "Heap",
+      "spelled": "[T any] kheap.Heap[T]",
+      "canonical": "[T any] github.com/kitsunium/sdk/internal/kernel/collections/heap.Heap[T]",
+      "owner": "go:github.com/kitsunium/sdk/internal/kernel/collections/heap.Heap",
+      "doc": "Heap is a binary heap ordered by the comparison given to [New].\n\n[Heap].Push adds an element in O(log n); [Heap].Pop removes and returns the\ntop one in O(log n), and [Heap].Peek returns it without removing it, both\nreporting false on an empty heap; [Heap].Len counts the elements.\n\nThe zero value is NOT usable — a heap with no comparison has no order — and\na Heap is not safe for concurrent use.\n",
+      "file": "heap/facade_gen.go",
+      "layer": "public",
+      "family": "collections"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/collections/heap.New[...]",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/collections/heap",
+      "name": "New",
+      "spelled": "func[T any](cmp func(a T, b T) int) *Heap[T]",
+      "canonical": "func[T any](cmp func(a T, b T) int) *github.com/kitsunium/sdk/pkg/v1/collections/heap.Heap[T]",
+      "doc": "New builds an empty [Heap] ordered by cmp, which returns a negative number\nwhen a sorts before b, zero on a tie and a positive one otherwise. A nil cmp\npanics here, at the call that made the mistake.\n",
+      "file": "heap/facade_gen.go",
+      "layer": "public",
+      "family": "collections"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/collections/ring.CapZero",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/collections/ring",
+      "name": "CapZero",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/kernel/collections/ring.CapZero",
+      "code": {
+        "value": "0.1.3.3",
+        "reason": "RING_CAP_ZERO",
+        "public": "Ring buffer capacity must be positive"
+      },
+      "doc": "CapZero is returned by New for a capacity that is not positive: a ring\nthat can hold nothing is a configuration mistake, not a queue.\n",
+      "file": "ring/facade_gen.go",
+      "layer": "public",
+      "family": "collections"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/collections/ring.Empty",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/collections/ring",
+      "name": "Empty",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/kernel/collections/ring.Empty",
+      "code": {
+        "value": "0.1.3.2",
+        "reason": "RING_EMPTY",
+        "public": "Ring buffer is empty"
+      },
+      "doc": "Empty is returned by TryRead when no item is waiting; the caller\ndecides whether to wait on a signal or yield — never to spin.\n",
+      "file": "ring/facade_gen.go",
+      "layer": "public",
+      "family": "collections"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/collections/ring.Full",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/collections/ring",
+      "name": "Full",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/kernel/collections/ring.Full",
+      "code": {
+        "value": "0.1.3.1",
+        "reason": "RING_FULL",
+        "public": "Ring buffer is at capacity"
+      },
+      "doc": "Full is returned by TryWrite when every slot is taken; the caller\ndecides whether to drop, retry or slow its producer.\n",
+      "file": "ring/facade_gen.go",
+      "layer": "public",
+      "family": "collections"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/collections/ring.New[...]",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/collections/ring",
+      "name": "New",
+      "spelled": "func[T any](capacity int) (Queue[T], error)",
+      "canonical": "func[T any](capacity int) (github.com/kitsunium/sdk/pkg/v1/collections/ring.Queue[T], error)",
+      "doc": "New returns an empty [Queue] holding at most capacity items, or [CapZero]\nwhen capacity is not positive. The storage is allocated once, here.\n",
+      "file": "ring/facade_gen.go",
+      "layer": "public",
+      "family": "collections"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/collections/ring.Queue",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/collections/ring",
+      "name": "Queue",
+      "spelled": "[T any] kring.Queue[T]",
+      "canonical": "[T any] github.com/kitsunium/sdk/internal/kernel/collections/ring.Queue[T]",
+      "owner": "go:github.com/kitsunium/sdk/internal/kernel/collections/ring.Queue",
+      "doc": "Queue is the single-producer, single-consumer ring.\n\nTryWrite enqueues an item without blocking, or returns [Full]. TryRead\ndequeues the oldest item without blocking, or returns [Empty]; the slot it\nread is cleared, so the queue keeps no reference to an item it handed out.\nCapacity is the number of items the ring holds when full, fixed at [New].\nLen is a snapshot count — the producer or the consumer may move it before\nthe caller acts on it.\n\nIts four methods are frozen: a published interface grows by a sibling,\nnever by a fifth method (ADR 0039).\n",
+      "file": "ring/facade_gen.go",
+      "layer": "public",
+      "family": "collections"
+    }
+  ]
+}

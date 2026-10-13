@@ -2,10 +2,10 @@
 # framework/connectors — the engines a database runs on, and the ssh identity
 
 The platform's ADR 0004: a store is the port, a database's engine the adapter the app plugs
-in. Each engine is its own Go module, requiring the SDK module (which holds
-kit — ADR 0162) and one driver, and the only code of a product that imports
+in. Each engine is its own Go module, requiring the root module (which holds
+kit — ADR 0171), the `pkg/v1` families and `internal` its build reaches, and one driver, and the only code of a product that imports
 that driver: a product's `main` imports one to call
-`kit.Database(name, <engine>.Engine())`. The SDK module imports no driver — a
+`kit.Database(name, <engine>.Engine())`. No module of the SDK imports a driver — a
 driver its `go.mod` required would sit in every product's module graph and
 `go.sum`.
 
@@ -19,7 +19,7 @@ One connector is not a database engine: `ssh` (ADR 0158 §3) is the
 `golang.org/x/crypto/ssh` implementation of `framework/entitlement.Identity`,
 plus enrolment. It has the same shape for the same reason — the one vendor
 dependency (and the `golang.org/x/sys` it brings) in a module of its own, so the
-SDK module's `go.mod` never requires it — and the rules below that are about
+root module's `go.mod` never requires it — and the rules below that are about
 `kit.Engine`, URLs and drivers do not apply to it; its own CLAUDE.md has its
 rules. It was `third-party/entitlement`, in the root module.
 
@@ -33,11 +33,11 @@ Rules:
   the user and the host. kit shows no engine's or driver's text anyway.
 - The MySQL driver's own logger is silenced: a product logs through the SDK.
 - Each engine is a module of the SDK's workspace (`go.work`), tagged by a
-  release only when it changed since its own last tag (ADR 0162): the tag
+  release only when it changed since its own last tag (ADR 0171): the tag
   carries the module's subdirectory (`framework/connectors/postgres/vX.Y.Z`)
-  at the version of the SDK release that carries the change, and on it the
-  `go.mod` requires the SDK module at that version. In development its
-  `go.mod` requires `github.com/kitsunium/sdk` and replaces it with this tree.
+  at its own version, and on it the `go.mod` requires each module of the
+  repository at the version that release gives it or its own last tag. In
+  development its `go.mod` requires them and replaces each with this tree.
 - Its codes are layer 4, one `PP` each: `0.4.16.*` postgres, `0.4.17.*`
   mysql, `0.4.18.*` sqlite (`URL_MALFORMED`, `.1`). `ssh` keeps the range it
   had as `third-party/entitlement`, `0.3.65.*` (`ENROLMENT_FAILED`, `.1`): a

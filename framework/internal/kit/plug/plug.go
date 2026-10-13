@@ -24,6 +24,11 @@ var (
 	// NewStaticFiles builds the file server of a frontend's tree; nil until
 	// framework/kit/server is imported.
 	NewStaticFiles atomic.Pointer[func(fsys fs.FS, csp string) (http.Handler, error)]
+	// SampleProcess samples the running process — its heap, goroutines,
+	// collections and CPU time — for the runtime graph a serving app answers;
+	// nil until framework/kit/server is imported, and the graph then carries
+	// no process (ADR 0172).
+	SampleProcess atomic.Pointer[func() *model.Process]
 	// OpenEventStream opens a Server-Sent Events stream on w; nil until
 	// framework/kit/studio is imported.
 	OpenEventStream atomic.Pointer[func(w http.ResponseWriter, r *http.Request) (EventStream, error)]

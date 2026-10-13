@@ -5277,7 +5277,9 @@ type Runtime struct {
 	// History lists the phases the process went through, oldest first: the
 	// daemon's own state machine, as it ran.
 	History    []PhaseChangeEvent `json:"history,omitempty"`
-	// Process is the Go process, sampled when the graph was built.
+	// Process is the Go process, sampled when the graph was built; nil when
+	// the product imports no framework/kit/server, which plugs the sampler
+	// in (ADR 0172).
 	Process    *ProcessSpec       `json:"process,omitempty"`
 	// HTTP is the product's HTTP server.
 	HTTP       *HTTPServer        `json:"http,omitempty"`

@@ -80,7 +80,7 @@ their values there (ADR 0160).
 
 ## Module
 
-A directory of the one SDK module, `github.com/kitsunium/sdk` (ADR 0162), whose `go.mod` is at the repository root; it was a module of its own until then. `cd internal/core && GOWORK=off go build ./...` builds this layer's packages.
+A directory of the `github.com/kitsunium/sdk/internal` module (ADR 0171), whose `go.mod` is at `internal/`; it was a module of its own until ADR 0162, then a directory of the root module. `cd internal/core && GOWORK=off go build ./...` builds this layer's packages.
 
 ## Conventions
 

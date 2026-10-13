@@ -29,6 +29,14 @@ testable by a downstream consumer without this package. Twenty-one more carry a
 those lack without this package is a NAME for the type and any way to reach
 `System`.
 
+## Module
+
+`github.com/kitsunium/sdk/pkg/v1/clock` is a Go module of its own since ADR 0171,
+whose `go.mod` is in this directory and holds every package beneath it: a
+consumer requires it at its own version, and a fix here moves no other family.
+It requires `internal` and the families its packages and tests import, as
+`design/sdk.yaml`'s `modules:` declares.
+
 ## Surface
 
 | Symbol | Notes |
@@ -83,10 +91,16 @@ held back and nothing is added.
 bazel test --config=race //pkg/v1/clock:clock_test
 ```
 
-`clock_external_test.go` is `package clock_test` and names `pkg/v1` only. It
-asserts that a hand-written clock is accepted by the first nine `Timed`-bearing
-configurations listed above, that a two-method double still reaches a
-`Clock`-typed field, that `System` is referenceable, and that a `ManualClock`
-fires a real scheduler with no `time.Sleep` and no wall-clock wait. The table of
+`clock_external_test.go` is `package clock_test` and names `pkg/v1/clock` only.
+It asserts at compile time that a hand-written clock satisfies `Clock`,
+`Waiter` and `Timed` and that `System` is referenceable. What a configuration
+does with that clock is asserted one module up, in
+`pkg/v1/app/scheduler/scheduler_external_test.go` (same doubles, public names
+only): a hand-written clock is accepted by the first nine `Timed`-bearing
+configurations listed above, a two-method double still reaches a
+`Clock`-typed field, and a `ManualClock` fires a real scheduler with no
+`time.Sleep` and no wall-clock wait. Those configurations belong to the `app`,
+`data` and `security` modules, which require this one (ADR 0171): a test here
+importing them would make `clock` require them back, a cycle. The table of
 `TestAHandWrittenTimedReachesEveryConfigThatTakesOne` does not carry the other
 seven `Timed`-bearing configurations.

@@ -74,9 +74,16 @@ than the newest release — the SDK module, `github.com/kitsunium/sdk` (ADR 0162
 sdkguard: warning: the SDK is 15 patch releases behind — go.mod requires v0.18.0, latest is v0.18.15.
   A patch is cut whenever an internal package the public packages depend on
   changes (ADR 0007), so releases carry fixes that never alter the public API.
-  Update:  go get github.com/kitsunium/sdk@v0.18.15
+  Update:  go get github.com/kitsunium/sdk@latest && go mod tidy
   Silence: -version-check=off
 ```
+
+The update line is `go get …@latest && go mod tidy` for the root
+(`updateCommand`): since ADR 0171 the root holds the framework alone and
+`pkg/v1` is a module per family, so raising the root alone would leave every
+`pkg/v1` import provided by nothing, and the tidy resolves each to its family
+module. The probe still reads the root's requirement only — a go.mod that
+requires families alone is not told one is behind (ADR 0171 §Deferred).
 
 This exists because of how the SDK versions. Per ADR 0007 a patch is cut
 whenever an `internal/*` package that the public packages depend on changes — so

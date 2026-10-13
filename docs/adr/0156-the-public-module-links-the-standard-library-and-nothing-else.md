@@ -1,6 +1,7 @@
 # ADR 0156 — the public module links the standard library and nothing else
 
 - **Status**: Accepted
+- **Amended by**: [ADR 0171](0171-a-module-per-family-and-a-version-is-never-reused.md) — §1 holds for each family module
 - **Date**: 2026-10-03
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0003](0003-sdk-codec-package.md) §M2–§M4 (YAML, TOML, CBOR and MessagePack over libraries, and the "30-dependency soft ceiling"), [ADR 0021](0021-sdk-codec-bson.md) (BSON over `mongo-driver/bson`, and the library-backed precedent it cites), [ADR 0077](0077-a-self-update-is-an-order-of-operations-and-a-product-name-is-not-part-of-it.md) (`golang.org/x/mod/semver`), [ADR 0100](0100-a-program-reads-what-it-was-built-from-and-asks-git-only-about-a-working-tree.md) (`golang.org/x/mod/module`)

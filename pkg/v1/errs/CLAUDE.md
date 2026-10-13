@@ -5,6 +5,14 @@
 
 Public **introspection and construction** of SDK errors (ADR 0019). The concrete `*errs.Error` type stays internal — consumers see `error`, never the struct, so they cannot forge one by literal. But they CAN mint typed errors in the SDK model via `New` / `Wrap` (+ `Field` helpers), and inspect any SDK error via the `Of`-family accessors. This lets a downstream codebase adopt the model wholesale (every error a dotted-quad `Code` + wire-safe `Public` + log-only `Private`) instead of only observing SDK-origin errors, while dashboards, retries, and structured logging branch on `Code` / `Reason` / `HTTPStatus` / `ExitCode` regardless of who built the error.
 
+## Module
+
+`github.com/kitsunium/sdk/pkg/v1/errs` is a Go module of its own since ADR 0171,
+whose `go.mod` is in this directory and holds every package beneath it: a
+consumer requires it at its own version, and a fix here moves no other family.
+It requires `internal` and the families its packages and tests import, as
+`design/sdk.yaml`'s `modules:` declares.
+
 ## Contents
 
 ```

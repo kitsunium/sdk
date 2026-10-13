@@ -43,10 +43,10 @@ func TestAModuleRefusesForeignBuilders(t *testing.T) {
 	qry.Authorize(func(context.Context, toolsEntry) error { return nil }).Expose("GET /entries/{id}")
 	said := refusedStart(t, NewApp("x").With(m, InMemory(), Listen("127.0.0.1:0"), Logs(io.Discard)))
 	for _, want := range []string{
-		"tools.desk/command/place, of module tools, is given Allow from outside its Go module github.com/kitsunium/sdk/pkg",
-		"tools.desk/command/place, of module tools, is given Key from outside its Go module github.com/kitsunium/sdk/pkg",
-		"tools.desk/query/read, of module tools, is given Authorize from outside its Go module github.com/kitsunium/sdk/pkg",
-		"tools.desk/endpoint/read is declared on tools.desk, a service of module tools, from outside its Go module github.com/kitsunium/sdk/pkg",
+		"tools.desk/command/place, of module tools, is given Allow from outside its Go module github.com/kitsunium/sdk/pkg/v1/clock",
+		"tools.desk/command/place, of module tools, is given Key from outside its Go module github.com/kitsunium/sdk/pkg/v1/clock",
+		"tools.desk/query/read, of module tools, is given Authorize from outside its Go module github.com/kitsunium/sdk/pkg/v1/clock",
+		"tools.desk/endpoint/read is declared on tools.desk, a service of module tools, from outside its Go module github.com/kitsunium/sdk/pkg/v1/clock",
 	} {
 		if !slices.ContainsFunc(said, func(s string) bool { return strings.HasPrefix(s, want) }) {
 			t.Errorf("no problem says %q:\n%s", want, strings.Join(said, "\n"))

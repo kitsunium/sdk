@@ -65,7 +65,10 @@ only when a branch actually fails. See BENCH.md §0.
   This one is **guarded**, not merely written down:
   `TestChainDepthAddsNoAllocationOnTheHealthyPath` (`alloc_external_test.go`)
   compares the total allocations of 2 000 writes at depths 2/3/4/8 against the
-  depth-1 total and fails on any difference — a total, since
+  depth-1 total — each arm the fewest of three windows, so a stray the runtime
+  makes once is in none of them — and fails when a deeper chain costs MORE (it
+  demanded equality until a depth-1 window caught one stray and every deeper
+  arm caught none, issue #270) — a total, since
   `testing.AllocsPerRun` rounds an amortised allocation down to 0. It was
   checked against the defect it exists for — restoring the pre-sized slate
   takes the healthy write from 0 to 1 alloc/op at depths 3, 4 and 8 while

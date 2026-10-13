@@ -21,7 +21,12 @@ the build it came from.
 - **Stdio re-exports** (`facade_gen.go` since ADR 0166; `stdio.go`, which held them, is gone, and the package comment is `doc.go`'s since ADR 0167): `StdioMode` and `StdioInherit` /
   `StdioNull` / `StdioCapture`, so a consumer sets `Spec.Stdio` — and captures
   a child's output into any `io.Writer` — with public names only.
-  `TestCaptureAndBareNamesThroughTheFacade` is that consumer.
+  `TestCaptureAndBareNamesThroughTheFacade` is that consumer. It writes the
+  program it runs under `syscall.ForkLock` (`writeExecutable`): a sibling
+  test forking while the file was open for writing kept a copy of the
+  descriptor until its own exec, and `execve` refused the probe with
+  `ETXTBSY` — 15 runs in 300, issue #269. The SDK reported that refusal
+  correctly; the race was the test's.
 
 ## Surface
 
@@ -32,7 +37,7 @@ the build it came from.
 | `SIGTERM` / `SIGKILL` / `SIGINT` / `SIGHUP` / `SIGQUIT` | typed `Signal` constants |
 | `ResourceNoFile` / `ResourceCore` / `ResourceCPU` / `ResourceAS` | the common `Spec.Rlimits` keys |
 | `Start`, `MustStart` | spawn; a bare `Spec.Path` is searched in the child's PATH (Spec.Env's, else the parent's), `exec.ErrDot`/`ErrNotFound` wrapped in `SpawnFailed` |
-| `Self`, `Build`, `ParseBuild`; `Stats`, `Distribution`, `BuildInfo`, `Module` | the running process and the build it came from — one-line delegations to, and aliases of, `internal/service/proc/self` (ADR 0100) |
+| `Self`, `Build`, `ParseBuild`; `Stats`, `Distribution`, `BuildInfo`, `Module` | the running process and the build it came from — one-line delegations to, and aliases of, `internal/service/proc/self` (`Self`, `Stats`, `Distribution`) and `internal/service/proc/buildinfo` (`Build`, `ParseBuild`, `BuildInfo`, `Module`; ADR 0100, ADR 0172) |
 
 - **README is generated.** `README.md` is written by `tools/genindex` from the
   committed `docs/api` (`make docs-readme`, ADR 0167). The package comment is in
@@ -42,8 +47,12 @@ the build it came from.
 
 ## The process itself (ADR 0100)
 
-`Self()`, `Build()` and `ParseBuild()` delegate to `internal/service/proc/self`,
-and `Stats` / `Distribution` / `BuildInfo` / `Module` alias its values — the
+`Self()` delegates to `internal/service/proc/self` and `Stats` / `Distribution`
+alias its values; `Build()` and `ParseBuild()` delegate to
+`internal/service/proc/buildinfo` and `BuildInfo` / `Module` alias its values,
+the same types `pkg/v1/proc/buildinfo` publishes alone for a program that
+reads its build and must not import runtime/metrics or the spawn engine
+(ADR 0172) — the
 facade's rule is unchanged: aliases and one-line delegations, no new named
 types. They read the process the package runs in, on every platform, and none
 of them can fail: `Stats.CPUEstimated` says when `CPUTime` is the runtime's

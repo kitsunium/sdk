@@ -19,7 +19,30 @@ jobs:
   bazel:
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    # `bazel` and `post-commit` are the only required checks on main (the
+    # branch protection names `bazel`, the ruleset `post-commit` — measured
+    # with `gh api`). shell-gates is a sibling that runs ci-gates-check and
+    # three BATS suites; on its own its failure blocks nothing. So this job
+    # waits for it and fails at once when it did not succeed — the gates it
+    # runs are as blocking as the ones below (#236).
+    #
+    # `needs:` alone would be worse than nothing: a job skipped because a job
+    # it needs failed concludes `skipped`, and GitHub counts a skipped required
+    # check as passing. `!cancelled()` keeps this job running when shell-gates
+    # fails, so the first step below is what turns the failure into a red
+    # `bazel`. scripts/ci-gates-check.sh asserts all three pieces.
+    needs: shell-gates
+    if: ${{ !cancelled() }}
     steps:
+      - name: shell-gates succeeded
+        env:
+          SHELL_GATES_RESULT: ${{ needs.shell-gates.result }}
+        run: |
+          if [ "$SHELL_GATES_RESULT" != success ]; then
+            echo "::error::the shell-gates job concluded '$SHELL_GATES_RESULT'; its gates block the merge through this required job"
+            exit 1
+          fi
+
       # SHA-pinned per the .github/workflows/CLAUDE.md policy — version
       # comments track the resolved human-readable tag.
       #
@@ -173,9 +196,9 @@ jobs:
       #
       # These sit INSIDE the `bazel` job deliberately. `bazel` and `post-commit`
       # are the only required checks on main (the legacy branch protection and
-      # the ruleset each name one, and they are additive); a sibling job would
-      # run and report but block nothing. Making a new job required is a
-      # merge-policy change, which is not this workflow's to decide.
+      # the ruleset each name one, and they are additive); a sibling job blocks
+      # only through this one, as shell-gates does. Making a new job required
+      # is a merge-policy change, which is not this workflow's to decide.
       - name: install gofumpt (pinned)
         env:
           # Pinned, never `latest`. A lane that follows `latest` changes its
@@ -208,15 +231,22 @@ jobs:
         run: make vuln-check
 
       # The ktn-linter half needs a credential this repository does not have,
-      # so it is asked for rather than assumed. Measured on this lane, not
-      # argued: `gh release download v1.11.2 --repo kodflow/ktn-linter` answered
+      # so it is asked for rather than assumed. kodflow/ktn-linter is PRIVATE,
+      # and a workflow token is scoped to the repository that issued it:
+      # measured on this lane, `gh release download v1.11.2 --repo
+      # kodflow/ktn-linter` answered `release not found` under
+      # `secrets.GITHUB_TOKEN`. A pull request from a fork, and a Dependabot
+      # one, receive no repository secret at all, so they take the same branch
+      # as a repository where the secret is unset: the three steps below are
+      # skipped and a warning says so. That is why `lint-ktn-check` is NOT in
+      # scripts/ci-gates-check.sh's GATES — a step a missing secret can skip is
+      # not a gate (#236).
       #
-      #     release not found
-      #
-      # under `secrets.GITHUB_TOKEN`, while the same command run by a
-      # credentialed account downloads ktn-linter_linux_amd64.tar.gz (10.7 MB).
-      # The release exists; a workflow token is scoped to the repository that
-      # issued it and cannot read another owner's private releases.
+      # The linter is BUILT FROM SOURCE at the commit the Makefile pins
+      # (KTN_LINTER_COMMIT), never downloaded from a release: a release binary
+      # carries the vendor's licence anchor and demands a licence on the runner,
+      # while a source build leaves the anchor empty and its gate inert — the
+      # mode upstream documents for maintainers. See `lint-ktn-install`.
       #
       # The secret is read in its own step so it is not exposed to the rest of
       # the job, and the `secrets` context is not available in a step-level
@@ -230,60 +260,41 @@ jobs:
             echo 'present=true' >> "$GITHUB_OUTPUT"
           else
             echo 'present=false' >> "$GITHUB_OUTPUT"
-            echo "::warning title=ktn-linter gate did not run::KTN_LINTER_TOKEN is unset, so the ktn-linter half of the lint gate was skipped. It is NOT in scripts/ci-gates-check.sh's GATES for that reason — a step a missing secret can skip is not a gate. Set the secret to a token with Contents:read on kodflow/ktn-linter and add lint-ktn-check to GATES (#236)."
+            echo "::warning title=ktn-linter gate did not run::KTN_LINTER_TOKEN is unset (or this is a fork or Dependabot pull request, which receives no secret), so the ktn-linter half of the lint gate was skipped. It is NOT in scripts/ci-gates-check.sh's GATES for that reason — a step a missing secret can skip is not a gate. Set the secret to a fine-grained token with Contents:read on kodflow/ktn-linter and add lint-ktn-check to GATES (#236)."
           fi
 
-      - name: install ktn-linter (pinned)
+      # Fetches the pinned commit, and only that, into the runner's temporary
+      # directory — outside the workspace, so no drift or untracked-file check
+      # can see it. The token travels as an HTTP header for this one git
+      # invocation; it is never written to a remote URL or to git config, and
+      # the step does nothing but fetch. Fetching by SHA is what pins it: a
+      # moved tag cannot change what is fetched.
+      - name: fetch ktn-linter source (pinned commit)
         if: steps.ktncred.outputs.present == 'true'
         env:
-          KTN_LINTER_VERSION: v1.45.4
-          # The archive's digest, pinned HERE and not read from the
-          # checksums.txt published beside it. Whoever can replace the archive
-          # can replace the manifest next to it, so a checksum fetched from the
-          # same release verifies nothing — ADR 0077 records that argument in
-          # this repository already. Pinned in the workflow, it is the same
-          # trust model as the SHA-pinned actions above: the artefact this
-          # commit was reviewed against is the artefact CI runs.
-          #
-          # Measured: two independent downloads of v1.45.4 produced this digest,
-          # and it matches the release manifest — which is a cross-check, not
-          # the proof. v1.45.4 is the build the tree is kept clean under
-          # (`make lint-ktn-check` exits 0 on it); the previous pin, v1.11.2,
-          # was 34 releases older, so the day the secret arrived this step
-          # would have judged the tree with rules nobody had run against it.
-          KTN_LINTER_SHA256: e44eae78eb3572725935d967624777384b9a01be84bdc8b556f01eb8bc0f9a4a
-          GH_TOKEN: ${{ secrets.KTN_LINTER_TOKEN }}
+          KTN_LINTER_TOKEN: ${{ secrets.KTN_LINTER_TOKEN }}
         run: |
-          mkdir -p "$RUNNER_TEMP/ktn"
-          gh release download "$KTN_LINTER_VERSION" \
-            --repo kodflow/ktn-linter \
-            --pattern 'ktn-linter_linux_amd64.tar.gz' \
-            --dir "$RUNNER_TEMP/ktn"
-          printf '%s  %s\n' "$KTN_LINTER_SHA256" \
-            "$RUNNER_TEMP/ktn/ktn-linter_linux_amd64.tar.gz" | sha256sum -c -
-          tar -xzf "$RUNNER_TEMP/ktn/ktn-linter_linux_amd64.tar.gz" -C "$RUNNER_TEMP/ktn"
-          install -m 0755 "$RUNNER_TEMP/ktn/ktn-linter" "$(go env GOPATH)/bin/ktn-linter"
+          commit="$(awk -F' := ' '$1 == "KTN_LINTER_COMMIT" { print $2 }' Makefile)"
+          [ -n "$commit" ] || { echo "::error::Makefile pins no KTN_LINTER_COMMIT"; exit 1; }
+          src="$RUNNER_TEMP/ktn-linter-src"
+          git init -q "$src"
+          auth="$(printf 'x-access-token:%s' "$KTN_LINTER_TOKEN" | base64 -w0)"
+          git -C "$src" -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \
+            fetch -q --depth 1 https://github.com/kodflow/ktn-linter.git "$commit"
+          git -C "$src" checkout -q --detach FETCH_HEAD
+          echo "KTN_LINTER_SRC=$src" >> "$GITHUB_ENV"
 
-      # A separate step so the downloaded binary's FIRST execution happens with
-      # no GH_TOKEN in the environment. Raised by Qodo on this PR and correct: a
-      # step that both holds a private-release credential and runs the artefact
-      # it has just fetched hands that credential to the artefact.
-      #
-      # The assertion itself is a compatibility check, not an integrity one —
-      # integrity is the digest above. It exists because 1.9.11 exits 0 with
-      # "No issues found! Code is compliant." on a tree 1.11.2 rejects, measured
-      # on this tree with zero commits between the two runs, so a binary that is
-      # merely present proves nothing about what was analysed.
-      - name: assert ktn-linter is the pinned build
+      # A separate step, with no credential in its environment: `go build`
+      # resolves public modules only, and the binary's first execution — the
+      # version assertion inside the target — must not be handed the token
+      # (raised by Qodo on this lane, and correct). The target refuses a
+      # checkout at any other commit or with local changes, and asserts the
+      # built binary reports the pinned version: 1.9.11 exits 0 with "No issues
+      # found!" on a tree 1.11.2 rejects, so a binary that is merely present
+      # proves nothing about what was analysed.
+      - name: build ktn-linter from source (pinned)
         if: steps.ktncred.outputs.present == 'true'
-        env:
-          KTN_LINTER_VERSION: v1.45.4
-        run: |
-          got="$(ktn-linter --version)"
-          case "$got" in
-            *"${KTN_LINTER_VERSION#v}"*) printf 'ktn-linter pinned: %s\n' "$got" ;;
-            *) printf '::error::expected %s, got %s\n' "$KTN_LINTER_VERSION" "$got"; exit 1 ;;
-          esac
+        run: make lint-ktn-install
 
       - name: lint gate — ktn-linter
         if: steps.ktncred.outputs.present == 'true'
@@ -307,7 +318,9 @@ jobs:
 
   # Shell gates — the checks that need neither Bazel nor Go. A sibling job, so
   # a broken release script is reported in seconds instead of behind a 120-minute
-  # Bazel lane, and so the Bazel cache is irrelevant to it.
+  # Bazel lane, and so the Bazel cache is irrelevant to it. It is not a required
+  # check itself: the `bazel` job needs it and fails when it did not succeed,
+  # which is how its gates block a merge.
   #
   # These are the first `make` invocations in this workflow. Everything else here
   # calls bazel or bash directly; ci-gates-check asserts the Makefile↔CI link for

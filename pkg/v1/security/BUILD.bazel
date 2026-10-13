@@ -1,0 +1,8 @@
+# gazelle:prefix github.com/kitsunium/sdk/pkg/v1/security
+
+# pkg/v1/security is a Go module of its own (ADR 0171): the security family's public packages.
+# This directory holds no package; the file marks the module root as a Bazel
+# package so gazelle's go_deps extension can load //pkg/v1/security:go.mod, which go.work
+# names.
+
+package(default_visibility = ["//visibility:public"])

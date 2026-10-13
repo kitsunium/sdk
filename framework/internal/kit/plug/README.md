@@ -6,7 +6,7 @@
 import "github.com/kitsunium/sdk/framework/internal/kit/plug"
 ```
 
-Package plug is where kit's opt-in subsystems plug in: the HTTP engine and the frontends' file server (framework/kit/server), the Studio's event stream and its profiler (framework/kit/studio). kit reads what they registered through the hooks declared here, and imports none of the SDK packages behind them: a product that does not import a subsystem neither links nor initialises its packages.
+Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the frontends' file server and the process sampler of the runtime graph (framework/kit/server), the Studio's event stream and its profiler (framework/kit/studio). kit reads what they registered through the hooks declared here, and imports none of the SDK packages behind them: a product that does not import a subsystem neither links nor initialises its packages.
 
 The package imports the standard library and the framework's model only, so that kit and every subsystem can import it.
 
@@ -65,6 +65,13 @@ var OpenEventStream atomic.Pointer[func(w http.ResponseWriter, r *http.Request) 
 ```
 
 OpenEventStream opens a Server-Sent Events stream on w; nil until framework/kit/studio is imported.
+
+<a name="SampleProcess"></a>
+```go
+var SampleProcess atomic.Pointer[func() *model.Process]
+```
+
+SampleProcess samples the running process — its heap, goroutines, collections and CPU time — for the runtime graph a serving app answers; nil until framework/kit/server is imported, and the graph then carries no process (ADR 0172).
 
 <a name="StudioProfiler"></a>
 ```go

@@ -79,10 +79,15 @@ teardown() { rm -rf "$REPO"; }
 # baseline on the tag's FIRST PARENT, and so does every vendor module's own
 # measurement, so a fixture that tags HEAD directly would exercise a range that
 # never occurs in production.
+#
+# When the test has an origin, the tags go there too: a run that publishes
+# fetches with --prune-tags first (ADR 0171), so a tag origin does not hold is
+# not a tag the release reads — exactly as in CI, where every tag is origin's.
 tag_release() {
   local rel t
   rel="$(g commit-tree "HEAD^{tree}" -p "$(g rev-parse HEAD)" -m "release $1")"
   for t in "$@"; do g tag "$t" "$rel"; done
+  if g remote get-url origin >/dev/null 2>&1; then g push -q origin "$@"; fi
 }
 
 # would_tag — the tags a dry run announces, from its `would tag:` line.
@@ -163,9 +168,13 @@ change_vendor() {
 
 # publish_remote — a bare repository as `origin`, so a run that is not a dry run
 # pushes somewhere this test owns.
+#
+# Every tag the fixture already holds goes there first: the run fetches with
+# --prune-tags before it reads one (ADR 0171).
 publish_remote() {
   g init -q --bare "$BATS_TEST_TMPDIR/origin.git"
   g remote add origin "$BATS_TEST_TMPDIR/origin.git"
+  if [ -n "$(g tag -l)" ]; then g push -q origin --tags; fi
 }
 
 # remote_tags — the tags on origin, sorted, on one line.
@@ -331,7 +340,7 @@ check_tombstone() {
   run bash -c "echo sdk | $SCRIPT --bump=minor"
   [ "$status" -eq 3 ]
   [[ "$output" == *"refusing to auto-cut the FIRST release of the SDK module (v0.18.0, after pkg/v0.17.0"* ]]
-  [ -z "$(g ls-remote --tags origin)" ]
+  [ "$(remote_tags)" = "pkg/v0.17.0" ]
 }
 
 # A stray stable root tag below the pkg history — the v0.0.0 the proxy already
@@ -346,7 +355,7 @@ check_tombstone() {
   run bash -c "echo sdk | $SCRIPT --bump=minor"
   [ "$status" -eq 3 ]
   [[ "$output" == *"refusing to auto-cut the FIRST release of the SDK module (v0.18.0, after pkg/v0.17.0"* ]]
-  [ -z "$(g ls-remote --tags origin)" ]
+  [ "$(remote_tags)" = "pkg/v0.17.0 v0.0.0" ]
 }
 
 # The first root tag moves every consumer to another module: a patch would cut
@@ -362,7 +371,7 @@ check_tombstone() {
   [[ "$output" == *"refusing v0.17.1 as the SDK module's first tag"* ]]
   [[ "$output" == *"release:minor"* ]]
   [[ "$output" == *"bump=minor"* ]]
-  [ -z "$(g ls-remote --tags origin)" ]
+  [ "$(remote_tags)" = "pkg/v0.17.0" ]
   # …and an automatic run says it at once, rather than holding a v0.17.1.
   run bash -c "echo sdk | $SCRIPT --bump=patch"
   [ "$status" -eq 65 ]
@@ -380,7 +389,7 @@ check_tombstone() {
   [ "$output" = $'v0.18.0\npkg/v0.18.0\nframework/v0.18.0' ]
   # On origin, on a release commit whose first parent is the main commit it was
   # cut from — where the next range and every vendor measurement start.
-  [ "$(remote_tags)" = "framework/v0.18.0 pkg/v0.18.0 v0.18.0" ]
+  [ "$(remote_tags)" = "framework/v0.18.0 pkg/v0.17.0 pkg/v0.18.0 v0.18.0" ]
   [ "$(g rev-parse 'v0.18.0^{commit}^1')" = "$head" ]
   [ "$(g rev-parse HEAD)" = "$head" ]
 }
@@ -411,7 +420,7 @@ check_tombstone() {
   run bash -c "echo sdk | $SCRIPT 2>/dev/null"
   [ "$status" -eq 0 ]
   [ "$output" = "v0.4.1" ]
-  [ "$(g ls-remote --tags --refs origin | awk '{print $2}')" = "refs/tags/v0.4.1" ]
+  [ "$(remote_tags)" = "framework/connectors/postgres/v0.4.0 third-party/aws/v0.4.0 third-party/x-crypto/v0.4.0 v0.4.0 v0.4.1" ]
   [ "$(g rev-parse 'v0.4.1^{commit}^1')" = "$head" ]
   [ -z "$(g diff --name-only "$head" 'v0.4.1^{commit}')" ]
 }
@@ -424,7 +433,8 @@ check_tombstone() {
   run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
   [ "$(would_tag)" = "v0.4.1 third-party/aws/v0.4.1" ]
-  [[ "$output" == *"third-party/aws changed since third-party/aws/v0.4.0 — tagged at v0.4.1"* ]]
+  [[ "$output" == *"third-party/aws changed since third-party/aws/v0.4.0 — tagged"* ]]
+  [[ "$output" == *"third-party/aws — third-party/aws/v0.4.0 -> third-party/aws/v0.4.1"* ]]
   [[ "$output" == *"--- third-party/aws/go.mod ---"* ]]
   [[ "$output" == *"require github.com/kitsunium/sdk v0.4.1"* ]]
   [[ "$output" != *"--- third-party/x-crypto/go.mod ---"* ]]
@@ -454,15 +464,18 @@ check_tombstone() {
   [[ "$(g show HEAD:framework/connectors/postgres/go.mod)" == *"replace github.com/kitsunium/sdk => ../../.."* ]]
 }
 
-@test "a vendor module that was never tagged is tagged" {
+# A module never tagged is a path no release has published, and starts at
+# v0.1.0 — the only path allowed to (ADR 0171), whatever the SDK's version.
+@test "a vendor module that was never tagged is tagged at v0.1.0" {
   need_toolchain
   add_vendors
   tag_release v0.4.0 framework/connectors/postgres/v0.4.0 third-party/aws/v0.4.0
   commit_pkg 'fix(codec): one'
   run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
-  [ "$(would_tag)" = "v0.4.1 third-party/x-crypto/v0.4.1" ]
-  [[ "$output" == *"third-party/x-crypto has never been tagged — tagged at v0.4.1"* ]]
+  [ "$(would_tag)" = "v0.4.1 third-party/x-crypto/v0.1.0" ]
+  [[ "$output" == *"third-party/x-crypto has never been tagged — tagged"* ]]
+  [[ "$output" == *"third-party/x-crypto — never tagged -> third-party/x-crypto/v0.1.0"* ]]
 }
 
 # A file that cannot cut a release cannot tag a module either (ADR 0089).
@@ -564,7 +577,7 @@ check_tombstone() {
   g commit -aq --no-verify -m "chore: split again"
   run bash -c "echo sdk | $SCRIPT --dry-run --bump=patch"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"uses pkg, which is no vendor module"* ]]
+  [[ "$output" == *"uses pkg, which no release can tag"* ]]
 }
 
 # A stray low root tag must not restart the numbering below the history.
@@ -644,7 +657,7 @@ check_tombstone() {
   [ "$(awk 'END { print NR }' "$PUSHES")" -eq 1 ]
   [[ "$(cat "$PUSHES")" == "push --atomic origin "* ]]
   [ "$(awk '{ print NF - 3 }' "$PUSHES")" -eq 16 ]
-  [ "$(g ls-remote --tags --refs origin | awk 'END { print NR }')" -eq 16 ]
+  [ "$(g ls-remote --tags --refs origin | awk 'END { print NR }')" -eq $((16 + ${#olds[@]})) ]
   # The SDK and the vendor modules share the release commit, a child of main…
   [ "$(g rev-parse 'v0.18.0^{commit}^1')" = "$head" ]
   [ "$(g rev-parse 'third-party/x-crypto/v0.18.0^{commit}')" = "$(g rev-parse 'v0.18.0^{commit}')" ]
@@ -677,7 +690,7 @@ check_tombstone() {
   [[ "$output" != *"tombstone"* ]]
   [[ "$output" != *"first tag"* ]]
   [ "$(tail -n1 <<<"$output")" = "v0.18.1" ]
-  [ "$(remote_tags)" = "framework/v0.18.0 pkg/v0.18.0 v0.18.0 v0.18.1" ]
+  [ "$(remote_tags)" = "framework/v0.18.0 pkg/v0.17.0 pkg/v0.18.0 v0.18.0 v0.18.1" ]
 }
 
 # A re-run of the release that published v0.18.0 — SDK Release dispatched
@@ -712,7 +725,7 @@ check_tombstone() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"framework/v0.18.0 already exists, at $(g rev-parse --short HEAD)"* ]]
   [[ "$output" == *"nothing was published"* ]]
-  [ "$(remote_tags)" = "framework/v0.18.0" ]
+  [ "$(remote_tags)" = "framework/v0.17.0 framework/v0.18.0 pkg/v0.17.0" ]
   [ -z "$(g tag -l v0.18.0 pkg/v0.18.0)" ]
   # The automatic run, which holds the first root tag, says it as well.
   run bash -c "echo sdk | $SCRIPT --bump=minor"
@@ -735,21 +748,22 @@ check_tombstone() {
   g add pkg/go.mod
   g commit -q --no-verify -m "a tombstone by hand"
   g tag pkg/v0.18.0
+  g push -q origin pkg/v0.18.0
   g checkout -q main
   run bash -c "echo sdk | $SCRIPT --bump=minor --allow-bootstrap"
   [ "$status" -eq 1 ]
   [[ "$output" == *"pkg/v0.18.0 already exists"* ]]
   [[ "$output" != *"v0.19.0"* ]]
-  [ -z "$(remote_tags)" ]
+  [ "$(remote_tags)" = "pkg/v0.17.0 pkg/v0.18.0" ]
 }
 
-@test "lib: is_valid_tombstone_tag accepts pkg and framework, and nothing else" {
+@test "lib: is_valid_tombstone_tag accepts pkg, framework and the three internal modules, and nothing else" {
   source "$LIB"
-  for t in pkg/v0.18.0 framework/v0.18.0 framework/v1.0.0; do
+  for t in pkg/v0.18.0 framework/v0.18.0 framework/v1.0.0 internal/kernel/v0.18.0 internal/core/v0.18.0 internal/service/v0.18.0; do
     run is_valid_tombstone_tag "$t"
     [ "$status" -eq 0 ]
   done
-  for t in v0.18.0 internal/core/v0.18.0 framework/connectors/postgres/v0.18.0 pkg/v0.18.0-rc.1 pkg/v2.0.0 third-party/aws/v0.18.0; do
+  for t in v0.18.0 internal/v0.18.0 internal/kernel/x/v0.18.0 internal/core/v0.18.0-rc.1 framework/connectors/postgres/v0.18.0 pkg/v0.18.0-rc.1 pkg/v2.0.0 third-party/aws/v0.18.0; do
     run is_valid_tombstone_tag "$t"
     [ "$status" -ne 0 ]
   done

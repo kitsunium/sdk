@@ -79,11 +79,11 @@ type App struct {
 	dataDir string
 	root    string
 	module  string
-	// build is what the binary was built from; devBuild, what kit dev said
-	// about the build it launched (dev only).
-	build    *model.Build
-	devBuild *model.DevBuild
-	baseCtx  context.Context
+	// build is what the binary was built from and, in dev, what kit dev
+	// said about the build it launched — described at the first read
+	// outside dev (buildDescription).
+	build   *buildDescription
+	baseCtx context.Context
 
 	mu         sync.Mutex
 	phase      string
@@ -256,7 +256,7 @@ func (a *App) resolve() error {
 		// question to git about the build, whatever the environment.
 		a.cfg.studio = studioConfig{}
 	}
-	a.build, a.devBuild = describeBuild(a.cfg.env == EnvDev && !a.cliRun, os.Getenv)
+	a.build = newBuildDescription(a.cfg.env == EnvDev && !a.cliRun, os.Getenv)
 	a.clock = a.cfg.clock
 	a.dataDir = a.cfg.dataDir
 	if a.dataDir != "" {

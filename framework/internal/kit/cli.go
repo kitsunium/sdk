@@ -109,9 +109,7 @@ func (s *Service) CLI(name, doc string, fn CLIFunc, opts ...CommandLineConfigure
 			o.commandLineConfigure(&c.opts)
 		}
 	}
-	if p, _ := funcInfo(fn); p.file() != "" {
-		c.body = &p
-	}
+	c.body = bodyOf(fn)
 	s.add(c, true)
 	if fn == nil {
 		s.problem(c.decl, c.id, "cli.nil", "name", name)

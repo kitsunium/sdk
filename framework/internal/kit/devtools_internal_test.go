@@ -6,14 +6,14 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"os"
-	"runtime"
+	"net/http/httptest"
 	"runtime/pprof"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/observe/profiling"
 )
@@ -288,18 +288,23 @@ func TestMailboxReadsEveryMailer(t *testing.T) {
 	}
 }
 
-// The process sample is the SDK's reading of this process.
-func TestTheProcessSample(t *testing.T) {
-	runtime.GC()
-	p := sampleProcess()
-	if p.PID != os.Getpid() || p.Goroutines < 1 || p.HeapBytes == 0 || p.MemoryBytes < p.HeapBytes || p.GCCycles == 0 || p.LastGC == nil {
-		t.Errorf("sample %+v", p)
+// Without a sampler — a product that imports no framework/kit/server — the
+// runtime graph carries no process and the dev route answers 404: kit
+// samples nothing by itself (ADR 0172).
+func TestNoSamplerNoProcess(t *testing.T) {
+	sample := plug.SampleProcess.Load()
+	plug.SampleProcess.Store(nil)
+	t.Cleanup(func() { plug.SampleProcess.Store(sample) })
+	app := &App{}
+	var rt model.Runtime
+	app.describeRuntime(&rt)
+	if rt.Process != nil {
+		t.Errorf("a process sampled without a sampler: %+v", rt.Process)
 	}
-	// The uptime and a pause's p99 may read 0 where the timer is coarse
-	// (Windows: ~0.5-15 ms) or every pause is below the histogram's first
-	// bucket: only a negative one is wrong.
-	if p.UptimeMs < 0 || p.At.IsZero() || p.At.Location() != time.UTC || p.GCPauseP99Ms < 0 {
-		t.Errorf("sample %+v", p)
+	rec := httptest.NewRecorder()
+	app.serveProcess(rec, httptest.NewRequest(http.MethodGet, "/_kit/api/process", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("GET /_kit/api/process without a sampler: %d", rec.Code)
 	}
 }
 

@@ -6,6 +6,7 @@ go_library(
     name = "serverkit",
     srcs = [
         "doc.go",
+        "sampler.go",
         "serverkit.go",
         "serverkit_compliance.go",
     ],
@@ -16,8 +17,10 @@ go_library(
     ],
     deps = [
         "//framework/internal/kit/plug",
+        "//framework/model",
         "//pkg/v1/net/server",
         "//pkg/v1/net/static",
+        "//pkg/v1/proc/process",
     ],
 )
 
@@ -32,6 +35,10 @@ alias(
 
 go_test(
     name = "serverkit_test",
-    srcs = ["api_gen_test.go"],
-    deps = [":serverkit"],
+    srcs = [
+        "api_gen_test.go",
+        "sampler_internal_test.go",
+    ],
+    embed = [":serverkit"],
+    deps = ["//framework/internal/kit/plug"],
 )

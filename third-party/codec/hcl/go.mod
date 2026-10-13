@@ -4,7 +4,7 @@ go 1.27.2
 
 require (
 	github.com/hashicorp/hcl/v2 v2.24.0
-	github.com/kitsunium/sdk v0.0.0-00010101000000-000000000000
+	github.com/kitsunium/sdk/internal v0.0.0-00010101000000-000000000000
 )
 
 require (
@@ -21,3 +21,5 @@ require (
 )
 
 replace github.com/kitsunium/sdk => ../../..
+
+replace github.com/kitsunium/sdk/internal => ../../../internal

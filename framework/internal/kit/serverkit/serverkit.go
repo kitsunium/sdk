@@ -15,11 +15,13 @@ type httpServer struct {
 	srv *server.Server
 }
 
-// Enable plugs the HTTP engine and the frontends' file server into kit.
+// Enable plugs the HTTP engine, the frontends' file server and the process
+// sampler into kit.
 func Enable() {
-	newServer, newFiles := newHTTPServer, newStaticFiles
+	newServer, newFiles, sample := newHTTPServer, newStaticFiles, sampleProcess
 	plug.NewHTTPServer.Store(&newServer)
 	plug.NewStaticFiles.Store(&newFiles)
+	plug.SampleProcess.Store(&sample)
 }
 
 // newHTTPServer builds the engine cfg describes: its engine accepts, bounds

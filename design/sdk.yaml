@@ -1,6 +1,7 @@
 # design/sdk.yaml — the SDK's project file: its structure, and the rules kit
 # holds it to (ADR 0163). The other files of design/ are its surface: every
-# exported symbol of the SDK module and of the thirteen vendor modules, one
+# exported symbol of the SDK's modules (modules: below) — the root, internal,
+# the pkg/v1 families — and of the thirteen vendor modules, one
 # file per domain or package group, each with its inputs and outputs —
 # `surface: closed` makes an exported symbol no file declares a finding. An
 # API change starts here, then `kit gen` writes the pins, the ports, the
@@ -18,7 +19,7 @@ project:
   # refuses the project under any other kit, by name, and `make regen`
   # (scripts/regen.sh) refuses to run one. No part of the design's digest.
   kit:
-    version: v0.1.0-rc.7
+    version: v0.1.0-rc.8
   surface: closed
   # Every doc comment is the design's (ADR 0167): kit gen writes each doc
   # slot of a designed declaration and each package's doc.go.
@@ -32,6 +33,66 @@ auxiliary:
   - e2e
   - tools/genindex
   - tools/sdkguard
+# The Go modules (ADR 0171 §7, platform ADR 0011): each by the directory of its
+# go.mod, with every module of the repository its go.mod requires — the go
+# command lists every module that provides a package to a module's build and
+# tests, and kit check holds each require directive and each import, a test's
+# included, to this list. The root holds the framework; internal is the one
+# shared module of kernel, core and service; a family of pkg/v1 is a module.
+# The requirements form no cycle: the floor on the root that §3 asks of
+# internal and every family is written by the release (cut-tags.sh), never here.
+modules:
+  - dir: .
+    requires: [internal, pkg/v1/app, pkg/v1/clock, pkg/v1/concur, pkg/v1/crypto, pkg/v1/data, pkg/v1/errs, pkg/v1/net, pkg/v1/observe, pkg/v1/proc, pkg/v1/security]
+  - dir: internal
+  - dir: pkg/v1/errs
+    requires: [internal]
+  - dir: pkg/v1/clock
+    requires: [internal]
+  - dir: pkg/v1/collections
+    requires: [internal, pkg/v1/errs]
+  - dir: pkg/v1/concur
+    requires: [internal, pkg/v1/clock, pkg/v1/errs]
+  - dir: pkg/v1/crypto
+    requires: [internal, pkg/v1/errs]
+  - dir: pkg/v1/net
+    requires: [internal]
+  - dir: pkg/v1/proc
+    requires: [internal, pkg/v1/errs]
+  - dir: pkg/v1/observe
+    requires: [internal, pkg/v1/clock, pkg/v1/errs]
+  - dir: pkg/v1/data
+    requires: [internal, pkg/v1/clock, pkg/v1/errs, pkg/v1/proc]
+  - dir: pkg/v1/security
+    requires: [internal, pkg/v1/clock, pkg/v1/crypto, pkg/v1/errs, pkg/v1/observe, pkg/v1/proc]
+  - dir: pkg/v1/app
+    requires: [internal, pkg/v1/clock, pkg/v1/crypto, pkg/v1/data, pkg/v1/errs, pkg/v1/observe, pkg/v1/security]
+  - dir: framework/connectors/mysql
+    requires: [., internal, pkg/v1/app, pkg/v1/clock, pkg/v1/concur, pkg/v1/crypto, pkg/v1/data, pkg/v1/errs, pkg/v1/net, pkg/v1/observe, pkg/v1/proc, pkg/v1/security]
+  - dir: framework/connectors/postgres
+    requires: [., internal, pkg/v1/app, pkg/v1/clock, pkg/v1/concur, pkg/v1/crypto, pkg/v1/data, pkg/v1/errs, pkg/v1/net, pkg/v1/observe, pkg/v1/proc, pkg/v1/security]
+  - dir: framework/connectors/sqlite
+    requires: [., internal, pkg/v1/app, pkg/v1/clock, pkg/v1/concur, pkg/v1/crypto, pkg/v1/data, pkg/v1/errs, pkg/v1/net, pkg/v1/observe, pkg/v1/proc, pkg/v1/security]
+  - dir: framework/connectors/ssh
+    requires: [., internal, pkg/v1/app, pkg/v1/crypto, pkg/v1/data]
+  - dir: third-party/aws
+    requires: [internal]
+  - dir: third-party/codec/hcl
+    requires: [internal]
+  - dir: third-party/codec/protobuf
+    requires: [internal]
+  - dir: third-party/codec/yaml
+    requires: [internal]
+  - dir: third-party/db/writer/clickhouse
+    requires: [internal]
+  - dir: third-party/db/writer/mysql
+    requires: [internal]
+  - dir: third-party/db/writer/redis
+    requires: [internal]
+  - dir: third-party/transform
+    requires: [internal]
+  - dir: third-party/x-crypto
+    requires: [internal]
 # The order is the direction (ADR 0068, ADR 0147, ADR 0157); the kernel is
 # rule 1, both halves; the service mirrors the core (ADR 0160); pkg/v1 is the
 # facade (ADR 0074), whose re-exports are its packages' facade: (ADR 0166).
@@ -358,7 +419,7 @@ codes:
       owner: pkg/v1/observe/logger/slogbridge
     - range: 1.2.0
       owner: pkg/v1/data/codec
-# ADR 0156 §1: the SDK module requires no module outside the standard
+# ADR 0156 §1: no module of the SDK requires a module outside the standard
 # library; the vendor modules are ADR 0157's, and the framework's connectors
 # ADR 0158's.
 stdlib:

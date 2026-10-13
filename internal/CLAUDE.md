@@ -88,7 +88,7 @@ Any import going "upward" fails `make lint` and CI: `scripts/check-layer-deps.sh
 
 ## Module
 
-The three sublayers are directories of the one SDK module, `github.com/kitsunium/sdk`, whose `go.mod` is at the repository root (ADR 0162). They were three modules of their own until then (ADR 0001), released in lockstep with `pkg` and tagged 78 times each although nothing outside the repository may import them; their `internal/<layer>/vX.Y.Z` tags are history. A layer builds from its own directory — `cd internal/service && GOWORK=off go build ./...` reaches the layer's packages in the SDK module — and `GOWORK=off go build ./...` at the root builds every layer, `pkg/` and `framework/`, and none of the vendor modules nested in the tree; checking every module loops over `bash scripts/ci/go-modules.sh`. The direction between the layers is the build graph's alone to enforce (`scripts/check-layer-deps.sh`, whose patterns take in each layer's `go_test` targets too, so a test importing a layer above fails it like a library): no module boundary stands between them any more. Nothing under `internal/` requires a module outside the SDK: every codec is written natively on the standard library (YAML as a named subset of YAML 1.2.2, whose full yaml.v3 reader is the opt-in `third-party/codec/yaml` module), and `proc/self` reads pseudo-versions with `internal/kernel/semver`, the stdlib primitive that replaced `golang.org/x/mod` (ADR 0156 §4) — its two other callers, `entitlement` and `selfupdate`, are the framework's (ADR 0158) and compare versions through `pkg/v1/data/semver`.
+The three sublayers are directories of ONE module, `github.com/kitsunium/sdk/internal`, whose `go.mod` is in this directory (ADR 0171): one module rather than one per domain, because a domain's core and service halves lie in two subtrees and a module is a subtree. It requires no other module of the repository — the families, the vendors and the root require it — and Go's `internal/` rule still keeps every importer outside `github.com/kitsunium/sdk/` out, whatever module holds the packages: a consumer may require it (it is the version of the SDK's internals a family runs on) but never import it. It was three modules until ADR 0162 (ADR 0001), tagged 78 times each, then directories of the root module; the `internal/<layer>/vX.Y.Z` tags are history, and its own tags are `internal/vX.Y.Z`. A layer builds from its own directory — `cd internal/service && GOWORK=off go build ./...` — and `GOWORK=off go build ./...` here builds every layer; checking every module loops over `bash scripts/ci/go-modules.sh`. The direction between the layers is the build graph's alone to enforce (`scripts/check-layer-deps.sh`, whose patterns take in each layer's `go_test` targets too, so a test importing a layer above fails it like a library): no module boundary stands between them any more. Nothing under `internal/` requires a module outside the SDK: every codec is written natively on the standard library (YAML as a named subset of YAML 1.2.2, whose full yaml.v3 reader is the opt-in `third-party/codec/yaml` module), and `proc/self` reads pseudo-versions with `internal/kernel/semver`, the stdlib primitive that replaced `golang.org/x/mod` (ADR 0156 §4) — its two other callers, `entitlement` and `selfupdate`, are the framework's (ADR 0158) and compare versions through `pkg/v1/data/semver`.
 
 ## Conventions
 
@@ -121,7 +121,7 @@ The three sublayers are directories of the one SDK module, `github.com/kitsunium
 - Move a logger-specific or codec-specific concept into `kernel/`. The kernel rule is both "stdlib-only" AND "generic". `level` was moved OUT for that reason.
 - Call `fmt.Errorf` / `errors.New` in production. All errors go through `errs.Define` / `errs.Wrap` — `make guard` fails on either call (ADR 0161) — and `errs.Define` itself only in a `core/` package (ADR 0160).
 - Reference `service/*` from `core/*` or `kernel/*`; the direction is top-down.
-- Add a third-party import anywhere under `internal/`. The SDK module links the standard library alone (ADR 0156), every layer included: the codecs are written natively under `service/data/codec/*`, and a vendor integration is a module of its own under `third-party/` (ADR 0157).
+- Add a third-party import anywhere under `internal/`. The internal module links the standard library alone (ADR 0156), every layer included: the codecs are written natively under `service/data/codec/*`, and a vendor integration is a module of its own under `third-party/` (ADR 0157).
 
 ## Verification
 
@@ -136,6 +136,6 @@ bazel query 'kind("go_library", deps(//internal/kernel/...)) except //internal/k
 # expected: empty result
 
 # Fallback (go test — still works for quick local iteration): the three
-# layers, packages of the SDK module (ADR 0162)
+# layers, packages of the internal module (ADR 0171)
 GOWORK=off go test -race -cover ./internal/...
 ```

@@ -1,0 +1,35 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "buildinfo",
+    srcs = [
+        "build.go",
+        "doc.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/proc/buildinfo",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = ["//internal/kernel/semver"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":buildinfo",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "buildinfo_test",
+    srcs = [
+        "api_gen_test.go",
+        "build_external_test.go",
+    ],
+    deps = [":buildinfo"],
+)

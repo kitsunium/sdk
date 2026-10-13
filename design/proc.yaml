@@ -1108,6 +1108,144 @@ packages:
         name: StdioMode
         underlying: uint8
   - doc: |-
+      Package buildinfo is what the running binary was built from, read from the
+      build information the Go toolchain embedded in it.
+
+      It only reads, and only the binary it runs in — or a debug.BuildInfo handed
+      to ParseBuild. It is a package of its own, apart from
+      internal/service/proc/self's runtime metrics, so that a program which only
+      asks what it was built from never imports runtime/metrics, whose
+      initialisation every process importing it pays at start (ADR 0172). Nothing
+      here can fail in a way a caller could act on, so nothing returns an error: a
+      binary built without module support reads as false.
+    functions:
+      - doc: |-
+          ReadBuild describes the running binary. It reports false when the binary
+          carries no build information — one built without module support — and
+          never fails otherwise.
+        name: ReadBuild
+        out:
+          - name: build
+            type: BuildValue
+          - name: ok
+            type: bool
+      - doc: |-
+          ParseBuild describes the build info. It is what ReadBuild uses on the
+          running binary, exported for a BuildInfo from elsewhere — one a test builds
+          by hand, or debug.ParseBuildInfo's reading of another binary's `go version
+          -m` output. A nil info describes nothing.
+        in:
+          - name: info
+            type: "*debug.BuildInfo"
+        name: ParseBuild
+        out:
+          - type: BuildValue
+    imports:
+      debug: runtime/debug
+    path: github.com/kitsunium/sdk/internal/service/proc/buildinfo
+    types:
+      - doc: |-
+          BuildValue is what the running binary was built from: the toolchain, the
+          main package, the main module with its version-control stamp, and every
+          dependency with the replacement it was built through.
+
+          It is the engine's own value (ADR 0074): no port in the proc domain speaks
+          it, and it describes one mechanism's reading of runtime/debug.
+        methods:
+          - doc: |-
+              Module returns the module whose path is path — the main module or one of
+              the dependencies — and whether the build contains it.
+            in:
+              - name: path
+                type: string
+            name: Module
+            out:
+              - name: found
+                type: ModuleValue
+              - name: ok
+                type: bool
+            recv: pointer
+        name: BuildValue
+        struct:
+          fields:
+            - doc: GoVersion is the toolchain that built the binary, e.g. "go1.27.1".
+              name: GoVersion
+              type: string
+            - doc: |-
+                Path is the import path of the main package, e.g.
+                "github.com/acme/app/cmd/server".
+              name: Path
+              type: string
+            - doc: Main is the main module.
+              name: Main
+              type: ModuleValue
+            - doc: |-
+                Deps are the dependencies linked into the binary, in the order the
+                toolchain recorded them.
+              name: Deps
+              type: "[]ModuleValue"
+      - doc: |-
+          ModuleValue is one module of the running binary, described by the code
+          that was actually built for it.
+
+          Its fields separate the three things a recorded version conflates: a
+          RELEASE (Version), a COMMIT (Revision and Time), and a DIRECTORY on the
+          build machine (Local and Dir). A pseudo-version names a commit rather than
+          a release, so it fills Revision and Time and leaves Version empty; a module
+          built from a directory has no version to tell at all.
+        name: ModuleValue
+        struct:
+          fields:
+            - doc: |-
+                Time is the commit's time, when known: the main module's vcs.time
+                stamp, or the timestamp a pseudo-version carries. Zero otherwise.
+              name: Time
+              type: time.Time
+            - doc: |-
+                Path is the module path the build required, e.g.
+                "github.com/kitsunium/sdk".
+              name: Path
+              type: string
+            - doc: |-
+                Version is the released version the code came from, e.g. "v0.4.6", or
+                "" when there is none to tell: a pseudo-version (a commit, in Revision),
+                a module built from a local directory, or a main module built without
+                one. A "+dirty" suffix is not kept here; it is what Modified says.
+              name: Version
+              type: string
+            - doc: |-
+                Revision is the version-control commit the code came from, when known:
+                the main module's vcs.revision stamp (a full object name), or the
+                commit a pseudo-version names (its twelve-character prefix).
+              name: Revision
+              type: string
+            - doc: |-
+                Dir is the directory a replace directive pointed the module at, as the
+                toolchain recorded it — relative to the main module, or to the
+                workspace root in workspace mode — or "" when it was not replaced by a
+                directory. A workspace module is Local with no Dir: the toolchain does
+                not record where it was.
+              name: Dir
+              type: string
+            - doc: |-
+                Replacement is the module path a replace directive substituted, when it
+                substituted another module rather than a directory; Version is then
+                that module's.
+              name: Replacement
+              type: string
+            - doc: |-
+                Local reports that the code came from a directory on the build machine
+                rather than from a published version: a directory replacement, a
+                workspace module, or a main module built inside its own source tree.
+              name: Local
+              type: bool
+            - doc: |-
+                Modified reports that the build included uncommitted changes: the main
+                module's vcs.modified stamp, or the "+dirty" its version carried. The
+                toolchain records nothing of the kind for a dependency.
+              name: Modified
+              type: bool
+  - doc: |-
       Package cgroup — creates and manages cgroup v2 control groups.
 
       This file holds the platform-neutral surface: Available and Create delegate
@@ -1868,16 +2006,16 @@ packages:
       coreproc: github.com/kitsunium/sdk/internal/core/proc
     path: github.com/kitsunium/sdk/internal/service/proc/rlimit
   - doc: |-
-      Package self is what the running process can say about itself: what it was
-      built from (build.go) and what it is doing right now (stats.go).
+      Package self is what the running process is doing right now: the Go
+      runtime's own metrics and the kernel's account of the CPU time used.
 
       The rest of the proc domain acts on OTHER processes — it spawns, signals,
       reaps and limits children. This package only reads, and only the process it
-      runs in: the build information the Go toolchain embedded in the binary, the
-      Go runtime's own metrics, and the kernel's account of the CPU time used.
-      Nothing here can fail in a way a caller could act on, so nothing returns an
-      error: an absent answer is a zero field or a false, and the doc comment of
-      each field says which.
+      runs in. What the binary was built from is internal/service/proc/buildinfo's,
+      a package of its own so that reading a build never imports runtime/metrics
+      (ADR 0172). Nothing here can fail in a way a caller could act on, so nothing
+      returns an error: an absent answer is a zero field or a false, and the doc
+      comment of each field says which.
 
       Package self — the CPU time the process used, where the kernel's count is
       not at hand.
@@ -1888,27 +2026,6 @@ packages:
       runtime's own metrics and the kernel's CPU accounting.
     functions:
       - doc: |-
-          ReadBuild describes the running binary. It reports false when the binary
-          carries no build information — one built without module support — and
-          never fails otherwise.
-        name: ReadBuild
-        out:
-          - name: build
-            type: BuildValue
-          - name: ok
-            type: bool
-      - doc: |-
-          ParseBuild describes the build info. It is what ReadBuild uses on the
-          running binary, exported for a BuildInfo from elsewhere — one a test builds
-          by hand, or debug.ParseBuildInfo's reading of another binary's `go version
-          -m` output. A nil info describes nothing.
-        in:
-          - name: info
-            type: "*debug.BuildInfo"
-        name: ParseBuild
-        out:
-          - type: BuildValue
-      - doc: |-
           ReadStats takes a snapshot of the running process. It reads the runtime's
           metrics once, the last collection's time once and the kernel's CPU
           accounting once, and never fails: a figure the platform cannot give is
@@ -1916,111 +2033,8 @@ packages:
         name: ReadStats
         out:
           - type: StatsValue
-    imports:
-      debug: runtime/debug
     path: github.com/kitsunium/sdk/internal/service/proc/self
     types:
-      - doc: |-
-          BuildValue is what the running binary was built from: the toolchain, the
-          main package, the main module with its version-control stamp, and every
-          dependency with the replacement it was built through.
-
-          It is the engine's own value (ADR 0074): no port in the proc domain speaks
-          it, and it describes one mechanism's reading of runtime/debug.
-        methods:
-          - doc: |-
-              Module returns the module whose path is path — the main module or one of
-              the dependencies — and whether the build contains it.
-            in:
-              - name: path
-                type: string
-            name: Module
-            out:
-              - name: found
-                type: ModuleValue
-              - name: ok
-                type: bool
-            recv: pointer
-        name: BuildValue
-        struct:
-          fields:
-            - doc: GoVersion is the toolchain that built the binary, e.g. "go1.27.1".
-              name: GoVersion
-              type: string
-            - doc: |-
-                Path is the import path of the main package, e.g.
-                "github.com/acme/app/cmd/server".
-              name: Path
-              type: string
-            - doc: Main is the main module.
-              name: Main
-              type: ModuleValue
-            - doc: |-
-                Deps are the dependencies linked into the binary, in the order the
-                toolchain recorded them.
-              name: Deps
-              type: "[]ModuleValue"
-      - doc: |-
-          ModuleValue is one module of the running binary, described by the code
-          that was actually built for it.
-
-          Its fields separate the three things a recorded version conflates: a
-          RELEASE (Version), a COMMIT (Revision and Time), and a DIRECTORY on the
-          build machine (Local and Dir). A pseudo-version names a commit rather than
-          a release, so it fills Revision and Time and leaves Version empty; a module
-          built from a directory has no version to tell at all.
-        name: ModuleValue
-        struct:
-          fields:
-            - doc: |-
-                Time is the commit's time, when known: the main module's vcs.time
-                stamp, or the timestamp a pseudo-version carries. Zero otherwise.
-              name: Time
-              type: time.Time
-            - doc: |-
-                Path is the module path the build required, e.g.
-                "github.com/kitsunium/sdk".
-              name: Path
-              type: string
-            - doc: |-
-                Version is the released version the code came from, e.g. "v0.4.6", or
-                "" when there is none to tell: a pseudo-version (a commit, in Revision),
-                a module built from a local directory, or a main module built without
-                one. A "+dirty" suffix is not kept here; it is what Modified says.
-              name: Version
-              type: string
-            - doc: |-
-                Revision is the version-control commit the code came from, when known:
-                the main module's vcs.revision stamp (a full object name), or the
-                commit a pseudo-version names (its twelve-character prefix).
-              name: Revision
-              type: string
-            - doc: |-
-                Dir is the directory a replace directive pointed the module at, as the
-                toolchain recorded it — relative to the main module, or to the
-                workspace root in workspace mode — or "" when it was not replaced by a
-                directory. A workspace module is Local with no Dir: the toolchain does
-                not record where it was.
-              name: Dir
-              type: string
-            - doc: |-
-                Replacement is the module path a replace directive substituted, when it
-                substituted another module rather than a directory; Version is then
-                that module's.
-              name: Replacement
-              type: string
-            - doc: |-
-                Local reports that the code came from a directory on the build machine
-                rather than from a published version: a directory replacement, a
-                workspace module, or a main module built inside its own source tree.
-              name: Local
-              type: bool
-            - doc: |-
-                Modified reports that the build included uncommitted changes: the main
-                module's vcs.modified stamp, or the "+dirty" its version carried. The
-                toolchain records nothing of the kind for a dependency.
-              name: Modified
-              type: bool
       - doc: |-
           StatsValue is the running process at one instant, as the Go runtime and
           the kernel account for it.
@@ -2649,6 +2663,70 @@ packages:
         name: UnsupportedPlatform
         type: "*kernelerrs.Error"
   - doc: |-
+      Package buildinfo is what the running binary was built from: the toolchain,
+      the main package, the main module with its version-control stamp, and every
+      dependency followed through its replacement.
+
+      	build, ok := buildinfo.Build()
+      	sdk, found := build.Module("github.com/kitsunium/sdk")
+      	// sdk.Version is a release ("v0.4.6"), or "" with sdk.Revision/sdk.Time
+      	// for a pseudo-version, or "" with sdk.Local for a directory.
+
+      A module's recorded version conflates three things, and [Module] keeps them
+      apart: a RELEASE in Version, a COMMIT in Revision and Time (a pseudo-version
+      names one, and so does the main module's version-control stamp), and a
+      DIRECTORY in Local and Dir (a replace, a workspace module). Nothing here fails:
+      a binary built without module support reads as false.
+
+      The same values are re-exported by pkg/v1/proc/process, beside the spawning of
+      children and the process's runtime statistics. This package is the reading
+      alone, so that a program asking only what it was built from imports neither
+      the spawn engine nor runtime/metrics, whose initialisation every process
+      importing them pays at start (ADR 0172).
+    facade:
+      - alias:
+          - doc: |-
+              BuildInfo is what the running binary was built from: the toolchain, the
+              main package, the main module with its version-control stamp, and every
+              dependency followed through its replacement. It is an alias of the service
+              value, and the same type as pkg/v1/proc/process.BuildInfo.
+            name: BuildInfo
+            target: svcbuild.BuildValue
+      - alias:
+          - doc: |-
+              Module is one module of the running binary, with its release, its commit
+              and its local directory told apart. It is an alias of the service value,
+              and the same type as pkg/v1/proc/process.Module.
+            name: Module
+            target: svcbuild.ModuleValue
+      - func:
+          doc: |-
+            Build describes what the running binary was built from, and reports false
+            when the binary carries no build information.
+          forward: svcbuild.ReadBuild
+          name: Build
+          out:
+            - name: info
+              type: BuildInfo
+            - name: ok
+              type: bool
+      - func:
+          doc: |-
+            ParseBuild describes a BuildInfo from elsewhere — one a test builds by
+            hand, or debug.ParseBuildInfo's reading of another binary — exactly as
+            Build describes the running one.
+          forward: svcbuild.ParseBuild
+          in:
+            - name: info
+              type: "*debug.BuildInfo"
+          name: ParseBuild
+          out:
+            - type: BuildInfo
+    imports:
+      debug: runtime/debug
+      svcbuild: github.com/kitsunium/sdk/internal/service/proc/buildinfo
+    path: github.com/kitsunium/sdk/pkg/v1/proc/buildinfo
+  - doc: |-
       Package cgroup creates and manages cgroup v2 control groups to confine a
       process tree's memory, CPU, pids, and IO.
 
@@ -3165,13 +3243,13 @@ packages:
               dependency followed through its replacement. It is an alias of the service
               value.
             name: BuildInfo
-            target: svcself.BuildValue
+            target: svcbuild.BuildValue
       - alias:
           - doc: |-
               Module is one module of the running binary, with its release, its commit
               and its local directory told apart. It is an alias of the service value.
             name: Module
-            target: svcself.ModuleValue
+            target: svcbuild.ModuleValue
       - func:
           doc: |-
             Self takes a snapshot of the running process. It never fails: a figure the
@@ -3185,7 +3263,7 @@ packages:
           doc: |-
             Build describes what the running binary was built from, and reports false
             when the binary carries no build information.
-          forward: svcself.ReadBuild
+          forward: svcbuild.ReadBuild
           name: Build
           out:
             - name: info
@@ -3197,7 +3275,7 @@ packages:
             ParseBuild describes a BuildInfo from elsewhere — one a test builds by
             hand, or debug.ParseBuildInfo's reading of another binary — exactly as
             Build describes the running one.
-          forward: svcself.ParseBuild
+          forward: svcbuild.ParseBuild
           in:
             - name: info
               type: "*debug.BuildInfo"
@@ -3287,6 +3365,7 @@ packages:
     imports:
       coreproc: github.com/kitsunium/sdk/internal/core/proc
       debug: runtime/debug
+      svcbuild: github.com/kitsunium/sdk/internal/service/proc/buildinfo
       svcexec: github.com/kitsunium/sdk/internal/service/proc/exec
       svcself: github.com/kitsunium/sdk/internal/service/proc/self
     path: github.com/kitsunium/sdk/pkg/v1/proc/process

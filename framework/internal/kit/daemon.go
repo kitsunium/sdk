@@ -125,7 +125,7 @@ func (a *App) describeRuntime(rt *model.Runtime) {
 	rt.Config = slices.Clone(a.rt.config)
 	rt.Boot = slices.Clone(a.rt.boot)
 	a.mu.Unlock()
-	rt.Process = sampleProcess()
+	rt.Process = processSample()
 	rt.HTTP = a.describeHTTP()
 	rt.Databases = a.describeDatabases()
 	if m := a.mockList(); len(m) > 0 {

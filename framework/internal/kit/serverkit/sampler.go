@@ -1,6 +1,7 @@
-package kit
+package serverkit
 
 import (
+	"math"
 	"runtime"
 	"time"
 
@@ -12,6 +13,11 @@ import (
 // as the model says it. Latency percentiles come from the runtime's
 // histograms, which count since the process started. The time is the wall
 // clock's: a process sample is about the machine, not the product's clock.
+//
+// It lives here rather than in kit because process.Self is runtime/metrics,
+// whose initialisation every process importing it pays at start, and the spawn
+// engine beside it in pkg/v1/proc/process: only a serving app answers the
+// runtime graph that carries a sample (ADR 0172).
 func sampleProcess() *model.Process {
 	st := process.Self()
 	p := &model.Process{
@@ -42,3 +48,6 @@ func sampleProcess() *model.Process {
 
 // millis is d in milliseconds, to two decimals.
 func millis(d time.Duration) float64 { return round2(float64(d) / float64(time.Millisecond)) }
+
+// round2 is f to two decimals, as kit rounds every figure it shows.
+func round2(f float64) float64 { return math.Round(f*100) / 100 }

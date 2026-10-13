@@ -56,8 +56,8 @@ func (t *TopicService[T]) Publish(ctx context.Context, msg T) error {
 	ctx, sp := a.begin(ctx, &spanStart{node: t.id, from: currentNode(ctx), edge: model.EdgePublishes, op: model.OpPublish, name: "Publish"})
 	payload, err := t.payload(ctx, a, msg)
 	if err == nil {
-		release := func() error {
-			err := t.publish(withoutUnit(context.WithoutCancel(ctx)), a, payload)
+		release := func(rctx context.Context) error {
+			err := t.publish(context.WithoutCancel(rctx), a, payload)
 			t.wake()
 			return err
 		}
@@ -224,9 +224,7 @@ func (s *Service) Subscribe[T any](name string, topic *TopicService[T], handler 
 	}
 	sub := &SubscriptionWorker[T]{topic: topic, handler: handler, maxDeliver: o.maxDeliveries, parallelism: o.parallelism}
 	sub.kind, sub.name, sub.decl = model.KindSubscription, name, callerPos()
-	if p, _ := funcInfo(handler); p.file() != "" {
-		sub.body = &p
-	}
+	sub.body = bodyOf(handler)
 	s.add(sub, true)
 	switch {
 	case topic == nil:

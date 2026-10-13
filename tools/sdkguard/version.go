@@ -833,10 +833,23 @@ func versionNotice(module, cur string, newer []string) string {
 	//: exported symbols.
 	b.WriteString("  A patch is cut whenever an internal package the public packages depend on\n")
 	b.WriteString("  changes (ADR 0007), so releases carry fixes that never alter the public API.\n")
-	b.WriteString("  Update:  go get " + module + "@" + latest + "\n")
+	b.WriteString("  Update:  " + updateCommand(module, latest) + "\n")
 	b.WriteString("  Silence: -version-check=off")
 	//: one block of text, printed verbatim by the caller.
 	return b.String()
+}
+
+// updateCommand is the line a notice gives to move module to latest. For the
+// SDK's root it is `go get …@latest && go mod tidy`: since ADR 0171 the root
+// holds the framework alone and pkg/v1 is a module per family, so moving the
+// root alone would leave every pkg/v1 import resolved by nothing; the tidy
+// resolves each to its family module, at its own latest. For any other module
+// it names the version.
+func updateCommand(module, latest string) string {
+	if module == sdkModule {
+		return "go get " + sdkModule + "@latest && go mod tidy"
+	}
+	return "go get " + module + "@" + latest
 }
 
 // dropMerged is the half of the migration command that drops every module ADR

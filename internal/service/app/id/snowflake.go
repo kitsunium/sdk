@@ -47,15 +47,20 @@ const (
 // Snowflake is the default-node snowflake generator, registered for the
 // "snowflake" scheme. Its node id is derived from the hostname+pid so distinct
 // processes rarely collide; use NewSnowflake for an explicit node assignment.
-var Snowflake = coreid.Register(newSnowflake(defaultNode(), clock.System))
+var Snowflake = coreid.Register(newDefaultSnowflake(clock.System))
 
 // snowflakeGen is a stateful Twitter-style snowflake generator: a 41-bit ms
 // timestamp, a 10-bit node, and a 12-bit per-ms sequence, packed into a
 // positive int64 rendered in decimal.
 type snowflakeGen struct {
-	mu     sync.Mutex
-	clk    clock.Clock
-	node   int64
+	mu   sync.Mutex
+	clk  clock.Clock
+	node int64
+	// derive says node is still to be derived from the hostname and pid, at
+	// the first id: the registered generator is built at the package's
+	// initialisation, which every program importing the domain pays at
+	// start, and reading the hostname is a file read on Linux.
+	derive bool
 	lastMS int64
 	seq    int64
 }
@@ -66,6 +71,13 @@ type snowflakeGen struct {
 func NewSnowflake(node int64) coreid.Generator {
 	//: clamp the node into the 10-bit space and use the system clock.
 	return newSnowflake(node&maxNode, clock.System)
+}
+
+// newDefaultSnowflake is the default-node generator, its node derived from
+// the hostname and pid at its first id rather than now.
+func newDefaultSnowflake(clk clock.Clock) *snowflakeGen {
+	//: the node stays zero until New derives it.
+	return &snowflakeGen{clk: clk, derive: true}
 }
 
 // newSnowflake is the shared constructor (clock injectable for tests).
@@ -86,6 +98,11 @@ func (*snowflakeGen) Scheme() coreid.Scheme {
 func (g *snowflakeGen) New() (newID string, err error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	//: the default generator derives its node once, under the lock.
+	if g.derive {
+		//: the hostname+pid seed, reduced into the 10-bit space.
+		g.node, g.derive = defaultNode(), false
+	}
 	//: milliseconds since the custom epoch.
 	now := g.clk.Now().UnixMilli() - snowflakeEpoch
 	//: a regressed clock would break monotonicity — refuse honestly.
