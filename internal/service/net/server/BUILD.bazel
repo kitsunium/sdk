@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "server",
     srcs = [
+        "admission.go",
         "adopt.go",
         "batch.go",
         "batch_compliance.go",
@@ -78,6 +79,7 @@ go_test(
     name = "server_test",
     srcs = [
         "accept_backoff_internal_test.go",
+        "admission_external_test.go",
         "adopt_internal_test.go",
         "api_gen_test.go",
         "batch_bench_test.go",

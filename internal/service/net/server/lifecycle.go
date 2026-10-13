@@ -373,10 +373,19 @@ func (s *Server) acceptLoop(bound *boundListener, group *StreamGroup, handler co
 			continue
 		}
 		failures = 0
+		var release func()
+		if group.admission != nil {
+			ok := false
+			//: refused before any TLS byte is read (ADR 0174).
+			if release, ok = group.admission.Admit(raw.RemoteAddr()); !ok {
+				swallowErr(raw.Close())
+				continue
+			}
+		}
 		s.total.Add(1)
 		s.active.Add(1)
 		s.inFlight.Add(1)
-		go s.serve(raw, group, handler)
+		go s.serve(raw, group, handler, release)
 	}
 }
 
@@ -402,8 +411,15 @@ func (s *Server) backOff(bound *boundListener, delay time.Duration) bool {
 // owned by the Server. It always closes the connection, releases its pooled
 // state and its inFlight token, so a handler that returns early or panics
 // cannot leak either.
-func (s *Server) serve(raw stdnet.Conn, group *StreamGroup, handler corenet.ConnHandler) {
+func (s *Server) serve(raw stdnet.Conn, group *StreamGroup, handler corenet.ConnHandler, release func()) {
 	defer s.inFlight.Done()
+	ctx := s.runCtx
+	//: a connection under admission gives its slot back when its handshake
+	//: completes, or at the latest when it ends.
+	if release != nil {
+		defer release()
+		ctx = context.WithValue(ctx, admissionReleaseKey{}, release)
+	}
 	defer s.active.Add(-1)
 	c := s.acquire(raw, group)
 	defer s.release(c)
@@ -415,7 +431,7 @@ func (s *Server) serve(raw stdnet.Conn, group *StreamGroup, handler corenet.Conn
 	//: goroutine to return it to, and one peer's failure is not the server's.
 	//: A ceiling rejection lands here too, and closes the connection the same
 	//: way — which is the intended answer to "we are full".
-	swallowErr(s.admit(s.runCtx, group.limiter, c, handler))
+	swallowErr(s.admit(ctx, group.limiter, c, handler))
 }
 
 // recoverHandler swallows a handler panic so it cannot unwind past the

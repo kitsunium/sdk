@@ -2222,6 +2222,22 @@ packages:
 
       Package server — how Windows reports a datagram longer than the read buffer.
     functions:
+      - doc: NewAdmission returns an admission with no reserved address.
+        in:
+          - name: cfg
+            type: AdmissionConfig
+        name: NewAdmission
+        out:
+          - type: "*Admission"
+      - doc: |-
+          PreHandshake puts the group's accepted connections under a, before any
+          TLS byte is read (ADR 0174 D2).
+        in:
+          - name: a
+            type: "*Admission"
+        name: PreHandshake
+        out:
+          - type: GroupOption
       - doc: |-
           WithDrainTimeout bounds how long Shutdown waits for in-flight connections
           before closing them hard.
@@ -2403,8 +2419,65 @@ packages:
     imports:
       corenet: github.com/kitsunium/sdk/internal/core/net
       http: net/http
+      stdnet: net
     path: github.com/kitsunium/sdk/internal/service/net/server
     types:
+      - doc: |-
+          AdmissionConfig parameterises NewAdmission. A zero budget is clamped to
+          its default, never read as "unlimited" (ADR 0031, clamp half).
+        name: AdmissionConfig
+        struct:
+          fields:
+            - doc: |-
+                PerAddress caps the connections one IPv4 address, or one IPv6 /64, may
+                hold before their handshake completes. Default 4.
+              name: PerAddress
+              type: int
+            - doc: |-
+                Reserved is the budget of the addresses declared with SetReserved.
+                Default 8.
+              name: Reserved
+              type: int
+      - doc: |-
+          Admission is the pre-handshake admission of ADR 0174 D2: a per-address
+          budget of connections that have not completed their handshake, checked
+          before any TLS byte is read, with a reserved budget for declared
+          addresses so a flood from elsewhere never locks them out. It is safe for
+          concurrent use, and shared by a StreamGroup (PreHandshake) and by any
+          transport that runs its own listener.
+        methods:
+          - doc: |-
+              Admit counts a new connection from remote against its address's budget.
+              It returns ok false, counted, when the budget is spent: the caller closes
+              the connection before reading a byte. Otherwise release, idempotent,
+              gives the slot back once the handshake completes or the connection ends.
+            in:
+              - name: remote
+                type: stdnet.Addr
+            name: Admit
+            out:
+              - name: release
+                type: func()
+              - name: ok
+                type: bool
+            recv: pointer
+          - doc: |-
+              SetReserved replaces the reserved addresses. Each is a host or a
+              host:port, resolved now; one that does not resolve is given no reserved
+              budget, never an unkeyed one.
+            in:
+              - name: addrs
+                type: "[]string"
+            name: SetReserved
+            recv: pointer
+          - doc: Refused counts the connections refused before their handshake.
+            name: Refused
+            out:
+              - type: int64
+            recv: pointer
+        name: Admission
+        struct:
+          unexported: true
       - doc: Option configures a Server.
         name: Option
         underlying: func(*Server)

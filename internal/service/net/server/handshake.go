@@ -43,6 +43,8 @@ func (h handshakeHandler) ServeConn(ctx context.Context, c corenet.Conn) error {
 		//: the peer never completed the negotiation.
 		return err
 	}
+	//: authenticated: the connection no longer counts against its address.
+	releaseAdmission(ctx)
 	//: negotiated, so the handler sees a connection that is genuinely secured.
 	return h.next.ServeConn(ctx, c)
 }

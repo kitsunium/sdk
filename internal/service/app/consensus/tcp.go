@@ -13,11 +13,13 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
+	"github.com/kitsunium/sdk/internal/service/net/server"
 )
 
 // TransportConfig builds the shipped mTLS transport (D4, D14).
@@ -131,9 +133,9 @@ type TCPTransport struct {
 	out         map[outKey]*peerConn
 	in          map[net.Conn][32]byte
 	raw         map[net.Conn]struct{}
-	pending     map[string]int
-	memberIPs   map[string]bool
-	refusedPre  int64
+	admission   *server.Admission
+	resvMu      sync.Mutex
+	resvSeq     atomic.Uint64
 	peerExpiry  map[coreconsensus.NodeID]time.Time
 	reloads     func() int
 	deliver     func(coreconsensus.AuthenticatedPeer, []byte)
@@ -207,7 +209,7 @@ func NewTCPTransport(cfg TransportConfig) (*TCPTransport, error) {
 	}
 	t := &TCPTransport{cfg: cfg, cluster: cid, slot: slot,
 		members: map[coreconsensus.GroupID][]coreconsensus.Member{}, byID: map[coreconsensus.NodeID]coreconsensus.Member{},
-		bySPKI: map[[32]byte]coreconsensus.Member{}, out: map[outKey]*peerConn{}, in: map[net.Conn][32]byte{}, raw: map[net.Conn]struct{}{}, pending: map[string]int{}, memberIPs: map[string]bool{}, peerExpiry: map[coreconsensus.NodeID]time.Time{},
+		bySPKI: map[[32]byte]coreconsensus.Member{}, out: map[outKey]*peerConn{}, in: map[net.Conn][32]byte{}, raw: map[net.Conn]struct{}{}, admission: server.NewAdmission(server.AdmissionConfig{PerAddress: cfg.MaxUnauthenticatedPerIP, Reserved: cfg.ReservedMemberSlots}), peerExpiry: map[coreconsensus.NodeID]time.Time{},
 		done: make(chan struct{})}
 	ln, err := net.Listen("tcp", cfg.ListenAddress)
 	if err != nil {
@@ -289,27 +291,21 @@ func (t *TCPTransport) accept() {
 			c.Close()
 			return
 		}
-		ip := ipKey(c.RemoteAddr())
-		limit := t.cfg.MaxUnauthenticatedPerIP
-		if t.memberIPs[ip] {
-			limit = t.cfg.ReservedMemberSlots
-		}
-		if t.pending[ip] >= limit {
-			// Refused before any TLS byte is read (R2-22).
-			t.refusedPre++
+		release, ok := t.admission.Admit(c.RemoteAddr())
+		if !ok {
+			// Refused before any TLS byte is read (R2-22, ADR 0174).
 			t.mu.Unlock()
 			c.Close()
 			continue
 		}
-		t.pending[ip]++
 		t.raw[c] = struct{}{}
 		t.wg.Add(1)
 		t.mu.Unlock()
-		go t.serve(c)
+		go t.serve(c, release)
 	}
 }
 
-func (t *TCPTransport) serve(raw net.Conn) {
+func (t *TCPTransport) serve(raw net.Conn, release func()) {
 	defer t.wg.Done()
 	defer func() {
 		raw.Close()
@@ -328,20 +324,10 @@ func (t *TCPTransport) serve(raw net.Conn) {
 	}
 	c := tls.Server(raw, cfg)
 	_ = c.SetDeadline(time.Now().Add(t.cfg.HandshakeTimeout))
-	ip := ipKey(raw.RemoteAddr())
-	authenticated := false
-	defer func() {
-		if !authenticated {
-			t.mu.Lock()
-			t.pending[ip]--
-			t.mu.Unlock()
-		}
-	}()
+	defer release()
 	err := c.Handshake()
-	t.mu.Lock()
-	t.pending[ip]--
-	t.mu.Unlock()
-	authenticated = true
+	// Authenticated or not, the connection no longer waits on its address.
+	release()
 	if err != nil {
 		return
 	}
@@ -640,23 +626,25 @@ func (t *TCPTransport) SetMembership(group coreconsensus.GroupID, admitted []cor
 		}
 	}
 	t.byID, t.bySPKI = byID, bySPKI
-	ips := map[string]bool{}
+	addrs := make([]string, 0, len(byID))
 	for _, m := range byID {
-		host, _, err := net.SplitHostPort(m.Address)
-		if err != nil {
-			continue
-		}
-		// A member address that does not resolve is refused a reserved
-		// slot, never given an unkeyed one.
-		addrs, err := net.LookupIP(host)
-		if err != nil {
-			continue
-		}
-		for _, a := range addrs {
-			ips[ipKeyOf(a)] = true
+		if m.Address != "" {
+			addrs = append(addrs, m.Address)
 		}
 	}
-	t.memberIPs = ips
+	// The members' addresses keep their reserved budget; one that does not
+	// resolve gets none (ADR 0174 D2). Resolving may block, and this runs on
+	// the engine's event loop, so it runs aside; only the newest set lands.
+	seq := t.resvSeq.Add(1)
+	t.wg.Add(1)
+	go func() {
+		defer t.wg.Done()
+		t.resvMu.Lock()
+		defer t.resvMu.Unlock()
+		if t.resvSeq.Load() == seq {
+			t.admission.SetReserved(addrs)
+		}
+	}()
 	for c, spki := range t.in {
 		if _, ok := bySPKI[spki]; !ok {
 			c.Close()
@@ -926,29 +914,9 @@ func (t *TCPTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig) (
 	return coreconsensus.Position{}, last
 }
 
-// ipKey is the admission key of a remote address: the IPv4 address, or the
-// IPv6 /64.
-func ipKey(a net.Addr) string {
-	if ta, ok := a.(*net.TCPAddr); ok {
-		return ipKeyOf(ta.IP)
-	}
-	return a.String()
-}
-
-func ipKeyOf(ip net.IP) string {
-	if v4 := ip.To4(); v4 != nil {
-		return v4.String()
-	}
-	return ip.Mask(net.CIDRMask(64, 128)).String() + "/64"
-}
-
 // RefusedBeforeHandshake counts the connections refused by the
 // pre-handshake admission.
-func (t *TCPTransport) RefusedBeforeHandshake() int64 {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.refusedPre
-}
+func (t *TCPTransport) RefusedBeforeHandshake() int64 { return t.admission.Refused() }
 
 // CertExpiry returns when the transport's own certificate expires.
 func (t *TCPTransport) CertExpiry() time.Time {
