@@ -1,5 +1,7 @@
 load("@rules_go//go:def.bzl", "go_library", "go_test")
 
+package(default_visibility = ["//internal/service:service_consumers"])
+
 go_library(
     name = "consensus",
     srcs = [
@@ -16,6 +18,7 @@ go_library(
         "memsnap.go",
         "memtransport.go",
         "node.go",
+        "observe.go",
         "offline.go",
         "ops.go",
         "pem.go",
@@ -34,6 +37,11 @@ go_library(
     deps = [
         "//internal/core/app/consensus",
         "//internal/core/data/transform",
+        "//internal/core/observe/logger",
+        "//internal/core/observe/logger/level",
+        "//internal/core/observe/metrics",
+        "//internal/core/observe/otel",
+        "//internal/core/observe/trace",
         "//internal/kernel/clock",
         "//internal/kernel/errs",
         "//internal/kernel/fs/flock",
@@ -58,13 +66,19 @@ go_test(
         "cluster_internal_test.go",
         "disk_cluster_internal_test.go",
         "filelog_internal_test.go",
+        "observe_internal_test.go",
         "offline_internal_test.go",
         "tcp_internal_test.go",
     ],
     embed = [":consensus"],
     deps = [
         "//internal/core/app/consensus",
+        "//internal/core/observe/logger",
+        "//internal/core/observe/logger/level",
+        "//internal/core/observe/otel",
+        "//internal/core/observe/trace",
         "//internal/kernel/errs",
         "//internal/service/app/consensus/wire",
+        "//internal/service/observe/metrics",
     ],
 )

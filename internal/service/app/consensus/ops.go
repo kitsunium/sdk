@@ -4,6 +4,7 @@ import (
 	"context"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	coreotel "github.com/kitsunium/sdk/internal/core/observe/otel"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/raft"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
@@ -29,23 +30,41 @@ func (n *Node) submit(ctx context.Context, e coreconsensus.Entry, admin bool) (c
 		return coreconsensus.Token{}, nil, n.stoppedErr()
 	}
 	p := &proposal{entry: e, admin: admin, done: make(chan propResult, 1)}
+	start := n.clk.Now()
+	span := n.obs.span(ctx, "consensus.Propose")
+	n.pendingProp.Add(1)
+	n.obs.setGauge(mProposalsPending, float64(n.pendingProp.Load()))
+	defer func() {
+		n.pendingProp.Add(-1)
+		n.obs.setGauge(mProposalsPending, float64(n.pendingProp.Load()))
+	}()
+	finish := func(r propResult) (coreconsensus.Token, any, error) {
+		if r.err != nil {
+			n.obs.inc(mProposalsFailed, codeAttr(r.err))
+		} else {
+			n.obs.record(mCommitLatency, n.clk.Since(start).Seconds())
+			spanEvent(span, "applied", coreotel.Int64("index", int64(r.tok.Index)))
+		}
+		spanEnd(span, r.err)
+		return r.tok, r.val, r.err
+	}
 	select {
 	case n.propc <- p:
 	case <-ctx.Done():
-		return coreconsensus.Token{}, nil, ctx.Err()
+		return finish(propResult{err: ctx.Err()})
 	case <-n.stopc:
-		return coreconsensus.Token{}, nil, n.stoppedErr()
+		return finish(propResult{err: n.stoppedErr()})
 	}
 	select {
 	case r := <-p.done:
-		return r.tok, r.val, r.err
+		return finish(r)
 	case <-ctx.Done():
 		if p.stage.Load() == stageUnsent {
 			// Ended before the append: ctx.Err(), as everywhere in the SDK.
-			return coreconsensus.Token{}, nil, ctx.Err()
+			return finish(propResult{err: ctx.Err()})
 		}
-		return coreconsensus.Token{}, nil, origin(coreconsensus.OutcomeUnknown,
-			errs.String("why", "context ended after the append"), errs.String("cause", ctx.Err().Error()))
+		return finish(propResult{err: origin(coreconsensus.OutcomeUnknown,
+			errs.String("why", "context ended after the append"), errs.String("cause", ctx.Err().Error()))})
 	}
 }
 
@@ -193,6 +212,12 @@ func (n *Node) Barrier(ctx context.Context) (coreconsensus.Token, error) {
 	}
 	w := &readWait{done: make(chan readResult, 1)}
 	noLease := n.cfg.Reads != ReadLease
+	start := n.clk.Now()
+	mode := "read_index"
+	if !noLease {
+		mode = "lease"
+	}
+	defer func() { n.obs.record(mBarrierLatency, n.clk.Since(start).Seconds(), coreotel.String("mode", mode)) }()
 	if !n.exec(func() {
 		n.readSeq++
 		ctx := n.readSeq
@@ -252,6 +277,14 @@ func (n *Node) admin(ctx context.Context, kind coreconsensus.EntryKind, a wire.A
 	}
 	data := wire.AppendAdmin(nil, &a)
 	_, _, err := n.submit(ctx, coreconsensus.Entry{Kind: kind, BodySum: wire.BodySum(data), Data: data}, true)
+	// Every administrative operation is logged at Warn with its operator
+	// (D8, R3-14).
+	outcome := "ok"
+	if err != nil {
+		outcome = err.Error()
+	}
+	n.obs.warn("consensus: administrative operation", lstr("operator", a.Operator), lattr("kind", uint64(kind)),
+		lattr("change", uint64(a.Change)), lattr("target", uint64(a.Target)), lstr("outcome", outcome))
 	return err
 }
 

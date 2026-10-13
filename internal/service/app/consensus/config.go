@@ -6,6 +6,9 @@ import (
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
 	coretransform "github.com/kitsunium/sdk/internal/core/data/transform"
+	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	coremetrics "github.com/kitsunium/sdk/internal/core/observe/metrics"
+	coretrace "github.com/kitsunium/sdk/internal/core/observe/trace"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	svctransform "github.com/kitsunium/sdk/internal/service/data/transform"
@@ -83,6 +86,12 @@ type Config struct {
 	PreferredLeaders []coreconsensus.NodeID
 	// Seed draws the election timeouts; 0 draws one.
 	Seed uint64
+	// Meter, Tracer and Logger receive D13's metrics, one span per Propose
+	// and the role, membership, snapshot and truncation events; nil turns
+	// each off. None of them changes a decision.
+	Meter  coremetrics.Meter
+	Tracer coretrace.Tracer
+	Logger corelogger.Logger
 }
 
 // TimingDefaults are D5's defaults for the RTT matrix of the three sites.

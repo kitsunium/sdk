@@ -10,6 +10,7 @@ import (
 	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	coreotel "github.com/kitsunium/sdk/internal/core/observe/otel"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/raft"
@@ -80,6 +81,8 @@ type Node struct {
 	wg          sync.WaitGroup
 	loopDone    chan struct{}
 
+	obs         *obs
+	pendingProp atomic.Int64
 	droppedFrom atomic.Int64
 	longTurns   atomic.Int64
 	joinMu      sync.Mutex
@@ -209,6 +212,7 @@ func newRaft(cfg Config) (*Node, error) {
 		watchers: map[chan coreconsensus.Status]struct{}{}, subEpoch: newSubEpoch(), loopDone: make(chan struct{}),
 	}
 	n.acond = sync.NewCond(&n.am)
+	n.obs = newObs(cfg)
 	start, err := n.load()
 	if err != nil {
 		return nil, err
@@ -353,6 +357,7 @@ func (n *Node) deliver(from coreconsensus.AuthenticatedPeer, frame []byte) {
 		// The engine trusts the transport's authenticated peer, never the
 		// frame's From (R7-05).
 		n.droppedFrom.Add(1)
+		n.obs.inc(mFramesDropped, coreotel.String("reason", "from_mismatch"))
 		return
 	}
 	q := n.inData
@@ -399,6 +404,7 @@ func (n *Node) loop() {
 			turn = n.clk.Now()
 			n.r.Tick(n.clk.Now())
 			n.sweep()
+			n.observePeers()
 		case m := <-n.inCtrl:
 			turn = n.clk.Now()
 			n.r.Step(n.clk.Now(), m)
@@ -450,12 +456,14 @@ func (n *Node) loop() {
 // than the drift budget, ElectionTimeoutMin × MaxClockDrift: a pause of
 // the process is exactly that (D9, R7-20, R8-37).
 func (n *Node) checkTurn(turn time.Time) {
+	d := n.clk.Since(turn)
+	n.obs.record(mLoopTurn, d.Seconds())
 	if n.cfg.Reads != ReadLease {
 		return
 	}
 	t := n.r.Status().Timing
 	budget := time.Duration(float64(t.ElectionTimeoutMin) * t.MaxClockDrift)
-	if d := n.clk.Since(turn); budget > 0 && d > budget {
+	if budget > 0 && d > budget {
 		n.longTurns.Add(1)
 		n.r.DropLease()
 	}
@@ -506,6 +514,10 @@ func (n *Node) handleReady() {
 		}
 		if len(rd.Membership) > 0 {
 			n.cfg.Transport.SetMembership(n.cfg.Group, rd.Membership)
+			n.obs.info("consensus: admitted members changed", lattr("members", uint64(len(rd.Membership))))
+		}
+		if rd.TruncateFrom != 0 {
+			n.obs.info("consensus: log truncated", lattr("from", rd.TruncateFrom))
 		}
 		if rd.NeedsWrite() {
 			n.sq.push(storeReq{rd: rd})
@@ -622,10 +634,12 @@ func (n *Node) publish() {
 		Log: n.ident, Timing: st.Timing, NoSpace: st.NoSpace,
 		Versions: coreconsensus.Versions{ProtocolMin: 1, ProtocolMax: 1, Cluster: st.Cluster, ClusterGeneration: st.ClusterG},
 	}
-	if old := n.status.Load(); old != nil && *old == *s {
+	old := n.status.Load()
+	if old != nil && *old == *s {
 		return
 	}
 	n.status.Store(s)
+	n.observeStatus(old, s)
 	n.watchMu.Lock()
 	for ch := range n.watchers {
 		select {
@@ -764,7 +778,18 @@ func (n *Node) write(q storeReq, synced *uint64) bool {
 			return false
 		}
 	}
-	if err := log.Sync(); err != nil {
+	syncStart := n.clk.Now()
+	err := log.Sync()
+	n.obs.record(mFsyncLatency, n.clk.Since(syncStart).Seconds())
+	if len(rd.Entries) > 0 {
+		size := 0
+		for i := range rd.Entries {
+			size += len(rd.Entries[i].Data)
+		}
+		n.obs.record(mBatchEntries, float64(len(rd.Entries)))
+		n.obs.record(mBatchBytes, float64(size))
+	}
+	if err != nil {
 		// A failed sync stops the node and is never retried (D4).
 		n.stop(storageFailed("sync", err), true)
 		return false
@@ -807,6 +832,9 @@ func (n *Node) stop(err error, storage bool) {
 	}
 	n.stopReason = reason
 	n.stopMu.Unlock()
+	code, _ := errs.CodeOf(err)
+	n.obs.setGauge(mStopped, 1, coreotel.String("reason", reasonOf(code)))
+	n.obs.warn("consensus: node stopped", lstr("reason", reasonOf(code)), lstr("error", err.Error()))
 	n.stopped.Store(true)
 	n.hard.Store(true)
 	n.closeOnce.Do(func() { close(n.stopc) })

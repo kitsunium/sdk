@@ -91,7 +91,10 @@ func (n *Node) applyEntries(es []coreconsensus.Entry) bool {
 		for k := i; k < j; k++ {
 			es[k].Token = n.token(es[k].Position)
 		}
-		if err := n.safeApply(batcher, batching, es[i:j], results); err != nil {
+		applyStart := n.clk.Now()
+		err := n.safeApply(batcher, batching, es[i:j], results)
+		n.obs.record(mApplyLatency, n.clk.Since(applyStart).Seconds())
+		if err != nil {
 			n.stop(err, false)
 			return false
 		}

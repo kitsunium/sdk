@@ -138,6 +138,7 @@ func (n *Node) writeSnapshot(snap coreconsensus.Snapshot, meta coreconsensus.Sna
 			return err
 		}
 	}
+	cutStart := n.clk.Now()
 	var out io.Writer = sink
 	if extra != nil {
 		out = io.MultiWriter(sink, extra)
@@ -156,6 +157,9 @@ func (n *Node) writeSnapshot(snap coreconsensus.Snapshot, meta coreconsensus.Sna
 	if err := sink.Commit(meta); err != nil {
 		return err
 	}
+	n.obs.record(mSnapshotDuration, n.clk.Since(cutStart).Seconds())
+	n.obs.record(mSnapshotBytes, float64(meta.EncodedSize))
+	n.obs.info("consensus: snapshot cut", lattr("index", meta.Position.Index), lattr("bytes", uint64(meta.EncodedSize)))
 	ss.mu.Lock()
 	ss.last = max(ss.last, meta.Position.Index)
 	ss.mu.Unlock()
@@ -400,6 +404,8 @@ func (n *Node) install(req coreconsensus.InstallRequest) error {
 		n.r.InstallSnapshot(meta)
 		n.handleReady()
 	})
+	n.obs.inc(mSnapshotInstalls)
+	n.obs.info("consensus: snapshot installed", lattr("index", meta.Position.Index), lattr("from", uint64(req.From.ID)))
 	return nil
 }
 
@@ -419,6 +425,7 @@ func (n *Node) join(ctx context.Context, from coreconsensus.AuthenticatedPeer, r
 	if last, ok := n.lastJoin[r.Slot]; ok && now.Sub(last) < n.Status().Timing.ElectionTimeoutMin {
 		n.joinMu.Unlock()
 		n.joinRefused.Add(1)
+		n.obs.inc(mJoinsRateLimited)
 		return coreconsensus.Position{}, coreconsensus.CodeJoinRefused
 	}
 	n.lastJoin[r.Slot] = now
