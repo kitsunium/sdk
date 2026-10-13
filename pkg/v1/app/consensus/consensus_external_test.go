@@ -105,10 +105,25 @@ func TestFacadeThreeNodesInMemory(t *testing.T) {
 	if sum != 3 {
 		t.Fatalf("sum %d", sum)
 	}
-	if _, err := nodes[0].Barrier(ctx); err != nil {
+	// Barrier is the contract: its token is the applied index once it
+	// returns. Status is the node's view after its LAST TURN, published by
+	// the loop while entries are applied on another goroutine, so it may
+	// trail the Barrier by one turn and is polled rather than read once.
+	tok, err := nodes[0].Barrier(ctx)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if st := nodes[0].Status(); st.Leader == 0 || st.Applied < 3 {
-		t.Fatalf("status %+v", st)
+	if tok.Index < 3 {
+		t.Fatalf("barrier token %+v", tok)
+	}
+	for {
+		st := nodes[0].Status()
+		if st.Leader != 0 && st.Applied >= 3 {
+			break
+		}
+		if ctx.Err() != nil {
+			t.Fatalf("status %+v", st)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
