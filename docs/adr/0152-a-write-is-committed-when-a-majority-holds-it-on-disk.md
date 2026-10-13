@@ -1528,7 +1528,11 @@ one term — once before the loss, once after — and elect two leaders.
 - **Bootstrap (R2-24, R7-36, R7-43).** It is an explicit call in two phases.
   First `Init` runs on every founding node and prints its
   `NodeID:Incarnation:slot:SPKI:address` (R9-04). Then `Bootstrap` runs on every founding node
-  with the IDENTICAL list `--members id:inc:slot:spki:addr,...`.
+  with the IDENTICAL list `--members id:inc:slot:spki:addr,...`. The list
+  is compared and written in NodeID order, so its order on the command line
+  does not matter: entry 1 is byte-identical on every founder, as the chain
+  requires (review of PR #301, M1). The founders also pass the same initial
+  timing contract, which entry 1 carries.
   **`Bootstrap`, `Recover` and `RestoreSnapshot` require a non-zero SPKI for
   every member (R9-04).** An empty pin is refused, so no member is ever
   admitted on its slot alone. A RUNNING server

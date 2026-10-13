@@ -232,7 +232,7 @@ func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsen
 		chain, termAt = metas[0].ChainTip, metas[0].Position.Term
 	}
 	term := max(hs.Term, termAt) + 1
-	conf := coreconsensus.Membership{Members: slices.Clone(members), Retired: old.Retired}
+	conf := coreconsensus.Membership{Members: byID(members), Retired: old.Retired}
 	data := wire.AppendAdmin(nil, &wire.Admin{Operator: string(opt.Operator), Change: wire.ChangeForced, Membership: conf})
 	e := coreconsensus.Entry{
 		Position: coreconsensus.Position{Term: term, Index: commit + 1}, Kind: coreconsensus.EntryMembership,
