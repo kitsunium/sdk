@@ -39,6 +39,7 @@ go_test(
     name = "raft_test",
     srcs = [
         "checks_internal_test.go",
+        "lincheck_internal_test.go",
         "sim_internal_test.go",
         "sim_scenarios_internal_test.go",
         "soak_internal_test.go",

@@ -2061,7 +2061,9 @@ packages:
     - type: '*PEMIdentity'
     - type: '*x509.CertPool'
     - type: error
-  - doc: NewTCPTransportFromPEM builds the shipped transport from PEM files.
+  - doc: |-
+      NewTCPTransportFromPEM builds the shipped transport from PEM files, over
+      the reloadable identity, its roots included.
     in:
     - name: certFile
       type: string
@@ -2101,10 +2103,7 @@ packages:
     name: SPKIOf
     out:
     - type: '[32]byte'
-  - doc: |-
-      NewTCPTransport validates the configuration, reads the cluster and slot
-      from the certificate, and listens (D4, R3-24).
-    in:
+  - in:
     - name: cfg
       type: TransportConfig
     name: NewTCPTransport
@@ -2123,7 +2122,9 @@ packages:
     flock: github.com/kitsunium/sdk/internal/kernel/fs/flock
     level: github.com/kitsunium/sdk/internal/core/observe/logger/level
     raft: github.com/kitsunium/sdk/internal/service/app/consensus/raft
+    server: github.com/kitsunium/sdk/internal/service/net/server
     svctransform: github.com/kitsunium/sdk/internal/service/data/transform
+    tlsid: github.com/kitsunium/sdk/internal/service/net/tlsid
     wire: github.com/kitsunium/sdk/internal/service/app/consensus/wire
   path: github.com/kitsunium/sdk/internal/service/app/consensus
   types:
@@ -3068,10 +3069,12 @@ packages:
         type: coretransform.BoundedDecompressor
   - doc: |-
       PEMIdentity is a node identity read from PEM files: the certificate (its
-      chain may follow it), the key, and the consensus CA. GetCertificate
-      rereads the files when they change, and keeps the old identity when the
-      new one fails, does not match its key, or carries another key or SAN: a
-      renewal reuses the key, so the members' pins hold (R8-07).
+      chain may follow it), the key, and the consensus CA. It is the
+      net/tlsid reloadable identity of ADR 0174 D1: GetCertificate rereads the
+      files when they change, and keeps the old identity when the new one
+      fails, does not match its key, or carries another key or SAN — a renewal
+      reuses the key, so the members' pins hold (R8-07). A new CA file is added
+      to the trusted roots, so a rollover trusts the union.
     methods:
     - doc: |-
         GetCertificate returns the current certificate, reloading it in place when
@@ -3247,6 +3250,23 @@ packages:
       name: RefusedBeforeHandshake
       out:
       - type: int64
+      recv: '*TCPTransport'
+    - doc: CertExpiry returns when the transport's own certificate expires.
+      name: CertExpiry
+      out:
+      - type: time.Time
+      recv: '*TCPTransport'
+    - doc: |-
+        PeerCertExpiry returns when each admitted peer's last-seen certificate
+        expires.
+      name: PeerCertExpiry
+      out:
+      - type: map[coreconsensus.NodeID]time.Time
+      recv: '*TCPTransport'
+    - doc: ReloadFailures counts the refused reloads of a PEM identity, 0 without one.
+      name: ReloadFailures
+      out:
+      - type: int
       recv: '*TCPTransport'
     name: TCPTransport
     struct:

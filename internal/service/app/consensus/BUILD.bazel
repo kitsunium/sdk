@@ -51,6 +51,7 @@ go_library(
         "//internal/service/app/consensus/wire",
         "//internal/service/data/transform",
         "//internal/service/net/server",
+        "//internal/service/net/tlsid",
     ],
 )
 

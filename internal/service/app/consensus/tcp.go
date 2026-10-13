@@ -20,6 +20,7 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 	"github.com/kitsunium/sdk/internal/service/net/server"
+	"github.com/kitsunium/sdk/internal/service/net/tlsid"
 )
 
 // TransportConfig builds the shipped mTLS transport (D4, D14).
@@ -122,6 +123,7 @@ type peerConn struct {
 // direction, length-prefixed frames bounded before allocation.
 type TCPTransport struct {
 	cfg     TransportConfig
+	id      *tlsid.Identity
 	cluster coreconsensus.ClusterID
 	slot    string
 	ln      net.Listener
@@ -137,7 +139,6 @@ type TCPTransport struct {
 	resvMu      sync.Mutex
 	resvSeq     atomic.Uint64
 	peerExpiry  map[coreconsensus.NodeID]time.Time
-	reloads     func() int
 	deliver     func(coreconsensus.AuthenticatedPeer, []byte)
 	offer       func(coreconsensus.AuthenticatedPeer, coreconsensus.InstallOffer) coreconsensus.InstallAccept
 	install     func(coreconsensus.InstallRequest) error
@@ -155,7 +156,8 @@ type outKey struct {
 
 // NewTCPTransport validates the configuration, reads the cluster and slot
 // from the certificate, and listens (D4, R3-24).
-func NewTCPTransport(cfg TransportConfig) (*TCPTransport, error) {
+// validate applies the defaults and the refusals of the configuration.
+func (cfg *TransportConfig) validate() error {
 	if cfg.MaxFrameBytes <= 0 {
 		cfg.MaxFrameBytes = 16 << 20
 	}
@@ -185,21 +187,41 @@ func NewTCPTransport(cfg TransportConfig) (*TCPTransport, error) {
 	}
 	switch {
 	case cfg.Roots == nil:
-		return nil, transportMisconfigured("Roots", "nil")
+		return transportMisconfigured("Roots", "nil")
 	case cfg.Certificate == nil && cfg.GetCertificate == nil:
-		return nil, transportMisconfigured("Certificate", "nil")
+		return transportMisconfigured("Certificate", "nil")
 	case cfg.HandshakeTimeout > time.Second:
-		return nil, transportMisconfigured("HandshakeTimeout", "above 1 s")
+		return transportMisconfigured("HandshakeTimeout", "above 1 s")
 	case cfg.MaxControlFrameBytes >= cfg.MaxFrameBytes:
-		return nil, transportMisconfigured("MaxControlFrameBytes", "not below MaxFrameBytes")
+		return transportMisconfigured("MaxControlFrameBytes", "not below MaxFrameBytes")
 	case cfg.ListenAddress == "":
-		return nil, transportMisconfigured("ListenAddress", "empty")
+		return transportMisconfigured("ListenAddress", "empty")
 	}
-	cert, err := (&TCPTransport{cfg: cfg}).certificate()
-	if err != nil {
+	return nil
+}
+
+func NewTCPTransport(cfg TransportConfig) (*TCPTransport, error) {
+	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
-	leaf, err := x509.ParseCertificate(cert.Certificate[0])
+	return newTCPTransport(cfg, nil)
+}
+
+// newTCPTransport builds the transport over id, or over the configuration's
+// certificate source and roots when id is nil.
+func newTCPTransport(cfg TransportConfig, id *tlsid.Identity) (*TCPTransport, error) {
+	if id == nil {
+		get := cfg.GetCertificate
+		if get == nil {
+			c := cfg.Certificate
+			get = func() (*tls.Certificate, error) { return c, nil }
+		}
+		var err error
+		if id, err = tlsid.NewIdentity(get, cfg.Roots); err != nil {
+			return nil, transportMisconfigured("Certificate", err.Error())
+		}
+	}
+	leaf, err := id.Leaf()
 	if err != nil {
 		return nil, transportMisconfigured("Certificate", "unparsable")
 	}
@@ -207,7 +229,7 @@ func NewTCPTransport(cfg TransportConfig) (*TCPTransport, error) {
 	if err != nil {
 		return nil, transportMisconfigured("Certificate", "URI SAN")
 	}
-	t := &TCPTransport{cfg: cfg, cluster: cid, slot: slot,
+	t := &TCPTransport{cfg: cfg, id: id, cluster: cid, slot: slot,
 		members: map[coreconsensus.GroupID][]coreconsensus.Member{}, byID: map[coreconsensus.NodeID]coreconsensus.Member{},
 		bySPKI: map[[32]byte]coreconsensus.Member{}, out: map[outKey]*peerConn{}, in: map[net.Conn][32]byte{}, raw: map[net.Conn]struct{}{}, admission: server.NewAdmission(server.AdmissionConfig{PerAddress: cfg.MaxUnauthenticatedPerIP, Reserved: cfg.ReservedMemberSlots}), peerExpiry: map[coreconsensus.NodeID]time.Time{},
 		done: make(chan struct{})}
@@ -230,49 +252,22 @@ func (t *TCPTransport) Cluster() coreconsensus.ClusterID { return t.cluster }
 // Slot returns the slot the certificate names.
 func (t *TCPTransport) Slot() string { return t.slot }
 
-func (t *TCPTransport) certificate() (*tls.Certificate, error) {
-	if t.cfg.GetCertificate != nil {
-		c, err := t.cfg.GetCertificate()
-		if err != nil || c == nil || len(c.Certificate) == 0 {
-			return nil, transportMisconfigured("GetCertificate", "no certificate")
+// checkPeer is what the transport adds to the identity's verification, on
+// every handshake: the one canonical URI SAN, of this cluster, and, when
+// dialing a member, its pinned key (R2-21, R7-41, R8-07).
+func (t *TCPTransport) checkPeer(pin *[32]byte) tlsid.Verify {
+	return func(p tlsid.PeerIdentity) error {
+		cid, _, err := parseSAN(p.Leaf)
+		if err != nil {
+			return err
 		}
-		return c, nil
-	}
-	return t.cfg.Certificate, nil
-}
-
-// verifyChain runs the full x509 verification, roots and extended key
-// usage, before any SAN is read (R2-21).
-func (t *TCPTransport) verifyChain(cs tls.ConnectionState, usage x509.ExtKeyUsage) (*x509.Certificate, error) {
-	if len(cs.PeerCertificates) == 0 {
-		return nil, peerRejected("no certificate")
-	}
-	leaf := cs.PeerCertificates[0]
-	inter := x509.NewCertPool()
-	for _, c := range cs.PeerCertificates[1:] {
-		inter.AddCert(c)
-	}
-	if _, err := leaf.Verify(x509.VerifyOptions{Roots: t.cfg.Roots, Intermediates: inter, KeyUsages: []x509.ExtKeyUsage{usage}}); err != nil {
-		return nil, peerRejected("chain: " + err.Error())
-	}
-	cid, _, err := parseSAN(leaf)
-	if err != nil {
-		return nil, err
-	}
-	if cid != t.cluster {
-		return nil, peerRejected("another cluster")
-	}
-	return leaf, nil
-}
-
-func (t *TCPTransport) tlsConfig() *tls.Config {
-	return &tls.Config{
-		MinVersion: tls.VersionTLS13,
-		// Session tickets are off, so a resumed session never skips the
-		// certificate check (R7-26).
-		SessionTicketsDisabled: true,
-		GetCertificate:         func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return t.certificate() },
-		GetClientCertificate:   func(*tls.CertificateRequestInfo) (*tls.Certificate, error) { return t.certificate() },
+		if cid != t.cluster {
+			return peerRejected("another cluster")
+		}
+		if pin != nil && p.SPKI != *pin {
+			return peerRejected("key does not match the member's pin")
+		}
+		return nil
 	}
 }
 
@@ -313,16 +308,7 @@ func (t *TCPTransport) serve(raw net.Conn, release func()) {
 		delete(t.raw, raw)
 		t.mu.Unlock()
 	}()
-	var leaf *x509.Certificate
-	cfg := t.tlsConfig()
-	cfg.ClientAuth = tls.RequireAndVerifyClientCert
-	cfg.ClientCAs = t.cfg.Roots
-	cfg.VerifyConnection = func(cs tls.ConnectionState) error {
-		l, err := t.verifyChain(cs, x509.ExtKeyUsageClientAuth)
-		leaf = l
-		return err
-	}
-	c := tls.Server(raw, cfg)
+	c := tls.Server(raw, t.id.ServerConfig(t.checkPeer(nil)))
 	_ = c.SetDeadline(time.Now().Add(t.cfg.HandshakeTimeout))
 	defer release()
 	err := c.Handshake()
@@ -331,12 +317,17 @@ func (t *TCPTransport) serve(raw net.Conn, release func()) {
 	if err != nil {
 		return
 	}
+	pid, ok := tlsid.PeerOf(c.ConnectionState())
+	if !ok {
+		return
+	}
+	leaf := pid.Leaf
 	var lane [1]byte
 	if _, err := io.ReadFull(c, lane[:]); err != nil {
 		return
 	}
 	_ = c.SetDeadline(time.Time{})
-	spki := spkiOf(leaf)
+	spki := pid.SPKI
 	_, slot, _ := parseSAN(leaf)
 	t.mu.Lock()
 	m, member := t.bySPKI[spki]
@@ -421,23 +412,9 @@ func (t *TCPTransport) dial(ctx context.Context, addr string, lane byte, pin *[3
 	if err != nil {
 		return nil, err
 	}
-	cfg := t.tlsConfig()
-	cfg.RootCAs = t.cfg.Roots
-	// The chain is verified by VerifyConnection itself, roots and extended
-	// key usage first, then the SAN and the pin (R2-21): the standard
-	// check would look for a DNS name the certificate does not carry.
-	cfg.InsecureSkipVerify = true
-	cfg.VerifyConnection = func(cs tls.ConnectionState) error {
-		leaf, err := t.verifyChain(cs, x509.ExtKeyUsageServerAuth)
-		if err != nil {
-			return err
-		}
-		if pin != nil && spkiOf(leaf) != *pin {
-			return peerRejected("key does not match the member's pin")
-		}
-		return nil
-	}
-	c := tls.Client(raw, cfg)
+	// The identity verifies the chain, roots and extended key usage first,
+	// then the transport's SAN and pin check runs (R2-21, ADR 0174 D1).
+	c := tls.Client(raw, t.id.ClientConfig(t.checkPeer(pin)))
 	_ = c.SetDeadline(time.Now().Add(t.cfg.HandshakeTimeout))
 	if err := c.HandshakeContext(ctx); err != nil {
 		raw.Close()
@@ -920,15 +897,9 @@ func (t *TCPTransport) RefusedBeforeHandshake() int64 { return t.admission.Refus
 
 // CertExpiry returns when the transport's own certificate expires.
 func (t *TCPTransport) CertExpiry() time.Time {
-	c, err := t.certificate()
-	if err != nil || len(c.Certificate) == 0 {
+	leaf, err := t.id.Leaf()
+	if err != nil {
 		return time.Time{}
-	}
-	leaf := c.Leaf
-	if leaf == nil {
-		if leaf, err = x509.ParseCertificate(c.Certificate[0]); err != nil {
-			return time.Time{}
-		}
 	}
 	return leaf.NotAfter
 }
@@ -946,9 +917,4 @@ func (t *TCPTransport) PeerCertExpiry() map[coreconsensus.NodeID]time.Time {
 }
 
 // ReloadFailures counts the refused reloads of a PEM identity, 0 without one.
-func (t *TCPTransport) ReloadFailures() int {
-	if t.reloads == nil {
-		return 0
-	}
-	return t.reloads()
-}
+func (t *TCPTransport) ReloadFailures() int { return int(t.id.ReloadFailures()) }

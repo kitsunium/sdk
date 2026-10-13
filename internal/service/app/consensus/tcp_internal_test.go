@@ -238,7 +238,7 @@ func TestTCPRefusesAnUnpinnedKeyAndAnotherCluster(t *testing.T) {
 		t.Fatalf("non-canonical SAN: %v", err)
 	}
 	// Session tickets stay off (R7-26).
-	if !target.tr.tlsConfig().SessionTicketsDisabled {
+	if !target.tr.id.ServerConfig(nil).SessionTicketsDisabled || !target.tr.id.ClientConfig(nil).SessionTicketsDisabled {
 		t.Fatal("session tickets enabled")
 	}
 	if _, err := NewTCPTransport(TransportConfig{Certificate: c, Roots: ca.pool, ListenAddress: "127.0.0.1:0", HandshakeTimeout: 2 * time.Second}); !errors.Is(err, coreconsensus.TransportMisconfigured) {
