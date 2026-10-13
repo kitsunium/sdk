@@ -253,12 +253,36 @@ func TestDataDirLockAndStopMarkers(t *testing.T) {
 		t.Fatalf("second open: %v", err)
 	}
 	l := d.d.log
+	// The boot-scoped place is /run on Linux, which only root may create
+	// into: the suite points it at a directory of its own, so the second
+	// marker is asserted rather than silently absent.
+	l.runDir = filepath.Join(t.TempDir(), "run")
 	if !l.markStop(coreconsensus.CodeStorageFailed, "fdatasync: EIO") {
 		t.Fatal("no marker written")
 	}
-	defer os.Remove(l.runtimeMarker("STORAGE_FAILED"))
+	inDir := filepath.Join(dir, markerStopPrefix+"STORAGE_FAILED")
+	for _, p := range []string{inDir, l.runtimeMarker("STORAGE_FAILED")} {
+		if _, err := os.Stat(p); err != nil {
+			t.Fatalf("STORAGE_FAILED marker missing: %v", err)
+		}
+	}
 	if err := l.checkMarkers(); !errors.Is(err, coreconsensus.StopMarkerPresent) {
 		t.Fatalf("same boot: %v", err)
+	}
+	// EITHER marker refuses on its own (R9-05): with the data directory's
+	// gone, the boot-scoped one still holds the node in this boot.
+	body, err := os.ReadFile(inDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(inDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.checkMarkers(); !errors.Is(err, coreconsensus.StopMarkerPresent) {
+		t.Fatalf("boot-scoped marker alone: %v", err)
+	}
+	if err := os.WriteFile(inDir, body, 0o600); err != nil {
+		t.Fatal(err)
 	}
 	// Another boot_id in both markers: the node starts (R8-05).
 	for _, p := range []string{filepath.Join(dir, markerStopPrefix+"STORAGE_FAILED"), l.runtimeMarker("STORAGE_FAILED")} {

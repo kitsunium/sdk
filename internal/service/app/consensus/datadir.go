@@ -237,7 +237,7 @@ func writeStamp(dir string, s coreconsensus.Stamp) error {
 
 func (l *FileLog) runtimeMarker(reason string) string {
 	sum := sha256.Sum256([]byte(l.dir))
-	return filepath.Join(runtimeMarkerDir(), hex.EncodeToString(sum[:8])+"-"+reason)
+	return filepath.Join(l.runDir, hex.EncodeToString(sum[:8])+"-"+reason)
 }
 
 // markStop writes the stop's marker: STORAGE_FAILED in TWO places, the data
@@ -248,7 +248,7 @@ func (l *FileLog) markStop(code errs.Code, detail string) bool {
 	body := []byte(fmt.Sprintf("boot=%s\n%s\n", bootID(), detail))
 	written := writeFileSync(filepath.Join(l.dir, markerStopPrefix+reason), body) == nil
 	if code == coreconsensus.CodeStorageFailed {
-		if err := os.MkdirAll(runtimeMarkerDir(), 0o700); err == nil {
+		if err := os.MkdirAll(l.runDir, 0o700); err == nil {
 			if writeFileSync(l.runtimeMarker(reason), body) == nil {
 				written = true
 			}

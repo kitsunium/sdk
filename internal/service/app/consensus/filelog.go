@@ -206,6 +206,11 @@ type FileLog struct {
 	failed         error
 	refuse         error
 	dd             *dataDir
+	// runDir is the boot-scoped directory of the second STORAGE_FAILED
+	// marker (R9-05). It is read once at open from runtimeMarkerDir and is
+	// a field, not a constant, so a test can point it at a directory an
+	// unprivileged process may create: /run is root's.
+	runDir string
 }
 
 func segName(n uint64) string { return fmt.Sprintf("seg-%016x", n) }
@@ -224,7 +229,7 @@ func openFileLog(dd *dataDir, segBytes int64) (*FileLog, error) {
 	if segBytes <= 0 {
 		segBytes = DefaultSegmentBytes
 	}
-	l := &FileLog{dir: dd.dir, segBytes: segBytes, dd: dd, first: 1, pendingLast: -1}
+	l := &FileLog{dir: dd.dir, segBytes: segBytes, dd: dd, first: 1, pendingLast: -1, runDir: runtimeMarkerDir()}
 	if err := os.MkdirAll(l.logDir(), 0o700); err != nil {
 		return nil, storageFailed("mkdir", err)
 	}
