@@ -517,3 +517,76 @@ drop_line() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"NOT BLOCKING: 'docs-check' runs only in job 'docs-site'"* ]]
 }
+
+# ── ktn-linter: a gate, through the public channel (#236) ───────────────────
+
+# lint-ktn-check was kept out of GATES while its step hung on a
+# KTN_LINTER_TOKEN secret the repository never had: every run skipped it with a
+# warning, and the manifest would have certified a gate that ran nowhere. The
+# public `kodflow/ktn/setup` action installs the release binary and proves the
+# licence with the runner's OIDC token, so nothing is left to skip it but a
+# pull request GitHub gives no id-token to.
+@test "ktn: lint-ktn-check is a gate, run by the required bazel job" {
+  run grep -qxE '  lint-ktn-check' "$REPO_ROOT/scripts/ci-gates-check.sh"
+  [ "$status" -eq 0 ]
+  body="$(job_body "$REPO_ROOT/.github/workflows/bazel-ci.yml" bazel)"
+  [[ "$body" == *"run: make lint-ktn-check"* ]]
+}
+
+# A tag or a branch of a third-party action can be moved under this lane; a
+# full commit SHA cannot (.github/workflows/CLAUDE.md, Conventions).
+@test "ktn: the setup action is the public one, pinned by a full commit SHA" {
+  body="$(job_body "$REPO_ROOT/.github/workflows/bazel-ci.yml" bazel)"
+  run grep -cE 'uses: kodflow/ktn/setup@[0-9a-f]{40}( |$)' <<<"$body"
+  [ "$output" = "1" ]
+  run grep -cE 'uses: kodflow/ktn/setup@' <<<"$body"
+  [ "$output" = "1" ]
+}
+
+# The dead path, by its three marks: the secret, the private source fetch, and
+# the from-source build CI no longer performs.
+@test "ktn: CI needs no secret and fetches no private source" {
+  wf="$REPO_ROOT/.github/workflows/bazel-ci.yml"
+  run grep -c 'KTN_LINTER_TOKEN' "$wf"
+  [ "$output" = "0" ]
+  run grep -c 'kodflow/ktn-linter.git' "$wf"
+  [ "$output" = "0" ]
+  run grep -cE '^[[:space:]]+run: make lint-ktn-install' "$wf"
+  [ "$output" = "0" ]
+}
+
+# id-token: write lets a job mint a token GitHub signs for this repository. The
+# bazel job needs it for the licence check and no other job does, so the
+# workflow root stays at contents: read.
+@test "ktn: id-token is granted to the bazel job, never to the workflow" {
+  wf="$REPO_ROOT/.github/workflows/bazel-ci.yml"
+  root_perms="$(awk '/^permissions:/ { p = 1; next } p && /^[^[:space:]#]/ { exit } p { print }' "$wf")"
+  [[ "$root_perms" == *"contents: read"* ]]
+  [[ "$root_perms" != *"id-token"* ]]
+  body="$(job_body "$wf" bazel)"
+  [[ "$body" == *"      id-token: write"* ]]
+  [[ "$body" == *"      contents: read"* ]]
+  # As a permissions KEY, exactly once in the file: no other job asks for it.
+  run grep -cE '^[[:space:]]+id-token:[[:space:]]*write[[:space:]]*$' "$wf"
+  [ "$output" = "1" ]
+}
+
+# A gate that can go red and still let the job pass is not a gate.
+@test "ktn: no step of the required job continues on error" {
+  body="$(job_body "$REPO_ROOT/.github/workflows/bazel-ci.yml" bazel)"
+  run grep -c 'continue-on-error' <<<"$body"
+  [ "$output" = "0" ]
+}
+
+# The one skip GitHub forces: a fork or Dependabot pull request gets no
+# id-token. It must say so, and a run that is neither must not skip quietly
+# when the token is missing.
+@test "ktn: only a fork or Dependabot pull request skips the linter, with a warning" {
+  body="$(job_body "$REPO_ROOT/.github/workflows/bazel-ci.yml" bazel)"
+  [[ "$body" == *'github.event.pull_request.head.repo.full_name'* ]]
+  [[ "$body" == *'dependabot[bot]'* ]]
+  [[ "$body" == *'::warning title=ktn-linter gate did not run::'* ]]
+  [[ "$body" == *'ACTIONS_ID_TOKEN_REQUEST_URL'* ]]
+  run grep -c "if: steps.ktnoidc.outputs.run == 'true'" <<<"$body"
+  [ "$output" = "2" ]
+}

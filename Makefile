@@ -112,9 +112,9 @@ lint:
 	bazel mod tidy
 	bazel run //:gazelle -- -mode=diff
 	@git diff --exit-code MODULE.bazel '**/BUILD.bazel'
-	# gofumpt + sdkguard, then ktn-linter. Two targets, not one, because CI can
-	# run the first pair unconditionally and the second only where a credential
-	# for the private linter release exists. See the comment on `lint-check`.
+	# gofumpt + sdkguard, then ktn-linter. Two targets, not one, because the
+	# second needs a binary and a licence the first does not. See the comment
+	# on `lint-check`.
 	$(MAKE) --no-print-directory lint-check
 	$(MAKE) --no-print-directory lint-ktn-check
 	# Exemption invariant: a `//go:build !race` test is invisible to the race
@@ -150,8 +150,8 @@ lint:
 	bash scripts/check-layer-deps.sh
 
 # `lint-check` and `lint-ktn-check` are the parts of `lint` a CI runner can
-# execute on its own: a Go toolchain and two pinned binaries, no Bazel, no
-# gazelle. `lint-check` also runs `doclinks` (ADR 0138) and `api-check`, which
+# execute on its own: a Go toolchain, a pinned gofumpt and the vendor's
+# ktn-linter, no Bazel, no gazelle. `lint-check` also runs `doclinks` (ADR 0138) and `api-check`, which
 # need nothing but the toolchain either — api-check also the workspace's
 # modules, which the go command fetches when the module cache lacks them.
 #
@@ -167,15 +167,12 @@ lint:
 #
 # The split is not cosmetic. `gofumpt` is a public Go module and `sdkguard` is
 # in this repository, so `lint-check` needs nothing but the toolchain.
-# kodflow/ktn-linter is a PRIVATE repository, and a workflow token is scoped to
-# the repository that issues it — measured on this lane, not assumed:
-#
-#   gh release download v1.11.2 --repo kodflow/ktn-linter  ->  release not found
-#
-# with `secrets.GITHUB_TOKEN`, and the same command with a credentialed account
-# downloads the asset. So the two halves have different preconditions, and a
-# single target would have made the half that CAN run depend on the half that
-# cannot.
+# `ktn-linter` is a licensed binary: CI installs it from the vendor's public
+# channel with `kodflow/ktn/setup`, which proves the licence with the runner's
+# OIDC token (bazel-ci.yml), and a machine installs it with the vendor's
+# installer and its own licence, or builds it from source (`lint-ktn-install`).
+# So the two halves have different preconditions, and a single target would
+# have made the half that needs nothing depend on the half that needs a licence.
 #
 # `lint` delegates to both instead of repeating either recipe, so the set CI
 # enforces and the set `make lint` enforces locally cannot drift apart by
@@ -199,22 +196,30 @@ lint-check:
 # Gate on the gating phases (1-7) only — phase 8 (tests) is advisory, matching
 # the MCP daemon's active set and the PostToolUse hook. `--phases=all` pulled in
 # style-only test rules (TEST-TABLE/TEST-CONTEXT) that block no CI lane.
+# `run` is the command the vendor documents; `lint` is its alias in 1.45.4.
+# A gate of scripts/ci-gates-check.sh, run by the required `bazel` job (#236).
 lint-ktn-check:
-	ktn-linter lint --skip-phases=tests ./...
+	ktn-linter run --skip-phases=tests ./...
 
-# ktn-linter is BUILT FROM SOURCE at a pinned commit, never downloaded from a
-# release. A release binary is stamped at link time with the vendor's licence
-# anchor (kodflow/ktn-linter cmd/ktn-linter/BUILD.bazel, x_defs
-# STABLE_KTN_ANCHOR) and then demands a licence on the machine that runs it — a
-# CI runner has none. A source build leaves that anchor empty, which upstream
-# documents as the maintainers' mode ("repository access IS the entitlement",
-# cmd/ktn-linter/cmd/vendor_key.go), so its licence gate is inert by
-# construction. The commit is pinned, not the tag: a tag can be moved, a commit
-# cannot, and a lane following `main` would change its verdict with no commit
-# of this repository moving (#223). KTN_LINTER_COMMIT is the commit tag v1.45.4
+# `lint-ktn-install` is the LOCAL alternative to the release binary, for a
+# maintainer with read access to the private source; CI does not run it (CI
+# installs the vendor's release binary through `kodflow/ktn/setup`, licensed by
+# the runner's OIDC token — bazel-ci.yml). It needs no secret: the clone uses
+# whatever account the maintainer is signed in with.
+#
+# A release binary is stamped at link time with the vendor's licence anchor
+# (kodflow/ktn-linter cmd/ktn-linter/BUILD.bazel, x_defs STABLE_KTN_ANCHOR) and
+# demands a licence on the machine that runs it. A source build leaves that
+# anchor empty, which upstream documents as the maintainers' mode ("repository
+# access IS the entitlement", cmd/ktn-linter/cmd/vendor_key.go), so its licence
+# gate is inert by construction. The commit is pinned, not the tag: a tag can be
+# moved, a commit cannot (#223). KTN_LINTER_COMMIT is the commit tag v1.45.4
 # points at; KTN_LINTER_VERSION is stamped into `main.Version` (for a main
 # package `-X` takes `main.`, not the import path — measured, the import path
-# leaves `--version` at `dev`).
+# leaves `--version` at `dev`). The release CI installs is the vendor's latest
+# and cannot be pinned (one release is kept, and the signed roster's minimum
+# version upgrades an older binary), so move this pin when CI's log reports a
+# newer version, or the two verdicts can differ.
 #
 # The target builds an existing checkout and fetches nothing, so the credential
 # that reads the private repository never reaches `go build` or the binary:
