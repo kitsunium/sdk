@@ -19,6 +19,8 @@ go_library(
         "fsfree_other.go",
         "fsfree_unix.go",
         "fsfree_windows.go",
+        "health.go",
+        "initlog.go",
         "join.go",
         "memlog.go",
         "memsnap.go",

@@ -2827,7 +2827,7 @@ func (*Node) HardClose() error
 HardClose stops now: no transfer, no final sync, bounded by HardCloseTimeout (R7-11). It launches one goroutine that waits for the node's goroutines; when the timeout fires first, that waiter is abandoned with them and the data directory stays held until the process exits.
 
 <a name="Node.Health"></a>
-### func \(Node\) [Health](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/bootstrap.go>)
+### func \(Node\) [Health](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/health.go>)
 
 ```go
 func (*Node) Health() HealthValue

@@ -2060,49 +2060,6 @@ packages:
               name: MaxClockDrift
               type: float64
   - constants:
-      - blockDoc: The facts a PeerHealthValue carries.
-        doc: PeerVoter is set for a voter, clear for a learner.
-        name: PeerVoter
-        type: PeerFlags
-        value: "1"
-      - blockDoc: The facts a PeerHealthValue carries.
-        doc: |-
-          PeerUnreachable is set when the transport failed to reach the peer
-          since it last answered, or it has not answered within the minimum
-          election timeout.
-        name: PeerUnreachable
-        type: PeerFlags
-        value: "2"
-      - blockDoc: The facts a PeerHealthValue carries.
-        doc: PeerSnapshot is set while a snapshot is being sent to the peer.
-        name: PeerSnapshot
-        type: PeerFlags
-        value: "4"
-      - blockDoc: The answers a HealthValue carries.
-        doc: |-
-          HealthReady is the readiness answer: running, a leader known,
-          everything known committed applied, and not refusing the current
-          leader's chain (D4).
-        name: HealthReady
-        type: HealthFlags
-        value: "1"
-      - blockDoc: The answers a HealthValue carries.
-        doc: HealthHasLeader is set when a leader is known in the current term.
-        name: HealthHasLeader
-        type: HealthFlags
-        value: "2"
-      - blockDoc: The answers a HealthValue carries.
-        doc: |-
-          HealthQuorumReachable is set on a leader a majority answered within
-          the minimum election timeout; never elsewhere.
-        name: HealthQuorumReachable
-        type: HealthFlags
-        value: "4"
-      - blockDoc: The answers a HealthValue carries.
-        doc: HealthStopped is set once the node stopped itself or was closed.
-        name: HealthStopped
-        type: HealthFlags
-        value: "8"
       - doc: |-
           ReadIndex confirms every read by a heartbeat round started after it
           arrived. It is the zero value and the default.
@@ -2153,6 +2110,49 @@ packages:
         name: DefaultSegmentBytes
         type: int64
         value: 64 << 20
+      - blockDoc: The facts a PeerHealthValue carries.
+        doc: PeerVoter is set for a voter, clear for a learner.
+        name: PeerVoter
+        type: PeerFlags
+        value: "1"
+      - blockDoc: The facts a PeerHealthValue carries.
+        doc: |-
+          PeerUnreachable is set when the transport failed to reach the peer
+          since it last answered, or it has not answered within the minimum
+          election timeout.
+        name: PeerUnreachable
+        type: PeerFlags
+        value: "2"
+      - blockDoc: The facts a PeerHealthValue carries.
+        doc: PeerSnapshot is set while a snapshot is being sent to the peer.
+        name: PeerSnapshot
+        type: PeerFlags
+        value: "4"
+      - blockDoc: The answers a HealthValue carries.
+        doc: |-
+          HealthReady is the readiness answer: running, a leader known,
+          everything known committed applied, and not refusing the current
+          leader's chain (D4).
+        name: HealthReady
+        type: HealthFlags
+        value: "1"
+      - blockDoc: The answers a HealthValue carries.
+        doc: HealthHasLeader is set when a leader is known in the current term.
+        name: HealthHasLeader
+        type: HealthFlags
+        value: "2"
+      - blockDoc: The answers a HealthValue carries.
+        doc: |-
+          HealthQuorumReachable is set on a leader a majority answered within
+          the minimum election timeout; never elsewhere.
+        name: HealthQuorumReachable
+        type: HealthFlags
+        value: "4"
+      - blockDoc: The answers a HealthValue carries.
+        doc: HealthStopped is set once the node stopped itself or was closed.
+        name: HealthStopped
+        type: HealthFlags
+        value: "8"
       - doc: |-
           WipeAndRejoin wipes the directory; the operator then Removes the old
           NodeID and Inits under a NEW one (R4-03). A voter's incarnation is
@@ -2184,32 +2184,6 @@ packages:
       retried (D4). The offline operations [Init], [Recover], [RestoreSnapshot],
       [Inspect] and [ClearQuarantine] work on a stopped node's directory only.
     functions:
-      - doc: |-
-          InitLog prepares a joining log purely offline: a random NodeID, a joining
-          stamp, and the pair returned. It is idempotent: a log already joining for
-          that cluster and slot returns its pair (D8, R3-02, R8-10).
-        in:
-          - name: log
-            type: coreconsensus.LogStore
-          - name: cluster
-            type: coreconsensus.ClusterID
-          - name: slot
-            type: string
-        name: InitLog
-        out:
-          - type: coreconsensus.NodeID
-          - type: coreconsensus.Incarnation
-          - type: error
-      - doc: |-
-          RedrawLog draws a new NodeID, only while the stamp is joining and the log
-          is empty (R8-10).
-        in:
-          - name: log
-            type: coreconsensus.LogStore
-        name: RedrawLog
-        out:
-          - type: coreconsensus.NodeID
-          - type: error
       - doc: |-
           Bootstrap founds a cluster on one founding node's log, in phases that are
           each idempotent: a bootstrap-pending stamp naming the founding list, the
@@ -2277,6 +2251,32 @@ packages:
         out:
           - type: string
           - type: bool
+      - doc: |-
+          InitLog prepares a joining log purely offline: a random NodeID, a joining
+          stamp, and the pair returned. It is idempotent: a log already joining for
+          that cluster and slot returns its pair (D8, R3-02, R8-10).
+        in:
+          - name: log
+            type: coreconsensus.LogStore
+          - name: cluster
+            type: coreconsensus.ClusterID
+          - name: slot
+            type: string
+        name: InitLog
+        out:
+          - type: coreconsensus.NodeID
+          - type: coreconsensus.Incarnation
+          - type: error
+      - doc: |-
+          RedrawLog draws a new NodeID, only while the stamp is joining and the log
+          is empty (R8-10).
+        in:
+          - name: log
+            type: coreconsensus.LogStore
+        name: RedrawLog
+        out:
+          - type: coreconsensus.NodeID
+          - type: error
       - doc: NewMemoryLog returns an empty in-memory log.
         name: NewMemoryLog
         out:
@@ -2510,113 +2510,6 @@ packages:
       x509: crypto/x509
     path: github.com/kitsunium/sdk/internal/service/app/consensus
     types:
-      - doc: |-
-          PeerHealthValue is the leader's view of one peer (D13), one line of
-          HealthValue.Peers. It is taken on the event loop and stale at the next
-          turn.
-        name: PeerHealthValue
-        struct:
-          fields:
-            - doc: ID is the peer.
-              name: ID
-              type: coreconsensus.NodeID
-            - doc: |-
-                Flags are the peer's yes/no facts: PeerVoter, PeerUnreachable,
-                PeerSnapshot.
-              name: Flags
-              type: PeerFlags
-            - doc: Match is the highest index the peer holds durably, as acknowledged.
-              name: Match
-              type: uint64
-            - doc: Lag is how far Match is behind the leader's last index.
-              name: Lag
-              type: uint64
-            - doc: Inflight counts the appends in flight to it.
-              name: Inflight
-              type: int
-            - doc: |-
-                LastContact is how long ago it last answered; negative when it never
-                answered in this term.
-              name: LastContact
-              type: time.Duration
-      - doc: |-
-          PeerFlags are a peer's yes/no facts in a health verdict, one bit each,
-          read with Has.
-        methods:
-          - doc: Has reports whether every fact of x is set.
-            in:
-              - name: x
-                type: PeerFlags
-            name: Has
-            out:
-              - type: bool
-            recv: value
-        name: PeerFlags
-        underlying: uint8
-      - doc: HealthFlags are a verdict's yes/no answers, one bit each, read with Has.
-        methods:
-          - doc: Has reports whether every answer of x is set.
-            in:
-              - name: x
-                type: HealthFlags
-            name: Has
-            out:
-              - type: bool
-            recv: value
-        name: HealthFlags
-        underlying: uint8
-      - doc: |-
-          HealthValue is a node's verdict for an orchestrator's probe (D13).
-          HealthReady in Flags is the readiness answer; the other fields say why, and
-          Peers is filled only on the leader.
-        name: HealthValue
-        struct:
-          fields:
-            - doc: Status is the node's view after its last turn.
-              name: Status
-              type: coreconsensus.StatusValue
-            - doc: |-
-                Flags are the verdict's yes/no answers: HealthReady, HealthHasLeader,
-                HealthQuorumReachable, HealthStopped.
-              name: Flags
-              type: HealthFlags
-            - doc: |-
-                FailureTolerance is how many voters can fail now with a majority
-                left. Only the leader knows it: -1 elsewhere.
-              name: FailureTolerance
-              type: int
-            - doc: ApplyLagEntries is commit minus applied.
-              name: ApplyLagEntries
-              type: uint64
-            - doc: Peers is the leader's view of every peer, nil elsewhere.
-              name: Peers
-              type: "[]PeerHealthValue"
-            - doc: |-
-                ChainRefusals counts identical chain refusals of this follower at
-                ChainRefusalIndex from ChainRefusalLeader; the node reports itself
-                unready while it refuses (D4, R6-05).
-              name: ChainRefusals
-              type: int
-            - name: ChainRefusalIndex
-              type: uint64
-            - name: ChainRefusalLeader
-              type: coreconsensus.NodeID
-            - doc: StopReason says why the node stopped itself.
-              name: StopReason
-              type: coreconsensus.StopReasonValue
-            - doc: |-
-                DroppedFrames counts frames whose From differed from the
-                authenticated peer (R7-05).
-              name: DroppedFrames
-              type: int64
-            - doc: |-
-                LongTurns counts the loop turns longer than the drift budget, each of
-                which dropped the lease (D9, R7-20).
-              name: LongTurns
-              type: int64
-            - doc: JoinsRateLimited counts JOINs refused by the one-per-slot rate.
-              name: JoinsRateLimited
-              type: int64
       - doc: ReadMode selects how Barrier confirms leadership (D9).
         name: ReadMode
         underlying: uint8
@@ -2765,6 +2658,113 @@ packages:
         name: DataDir
         struct:
           unexported: true
+      - doc: |-
+          PeerHealthValue is the leader's view of one peer (D13), one line of
+          HealthValue.Peers. It is taken on the event loop and stale at the next
+          turn.
+        name: PeerHealthValue
+        struct:
+          fields:
+            - doc: ID is the peer.
+              name: ID
+              type: coreconsensus.NodeID
+            - doc: |-
+                Flags are the peer's yes/no facts: PeerVoter, PeerUnreachable,
+                PeerSnapshot.
+              name: Flags
+              type: PeerFlags
+            - doc: Match is the highest index the peer holds durably, as acknowledged.
+              name: Match
+              type: uint64
+            - doc: Lag is how far Match is behind the leader's last index.
+              name: Lag
+              type: uint64
+            - doc: Inflight counts the appends in flight to it.
+              name: Inflight
+              type: int
+            - doc: |-
+                LastContact is how long ago it last answered; negative when it never
+                answered in this term.
+              name: LastContact
+              type: time.Duration
+      - doc: |-
+          PeerFlags are a peer's yes/no facts in a health verdict, one bit each,
+          read with Has.
+        methods:
+          - doc: Has reports whether every fact of x is set.
+            in:
+              - name: x
+                type: PeerFlags
+            name: Has
+            out:
+              - type: bool
+            recv: value
+        name: PeerFlags
+        underlying: uint8
+      - doc: HealthFlags are a verdict's yes/no answers, one bit each, read with Has.
+        methods:
+          - doc: Has reports whether every answer of x is set.
+            in:
+              - name: x
+                type: HealthFlags
+            name: Has
+            out:
+              - type: bool
+            recv: value
+        name: HealthFlags
+        underlying: uint8
+      - doc: |-
+          HealthValue is a node's verdict for an orchestrator's probe (D13).
+          HealthReady in Flags is the readiness answer; the other fields say why, and
+          Peers is filled only on the leader.
+        name: HealthValue
+        struct:
+          fields:
+            - doc: Status is the node's view after its last turn.
+              name: Status
+              type: coreconsensus.StatusValue
+            - doc: |-
+                Flags are the verdict's yes/no answers: HealthReady, HealthHasLeader,
+                HealthQuorumReachable, HealthStopped.
+              name: Flags
+              type: HealthFlags
+            - doc: |-
+                FailureTolerance is how many voters can fail now with a majority
+                left. Only the leader knows it: -1 elsewhere.
+              name: FailureTolerance
+              type: int
+            - doc: ApplyLagEntries is commit minus applied.
+              name: ApplyLagEntries
+              type: uint64
+            - doc: Peers is the leader's view of every peer, nil elsewhere.
+              name: Peers
+              type: "[]PeerHealthValue"
+            - doc: |-
+                ChainRefusals counts identical chain refusals of this follower at
+                ChainRefusalIndex from ChainRefusalLeader; the node reports itself
+                unready while it refuses (D4, R6-05).
+              name: ChainRefusals
+              type: int
+            - name: ChainRefusalIndex
+              type: uint64
+            - name: ChainRefusalLeader
+              type: coreconsensus.NodeID
+            - doc: StopReason says why the node stopped itself.
+              name: StopReason
+              type: coreconsensus.StopReasonValue
+            - doc: |-
+                DroppedFrames counts frames whose From differed from the
+                authenticated peer (R7-05).
+              name: DroppedFrames
+              type: int64
+            - doc: |-
+                LongTurns counts the loop turns longer than the drift budget, each of
+                which dropped the lease (D9, R7-20).
+              name: LongTurns
+              type: int64
+            - doc: JoinsRateLimited counts JOINs refused by the one-per-slot rate.
+              name: JoinsRateLimited
+              type: int64
       - doc: |-
           MemoryLog is the in-memory LogStore double (D2): every port contract
           except durability, which it has none of. Sync can be made to fail, so a

@@ -44491,7 +44491,7 @@
       "spelled": "uint8",
       "canonical": "uint8",
       "doc": "HealthFlags are a verdict's yes/no answers, one bit each, read with Has.\n",
-      "file": "service/app/consensus/bootstrap.go",
+      "file": "service/app/consensus/health.go",
       "layer": "service",
       "family": "app"
     },
@@ -44504,7 +44504,7 @@
       "spelled": "func(x HealthFlags) bool",
       "canonical": "func(x github.com/kitsunium/sdk/internal/service/app/consensus.HealthFlags) bool",
       "doc": "Has reports whether every answer of x is set.\n",
-      "file": "service/app/consensus/bootstrap.go",
+      "file": "service/app/consensus/health.go",
       "layer": "service",
       "family": "app"
     },
@@ -44517,7 +44517,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.HealthFlags",
       "value": "2",
       "doc": "HealthHasLeader is set when a leader is known in the current term.\n",
-      "file": "service/app/consensus/bootstrap.go",
+      "file": "service/app/consensus/health.go",
       "layer": "service",
       "family": "app"
     },
@@ -44530,7 +44530,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.HealthFlags",
       "value": "4",
       "doc": "HealthQuorumReachable is set on a leader a majority answered within\nthe minimum election timeout; never elsewhere.\n",
-      "file": "service/app/consensus/bootstrap.go",
+      "file": "service/app/consensus/health.go",
       "layer": "service",
       "family": "app"
     },
@@ -44543,7 +44543,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.HealthFlags",
       "value": "1",
       "doc": "HealthReady is the readiness answer: running, a leader known,\neverything known committed applied, and not refusing the current\nleader's chain (D4).\n",
-      "file": "service/app/consensus/bootstrap.go",
+      "file": "service/app/consensus/health.go",
       "layer": "service",
       "family": "app"
     },
@@ -44556,7 +44556,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.HealthFlags",
       "value": "8",
       "doc": "HealthStopped is set once the node stopped itself or was closed.\n",
-      "file": "service/app/consensus/bootstrap.go",
+      "file": "service/app/consensus/health.go",
       "layer": "service",
       "family": "app"
     },
@@ -44628,7 +44628,7 @@
         }
       ],
       "doc": "HealthValue is a node's verdict for an orchestrator's probe (D13).\nHealthReady in Flags is the readiness answer; the other fields say why, and\nPeers is filled only on the leader.\n",
-      "file": "service/app/consensus/bootstrap.go",
+      "file": "service/app/consensus/health.go",
       "layer": "service",
       "family": "app"
     },
@@ -44652,7 +44652,7 @@
       "spelled": "func(log coreconsensus.LogStore, cluster coreconsensus.ClusterID, slot string) (coreconsensus.NodeID, coreconsensus.Incarnation, error)",
       "canonical": "func(log github.com/kitsunium/sdk/internal/core/app/consensus.LogStore, cluster github.com/kitsunium/sdk/internal/core/app/consensus.ClusterID, slot string) (github.com/kitsunium/sdk/internal/core/app/consensus.NodeID, github.com/kitsunium/sdk/internal/core/app/consensus.Incarnation, error)",
       "doc": "InitLog prepares a joining log purely offline: a random NodeID, a joining\nstamp, and the pair returned. It is idempotent: a log already joining for\nthat cluster and slot returns its pair (D8, R3-02, R8-10).\n",
-      "file": "service/app/consensus/bootstrap.go",
+      "file": "service/app/consensus/initlog.go",
       "layer": "service",
       "family": "app"
     },
@@ -45321,7 +45321,7 @@
       "spelled": "func() HealthValue",
       "canonical": "func() github.com/kitsunium/sdk/internal/service/app/consensus.HealthValue",
       "doc": "Health returns the node's verdict, computed on the event loop.\n",
-      "file": "service/app/consensus/bootstrap.go",
+      "file": "service/app/consensus/health.go",
       "layer": "service",
       "family": "app"
     },
@@ -45567,7 +45567,7 @@
       "spelled": "uint8",
       "canonical": "uint8",
       "doc": "PeerFlags are a peer's yes/no facts in a health verdict, one bit each,\nread with Has.\n",
-      "file": "service/app/consensus/bootstrap.go",
+      "file": "service/app/consensus/health.go",
       "layer": "service",
       "family": "app"
     },
@@ -45580,7 +45580,7 @@
       "spelled": "func(x PeerFlags) bool",
       "canonical": "func(x github.com/kitsunium/sdk/internal/service/app/consensus.PeerFlags) bool",
       "doc": "Has reports whether every fact of x is set.\n",
-      "file": "service/app/consensus/bootstrap.go",
+      "file": "service/app/consensus/health.go",
       "layer": "service",
       "family": "app"
     },
@@ -45624,7 +45624,7 @@
         }
       ],
       "doc": "PeerHealthValue is the leader's view of one peer (D13), one line of\nHealthValue.Peers. It is taken on the event loop and stale at the next\nturn.\n",
-      "file": "service/app/consensus/bootstrap.go",
+      "file": "service/app/consensus/health.go",
       "layer": "service",
       "family": "app"
     },
@@ -45637,7 +45637,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.PeerFlags",
       "value": "4",
       "doc": "PeerSnapshot is set while a snapshot is being sent to the peer.\n",
-      "file": "service/app/consensus/bootstrap.go",
+      "file": "service/app/consensus/health.go",
       "layer": "service",
       "family": "app"
     },
@@ -45650,7 +45650,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.PeerFlags",
       "value": "2",
       "doc": "PeerUnreachable is set when the transport failed to reach the peer\nsince it last answered, or it has not answered within the minimum\nelection timeout.\n",
-      "file": "service/app/consensus/bootstrap.go",
+      "file": "service/app/consensus/health.go",
       "layer": "service",
       "family": "app"
     },
@@ -45663,7 +45663,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.PeerFlags",
       "value": "1",
       "doc": "PeerVoter is set for a voter, clear for a learner.\n",
-      "file": "service/app/consensus/bootstrap.go",
+      "file": "service/app/consensus/health.go",
       "layer": "service",
       "family": "app"
     },
@@ -45807,7 +45807,7 @@
       "spelled": "func(log coreconsensus.LogStore) (coreconsensus.NodeID, error)",
       "canonical": "func(log github.com/kitsunium/sdk/internal/core/app/consensus.LogStore) (github.com/kitsunium/sdk/internal/core/app/consensus.NodeID, error)",
       "doc": "RedrawLog draws a new NodeID, only while the stamp is joining and the log\nis empty (R8-10).\n",
-      "file": "service/app/consensus/bootstrap.go",
+      "file": "service/app/consensus/initlog.go",
       "layer": "service",
       "family": "app"
     },
