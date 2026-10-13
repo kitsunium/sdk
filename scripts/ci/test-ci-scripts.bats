@@ -440,14 +440,16 @@ drop_line() {
 # GitHub counts as passing. Each test removes one of the three pieces.
 @test "gates: the gates of shell-gates block through the required bazel job" {
   body="$(job_body "$REPO_ROOT/.github/workflows/bazel-ci.yml" bazel)"
-  [[ "$body" == *"    needs: shell-gates"* ]]
+  [[ "$body" == *"    needs: [shell-gates, lint-ktn]"* ]]
   [[ "$body" == *'    if: ${{ !cancelled() }}'* ]]
   [[ "$body" == *'needs.shell-gates.result'* ]]
+  [[ "$body" == *'needs.lint-ktn.result'* ]]
 }
 
 @test "gates: a gate in a job the required job does not need is NOT BLOCKING" {
   gates_fixture
-  drop_line .github/workflows/bazel-ci.yml "    needs: shell-gates"
+  sed -e 's/^    needs: \[shell-gates, lint-ktn\]$/    needs: [lint-ktn]/' .github/workflows/bazel-ci.yml >wf.tmp
+  mv wf.tmp .github/workflows/bazel-ci.yml
 
   run bash scripts/ci-gates-check.sh
 
@@ -526,17 +528,33 @@ drop_line() {
 # public `kodflow/ktn/setup` action installs the release binary and proves the
 # licence with the runner's OIDC token, so nothing is left to skip it but a
 # pull request GitHub gives no id-token to.
-@test "ktn: lint-ktn-check is a gate, run by the required bazel job" {
+@test "ktn: lint-ktn-check is a gate, run by lint-ktn and blocking through bazel" {
   run grep -qxE '  lint-ktn-check' "$REPO_ROOT/scripts/ci-gates-check.sh"
   [ "$status" -eq 0 ]
-  body="$(job_body "$REPO_ROOT/.github/workflows/bazel-ci.yml" bazel)"
+  body="$(job_body "$REPO_ROOT/.github/workflows/bazel-ci.yml" lint-ktn)"
   [[ "$body" == *"run: make lint-ktn-check"* ]]
+  run bash "$REPO_ROOT/scripts/ci-gates-check.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"NOT BLOCKING: 'lint-ktn-check'"* ]]
+}
+
+# The three pieces again, for lint-ktn: drop its result check from bazel's
+# first step, and its gate stops blocking.
+@test "ktn: a lint-ktn result bazel ignores is NOT BLOCKING" {
+  gates_fixture
+  drop_line .github/workflows/bazel-ci.yml 'needs.lint-ktn.result'
+
+  run bash scripts/ci-gates-check.sh
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"NOT BLOCKING: 'lint-ktn-check' runs only in job 'lint-ktn'"* ]]
+  [[ "$output" == *"never checks needs.lint-ktn.result"* ]]
 }
 
 # A tag or a branch of a third-party action can be moved under this lane; a
 # full commit SHA cannot (.github/workflows/CLAUDE.md, Conventions).
 @test "ktn: the setup action is the public one, pinned by a full commit SHA" {
-  body="$(job_body "$REPO_ROOT/.github/workflows/bazel-ci.yml" bazel)"
+  body="$(job_body "$REPO_ROOT/.github/workflows/bazel-ci.yml" lint-ktn)"
   run grep -cE 'uses: kodflow/ktn/setup@[0-9a-f]{40}( |$)' <<<"$body"
   [ "$output" = "1" ]
   run grep -cE 'uses: kodflow/ktn/setup@' <<<"$body"
@@ -555,34 +573,41 @@ drop_line() {
   [ "$output" = "0" ]
 }
 
-# id-token: write lets a job mint a token GitHub signs for this repository. The
-# bazel job needs it for the licence check and no other job does, so the
-# workflow root stays at contents: read.
-@test "ktn: id-token is granted to the bazel job, never to the workflow" {
+# id-token: write lets a job mint a token GitHub signs for this repository, and
+# exports ACTIONS_ID_TOKEN_REQUEST_URL to every process of that job. lint-ktn
+# needs it for the licence check; the bazel job must NOT hold it, because the
+# entitlement suites it runs read that variable and take the CI path — which
+# is what #300's first run measured. The workflow root stays at contents: read.
+@test "ktn: id-token is granted to lint-ktn alone, never to bazel or the workflow" {
   wf="$REPO_ROOT/.github/workflows/bazel-ci.yml"
   root_perms="$(awk '/^permissions:/ { p = 1; next } p && /^[^[:space:]#]/ { exit } p { print }' "$wf")"
   [[ "$root_perms" == *"contents: read"* ]]
   [[ "$root_perms" != *"id-token"* ]]
-  body="$(job_body "$wf" bazel)"
+  body="$(job_body "$wf" lint-ktn)"
   [[ "$body" == *"      id-token: write"* ]]
   [[ "$body" == *"      contents: read"* ]]
+  bazel_body="$(job_body "$wf" bazel)"
+  run grep -cE '^[[:space:]]+id-token:' <<<"$bazel_body"
+  [ "$output" = "0" ]
   # As a permissions KEY, exactly once in the file: no other job asks for it.
   run grep -cE '^[[:space:]]+id-token:[[:space:]]*write[[:space:]]*$' "$wf"
   [ "$output" = "1" ]
 }
 
 # A gate that can go red and still let the job pass is not a gate.
-@test "ktn: no step of the required job continues on error" {
-  body="$(job_body "$REPO_ROOT/.github/workflows/bazel-ci.yml" bazel)"
-  run grep -c 'continue-on-error' <<<"$body"
-  [ "$output" = "0" ]
+@test "ktn: no step of lint-ktn or of the required job continues on error" {
+  for job in lint-ktn bazel; do
+    body="$(job_body "$REPO_ROOT/.github/workflows/bazel-ci.yml" "$job")"
+    run grep -c 'continue-on-error' <<<"$body"
+    [ "$output" = "0" ]
+  done
 }
 
 # The one skip GitHub forces: a fork or Dependabot pull request gets no
 # id-token. It must say so, and a run that is neither must not skip quietly
 # when the token is missing.
 @test "ktn: only a fork or Dependabot pull request skips the linter, with a warning" {
-  body="$(job_body "$REPO_ROOT/.github/workflows/bazel-ci.yml" bazel)"
+  body="$(job_body "$REPO_ROOT/.github/workflows/bazel-ci.yml" lint-ktn)"
   [[ "$body" == *'github.event.pull_request.head.repo.full_name'* ]]
   [[ "$body" == *'dependabot[bot]'* ]]
   [[ "$body" == *'::warning title=ktn-linter gate did not run::'* ]]

@@ -21,34 +21,41 @@ jobs:
     timeout-minutes: 120
     # `bazel` and `post-commit` are the only required checks on main (the
     # branch protection names `bazel`, the ruleset `post-commit` — measured
-    # with `gh api`). shell-gates is a sibling that runs ci-gates-check and
-    # three BATS suites; on its own its failure blocks nothing. So this job
-    # waits for it and fails at once when it did not succeed — the gates it
-    # runs are as blocking as the ones below (#236).
+    # with `gh api`). shell-gates (ci-gates-check and three BATS suites) and
+    # lint-ktn (ktn-linter) are siblings; on their own their failures block
+    # nothing. So this job waits for both and fails at once when either did
+    # not succeed — the gates they run are as blocking as the ones below
+    # (#236).
     #
     # `needs:` alone would be worse than nothing: a job skipped because a job
     # it needs failed concludes `skipped`, and GitHub counts a skipped required
-    # check as passing. `!cancelled()` keeps this job running when shell-gates
-    # fails, so the first step below is what turns the failure into a red
-    # `bazel`. scripts/ci-gates-check.sh asserts all three pieces.
-    needs: shell-gates
+    # check as passing. `!cancelled()` keeps this job running when a needed
+    # job fails, so the first step below is what turns the failure into a red
+    # `bazel`. scripts/ci-gates-check.sh asserts all three pieces, per job.
+    #
+    # This job keeps the workflow's `contents: read` and nothing more. The
+    # id-token ktn-linter needs is granted to lint-ktn alone: a job granted it
+    # exports ACTIONS_ID_TOKEN_REQUEST_URL to every process, and the
+    # entitlement suites `make test-framework` runs here read exactly that
+    # variable to decide they are on CI (#300's first run).
+    needs: [shell-gates, lint-ktn]
     if: ${{ !cancelled() }}
-    # A job-level block REPLACES the workflow's, so contents: read is restated.
-    # The id-token grant is for ktn-linter's licence check alone (below): the
-    # runner's OIDC token is how a CI run proves it is one. No other job asks
-    # for it, and the workflow root does not grant it.
-    permissions:
-      contents: read
-      id-token: write
     steps:
-      - name: shell-gates succeeded
+      - name: shell-gates and lint-ktn succeeded
         env:
           SHELL_GATES_RESULT: ${{ needs.shell-gates.result }}
+          LINT_KTN_RESULT: ${{ needs.lint-ktn.result }}
         run: |
+          failed=0
           if [ "$SHELL_GATES_RESULT" != success ]; then
             echo "::error::the shell-gates job concluded '$SHELL_GATES_RESULT'; its gates block the merge through this required job"
-            exit 1
+            failed=1
           fi
+          if [ "$LINT_KTN_RESULT" != success ]; then
+            echo "::error::the lint-ktn job concluded '$LINT_KTN_RESULT'; ktn-linter blocks the merge through this required job"
+            failed=1
+          fi
+          exit "$failed"
 
       # SHA-pinned per the .github/workflows/CLAUDE.md policy — version
       # comments track the resolved human-readable tag.
@@ -193,7 +200,7 @@ jobs:
         run: bash scripts/pre-commit/check-platforms.sh
 
       # The three checks of `make lint` that no lane ran (#236): `gofumpt -l`,
-      # sdkguard and ktn-linter (its steps follow the vulnerability gate). The
+      # sdkguard and ktn-linter (the lint-ktn job, which this one needs). The
       # other five are the steps above — gazelle drift, alloc-lane,
       # audit-coverage, domain-docs, layer-deps — so this adds a class of
       # analysis, it does not repeat one. `make lint-check`
@@ -238,6 +245,52 @@ jobs:
       - name: vulnerability gate — govulncheck over every module
         run: make vuln-check
 
+      - name: coverage
+        run: |
+          bazel coverage --combined_report=lcov //...
+          cp "$(bazel info output_path)/_coverage/_coverage_report.dat" coverage.lcov
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          # Unique per-run artifact name so concurrent runs never silently
+          # deduplicate coverage reports (finding #28).
+          name: coverage-${{ github.run_number }}
+          path: coverage.lcov
+          # The repo caps artifact retention at 1 day; request that explicitly so
+          # the run does not emit a "retention-days greater than max" warning.
+          retention-days: 1
+          if-no-files-found: warn
+
+  # ktn-linter — its own job, because it is the only one that needs an
+  # id-token, and a job granted one exports ACTIONS_ID_TOKEN_REQUEST_URL to
+  # every process it starts: the entitlement suites of the `bazel` job read
+  # that variable and took the CI path when the grant sat there. Not a
+  # required check itself; `bazel` needs it and fails when it did not succeed,
+  # exactly as for shell-gates.
+  lint-ktn:
+    name: lint gate — ktn-linter
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # A job-level block REPLACES the workflow's, so contents: read is restated.
+    # The id-token grant is for ktn-linter's licence check alone: the runner's
+    # OIDC token is how a CI run proves it is one. No other job asks for it,
+    # and the workflow root does not grant it.
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      # ktn-linter loads packages through the go command, so it needs the
+      # toolchain and the module cache the `bazel` job sets up the same way.
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: '**/go.sum'
+
       # ktn-linter, through the vendor's PUBLIC channel (#236). kodflow/ktn
       # publishes the release binary and a setup action that installs it and
       # proves the licence with the runner's own OIDC token: no key and no
@@ -281,7 +334,7 @@ jobs:
             exit 0
           fi
           if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
-            echo "::error title=ktn-linter has no OIDC token::this run is neither a fork nor a Dependabot pull request, yet no id-token is available — the bazel job lost 'permissions: id-token: write'. Refusing to skip the gate."
+            echo "::error title=ktn-linter has no OIDC token::this run is neither a fork nor a Dependabot pull request, yet no id-token is available — the lint-ktn job lost 'permissions: id-token: write'. Refusing to skip the gate."
             exit 1
           fi
           echo 'run=true' >> "$GITHUB_OUTPUT"
@@ -297,22 +350,6 @@ jobs:
       - name: lint gate — ktn-linter
         if: steps.ktnoidc.outputs.run == 'true'
         run: make lint-ktn-check
-
-      - name: coverage
-        run: |
-          bazel coverage --combined_report=lcov //...
-          cp "$(bazel info output_path)/_coverage/_coverage_report.dat" coverage.lcov
-
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          # Unique per-run artifact name so concurrent runs never silently
-          # deduplicate coverage reports (finding #28).
-          name: coverage-${{ github.run_number }}
-          path: coverage.lcov
-          # The repo caps artifact retention at 1 day; request that explicitly so
-          # the run does not emit a "retention-days greater than max" warning.
-          retention-days: 1
-          if-no-files-found: warn
 
   # Shell gates — the checks that need neither Bazel nor Go. A sibling job, so
   # a broken release script is reported in seconds instead of behind a 120-minute

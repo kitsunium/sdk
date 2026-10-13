@@ -76,14 +76,17 @@ Superseded by ADR 0154 (the charter); ADR 0088 stays as the incident's record, a
 ## ktn-linter in CI (#236)
 
 `make lint` runs `ktn-linter`, and `make lint-ktn-check` is a gate: listed in
-`ci-gates-check.sh`'s `GATES`, run by the required `bazel` job, blocking.
+`ci-gates-check.sh`'s `GATES`, run by the `lint-ktn` job of `bazel-ci.yml`,
+which the required `bazel` job needs and checks — so it blocks.
 
 - **The binary is the vendor's release, from its public channel.**
   `kodflow/ktn/setup` (pinned by commit in `bazel-ci.yml`) installs it — its
   installer verifies the published checksum — and runs `ktn-linter license
   status`, which proves the licence with the runner's OIDC token: no key, no
-  repository secret, no device seat. The `bazel` job holds `id-token: write`
-  for that alone. The run is covered when the vendor's signed roster lists the
+  repository secret, no device seat. The `lint-ktn` job holds `id-token:
+  write` for that alone — never `bazel`, because the grant exports
+  `ACTIONS_ID_TOKEN_REQUEST_URL` to every process and the entitlement suites
+  `make test-framework` runs read it to decide they are on CI. The run is covered when the vendor's signed roster lists the
   numeric id of the repository's owner (`repository_owner_id`), which for
   `kitsunium/sdk` is the `kitsunium` organisation — not the maintainer's own
   account. The binary is rolling-latest by the vendor's design (one release is
