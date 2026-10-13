@@ -24,9 +24,9 @@ const (
 	ChangeForced uint8 = 7
 )
 
-// Admin is the payload of every engine entry kind: who asked, what it expects
+// AdminValue is the payload of every engine entry kind: who asked, what it expects
 // to act on, and what it changes. Each kind reads the fields it needs.
-type Admin struct {
+type AdminValue struct {
 	// Operator is the identity the caller vouched for.
 	Operator string
 	// Change is the membership change of an EntryMembership.
@@ -44,7 +44,7 @@ type Admin struct {
 }
 
 // AppendAdmin appends the encoding of an engine entry's payload.
-func AppendAdmin(dst []byte, a *Admin) []byte {
+func AppendAdmin(dst []byte, a *AdminValue) []byte {
 	dst = appendString(dst, a.Operator)
 	dst = append(dst, a.Change)
 	dst = binary.LittleEndian.AppendUint64(dst, uint64(a.Target))
@@ -57,9 +57,9 @@ func AppendAdmin(dst []byte, a *Admin) []byte {
 }
 
 // ParseAdmin decodes an engine entry's payload.
-func ParseAdmin(b []byte) (Admin, error) {
+func ParseAdmin(b []byte) (AdminValue, error) {
 	r := reader{b: b}
-	var a Admin
+	var a AdminValue
 	a.Operator = r.str()
 	a.Change = r.u8()
 	a.Target = coreconsensus.NodeID(r.u64())

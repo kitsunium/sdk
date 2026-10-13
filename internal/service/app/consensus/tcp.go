@@ -301,7 +301,7 @@ func (t *TCPTransport) Slot() string { return t.slot }
 // every handshake: the one canonical URI SAN, of this cluster, and, when
 // dialing a member, its pinned key (R2-21, R7-41, R8-07).
 func (t *TCPTransport) checkPeer(pin *[32]byte) tlsid.Verify {
-	return func(p tlsid.PeerIdentity) error {
+	return func(p tlsid.PeerIdentityValue) error {
 		cid, _, err := parseSAN(p.Leaf)
 		if err != nil {
 			return err
@@ -381,7 +381,7 @@ func (t *TCPTransport) serve(raw net.Conn, release func()) {
 // handshake runs the TLS handshake of an inbound connection under its
 // deadline, gives the admission slot back once it is over, and reads the
 // lane byte; ok is false when any step failed and the connection must end.
-func (t *TCPTransport) handshake(raw net.Conn, release func()) (conn *tls.Conn, pid tlsid.PeerIdentity, lane byte, ok bool) {
+func (t *TCPTransport) handshake(raw net.Conn, release func()) (conn *tls.Conn, pid tlsid.PeerIdentityValue, lane byte, ok bool) {
 	conn = tls.Server(raw, t.id.ServerConfig(t.checkPeer(nil)))
 	// No handshake runs without its deadline: a connection that cannot take
 	// one is dropped, never left to hold its slot for as long as it likes.
@@ -410,7 +410,7 @@ func (t *TCPTransport) handshake(raw net.Conn, release func()) (conn *tls.Conn, 
 // serveAuthenticated serves a handshaken connection: registered for the
 // membership's cuts while a member's, a JOIN for anyone, and a member's own
 // lane only when the key and the slot are those the membership pins.
-func (t *TCPTransport) serveAuthenticated(conn *tls.Conn, pid *tlsid.PeerIdentity, lane byte, slot string) {
+func (t *TCPTransport) serveAuthenticated(conn *tls.Conn, pid *tlsid.PeerIdentityValue, lane byte, slot string) {
 	spki := pid.SPKI
 	t.mu.Lock()
 	m, member := t.bySPKI[spki]
@@ -534,7 +534,7 @@ func (t *TCPTransport) dial(ctx context.Context, addr string, lane byte, pin *[3
 // dialAny dials a peer that must present one of pins.
 func (t *TCPTransport) dialAny(ctx context.Context, addr string, lane byte, pins [][32]byte) (*tls.Conn, error) {
 	check := t.checkPeer(nil)
-	return t.dialVerified(ctx, addr, lane, func(p tlsid.PeerIdentity) error {
+	return t.dialVerified(ctx, addr, lane, func(p tlsid.PeerIdentityValue) error {
 		if err := check(p); err != nil {
 			return err
 		}

@@ -23,7 +23,7 @@ type PEMIdentity struct {
 // LoadPEMIdentity reads the files once and returns the identity and the CA
 // pool to pass as TransportConfig.Roots.
 func LoadPEMIdentity(certFile, keyFile, caFile string) (*PEMIdentity, *x509.CertPool, error) {
-	id, err := tlsid.LoadReloadable(tlsid.Files{CertFile: certFile, KeyFile: keyFile, RootsFile: caFile})
+	id, err := tlsid.LoadReloadable(tlsid.FilesConfig{CertFile: certFile, KeyFile: keyFile, RootsFile: caFile})
 	if err != nil {
 		return nil, nil, transportMisconfigured("CertFile", err.Error())
 	}

@@ -96,8 +96,8 @@ func Redraw(d DataDir) (coreconsensus.NodeID, error) {
 	return RedrawLog(d.Log())
 }
 
-// Report is what Inspect reads, read-only.
-type Report struct {
+// ReportValue is what Inspect reads, read-only.
+type ReportValue struct {
 	Stamp      coreconsensus.StampValue
 	HardState  coreconsensus.HardState
 	First      uint64
@@ -108,15 +108,15 @@ type Report struct {
 }
 
 // Inspect reads a data directory without changing it.
-func Inspect(d DataDir) (Report, error) {
+func Inspect(d DataDir) (ReportValue, error) {
 	if err := d.offline(); err != nil {
-		return Report{}, err
+		return ReportValue{}, err
 	}
 	l := d.d.log
-	r := Report{Stamp: l.stamp}
+	r := ReportValue{Stamp: l.stamp}
 	q, err := readQuarantineMarker(d.d.dir)
 	if err != nil {
-		return Report{}, err
+		return ReportValue{}, err
 	}
 	r.Quarantine = q
 	if l.refuse == nil {
@@ -131,10 +131,10 @@ func Inspect(d DataDir) (Report, error) {
 	// An operator decides from this report: a list that could not be read
 	// fails it rather than reading as "no snapshot" or "no stop marker".
 	if r.Snapshots, err = d.d.snaps.List(); err != nil {
-		return Report{}, err
+		return ReportValue{}, err
 	}
 	if r.Markers, err = stopMarkers(d.d.dir); err != nil {
-		return Report{}, err
+		return ReportValue{}, err
 	}
 	return r, nil
 }
@@ -420,7 +420,7 @@ func (d DataDir) appendForced(hard *coreconsensus.HardState, members []coreconse
 	}
 	term := max(hard.Term, termAt) + 1
 	conf := coreconsensus.MembershipValue{Members: byID(members), Retired: old.Retired}
-	data := wire.AppendAdmin(nil, &wire.Admin{Operator: string(operator), Change: wire.ChangeForced, Membership: conf})
+	data := wire.AppendAdmin(nil, &wire.AdminValue{Operator: string(operator), Change: wire.ChangeForced, Membership: conf})
 	e := coreconsensus.EntryValue{
 		Position: coreconsensus.PositionValue{Term: term, Index: commit + 1}, Kind: coreconsensus.EntryMembership,
 		BodySum: wire.BodySum(data), Data: data,

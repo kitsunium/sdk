@@ -38,7 +38,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 - [func ClearQuarantine\(d DataDir, exit QuarantineExit, op Operator\) error](<#ClearQuarantine>)
 - [func Init\(d DataDir, cluster ClusterID, slot string\) \(NodeID, Incarnation, error\)](<#Init>)
 - [func InitLog\(log LogStore, cluster ClusterID, slot string\) \(NodeID, Incarnation, error\)](<#InitLog>)
-- [func Inspect\(d DataDir\) \(Report, error\)](<#Inspect>)
+- [func Inspect\(d DataDir\) \(ReportValue, error\)](<#Inspect>)
 - [func JoinRefusalReason\(err error\) \(string, bool\)](<#JoinRefusalReason>)
 - [func Lane\(frame \[\]byte\) \(FrameLane, error\)](<#Lane>)
 - [func Latest\(s SnapshotStore\) \(SnapshotHandle, error\)](<#Latest>)
@@ -91,7 +91,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 - [type FrameLane](<#FrameLane>)
 - [type GroupID](<#GroupID>)
 - [type HardState](<#HardState>)
-- [type Health](<#Health>)
+- [type HealthValue](<#HealthValue>)
 - [type Incarnation](<#Incarnation>)
   - [func \(Incarnation\) IsZero\(\) bool](<#Incarnation.IsZero>)
   - [func \(Incarnation\) String\(\) string](<#Incarnation.String>)
@@ -170,7 +170,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
   - [func \(\*Node\) Close\(ctx context.Context\) error](<#Node.Close>)
   - [func \(\*Node\) DenyPin\(ctx context.Context, op coreconsensus.Operator, id coreconsensus.NodeID\) error](<#Node.DenyPin>)
   - [func \(\*Node\) HardClose\(\) error](<#Node.HardClose>)
-  - [func \(\*Node\) Health\(\) Health](<#Node.Health>)
+  - [func \(\*Node\) Health\(\) HealthValue](<#Node.Health>)
   - [func \(\*Node\) Membership\(\) coreconsensus.MembershipValue](<#Node.Membership>)
   - [func \(\*Node\) Promote\(ctx context.Context, op coreconsensus.Operator, id coreconsensus.NodeID\) error](<#Node.Promote>)
   - [func \(\*Node\) Propose\(ctx context.Context, data \[\]byte\) \(coreconsensus.TokenValue, any, error\)](<#Node.Propose>)
@@ -191,7 +191,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 - [type PEMIdentity](<#PEMIdentity>)
   - [func \(\*PEMIdentity\) GetCertificate\(\) \(\*tls.Certificate, error\)](<#PEMIdentity.GetCertificate>)
   - [func \(\*PEMIdentity\) ReloadFailures\(\) int](<#PEMIdentity.ReloadFailures>)
-- [type PeerHealth](<#PeerHealth>)
+- [type PeerHealthValue](<#PeerHealthValue>)
 - [type PositionValue](<#PositionValue>)
 - [type PreconditionSpec](<#PreconditionSpec>)
 - [type QuarantineExit](<#QuarantineExit>)
@@ -202,7 +202,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
   - [func \(Replicated\) Propose\(ctx context.Context, data \[\]byte\) \(TokenValue, any, error\)](<#Replicated.Propose>)
   - [func \(Replicated\) Status\(\) StatusValue](<#Replicated.Status>)
   - [func \(Replicated\) WaitApplied\(ctx context.Context, t TokenValue\) error](<#Replicated.WaitApplied>)
-- [type Report](<#Report>)
+- [type ReportValue](<#ReportValue>)
 - [type RestoreOptions](<#RestoreOptions>)
 - [type Role](<#Role>)
   - [func \(Role\) String\(\) string](<#Role.String>)
@@ -1091,7 +1091,7 @@ InitLog prepares a joining log on any LogStore: a random NodeID and a joining st
 ## func [Inspect](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 ```go
-func Inspect(d DataDir) (Report, error)
+func Inspect(d DataDir) (ReportValue, error)
 ```
 
 Inspect reads a stopped node's directory without changing it.
@@ -1767,19 +1767,19 @@ type HardState struct {
 }
 ```
 
-<a name="Health"></a>
-## type [Health](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+<a name="HealthValue"></a>
+## type [HealthValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
 ```go
-type Health = svcconsensus.Health
+type HealthValue = svcconsensus.HealthValue
 ```
 
-Health is an alias of `github.com/kitsunium/sdk/internal/service/app/consensus.Health`, declared as:
+HealthValue is an alias of `github.com/kitsunium/sdk/internal/service/app/consensus.HealthValue`, declared as:
 
 ```go
-type Health struct {
+type HealthValue struct {
 	// Status is the node's view after its last turn.
 	Status             coreconsensus.StatusValue
 	// Ready is true while a leader is known and the node applied what it
@@ -1796,7 +1796,7 @@ type Health struct {
 	// ApplyLagEntries is commit minus applied.
 	ApplyLagEntries    uint64
 	// Peers is the leader's view of every peer, nil elsewhere.
-	Peers              []PeerHealth
+	Peers              []PeerHealthValue
 	// ChainRefusals counts identical chain refusals of this follower at
 	// ChainRefusalIndex from ChainRefusalLeader; the node reports itself
 	// unready while it refuses (D4, R6-05).
@@ -2836,7 +2836,7 @@ HardClose stops now: no transfer, no final sync, bounded by HardCloseTimeout (R7
 ### func \(Node\) [Health](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/bootstrap.go>)
 
 ```go
-func (*Node) Health() Health
+func (*Node) Health() HealthValue
 ```
 
 Health returns the node's verdict, computed on the event loop.
@@ -3043,19 +3043,19 @@ func (*PEMIdentity) ReloadFailures() int
 
 ReloadFailures counts the reloads refused so far.
 
-<a name="PeerHealth"></a>
-## type [PeerHealth](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+<a name="PeerHealthValue"></a>
+## type [PeerHealthValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
 ```go
-type PeerHealth = svcconsensus.PeerHealth
+type PeerHealthValue = svcconsensus.PeerHealthValue
 ```
 
-PeerHealth is an alias of `github.com/kitsunium/sdk/internal/service/app/consensus.PeerHealth`, declared as:
+PeerHealthValue is an alias of `github.com/kitsunium/sdk/internal/service/app/consensus.PeerHealthValue`, declared as:
 
 ```go
-type PeerHealth struct {
+type PeerHealthValue struct {
 	// ID is the peer.
 	ID          coreconsensus.NodeID
 	// Voter is false for a learner.
@@ -3240,19 +3240,19 @@ func (Replicated) WaitApplied(ctx context.Context, t TokenValue) error
 
 WaitApplied returns once the local node has applied t. A token of another lineage is LINEAGE\_MISMATCH.
 
-<a name="Report"></a>
-## type [Report](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+<a name="ReportValue"></a>
+## type [ReportValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
 ```go
-type Report = svcconsensus.Report
+type ReportValue = svcconsensus.ReportValue
 ```
 
-Report is an alias of `github.com/kitsunium/sdk/internal/service/app/consensus.Report`, declared as:
+ReportValue is an alias of `github.com/kitsunium/sdk/internal/service/app/consensus.ReportValue`, declared as:
 
 ```go
-type Report struct {
+type ReportValue struct {
 	Stamp      coreconsensus.StampValue
 	HardState  coreconsensus.HardState
 	First      uint64

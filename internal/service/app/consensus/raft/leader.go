@@ -182,7 +182,7 @@ func (r *Raft) sendAppend(to core.NodeID, sendIfEmpty bool) {
 	if pr.next <= r.log.evicted && pr.next <= r.log.lastIndex() {
 		// The payloads were evicted: the driver reads them off the loop.
 		pr.fetching = true
-		r.rd.Fetch = append(r.rd.Fetch, FetchRequest{To: to, Lo: pr.next, Hi: min(r.log.evicted, r.log.lastIndex()) + 1})
+		r.rd.Fetch = append(r.rd.Fetch, FetchSpec{To: to, Lo: pr.next, Hi: min(r.log.evicted, r.log.lastIndex()) + 1})
 		return
 	}
 	ents := r.log.slice(pr.next, r.log.lastIndex()+1, r.cfg.MaxBatchBytes)
@@ -476,7 +476,7 @@ func (r *Raft) validateAdmin(e *core.EntryValue, index uint64) (core.NodeID, err
 // checkAdmin holds an engine entry of kind to the leader's state, rewriting
 // admin in place where the entry it replicates differs from the one
 // proposed. It returns the transfer target of an EntryTransfer.
-func (r *Raft) checkAdmin(kind core.EntryKind, admin *wire.Admin, index uint64) (core.NodeID, errs.Code) {
+func (r *Raft) checkAdmin(kind core.EntryKind, admin *wire.AdminValue, index uint64) (core.NodeID, errs.Code) {
 	switch kind {
 	case core.EntryMembership:
 		return 0, r.checkMembership(admin, index)
@@ -499,7 +499,7 @@ func (r *Raft) checkAdmin(kind core.EntryKind, admin *wire.Admin, index uint64) 
 // checkMembership admits one membership change at a time, only once the
 // term's no-op committed, and rewrites it into the whole configuration that
 // takes effect at index.
-func (r *Raft) checkMembership(admin *wire.Admin, index uint64) errs.Code {
+func (r *Raft) checkMembership(admin *wire.AdminValue, index uint64) errs.Code {
 	if (!r.mutated(mutMembershipBeforeNoOp) && r.log.committed < r.termStart) || r.conf().Index > r.log.committed {
 		return codeChangePending
 	}
@@ -516,7 +516,7 @@ func (r *Raft) checkMembership(admin *wire.Admin, index uint64) errs.Code {
 // generation that can hold: a heartbeat at most a fifth of the minimum
 // election timeout, a non-empty randomization range and a drift in [0, 1).
 // Admitting it drops the lease at once (D9 d).
-func (r *Raft) checkTimingContract(admin *wire.Admin) errs.Code {
+func (r *Raft) checkTimingContract(admin *wire.AdminValue) errs.Code {
 	if !admin.Pre.Log.Same(r.cfg.Log) || admin.Pre.Generation != r.timing.Generation {
 		return codePrecondition
 	}
@@ -533,7 +533,7 @@ func (r *Raft) checkTimingContract(admin *wire.Admin) errs.Code {
 
 // checkClusterVersion admits only a raise, proposed against the current
 // cluster generation of this log.
-func (r *Raft) checkClusterVersion(admin *wire.Admin) errs.Code {
+func (r *Raft) checkClusterVersion(admin *wire.AdminValue) errs.Code {
 	if admin.ClusterVersion > ProtocolMax {
 		// No member of this version announces more (D18, review M3).
 		return codeVersion
@@ -546,7 +546,7 @@ func (r *Raft) checkClusterVersion(admin *wire.Admin) errs.Code {
 
 // checkNoSpaceClear admits clearing only the alarm that is raised now, so a
 // late clear cannot end a newer alarm.
-func (r *Raft) checkNoSpaceClear(admin *wire.Admin) errs.Code {
+func (r *Raft) checkNoSpaceClear(admin *wire.AdminValue) errs.Code {
 	if !admin.Pre.Log.Same(r.cfg.Log) || r.noSpace == 0 || admin.Pre.Alarm != r.noSpace {
 		return codePrecondition
 	}
@@ -554,7 +554,7 @@ func (r *Raft) checkNoSpaceClear(admin *wire.Admin) errs.Code {
 }
 
 // checkTransfer admits a transfer to another voter and returns it.
-func (r *Raft) checkTransfer(admin *wire.Admin) (core.NodeID, errs.Code) {
+func (r *Raft) checkTransfer(admin *wire.AdminValue) (core.NodeID, errs.Code) {
 	if admin.Target == r.id || !r.isVoter(admin.Target) {
 		return 0, codeMembershipInvalid
 	}
@@ -564,7 +564,7 @@ func (r *Raft) checkTransfer(admin *wire.Admin) (core.NodeID, errs.Code) {
 // nextConf computes the configuration a single-server change produces, and
 // refuses it on its merits (D8). On a refusal the configuration returned is
 // not to be used.
-func (r *Raft) nextConf(admin wire.Admin) (core.MembershipValue, errs.Code) {
+func (r *Raft) nextConf(admin wire.AdminValue) (core.MembershipValue, errs.Code) {
 	cur := r.conf().Clone()
 	idx := slices.IndexFunc(cur.Members, func(m core.MemberValue) bool { return m.ID == admin.Target })
 	var code errs.Code
@@ -588,7 +588,7 @@ func (r *Raft) nextConf(admin wire.Admin) (core.MembershipValue, errs.Code) {
 // addLearner adds the one member admin carries as a learner: a new id with
 // a key no member holds, never retired, with a pin, and only while a quorum
 // answers so the change can commit.
-func (r *Raft) addLearner(cur *core.MembershipValue, admin *wire.Admin) errs.Code {
+func (r *Raft) addLearner(cur *core.MembershipValue, admin *wire.AdminValue) errs.Code {
 	if len(admin.Membership.Members) != 1 {
 		return codeMembershipInvalid
 	}
@@ -661,7 +661,7 @@ func (r *Raft) removeMember(cur *core.MembershipValue, target core.NodeID, idx i
 
 // updateAddress changes the address of the member at idx to the one admin
 // carries, while a majority answers.
-func (r *Raft) updateAddress(cur *core.MembershipValue, admin *wire.Admin, idx int) errs.Code {
+func (r *Raft) updateAddress(cur *core.MembershipValue, admin *wire.AdminValue, idx int) errs.Code {
 	if idx < 0 || len(admin.Membership.Members) != 1 || !r.activeMajority(*cur) {
 		return codeMembershipInvalid
 	}

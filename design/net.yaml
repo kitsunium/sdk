@@ -3075,7 +3075,7 @@ packages:
           union until the process restarts.
         in:
           - name: f
-            type: Files
+            type: FilesConfig
         name: LoadReloadable
         out:
           - type: "*Identity"
@@ -3089,7 +3089,7 @@ packages:
             type: tls.ConnectionState
         name: PeerOf
         out:
-          - type: PeerIdentity
+          - type: PeerIdentityValue
           - type: bool
       - doc: |-
           Deadline is when a connection to peer must end: at its certificate's
@@ -3097,7 +3097,7 @@ packages:
           revoked or expired identity cannot ride an old connection.
         in:
           - name: peer
-            type: PeerIdentity
+            type: PeerIdentityValue
           - name: opened
             type: time.Time
           - name: maxAge
@@ -3129,10 +3129,10 @@ packages:
     path: github.com/kitsunium/sdk/internal/service/net/tlsid
     types:
       - doc: |-
-          PeerIdentity is what a handshake PROVED about the peer: its verified leaf
+          PeerIdentityValue is what a handshake PROVED about the peer: its verified leaf
           and chain, and the SHA-256 of its SubjectPublicKeyInfo, the pin a member
           is admitted on. Nothing in it comes from a frame the peer wrote.
-        name: PeerIdentity
+        name: PeerIdentityValue
         struct:
           fields:
             - doc: Leaf is the peer's verified certificate.
@@ -3158,7 +3158,7 @@ packages:
           after the chain, the roots and the extended key usage passed. A non-nil
           error fails the handshake (fail-closed).
         name: Verify
-        underlying: func(peer PeerIdentity) error
+        underlying: func(peer PeerIdentityValue) error
       - doc: |-
           Identity is a node's own TLS identity and the roots it trusts, reloadable
           in place. It is safe for concurrent use.
@@ -3210,8 +3210,8 @@ packages:
         name: Identity
         struct:
           unexported: true
-      - doc: Files names the PEM files of a reloadable identity.
-        name: Files
+      - doc: FilesConfig names the PEM files of a reloadable identity.
+        name: FilesConfig
         struct:
           fields:
             - doc: CertFile holds the certificate, its chain may follow it.

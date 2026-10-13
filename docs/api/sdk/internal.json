@@ -775,7 +775,7 @@
       "dir": "service/app/consensus/raft",
       "layer": "service",
       "family": "app",
-      "doc": "Package raft is the consensus engine's step function (ADR 0152 D15): a\nvalue with no goroutine, no I/O and no clock. Every decision of the\nprotocol is taken here — PreVote, elections and the election restriction,\nCheckQuorum, the vote refusals, the leader lease and ReadIndex, log\nreplication and commit, leadership transfer, single-server membership\nchanges through learners, the snapshot offer — and every effect leaves\nthrough [Raft.Ready] for a driver to perform.\n\nInstants come in with each input, taken by the driver from its injected\nclock, and are compared with Sub only, never rounded, so the lease keeps\nGo's monotonic reading (D9, R7-20). Randomness comes from a seed in\n[Config], so a run is a pure function of its inputs (D15).\n\nDurability is an input, never an assumption (D5b): a write the step\nfunction asks for is counted only once the driver reports it with\n[Raft.StorageDone], and the replies that depend on it leave in\n[Ready.AfterSync], which the driver sends only once that write is durable.\n"
+      "doc": "Package raft is the consensus engine's step function (ADR 0152 D15): a\nvalue with no goroutine, no I/O and no clock. Every decision of the\nprotocol is taken here — PreVote, elections and the election restriction,\nCheckQuorum, the vote refusals, the leader lease and ReadIndex, log\nreplication and commit, leadership transfer, single-server membership\nchanges through learners, the snapshot offer — and every effect leaves\nthrough [Raft.Ready] for a driver to perform.\n\nInstants come in with each input, taken by the driver from its injected\nclock, and are compared with Sub only, never rounded, so the lease keeps\nGo's monotonic reading (D9, R7-20). Randomness comes from a seed in\n[Config], so a run is a pure function of its inputs (D15).\n\nDurability is an input, never an assumption (D5b): a write the step\nfunction asks for is counted only once the driver reports it with\n[Raft.StorageDone], and the replies that depend on it leave in\n[ReadyValue.AfterSync], which the driver sends only once that write is durable.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/internal/service/app/consensus/wire",
@@ -44703,12 +44703,12 @@
       "family": "app"
     },
     {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.Health",
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.HealthValue",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
-      "name": "Health",
-      "spelled": "struct{Status coreconsensus.StatusValue; Ready bool; HasLeader bool; QuorumReachable bool; FailureTolerance int; ApplyLagEntries uint64; Peers []PeerHealth; ChainRefusals int; ChainRefusalIndex uint64; ChainRefusalLeader coreconsensus.NodeID; Stopped bool; StopReason coreconsensus.StopReasonValue; DroppedFrames int64; LongTurns int64; JoinsRateLimited int64}",
-      "canonical": "struct{Status github.com/kitsunium/sdk/internal/core/app/consensus.StatusValue; Ready bool; HasLeader bool; QuorumReachable bool; FailureTolerance int; ApplyLagEntries uint64; Peers []github.com/kitsunium/sdk/internal/service/app/consensus.PeerHealth; ChainRefusals int; ChainRefusalIndex uint64; ChainRefusalLeader github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Stopped bool; StopReason github.com/kitsunium/sdk/internal/core/app/consensus.StopReasonValue; DroppedFrames int64; LongTurns int64; JoinsRateLimited int64}",
+      "name": "HealthValue",
+      "spelled": "struct{Status coreconsensus.StatusValue; Ready bool; HasLeader bool; QuorumReachable bool; FailureTolerance int; ApplyLagEntries uint64; Peers []PeerHealthValue; ChainRefusals int; ChainRefusalIndex uint64; ChainRefusalLeader coreconsensus.NodeID; Stopped bool; StopReason coreconsensus.StopReasonValue; DroppedFrames int64; LongTurns int64; JoinsRateLimited int64}",
+      "canonical": "struct{Status github.com/kitsunium/sdk/internal/core/app/consensus.StatusValue; Ready bool; HasLeader bool; QuorumReachable bool; FailureTolerance int; ApplyLagEntries uint64; Peers []github.com/kitsunium/sdk/internal/service/app/consensus.PeerHealthValue; ChainRefusals int; ChainRefusalIndex uint64; ChainRefusalLeader github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Stopped bool; StopReason github.com/kitsunium/sdk/internal/core/app/consensus.StopReasonValue; DroppedFrames int64; LongTurns int64; JoinsRateLimited int64}",
       "fields": [
         {
           "name": "Status",
@@ -44742,7 +44742,7 @@
         },
         {
           "name": "Peers",
-          "type": "[]PeerHealth",
+          "type": "[]PeerHealthValue",
           "doc": "Peers is the leader's view of every peer, nil elsewhere.\n"
         },
         {
@@ -44784,7 +44784,7 @@
           "doc": "JoinsRateLimited counts JOINs refused by the one-per-slot rate.\n"
         }
       ],
-      "doc": "Health is a node's verdict for an orchestrator's probe (D13).\n",
+      "doc": "HealthValue is a node's verdict for an orchestrator's probe (D13).\n",
       "file": "service/app/consensus/bootstrap.go",
       "layer": "service",
       "family": "app"
@@ -44818,8 +44818,8 @@
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
       "name": "Inspect",
-      "spelled": "func(d DataDir) (Report, error)",
-      "canonical": "func(d github.com/kitsunium/sdk/internal/service/app/consensus.DataDir) (github.com/kitsunium/sdk/internal/service/app/consensus.Report, error)",
+      "spelled": "func(d DataDir) (ReportValue, error)",
+      "canonical": "func(d github.com/kitsunium/sdk/internal/service/app/consensus.DataDir) (github.com/kitsunium/sdk/internal/service/app/consensus.ReportValue, error)",
       "doc": "Inspect reads a data directory without changing it.\n",
       "file": "service/app/consensus/offline.go",
       "layer": "service",
@@ -45452,8 +45452,8 @@
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
       "name": "Health",
       "recv": "Node",
-      "spelled": "func() Health",
-      "canonical": "func() github.com/kitsunium/sdk/internal/service/app/consensus.Health",
+      "spelled": "func() HealthValue",
+      "canonical": "func() github.com/kitsunium/sdk/internal/service/app/consensus.HealthValue",
       "doc": "Health returns the node's verdict, computed on the event loop.\n",
       "file": "service/app/consensus/bootstrap.go",
       "layer": "service",
@@ -45705,10 +45705,10 @@
       "family": "app"
     },
     {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PeerHealth",
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PeerHealthValue",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
-      "name": "PeerHealth",
+      "name": "PeerHealthValue",
       "spelled": "struct{ID coreconsensus.NodeID; Voter bool; Match uint64; Lag uint64; Inflight int; LastContact time.Duration; Unreachable bool; Snapshot bool}",
       "canonical": "struct{ID github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Voter bool; Match uint64; Lag uint64; Inflight int; LastContact time.Duration; Unreachable bool; Snapshot bool}",
       "fields": [
@@ -45753,7 +45753,7 @@
           "doc": "Snapshot is set while a snapshot is being sent to it.\n"
         }
       ],
-      "doc": "PeerHealth is the leader's view of one peer (D13).\n",
+      "doc": "PeerHealthValue is the leader's view of one peer (D13).\n",
       "file": "service/app/consensus/bootstrap.go",
       "layer": "service",
       "family": "app"
@@ -45903,10 +45903,10 @@
       "family": "app"
     },
     {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.Report",
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.ReportValue",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
-      "name": "Report",
+      "name": "ReportValue",
       "spelled": "struct{Stamp coreconsensus.StampValue; HardState coreconsensus.HardState; First uint64; Last uint64; Snapshots []coreconsensus.SnapshotMetaValue; Quarantine string; Markers []string}",
       "canonical": "struct{Stamp github.com/kitsunium/sdk/internal/core/app/consensus.StampValue; HardState github.com/kitsunium/sdk/internal/core/app/consensus.HardState; First uint64; Last uint64; Snapshots []github.com/kitsunium/sdk/internal/core/app/consensus.SnapshotMetaValue; Quarantine string; Markers []string}",
       "fields": [
@@ -45939,7 +45939,7 @@
           "type": "[]string"
         }
       ],
-      "doc": "Report is what Inspect reads, read-only.\n",
+      "doc": "ReportValue is what Inspect reads, read-only.\n",
       "file": "service/app/consensus/offline.go",
       "layer": "service",
       "family": "app"
@@ -46466,10 +46466,10 @@
       "family": "app"
     },
     {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.FetchRequest",
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.FetchSpec",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
-      "name": "FetchRequest",
+      "name": "FetchSpec",
       "spelled": "struct{To core.NodeID; Lo uint64; Hi uint64}",
       "canonical": "struct{To github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Lo uint64; Hi uint64}",
       "fields": [
@@ -46486,7 +46486,7 @@
           "type": "uint64"
         }
       ],
-      "doc": "FetchRequest asks for the entries [Lo, Hi) of the store for a peer.\n",
+      "doc": "FetchSpec asks for the entries [Lo, Hi) of the store for a peer.\n",
       "file": "service/app/consensus/raft/raft.go",
       "layer": "service",
       "family": "app"
@@ -46496,18 +46496,18 @@
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
       "name": "New",
-      "spelled": "func(cfg Config, st Start) *Raft",
-      "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/app/consensus/raft.Config, st github.com/kitsunium/sdk/internal/service/app/consensus/raft.Start) *github.com/kitsunium/sdk/internal/service/app/consensus/raft.Raft",
+      "spelled": "func(cfg Config, st StartState) *Raft",
+      "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/app/consensus/raft.Config, st github.com/kitsunium/sdk/internal/service/app/consensus/raft.StartState) *github.com/kitsunium/sdk/internal/service/app/consensus/raft.Raft",
       "doc": "New builds the step function over the loaded state.\n",
       "file": "service/app/consensus/raft/raft.go",
       "layer": "service",
       "family": "app"
     },
     {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.PeerStat",
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.PeerStatValue",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
-      "name": "PeerStat",
+      "name": "PeerStatValue",
       "spelled": "struct{ID core.NodeID; Voter bool; Match uint64; Next uint64; Inflight int; LastHeard time.Time; Heard bool; Probing bool; Snapshot bool}",
       "canonical": "struct{ID github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Voter bool; Match uint64; Next uint64; Inflight int; LastHeard time.Time; Heard bool; Probing bool; Snapshot bool}",
       "fields": [
@@ -46548,7 +46548,7 @@
           "type": "bool"
         }
       ],
-      "doc": "PeerStat is the leader's view of one peer, for Health (D13).\n",
+      "doc": "PeerStatValue is the leader's view of one peer, for Health (D13).\n",
       "file": "service/app/consensus/raft/raft.go",
       "layer": "service",
       "family": "app"
@@ -46779,8 +46779,8 @@
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
       "name": "PeerStats",
       "recv": "Raft",
-      "spelled": "func() []PeerStat",
-      "canonical": "func() []github.com/kitsunium/sdk/internal/service/app/consensus/raft.PeerStat",
+      "spelled": "func() []PeerStatValue",
+      "canonical": "func() []github.com/kitsunium/sdk/internal/service/app/consensus/raft.PeerStatValue",
       "doc": "PeerStats returns the leader's view of every peer, in configuration\norder; nil off the leader.\n",
       "file": "service/app/consensus/raft/raft.go",
       "layer": "service",
@@ -46844,8 +46844,8 @@
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
       "name": "Ready",
       "recv": "Raft",
-      "spelled": "func() Ready",
-      "canonical": "func() github.com/kitsunium/sdk/internal/service/app/consensus/raft.Ready",
+      "spelled": "func() ReadyValue",
+      "canonical": "func() github.com/kitsunium/sdk/internal/service/app/consensus/raft.ReadyValue",
       "doc": "Ready returns the work of the turns since the last call and resets it.\n",
       "file": "service/app/consensus/raft/raft.go",
       "layer": "service",
@@ -46922,8 +46922,8 @@
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
       "name": "Status",
       "recv": "Raft",
-      "spelled": "func() Status",
-      "canonical": "func() github.com/kitsunium/sdk/internal/service/app/consensus/raft.Status",
+      "spelled": "func() StatusValue",
+      "canonical": "func() github.com/kitsunium/sdk/internal/service/app/consensus/raft.StatusValue",
       "doc": "Status returns the step function's view.\n",
       "file": "service/app/consensus/raft/raft.go",
       "layer": "service",
@@ -47021,12 +47021,12 @@
       "family": "app"
     },
     {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.Ready",
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.ReadyValue",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
-      "name": "Ready",
-      "spelled": "struct{Seq uint64; HardState *core.HardState; Commit uint64; TruncateFrom uint64; Entries []core.EntryValue; Messages []core.MessageValue; AfterSync []core.MessageValue; Apply []core.EntryValue; SendSnapshot []core.NodeID; ReadStates []ReadState; Forwarded []core.MessageValue; Transfers []TransferResult; Compact uint64; SilenceEnded bool; Fetch []FetchRequest; Membership []core.MemberValue; Unsupported UnsupportedEntry}",
-      "canonical": "struct{Seq uint64; HardState *github.com/kitsunium/sdk/internal/core/app/consensus.HardState; Commit uint64; TruncateFrom uint64; Entries []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue; Messages []github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue; AfterSync []github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue; Apply []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue; SendSnapshot []github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; ReadStates []github.com/kitsunium/sdk/internal/service/app/consensus/raft.ReadState; Forwarded []github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue; Transfers []github.com/kitsunium/sdk/internal/service/app/consensus/raft.TransferResult; Compact uint64; SilenceEnded bool; Fetch []github.com/kitsunium/sdk/internal/service/app/consensus/raft.FetchRequest; Membership []github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue; Unsupported github.com/kitsunium/sdk/internal/service/app/consensus/raft.UnsupportedEntry}",
+      "name": "ReadyValue",
+      "spelled": "struct{Seq uint64; HardState *core.HardState; Commit uint64; TruncateFrom uint64; Entries []core.EntryValue; Messages []core.MessageValue; AfterSync []core.MessageValue; Apply []core.EntryValue; SendSnapshot []core.NodeID; ReadStates []ReadState; Forwarded []core.MessageValue; Transfers []TransferResult; Compact uint64; SilenceEnded bool; Fetch []FetchSpec; Membership []core.MemberValue; Unsupported UnsupportedEntry}",
+      "canonical": "struct{Seq uint64; HardState *github.com/kitsunium/sdk/internal/core/app/consensus.HardState; Commit uint64; TruncateFrom uint64; Entries []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue; Messages []github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue; AfterSync []github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue; Apply []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue; SendSnapshot []github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; ReadStates []github.com/kitsunium/sdk/internal/service/app/consensus/raft.ReadState; Forwarded []github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue; Transfers []github.com/kitsunium/sdk/internal/service/app/consensus/raft.TransferResult; Compact uint64; SilenceEnded bool; Fetch []github.com/kitsunium/sdk/internal/service/app/consensus/raft.FetchSpec; Membership []github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue; Unsupported github.com/kitsunium/sdk/internal/service/app/consensus/raft.UnsupportedEntry}",
       "fields": [
         {
           "name": "Seq",
@@ -47100,7 +47100,7 @@
         },
         {
           "name": "Fetch",
-          "type": "[]FetchRequest",
+          "type": "[]FetchSpec",
           "doc": "Fetch asks the driver to read entries the step function no longer\nholds, off the event loop, and hand them back with Fetched.\n"
         },
         {
@@ -47114,17 +47114,17 @@
           "doc": "Unsupported names an entry whose kind this version does not know:\nthe driver stops the node with VERSION_UNSUPPORTED.\n"
         }
       ],
-      "doc": "Ready is what the driver must do after a turn.\n",
+      "doc": "ReadyValue is what the driver must do after a turn.\n",
       "file": "service/app/consensus/raft/raft.go",
       "layer": "service",
       "family": "app"
     },
     {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.(*Ready).NeedsWrite",
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.(*ReadyValue).NeedsWrite",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
       "name": "NeedsWrite",
-      "recv": "Ready",
+      "recv": "ReadyValue",
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "NeedsWrite reports whether the Ready asks the storage actor for anything.\n",
@@ -47133,10 +47133,10 @@
       "family": "app"
     },
     {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.Start",
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.StartState",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
-      "name": "Start",
+      "name": "StartState",
       "spelled": "struct{HardState core.HardState; Snapshot core.SnapshotMetaValue; Entries []core.EntryValue; Applied uint64; Now time.Time}",
       "canonical": "struct{HardState github.com/kitsunium/sdk/internal/core/app/consensus.HardState; Snapshot github.com/kitsunium/sdk/internal/core/app/consensus.SnapshotMetaValue; Entries []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue; Applied uint64; Now time.Time}",
       "fields": [
@@ -47166,16 +47166,16 @@
           "doc": "Now is the start instant: the restart vote-refusal window opens here.\n"
         }
       ],
-      "doc": "Start is the durable state the driver loaded.\n",
+      "doc": "StartState is the durable state the driver loaded.\n",
       "file": "service/app/consensus/raft/raft.go",
       "layer": "service",
       "family": "app"
     },
     {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.Status",
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.StatusValue",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
-      "name": "Status",
+      "name": "StatusValue",
       "spelled": "struct{Role core.Role; Term uint64; Lead core.NodeID; Commit uint64; Last uint64; Stable uint64; Timing core.TimingContractSpec; Cluster uint32; ClusterG uint64; NoSpace core.AlarmID; Conf core.MembershipValue; Committed core.MembershipValue; Transfer core.NodeID}",
       "canonical": "struct{Role github.com/kitsunium/sdk/internal/core/app/consensus.Role; Term uint64; Lead github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Commit uint64; Last uint64; Stable uint64; Timing github.com/kitsunium/sdk/internal/core/app/consensus.TimingContractSpec; Cluster uint32; ClusterG uint64; NoSpace github.com/kitsunium/sdk/internal/core/app/consensus.AlarmID; Conf github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue; Committed github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue; Transfer github.com/kitsunium/sdk/internal/core/app/consensus.NodeID}",
       "fields": [
@@ -47232,7 +47232,7 @@
           "type": "core.NodeID"
         }
       ],
-      "doc": "Status is the step function's part of a node's status.\n",
+      "doc": "StatusValue is the step function's part of a node's status.\n",
       "file": "service/app/consensus/raft/raft.go",
       "layer": "service",
       "family": "app"
@@ -47282,10 +47282,10 @@
       "family": "app"
     },
     {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/wire.Admin",
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/wire.AdminValue",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/wire",
-      "name": "Admin",
+      "name": "AdminValue",
       "spelled": "struct{Operator string; Change uint8; Target coreconsensus.NodeID; Pre coreconsensus.PreconditionSpec; Membership coreconsensus.MembershipValue; Contract coreconsensus.TimingContractSpec; ClusterVersion uint32}",
       "canonical": "struct{Operator string; Change uint8; Target github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Pre github.com/kitsunium/sdk/internal/core/app/consensus.PreconditionSpec; Membership github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue; Contract github.com/kitsunium/sdk/internal/core/app/consensus.TimingContractSpec; ClusterVersion uint32}",
       "fields": [
@@ -47325,7 +47325,7 @@
           "doc": "ClusterVersion is the version an EntryClusterVersion raises to.\n"
         }
       ],
-      "doc": "Admin is the payload of every engine entry kind: who asked, what it expects\nto act on, and what it changes. Each kind reads the fields it needs.\n",
+      "doc": "AdminValue is the payload of every engine entry kind: who asked, what it expects\nto act on, and what it changes. Each kind reads the fields it needs.\n",
       "file": "service/app/consensus/wire/admin.go",
       "layer": "service",
       "family": "app"
@@ -47335,8 +47335,8 @@
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/wire",
       "name": "AppendAdmin",
-      "spelled": "func(dst []byte, a *Admin) []byte",
-      "canonical": "func(dst []byte, a *github.com/kitsunium/sdk/internal/service/app/consensus/wire.Admin) []byte",
+      "spelled": "func(dst []byte, a *AdminValue) []byte",
+      "canonical": "func(dst []byte, a *github.com/kitsunium/sdk/internal/service/app/consensus/wire.AdminValue) []byte",
       "doc": "AppendAdmin appends the encoding of an engine entry's payload.\n",
       "file": "service/app/consensus/wire/admin.go",
       "layer": "service",
@@ -47534,8 +47534,8 @@
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/wire",
       "name": "ParseAdmin",
-      "spelled": "func(b []byte) (Admin, error)",
-      "canonical": "func(b []byte) (github.com/kitsunium/sdk/internal/service/app/consensus/wire.Admin, error)",
+      "spelled": "func(b []byte) (AdminValue, error)",
+      "canonical": "func(b []byte) (github.com/kitsunium/sdk/internal/service/app/consensus/wire.AdminValue, error)",
       "doc": "ParseAdmin decodes an engine entry's payload.\n",
       "file": "service/app/consensus/wire/admin.go",
       "layer": "service",
@@ -57111,18 +57111,18 @@
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/net/tlsid",
       "name": "Deadline",
-      "spelled": "func(peer PeerIdentity, opened time.Time, maxAge time.Duration) time.Time",
-      "canonical": "func(peer github.com/kitsunium/sdk/internal/service/net/tlsid.PeerIdentity, opened time.Time, maxAge time.Duration) time.Time",
+      "spelled": "func(peer PeerIdentityValue, opened time.Time, maxAge time.Duration) time.Time",
+      "canonical": "func(peer github.com/kitsunium/sdk/internal/service/net/tlsid.PeerIdentityValue, opened time.Time, maxAge time.Duration) time.Time",
       "doc": "Deadline is when a connection to peer must end: at its certificate's\nNotAfter, or after maxAge from opened, whichever comes first, so a\nrevoked or expired identity cannot ride an old connection.\n",
       "file": "service/net/tlsid/identity.go",
       "layer": "service",
       "family": "net"
     },
     {
-      "id": "go:github.com/kitsunium/sdk/internal/service/net/tlsid.Files",
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/tlsid.FilesConfig",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/net/tlsid",
-      "name": "Files",
+      "name": "FilesConfig",
       "spelled": "struct{CertFile string; KeyFile string; RootsFile string; Every time.Duration}",
       "canonical": "struct{CertFile string; KeyFile string; RootsFile string; Every time.Duration}",
       "fields": [
@@ -57147,7 +57147,7 @@
           "doc": "Every bounds how often the files are looked at; 0 is one second.\n"
         }
       ],
-      "doc": "Files names the PEM files of a reloadable identity.\n",
+      "doc": "FilesConfig names the PEM files of a reloadable identity.\n",
       "file": "service/net/tlsid/identity.go",
       "layer": "service",
       "family": "net"
@@ -57259,8 +57259,8 @@
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/net/tlsid",
       "name": "LoadReloadable",
-      "spelled": "func(f Files) (*Identity, error)",
-      "canonical": "func(f github.com/kitsunium/sdk/internal/service/net/tlsid.Files) (*github.com/kitsunium/sdk/internal/service/net/tlsid.Identity, error)",
+      "spelled": "func(f FilesConfig) (*Identity, error)",
+      "canonical": "func(f github.com/kitsunium/sdk/internal/service/net/tlsid.FilesConfig) (*github.com/kitsunium/sdk/internal/service/net/tlsid.Identity, error)",
       "doc": "LoadReloadable reads an identity from files and reloads it in place when\nthey change. A reload is refused, counted, and the old identity kept, when\nthe new certificate does not parse or match its key, or names another URI\nSAN, or carries another key: a renewal reuses the key, so the pins hold.\nA new roots file is added to the old roots, so a CA rollover trusts the\nunion until the process restarts.\n",
       "file": "service/net/tlsid/identity.go",
       "layer": "service",
@@ -57279,10 +57279,10 @@
       "family": "net"
     },
     {
-      "id": "go:github.com/kitsunium/sdk/internal/service/net/tlsid.PeerIdentity",
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/tlsid.PeerIdentityValue",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/net/tlsid",
-      "name": "PeerIdentity",
+      "name": "PeerIdentityValue",
       "spelled": "struct{Leaf *x509.Certificate; Chain []*x509.Certificate; SPKI [32]byte; URIs []*url.URL; NotAfter time.Time}",
       "canonical": "struct{Leaf *crypto/x509.Certificate; Chain []*crypto/x509.Certificate; SPKI [32]byte; URIs []*net/url.URL; NotAfter time.Time}",
       "fields": [
@@ -57312,7 +57312,7 @@
           "doc": "NotAfter is when the leaf expires: a connection is closed by then.\n"
         }
       ],
-      "doc": "PeerIdentity is what a handshake PROVED about the peer: its verified leaf\nand chain, and the SHA-256 of its SubjectPublicKeyInfo, the pin a member\nis admitted on. Nothing in it comes from a frame the peer wrote.\n",
+      "doc": "PeerIdentityValue is what a handshake PROVED about the peer: its verified leaf\nand chain, and the SHA-256 of its SubjectPublicKeyInfo, the pin a member\nis admitted on. Nothing in it comes from a frame the peer wrote.\n",
       "file": "service/net/tlsid/identity.go",
       "layer": "service",
       "family": "net"
@@ -57322,8 +57322,8 @@
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/net/tlsid",
       "name": "PeerOf",
-      "spelled": "func(cs tls.ConnectionState) (PeerIdentity, bool)",
-      "canonical": "func(cs crypto/tls.ConnectionState) (github.com/kitsunium/sdk/internal/service/net/tlsid.PeerIdentity, bool)",
+      "spelled": "func(cs tls.ConnectionState) (PeerIdentityValue, bool)",
+      "canonical": "func(cs crypto/tls.ConnectionState) (github.com/kitsunium/sdk/internal/service/net/tlsid.PeerIdentityValue, bool)",
       "doc": "PeerOf returns the peer of a completed handshake, false before one or\nwithout a peer certificate. Its Chain is set only when the standard\nverifier ran; the identity's own check sees the chain it verified.\n",
       "file": "service/net/tlsid/identity.go",
       "layer": "service",
@@ -57346,8 +57346,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/net/tlsid",
       "name": "Verify",
-      "spelled": "func(peer PeerIdentity) error",
-      "canonical": "func(peer github.com/kitsunium/sdk/internal/service/net/tlsid.PeerIdentity) error",
+      "spelled": "func(peer PeerIdentityValue) error",
+      "canonical": "func(peer github.com/kitsunium/sdk/internal/service/net/tlsid.PeerIdentityValue) error",
       "doc": "Verify is a caller's check of a verified peer, run on EVERY handshake,\nafter the chain, the roots and the extended key usage passed. A non-nil\nerror fails the handshake (fail-closed).\n",
       "file": "service/net/tlsid/identity.go",
       "layer": "service",

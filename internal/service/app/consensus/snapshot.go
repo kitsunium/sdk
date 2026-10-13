@@ -618,7 +618,7 @@ func (n *Node) slotTaken(slot string) bool {
 // the code and reason of its failure.
 func (n *Node) addJoiner(ctx context.Context, op coreconsensus.Operator, r *coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code, string) {
 	m := coreconsensus.MemberValue{ID: r.ID, Incarnation: r.Incarnation, Slot: r.Slot, SPKI: r.SPKI, Address: r.Address, Joining: true}
-	a := new(wire.Admin{
+	a := new(wire.AdminValue{
 		Operator: string(op), Change: wire.ChangeAddLearner, Target: m.ID,
 		Membership: coreconsensus.MembershipValue{Members: []coreconsensus.MemberValue{m}},
 	})

@@ -61,7 +61,7 @@ func (q *eventQueue) Pop() any {
 }
 
 type simWrite struct {
-	rd     Ready
+	rd     ReadyValue
 	doneAt time.Time
 }
 
@@ -189,7 +189,7 @@ func newSim(opt simOptions) *sim {
 		conf.Members = append(conf.Members, core.MemberValue{ID: id, Voter: true, SPKI: [32]byte{byte(i)}})
 	}
 	// The founding configuration is entry 1 on every founder, committed.
-	data := wire.AppendAdmin(nil, &wire.Admin{Change: wire.ChangeFounding, Membership: conf})
+	data := wire.AppendAdmin(nil, &wire.AdminValue{Change: wire.ChangeFounding, Membership: conf})
 	found := core.EntryValue{Position: core.PositionValue{Term: 1, Index: 1}, Kind: core.EntryMembership, BodySum: wire.BodySum(data), Data: data}
 	found.ChainSum = wire.ChainSum(0, &found)
 	for _, id := range s.ids {
@@ -221,7 +221,7 @@ func (s *sim) start(n *simNode) {
 	n.checked = 0
 	cfg := s.cfg(n.id)
 	cfg.NoTable = n.noTable
-	n.r = New(cfg, Start{HardState: n.hs, Snapshot: n.base, Entries: slices.Clone(n.ents), Applied: n.base.Position.Index, Now: s.clock(n)})
+	n.r = New(cfg, StartState{HardState: n.hs, Snapshot: n.base, Entries: slices.Clone(n.ents), Applied: n.base.Position.Index, Now: s.clock(n)})
 	s.push(&event{at: s.now.Add(time.Duration(s.rng.Int64N(int64(10 * time.Millisecond)))), kind: evTick, node: n.id, life: n.life})
 }
 

@@ -76,8 +76,8 @@ type fwdEntry struct {
 // commands for apply backpressure (D6): forwarded ones are refused too.
 func (r *Raft) SetOverloaded(on bool) { r.overloaded = on }
 
-// Start is the durable state the driver loaded.
-type Start struct {
+// StartState is the durable state the driver loaded.
+type StartState struct {
 	// HardState is the last hard state on disk.
 	HardState core.HardState
 	// Snapshot is the base the log continues, zero for none.
@@ -104,8 +104,8 @@ type TransferResult struct {
 	Code errs.Code
 }
 
-// Ready is what the driver must do after a turn.
-type Ready struct {
+// ReadyValue is what the driver must do after a turn.
+type ReadyValue struct {
 	// Seq names the write when there is one; completions carry it.
 	Seq uint64
 	// HardState is set when the term or the vote changed: it is durable
@@ -139,7 +139,7 @@ type Ready struct {
 	SilenceEnded bool
 	// Fetch asks the driver to read entries the step function no longer
 	// holds, off the event loop, and hand them back with Fetched.
-	Fetch []FetchRequest
+	Fetch []FetchSpec
 	// Membership is set when the admitted set changed.
 	Membership []core.MemberValue
 	// Unsupported names an entry whose kind this version does not know:
@@ -154,14 +154,14 @@ type UnsupportedEntry struct {
 	Kind  core.EntryKind
 }
 
-// FetchRequest asks for the entries [Lo, Hi) of the store for a peer.
-type FetchRequest struct {
+// FetchSpec asks for the entries [Lo, Hi) of the store for a peer.
+type FetchSpec struct {
 	To     core.NodeID
 	Lo, Hi uint64
 }
 
 // NeedsWrite reports whether the Ready asks the storage actor for anything.
-func (rd *Ready) NeedsWrite() bool {
+func (rd *ReadyValue) NeedsWrite() bool {
 	return rd.HardState != nil || rd.TruncateFrom != 0 || rd.Compact != 0 || len(rd.Entries) != 0 || len(rd.AfterSync) != 0 || rd.Commit != 0
 }
 
@@ -257,12 +257,12 @@ type Raft struct {
 	refusals    int
 
 	seq uint64
-	rd  Ready
+	rd  ReadyValue
 	hs  core.HardState
 }
 
 // New builds the step function over the loaded state.
-func New(cfg Config, st Start) *Raft {
+func New(cfg Config, st StartState) *Raft {
 	node := &Raft{
 		cfg:    cfg,
 		mut:    cfg.mut,
@@ -439,8 +439,8 @@ func (r *Raft) TermAt(i uint64) (uint64, bool) { return r.log.term(i) }
 
 // ---- status ----
 
-// Status is the step function's part of a node's status.
-type Status struct {
+// StatusValue is the step function's part of a node's status.
+type StatusValue struct {
 	Role      core.Role
 	Term      uint64
 	Lead      core.NodeID
@@ -457,8 +457,8 @@ type Status struct {
 }
 
 // Status returns the step function's view.
-func (r *Raft) Status() Status {
-	return Status{
+func (r *Raft) Status() StatusValue {
+	return StatusValue{
 		Role: r.role, Term: r.term, Lead: r.lead, Commit: r.log.committed,
 		Last: r.log.lastIndex(), Stable: r.log.stable, Timing: r.timing,
 		Cluster: r.clusterVer, ClusterG: r.clusterGen, NoSpace: r.noSpace,
@@ -502,24 +502,24 @@ func (r *Raft) HasReady() bool {
 }
 
 // hasLogWork reports whether the Ready queues a log change or a message.
-func (rd *Ready) hasLogWork() bool {
+func (rd *ReadyValue) hasLogWork() bool {
 	return rd.TruncateFrom != 0 || rd.Compact != 0 || len(rd.Entries) != 0 || len(rd.Messages) != 0 || len(rd.AfterSync) != 0
 }
 
 // hasNotices reports whether the Ready queues anything else for the
 // driver: snapshots to send, answers, a membership, fetches, the end of the
 // silence, an entry this version cannot apply.
-func (rd *Ready) hasNotices() bool {
+func (rd *ReadyValue) hasNotices() bool {
 	return len(rd.SendSnapshot) != 0 || len(rd.ReadStates) != 0 || len(rd.Forwarded) != 0 ||
 		len(rd.Transfers) != 0 || rd.Membership != nil || len(rd.Fetch) != 0 || rd.SilenceEnded ||
 		rd.Unsupported.Index != 0
 }
 
 // Ready returns the work of the turns since the last call and resets it.
-func (r *Raft) Ready() Ready {
+func (r *Raft) Ready() ReadyValue {
 	r.flushReads()
 	rd := r.rd
-	r.rd = Ready{}
+	r.rd = ReadyValue{}
 	hsChanged := r.term != r.hs.Term || r.vote != r.hs.Vote
 	if hsChanged {
 		rd.HardState = new(core.HardState{Term: r.term, Vote: r.vote, Commit: r.log.committed})
@@ -545,7 +545,7 @@ func (r *Raft) Ready() Ready {
 // numberWrite gives a Ready that asks the storage actor for anything the
 // next write sequence number, and remembers it as the write carrying a
 // candidate's own vote when this one persists that vote (D5b).
-func (r *Raft) numberWrite(rd *Ready, hsChanged bool) {
+func (r *Raft) numberWrite(rd *ReadyValue, hsChanged bool) {
 	if !rd.NeedsWrite() {
 		return
 	}
@@ -795,7 +795,7 @@ func actsAtCommit(kind core.EntryKind) bool {
 // applyAdmin applies the committed engine entry at index i, of kind, whose
 // payload is admin, and reports whether it is one this version cannot
 // apply, which stops the walk over the committed entries.
-func (r *Raft) applyAdmin(i uint64, kind core.EntryKind, admin *wire.Admin) bool {
+func (r *Raft) applyAdmin(i uint64, kind core.EntryKind, admin *wire.AdminValue) bool {
 	switch kind {
 	case core.EntryTimingContract:
 		r.commitTimingContract(admin)
@@ -818,7 +818,7 @@ func (r *Raft) applyAdmin(i uint64, kind core.EntryKind, admin *wire.Admin) bool
 // commitTimingContract makes a committed contract the current one when it
 // was proposed against the current generation, and widens the vote-refusal
 // window to it.
-func (r *Raft) commitTimingContract(admin *wire.Admin) {
+func (r *Raft) commitTimingContract(admin *wire.AdminValue) {
 	if admin.Pre.Generation != r.timing.Generation {
 		return
 	}
@@ -835,7 +835,7 @@ func (r *Raft) commitTimingContract(admin *wire.Admin) {
 // index i proposed against the current generation, never lowering it. A
 // version above ProtocolMax is not applied: it is named in the Ready for the
 // driver to stop the node, and true stops the walk there.
-func (r *Raft) commitClusterVersion(i uint64, admin *wire.Admin) bool {
+func (r *Raft) commitClusterVersion(i uint64, admin *wire.AdminValue) bool {
 	if admin.ClusterVersion > ProtocolMax {
 		// Unknown means stop (D18, review M3).
 		r.rd.Unsupported = UnsupportedEntry{Index: i, Kind: core.EntryClusterVersion}
@@ -858,8 +858,8 @@ func (r *Raft) commitTo(i uint64) {
 	}
 }
 
-// PeerStat is the leader's view of one peer, for Health (D13).
-type PeerStat struct {
+// PeerStatValue is the leader's view of one peer, for Health (D13).
+type PeerStatValue struct {
 	ID        core.NodeID
 	Voter     bool
 	Match     uint64
@@ -873,14 +873,14 @@ type PeerStat struct {
 
 // PeerStats returns the leader's view of every peer, in configuration
 // order; nil off the leader.
-func (r *Raft) PeerStats() []PeerStat {
+func (r *Raft) PeerStats() []PeerStatValue {
 	if r.role != core.RoleLeader {
 		return nil
 	}
-	var out []PeerStat
+	var out []PeerStatValue
 	for _, id := range r.peers() {
 		pr := r.prs[id]
-		out = append(out, PeerStat{
+		out = append(out, PeerStatValue{
 			ID: id, Voter: r.isVoter(id), Match: pr.match, Next: pr.next, Inflight: len(pr.inflight),
 			LastHeard: pr.lastHeard, Heard: pr.heard, Probing: pr.state == stateProbe, Snapshot: pr.state == stateSnapshot,
 		})

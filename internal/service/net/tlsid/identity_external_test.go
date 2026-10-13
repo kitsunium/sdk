@@ -87,10 +87,10 @@ func writeFile(t *testing.T, dir, name string, b []byte) string {
 	return p
 }
 
-func files(t *testing.T, c *ca, san string, key *ecdsa.PrivateKey) tlsid.Files {
+func files(t *testing.T, c *ca, san string, key *ecdsa.PrivateKey) tlsid.FilesConfig {
 	dir := t.TempDir()
 	cp, kp := c.issue(t, san, key)
-	return tlsid.Files{
+	return tlsid.FilesConfig{
 		CertFile: writeFile(t, dir, "cert.pem", cp), KeyFile: writeFile(t, dir, "key.pem", kp),
 		RootsFile: writeFile(t, dir, "ca.pem", c.pem), Every: time.Millisecond,
 	}
@@ -162,8 +162,8 @@ func TestIdentityVerifiesEveryHandshakeAndExposesThePeer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var seen tlsid.PeerIdentity
-	hs := handshake(srv, cli, func(p tlsid.PeerIdentity) error { seen = p; return nil }, nil)
+	var seen tlsid.PeerIdentityValue
+	hs := handshake(srv, cli, func(p tlsid.PeerIdentityValue) error { seen = p; return nil }, nil)
 	if hs.server != nil || hs.client != nil {
 		t.Fatalf("handshake: %v / %v", hs.server, hs.client)
 	}
@@ -173,17 +173,17 @@ func TestIdentityVerifiesEveryHandshakeAndExposesThePeer(t *testing.T) {
 	}
 	// The check is fail-closed, on either side.
 	refuse := errors.New("no")
-	if hs := handshake(srv, cli, func(tlsid.PeerIdentity) error { return refuse }, nil); hs.server == nil {
+	if hs := handshake(srv, cli, func(tlsid.PeerIdentityValue) error { return refuse }, nil); hs.server == nil {
 		t.Fatal("the server's check did not fail the handshake")
 	}
-	if hs := handshake(srv, cli, nil, func(tlsid.PeerIdentity) error { return refuse }); hs.client == nil {
+	if hs := handshake(srv, cli, nil, func(tlsid.PeerIdentityValue) error { return refuse }); hs.client == nil {
 		t.Fatal("the client's check did not fail the handshake")
 	}
 	// Another CA's certificate fails the chain before any check runs.
 	other := newCA(t, "other")
 	stranger := must(tlsid.LoadReloadable(files(t, other, "kitsunium-consensus://aa/slot/x", nil)))(t)
 	called := false
-	if hs := handshake(srv, stranger, func(tlsid.PeerIdentity) error { called = true; return nil }, nil); hs.server == nil || called {
+	if hs := handshake(srv, stranger, func(tlsid.PeerIdentityValue) error { called = true; return nil }, nil); hs.server == nil || called {
 		t.Fatalf("another CA was accepted (check called %v)", called)
 	}
 	if !srv.ServerConfig(nil).SessionTicketsDisabled || !srv.ClientConfig(nil).SessionTicketsDisabled {

@@ -261,7 +261,7 @@ func TestSimTransferForwardedFromFollower(t *testing.T) {
 				}
 			}
 		}
-		data := wire.AppendAdmin(nil, &wire.Admin{Operator: "op:test", Target: to.id})
+		data := wire.AppendAdmin(nil, &wire.AdminValue{Operator: "op:test", Target: to.id})
 		m := core.MessageValue{
 			Version: 1, Group: 1, Kind: core.MsgForwardAdmin, From: f.id, To: l.id, Term: f.r.Status().Term,
 			Context: 77, Entries: []core.EntryValue{{Kind: core.EntryTransfer, BodySum: wire.BodySum(data), Data: data}},

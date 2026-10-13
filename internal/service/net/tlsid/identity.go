@@ -22,10 +22,10 @@ import (
 // corenet.IdentityValue; the two do not share a type because a reloadable
 // identity is a live object, not a value.
 
-// PeerIdentity is what a handshake PROVED about the peer: its verified leaf
+// PeerIdentityValue is what a handshake PROVED about the peer: its verified leaf
 // and chain, and the SHA-256 of its SubjectPublicKeyInfo, the pin a member
 // is admitted on. Nothing in it comes from a frame the peer wrote.
-type PeerIdentity struct {
+type PeerIdentityValue struct {
 	// Leaf is the peer's verified certificate.
 	Leaf *x509.Certificate
 	// Chain is the chain the standard verifier built, leaf first; empty
@@ -47,7 +47,7 @@ func SPKI(c *x509.Certificate) [32]byte { return sha256.Sum256(c.RawSubjectPubli
 // Verify is a caller's check of a verified peer, run on EVERY handshake,
 // after the chain, the roots and the extended key usage passed. A non-nil
 // error fails the handshake (fail-closed).
-type Verify func(peer PeerIdentity) error
+type Verify func(peer PeerIdentityValue) error
 
 // Identity is a node's own TLS identity and the roots it trusts, reloadable
 // in place. It is safe for concurrent use.
@@ -58,7 +58,7 @@ type Identity struct {
 
 	// For an identity read from files.
 	mu        sync.Mutex
-	files     *Files
+	files     *FilesConfig
 	cur       *tls.Certificate
 	spki      [32]byte
 	san       string
@@ -68,8 +68,8 @@ type Identity struct {
 	rootsSeen [][]byte
 }
 
-// Files names the PEM files of a reloadable identity.
-type Files struct {
+// FilesConfig names the PEM files of a reloadable identity.
+type FilesConfig struct {
 	// CertFile holds the certificate, its chain may follow it.
 	CertFile string
 	// KeyFile holds its private key.
@@ -110,7 +110,7 @@ func NewIdentity(get func() (*tls.Certificate, error), roots *x509.CertPool) (*I
 // SAN, or carries another key: a renewal reuses the key, so the pins hold.
 // A new roots file is added to the old roots, so a CA rollover trusts the
 // union until the process restarts.
-func LoadReloadable(f Files) (*Identity, error) {
+func LoadReloadable(f FilesConfig) (*Identity, error) {
 	if f.Every <= 0 {
 		f.Every = time.Second
 	}
@@ -286,7 +286,7 @@ func (id *Identity) verifyPeer(cs tls.ConnectionState, usage x509.ExtKeyUsage, c
 	if check == nil {
 		return nil
 	}
-	return check(PeerIdentity{Leaf: leaf, Chain: chains[0], SPKI: SPKI(leaf), URIs: leaf.URIs, NotAfter: leaf.NotAfter})
+	return check(PeerIdentityValue{Leaf: leaf, Chain: chains[0], SPKI: SPKI(leaf), URIs: leaf.URIs, NotAfter: leaf.NotAfter})
 }
 
 // base is the configuration both ends share: TLS 1.3 only, no session
@@ -330,12 +330,12 @@ func (id *Identity) ClientConfig(check Verify) *tls.Config {
 // PeerOf returns the peer of a completed handshake, false before one or
 // without a peer certificate. Its Chain is set only when the standard
 // verifier ran; the identity's own check sees the chain it verified.
-func PeerOf(cs tls.ConnectionState) (PeerIdentity, bool) {
+func PeerOf(cs tls.ConnectionState) (PeerIdentityValue, bool) {
 	if !cs.HandshakeComplete || len(cs.PeerCertificates) == 0 {
-		return PeerIdentity{}, false
+		return PeerIdentityValue{}, false
 	}
 	leaf := cs.PeerCertificates[0]
-	p := PeerIdentity{Leaf: leaf, SPKI: SPKI(leaf), URIs: leaf.URIs, NotAfter: leaf.NotAfter}
+	p := PeerIdentityValue{Leaf: leaf, SPKI: SPKI(leaf), URIs: leaf.URIs, NotAfter: leaf.NotAfter}
 	if len(cs.VerifiedChains) > 0 {
 		// Under VerifyConnection the standard verifier does not run and
 		// this stays empty: the presented certificates are never handed
@@ -348,7 +348,7 @@ func PeerOf(cs tls.ConnectionState) (PeerIdentity, bool) {
 // Deadline is when a connection to peer must end: at its certificate's
 // NotAfter, or after maxAge from opened, whichever comes first, so a
 // revoked or expired identity cannot ride an old connection.
-func Deadline(peer PeerIdentity, opened time.Time, maxAge time.Duration) time.Time {
+func Deadline(peer PeerIdentityValue, opened time.Time, maxAge time.Duration) time.Time {
 	d := opened.Add(maxAge)
 	if !peer.NotAfter.IsZero() && peer.NotAfter.Before(d) {
 		return peer.NotAfter

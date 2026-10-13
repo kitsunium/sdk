@@ -48,7 +48,7 @@ func FuzzParseSnapshotMeta(f *testing.F) {
 // expected outcome for most inputs and carries nothing to assert; the
 // property under test is that the call returns at all.
 func FuzzParseAdmin(f *testing.F) {
-	f.Add(wire.AppendAdmin(nil, &wire.Admin{Operator: "op", Change: wire.ChangeRemove, Target: 9}))
+	f.Add(wire.AppendAdmin(nil, &wire.AdminValue{Operator: "op", Change: wire.ChangeRemove, Target: 9}))
 	f.Fuzz(func(_ *testing.T, b []byte) {
 		if _, err := wire.ParseAdmin(b); err != nil {
 			return

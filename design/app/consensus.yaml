@@ -2294,7 +2294,7 @@ packages:
             type: DataDir
         name: Inspect
         out:
-          - type: Report
+          - type: ReportValue
           - type: error
       - doc: |-
           ClearQuarantine clears a quarantined, or stopped, directory through one of
@@ -2450,8 +2450,8 @@ packages:
       x509: crypto/x509
     path: github.com/kitsunium/sdk/internal/service/app/consensus
     types:
-      - doc: PeerHealth is the leader's view of one peer (D13).
-        name: PeerHealth
+      - doc: PeerHealthValue is the leader's view of one peer (D13).
+        name: PeerHealthValue
         struct:
           fields:
             - doc: ID is the peer.
@@ -2483,8 +2483,8 @@ packages:
             - doc: Snapshot is set while a snapshot is being sent to it.
               name: Snapshot
               type: bool
-      - doc: Health is a node's verdict for an orchestrator's probe (D13).
-        name: Health
+      - doc: HealthValue is a node's verdict for an orchestrator's probe (D13).
+        name: HealthValue
         struct:
           fields:
             - doc: Status is the node's view after its last turn.
@@ -2513,7 +2513,7 @@ packages:
               type: uint64
             - doc: Peers is the leader's view of every peer, nil elsewhere.
               name: Peers
-              type: "[]PeerHealth"
+              type: "[]PeerHealthValue"
             - doc: |-
                 ChainRefusals counts identical chain refusals of this follower at
                 ChainRefusalIndex from ChainRefusalLeader; the node reports itself
@@ -3107,7 +3107,7 @@ packages:
           - doc: Health returns the node's verdict, computed on the event loop.
             name: Health
             out:
-              - type: Health
+              - type: HealthValue
             recv: pointer
           - doc: StopReason returns why the node stopped itself, if it did.
             name: StopReason
@@ -3324,8 +3324,8 @@ packages:
         name: Node
         struct:
           unexported: true
-      - doc: Report is what Inspect reads, read-only.
-        name: Report
+      - doc: ReportValue is what Inspect reads, read-only.
+        name: ReportValue
         struct:
           fields:
             - name: Stamp
@@ -3617,14 +3617,14 @@ packages:
       Durability is an input, never an assumption (D5b): a write the step
       function asks for is counted only once the driver reports it with
       [Raft.StorageDone], and the replies that depend on it leave in
-      [Ready.AfterSync], which the driver sends only once that write is durable.
+      [ReadyValue.AfterSync], which the driver sends only once that write is durable.
     functions:
       - doc: New builds the step function over the loaded state.
         in:
           - name: cfg
             type: Config
           - name: st
-            type: Start
+            type: StartState
         name: New
         out:
           - type: "*Raft"
@@ -3716,8 +3716,8 @@ packages:
               name: MaxForwardBytes
               type: int64
           unexported: true
-      - doc: Start is the durable state the driver loaded.
-        name: Start
+      - doc: StartState is the durable state the driver loaded.
+        name: StartState
         struct:
           fields:
             - doc: HardState is the last hard state on disk.
@@ -3755,14 +3755,14 @@ packages:
               type: core.NodeID
             - name: Code
               type: errs.Code
-      - doc: Ready is what the driver must do after a turn.
+      - doc: ReadyValue is what the driver must do after a turn.
         methods:
           - doc: NeedsWrite reports whether the Ready asks the storage actor for anything.
             name: NeedsWrite
             out:
               - type: bool
             recv: pointer
-        name: Ready
+        name: ReadyValue
         struct:
           fields:
             - doc: Seq names the write when there is one; completions carry it.
@@ -3817,7 +3817,7 @@ packages:
                 Fetch asks the driver to read entries the step function no longer
                 holds, off the event loop, and hand them back with Fetched.
               name: Fetch
-              type: "[]FetchRequest"
+              type: "[]FetchSpec"
             - doc: Membership is set when the admitted set changed.
               name: Membership
               type: "[]core.MemberValue"
@@ -3836,8 +3836,8 @@ packages:
               type: uint64
             - name: Kind
               type: core.EntryKind
-      - doc: FetchRequest asks for the entries [Lo, Hi) of the store for a peer.
-        name: FetchRequest
+      - doc: FetchSpec asks for the entries [Lo, Hi) of the store for a peer.
+        name: FetchSpec
         struct:
           fields:
             - name: To
@@ -4036,7 +4036,7 @@ packages:
           - doc: Status returns the step function's view.
             name: Status
             out:
-              - type: Status
+              - type: StatusValue
             recv: pointer
           - doc: Progress returns the leader's match index of a peer.
             in:
@@ -4072,14 +4072,14 @@ packages:
           - doc: Ready returns the work of the turns since the last call and resets it.
             name: Ready
             out:
-              - type: Ready
+              - type: ReadyValue
             recv: pointer
           - doc: |-
               PeerStats returns the leader's view of every peer, in configuration
               order; nil off the leader.
             name: PeerStats
             out:
-              - type: "[]PeerStat"
+              - type: "[]PeerStatValue"
             recv: pointer
           - doc: |-
               FailureTolerance is how many voters can fail now with a majority left:
@@ -4124,8 +4124,8 @@ packages:
         name: Raft
         struct:
           unexported: true
-      - doc: Status is the step function's part of a node's status.
-        name: Status
+      - doc: StatusValue is the step function's part of a node's status.
+        name: StatusValue
         struct:
           fields:
             - name: Role
@@ -4154,8 +4154,8 @@ packages:
               type: core.MembershipValue
             - name: Transfer
               type: core.NodeID
-      - doc: PeerStat is the leader's view of one peer, for Health (D13).
-        name: PeerStat
+      - doc: PeerStatValue is the leader's view of one peer, for Health (D13).
+        name: PeerStatValue
         struct:
           fields:
             - name: ID
@@ -4225,7 +4225,7 @@ packages:
           - name: dst
             type: "[]byte"
           - name: a
-            type: "*Admin"
+            type: "*AdminValue"
         name: AppendAdmin
         out:
           - type: "[]byte"
@@ -4235,7 +4235,7 @@ packages:
             type: "[]byte"
         name: ParseAdmin
         out:
-          - type: Admin
+          - type: AdminValue
           - type: error
       - doc: |-
           BodySum returns the CRC-32C of an entry's payload, the checksum a proposer
@@ -4368,9 +4368,9 @@ packages:
     path: github.com/kitsunium/sdk/internal/service/app/consensus/wire
     types:
       - doc: |-
-          Admin is the payload of every engine entry kind: who asked, what it expects
+          AdminValue is the payload of every engine entry kind: who asked, what it expects
           to act on, and what it changes. Each kind reads the fields it needs.
-        name: Admin
+        name: AdminValue
         struct:
           fields:
             - doc: Operator is the identity the caller vouched for.
@@ -4526,10 +4526,10 @@ packages:
           - name: LeadershipWatcher
             target: coreconsensus.LeadershipWatcher
           - blank: true
-            name: Health
-            target: svcconsensus.Health
-          - name: PeerHealth
-            target: svcconsensus.PeerHealth
+            name: HealthValue
+            target: svcconsensus.HealthValue
+          - name: PeerHealthValue
+            target: svcconsensus.PeerHealthValue
           - name: ReadMode
             target: svcconsensus.ReadMode
           - name: Durability
@@ -4551,8 +4551,8 @@ packages:
             target: svcconsensus.DataDir
           - name: DataDirOptions
             target: svcconsensus.DataDirOptions
-          - name: Report
-            target: svcconsensus.Report
+          - name: ReportValue
+            target: svcconsensus.ReportValue
           - name: QuarantineExit
             target: svcconsensus.QuarantineExit
           - name: RecoverOptions
@@ -4631,7 +4631,7 @@ packages:
               type: DataDir
           name: Inspect
           out:
-            - type: Report
+            - type: ReportValue
             - type: error
       - func:
           doc: |-

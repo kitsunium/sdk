@@ -191,7 +191,7 @@ func (n *Node) appended(p *proposal, pos coreconsensus.PositionValue, local bool
 // forward sends a proposal to the leader under a submission id that never
 // repeats across restarts: a random epoch in the high 32 bits, a counter in
 // the low 32, and a fresh epoch before the counter runs out (R7-23, R9-17).
-func (n *Node) forward(p *proposal, st raft.Status) {
+func (n *Node) forward(p *proposal, st raft.StatusValue) {
 	if st.Lead == 0 || st.Lead == n.stamp.ID {
 		p.done <- propResult{err: notLeader(0)}
 		return
@@ -322,7 +322,7 @@ func (n *Node) WaitApplied(ctx context.Context, t coreconsensus.TokenValue) erro
 // admin validates the operator, then submits an administrative entry and
 // logs it at Warn with its outcome whatever that outcome is, so every
 // operator action leaves a trace (D8, D17).
-func (n *Node) admin(ctx context.Context, kind coreconsensus.EntryKind, a wire.Admin) error {
+func (n *Node) admin(ctx context.Context, kind coreconsensus.EntryKind, a wire.AdminValue) error {
 	if !coreconsensus.Operator(a.Operator).Valid() {
 		return origin(coreconsensus.MembershipInvalid, errs.String("why", "operator"))
 	}
@@ -341,7 +341,7 @@ func (n *Node) admin(ctx context.Context, kind coreconsensus.EntryKind, a wire.A
 
 // AddLearner adds a non-voting member that receives the log (D8).
 func (n *Node) AddLearner(ctx context.Context, op coreconsensus.Operator, m coreconsensus.MemberValue) error {
-	return n.admin(ctx, coreconsensus.EntryMembership, wire.Admin{
+	return n.admin(ctx, coreconsensus.EntryMembership, wire.AdminValue{
 		Operator: string(op), Change: wire.ChangeAddLearner,
 		Target: m.ID, Membership: coreconsensus.MembershipValue{Members: []coreconsensus.MemberValue{m}},
 	})
@@ -349,7 +349,7 @@ func (n *Node) AddLearner(ctx context.Context, op coreconsensus.Operator, m core
 
 // Promote makes a caught-up learner a voter (D8).
 func (n *Node) Promote(ctx context.Context, op coreconsensus.Operator, id coreconsensus.NodeID) error {
-	return n.admin(ctx, coreconsensus.EntryMembership, wire.Admin{Operator: string(op), Change: wire.ChangePromote, Target: id})
+	return n.admin(ctx, coreconsensus.EntryMembership, wire.AdminValue{Operator: string(op), Change: wire.ChangePromote, Target: id})
 }
 
 // Remove removes a member and retires its id; removing the leader first
@@ -358,13 +358,13 @@ func (n *Node) Remove(ctx context.Context, op coreconsensus.Operator, id corecon
 	if st := n.Status(); st.Leader == id && id == n.stamp.ID {
 		n.handOff(ctx)
 	}
-	return n.admin(ctx, coreconsensus.EntryMembership, wire.Admin{Operator: string(op), Change: wire.ChangeRemove, Target: id})
+	return n.admin(ctx, coreconsensus.EntryMembership, wire.AdminValue{Operator: string(op), Change: wire.ChangeRemove, Target: id})
 }
 
 // UpdateAddress changes where a member listens.
 func (n *Node) UpdateAddress(ctx context.Context, op coreconsensus.Operator, id coreconsensus.NodeID, addr string) error {
 	members := []coreconsensus.MemberValue{{ID: id, Address: addr}}
-	return n.admin(ctx, coreconsensus.EntryMembership, wire.Admin{
+	return n.admin(ctx, coreconsensus.EntryMembership, wire.AdminValue{
 		Operator: string(op), Change: wire.ChangeUpdateAddress,
 		Target: id, Membership: coreconsensus.MembershipValue{Members: members},
 	})
@@ -372,29 +372,29 @@ func (n *Node) UpdateAddress(ctx context.Context, op coreconsensus.Operator, id 
 
 // DenyPin withdraws a member's SPKI pin (R9-18).
 func (n *Node) DenyPin(ctx context.Context, op coreconsensus.Operator, id coreconsensus.NodeID) error {
-	return n.admin(ctx, coreconsensus.EntryMembership, wire.Admin{Operator: string(op), Change: wire.ChangeDenyPin, Target: id})
+	return n.admin(ctx, coreconsensus.EntryMembership, wire.AdminValue{Operator: string(op), Change: wire.ChangeDenyPin, Target: id})
 }
 
 // ProposeTimingContract proposes a new timing contract.
 func (n *Node) ProposeTimingContract(ctx context.Context, op coreconsensus.Operator, pre coreconsensus.PreconditionSpec, c coreconsensus.TimingContractSpec) error {
-	return n.admin(ctx, coreconsensus.EntryTimingContract, wire.Admin{Operator: string(op), Pre: pre, Contract: c})
+	return n.admin(ctx, coreconsensus.EntryTimingContract, wire.AdminValue{Operator: string(op), Pre: pre, Contract: c})
 }
 
 // RaiseClusterVersion raises the protocol version every member must speak.
 func (n *Node) RaiseClusterVersion(ctx context.Context, op coreconsensus.Operator, pre coreconsensus.PreconditionSpec, v uint32) error {
-	return n.admin(ctx, coreconsensus.EntryClusterVersion, wire.Admin{Operator: string(op), Pre: pre, ClusterVersion: v})
+	return n.admin(ctx, coreconsensus.EntryClusterVersion, wire.AdminValue{Operator: string(op), Pre: pre, ClusterVersion: v})
 }
 
 // ClearNoSpace clears the no-space alarm the precondition names.
 func (n *Node) ClearNoSpace(ctx context.Context, op coreconsensus.Operator, pre coreconsensus.PreconditionSpec) error {
-	return n.admin(ctx, coreconsensus.EntryNoSpaceClear, wire.Admin{Operator: string(op), Pre: pre})
+	return n.admin(ctx, coreconsensus.EntryNoSpaceClear, wire.AdminValue{Operator: string(op), Pre: pre})
 }
 
 // TransferLeadership moves leadership to a voter (D8). It records the
 // operator in an entry, then waits until the target leads or one election
 // timeout passes.
 func (n *Node) TransferLeadership(ctx context.Context, op coreconsensus.Operator, to coreconsensus.NodeID) error {
-	err := n.admin(ctx, coreconsensus.EntryTransfer, wire.Admin{Operator: string(op), Target: to})
+	err := n.admin(ctx, coreconsensus.EntryTransfer, wire.AdminValue{Operator: string(op), Target: to})
 	switch {
 	case err == nil, errs.HasCode(err, coreconsensus.CodeOutcomeUnknown):
 		// The transfer entry may have committed and the transfer may be

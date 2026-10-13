@@ -272,7 +272,7 @@ func writeFoundingEntry(cfg *Config, members []coreconsensus.MemberValue) error 
 		timing = TimingDefaults()
 	}
 	timing.Generation = 1
-	data := wire.AppendAdmin(nil, &wire.Admin{Operator: "bootstrap", Change: wire.ChangeFounding, Membership: conf, Contract: timing})
+	data := wire.AppendAdmin(nil, &wire.AdminValue{Operator: "bootstrap", Change: wire.ChangeFounding, Membership: conf, Contract: timing})
 	e := coreconsensus.EntryValue{
 		Position: coreconsensus.PositionValue{Term: 1, Index: 1}, Kind: coreconsensus.EntryMembership,
 		BodySum: wire.BodySum(data), Data: data,
@@ -288,8 +288,8 @@ func writeFoundingEntry(cfg *Config, members []coreconsensus.MemberValue) error 
 	return nil
 }
 
-// PeerHealth is the leader's view of one peer (D13).
-type PeerHealth struct {
+// PeerHealthValue is the leader's view of one peer (D13).
+type PeerHealthValue struct {
 	// ID is the peer.
 	ID coreconsensus.NodeID
 	// Voter is false for a learner.
@@ -311,8 +311,8 @@ type PeerHealth struct {
 	Snapshot bool
 }
 
-// Health is a node's verdict for an orchestrator's probe (D13).
-type Health struct {
+// HealthValue is a node's verdict for an orchestrator's probe (D13).
+type HealthValue struct {
 	// Status is the node's view after its last turn.
 	Status coreconsensus.StatusValue
 	// Ready is true while a leader is known and the node applied what it
@@ -329,7 +329,7 @@ type Health struct {
 	// ApplyLagEntries is commit minus applied.
 	ApplyLagEntries uint64
 	// Peers is the leader's view of every peer, nil elsewhere.
-	Peers []PeerHealth
+	Peers []PeerHealthValue
 	// ChainRefusals counts identical chain refusals of this follower at
 	// ChainRefusalIndex from ChainRefusalLeader; the node reports itself
 	// unready while it refuses (D4, R6-05).
@@ -351,9 +351,9 @@ type Health struct {
 }
 
 // Health returns the node's verdict, computed on the event loop.
-func (n *Node) Health() Health {
+func (n *Node) Health() HealthValue {
 	st := n.Status()
-	h := Health{
+	h := HealthValue{
 		Status: st, Stopped: n.stopped.Load(), DroppedFrames: n.droppedFrom.Load(), FailureTolerance: -1,
 		LongTurns: n.longTurns.Load(), JoinsRateLimited: n.joinRefused.Load(),
 	}
@@ -373,7 +373,7 @@ func (n *Node) Health() Health {
 
 // isReady is the verdict's Ready: running, a leader known, everything known
 // committed applied, and not refusing the current leader's chain (D4).
-func isReady(h *Health, st *coreconsensus.StatusValue) bool {
+func isReady(h *HealthValue, st *coreconsensus.StatusValue) bool {
 	return !h.Stopped && h.HasLeader && st.Applied >= st.Commit &&
 		(h.ChainRefusals == 0 || h.ChainRefusalLeader != st.Leader)
 }
@@ -381,7 +381,7 @@ func isReady(h *Health, st *coreconsensus.StatusValue) bool {
 // loopHealth fills the part of a verdict only the event loop can read: the
 // quorum, the failure tolerance, the chain refusal and, on a leader, every
 // peer's view. It runs on the loop, through exec.
-func (n *Node) loopHealth(h *Health) {
+func (n *Node) loopHealth(h *HealthValue) {
 	now := n.clk.Now()
 	h.QuorumReachable = n.r.QuorumActive(now)
 	h.FailureTolerance = n.r.FailureTolerance(now)
@@ -396,8 +396,8 @@ func (n *Node) loopHealth(h *Health) {
 // peerHealth is one peer's line of a verdict. A peer is unreachable when it
 // never answered this term, when its last answer is older than the minimum
 // election timeout, or when the transport reported it unreachable since.
-func (n *Node) peerHealth(p *raft.PeerStat, now time.Time, last uint64, window time.Duration) PeerHealth {
-	ph := PeerHealth{ID: p.ID, Voter: p.Voter, Match: p.Match, Inflight: p.Inflight, Snapshot: p.Snapshot, LastContact: -1}
+func (n *Node) peerHealth(p *raft.PeerStatValue, now time.Time, last uint64, window time.Duration) PeerHealthValue {
+	ph := PeerHealthValue{ID: p.ID, Voter: p.Voter, Match: p.Match, Inflight: p.Inflight, Snapshot: p.Snapshot, LastContact: -1}
 	if last > p.Match {
 		ph.Lag = last - p.Match
 	}
