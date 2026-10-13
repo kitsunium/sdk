@@ -392,6 +392,8 @@ var checks = map[string]func(mutation) error{
 	"lease from acking minimum":     checkLeaseFromAckingMinimum,
 	"chain verified":                checkChainVerified,
 	"simulated safety":              checkSimSafety,
+	"simulated linearizability":     checkSimLinearizable,
+	"deposed leader read":           checkDeposedLeaderRead,
 }
 
 func TestChecksPassUnmutated(t *testing.T) {
@@ -425,11 +427,15 @@ func TestMutationsAreCaught(t *testing.T) {
 		"restriction skipped on transfer": mutRestrictionUnderTransfer,
 		"chain mismatch appended":         mutChainSkip,
 		"lease from the leader's view":    mutLeaseLeaderView,
+		"read without a round":            mutReadNoRound,
 	}
 	for name, m := range muts {
 		caught := ""
 		for cname, c := range checks {
 			if cname == "simulated safety" {
+				continue
+			}
+			if cname == "simulated linearizability" && m != mutReadNoRound {
 				continue
 			}
 			if err := c(m); err != nil {

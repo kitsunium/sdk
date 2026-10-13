@@ -59,17 +59,23 @@ type simWrite struct {
 }
 
 type simNode struct {
-	id       core.NodeID
-	r        *Raft
-	alive    bool
-	life     int
-	hs       core.HardState
-	ents     []core.Entry
-	writes   []simWrite
-	lastDone time.Time
-	applied  []core.Entry
-	checked  uint64
-	maxTerm  uint64
+	// rate is the node's clock rate against true time: 1 is exact (D15,
+	// clock-rate skew per node).
+	rate float64
+	// rateFrom and clockAt anchor the node's clock where its rate last
+	// changed.
+	rateFrom, clockAt time.Time
+	id                core.NodeID
+	r                 *Raft
+	alive             bool
+	life              int
+	hs                core.HardState
+	ents              []core.Entry
+	writes            []simWrite
+	lastDone          time.Time
+	applied           []core.Entry
+	checked           uint64
+	maxTerm           uint64
 }
 
 type entryKey struct {
@@ -114,6 +120,7 @@ type sim struct {
 	nextCrash time.Time
 	forwarded map[[2]uint64]core.Message
 	fetches   int
+	kv        *kvWorld
 }
 
 func rtt(a, b core.NodeID) time.Duration {
@@ -177,14 +184,32 @@ func (s *sim) cfg(id core.NodeID) Config {
 }
 
 func (s *sim) start(n *simNode) {
+	if s.kv != nil {
+		s.kv.restart(n)
+	}
 	n.alive = true
 	n.life++
 	n.writes = nil
 	n.lastDone = s.now
 	n.applied = nil
 	n.checked = 0
-	n.r = New(s.cfg(n.id), Start{HardState: n.hs, Entries: slices.Clone(n.ents), Now: s.now})
+	n.r = New(s.cfg(n.id), Start{HardState: n.hs, Entries: slices.Clone(n.ents), Now: s.clock(n)})
 	s.push(&event{at: s.now.Add(time.Duration(s.rng.Int64N(int64(10 * time.Millisecond)))), kind: evTick, node: n.id, life: n.life})
+}
+
+// clock is the node's own reading of the true time s.now.
+func (s *sim) clock(n *simNode) time.Time {
+	if n.rate == 0 || n.rateFrom.IsZero() {
+		return s.now
+	}
+	return n.clockAt.Add(time.Duration(float64(s.now.Sub(n.rateFrom)) * n.rate))
+}
+
+// setRate changes a node's clock rate from now on; its clock stays
+// monotonic.
+func (s *sim) setRate(id core.NodeID, rate float64) {
+	n := s.nodes[id]
+	n.clockAt, n.rateFrom, n.rate = s.clock(n), s.now, rate
 }
 
 func (s *sim) crash(id core.NodeID) {
@@ -252,6 +277,11 @@ func (s *sim) process(n *simNode) {
 			s.fetches++
 			n.r.Fetched(f.To, f.Lo, out, compacted)
 		}
+		if s.kv != nil {
+			for _, rs := range rd.ReadStates {
+				s.kv.readState(s, n, rs)
+			}
+		}
 		for _, m := range rd.Forwarded {
 			s.forwarded[[2]uint64{uint64(n.id), m.Context}] = m
 		}
@@ -261,6 +291,9 @@ func (s *sim) process(n *simNode) {
 				s.fail("node %d applied %d after %d", n.id, e.Position.Index, n.applied[len(n.applied)-1].Position.Index)
 			}
 			n.applied = append(n.applied, *e)
+			if s.kv != nil {
+				s.kv.applied(s, n, e)
+			}
 			k := keyOf(e)
 			if prev, ok := s.applied[e.Position.Index]; ok && prev != k {
 				s.fail("agreement: node %d applied %v at %d, another node applied %v", n.id, k, e.Position.Index, prev)
@@ -353,7 +386,7 @@ func (s *sim) leader() *simNode {
 
 func (s *sim) propose(n *simNode, data []byte) bool {
 	e := core.Entry{Kind: core.EntryCommand, BodySum: wire.BodySum(data), Data: data}
-	_, code := n.r.Propose(s.now, []core.Entry{e})
+	_, code := n.r.Propose(s.clock(n), []core.Entry{e})
 	s.process(n)
 	return code == 0
 }
@@ -398,14 +431,14 @@ func (s *sim) run(until time.Time, load bool) {
 			if !n.alive || e.life != n.life {
 				continue
 			}
-			n.r.Tick(s.now)
+			n.r.Tick(s.clock(n))
 			s.process(n)
 			s.push(&event{at: s.now.Add(10 * time.Millisecond), kind: evTick, node: n.id, life: n.life})
 		case evDeliver:
 			if !n.alive {
 				continue
 			}
-			n.r.Step(s.now, e.msg)
+			n.r.Step(s.clock(n), e.msg)
 			s.process(n)
 		case evStorage:
 			if !n.alive || e.life != n.life || len(n.writes) == 0 {

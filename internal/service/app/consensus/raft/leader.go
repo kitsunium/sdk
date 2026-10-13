@@ -595,6 +595,13 @@ func (r *Raft) flushReads() {
 	if r.role != core.RoleLeader || len(r.pendingReads) == 0 || r.log.committed < r.termStart {
 		return
 	}
+	if r.mutated(mutReadNoRound) {
+		for _, q := range r.pendingReads {
+			r.answerRead(q, r.log.committed, 0)
+		}
+		r.pendingReads = r.pendingReads[:0]
+		return
+	}
 	r.broadcastHeartbeat(r.now)
 	id := r.nextRound
 	for _, q := range r.pendingReads {

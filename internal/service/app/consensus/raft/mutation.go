@@ -47,6 +47,9 @@ const (
 	// mutLeaseLeaderView computes the lease from the leader's own contract,
 	// not the minimum over the acknowledging majority.
 	mutLeaseLeaderView
+	// mutReadNoRound answers a ReadIndex at once, with no confirmation
+	// round: the read a deposed leader serves stale.
+	mutReadNoRound
 	// mutChainSkip appends an entry whose chain value does not match.
 	mutChainSkip
 )
