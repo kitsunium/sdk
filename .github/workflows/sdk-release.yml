@@ -406,6 +406,20 @@ jobs:
           echo "held=false" >> "$GITHUB_OUTPUT"
           exit "$rc"
 
+      - name: Check the dry run's tags against the version floor
+        # The step before the cut asks the floor of each module's LAST tag; this
+        # asks it of each tag the dry run would cut — modules and tombstones,
+        # from the manifest it wrote —, so a dispatch's dry run shows a version
+        # the proxy would refuse before anybody dispatches the real cut.
+        if: steps.compute.outputs.majors != '' && steps.cut.outputs.held != 'true' && env.DRY_RUN == 'true'
+        run: |
+          set -euo pipefail
+          if [ ! -s /tmp/release-manifest.json ]; then
+            echo "::error::the dry run wrote no release-manifest.json"
+            exit 1
+          fi
+          bash scripts/release/check-version-floor.sh --manifest=/tmp/release-manifest.json
+
       - name: Verify the computed release was actually published
         # #227 defect 2. A bump was computed, so a release IS happening — a run
         # that then pushes no tag is a failure, not a quiet success. This is the

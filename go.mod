@@ -25,7 +25,7 @@ go 1.27.2
 // they are retracted, and every family and internal require this module at
 // the first version that holds neither (written by the release, ADR 0171 §7).
 
-retract [v0.18.0, v0.19.7] // pkg/v1/<family> and internal moved to modules of their own (ADR 0171): go get github.com/kitsunium/sdk@latest and the github.com/kitsunium/sdk/pkg/v1/<family> modules you import
+retract [v0.18.0, v0.19.7] // these held pkg/ and internal/, now a module per pkg/v1 family and github.com/kitsunium/sdk/internal (ADR 0171): go get github.com/kitsunium/sdk@latest && go mod tidy
 
 replace github.com/kitsunium/sdk/internal => ./internal
 

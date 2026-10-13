@@ -107,10 +107,23 @@ went. A retraction does not remove a version — a go.mod pinning one still
 builds — it only stops `@latest` and `-u` from choosing it, which they would
 not do anyway since it is lower.
 
-**No git tag is deleted**, old or new: the tags are what the proxy and the
-checksum database already hold, and `GOPROXY=direct` and ADR 0007's rollback
-read them. GitHub releases of the old scheme may be removed later; that is
-presentation, not publication, and not part of this change.
+**No git tag is deleted** by this change, old or new, and none is recreated:
+the tags are what the proxy and the checksum database already hold, and
+`GOPROXY=direct` and ADR 0007's rollback read them. GitHub releases of the old
+scheme may be removed later; that is presentation, not publication, and not
+part of this change.
+
+*Measured on 2026-10-13, and recorded rather than assumed:* origin holds 77
+tags — the root `v0.18.0`…`v0.19.7`, the tombstones `pkg/v0.18.0` and
+`framework/v0.18.0`, the vendor and connector modules' `v0.19.x`, and two
+`pin/*` tags. The tags of every release before v0.18.0 — `pkg/v0.1.0` to
+`pkg/v0.17.0`, the three `internal/*` modules', `framework/` up to v0.17.0,
+the root's `v0.0.0` and the connectors' `v0.14`–`v0.17` — are no longer on
+origin; they were removed before this change. The module proxy and the
+checksum database still serve every one of those versions, so a consumer
+going through the proxy is unaffected, but `GOPROXY=direct`, or a `GOPRIVATE`
+that bypasses the proxy, can no longer resolve them, and ADR 0007's rollback
+cannot read them from a clone.
 
 ### 4. A release is per module: base, size, tag, and a manifest
 
@@ -421,7 +434,9 @@ a consumer who requires `app` alone.
   and a domain's core and service halves are in two subtrees (§1).
 - **Deleting the tags of the old scheme**: refused — they are what
   `GOPROXY=direct` resolves and what ADR 0007's rollback reads; deleting one
-  breaks those and changes nothing the proxy serves.
+  breaks those and changes nothing the proxy serves. (Those of the releases
+  before v0.18.0 had already been removed from origin before this change —
+  §3; recreating them is refused too, since the proxy keeps their content.)
 - **Splitting the code in this change**: refused for now — kit, which writes
   the SDK, does not read a multi-module design yet (§6), and a hand split would
   be overwritten by the next `kit gen`.
@@ -433,9 +448,10 @@ a consumer who requires `app` alone.
 - The first split release: a maintainer's dispatch of SDK Release once
   `RELEASE_ENABLED` is opened (§5), after the dry run and the rehearsal of §7.
 - `tools/sdkguard`'s freshness probe reads the root's requirement only; a
-  consumer who requires families alone is not told a family is behind, and one
-  on a retracted root is told to update the root, which MVS and the
-  retraction then carry. A per-family probe is its own change.
+  consumer who requires families alone is not told a family is behind. One on
+  a behind root is told `go get github.com/kitsunium/sdk@latest && go mod
+  tidy`, which resolves each `pkg/v1` import to its family. A per-family probe
+  is its own change.
 - Tombstones for `…/internal/{kernel,core,service}` above v0.17.0: only if the
   file-proxy rehearsal shows a consumer reaching them; ADR 0162's migration
   removes them today.
