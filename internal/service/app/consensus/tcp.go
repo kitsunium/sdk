@@ -111,12 +111,10 @@ func spkiOf(c *x509.Certificate) [32]byte { return sha256.Sum256(c.RawSubjectPub
 func SPKIOf(c *x509.Certificate) [32]byte { return spkiOf(c) }
 
 type peerConn struct {
-	conn    net.Conn
-	queue   chan []byte
-	bytes   int64
-	mu      sync.Mutex
-	closed  bool
-	created time.Time
+	conn  net.Conn
+	queue chan []byte
+	bytes int64
+	mu    sync.Mutex
 }
 
 // TCPTransport is the shipped transport: TLS 1.3 with mutual
@@ -156,8 +154,6 @@ type outKey struct {
 	lane byte
 }
 
-// NewTCPTransport validates the configuration, reads the cluster and slot
-// from the certificate, and listens (D4, R3-24).
 // validate applies the defaults and the refusals of the configuration.
 func (cfg *TransportConfig) validate() error {
 	if cfg.MaxFrameBytes <= 0 {
@@ -202,6 +198,8 @@ func (cfg *TransportConfig) validate() error {
 	return nil
 }
 
+// NewTCPTransport validates the configuration, reads the cluster and slot
+// from the certificate, and listens (D4, R3-24).
 func NewTCPTransport(cfg TransportConfig) (*TCPTransport, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err

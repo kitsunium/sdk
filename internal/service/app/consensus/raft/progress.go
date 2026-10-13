@@ -41,10 +41,6 @@ type progress struct {
 	fetching bool
 }
 
-func (p *progress) reset(next uint64) {
-	*p = progress{next: next, inflight: p.inflight[:0], inflightBytes: p.inflightBytes[:0]}
-}
-
 func (p *progress) becomeProbe() {
 	if p.state == stateSnapshot {
 		p.next = max(p.match+1, p.pendingSnapshot+1)

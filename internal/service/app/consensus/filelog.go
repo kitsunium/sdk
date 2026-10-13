@@ -125,13 +125,12 @@ func parseRecord(b []byte) (r record, ok bool) {
 // checkpoint is the record that opens every segment: the hard state, the
 // effective last entry before it, the compaction point and the next batch.
 type checkpoint struct {
-	hs            coreconsensus.HardState
-	prevIndex     uint64
-	prevTerm      uint64
-	compact       uint64
-	compactTerm   uint64
-	nextBatchSeq  uint64
-	sealedPrevLen uint64
+	hs           coreconsensus.HardState
+	prevIndex    uint64
+	prevTerm     uint64
+	compact      uint64
+	compactTerm  uint64
+	nextBatchSeq uint64
 }
 
 func (c checkpoint) encode() []byte {
