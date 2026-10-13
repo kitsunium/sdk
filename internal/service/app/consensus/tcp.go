@@ -122,6 +122,7 @@ type TCPTransport struct {
 	bySPKI      map[[32]byte]coreconsensus.Member
 	out         map[outKey]*peerConn
 	in          map[net.Conn][32]byte
+	raw         map[net.Conn]struct{}
 	deliver     func(coreconsensus.AuthenticatedPeer, []byte)
 	offer       func(coreconsensus.AuthenticatedPeer, coreconsensus.InstallOffer) coreconsensus.InstallAccept
 	install     func(coreconsensus.InstallRequest) error
@@ -187,7 +188,7 @@ func NewTCPTransport(cfg TransportConfig) (*TCPTransport, error) {
 	}
 	t := &TCPTransport{cfg: cfg, cluster: cid, slot: slot,
 		members: map[coreconsensus.GroupID][]coreconsensus.Member{}, byID: map[coreconsensus.NodeID]coreconsensus.Member{},
-		bySPKI: map[[32]byte]coreconsensus.Member{}, out: map[outKey]*peerConn{}, in: map[net.Conn][32]byte{},
+		bySPKI: map[[32]byte]coreconsensus.Member{}, out: map[outKey]*peerConn{}, in: map[net.Conn][32]byte{}, raw: map[net.Conn]struct{}{},
 		done: make(chan struct{})}
 	ln, err := net.Listen("tcp", cfg.ListenAddress)
 	if err != nil {
@@ -263,14 +264,27 @@ func (t *TCPTransport) accept() {
 		if err != nil {
 			return
 		}
+		t.mu.Lock()
+		if t.closed {
+			t.mu.Unlock()
+			c.Close()
+			return
+		}
+		t.raw[c] = struct{}{}
 		t.wg.Add(1)
+		t.mu.Unlock()
 		go t.serve(c)
 	}
 }
 
 func (t *TCPTransport) serve(raw net.Conn) {
 	defer t.wg.Done()
-	defer raw.Close()
+	defer func() {
+		raw.Close()
+		t.mu.Lock()
+		delete(t.raw, raw)
+		t.mu.Unlock()
+	}()
 	var leaf *x509.Certificate
 	cfg := t.tlsConfig()
 	cfg.ClientAuth = tls.RequireAndVerifyClientCert
@@ -593,7 +607,7 @@ func (t *TCPTransport) Close() error {
 	}
 	t.closed = true
 	close(t.done)
-	for c := range t.in {
+	for c := range t.raw {
 		c.Close()
 	}
 	t.mu.Unlock()

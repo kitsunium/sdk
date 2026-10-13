@@ -486,3 +486,36 @@ func TestEngineDropsAFrameWhoseFromIsNotThePeer(t *testing.T) {
 }
 
 func appendFrame(m *coreconsensus.Message) []byte { return wire.AppendMessage(nil, m) }
+
+// A transfer submitted on a follower succeeds, or fails with TRANSFER_FAILED
+// and the old leader resumes; never OUTCOME_UNKNOWN (D8).
+func TestClusterTransferSubmittedOnAFollower(t *testing.T) {
+	c := newCluster(t, 3, 0)
+	for round := 0; round < 10; round++ {
+		l := c.leader(5 * time.Second)
+		propose(t, l.node, fmt.Sprintf("r=%d", round))
+		var f, to *testNode
+		for _, tn := range c.nodes {
+			if tn == l {
+				continue
+			}
+			if f == nil {
+				f = tn
+			} else {
+				to = tn
+			}
+		}
+		if round%2 == 1 {
+			to = f // the follower moves leadership to itself
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := f.node.TransferLeadership(ctx, "op:test", to.id)
+		cancel()
+		if err != nil {
+			t.Fatalf("round %d: transfer from a follower: %v", round, err)
+		}
+		if nl := c.leader(5 * time.Second); nl != to {
+			t.Fatalf("round %d: leader is %d, want %d", round, nl.id, to.id)
+		}
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	core "github.com/kitsunium/sdk/internal/core/app/consensus"
+	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
 
 func seeds(t *testing.T, n int) []uint64 {
@@ -202,5 +203,48 @@ func TestSimLeadershipTransfer(t *testing.T) {
 	}
 	if nl := s.leader(); nl == nil || nl.id != to {
 		t.Fatalf("transfer did not elect %d", to)
+	}
+}
+
+// A transfer submitted on a FOLLOWER is forwarded to the leader, recorded as
+// an entry, and completes: the follower gets the entry's position, that
+// entry commits with that term, and the target leads.
+func TestSimTransferForwardedFromFollower(t *testing.T) {
+	for _, seed := range seeds(t, 20) {
+		s := newSim(simOptions{seed: seed})
+		s.run(s.after(3*time.Second), true)
+		l := s.leader()
+		if l == nil {
+			t.Fatalf("seed %d: no leader", seed)
+		}
+		var f, to *simNode
+		for _, id := range s.ids {
+			if id != l.id {
+				if f == nil {
+					f = s.nodes[id]
+				} else {
+					to = s.nodes[id]
+				}
+			}
+		}
+		data := wire.AppendAdmin(nil, &wire.Admin{Operator: "op:test", Target: to.id})
+		m := core.Message{Version: 1, Group: 1, Kind: core.MsgForwardAdmin, From: f.id, To: l.id, Term: f.r.Status().Term,
+			Context: 77, Entries: []core.Entry{{Kind: core.EntryTransfer, BodySum: wire.BodySum(data), Data: data}}}
+		s.deliver(m)
+		s.run(s.after(3*time.Second), true)
+		if s.err != nil {
+			t.Fatalf("seed %d: %v", seed, s.err)
+		}
+		if nl := s.leader(); nl == nil || nl.id != to.id {
+			t.Fatalf("seed %d: the forwarded transfer did not elect %d", seed, to.id)
+		}
+		resp, ok := s.forwarded[[2]uint64{uint64(f.id), 77}]
+		if !ok || resp.Reject {
+			t.Fatalf("seed %d: no position answered to the follower: %+v", seed, resp)
+		}
+		e, ok := f.r.Entry(resp.Index)
+		if !ok || e.Position.Term != resp.LogTerm || e.Kind != core.EntryTransfer || f.r.Status().Commit < resp.Index {
+			t.Fatalf("seed %d: the transfer entry is not committed at its answered position", seed)
+		}
 	}
 }

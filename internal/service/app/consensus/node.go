@@ -93,6 +93,9 @@ type proposal struct {
 	pos   coreconsensus.Position
 	local bool
 	done  chan propResult
+	// changedAt is when leadership changed while it was unresolved; only
+	// the loop and, for waiters, holders of am touch it.
+	changedAt time.Time
 }
 
 const (
@@ -353,6 +356,7 @@ func (n *Node) loop() {
 			return
 		case <-tick.C():
 			n.r.Tick(n.clk.Now())
+			n.sweep()
 		case m := <-n.inCtrl:
 			n.r.Step(n.clk.Now(), m)
 		case m := <-n.inData:
@@ -389,6 +393,39 @@ func (n *Node) loop() {
 		}
 		n.handleReady()
 	}
+}
+
+// sweep answers OUTCOME_UNKNOWN to proposals whose leader changed more than
+// two maximum election timeouts ago and that are still not resolved: the
+// answer was lost, the entry may still commit.
+func (n *Node) sweep() {
+	grace := 2 * n.r.Status().Timing.ElectionTimeoutMax
+	now := n.clk.Now()
+	for ctx, p := range n.forwards {
+		if !p.changedAt.IsZero() && now.Sub(p.changedAt) > grace {
+			n.dropForward(ctx)
+			p.done <- propResult{err: outcomeUnknown("leader changed before the answer")}
+		}
+	}
+	commit := n.r.Status().Commit
+	n.am.Lock()
+	for idx, p := range n.waiters {
+		if idx > commit && !p.changedAt.IsZero() && now.Sub(p.changedAt) > grace {
+			delete(n.waiters, idx)
+			if p.local {
+				n.pendingBytes.Add(-int64(len(p.entry.Data)))
+			}
+			p.done <- propResult{err: outcomeUnknown("leadership changed before commit")}
+		}
+	}
+	n.am.Unlock()
+}
+
+func (n *Node) dropForward(ctx uint64) {
+	delete(n.forwards, ctx)
+	n.am.Lock()
+	n.keepResults--
+	n.am.Unlock()
 }
 
 func (n *Node) tickInterval() time.Duration {
@@ -461,22 +498,21 @@ func (n *Node) leadershipChanged() {
 		return
 	}
 	n.lastTerm, n.lastLead, n.lastRole = st.Term, st.Lead, st.Role
-	for ctx, p := range n.forwards {
-		delete(n.forwards, ctx)
-		if p.stage.Load() == stageUnsent {
-			p.done <- propResult{err: notLeader(st.Lead)}
-			continue
+	// Forwarded and appended proposals are NOT answered here: an entry at a
+	// known position resolves when that index is applied (success or
+	// ENTRY_SUPERSEDED), and a forward may still be answered by the leader
+	// it went to. A leadership change only starts their grace period; the
+	// tick sweep answers OUTCOME_UNKNOWN once it ends (D6).
+	now := n.clk.Now()
+	for _, p := range n.forwards {
+		if p.changedAt.IsZero() {
+			p.changedAt = now
 		}
-		p.done <- propResult{err: outcomeUnknown("leader changed before the answer")}
 	}
 	n.am.Lock()
 	for idx, p := range n.waiters {
-		if idx > st.Commit {
-			delete(n.waiters, idx)
-			if p.local {
-				n.pendingBytes.Add(-int64(len(p.entry.Data)))
-			}
-			p.done <- propResult{err: outcomeUnknown("leadership changed before commit")}
+		if idx > st.Commit && p.changedAt.IsZero() {
+			p.changedAt = now
 		}
 	}
 	n.am.Unlock()
@@ -676,7 +712,7 @@ func (n *Node) StopReason() (coreconsensus.StopReason, bool) {
 func (n *Node) failAllOnStop() {
 	err := n.stoppedErr()
 	for ctx, p := range n.forwards {
-		delete(n.forwards, ctx)
+		n.dropForward(ctx)
 		if p.stage.Load() == stageUnsent {
 			p.done <- propResult{err: err}
 		} else {

@@ -111,6 +111,7 @@ type sim struct {
 	err       error
 	timing    core.TimingContract
 	nextCrash time.Time
+	forwarded map[[2]uint64]core.Message
 }
 
 func rtt(a, b core.NodeID) time.Duration {
@@ -136,15 +137,16 @@ func newSim(opt simOptions) *sim {
 		opt.diskMin, opt.diskMax = 500*time.Microsecond, 5*time.Millisecond
 	}
 	s := &sim{
-		opt:     opt,
-		rng:     rand.New(rand.NewPCG(opt.seed, 0x5eed)),
-		now:     time.Unix(1_700_000_000, 0),
-		nodes:   map[core.NodeID]*simNode{},
-		cut:     map[[2]core.NodeID]bool{},
-		leaders: map[uint64]core.NodeID{},
-		votes:   map[[2]uint64]core.NodeID{},
-		applied: map[uint64]entryKey{},
-		commits: map[uint64]entryKey{},
+		opt:       opt,
+		rng:       rand.New(rand.NewPCG(opt.seed, 0x5eed)),
+		now:       time.Unix(1_700_000_000, 0),
+		nodes:     map[core.NodeID]*simNode{},
+		cut:       map[[2]core.NodeID]bool{},
+		leaders:   map[uint64]core.NodeID{},
+		votes:     map[[2]uint64]core.NodeID{},
+		applied:   map[uint64]entryKey{},
+		commits:   map[uint64]entryKey{},
+		forwarded: map[[2]uint64]core.Message{},
 		timing: core.TimingContract{Generation: 1, HeartbeatInterval: 100 * time.Millisecond,
 			ElectionTimeoutMin: time.Second, ElectionTimeoutMax: 2 * time.Second, MaxClockDrift: 0.01},
 	}
@@ -230,6 +232,9 @@ func (s *sim) process(n *simNode) {
 			n.lastDone = at
 			n.writes = append(n.writes, simWrite{rd: rd, doneAt: at})
 			s.push(&event{at: at, kind: evStorage, node: n.id, life: n.life})
+		}
+		for _, m := range rd.Forwarded {
+			s.forwarded[[2]uint64{uint64(n.id), m.Context}] = m
 		}
 		for i := range rd.Apply {
 			e := &rd.Apply[i]

@@ -156,10 +156,7 @@ func (n *Node) forwardAnswered(m coreconsensus.Message) {
 	if !ok {
 		return
 	}
-	delete(n.forwards, m.Context)
-	n.am.Lock()
-	n.keepResults--
-	n.am.Unlock()
+	n.dropForward(m.Context)
 	if m.Reject {
 		// A rejection that correlates with the submission and says nothing
 		// was appended is the one exception to OUTCOME_UNKNOWN (D6).
@@ -308,10 +305,16 @@ func (n *Node) ClearNoSpace(ctx context.Context, op coreconsensus.Operator, pre 
 // operator in an entry, then waits until the target leads or one election
 // timeout passes.
 func (n *Node) TransferLeadership(ctx context.Context, op coreconsensus.Operator, to coreconsensus.NodeID) error {
-	if err := n.admin(ctx, coreconsensus.EntryTransfer, wire.Admin{Operator: string(op), Target: to}); err != nil {
-		return err
+	err := n.admin(ctx, coreconsensus.EntryTransfer, wire.Admin{Operator: string(op), Target: to})
+	switch {
+	case err == nil, errs.HasCode(err, coreconsensus.CodeOutcomeUnknown):
+		// The transfer entry may have committed and the transfer may be
+		// under way: its outcome is the leader, not the entry's answer.
+		return n.awaitLeader(ctx, to)
+	case n.Status().Leader == to:
+		return nil
 	}
-	return n.awaitLeader(ctx, to)
+	return err
 }
 
 func (n *Node) transferLocal(ctx context.Context, to coreconsensus.NodeID) error {

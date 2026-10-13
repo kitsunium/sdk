@@ -99,10 +99,8 @@ func (r *Raft) broadcastHeartbeat(now time.Time) {
 	if len(r.rounds) > 64 {
 		r.rounds = r.rounds[len(r.rounds)-64:]
 	}
-	for id, pr := range r.prs {
-		if id == r.id {
-			continue
-		}
+	for _, id := range r.peers() {
+		pr := r.prs[id]
 		commit := min(pr.match, r.log.committed)
 		if r.mutated(mutHeartbeatUnclamped) {
 			commit = r.log.committed
@@ -119,11 +117,22 @@ func (r *Raft) broadcastHeartbeat(now time.Time) {
 	r.confirmRounds()
 }
 
-func (r *Raft) broadcastAppend(sendIfEmpty bool) {
-	for id := range r.prs {
-		if id != r.id {
-			r.sendAppend(id, sendIfEmpty)
+// peers returns the other members with a progress, in configuration order,
+// so that a run stays a pure function of its inputs (D15): a map's order is
+// not.
+func (r *Raft) peers() []core.NodeID {
+	out := make([]core.NodeID, 0, len(r.prs))
+	for _, m := range r.conf().Members {
+		if m.ID != r.id && r.prs[m.ID] != nil {
+			out = append(out, m.ID)
 		}
+	}
+	return out
+}
+
+func (r *Raft) broadcastAppend(sendIfEmpty bool) {
+	for _, id := range r.peers() {
+		r.sendAppend(id, sendIfEmpty)
 	}
 }
 
