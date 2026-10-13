@@ -179,6 +179,7 @@ const (
 	FlagTransfer          = coreconsensus.FlagTransfer
 	FlagNoLease           = coreconsensus.FlagNoLease
 	FlagNeedSnapshot      = coreconsensus.FlagNeedSnapshot
+	FlagTruncated         = coreconsensus.FlagTruncated
 	MsgForward            = coreconsensus.MsgForward
 	MsgApp                = coreconsensus.MsgApp
 	MsgHeartbeat          = coreconsensus.MsgHeartbeat

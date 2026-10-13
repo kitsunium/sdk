@@ -298,6 +298,13 @@ packages:
     name: FlagNoLease
     type: MessageFlags
     value: 1 << 2
+  - doc: |-
+      FlagTruncated marks an append rejection from a node that truncated
+      acknowledged entries through TruncateAndStaySilent: the leader lowers
+      its match to the node's log, the one exception to "match only grows".
+    name: FlagTruncated
+    type: MessageFlags
+    value: 1 << 3
   - doc: RoleFollower follows a leader, or waits for one.
     name: RoleFollower
     type: Role
@@ -2107,9 +2114,14 @@ packages:
   imports:
     clock: github.com/kitsunium/sdk/internal/kernel/clock
     coreconsensus: github.com/kitsunium/sdk/internal/core/app/consensus
+    corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+    coremetrics: github.com/kitsunium/sdk/internal/core/observe/metrics
+    coreotel: github.com/kitsunium/sdk/internal/core/observe/otel
+    coretrace: github.com/kitsunium/sdk/internal/core/observe/trace
     coretransform: github.com/kitsunium/sdk/internal/core/data/transform
     errs: github.com/kitsunium/sdk/internal/kernel/errs
     flock: github.com/kitsunium/sdk/internal/kernel/fs/flock
+    level: github.com/kitsunium/sdk/internal/core/observe/logger/level
     raft: github.com/kitsunium/sdk/internal/service/app/consensus/raft
     svctransform: github.com/kitsunium/sdk/internal/service/data/transform
     wire: github.com/kitsunium/sdk/internal/service/app/consensus/wire
@@ -2199,6 +2211,14 @@ packages:
           DroppedFrames counts frames whose From differed from the
           authenticated peer (R7-05).
         name: DroppedFrames
+        type: int64
+      - doc: |-
+          LongTurns counts the loop turns longer than the drift budget, each of
+          which dropped the lease (D9, R7-20).
+        name: LongTurns
+        type: int64
+      - doc: JoinsRateLimited counts JOINs refused by the one-per-slot rate.
+        name: JoinsRateLimited
         type: int64
   - doc: ReadMode selects how Barrier confirms leadership (D9).
     name: ReadMode
@@ -2307,6 +2327,16 @@ packages:
       - doc: Seed draws the election timeouts; 0 draws one.
         name: Seed
         type: uint64
+      - doc: |-
+          Meter, Tracer and Logger receive D13's metrics, one span per Propose
+          and the role, membership, snapshot and truncation events; nil turns
+          each off. None of them changes a decision.
+        name: Meter
+        type: coremetrics.Meter
+      - name: Tracer
+        type: coretrace.Tracer
+      - name: Logger
+        type: corelogger.Logger
   - doc: DataDirOptions tunes OpenDataDirWith.
     name: DataDirOptions
     struct:
@@ -3091,6 +3121,16 @@ packages:
           addresses rule afterwards.
         name: Seeds
         type: map[coreconsensus.NodeID]string
+      - doc: |-
+          MaxUnauthenticatedPerIP caps the connections an IPv4 address, or an
+          IPv6 /64, may hold before their handshake completes; the addresses
+          the admitted members' addresses resolve to get ReservedMemberSlots
+          instead, so a flood never locks a member out (R2-22). It runs before
+          any TLS byte is read.
+        name: MaxUnauthenticatedPerIP
+        type: int
+      - name: ReservedMemberSlots
+        type: int
       - name: MaxFrameBytes
         type: int
       - name: MaxControlFrameBytes
@@ -3200,6 +3240,13 @@ packages:
       out:
       - type: coreconsensus.Position
       - type: error
+      recv: '*TCPTransport'
+    - doc: |-
+        RefusedBeforeHandshake counts the connections refused by the
+        pre-handshake admission.
+      name: RefusedBeforeHandshake
+      out:
+      - type: int64
       recv: '*TCPTransport'
     name: TCPTransport
     struct:
@@ -3574,6 +3621,10 @@ packages:
     - name: FlagNeedSnapshot
       reexport: coreconsensus.FlagNeedSnapshot
       value: coreconsensus.FlagNeedSnapshot
+  - const:
+    - name: FlagTruncated
+      reexport: coreconsensus.FlagTruncated
+      value: coreconsensus.FlagTruncated
   - const:
     - name: MsgForward
       reexport: coreconsensus.MsgForward
