@@ -1,0 +1,4189 @@
+# design/app/consensus.yaml — ADR 0152, the consensus domain.
+#
+# Written from the code by a one-off reader, NOT by kit: `kit design import`
+# failed twice on this tree (a strictjson error on another package, then a
+# cancelled context). It records the surface as built; codes_gen.go,
+# design_gen.go and facade_gen.go are not generated from it yet, and the
+# hand-written codes.go and facade.go stand until kit regenerates them.
+apiVersion: kit.kitsunium/design/v2
+domain: app/consensus
+packages:
+- codes:
+  - const:
+    - name: CodeConsensusMisconfigured
+      value: '0x00_02_39_01'
+    type: errs.Code
+  - const:
+    - name: CodeNotLeader
+      value: '0x00_02_39_02'
+    type: errs.Code
+  - const:
+    - name: CodeOutcomeUnknown
+      value: '0x00_02_39_03'
+    type: errs.Code
+  - const:
+    - name: CodeLeadershipUnconfirmed
+      value: '0x00_02_39_04'
+    type: errs.Code
+  - const:
+    - name: CodeMembershipChangePending
+      value: '0x00_02_39_05'
+    type: errs.Code
+  - const:
+    - name: CodeMembershipInvalid
+      value: '0x00_02_39_06'
+    type: errs.Code
+  - const:
+    - name: CodeTransferFailed
+      value: '0x00_02_39_07'
+    type: errs.Code
+  - const:
+    - name: CodeEntryTooLarge
+      value: '0x00_02_39_08'
+    type: errs.Code
+  - const:
+    - name: CodeCompacted
+      value: '0x00_02_39_09'
+    type: errs.Code
+  - const:
+    - name: CodeStateMachineFailed
+      value: '0x00_02_39_0A'
+    type: errs.Code
+  - const:
+    - name: CodeNodeStopped
+      value: '0x00_02_39_0B'
+    type: errs.Code
+  - const:
+    - name: CodeEntrySuperseded
+      value: '0x00_02_39_0C'
+    type: errs.Code
+  - const:
+    - name: CodeOverloaded
+      value: '0x00_02_39_0D'
+    type: errs.Code
+  - const:
+    - name: CodeVersionUnsupported
+      value: '0x00_02_39_0F'
+    type: errs.Code
+  - const:
+    - name: CodeNodeIDRetired
+      value: '0x00_02_39_10'
+    type: errs.Code
+  - const:
+    - name: CodeNoSpace
+      value: '0x00_02_39_11'
+    type: errs.Code
+  - const:
+    - name: CodeResultTypeMismatch
+      value: '0x00_02_39_12'
+    type: errs.Code
+  - const:
+    - name: CodePayloadVersionRefused
+      value: '0x00_02_39_13'
+    type: errs.Code
+  - const:
+    - name: CodeLineageMismatch
+      value: '0x00_02_39_14'
+    type: errs.Code
+  - const:
+    - name: CodeAdminPreconditionFailed
+      value: '0x00_02_39_19'
+    type: errs.Code
+  - const:
+    - name: CodeLogCorrupt
+      value: '0x00_03_5C_01'
+    type: errs.Code
+  - const:
+    - name: CodeHardStateCorrupt
+      value: '0x00_03_5C_02'
+    type: errs.Code
+  - const:
+    - name: CodeSnapshotCorrupt
+      value: '0x00_03_5C_03'
+    type: errs.Code
+  - const:
+    - name: CodeStorageFailed
+      value: '0x00_03_5C_04'
+    type: errs.Code
+  - const:
+    - name: CodeDataDirLocked
+      value: '0x00_03_5C_05'
+    type: errs.Code
+  - const:
+    - name: CodeDataDirMismatch
+      value: '0x00_03_5C_06'
+    type: errs.Code
+  - const:
+    - name: CodePeerRejected
+      value: '0x00_03_5C_07'
+    type: errs.Code
+  - const:
+    - name: CodeClusterMismatch
+      value: '0x00_03_5C_08'
+    type: errs.Code
+  - const:
+    - name: CodeFrameInvalid
+      value: '0x00_03_5C_09'
+    type: errs.Code
+  - const:
+    - name: CodeSnapshotTooLarge
+      value: '0x00_03_5C_0A'
+    type: errs.Code
+  - const:
+    - name: CodeBootstrapRefused
+      value: '0x00_03_5C_0B'
+    type: errs.Code
+  - const:
+    - name: CodeTransportMisconfigured
+      value: '0x00_03_5C_0C'
+    type: errs.Code
+  - const:
+    - name: CodeRecoverRefused
+      value: '0x00_03_5C_0D'
+    type: errs.Code
+  - const:
+    - name: CodeLogQuarantined
+      value: '0x00_03_5C_0E'
+    type: errs.Code
+  - const:
+    - name: CodeRestoreRefused
+      value: '0x00_03_5C_0F'
+    type: errs.Code
+  - const:
+    - name: CodeDataDirInUse
+      value: '0x00_03_5C_10'
+    type: errs.Code
+  - const:
+    - name: CodeJoinRefused
+      value: '0x00_03_5C_11'
+    type: errs.Code
+  - const:
+    - name: CodeStopMarkerPresent
+      value: '0x00_03_5C_12'
+    type: errs.Code
+  constants:
+  - doc: EntryCommand is a caller's command, handed to StateMachine.Apply.
+    name: EntryCommand
+    type: EntryKind
+    value: '1'
+  - doc: |-
+      EntryNoOp is the empty entry a new leader commits in its term before it
+      serves a read or accepts a membership change.
+    name: EntryNoOp
+    type: EntryKind
+    value: '2'
+  - doc: |-
+      EntryMembership carries a whole new Membership and the change that
+      produced it. It takes effect when APPENDED.
+    name: EntryMembership
+    type: EntryKind
+    value: '3'
+  - doc: EntryTimingContract carries a new committed timing contract.
+    name: EntryTimingContract
+    type: EntryKind
+    value: '4'
+  - doc: EntryClusterVersion raises the protocol version every member must speak.
+    name: EntryClusterVersion
+    type: EntryKind
+    value: '5'
+  - doc: EntryNoSpaceRaise raises the replicated no-space alarm.
+    name: EntryNoSpaceRaise
+    type: EntryKind
+    value: '6'
+  - doc: EntryNoSpaceClear clears the no-space alarm it names.
+    name: EntryNoSpaceClear
+    type: EntryKind
+    value: '7'
+  - doc: EntryTransfer records a leadership transfer and its operator.
+    name: EntryTransfer
+    type: EntryKind
+    value: '8'
+  - doc: |-
+      StampJoining is a directory Init prepared: it may join as an empty
+      learner, never vote or acknowledge until it is admitted.
+    name: StampJoining
+    type: StampState
+    value: '1'
+  - doc: |-
+      StampBootstrapPending is a founding in progress: Bootstrap wrote it
+      before it wrote the founding configuration.
+    name: StampBootstrapPending
+    type: StampState
+    value: '2'
+  - doc: StampMember is a directory that belongs to a cluster.
+    name: StampMember
+    type: StampState
+    value: '3'
+  - doc: |-
+      MsgPreVote asks whether the sender COULD win at Term, without raising
+      anybody's term.
+    name: MsgPreVote
+    type: MessageKind
+    value: '0x01'
+  - doc: MsgPreVoteResp answers a MsgPreVote.
+    name: MsgPreVoteResp
+    type: MessageKind
+    value: '0x02'
+  - doc: MsgVote asks for a vote at Term.
+    name: MsgVote
+    type: MessageKind
+    value: '0x03'
+  - doc: MsgVoteResp answers a MsgVote.
+    name: MsgVoteResp
+    type: MessageKind
+    value: '0x04'
+  - doc: |-
+      MsgHeartbeat confirms the leader and carries a commit index clamped to
+      the follower's match.
+    name: MsgHeartbeat
+    type: MessageKind
+    value: '0x05'
+  - doc: |-
+      MsgHeartbeatResp answers a heartbeat and carries the applied contract
+      generation.
+    name: MsgHeartbeatResp
+    type: MessageKind
+    value: '0x06'
+  - doc: MsgTimeoutNow tells the transfer target to campaign at once.
+    name: MsgTimeoutNow
+    type: MessageKind
+    value: '0x07'
+  - doc: MsgReadIndex asks the leader for a confirmed read index.
+    name: MsgReadIndex
+    type: MessageKind
+    value: '0x08'
+  - doc: MsgReadIndexResp answers a MsgReadIndex.
+    name: MsgReadIndexResp
+    type: MessageKind
+    value: '0x09'
+  - doc: MsgForwardAdmin forwards an administrative operation to the leader.
+    name: MsgForwardAdmin
+    type: MessageKind
+    value: '0x0A'
+  - doc: MsgForwardAdminResp answers a MsgForwardAdmin.
+    name: MsgForwardAdminResp
+    type: MessageKind
+    value: '0x0B'
+  - doc: MsgApp appends entries after (LogTerm, Index).
+    name: MsgApp
+    type: MessageKind
+    value: '0x41'
+  - doc: MsgAppResp acknowledges, or refuses, a MsgApp.
+    name: MsgAppResp
+    type: MessageKind
+    value: '0x42'
+  - doc: MsgForward forwards a proposal to the leader under a submission id.
+    name: MsgForward
+    type: MessageKind
+    value: '0x43'
+  - doc: MsgForwardResp answers a MsgForward with the position it appended at.
+    name: MsgForwardResp
+    type: MessageKind
+    value: '0x44'
+  - doc: |-
+      FlagTransfer marks a vote request of a leadership transfer. It lifts the
+      live-leader refusal for ONE campaign, never the election restriction.
+    name: FlagTransfer
+    type: MessageFlags
+    value: 1 << 0
+  - doc: |-
+      FlagNeedSnapshot marks an append rejection from a node that holds no
+      usable snapshot and asks for one.
+    name: FlagNeedSnapshot
+    type: MessageFlags
+    value: 1 << 1
+  - doc: |-
+      FlagNoLease marks a read the follower wants confirmed by a round, never
+      by a lease.
+    name: FlagNoLease
+    type: MessageFlags
+    value: 1 << 2
+  - doc: RoleFollower follows a leader, or waits for one.
+    name: RoleFollower
+    type: Role
+    value: '1'
+  - doc: RolePreCandidate asks whether it COULD win, without raising its term.
+    name: RolePreCandidate
+    type: Role
+    value: '2'
+  - doc: RoleCandidate campaigns at a raised term.
+    name: RoleCandidate
+    type: Role
+    value: '3'
+  - doc: RoleLeader leads its term.
+    name: RoleLeader
+    type: Role
+    value: '4'
+  - doc: RoleLearner receives the log and votes when asked, but never campaigns.
+    name: RoleLearner
+    type: Role
+    value: '5'
+  - doc: LaneControl carries votes, heartbeats, their replies and TimeoutNow.
+    name: LaneControl
+    type: FrameLane
+    value: '0'
+  - doc: LaneData carries entries, their acknowledgements and forwarded proposals.
+    name: LaneData
+    type: FrameLane
+    value: '1'
+  - doc: LaneSnapshot carries snapshot streams.
+    name: LaneSnapshot
+    type: FrameLane
+    value: '2'
+  doc: |-
+    Package consensus — ranges 0.2.57.* (ADR 0152, the domain's outcomes) and
+    0.3.92.* (ADR 0152, the shipped storage and transport's outcomes, declared
+    here since ADR 0160).
+
+    Package consensus declares the SDK's consensus DOMAIN: agreement of several
+    machines on the order of their writes. It holds every value a port speaks —
+    node and cluster identities, positions, entries, messages, snapshots,
+    membership — and the frozen ports themselves: [Replicated], the consumer's
+    algorithm-neutral port, [StateMachine] and its siblings, and the storage and
+    transport ports [LogStore], [SnapshotStore] and [Transport], which speak
+    Raft's terms (ADR 0152 D1).
+
+    # A write is committed when a majority holds it on disk
+
+    An entry is committed once a majority of the voters have made it durable.
+    Every port in this package exists to keep that sentence true across crashes,
+    partitions, restarts, recoveries and upgrades: [LogStore.Sync] and
+    [LogStore.WriteStamp] carry the safety of the whole domain, and a failed
+    sync stops the node rather than being retried.
+
+    # This is not ADR 0120's state machine
+
+    [StateMachine] is HOW a deterministic program is replicated: a pure
+    transition applied in log order on every node. The statemachine domain
+    decides WHAT state an entity is in and moves it on a timer. The two share a
+    textbook name and nothing else.
+
+    The engine, its storage and its transport live in
+    internal/service/app/consensus; the facade is pkg/v1/app/consensus.
+  imports:
+    errs: github.com/kitsunium/sdk/internal/kernel/errs
+  path: github.com/kitsunium/sdk/internal/core/app/consensus
+  ports:
+  - doc: |-
+      Replicated is the consumer's port, and the only algorithm-neutral one:
+      propose a command, wait for a linearizable read point, wait for a position,
+      read the node's status. FROZEN under ADR 0039.
+    methods:
+    - doc: |-
+        Propose replicates data and returns, once the entry is applied
+        locally, its lineage-scoped token and the value Apply returned.
+        NOT_LEADER means certainly not appended; OUTCOME_UNKNOWN means it may
+        still commit, and the caller must read the state before deciding.
+      in:
+      - name: ctx
+        type: context.Context
+      - name: data
+        type: '[]byte'
+      name: Propose
+      out:
+      - type: Token
+      - type: any
+      - type: error
+    - doc: |-
+        Barrier returns once the local state machine reflects every write
+        committed before the call, with the token of the applied index.
+      in:
+      - name: ctx
+        type: context.Context
+      name: Barrier
+      out:
+      - type: Token
+      - type: error
+    - doc: |-
+        WaitApplied returns once the local node has applied t. A token of
+        another lineage is LINEAGE_MISMATCH.
+      in:
+      - name: ctx
+        type: context.Context
+      - name: t
+        type: Token
+      name: WaitApplied
+      out:
+      - type: error
+    - doc: Status returns the node's view after its last turn.
+      name: Status
+      out:
+      - type: Status
+    name: Replicated
+  - doc: |-
+      StateMachine is the caller's replicated program. Apply is a PURE transition
+      of state the state machine owns: no side effect outside that state, no
+      precondition that can differ between nodes. It is called for every committed
+      command, in log order, on one goroutine, and must be deterministic. A
+      refusal is an answer carried in the result; an Apply that cannot complete
+      must panic, and the node stops with STATE_MACHINE_FAILED — the entry IS
+      committed. FROZEN under ADR 0039.
+    methods:
+    - doc: |-
+        Apply applies one committed command and returns its result, delivered
+        to the Propose that created it on the node that created it.
+      in:
+      - name: e
+        type: Entry
+      name: Apply
+      out:
+      - type: any
+    - doc: |-
+        Snapshot captures a point-in-time view of the state, cheaply: it is
+        called on the apply goroutine.
+      name: Snapshot
+      out:
+      - type: Snapshot
+      - type: error
+    - doc: |-
+        Restore replaces the state with a snapshot's. It is serialised with
+        Apply.
+      in:
+      - name: r
+        type: io.Reader
+      - name: meta
+        type: SnapshotMeta
+      name: Restore
+      out:
+      - type: error
+    name: StateMachine
+  - doc: |-
+      Snapshot is a point-in-time view a StateMachine captured. WriteTo runs on
+      the snapshot goroutine while Apply continues; Release frees the view.
+    methods:
+    - doc: WriteTo writes the view's state.
+      in:
+      - name: w
+        type: io.Writer
+      name: WriteTo
+      out:
+      - type: int64
+      - type: error
+    - doc: Release frees the view.
+      name: Release
+    name: Snapshot
+  - doc: |-
+      DurableStateMachine is the sibling of a state machine that keeps its state
+      on disk: it persists the applied position atomically with the state that
+      entry produced, and the engine resumes after it.
+    embeds:
+    - StateMachine
+    methods:
+    - doc: |-
+        AppliedPosition returns the log identity and the position of the last
+        entry whose effects are durable.
+      name: AppliedPosition
+      out:
+      - type: LogIdentity
+      - type: Position
+      - type: error
+    name: DurableStateMachine
+  - doc: |-
+      BatchingStateMachine is the sibling of a state machine that applies
+      committed commands in batches, one result slot per entry.
+    embeds:
+    - StateMachine
+    methods:
+    - doc: ApplyBatch applies es in order and writes each result into results.
+      in:
+      - name: es
+        type: '[]Entry'
+      - name: results
+        type: '[]any'
+      name: ApplyBatch
+    name: BatchingStateMachine
+  - doc: |-
+      LogReader reads the log. Expected outcomes are answers, not failures: an
+      index below the first retained one is COMPACTED.
+    methods:
+    - doc: |-
+        Entries returns entries in [lo, hi), at most maxBytes, and always at
+        least one entry when lo < hi, even above maxBytes. lo below first is
+        COMPACTED.
+      in:
+      - name: lo
+        type: uint64
+      - name: hi
+        type: uint64
+      - name: maxBytes
+        type: int
+      - name: dst
+        type: '[]Entry'
+      name: Entries
+      out:
+      - type: '[]Entry'
+      - type: error
+    - doc: Term answers for first-1 too, from the term kept at compaction.
+      in:
+      - name: index
+        type: uint64
+      name: Term
+      out:
+      - type: uint64
+      - type: error
+    - doc: Bounds of an empty log after a snapshot at s are (s+1, s).
+      name: Bounds
+      out:
+      - name: first
+        type: uint64
+      - name: last
+        type: uint64
+    name: LogReader
+  - doc: |-
+      LogStore is the durable log. Term, vote and entries travel in one Append
+      and become durable under one Sync; readers see appended entries before they
+      are synced. One writer, many readers. When Sync and WriteStamp return nil,
+      what they cover survives a power loss: the safety of the whole domain rests
+      on it. FROZEN under ADR 0039.
+    embeds:
+    - LogReader
+    methods:
+    - doc: |-
+        Append buffers entries and, when hs is not nil, a hard state, in ONE
+        record batch.
+      in:
+      - name: entries
+        type: '[]Entry'
+      - name: hs
+        type: '*HardState'
+      name: Append
+      out:
+      - type: error
+    - doc: Sync makes everything appended so far durable.
+      name: Sync
+      out:
+      - type: error
+    - doc: |-
+        TruncateSuffix writes ONE durable truncate record removing every entry
+        from index from on, and nothing else.
+      in:
+      - name: from
+        type: uint64
+      name: TruncateSuffix
+      out:
+      - type: error
+    - doc: CompactPrefix drops what a snapshot covers, through index through.
+      in:
+      - name: through
+        type: uint64
+      name: CompactPrefix
+      out:
+      - type: error
+    - doc: HardState returns the last hard state appended.
+      name: HardState
+      out:
+      - type: HardState
+      - type: error
+    - doc: Stamp returns the directory's stamp.
+      name: Stamp
+      out:
+      - type: Stamp
+      - type: error
+    - doc: WriteStamp writes the stamp, durable on return.
+      in:
+      - type: Stamp
+      name: WriteStamp
+      out:
+      - type: error
+    - doc: Close releases the store.
+      name: Close
+      out:
+      - type: error
+    name: LogStore
+  - doc: |-
+      SnapshotSink receives the ENCODED chunks of one snapshot and checks each
+      chunk's integrity as it arrives.
+    embeds:
+    - io.Writer
+    methods:
+    - doc: |-
+        Commit publishes the snapshot; final carries the SHA-256 the engine
+        computed over the DECODED stream.
+      in:
+      - name: final
+        type: SnapshotMeta
+      name: Commit
+      out:
+      - type: error
+    - doc: Abort drops the spool.
+      name: Abort
+      out:
+      - type: error
+    name: SnapshotSink
+  - doc: SnapshotHandle is a published snapshot, pinned until Close.
+    embeds:
+    - io.ReaderAt
+    methods:
+    - doc: Meta describes the snapshot.
+      name: Meta
+      out:
+      - type: SnapshotMeta
+    - doc: Close unpins it.
+      name: Close
+      out:
+      - type: error
+    name: SnapshotHandle
+  - doc: SnapshotStore holds snapshots. FROZEN under ADR 0039.
+    methods:
+    - doc: |-
+        Create opens the spool of id. When a spool of that id exists, it is
+        returned with the ENCODED offset durably spooled so far.
+      in:
+      - name: id
+        type: string
+      - name: meta
+        type: SnapshotMeta
+      name: Create
+      out:
+      - name: sink
+        type: SnapshotSink
+      - name: spooled
+        type: int64
+      - name: err
+        type: error
+    - doc: List returns the complete snapshots, newest first.
+      name: List
+      out:
+      - type: '[]SnapshotMeta'
+      - type: error
+    - doc: Open pins a snapshot until the handle is closed.
+      in:
+      - name: id
+        type: string
+      name: Open
+      out:
+      - type: SnapshotHandle
+      - type: error
+    - doc: Remove deletes a snapshot; refused while a handle is open.
+      in:
+      - name: id
+        type: string
+      name: Remove
+      out:
+      - type: error
+    name: SnapshotStore
+  - doc: |-
+      Transport carries ENCODED frames between the nodes of a group. FROZEN under
+      ADR 0039.
+    methods:
+    - doc: |-
+        Send hands over an encoded frame. It never blocks and may drop; the
+        transport owns frame after the call.
+      in:
+      - name: to
+        type: NodeID
+      - name: frame
+        type: '[]byte'
+      name: Send
+    - doc: |-
+        Stream sends a snapshot from the offset the receiver accepted; open
+        returns a reader at an encoded offset on a chunk boundary, which
+        Stream closes.
+      in:
+      - name: ctx
+        type: context.Context
+      - name: to
+        type: NodeID
+      - name: offer
+        type: InstallOffer
+      - name: open
+        type: func(offset int64) (io.ReadCloser, error)
+      name: Stream
+      out:
+      - type: error
+    - doc: |-
+        Bind registers the group's callbacks. deliver gets the frame and the
+        peer TLS authenticated, valid until deliver returns; offer is answered
+        on the event loop; join is answered off it, under a deadline.
+      in:
+      - name: group
+        type: GroupID
+      - name: deliver
+        type: func(from AuthenticatedPeer, frame []byte)
+      - name: offer
+        type: func(from AuthenticatedPeer, o InstallOffer) InstallAccept
+      - name: install
+        type: func(InstallRequest) error
+      - name: join
+        type: func(ctx context.Context, from AuthenticatedPeer, r JoinRequest) (Position, errs.Code)
+      name: Bind
+      out:
+      - type: error
+    - doc: |-
+        SetMembership pushes the group's admitted members; the transport
+        computes the union over its groups.
+      in:
+      - name: group
+        type: GroupID
+      - name: admitted
+        type: '[]Member'
+      name: SetMembership
+    name: Transport
+  - doc: |-
+      UnreachableReporter is the sibling of a transport that reports a peer it
+      could not reach, so that the leader moves its progress to probe.
+    methods:
+    - doc: Unreachable registers the callback.
+      in:
+      - type: func(NodeID)
+      name: Unreachable
+    name: UnreachableReporter
+  - doc: Joiner is the sibling a transport implements to carry a pre-admission JOIN.
+    methods:
+    - doc: |-
+        Join sends the JOIN and returns the position its AddLearner was
+        appended at.
+      in:
+      - name: ctx
+        type: context.Context
+      - name: cfg
+        type: JoinConfig
+      name: Join
+      out:
+      - type: Position
+      - type: error
+    name: Joiner
+  - doc: |-
+      JoinAuthorizer is the PRODUCT's port: a member calls it before it turns a
+      JOIN into an AddLearner. It decides whether the slot's previous member is
+      fenced, which only the product can know, and returns the Operator to record.
+    methods:
+    - doc: Authorize accepts or refuses the request.
+      in:
+      - name: ctx
+        type: context.Context
+      - name: r
+        type: JoinRequest
+      name: Authorize
+      out:
+      - type: Operator
+      - type: error
+    name: JoinAuthorizer
+  - doc: LeadershipWatcher is the sibling of a node that notifies leadership changes.
+    methods:
+    - doc: |-
+        Watch returns its OWN channel, of capacity one, holding the latest
+        status; it is unsubscribed and closed when ctx ends or the node closes.
+      in:
+      - name: ctx
+        type: context.Context
+      name: Watch
+      out:
+      - type: <-chan Status
+    name: LeadershipWatcher
+  types:
+  - doc: |-
+      EntryKind says what a log entry carries. Only [EntryCommand] reaches the
+      state machine; every other kind is the engine's own replicated state. A kind
+      a node does not know stops it with VERSION_UNSUPPORTED: it is never skipped.
+    methods:
+    - doc: Known reports whether the kind is one protocol version 1 defines.
+      name: Known
+      out:
+      - type: bool
+      recv: EntryKind
+    name: EntryKind
+    underlying: uint8
+  - doc: |-
+      Entry is one record of the replicated log. Data is immutable once appended:
+      the store and the engine never write into it, and a caller that hands bytes
+      to Propose gives up their ownership.
+    name: Entry
+    struct:
+      fields:
+      - doc: Position is the entry's term and index.
+        name: Position
+        type: Position
+      - doc: Kind says what Data carries.
+        name: Kind
+        type: EntryKind
+      - doc: |-
+          Version is the payload version the proposer set; it selects the frozen
+          code path that applies the entry.
+        name: Version
+        type: uint32
+      - doc: BodySum is the CRC-32C of Data, computed by the proposer.
+        name: BodySum
+        type: uint32
+      - doc: |-
+          ChainSum chains the previous entry's header: computed by the LEADER at
+          its serialized append point, verified at append and before Apply.
+        name: ChainSum
+        type: uint32
+      - doc: |-
+          Data is the payload: a command for EntryCommand, the engine's encoding
+          for the other kinds.
+        name: Data
+        type: '[]byte'
+      - doc: |-
+          Token is the entry's lineage-scoped command identity, set in memory by
+          the engine before Apply and never encoded in the log.
+        name: Token
+        type: Token
+  - doc: |-
+      HardState is what a node must never forget: its term, its vote in that term
+      and the commit index it knows of. Term and vote are durable before any reply
+      depends on them; the commit index is written lazily, never above the last
+      synced index.
+    name: HardState
+    struct:
+      fields:
+      - doc: Term is the node's current term.
+        name: Term
+        type: uint64
+      - doc: Vote is the candidate voted for in Term, 0 for none.
+        name: Vote
+        type: NodeID
+      - doc: Commit is the highest index known committed.
+        name: Commit
+        type: uint64
+  - doc: StampState says how far a data directory has come.
+    name: StampState
+    underlying: uint8
+  - doc: |-
+      Stamp binds a data directory to one node of one cluster: written by
+      LogStore.WriteStamp, durable on return, and verified at every start. A
+      mismatch is DATA_DIR_MISMATCH.
+    name: Stamp
+    struct:
+      fields:
+      - doc: Log is the log identity the directory belongs to.
+        name: Log
+        type: LogIdentity
+      - doc: ID is the node.
+        name: ID
+        type: NodeID
+      - doc: Incarnation is drawn when the stamp is first written.
+        name: Incarnation
+        type: Incarnation
+      - doc: Slot is the placement slot the node's certificate names.
+        name: Slot
+        type: string
+      - doc: State is how far the directory has come.
+        name: State
+        type: StampState
+      - doc: |-
+          Founding is the digest of the founding member list while a bootstrap
+          is pending, so that a rerun with another list is refused.
+        name: Founding
+        type: '[32]byte'
+  - doc: |-
+      NodeID names one member of a group for its whole life. It is a random 64-bit
+      value drawn at Init, never 0 and never reused: a node whose disk was lost
+      rejoins under a NEW id, because one that rejoined under its old id could vote
+      twice in one term.
+    methods:
+    - doc: String renders the id in decimal, the form an operator types back.
+      name: String
+      out:
+      - type: string
+      recv: NodeID
+    name: NodeID
+    underlying: uint64
+  - doc: |-
+      Incarnation is a random 128-bit value drawn when a data directory is first
+      stamped. A wiped machine that kept its certificate and its NodeID is still
+      a different incarnation, and is refused. It is an identifier, not a secret.
+    methods:
+    - doc: String renders the incarnation in lowercase hex.
+      name: String
+      out:
+      - type: string
+      recv: Incarnation
+    - doc: IsZero reports whether no incarnation was drawn.
+      name: IsZero
+      out:
+      - type: bool
+      recv: Incarnation
+    name: Incarnation
+    underlying: '[16]byte'
+  - doc: |-
+      ClusterID names one cluster: the founding, or a Recover or RestoreSnapshot
+      that started a new history. It is 16 bytes everywhere it is encoded.
+    methods:
+    - doc: |-
+        String renders the cluster id in lowercase hex, the form the certificate's
+        URI SAN carries.
+      name: String
+      out:
+      - type: string
+      recv: ClusterID
+    - doc: IsZero reports whether the cluster id was never set.
+      name: IsZero
+      out:
+      - type: bool
+      recv: ClusterID
+    name: ClusterID
+    underlying: '[16]byte'
+  - doc: |-
+      GroupID names a consensus group. v1 runs exactly one group, 1, and every
+      frame carries it so that a later version can multiplex groups without
+      changing the wire.
+    name: GroupID
+    underlying: uint64
+  - doc: |-
+      Position is an entry's place in the log: the term it was created in and its
+      index. The index is a fencing token: unique, strictly increasing over the
+      group's life and identical on every node. The term says WHICH command, never
+      who may act on it now (ADR 0152 D10).
+    name: Position
+    struct:
+      fields:
+      - doc: Term is the leader term the entry was appended in.
+        name: Term
+        type: uint64
+      - doc: Index is the entry's place in the log, from 1.
+        name: Index
+        type: uint64
+  - doc: |-
+      LogIdentity scopes positions: the ClusterID and a log epoch that Recover and
+      RestoreSnapshot bump, and the predecessor this history descends from with the
+      last index it kept. A position or a token from another identity is not
+      comparable with this log's.
+    methods:
+    - doc: |-
+        Same reports whether two identities name the same history (cluster and
+        epoch), whatever lineage they record.
+      in:
+      - name: o
+        type: LogIdentity
+      name: Same
+      out:
+      - type: bool
+      recv: LogIdentity
+    name: LogIdentity
+    struct:
+      fields:
+      - doc: Cluster is the cluster the log belongs to.
+        name: Cluster
+        type: ClusterID
+      - doc: 'Epoch counts the histories of this cluster id: 1 at founding.'
+        name: Epoch
+        type: uint64
+      - doc: |-
+          Predecessor is the cluster of the history this one was recovered from,
+          zero for a founding.
+        name: Predecessor
+        type: ClusterID
+      - doc: PredecessorEpoch is the predecessor's epoch.
+        name: PredecessorEpoch
+        type: uint64
+      - doc: |-
+          KeptIndex is the last index Recover kept from the predecessor. An
+          applied position of the predecessor at or below it is still trusted.
+        name: KeptIndex
+        type: uint64
+  - doc: |-
+      Token is a lineage-scoped position: the cluster, the log epoch, the term and
+      the index. It is comparable, and its encoding is fixed at 41 bytes: a version
+      byte, the 16-byte ClusterID, then epoch, term and index as big-endian uint64.
+    methods:
+    - doc: Position returns the token's position, without its lineage.
+      name: Position
+      out:
+      - type: Position
+      recv: Token
+    name: Token
+    struct:
+      fields:
+      - doc: Cluster is the cluster of the log that committed the entry.
+        name: Cluster
+        type: ClusterID
+      - doc: Epoch is that log's epoch.
+        name: Epoch
+        type: uint64
+      - doc: Term is the entry's term.
+        name: Term
+        type: uint64
+      - doc: Index is the entry's index.
+        name: Index
+        type: uint64
+  - doc: |-
+      Operator is the opaque identity an administrative operation is performed
+      under. The product vouches for it and the SDK records it in the entry,
+      never authenticating it. It is printable ASCII 0x21-0x7E, at most 128 bytes,
+      and must not carry personal data: the log is replicated and kept.
+    methods:
+    - doc: Valid reports whether the operator satisfies the format rules.
+      name: Valid
+      out:
+      - type: bool
+      recv: Operator
+    name: Operator
+    underlying: string
+  - doc: |-
+      AlarmID names an alarm by the index of the entry that raised it, so that a
+      clearing operation names the alarm it means to clear.
+    name: AlarmID
+    underlying: uint64
+  - doc: |-
+      Precondition is what a clearing or raising operation expects to act on: the
+      log identity it was read in, and the alarm or the contract or cluster-version
+      generation it expects to replace. Apply refuses a mismatch with
+      ADMIN_PRECONDITION_FAILED, so a stale page cannot clear an alarm raised since.
+    name: Precondition
+    struct:
+      fields:
+      - doc: Log is the identity the precondition was read in.
+        name: Log
+        type: LogIdentity
+      - doc: Alarm is the alarm a clearing operation names.
+        name: Alarm
+        type: AlarmID
+      - doc: |-
+          Generation is the contract or cluster-version generation an operation
+          expects to replace.
+        name: Generation
+        type: uint64
+  - doc: |-
+      Member is one node of the membership: its identity, the key it is pinned
+      to, where it listens, and whether it votes.
+    name: Member
+    struct:
+      fields:
+      - doc: ID is the node.
+        name: ID
+        type: NodeID
+      - doc: Incarnation is the node's data-directory incarnation.
+        name: Incarnation
+        type: Incarnation
+      - doc: Slot is the placement slot its certificate names.
+        name: Slot
+        type: string
+      - doc: |-
+          SPKI is the SHA-256 of its certificate's SubjectPublicKeyInfo. A zero
+          pin admits nobody: it is what DenyPin leaves.
+        name: SPKI
+        type: '[32]byte'
+      - doc: Address is where its transport listens.
+        name: Address
+        type: string
+      - doc: Voter is true for a voter, false for a learner.
+        name: Voter
+        type: bool
+      - doc: Joining marks an empty learner admitted before it holds any log.
+        name: Joining
+        type: bool
+      - doc: |-
+          PayloadMax is the highest payload version its state machine supports; 0
+          means only the lowest.
+        name: PayloadMax
+        type: uint32
+      - doc: MaxSnapshotBytes is the largest snapshot it accepts, 0 when unknown.
+        name: MaxSnapshotBytes
+        type: int64
+  - doc: |-
+      Membership is the configuration at a position: its members and the set of
+      retired IDs, which is never reused.
+    methods:
+    - doc: Member returns the member with that id.
+      in:
+      - name: id
+        type: NodeID
+      name: Member
+      out:
+      - type: Member
+      - type: bool
+      recv: Membership
+    - doc: IsRetired reports whether the id was removed.
+      in:
+      - name: id
+        type: NodeID
+      name: IsRetired
+      out:
+      - type: bool
+      recv: Membership
+    - doc: Voters returns the ids of the voters, in membership order.
+      name: Voters
+      out:
+      - type: '[]NodeID'
+      recv: Membership
+    - doc: |-
+        Clone returns a deep copy, so that a membership handed out cannot be changed
+        under the engine.
+      name: Clone
+      out:
+      - type: Membership
+      recv: Membership
+    name: Membership
+    struct:
+      fields:
+      - doc: Index is the index of the entry that produced it, 0 at founding.
+        name: Index
+        type: uint64
+      - doc: Members lists every voter and learner.
+        name: Members
+        type: '[]Member'
+      - doc: Retired lists every removed NodeID.
+        name: Retired
+        type: '[]NodeID'
+  - doc: |-
+      TimingContract is the set of timings every member must agree on for leases
+      and vote refusals to be sound. The committed contract entry is its ONLY
+      authority; a node's own configuration is merely the proposal used at
+      Bootstrap.
+    name: TimingContract
+    struct:
+      fields:
+      - doc: Generation counts the committed contracts, 1 at founding.
+        name: Generation
+        type: uint64
+      - doc: HeartbeatInterval is how often the leader confirms itself.
+        name: HeartbeatInterval
+        type: time.Duration
+      - doc: |-
+          ElectionTimeoutMin is the lower bound of the randomized election
+          timeout, and the vote-refusal window.
+        name: ElectionTimeoutMin
+        type: time.Duration
+      - doc: ElectionTimeoutMax is its upper bound, exclusive.
+        name: ElectionTimeoutMax
+        type: time.Duration
+      - doc: |-
+          MaxClockDrift is the largest rate difference between two clocks, as a
+          fraction in (0, 1). Zero refuses lease reads.
+        name: MaxClockDrift
+        type: float64
+  - doc: |-
+      Versions are a node's capabilities: the protocol range it speaks, the
+      payload versions its state machine supports, and the committed cluster
+      version.
+    name: Versions
+    struct:
+      fields:
+      - doc: ProtocolMin is the lowest protocol version it speaks.
+        name: ProtocolMin
+        type: uint32
+      - doc: ProtocolMax is the highest.
+        name: ProtocolMax
+        type: uint32
+      - doc: PayloadMax is the highest payload version it applies.
+        name: PayloadMax
+        type: uint32
+      - doc: Cluster is the committed cluster version.
+        name: Cluster
+        type: uint32
+      - doc: ClusterGeneration counts cluster-version raises.
+        name: ClusterGeneration
+        type: uint64
+  - doc: |-
+      MessageKind says what a Message is. The two high bits are its lane, so that
+      the frame header alone routes it (ADR 0152 D18).
+    methods:
+    - doc: Lane returns the connection the kind belongs on.
+      name: Lane
+      out:
+      - type: FrameLane
+      recv: MessageKind
+    - doc: Known reports whether protocol version 1 defines the kind.
+      name: Known
+      out:
+      - type: bool
+      recv: MessageKind
+    name: MessageKind
+    underlying: uint8
+  - doc: MessageFlags are a message's boolean qualifiers.
+    name: MessageFlags
+    underlying: uint8
+  - doc: |-
+      Message is one protocol message: a plain value, encoded by the service's
+      AppendMessage and decoded by ParseMessage, never by a method. The engine
+      trusts the transport's authenticated peer over From, and drops a message
+      whose From differs from it.
+    name: Message
+    struct:
+      fields:
+      - doc: Version is the frame layout version, 1.
+        name: Version
+        type: uint8
+      - doc: Group is the consensus group, 1 in v1.
+        name: Group
+        type: GroupID
+      - doc: Kind says what the message is.
+        name: Kind
+        type: MessageKind
+      - doc: Flags qualify it.
+        name: Flags
+        type: MessageFlags
+      - doc: From is the sender, as the sender wrote it.
+        name: From
+        type: NodeID
+      - doc: To is the receiver.
+        name: To
+        type: NodeID
+      - doc: Term is the sender's term.
+        name: Term
+        type: uint64
+      - doc: |-
+          LogTerm is the term of the entry at Index: the previous entry of an
+          append, the last entry of a vote request.
+        name: LogTerm
+        type: uint64
+      - doc: |-
+          Index is the previous index of an append, the last index of a vote
+          request, the verified prefix of an acknowledgement, a read index.
+        name: Index
+        type: uint64
+      - doc: Commit is the commit index the sender lets the receiver advance to.
+        name: Commit
+        type: uint64
+      - doc: Reject marks a refusal.
+        name: Reject
+        type: bool
+      - doc: RejectHint is the receiver's last index, a hint where to probe from.
+        name: RejectHint
+        type: uint64
+      - doc: |-
+          Context correlates a reply with its request: a heartbeat round, a read
+          request, a submission sequence.
+        name: Context
+        type: uint64
+      - doc: TransferIssuer is the leader that issued a transfer flag.
+        name: TransferIssuer
+        type: NodeID
+      - doc: TransferTerm is the term the transfer flag was issued in.
+        name: TransferTerm
+        type: uint64
+      - doc: Contract is the committed contract generation the sender has applied.
+        name: Contract
+        type: uint64
+      - doc: Code is a refusal's error code, 0 for none.
+        name: Code
+        type: errs.Code
+      - doc: |-
+          Entries are the entries an append carries, or the proposal a forward
+          carries with a zero position.
+        name: Entries
+        type: '[]Entry'
+  - doc: |-
+      SnapshotMeta describes one snapshot: where it cuts the log, the engine state
+      it carries, and what its bytes must hash to. It is versioned; a version a
+      node does not know is refused cleanly.
+    name: SnapshotMeta
+    struct:
+      fields:
+      - doc: ID names the snapshot, the same in a spool, an offer and a handle.
+        name: ID
+        type: string
+      - doc: Version is the snapshot format version, 1.
+        name: Version
+        type: uint8
+      - doc: Position is the last entry the snapshot covers.
+        name: Position
+        type: Position
+      - doc: Log is the identity of the log the snapshot was cut from.
+        name: Log
+        type: LogIdentity
+      - doc: Membership is the configuration valid at Position, never a later one.
+        name: Membership
+        type: Membership
+      - doc: |-
+          ChainTip is the authenticated chain value at Position: the chain is
+          carried across the boundary, never reseeded.
+        name: ChainTip
+        type: uint32
+      - doc: 'Codec names the compression of the chunks: "flate" or "gzip".'
+        name: Codec
+        type: string
+      - doc: EncodedSize is the size of the encoded stream, chunk headers included.
+        name: EncodedSize
+        type: int64
+      - doc: DecodedSize is the size of the decoded stream.
+        name: DecodedSize
+        type: int64
+      - doc: ChunkSize is the largest decoded chunk.
+        name: ChunkSize
+        type: int64
+      - doc: SHA256 is the digest of the DECODED stream, computed by the engine.
+        name: SHA256
+        type: '[32]byte'
+      - doc: Timing is the committed timing contract at Position.
+        name: Timing
+        type: TimingContract
+      - doc: ClusterVersion is the committed cluster version at Position.
+        name: ClusterVersion
+        type: uint32
+      - doc: ClusterGeneration counts its raises.
+        name: ClusterGeneration
+        type: uint64
+      - doc: NoSpace is the no-space alarm raised at Position, 0 for none.
+        name: NoSpace
+        type: AlarmID
+      - doc: Reserved is carried uninterpreted for ADR 0173.
+        name: Reserved
+        type: '[]byte'
+  - doc: InstallOffer is what a leader sends before streaming a snapshot.
+    name: InstallOffer
+    struct:
+      fields:
+      - doc: Term is the sender's term.
+        name: Term
+        type: uint64
+      - doc: SnapshotID equals Meta.ID.
+        name: SnapshotID
+        type: string
+      - doc: Meta describes the snapshot.
+        name: Meta
+        type: SnapshotMeta
+  - doc: InstallAccept is the receiver's answer to an offer.
+    name: InstallAccept
+    struct:
+      fields:
+      - doc: SnapshotID is the snapshot answered.
+        name: SnapshotID
+        type: string
+      - doc: |-
+          Offset is the chunk-aligned ENCODED offset to resume from, 0 for a
+          fresh spool.
+        name: Offset
+        type: int64
+      - doc: Refused is zero, or why the offer is refused.
+        name: Refused
+        type: errs.Code
+      - doc: |-
+          Held reports that the receiver already holds the snapshot: an
+          idempotent success.
+        name: Held
+        type: bool
+  - doc: InstallRequest is what the transport hands the engine once bytes flow.
+    name: InstallRequest
+    struct:
+      fields:
+      - doc: Ctx ends with the connection.
+        name: Ctx
+        type: context.Context
+      - doc: From is the peer TLS authenticated.
+        name: From
+        type: AuthenticatedPeer
+      - doc: Offer is the accepted offer.
+        name: Offer
+        type: InstallOffer
+      - doc: Offset is the accepted offset.
+        name: Offset
+        type: int64
+      - doc: Body is the encoded stream from Offset, ending with the connection.
+        name: Body
+        type: io.Reader
+  - doc: |-
+      AuthenticatedPeer is what the TLS handshake proved, never what a frame
+      claims. The certificate proves the slot and the key; the ID and the
+      incarnation are the member the transport admitted on that key. A peer that is
+      not yet a member, during a JOIN, has ID 0 and only Slot and SPKI set.
+    name: AuthenticatedPeer
+    struct:
+      fields:
+      - doc: ID is the admitted member, 0 for a joiner.
+        name: ID
+        type: NodeID
+      - doc: Incarnation is that member's incarnation.
+        name: Incarnation
+        type: Incarnation
+      - doc: Slot is the slot the certificate's URI SAN names.
+        name: Slot
+        type: string
+      - doc: SPKI is the SHA-256 of the certificate's SubjectPublicKeyInfo.
+        name: SPKI
+        type: '[32]byte'
+  - doc: |-
+      JoinRequest is a pre-admission JOIN as a member received it: the slot and
+      the key from TLS, the new node's id and incarnation from its frame.
+    name: JoinRequest
+    struct:
+      fields:
+      - doc: Cluster is the cluster the joiner claims.
+        name: Cluster
+        type: ClusterID
+      - doc: ID is the joiner's new NodeID.
+        name: ID
+        type: NodeID
+      - doc: Incarnation is the joiner's incarnation.
+        name: Incarnation
+        type: Incarnation
+      - doc: Slot is the slot its certificate names.
+        name: Slot
+        type: string
+      - doc: SPKI is its key, from the handshake.
+        name: SPKI
+        type: '[32]byte'
+      - doc: Address is where it listens.
+        name: Address
+        type: string
+  - doc: JoinConfig is what a joining node needs to send its JOIN.
+    name: JoinConfig
+    struct:
+      fields:
+      - doc: Addresses are the members to try, in order.
+        name: Addresses
+        type: '[]string'
+      - doc: Stamp is the joiner's stamp, from Init.
+        name: Stamp
+        type: Stamp
+      - doc: Address is where the joiner listens.
+        name: Address
+        type: string
+  - doc: |-
+      FencedAttestation is the operator's statement that an old voter was fenced
+      before a Recover: the voter, the method that fenced it, and one signed
+      receipt per witness (one per NAS).
+    name: FencedAttestation
+    struct:
+      fields:
+      - doc: Voter is the old voter.
+        name: Voter
+        type: NodeID
+      - doc: 'Method is how it was fenced: "stopped", "powered-off" or "cut".'
+        name: Method
+        type: string
+      - doc: |-
+          Receipts are Ed25519 signatures, one per witness key, over the old
+          cluster id, the new cluster id and the voter.
+        name: Receipts
+        type: '[][]byte'
+  - doc: Role is a node's part in its group.
+    methods:
+    - doc: String names the role.
+      name: String
+      out:
+      - type: string
+      recv: Role
+    name: Role
+    underlying: uint8
+  - doc: Status is a node's view of its group after one turn of its event loop.
+    methods:
+    - doc: |-
+        Precondition returns the precondition an operation clearing the current
+        alarm, or replacing the current contract, would carry.
+      name: Precondition
+      out:
+      - type: Precondition
+      recv: Status
+    name: Status
+    struct:
+      fields:
+      - doc: ID is this node.
+        name: ID
+        type: NodeID
+      - doc: Role is its role.
+        name: Role
+        type: Role
+      - doc: Term is its current term.
+        name: Term
+        type: uint64
+      - doc: Leader is the leader it knows of in Term, 0 for none.
+        name: Leader
+        type: NodeID
+      - doc: Commit is the highest index it knows committed.
+        name: Commit
+        type: uint64
+      - doc: Applied is the highest index its state machine applied.
+        name: Applied
+        type: uint64
+      - doc: Log is the identity of its log.
+        name: Log
+        type: LogIdentity
+      - doc: Versions are its capabilities and the committed cluster version.
+        name: Versions
+        type: Versions
+      - doc: Timing is the committed timing contract.
+        name: Timing
+        type: TimingContract
+      - doc: NoSpace is the raised no-space alarm, 0 when none.
+        name: NoSpace
+        type: AlarmID
+  - doc: |-
+      StopReason says why a node stopped itself. Err carries the sentinel of the
+      stop; ExitCode is the process exit status the product should use.
+    methods:
+    - doc: |-
+        ExitCode returns errs.ExitCodeOf of the stop's error, or 73 for a storage
+        failure whose marker could not be written (ADR 0152 D4).
+      name: ExitCode
+      out:
+      - type: int
+      recv: StopReason
+    name: StopReason
+    struct:
+      fields:
+      - doc: Err is the stop's error, built on its sentinel.
+        name: Err
+        type: error
+      - doc: |-
+          Unmarked is set when a STORAGE_FAILED stop could write its marker
+          nowhere: the exit code is then 73.
+        name: Unmarked
+        type: bool
+  - doc: |-
+      FrameLane is the connection a frame belongs on: control, data or snapshot.
+      It is carried in the two high bits of the frame's type byte, so a transport
+      routes a frame of a type it does not parse.
+    name: FrameLane
+    underlying: uint8
+  variables:
+  - doc: |-
+      ConsensusMisconfigured is returned by a constructor whose configuration
+      it cannot honour: a bound out of range, a heartbeat not below a fifth of
+      the minimum election timeout, a lease without a stated clock drift, a
+      durability that disagrees with the state machine.
+    name: ConsensusMisconfigured
+    type: "= errs.Define(CodeConsensusMisconfigured, \"CONSENSUS_MISCONFIGURED\",\n\t\"The consensus node\
+      \ cannot be built from the given configuration\",\n\t\"core/app/consensus: a configuration field\
+      \ is missing, out of range, or contradicts another; the fields name it\",\n\terrs.WithExitCode(exitConfig))"
+  - doc: |-
+      NotLeader is returned when a proposal was certainly NOT appended. It is
+      safe to retry; LeaderHint reads the known leader from its fields.
+    name: NotLeader
+    type: "= errs.Define(CodeNotLeader, \"NOT_LEADER\",\n\t\"This node is not the leader; the proposal\
+      \ was not appended\",\n\t\"core/app/consensus: the proposal was refused before append because this\
+      \ node does not lead and could not forward it\",\n\terrs.WithExitCode(exitTempFail))"
+  - doc: |-
+      OutcomeUnknown is returned when a proposal was appended, or possibly
+      delivered, and its answer was lost. The entry may still commit: never
+      retry blindly, read the state through Barrier first.
+    name: OutcomeUnknown
+    type: "= errs.Define(CodeOutcomeUnknown, \"OUTCOME_UNKNOWN\",\n\t\"The proposal may or may not have\
+      \ been committed\",\n\t\"core/app/consensus: the proposal was appended or possibly delivered, then\
+      \ the answer was lost to a leadership change, a context's end or a broken connection\",\n\terrs.WithExitCode(exitTempFail))"
+  - doc: |-
+      LeadershipUnconfirmed is returned by Barrier when its round did not reach
+      a majority in time.
+    name: LeadershipUnconfirmed
+    type: "= errs.Define(CodeLeadershipUnconfirmed, \"LEADERSHIP_UNCONFIRMED\",\n\t\"The leader could\
+      \ not confirm its leadership\",\n\t\"core/app/consensus: a read barrier's heartbeat round did not\
+      \ reach a majority of the configuration in time\",\n\terrs.WithExitCode(exitTempFail))"
+  - doc: |-
+      MembershipChangePending is returned while another membership change is
+      still uncommitted: one change at a time.
+    name: MembershipChangePending
+    type: "= errs.Define(CodeMembershipChangePending, \"MEMBERSHIP_CHANGE_PENDING\",\n\t\"Another membership\
+      \ change is still pending\",\n\t\"core/app/consensus: a membership change was proposed while a previous\
+      \ one is uncommitted\",\n\terrs.WithExitCode(exitTempFail))"
+  - doc: |-
+      MembershipInvalid is returned for a change refused on its merits: an
+      unknown node, the last voter, a removal below MinVoters, a promotion
+      without durable progress, a change without a reachable majority.
+    name: MembershipInvalid
+    type: "= errs.Define(CodeMembershipInvalid, \"MEMBERSHIP_INVALID\",\n\t\"The membership change is\
+      \ not allowed\",\n\t\"core/app/consensus: the membership change names an unknown node, leaves too\
+      \ few voters, or would leave no reachable majority\",\n\terrs.WithExitCode(exitDataErr))"
+  - doc: |-
+      TransferFailed is returned when a leadership transfer's target did not
+      win within one election timeout. The old leader resumes, without its
+      lease for the rest of the term.
+    name: TransferFailed
+    type: "= errs.Define(CodeTransferFailed, \"TRANSFER_FAILED\",\n\t\"The leadership transfer did not\
+      \ complete\",\n\t\"core/app/consensus: the transfer target did not win an election within one election\
+      \ timeout\",\n\terrs.WithExitCode(exitTempFail))"
+  - doc: EntryTooLarge is returned for a command above MaxEntryBytes.
+    name: EntryTooLarge
+    type: "= errs.Define(CodeEntryTooLarge, \"ENTRY_TOO_LARGE\",\n\t\"The proposed entry is too large\"\
+      ,\n\t\"core/app/consensus: the command exceeds MaxEntryBytes\",\n\terrs.WithExitCode(exitDataErr))"
+  - doc: |-
+      Compacted is the answer for an index below the first retained one. It is
+      an expected outcome the engine acts on, never a failure.
+    name: Compacted
+    type: "= errs.Define(CodeCompacted, \"COMPACTED\",\n\t\"The requested log position has been compacted\"\
+      ,\n\t\"core/app/consensus: the index is below the first index the log retains\",\n\terrs.WithExitCode(exitTempFail))"
+  - doc: |-
+      StateMachineFailed stops the node when Apply panics or cannot complete.
+      The entry IS committed: this never means "not written".
+    name: StateMachineFailed
+    type: "= errs.Define(CodeStateMachineFailed, \"STATE_MACHINE_FAILED\",\n\t\"The replicated state machine\
+      \ failed and the node stopped\",\n\t\"core/app/consensus: Apply panicked or could not complete;\
+      \ the entry is committed and the node stopped applying\",\n\terrs.WithExitCode(exitUnavailable))"
+  - doc: |-
+      NodeStopped is returned by a call on a node that was closed or stopped
+      itself.
+    name: NodeStopped
+    type: "= errs.Define(CodeNodeStopped, \"NODE_STOPPED\",\n\t\"The consensus node is stopped\",\n\t\"\
+      core/app/consensus: the node was closed, or stopped itself; its StopReason says why\",\n\terrs.WithExitCode(exitTempFail))"
+  - doc: |-
+      EntrySuperseded is returned when a COMMITTED entry at the proposal's
+      index has another term: the proposal certainly did not commit.
+    name: EntrySuperseded
+    type: "= errs.Define(CodeEntrySuperseded, \"ENTRY_SUPERSEDED\",\n\t\"Another entry was committed at\
+      \ the proposal's position\",\n\t\"core/app/consensus: the entry committed at the proposal's index\
+      \ carries another term\",\n\terrs.WithExitCode(exitTempFail))"
+  - doc: |-
+      Overloaded is returned when a proposal is refused before append: pending
+      bytes or apply lag over their bound. It is safe to retry.
+    name: Overloaded
+    type: "= errs.Define(CodeOverloaded, \"OVERLOADED\",\n\t\"The cluster is overloaded; the proposal\
+      \ was not appended\",\n\t\"core/app/consensus: pending proposal bytes or apply lag are over their\
+      \ bound; nothing was appended\",\n\terrs.WithExitCode(exitTempFail))"
+  - doc: |-
+      VersionUnsupported stops the node on an entry kind, record, frame or
+      snapshot version it does not know. Skipping one would be a fork.
+    name: VersionUnsupported
+    type: "= errs.Define(CodeVersionUnsupported, \"VERSION_UNSUPPORTED\",\n\t\"A version this node does\
+      \ not support was met\",\n\t\"core/app/consensus: an entry kind, log record, frame or snapshot version\
+      \ is unknown to this node, which stops\",\n\terrs.WithExitCode(exitProtocol))"
+  - doc: NodeIDRetired is returned when a removed NodeID is offered again.
+    name: NodeIDRetired
+    type: "= errs.Define(CodeNodeIDRetired, \"NODE_ID_RETIRED\",\n\t\"The node ID has been retired and\
+      \ cannot be used again\",\n\t\"core/app/consensus: the NodeID is in the replicated retired set\"\
+      ,\n\terrs.WithExitCode(exitDataErr))"
+  - doc: |-
+      NoSpace is returned for an ordinary proposal while the replicated
+      no-space alarm is raised.
+    name: NoSpace
+    type: "= errs.Define(CodeNoSpace, \"NO_SPACE\",\n\t\"Writes are refused until the no-space alarm is\
+      \ cleared\",\n\t\"core/app/consensus: the replicated no-space alarm is raised; only the alarm, its\
+      \ clearing and administrative entries are admitted\",\n\terrs.WithExitCode(exitTempFail))"
+  - doc: |-
+      ResultTypeMismatch is returned by ProposeAs for an Apply result of
+      another type. The entry IS committed; TokenOf reads its token.
+    name: ResultTypeMismatch
+    type: "= errs.Define(CodeResultTypeMismatch, \"RESULT_TYPE_MISMATCH\",\n\t\"The entry was committed\
+      \ but its result has an unexpected type\",\n\t\"core/app/consensus: ProposeAs got an Apply result\
+      \ of another dynamic type; the entry is committed\",\n\terrs.WithExitCode(exitDataErr))"
+  - doc: |-
+      PayloadVersionRefused is returned for a proposal whose payload version is
+      above what some member announced; retryable after the upgrade.
+    name: PayloadVersionRefused
+    type: "= errs.Define(CodePayloadVersionRefused, \"PAYLOAD_VERSION_REFUSED\",\n\t\"The payload version\
+      \ is not yet supported by every member\",\n\t\"core/app/consensus: the proposal's payload version\
+      \ exceeds the cluster's committed floor; nothing was appended\",\n\terrs.WithExitCode(exitTempFail))"
+  - doc: |-
+      LineageMismatch is returned for a position, outbox identity or fence
+      from another LogIdentity lineage.
+    name: LineageMismatch
+    type: "= errs.Define(CodeLineageMismatch, \"LINEAGE_MISMATCH\",\n\t\"The position belongs to another\
+      \ log lineage\",\n\t\"core/app/consensus: a token or precondition names another ClusterID or log\
+      \ epoch than this log's\",\n\terrs.WithExitCode(exitDataErr))"
+  - doc: |-
+      AdminPreconditionFailed is returned when a clearing or raising
+      operation names an alarm, version or contract that is not current.
+    name: AdminPreconditionFailed
+    type: "= errs.Define(CodeAdminPreconditionFailed, \"ADMIN_PRECONDITION_FAILED\",\n\t\"The administrative\
+      \ operation's precondition no longer holds\",\n\t\"core/app/consensus: the precondition names an\
+      \ alarm, contract or version generation that is not the current one\",\n\terrs.WithExitCode(exitTempFail))"
+  - doc: |-
+      LogCorrupt is a CRC failure that is not a torn tail, or a gap in the
+      effective log. It is never repaired.
+    name: LogCorrupt
+    type: "= errs.Define(CodeLogCorrupt, \"LOG_CORRUPT\",\n\t\"The consensus log is corrupt\",\n\t\"core/app/consensus:\
+      \ a log record failed its checksum outside a torn tail, or the effective indexes have a gap\",\n\
+      \terrs.WithExitCode(exitDataErr))"
+  - doc: |-
+      HardStateCorrupt is an unreadable hard-state record or checkpoint; it is
+      never defaulted.
+    name: HardStateCorrupt
+    type: "= errs.Define(CodeHardStateCorrupt, \"HARD_STATE_CORRUPT\",\n\t\"The consensus hard state is\
+      \ corrupt\",\n\t\"core/app/consensus: the hard-state record or the checkpoint holding it is unreadable\"\
+      ,\n\terrs.WithExitCode(exitDataErr))"
+  - doc: |-
+      SnapshotCorrupt is a snapshot whose SHA-256 or size does not match its
+      metadata.
+    name: SnapshotCorrupt
+    type: "= errs.Define(CodeSnapshotCorrupt, \"SNAPSHOT_CORRUPT\",\n\t\"The snapshot is corrupt\",\n\t\
+      \"core/app/consensus: a snapshot's digest, chunk checksum or size does not match its metadata\"\
+      ,\n\terrs.WithExitCode(exitDataErr))"
+  - doc: |-
+      StorageFailed stops the node on a failed write, sync or read. It is
+      never retried: a retried fsync can report success over lost pages.
+    name: StorageFailed
+    type: "= errs.Define(CodeStorageFailed, \"STORAGE_FAILED\",\n\t\"The consensus storage failed and\
+      \ the node stopped\",\n\t\"core/app/consensus: a write, fsync or read failed; the node stops and\
+      \ refuses to start again until the machine reboots\",\n\terrs.WithExitCode(exitIOErr))"
+  - doc: DataDirLocked is returned when another process holds the data directory.
+    name: DataDirLocked
+    type: "= errs.Define(CodeDataDirLocked, \"DATA_DIR_LOCKED\",\n\t\"The data directory is held by another\
+      \ process\",\n\t\"core/app/consensus: the data directory lock is held by another process\",\n\t\
+      errs.WithExitCode(exitTempFail))"
+  - doc: |-
+      DataDirMismatch is returned when the stamp names another cluster, node
+      or incarnation, or an applied position cannot be trusted.
+    name: DataDirMismatch
+    type: "= errs.Define(CodeDataDirMismatch, \"DATA_DIR_MISMATCH\",\n\t\"The data directory belongs to\
+      \ another node or cluster\",\n\t\"core/app/consensus: the stamp or the applied position names another\
+      \ cluster, node, incarnation or lineage\",\n\terrs.WithExitCode(exitConfig))"
+  - doc: |-
+      PeerRejected is returned when a peer's certificate is not canonical,
+      names another cluster or slot, or carries a key that is not pinned.
+    name: PeerRejected
+    type: "= errs.Define(CodePeerRejected, \"PEER_REJECTED\",\n\t\"The peer was rejected\",\n\t\"core/app/consensus:\
+      \ the peer certificate's URI SAN is not canonical, names another cluster or slot, or its key is\
+      \ not admitted\",\n\terrs.WithExitCode(exitTempFail))"
+  - doc: |-
+      ClusterMismatch is returned when a peer's first frame names another
+      cluster or group.
+    name: ClusterMismatch
+    type: "= errs.Define(CodeClusterMismatch, \"CLUSTER_MISMATCH\",\n\t\"The peer belongs to another cluster\"\
+      ,\n\t\"core/app/consensus: the first frame names another cluster or group\",\n\terrs.WithExitCode(exitConfig))"
+  - doc: |-
+      FrameInvalid is a frame that does not parse or exceeds MaxFrameBytes;
+      the connection closes.
+    name: FrameInvalid
+    type: "= errs.Define(CodeFrameInvalid, \"FRAME_INVALID\",\n\t\"A malformed frame was received\",\n\
+      \t\"core/app/consensus: a frame does not parse, or its length exceeds the frame cap\",\n\terrs.WithExitCode(exitDataErr))"
+  - doc: |-
+      SnapshotTooLarge is an announced snapshot above the local
+      MaxSnapshotBytes, refused before anything is spooled.
+    name: SnapshotTooLarge
+    type: "= errs.Define(CodeSnapshotTooLarge, \"SNAPSHOT_TOO_LARGE\",\n\t\"The snapshot is larger than\
+      \ this node accepts\",\n\t\"core/app/consensus: the announced snapshot size exceeds MaxSnapshotBytes\"\
+      ,\n\terrs.WithExitCode(exitDataErr))"
+  - doc: |-
+      BootstrapRefused is returned when a listed peer already holds a history,
+      or the founding member lists differ.
+    name: BootstrapRefused
+    type: "= errs.Define(CodeBootstrapRefused, \"BOOTSTRAP_REFUSED\",\n\t\"The cluster cannot be bootstrapped\"\
+      ,\n\t\"core/app/consensus: the data directory already holds log entries, or a bootstrap with another\
+      \ member list is pending\",\n\terrs.WithExitCode(exitConfig))"
+  - doc: |-
+      TransportMisconfigured is returned when the transport cannot be built
+      from its configuration.
+    name: TransportMisconfigured
+    type: "= errs.Define(CodeTransportMisconfigured, \"TRANSPORT_MISCONFIGURED\",\n\t\"The consensus transport\
+      \ cannot be built from the given configuration\",\n\t\"core/app/consensus: an identity without roots,\
+      \ a listener without client-certificate verification, or a limit out of range\",\n\terrs.WithExitCode(exitConfig))"
+  - doc: RecoverRefused is returned when Recover's preconditions do not hold.
+    name: RecoverRefused
+    type: "= errs.Define(CodeRecoverRefused, \"RECOVER_REFUSED\",\n\t\"The recovery was refused\",\n\t\
+      \"core/app/consensus: Recover needs a stopped, locked directory, a new ClusterID, the typed confirmation\
+      \ and a signed fence for every old voter\",\n\terrs.WithExitCode(exitConfig))"
+  - doc: |-
+      LogQuarantined is returned at start while the data directory carries a
+      quarantine marker; only ClearQuarantine lifts it.
+    name: LogQuarantined
+    type: "= errs.Define(CodeLogQuarantined, \"LOG_QUARANTINED\",\n\t\"The consensus log is quarantined\"\
+      ,\n\t\"core/app/consensus: the data directory carries a quarantine marker from a LOG_CORRUPT; an\
+      \ operator must clear it\",\n\terrs.WithExitCode(exitDataErr))"
+  - doc: |-
+      RestoreRefused is returned when RestoreSnapshot's preconditions do not
+      hold.
+    name: RestoreRefused
+    type: "= errs.Define(CodeRestoreRefused, \"RESTORE_REFUSED\",\n\t\"The snapshot restore was refused\"\
+      ,\n\t\"core/app/consensus: RestoreSnapshot needs an empty directory, a non-zero expected digest\
+      \ that matches, and the typed confirmation\",\n\terrs.WithExitCode(exitConfig))"
+  - doc: |-
+      DataDirInUse is returned by an offline operation on a directory a live
+      node holds.
+    name: DataDirInUse
+    type: "= errs.Define(CodeDataDirInUse, \"DATA_DIR_IN_USE\",\n\t\"The data directory is in use by a\
+      \ running node\",\n\t\"core/app/consensus: Close, Recover or Inspect was called while a live Node\
+      \ holds the directory\",\n\terrs.WithExitCode(exitTempFail))"
+  - doc: JoinRefused is returned to a pre-admission JOIN that was refused.
+    name: JoinRefused
+    type: "= errs.Define(CodeJoinRefused, \"JOIN_REFUSED\",\n\t\"The join request was refused\",\n\t\"\
+      core/app/consensus: the JOIN names a slot whose member is not fenced, exceeds its rate, or reuses\
+      \ a retired id\",\n\terrs.WithExitCode(exitTempFail))"
+  - doc: StopMarkerPresent is returned by NewRaft when a stop marker applies.
+    name: StopMarkerPresent
+    type: "= errs.Define(CodeStopMarkerPresent, \"STOP_MARKER_PRESENT\",\n\t\"The node refuses to start\
+      \ until its stop marker is cleared\",\n\t\"core/app/consensus: a stop marker is present; STORAGE_FAILED\
+      \ clears at reboot, the others by an operator\",\n\terrs.WithExitCode(exitDataErr))"
+- constants:
+  - doc: |-
+      ReadIndex confirms every read by a heartbeat round started after it
+      arrived. It is the zero value and the default.
+    name: ReadIndex
+    type: ReadMode
+    value: iota
+  - doc: |-
+      ReadLease serves reads under the leader lease, sound only under the
+      four conditions of D9; it requires InitialTiming.MaxClockDrift.
+    name: ReadLease
+    value: iota
+  - doc: 'DurabilityUnset is refused: the caller states it.'
+    name: DurabilityUnset
+    type: Durability
+    value: iota
+  - doc: |-
+      DurabilityVolatile is a state machine held in memory, rebuilt from the
+      latest snapshot and the log at every start.
+    name: DurabilityVolatile
+    value: iota
+  - doc: |-
+      DurabilityDurable is a DurableStateMachine that persists its applied
+      position with its state.
+    name: DurabilityDurable
+    value: iota
+  - doc: DefaultSegmentBytes is a segment's fixed size (provisional).
+    name: DefaultSegmentBytes
+    value: 64 << 20
+  - doc: |-
+      WipeAndRejoin wipes the directory; the operator then Removes the old
+      NodeID and Inits under a NEW one (R4-03). A voter's incarnation is
+      never swapped in place.
+    name: WipeAndRejoin
+    type: QuarantineExit
+    value: iota + 1
+  - doc: |-
+      TruncateAndStaySilent truncates at the damage and persists a silence
+      condition (R4-03).
+    name: TruncateAndStaySilent
+    value: iota
+  functions:
+  - doc: |-
+      InitLog prepares a joining log purely offline: a random NodeID, a joining
+      stamp, and the pair returned. It is idempotent: a log already joining for
+      that cluster and slot returns its pair (D8, R3-02, R8-10).
+    in:
+    - name: log
+      type: coreconsensus.LogStore
+    - name: cluster
+      type: coreconsensus.ClusterID
+    - name: slot
+      type: string
+    name: InitLog
+    out:
+    - type: coreconsensus.NodeID
+    - type: coreconsensus.Incarnation
+    - type: error
+  - doc: |-
+      RedrawLog draws a new NodeID, only while the stamp is joining and the log
+      is empty (R8-10).
+    in:
+    - name: log
+      type: coreconsensus.LogStore
+    name: RedrawLog
+    out:
+    - type: coreconsensus.NodeID
+    - type: error
+  - doc: |-
+      Bootstrap founds a cluster on one founding node's log, in phases that are
+      each idempotent: a bootstrap-pending stamp naming the founding list, the
+      founding configuration as entry 1, then the member stamp. Every founder
+      runs it with the IDENTICAL list (D8, R2-24, R3-02, R9-04). It never runs
+      inside NewRaft.
+    in:
+    - name: _
+      type: context.Context
+    - name: cfg
+      type: Config
+    - name: members
+      type: '[]coreconsensus.Member'
+    name: Bootstrap
+    out:
+    - type: error
+  - doc: TimingDefaults are D5's defaults for the RTT matrix of the three sites.
+    name: TimingDefaults
+    out:
+    - type: coreconsensus.TimingContract
+  - doc: |-
+      OpenDataDir takes the directory lock FIRST, then reads, scans and repairs
+      (D11). A second process fails at once with DATA_DIR_LOCKED.
+    in:
+    - name: dir
+      type: string
+    name: OpenDataDir
+    out:
+    - type: DataDir
+    - type: error
+  - doc: OpenDataDirWith is OpenDataDir with options.
+    in:
+    - name: dir
+      type: string
+    - name: opts
+      type: DataDirOptions
+    name: OpenDataDirWith
+    out:
+    - type: DataDir
+    - type: error
+  - doc: LeaderHint reads the known leader from a NOT_LEADER's field (R7-10).
+    in:
+    - name: err
+      type: error
+    name: LeaderHint
+    out:
+    - type: coreconsensus.NodeID
+    - type: bool
+  - doc: TokenOf reads the committed token an error carries (R7-10).
+    in:
+    - name: err
+      type: error
+    name: TokenOf
+    out:
+    - type: coreconsensus.Token
+    - type: bool
+  - doc: NewMemoryLog returns an empty in-memory log.
+    name: NewMemoryLog
+    out:
+    - type: '*MemoryLog'
+  - doc: NewMemorySnapshots returns an empty store.
+    name: NewMemorySnapshots
+    out:
+    - type: '*MemorySnapshots'
+  - doc: NewMemoryNetwork returns an empty network.
+    name: NewMemoryNetwork
+    out:
+    - type: '*MemoryNetwork'
+  - doc: MemorySPKI returns the key the memory transport authenticates id with.
+    in:
+    - name: id
+      type: coreconsensus.NodeID
+    name: MemorySPKI
+    out:
+    - type: '[32]byte'
+  - doc: |-
+      NewRaft opens a node over what an offline tool founded or initialised. It
+      never bootstraps (D8). The start sequence is fixed (D14): the stamp, the
+      latest snapshot whose checksums pass, the log to its end, then serve.
+    in:
+    - name: cfg
+      type: Config
+    name: NewRaft
+    out:
+    - type: '*Node'
+    - type: error
+  - doc: |-
+      Init prepares a joining node purely offline: a random NodeID, a joining
+      stamp, and the pair the operator or the JOIN gives to AddLearner. It is
+      idempotent (R3-02, R7-41, R8-10).
+    in:
+    - name: d
+      type: DataDir
+    - name: cluster
+      type: coreconsensus.ClusterID
+    - name: slot
+      type: string
+    name: Init
+    out:
+    - type: coreconsensus.NodeID
+    - type: coreconsensus.Incarnation
+    - type: error
+  - doc: |-
+      Redraw draws a new id, only while the stamp is joining and the log empty,
+      after a JOIN_REFUSED for a reused or retired id (R8-10).
+    in:
+    - name: d
+      type: DataDir
+    name: Redraw
+    out:
+    - type: coreconsensus.NodeID
+    - type: error
+  - doc: Inspect reads a data directory without changing it.
+    in:
+    - name: d
+      type: DataDir
+    name: Inspect
+    out:
+    - type: Report
+    - type: error
+  - doc: |-
+      ClearQuarantine clears a quarantined, or stopped, directory through one of
+      the two exits. There is no third exit that keeps the damaged node voting.
+    in:
+    - name: d
+      type: DataDir
+    - name: exit
+      type: QuarantineExit
+    - name: op
+      type: coreconsensus.Operator
+    name: ClearQuarantine
+    out:
+    - type: error
+  - doc: ReceiptMessage returns the bytes a witness signs to attest a fenced voter.
+    in:
+    - name: old
+      type: coreconsensus.ClusterID
+    - name: next
+      type: coreconsensus.ClusterID
+    - name: voter
+      type: coreconsensus.NodeID
+    name: ReceiptMessage
+    out:
+    - type: '[]byte'
+  - doc: |-
+      Recover starts a NEW history from this node's committed log: a new
+      cluster id that records its predecessor and the last index it kept, and a
+      forced configuration. Every old voter left out must be attested fenced by
+      every witness; without witness keys it fails closed.
+    in:
+    - name: d
+      type: DataDir
+    - name: newCluster
+      type: coreconsensus.ClusterID
+    - name: members
+      type: '[]coreconsensus.Member'
+    - name: opt
+      type: RecoverOptions
+    name: Recover
+    out:
+    - type: error
+  - doc: |-
+      RestoreSnapshot starts a new history from a saved snapshot on an empty,
+      joining directory, without a Node (R3-15).
+    in:
+    - name: d
+      type: DataDir
+    - name: r
+      type: io.Reader
+    - name: newCluster
+      type: coreconsensus.ClusterID
+    - name: members
+      type: '[]coreconsensus.Member'
+    - name: opt
+      type: RestoreOptions
+    name: RestoreSnapshot
+    out:
+    - type: coreconsensus.SnapshotMeta
+    - type: error
+  - doc: |-
+      ProposeAs types the Apply result. A result of another dynamic type is
+      RESULT_TYPE_MISMATCH carrying the committed token: the entry IS committed.
+      A nil result is the zero R.
+    in:
+    - name: ctx
+      type: context.Context
+    - name: r
+      type: coreconsensus.Replicated
+    - name: data
+      type: '[]byte'
+    name: ProposeAs
+    out:
+    - type: coreconsensus.Token
+    - type: R
+    - type: error
+    typeParams:
+    - constraint: any
+      name: R
+  - doc: |-
+      LoadPEMIdentity reads the files once and returns the identity and the CA
+      pool to pass as TransportConfig.Roots.
+    in:
+    - name: certFile
+      type: string
+    - name: keyFile
+      type: string
+    - name: caFile
+      type: string
+    name: LoadPEMIdentity
+    out:
+    - type: '*PEMIdentity'
+    - type: '*x509.CertPool'
+    - type: error
+  - doc: NewTCPTransportFromPEM builds the shipped transport from PEM files.
+    in:
+    - name: certFile
+      type: string
+    - name: keyFile
+      type: string
+    - name: caFile
+      type: string
+    - name: cfg
+      type: TransportConfig
+    name: NewTCPTransportFromPEM
+    out:
+    - type: '*TCPTransport'
+    - type: error
+  - doc: Latest opens the newest complete snapshot of a store (R7-07).
+    in:
+    - name: s
+      type: coreconsensus.SnapshotStore
+    name: Latest
+    out:
+    - type: coreconsensus.SnapshotHandle
+    - type: error
+  - doc: SAN returns the canonical URI SAN of a node certificate.
+    in:
+    - name: cluster
+      type: coreconsensus.ClusterID
+    - name: slot
+      type: string
+    name: SAN
+    out:
+    - type: '*url.URL'
+  - doc: |-
+      SPKIOf returns the pin of a certificate: the SHA-256 of its
+      SubjectPublicKeyInfo.
+    in:
+    - name: c
+      type: '*x509.Certificate'
+    name: SPKIOf
+    out:
+    - type: '[32]byte'
+  - doc: |-
+      NewTCPTransport validates the configuration, reads the cluster and slot
+      from the certificate, and listens (D4, R3-24).
+    in:
+    - name: cfg
+      type: TransportConfig
+    name: NewTCPTransport
+    out:
+    - type: '*TCPTransport'
+    - type: error
+  imports:
+    clock: github.com/kitsunium/sdk/internal/kernel/clock
+    coreconsensus: github.com/kitsunium/sdk/internal/core/app/consensus
+    coretransform: github.com/kitsunium/sdk/internal/core/data/transform
+    errs: github.com/kitsunium/sdk/internal/kernel/errs
+    flock: github.com/kitsunium/sdk/internal/kernel/fs/flock
+    raft: github.com/kitsunium/sdk/internal/service/app/consensus/raft
+    svctransform: github.com/kitsunium/sdk/internal/service/data/transform
+    wire: github.com/kitsunium/sdk/internal/service/app/consensus/wire
+  path: github.com/kitsunium/sdk/internal/service/app/consensus
+  types:
+  - doc: PeerHealth is the leader's view of one peer (D13).
+    name: PeerHealth
+    struct:
+      fields:
+      - doc: ID is the peer.
+        name: ID
+        type: coreconsensus.NodeID
+      - doc: Voter is false for a learner.
+        name: Voter
+        type: bool
+      - doc: Match is the highest index the peer holds durably, as acknowledged.
+        name: Match
+        type: uint64
+      - doc: Lag is how far Match is behind the leader's last index.
+        name: Lag
+        type: uint64
+      - doc: Inflight counts the appends in flight to it.
+        name: Inflight
+        type: int
+      - doc: |-
+          LastContact is how long ago it last answered; negative when it never
+          answered in this term.
+        name: LastContact
+        type: time.Duration
+      - doc: |-
+          Unreachable is set when the transport failed to reach it since it
+          last answered, or it has not answered within the minimum election
+          timeout.
+        name: Unreachable
+        type: bool
+      - doc: Snapshot is set while a snapshot is being sent to it.
+        name: Snapshot
+        type: bool
+  - doc: Health is a node's verdict for an orchestrator's probe (D13).
+    name: Health
+    struct:
+      fields:
+      - doc: Status is the node's view after its last turn.
+        name: Status
+        type: coreconsensus.Status
+      - doc: |-
+          Ready is true while a leader is known and the node applied what it
+          knows committed.
+        name: Ready
+        type: bool
+      - doc: HasLeader is true while a leader is known in the current term.
+        name: HasLeader
+        type: bool
+      - doc: |-
+          QuorumReachable is true on a leader a majority answered within the
+          minimum election timeout; false elsewhere.
+        name: QuorumReachable
+        type: bool
+      - doc: |-
+          FailureTolerance is how many voters can fail now with a majority
+          left. Only the leader knows it: -1 elsewhere.
+        name: FailureTolerance
+        type: int
+      - doc: ApplyLagEntries is commit minus applied.
+        name: ApplyLagEntries
+        type: uint64
+      - doc: Peers is the leader's view of every peer, nil elsewhere.
+        name: Peers
+        type: '[]PeerHealth'
+      - doc: |-
+          ChainRefusals counts identical chain refusals of this follower at
+          ChainRefusalIndex from ChainRefusalLeader; the node reports itself
+          unready while it refuses (D4, R6-05).
+        name: ChainRefusals
+        type: int
+      - name: ChainRefusalIndex
+        type: uint64
+      - name: ChainRefusalLeader
+        type: coreconsensus.NodeID
+      - doc: Stopped is true once the node stopped, closed or not.
+        name: Stopped
+        type: bool
+      - doc: StopReason says why the node stopped itself.
+        name: StopReason
+        type: coreconsensus.StopReason
+      - doc: |-
+          DroppedFrames counts frames whose From differed from the
+          authenticated peer (R7-05).
+        name: DroppedFrames
+        type: int64
+  - doc: ReadMode selects how Barrier confirms leadership (D9).
+    name: ReadMode
+    underlying: uint8
+  - doc: Durability says where the state machine's state lives (D3).
+    name: Durability
+    underlying: uint8
+  - doc: Config builds a Node. Every bound has a default and a validation (D14).
+    methods:
+    - doc: |-
+        MemoryBudget is the node's memory budget with two peers, the sum of its
+        bounds (D14).
+      in:
+      - name: peers
+        type: int
+      name: MemoryBudget
+      out:
+      - type: int64
+      recv: Config
+    name: Config
+    struct:
+      fields:
+      - doc: Cluster is the cluster the node belongs to; it must match the stamp.
+        name: Cluster
+        type: coreconsensus.ClusterID
+      - doc: Group is the consensus group, 1 in v1; 0 is clamped to 1.
+        name: Group
+        type: coreconsensus.GroupID
+      - doc: ID is the node; 0 takes the stamp's, any other value must match it.
+        name: ID
+        type: coreconsensus.NodeID
+      - doc: Machine is the replicated program.
+        name: Machine
+        type: coreconsensus.StateMachine
+      - doc: Durability must agree with Machine's siblings.
+        name: Durability
+        type: Durability
+      - doc: |-
+          Log, Snapshots and Transport are the node's ports; the caller owns
+          them and closes them after the node.
+        name: Log
+        type: coreconsensus.LogStore
+      - name: Snapshots
+        type: coreconsensus.SnapshotStore
+      - name: Transport
+        type: coreconsensus.Transport
+      - doc: Clock drives every timer; nil is clock.System.
+        name: Clock
+        type: clock.Timed
+      - doc: |-
+          InitialTiming is proposed at Bootstrap only; the committed contract
+          rules.
+        name: InitialTiming
+        type: coreconsensus.TimingContract
+      - name: MaxBatchBytes
+        type: int
+      - name: MaxInflight
+        type: int
+      - name: MaxInflightBytes
+        type: int
+      - name: MaxEntryBytes
+        type: int
+      - name: MaxPendingBytes
+        type: int64
+      - name: MaxApplyLagBytes
+        type: int64
+      - name: RecentEntriesBytes
+        type: int64
+      - name: SnapshotEvery
+        type: uint64
+      - name: SnapshotTrailing
+        type: uint64
+      - name: PromoteLag
+        type: uint64
+      - name: SnapshotEveryBytes
+        type: int64
+      - name: MaxSnapshotBytes
+        type: int64
+      - name: MaxLogBytes
+        type: int64
+      - name: LogReserveBytes
+        type: int64
+      - doc: SnapshotCodec compresses snapshot chunks; nil is flate.
+        name: SnapshotCodec
+        type: coretransform.BoundedDecompressor
+      - doc: SnapshotPausesApply says the state machine cannot cut cheaply.
+        name: SnapshotPausesApply
+        type: bool
+      - doc: MinVoters is the floor a Remove may not cross.
+        name: MinVoters
+        type: int
+      - doc: JoinAuthorizer decides a JOIN; without it every JOIN is refused.
+        name: JoinAuthorizer
+        type: coreconsensus.JoinAuthorizer
+      - doc: HardCloseTimeout bounds HardClose.
+        name: HardCloseTimeout
+        type: time.Duration
+      - doc: Reads selects the read mode.
+        name: Reads
+        type: ReadMode
+      - doc: |-
+          PreferredLeaders are the nodes a leader transfers to after an
+          election when it is not one of them.
+        name: PreferredLeaders
+        type: '[]coreconsensus.NodeID'
+      - doc: Seed draws the election timeouts; 0 draws one.
+        name: Seed
+        type: uint64
+  - doc: DataDirOptions tunes OpenDataDirWith.
+    name: DataDirOptions
+    struct:
+      fields:
+      - doc: SegmentBytes is the fixed size of a log segment; 0 is 64 MiB.
+        name: SegmentBytes
+        type: int64
+  - doc: |-
+      DataDir is the shipped layout: a lock, a stamp, the segmented log, the
+      snapshots and the markers. A DataDir value wraps a pointer, so copies
+      share one lock and one Close (R4-29).
+    methods:
+    - doc: Dir returns the directory.
+      name: Dir
+      out:
+      - type: string
+      recv: DataDir
+    - doc: Log returns the directory's LogStore.
+      name: Log
+      out:
+      - type: coreconsensus.LogStore
+      recv: DataDir
+    - doc: Snapshots returns the directory's SnapshotStore.
+      name: Snapshots
+      out:
+      - type: coreconsensus.SnapshotStore
+      recv: DataDir
+    - doc: |-
+        Close releases the lock; idempotent, and refused while a Node built on it
+        is open (R3-18).
+      name: Close
+      out:
+      - type: error
+      recv: DataDir
+    name: DataDir
+    struct:
+      fields: null
+      unexported: true
+  - doc: |-
+      FileLog is the shipped segmented LogStore. One writer, many readers;
+      appended entries are readable before they are synced (D4).
+    methods:
+    - doc: Entries implements LogReader.
+      in:
+      - name: lo
+        type: uint64
+      - name: hi
+        type: uint64
+      - name: maxBytes
+        type: int
+      - name: dst
+        type: '[]coreconsensus.Entry'
+      name: Entries
+      out:
+      - type: '[]coreconsensus.Entry'
+      - type: error
+      recv: '*FileLog'
+    - doc: Term implements LogReader.
+      in:
+      - name: index
+        type: uint64
+      name: Term
+      out:
+      - type: uint64
+      - type: error
+      recv: '*FileLog'
+    - doc: Bounds implements LogReader; a refused log is empty.
+      name: Bounds
+      out:
+      - name: first
+        type: uint64
+      - name: last
+        type: uint64
+      recv: '*FileLog'
+    - doc: 'Append implements LogStore: entries and the hard state in ONE batch.'
+      in:
+      - name: entries
+        type: '[]coreconsensus.Entry'
+      - name: hs
+        type: '*coreconsensus.HardState'
+      name: Append
+      out:
+      - type: error
+      recv: '*FileLog'
+    - doc: |-
+        Sync implements LogStore: the pending batch is written, its last record
+        flagged end-of-batch, and made durable by one fdatasync. A failure is
+        final: the log refuses every later call (D4, fsyncgate).
+      name: Sync
+      out:
+      - type: error
+      recv: '*FileLog'
+    - doc: |-
+        TruncateSuffix implements LogStore: ONE truncate record, nothing else
+        (R7-12, R8-01, R8-03).
+      in:
+      - name: from
+        type: uint64
+      name: TruncateSuffix
+      out:
+      - type: error
+      recv: '*FileLog'
+    - doc: |-
+        CompactPrefix implements LogStore: a compact record, then whole segments
+        whose entries the next checkpoint already supersedes are deleted, as a
+        prefix, with a directory fsync after the unlinks (D4 step 6).
+      in:
+      - name: through
+        type: uint64
+      name: CompactPrefix
+      out:
+      - type: error
+      recv: '*FileLog'
+    - doc: HardState implements LogStore.
+      name: HardState
+      out:
+      - type: coreconsensus.HardState
+      - type: error
+      recv: '*FileLog'
+    - doc: Stamp implements LogStore.
+      name: Stamp
+      out:
+      - type: coreconsensus.Stamp
+      - type: error
+      recv: '*FileLog'
+    - doc: 'WriteStamp implements LogStore: durable on return.'
+      in:
+      - name: s
+        type: coreconsensus.Stamp
+      name: WriteStamp
+      out:
+      - type: error
+      recv: '*FileLog'
+    - doc: Close implements LogStore; the DataDir closes it.
+      name: Close
+      out:
+      - type: error
+      recv: '*FileLog'
+    name: FileLog
+    struct:
+      fields: null
+      unexported: true
+  - doc: |-
+      FileSnapshots is the shipped SnapshotStore: ADR 0056's publication rules
+      applied to a stream (D4). A snapshot is spooled to <id>.spool, synced,
+      renamed to <id>.snap, and published by its <id>.meta, written atomically
+      last; a .snap without its .meta is not a snapshot.
+    methods:
+    - doc: |-
+        Create implements SnapshotStore: an existing spool of that id resumes from
+        its last whole, checksummed chunk (R8-21).
+      in:
+      - name: id
+        type: string
+      - name: meta
+        type: coreconsensus.SnapshotMeta
+      name: Create
+      out:
+      - type: coreconsensus.SnapshotSink
+      - type: int64
+      - type: error
+      recv: '*FileSnapshots'
+    - doc: 'List implements SnapshotStore: complete snapshots, newest first.'
+      name: List
+      out:
+      - type: '[]coreconsensus.SnapshotMeta'
+      - type: error
+      recv: '*FileSnapshots'
+    - doc: 'Open implements SnapshotStore: pinned until Close.'
+      in:
+      - name: id
+        type: string
+      name: Open
+      out:
+      - type: coreconsensus.SnapshotHandle
+      - type: error
+      recv: '*FileSnapshots'
+    - doc: |-
+        Remove implements SnapshotStore: refused while a handle is open. The meta
+        goes first, so a crash leaves no published snapshot without its bytes.
+      in:
+      - name: id
+        type: string
+      name: Remove
+      out:
+      - type: error
+      recv: '*FileSnapshots'
+    name: FileSnapshots
+    struct:
+      fields: null
+      unexported: true
+  - doc: |-
+      MemoryLog is the in-memory LogStore double (D2): every port contract
+      except durability, which it has none of. Sync can be made to fail, so a
+      test drives STORAGE_FAILED.
+    methods:
+    - doc: Entries implements LogReader.
+      in:
+      - name: lo
+        type: uint64
+      - name: hi
+        type: uint64
+      - name: maxBytes
+        type: int
+      - name: dst
+        type: '[]coreconsensus.Entry'
+      name: Entries
+      out:
+      - type: '[]coreconsensus.Entry'
+      - type: error
+      recv: '*MemoryLog'
+    - doc: Term implements LogReader.
+      in:
+      - name: index
+        type: uint64
+      name: Term
+      out:
+      - type: uint64
+      - type: error
+      recv: '*MemoryLog'
+    - doc: Bounds implements LogReader.
+      name: Bounds
+      out:
+      - name: first
+        type: uint64
+      - name: last
+        type: uint64
+      recv: '*MemoryLog'
+    - doc: Append implements LogStore.
+      in:
+      - name: entries
+        type: '[]coreconsensus.Entry'
+      - name: hs
+        type: '*coreconsensus.HardState'
+      name: Append
+      out:
+      - type: error
+      recv: '*MemoryLog'
+    - doc: Sync implements LogStore.
+      name: Sync
+      out:
+      - type: error
+      recv: '*MemoryLog'
+    - doc: FailSync makes every later Sync return err.
+      in:
+      - name: err
+        type: error
+      name: FailSync
+      recv: '*MemoryLog'
+    - doc: TruncateSuffix implements LogStore.
+      in:
+      - name: from
+        type: uint64
+      name: TruncateSuffix
+      out:
+      - type: error
+      recv: '*MemoryLog'
+    - doc: |-
+        CompactPrefix implements LogStore; compacting past the end leaves an
+        empty log at (through+1, through).
+      in:
+      - name: through
+        type: uint64
+      name: CompactPrefix
+      out:
+      - type: error
+      recv: '*MemoryLog'
+    - doc: HardState implements LogStore.
+      name: HardState
+      out:
+      - type: coreconsensus.HardState
+      - type: error
+      recv: '*MemoryLog'
+    - doc: Stamp implements LogStore.
+      name: Stamp
+      out:
+      - type: coreconsensus.Stamp
+      - type: error
+      recv: '*MemoryLog'
+    - doc: WriteStamp implements LogStore.
+      in:
+      - name: s
+        type: coreconsensus.Stamp
+      name: WriteStamp
+      out:
+      - type: error
+      recv: '*MemoryLog'
+    - doc: Close implements LogStore.
+      name: Close
+      out:
+      - type: error
+      recv: '*MemoryLog'
+    name: MemoryLog
+    struct:
+      fields: null
+      unexported: true
+  - doc: MemorySnapshots is the in-memory SnapshotStore double.
+    methods:
+    - doc: |-
+        Create implements SnapshotStore: an existing spool resumes from its last
+        whole chunk.
+      in:
+      - name: id
+        type: string
+      - name: meta
+        type: coreconsensus.SnapshotMeta
+      name: Create
+      out:
+      - type: coreconsensus.SnapshotSink
+      - type: int64
+      - type: error
+      recv: '*MemorySnapshots'
+    - doc: List implements SnapshotStore.
+      name: List
+      out:
+      - type: '[]coreconsensus.SnapshotMeta'
+      - type: error
+      recv: '*MemorySnapshots'
+    - doc: Open implements SnapshotStore.
+      in:
+      - name: id
+        type: string
+      name: Open
+      out:
+      - type: coreconsensus.SnapshotHandle
+      - type: error
+      recv: '*MemorySnapshots'
+    - doc: Remove implements SnapshotStore; refused while a handle is open.
+      in:
+      - name: id
+        type: string
+      name: Remove
+      out:
+      - type: error
+      recv: '*MemorySnapshots'
+    name: MemorySnapshots
+    struct:
+      fields: null
+      unexported: true
+  - doc: |-
+      MemoryNetwork connects in-memory transports, the double of D2: frames are
+      copied, delivered on per-lane queues that drop when full, and links can be
+      cut in either direction.
+    methods:
+    - doc: Transport returns the transport of id, creating it.
+      in:
+      - name: id
+        type: coreconsensus.NodeID
+      name: Transport
+      out:
+      - type: '*MemoryTransport'
+      recv: '*MemoryNetwork'
+    - doc: Cut cuts, or restores, the link from a to b.
+      in:
+      - name: a
+        type: coreconsensus.NodeID
+      - name: b
+        type: coreconsensus.NodeID
+      - name: cut
+        type: bool
+      name: Cut
+      recv: '*MemoryNetwork'
+    - doc: Isolate cuts, or restores, every link of id in both directions.
+      in:
+      - name: id
+        type: coreconsensus.NodeID
+      - name: cut
+        type: bool
+      name: Isolate
+      recv: '*MemoryNetwork'
+    name: MemoryNetwork
+    struct:
+      fields: null
+      unexported: true
+  - doc: MemoryTransport is one node's end of a MemoryNetwork.
+    methods:
+    - doc: |-
+        Send implements Transport: it never blocks and drops when the queue is
+        full.
+      in:
+      - name: to
+        type: coreconsensus.NodeID
+      - name: frame
+        type: '[]byte'
+      name: Send
+      recv: '*MemoryTransport'
+    - doc: |-
+        Stream implements Transport: offer, accept, then the stream from the
+        accepted offset.
+      in:
+      - name: ctx
+        type: context.Context
+      - name: to
+        type: coreconsensus.NodeID
+      - name: offer
+        type: coreconsensus.InstallOffer
+      - name: open
+        type: func(int64) (io.ReadCloser, error)
+      name: Stream
+      out:
+      - type: error
+      recv: '*MemoryTransport'
+    - doc: Bind implements Transport.
+      in:
+      - name: group
+        type: coreconsensus.GroupID
+      - name: deliver
+        type: func(coreconsensus.AuthenticatedPeer, []byte)
+      - name: offer
+        type: func(coreconsensus.AuthenticatedPeer, coreconsensus.InstallOffer) coreconsensus.InstallAccept
+      - name: install
+        type: func(coreconsensus.InstallRequest) error
+      - name: join
+        type: func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position,
+          errs.Code)
+      name: Bind
+      out:
+      - type: error
+      recv: '*MemoryTransport'
+    - doc: SetMembership implements Transport.
+      in:
+      - name: _
+        type: coreconsensus.GroupID
+      - name: admitted
+        type: '[]coreconsensus.Member'
+      name: SetMembership
+      recv: '*MemoryTransport'
+    - doc: Join implements Joiner over the network, as the TCP transport does.
+      in:
+      - name: ctx
+        type: context.Context
+      - name: cfg
+        type: coreconsensus.JoinConfig
+      name: Join
+      out:
+      - type: coreconsensus.Position
+      - type: error
+      recv: '*MemoryTransport'
+    - doc: |-
+        Close stops delivery; a later Bind starts it again, as a restarted node
+        does.
+      name: Close
+      out:
+      - type: error
+      recv: '*MemoryTransport'
+    name: MemoryTransport
+    struct:
+      fields: null
+      unexported: true
+  - doc: |-
+      Node is one member of a consensus group: the event loop that owns the step
+      function, its storage actor, its apply goroutine and its snapshot
+      goroutines (D5b). A Node never closes what it was handed.
+    methods:
+    - doc: StopReason returns why the node stopped itself, if it did.
+      name: StopReason
+      out:
+      - type: coreconsensus.StopReason
+      - type: bool
+      recv: '*Node'
+    - doc: |-
+        Close transfers leadership first, then stops every goroutine after the
+        storage actor's final sync (R2-38). It is idempotent.
+      in:
+      - name: ctx
+        type: context.Context
+      name: Close
+      out:
+      - type: error
+      recv: '*Node'
+    - doc: |-
+        HardClose stops now: no transfer, no final sync, bounded by
+        HardCloseTimeout (R7-11).
+      name: HardClose
+      out:
+      - type: error
+      recv: '*Node'
+    - doc: Status returns the node's view after its last turn.
+      name: Status
+      out:
+      - type: coreconsensus.Status
+      recv: '*Node'
+    - doc: Watch implements LeadershipWatcher.
+      in:
+      - name: ctx
+        type: context.Context
+      name: Watch
+      out:
+      - type: <-chan coreconsensus.Status
+      recv: '*Node'
+    - doc: Membership returns the configuration the node last appended.
+      name: Membership
+      out:
+      - type: coreconsensus.Membership
+      recv: '*Node'
+    - doc: |-
+        Propose replicates data and returns, once the entry is applied locally,
+        its token and the value Apply returned. NOT_LEADER means certainly not
+        appended; OUTCOME_UNKNOWN means it may still commit: read the state through
+        Barrier before deciding, never retry blindly (D6, R1-04).
+      in:
+      - name: ctx
+        type: context.Context
+      - name: data
+        type: '[]byte'
+      name: Propose
+      out:
+      - type: coreconsensus.Token
+      - type: any
+      - type: error
+      recv: '*Node'
+    - doc: |-
+        Barrier returns once the local state machine reflects every write
+        committed before the call (D9).
+      in:
+      - name: ctx
+        type: context.Context
+      name: Barrier
+      out:
+      - type: coreconsensus.Token
+      - type: error
+      recv: '*Node'
+    - doc: |-
+        WaitApplied returns once the local node has applied t. A token of another
+        lineage is LINEAGE_MISMATCH.
+      in:
+      - name: ctx
+        type: context.Context
+      - name: t
+        type: coreconsensus.Token
+      name: WaitApplied
+      out:
+      - type: error
+      recv: '*Node'
+    - doc: AddLearner adds a non-voting member that receives the log (D8).
+      in:
+      - name: ctx
+        type: context.Context
+      - name: op
+        type: coreconsensus.Operator
+      - name: m
+        type: coreconsensus.Member
+      name: AddLearner
+      out:
+      - type: error
+      recv: '*Node'
+    - doc: Promote makes a caught-up learner a voter (D8).
+      in:
+      - name: ctx
+        type: context.Context
+      - name: op
+        type: coreconsensus.Operator
+      - name: id
+        type: coreconsensus.NodeID
+      name: Promote
+      out:
+      - type: error
+      recv: '*Node'
+    - doc: |-
+        Remove removes a member and retires its id; removing the leader first
+        transfers leadership (D8).
+      in:
+      - name: ctx
+        type: context.Context
+      - name: op
+        type: coreconsensus.Operator
+      - name: id
+        type: coreconsensus.NodeID
+      name: Remove
+      out:
+      - type: error
+      recv: '*Node'
+    - doc: UpdateAddress changes where a member listens.
+      in:
+      - name: ctx
+        type: context.Context
+      - name: op
+        type: coreconsensus.Operator
+      - name: id
+        type: coreconsensus.NodeID
+      - name: addr
+        type: string
+      name: UpdateAddress
+      out:
+      - type: error
+      recv: '*Node'
+    - doc: DenyPin withdraws a member's SPKI pin (R9-18).
+      in:
+      - name: ctx
+        type: context.Context
+      - name: op
+        type: coreconsensus.Operator
+      - name: id
+        type: coreconsensus.NodeID
+      name: DenyPin
+      out:
+      - type: error
+      recv: '*Node'
+    - doc: ProposeTimingContract proposes a new timing contract.
+      in:
+      - name: ctx
+        type: context.Context
+      - name: op
+        type: coreconsensus.Operator
+      - name: pre
+        type: coreconsensus.Precondition
+      - name: c
+        type: coreconsensus.TimingContract
+      name: ProposeTimingContract
+      out:
+      - type: error
+      recv: '*Node'
+    - doc: RaiseClusterVersion raises the protocol version every member must speak.
+      in:
+      - name: ctx
+        type: context.Context
+      - name: op
+        type: coreconsensus.Operator
+      - name: pre
+        type: coreconsensus.Precondition
+      - name: v
+        type: uint32
+      name: RaiseClusterVersion
+      out:
+      - type: error
+      recv: '*Node'
+    - doc: ClearNoSpace clears the no-space alarm the precondition names.
+      in:
+      - name: ctx
+        type: context.Context
+      - name: op
+        type: coreconsensus.Operator
+      - name: pre
+        type: coreconsensus.Precondition
+      name: ClearNoSpace
+      out:
+      - type: error
+      recv: '*Node'
+    - doc: |-
+        TransferLeadership moves leadership to a voter (D8). It records the
+        operator in an entry, then waits until the target leads or one election
+        timeout passes.
+      in:
+      - name: ctx
+        type: context.Context
+      - name: op
+        type: coreconsensus.Operator
+      - name: to
+        type: coreconsensus.NodeID
+      name: TransferLeadership
+      out:
+      - type: error
+      recv: '*Node'
+    - doc: SaveSnapshot cuts a snapshot now and copies its encoded stream to w.
+      in:
+      - name: ctx
+        type: context.Context
+      - name: op
+        type: coreconsensus.Operator
+      - name: w
+        type: io.Writer
+      name: SaveSnapshot
+      out:
+      - type: coreconsensus.SnapshotMeta
+      - type: error
+      recv: '*Node'
+    name: Node
+    struct:
+      fields: null
+      unexported: true
+  - doc: Report is what Inspect reads, read-only.
+    name: Report
+    struct:
+      fields:
+      - name: Stamp
+        type: coreconsensus.Stamp
+      - name: HardState
+        type: coreconsensus.HardState
+      - name: First
+        type: uint64
+      - name: Last
+        type: uint64
+      - name: Snapshots
+        type: '[]coreconsensus.SnapshotMeta'
+      - name: Quarantine
+        type: string
+      - name: Markers
+        type: '[]string'
+  - doc: QuarantineExit is one of the two exits ClearQuarantine allows (R3-09).
+    name: QuarantineExit
+    underlying: uint8
+  - doc: RecoverOptions are Recover's preconditions (R2-25, R3-02, R4-04, R9-08).
+    name: RecoverOptions
+    struct:
+      fields:
+      - doc: 'Confirm must equal the new cluster id in hex: a typed confirmation.'
+        name: Confirm
+        type: string
+      - doc: Operator is recorded in the audit file.
+        name: Operator
+        type: coreconsensus.Operator
+      - doc: Fenced attests every old voter left out of the new members.
+        name: Fenced
+        type: '[]coreconsensus.FencedAttestation'
+      - doc: 'WitnessKeys verify the receipts: one per witness, each must sign.'
+        name: WitnessKeys
+        type: '[]ed25519.PublicKey'
+  - doc: RestoreOptions are RestoreSnapshot's preconditions (R3-15).
+    name: RestoreOptions
+    struct:
+      fields:
+      - doc: 'Expected is the snapshot''s metadata, from SaveSnapshot: non-zero.'
+        name: Expected
+        type: coreconsensus.SnapshotMeta
+      - doc: Confirm must equal the new cluster id in hex.
+        name: Confirm
+        type: string
+      - doc: Operator is recorded in the audit file.
+        name: Operator
+        type: coreconsensus.Operator
+      - doc: MaxEncoded and MaxDecoded bound what is read.
+        name: MaxEncoded
+        type: int64
+      - doc: MaxEncoded and MaxDecoded bound what is read.
+        name: MaxDecoded
+        type: int64
+      - doc: Codec decodes the chunks; nil is flate.
+        name: Codec
+        type: coretransform.BoundedDecompressor
+  - doc: |-
+      PEMIdentity is a node identity read from PEM files: the certificate (its
+      chain may follow it), the key, and the consensus CA. GetCertificate
+      rereads the files when they change, and keeps the old identity when the
+      new one fails, does not match its key, or carries another key or SAN: a
+      renewal reuses the key, so the members' pins hold (R8-07).
+    methods:
+    - doc: |-
+        GetCertificate returns the current certificate, reloading it in place when
+        its files changed.
+      name: GetCertificate
+      out:
+      - type: '*tls.Certificate'
+      - type: error
+      recv: '*PEMIdentity'
+    - doc: ReloadFailures counts the reloads refused so far.
+      name: ReloadFailures
+      out:
+      - type: int
+      recv: '*PEMIdentity'
+    name: PEMIdentity
+    struct:
+      fields:
+      - name: CertFile
+        type: string
+      - name: KeyFile
+        type: string
+      - name: CAFile
+        type: string
+      unexported: true
+  - doc: TransportConfig builds the shipped mTLS transport (D4, D14).
+    name: TransportConfig
+    struct:
+      fields:
+      - doc: |-
+          Certificate is the node's certificate and key. It carries exactly one
+          URI SAN, kitsunium-consensus://<cluster>/slot/<slot>, and both
+          serverAuth and clientAuth; the transport takes its cluster and slot
+          from it. GetCertificate, when set, is asked at every handshake instead,
+          so a renewed certificate over the same key is picked up in place.
+        name: Certificate
+        type: '*tls.Certificate'
+      - name: GetCertificate
+        type: func() (*tls.Certificate, error)
+      - doc: Roots is the consensus intermediate, trusted as RootCAs and ClientCAs.
+        name: Roots
+        type: '*x509.CertPool'
+      - doc: ListenAddress is bound as given, e.g. a private interface (R2-37).
+        name: ListenAddress
+        type: string
+      - doc: |-
+          Seeds are addresses for the first contact; the committed membership's
+          addresses rule afterwards.
+        name: Seeds
+        type: map[coreconsensus.NodeID]string
+      - name: MaxFrameBytes
+        type: int
+      - name: MaxControlFrameBytes
+        type: int
+      - name: HandshakeTimeout
+        type: time.Duration
+      - name: PeerQueueBytes
+        type: int64
+      - name: MaxConnectionAge
+        type: time.Duration
+      - name: WriteTimeout
+        type: time.Duration
+      - name: JoinTimeout
+        type: time.Duration
+  - doc: |-
+      TCPTransport is the shipped transport: TLS 1.3 with mutual
+      authentication, a pinned SPKI per member, three connections per peer and
+      direction, length-prefixed frames bounded before allocation.
+    methods:
+    - doc: Addr returns the bound address.
+      name: Addr
+      out:
+      - type: string
+      recv: '*TCPTransport'
+    - doc: Cluster returns the cluster the certificate names.
+      name: Cluster
+      out:
+      - type: coreconsensus.ClusterID
+      recv: '*TCPTransport'
+    - doc: Slot returns the slot the certificate names.
+      name: Slot
+      out:
+      - type: string
+      recv: '*TCPTransport'
+    - doc: |-
+        Send implements Transport: it never blocks, and drops when the peer's
+        queue is full (D4).
+      in:
+      - name: to
+        type: coreconsensus.NodeID
+      - name: frame
+        type: '[]byte'
+      name: Send
+      recv: '*TCPTransport'
+    - doc: Unreachable implements UnreachableReporter.
+      in:
+      - name: f
+        type: func(coreconsensus.NodeID)
+      name: Unreachable
+      recv: '*TCPTransport'
+    - doc: Bind implements Transport.
+      in:
+      - name: _
+        type: coreconsensus.GroupID
+      - name: deliver
+        type: func(coreconsensus.AuthenticatedPeer, []byte)
+      - name: offer
+        type: func(coreconsensus.AuthenticatedPeer, coreconsensus.InstallOffer) coreconsensus.InstallAccept
+      - name: install
+        type: func(coreconsensus.InstallRequest) error
+      - name: join
+        type: func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position,
+          errs.Code)
+      name: Bind
+      out:
+      - type: error
+      recv: '*TCPTransport'
+    - doc: |-
+        SetMembership implements Transport: the admitted set is the union over
+        the groups; a member that left has its connections cut and its
+        handshakes refused from then on (D4).
+      in:
+      - name: group
+        type: coreconsensus.GroupID
+      - name: admitted
+        type: '[]coreconsensus.Member'
+      name: SetMembership
+      recv: '*TCPTransport'
+    - doc: Close stops the transport and joins its goroutines.
+      name: Close
+      out:
+      - type: error
+      recv: '*TCPTransport'
+    - doc: Stream implements Transport.
+      in:
+      - name: ctx
+        type: context.Context
+      - name: to
+        type: coreconsensus.NodeID
+      - name: offer
+        type: coreconsensus.InstallOffer
+      - name: open
+        type: func(int64) (io.ReadCloser, error)
+      name: Stream
+      out:
+      - type: error
+      recv: '*TCPTransport'
+    - doc: |-
+        Join implements Joiner: the JOIN goes to each address in turn until one
+        member answers JOIN_ACK with the position its AddLearner was appended at.
+      in:
+      - name: ctx
+        type: context.Context
+      - name: cfg
+        type: coreconsensus.JoinConfig
+      name: Join
+      out:
+      - type: coreconsensus.Position
+      - type: error
+      recv: '*TCPTransport'
+    name: TCPTransport
+    struct:
+      fields: null
+      unexported: true
+- doc: "Package consensus is the public facade of the SDK's consensus domain\n(ADR 0152): agreement of\
+    \ several machines on the order of their writes.\nA write is committed when a majority holds it on\
+    \ disk.\n\n\tid, inc, _ := consensus.Init(dir, cluster, \"fra\")      // offline, every founder\n\t\
+    _ = consensus.Bootstrap(ctx, cfg, members)              // offline, identical list\n\tnode, _ := consensus.NewRaft(cfg)\
+    \                       // never bootstraps\n\ttok, result, err := node.Propose(ctx, command)\n\n\
+    # After OUTCOME_UNKNOWN, never retry blindly\n\nNOT_LEADER means the proposal was certainly NOT appended\
+    \ and is safe to\nretry. OUTCOME_UNKNOWN means it was appended, or possibly delivered, and the\nanswer\
+    \ was lost: it may still commit. Read the state through Barrier and\ndecide, or carry a per-key revision\
+    \ in the command, because a replayed\ncompare-and-swap is not harmless under ABA (D6, R1-04).\n\n\
+    # Reads\n\nBarrier returns once the local state machine reflects every write\ncommitted before the\
+    \ call: ReadIndex by default, confirmed by a heartbeat\nround started after the read arrived. ReadLease\
+    \ is opt-in and sound only\nunder the four conditions of D9; a leader paused after its lease check\n\
+    serves a stale read, which ReadIndex never does.\n\n# Apply is a pure transition\n\nStateMachine.Apply\
+    \ is called for every committed command, in log order, on\none goroutine, and must be deterministic.\
+    \ An Apply that cannot complete\nmust panic: the node stops with STATE_MACHINE_FAILED, and the entry\
+    \ IS\ncommitted."
+  facade:
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: NodeID
+      target: coreconsensus.NodeID
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: Incarnation
+      target: coreconsensus.Incarnation
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: ClusterID
+      target: coreconsensus.ClusterID
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: LogIdentity
+      target: coreconsensus.LogIdentity
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: GroupID
+      target: coreconsensus.GroupID
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: Position
+      target: coreconsensus.Position
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: Entry
+      target: coreconsensus.Entry
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: Token
+      target: coreconsensus.Token
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: EntryKind
+      target: coreconsensus.EntryKind
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: HardState
+      target: coreconsensus.HardState
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: Stamp
+      target: coreconsensus.Stamp
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: StampState
+      target: coreconsensus.StampState
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: Message
+      target: coreconsensus.Message
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: MessageKind
+      target: coreconsensus.MessageKind
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: FrameLane
+      target: coreconsensus.FrameLane
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: AuthenticatedPeer
+      target: coreconsensus.AuthenticatedPeer
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: InstallOffer
+      target: coreconsensus.InstallOffer
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: InstallAccept
+      target: coreconsensus.InstallAccept
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: InstallRequest
+      target: coreconsensus.InstallRequest
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: StopReason
+      target: coreconsensus.StopReason
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: JoinConfig
+      target: coreconsensus.JoinConfig
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: JoinRequest
+      target: coreconsensus.JoinRequest
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: Joiner
+      target: coreconsensus.Joiner
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: JoinAuthorizer
+      target: coreconsensus.JoinAuthorizer
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: FencedAttestation
+      target: coreconsensus.FencedAttestation
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: SnapshotMeta
+      target: coreconsensus.SnapshotMeta
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: SnapshotSink
+      target: coreconsensus.SnapshotSink
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: SnapshotHandle
+      target: coreconsensus.SnapshotHandle
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: TimingContract
+      target: coreconsensus.TimingContract
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: Versions
+      target: coreconsensus.Versions
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: Member
+      target: coreconsensus.Member
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: Membership
+      target: coreconsensus.Membership
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: Operator
+      target: coreconsensus.Operator
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: Status
+      target: coreconsensus.Status
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: Role
+      target: coreconsensus.Role
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: AlarmID
+      target: coreconsensus.AlarmID
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: Precondition
+      target: coreconsensus.Precondition
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: Replicated
+      target: coreconsensus.Replicated
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: StateMachine
+      target: coreconsensus.StateMachine
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: DurableStateMachine
+      target: coreconsensus.DurableStateMachine
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: BatchingStateMachine
+      target: coreconsensus.BatchingStateMachine
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: Snapshot
+      target: coreconsensus.Snapshot
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: LogReader
+      target: coreconsensus.LogReader
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: LogStore
+      target: coreconsensus.LogStore
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: SnapshotStore
+      target: coreconsensus.SnapshotStore
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: Transport
+      target: coreconsensus.Transport
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: UnreachableReporter
+      target: coreconsensus.UnreachableReporter
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: LeadershipWatcher
+      target: coreconsensus.LeadershipWatcher
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: Health
+      target: svcconsensus.Health
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: PeerHealth
+      target: svcconsensus.PeerHealth
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: ReadMode
+      target: svcconsensus.ReadMode
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: Durability
+      target: svcconsensus.Durability
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: Config
+      target: svcconsensus.Config
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: Node
+      target: svcconsensus.Node
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: MemoryLog
+      target: svcconsensus.MemoryLog
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: MemorySnapshots
+      target: svcconsensus.MemorySnapshots
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: MemoryNetwork
+      target: svcconsensus.MemoryNetwork
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: MemoryTransport
+      target: svcconsensus.MemoryTransport
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: DataDir
+      target: svcconsensus.DataDir
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: DataDirOptions
+      target: svcconsensus.DataDirOptions
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: Report
+      target: svcconsensus.Report
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: QuarantineExit
+      target: svcconsensus.QuarantineExit
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: RecoverOptions
+      target: svcconsensus.RecoverOptions
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: RestoreOptions
+      target: svcconsensus.RestoreOptions
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: TransportConfig
+      target: svcconsensus.TransportConfig
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: TCPTransport
+      target: svcconsensus.TCPTransport
+  - alias:
+    - doc: Every type needed to implement a published port is aliased here (R2-32).
+      name: PEMIdentity
+      target: svcconsensus.PEMIdentity
+  - const:
+    - name: WipeAndRejoin
+      reexport: svcconsensus.WipeAndRejoin
+      value: svcconsensus.WipeAndRejoin
+  - const:
+    - name: TruncateAndStaySilent
+      reexport: svcconsensus.TruncateAndStaySilent
+      value: svcconsensus.TruncateAndStaySilent
+  - const:
+    - name: RoleFollower
+      reexport: coreconsensus.RoleFollower
+      value: coreconsensus.RoleFollower
+  - const:
+    - name: RolePreCandidate
+      reexport: coreconsensus.RolePreCandidate
+      value: coreconsensus.RolePreCandidate
+  - const:
+    - name: RoleCandidate
+      reexport: coreconsensus.RoleCandidate
+      value: coreconsensus.RoleCandidate
+  - const:
+    - name: RoleLeader
+      reexport: coreconsensus.RoleLeader
+      value: coreconsensus.RoleLeader
+  - const:
+    - name: RoleLearner
+      reexport: coreconsensus.RoleLearner
+      value: coreconsensus.RoleLearner
+  - const:
+    - name: ReadIndex
+      reexport: svcconsensus.ReadIndex
+      value: svcconsensus.ReadIndex
+  - const:
+    - name: ReadLease
+      reexport: svcconsensus.ReadLease
+      value: svcconsensus.ReadLease
+  - const:
+    - name: DurabilityVolatile
+      reexport: svcconsensus.DurabilityVolatile
+      value: svcconsensus.DurabilityVolatile
+  - const:
+    - name: DurabilityDurable
+      reexport: svcconsensus.DurabilityDurable
+      value: svcconsensus.DurabilityDurable
+  - const:
+    - name: EntryCommand
+      reexport: coreconsensus.EntryCommand
+      value: coreconsensus.EntryCommand
+  - const:
+    - name: LaneControl
+      reexport: coreconsensus.LaneControl
+      value: coreconsensus.LaneControl
+  - const:
+    - name: LaneData
+      reexport: coreconsensus.LaneData
+      value: coreconsensus.LaneData
+  - const:
+    - name: LaneSnapshot
+      reexport: coreconsensus.LaneSnapshot
+      value: coreconsensus.LaneSnapshot
+  - const:
+    - name: StampJoining
+      reexport: coreconsensus.StampJoining
+      value: coreconsensus.StampJoining
+  - const:
+    - name: StampMember
+      reexport: coreconsensus.StampMember
+      value: coreconsensus.StampMember
+  - const:
+    - name: StampBootstrapPending
+      reexport: coreconsensus.StampBootstrapPending
+      value: coreconsensus.StampBootstrapPending
+  - const:
+    - name: FlagTransfer
+      reexport: coreconsensus.FlagTransfer
+      value: coreconsensus.FlagTransfer
+  - const:
+    - name: FlagNoLease
+      reexport: coreconsensus.FlagNoLease
+      value: coreconsensus.FlagNoLease
+  - const:
+    - name: FlagNeedSnapshot
+      reexport: coreconsensus.FlagNeedSnapshot
+      value: coreconsensus.FlagNeedSnapshot
+  - const:
+    - name: MsgForward
+      reexport: coreconsensus.MsgForward
+      value: coreconsensus.MsgForward
+  - const:
+    - name: MsgApp
+      reexport: coreconsensus.MsgApp
+      value: coreconsensus.MsgApp
+  - const:
+    - name: MsgHeartbeat
+      reexport: coreconsensus.MsgHeartbeat
+      value: coreconsensus.MsgHeartbeat
+  - const:
+    - name: MsgVote
+      reexport: coreconsensus.MsgVote
+      value: coreconsensus.MsgVote
+  - const:
+    - name: MsgPreVote
+      reexport: coreconsensus.MsgPreVote
+      value: coreconsensus.MsgPreVote
+  - const:
+    - name: MsgTimeoutNow
+      reexport: coreconsensus.MsgTimeoutNow
+      value: coreconsensus.MsgTimeoutNow
+  - const:
+    - name: MsgReadIndex
+      reexport: coreconsensus.MsgReadIndex
+      value: coreconsensus.MsgReadIndex
+  - const:
+    - name: MsgForwardAdmin
+      reexport: coreconsensus.MsgForwardAdmin
+      value: coreconsensus.MsgForwardAdmin
+  - const:
+    - name: MsgAppResp
+      reexport: coreconsensus.MsgAppResp
+      value: coreconsensus.MsgAppResp
+  - const:
+    - name: MsgVoteResp
+      reexport: coreconsensus.MsgVoteResp
+      value: coreconsensus.MsgVoteResp
+  - const:
+    - name: MsgPreVoteResp
+      reexport: coreconsensus.MsgPreVoteResp
+      value: coreconsensus.MsgPreVoteResp
+  - const:
+    - name: MsgHeartbeatResp
+      reexport: coreconsensus.MsgHeartbeatResp
+      value: coreconsensus.MsgHeartbeatResp
+  - const:
+    - name: MsgReadIndexResp
+      reexport: coreconsensus.MsgReadIndexResp
+      value: coreconsensus.MsgReadIndexResp
+  - const:
+    - name: MsgForwardResp
+      reexport: coreconsensus.MsgForwardResp
+      value: coreconsensus.MsgForwardResp
+  - const:
+    - name: MsgForwardAdminResp
+      reexport: coreconsensus.MsgForwardAdminResp
+      value: coreconsensus.MsgForwardAdminResp
+  - var:
+    - name: ConsensusMisconfigured
+      reexport: coreconsensus.ConsensusMisconfigured
+      type: '*errs.Error'
+  - var:
+    - name: NotLeader
+      reexport: coreconsensus.NotLeader
+      type: '*errs.Error'
+  - var:
+    - name: OutcomeUnknown
+      reexport: coreconsensus.OutcomeUnknown
+      type: '*errs.Error'
+  - var:
+    - name: LeadershipUnconfirmed
+      reexport: coreconsensus.LeadershipUnconfirmed
+      type: '*errs.Error'
+  - var:
+    - name: MembershipChangePending
+      reexport: coreconsensus.MembershipChangePending
+      type: '*errs.Error'
+  - var:
+    - name: MembershipInvalid
+      reexport: coreconsensus.MembershipInvalid
+      type: '*errs.Error'
+  - var:
+    - name: TransferFailed
+      reexport: coreconsensus.TransferFailed
+      type: '*errs.Error'
+  - var:
+    - name: EntryTooLarge
+      reexport: coreconsensus.EntryTooLarge
+      type: '*errs.Error'
+  - var:
+    - name: Compacted
+      reexport: coreconsensus.Compacted
+      type: '*errs.Error'
+  - var:
+    - name: StateMachineFailed
+      reexport: coreconsensus.StateMachineFailed
+      type: '*errs.Error'
+  - var:
+    - name: NodeStopped
+      reexport: coreconsensus.NodeStopped
+      type: '*errs.Error'
+  - var:
+    - name: EntrySuperseded
+      reexport: coreconsensus.EntrySuperseded
+      type: '*errs.Error'
+  - var:
+    - name: Overloaded
+      reexport: coreconsensus.Overloaded
+      type: '*errs.Error'
+  - var:
+    - name: VersionUnsupported
+      reexport: coreconsensus.VersionUnsupported
+      type: '*errs.Error'
+  - var:
+    - name: NodeIDRetired
+      reexport: coreconsensus.NodeIDRetired
+      type: '*errs.Error'
+  - var:
+    - name: NoSpace
+      reexport: coreconsensus.NoSpace
+      type: '*errs.Error'
+  - var:
+    - name: ResultTypeMismatch
+      reexport: coreconsensus.ResultTypeMismatch
+      type: '*errs.Error'
+  - var:
+    - name: PayloadVersionRefused
+      reexport: coreconsensus.PayloadVersionRefused
+      type: '*errs.Error'
+  - var:
+    - name: LineageMismatch
+      reexport: coreconsensus.LineageMismatch
+      type: '*errs.Error'
+  - var:
+    - name: AdminPreconditionFailed
+      reexport: coreconsensus.AdminPreconditionFailed
+      type: '*errs.Error'
+  - var:
+    - name: LogCorrupt
+      reexport: coreconsensus.LogCorrupt
+      type: '*errs.Error'
+  - var:
+    - name: HardStateCorrupt
+      reexport: coreconsensus.HardStateCorrupt
+      type: '*errs.Error'
+  - var:
+    - name: SnapshotCorrupt
+      reexport: coreconsensus.SnapshotCorrupt
+      type: '*errs.Error'
+  - var:
+    - name: StorageFailed
+      reexport: coreconsensus.StorageFailed
+      type: '*errs.Error'
+  - var:
+    - name: DataDirLocked
+      reexport: coreconsensus.DataDirLocked
+      type: '*errs.Error'
+  - var:
+    - name: DataDirMismatch
+      reexport: coreconsensus.DataDirMismatch
+      type: '*errs.Error'
+  - var:
+    - name: PeerRejected
+      reexport: coreconsensus.PeerRejected
+      type: '*errs.Error'
+  - var:
+    - name: ClusterMismatch
+      reexport: coreconsensus.ClusterMismatch
+      type: '*errs.Error'
+  - var:
+    - name: FrameInvalid
+      reexport: coreconsensus.FrameInvalid
+      type: '*errs.Error'
+  - var:
+    - name: SnapshotTooLarge
+      reexport: coreconsensus.SnapshotTooLarge
+      type: '*errs.Error'
+  - var:
+    - name: BootstrapRefused
+      reexport: coreconsensus.BootstrapRefused
+      type: '*errs.Error'
+  - var:
+    - name: TransportMisconfigured
+      reexport: coreconsensus.TransportMisconfigured
+      type: '*errs.Error'
+  - var:
+    - name: RecoverRefused
+      reexport: coreconsensus.RecoverRefused
+      type: '*errs.Error'
+  - var:
+    - name: LogQuarantined
+      reexport: coreconsensus.LogQuarantined
+      type: '*errs.Error'
+  - var:
+    - name: RestoreRefused
+      reexport: coreconsensus.RestoreRefused
+      type: '*errs.Error'
+  - var:
+    - name: DataDirInUse
+      reexport: coreconsensus.DataDirInUse
+      type: '*errs.Error'
+  - var:
+    - name: JoinRefused
+      reexport: coreconsensus.JoinRefused
+      type: '*errs.Error'
+  - var:
+    - name: StopMarkerPresent
+      reexport: coreconsensus.StopMarkerPresent
+      type: '*errs.Error'
+  - func:
+      doc: OpenDataDir takes the directory lock first, then recovers the log.
+      forward: svcconsensus.OpenDataDir
+      in:
+      - name: dir
+        type: string
+      name: OpenDataDir
+      out:
+      - type: DataDir
+      - type: error
+  - func:
+      doc: OpenDataDirWith is OpenDataDir with options.
+      forward: svcconsensus.OpenDataDirWith
+      in:
+      - name: dir
+        type: string
+      - name: opts
+        type: DataDirOptions
+      name: OpenDataDirWith
+      out:
+      - type: DataDir
+      - type: error
+  - func:
+      doc: 'Init prepares a joining node offline: a random NodeID and a joining stamp.'
+      forward: svcconsensus.Init
+      in:
+      - name: d
+        type: DataDir
+      - name: cluster
+        type: ClusterID
+      - name: slot
+        type: string
+      name: Init
+      out:
+      - type: NodeID
+      - type: Incarnation
+      - type: error
+  - func:
+      doc: Redraw draws a new id on an empty joining directory.
+      forward: svcconsensus.Redraw
+      in:
+      - name: d
+        type: DataDir
+      name: Redraw
+      out:
+      - type: NodeID
+      - type: error
+  - func:
+      doc: Inspect reads a stopped node's directory without changing it.
+      forward: svcconsensus.Inspect
+      in:
+      - name: d
+        type: DataDir
+      name: Inspect
+      out:
+      - type: Report
+      - type: error
+  - func:
+      doc: |-
+        ClearQuarantine clears a quarantined or stopped directory by one of its
+        two exits.
+      forward: svcconsensus.ClearQuarantine
+      in:
+      - name: d
+        type: DataDir
+      - name: exit
+        type: QuarantineExit
+      - name: op
+        type: Operator
+      name: ClearQuarantine
+      out:
+      - type: error
+  - func:
+      doc: |-
+        Recover starts a new history from this node's committed log, every old
+        voter left out attested fenced by every witness.
+      forward: svcconsensus.Recover
+      in:
+      - name: d
+        type: DataDir
+      - name: newCluster
+        type: ClusterID
+      - name: members
+        type: '[]Member'
+      - name: opt
+        type: RecoverOptions
+      name: Recover
+      out:
+      - type: error
+  - func:
+      doc: ReceiptMessage returns the bytes a witness signs to attest a fenced voter.
+      forward: svcconsensus.ReceiptMessage
+      in:
+      - name: old
+        type: ClusterID
+      - name: next
+        type: ClusterID
+      - name: voter
+        type: NodeID
+      name: ReceiptMessage
+      out:
+      - type: '[]byte'
+  - func:
+      doc: RestoreSnapshot starts a new history from a saved snapshot, offline.
+      forward: svcconsensus.RestoreSnapshot
+      in:
+      - name: d
+        type: DataDir
+      - name: r
+        type: io.Reader
+      - name: newCluster
+        type: ClusterID
+      - name: members
+        type: '[]Member'
+      - name: opt
+        type: RestoreOptions
+      name: RestoreSnapshot
+      out:
+      - type: SnapshotMeta
+      - type: error
+  - func:
+      doc: NewTCPTransport builds the shipped mTLS transport; it is also a Joiner.
+      forward: svcconsensus.NewTCPTransport
+      in:
+      - name: cfg
+        type: TransportConfig
+      name: NewTCPTransport
+      out:
+      - type: '*TCPTransport'
+      - type: error
+  - func:
+      doc: |-
+        NewTCPTransportFromPEM builds it from a certificate, a key and the
+        consensus CA, as PEM files reloaded in place on renewal.
+      forward: svcconsensus.NewTCPTransportFromPEM
+      in:
+      - name: certFile
+        type: string
+      - name: keyFile
+        type: string
+      - name: caFile
+        type: string
+      - name: cfg
+        type: TransportConfig
+      name: NewTCPTransportFromPEM
+      out:
+      - type: '*TCPTransport'
+      - type: error
+  - func:
+      doc: LoadPEMIdentity reads a node identity and the CA pool from PEM files.
+      forward: svcconsensus.LoadPEMIdentity
+      in:
+      - name: certFile
+        type: string
+      - name: keyFile
+        type: string
+      - name: caFile
+        type: string
+      name: LoadPEMIdentity
+      out:
+      - type: '*PEMIdentity'
+      - type: '*x509.CertPool'
+      - type: error
+  - func:
+      doc: SAN returns the canonical URI SAN a node certificate must carry.
+      forward: svcconsensus.SAN
+      in:
+      - name: cluster
+        type: ClusterID
+      - name: slot
+        type: string
+      name: SAN
+      out:
+      - type: '*url.URL'
+  - func:
+      doc: 'SPKIOf returns a certificate''s pin: the SHA-256 of its public key info.'
+      forward: svcconsensus.SPKIOf
+      in:
+      - name: c
+        type: '*x509.Certificate'
+      name: SPKIOf
+      out:
+      - type: '[32]byte'
+  - func:
+      doc: |-
+        NewRaft opens a node over what Init and Bootstrap prepared. It never
+        bootstraps.
+      forward: svcconsensus.NewRaft
+      in:
+      - name: cfg
+        type: Config
+      name: NewRaft
+      out:
+      - type: '*Node'
+      - type: error
+  - func:
+      doc: |-
+        Bootstrap founds a cluster on one founding node, with the IDENTICAL member
+        list on every founder. Idempotent and resumable.
+      forward: svcconsensus.Bootstrap
+      in:
+      - name: ctx
+        type: context.Context
+      - name: cfg
+        type: Config
+      - name: members
+        type: '[]Member'
+      name: Bootstrap
+      out:
+      - type: error
+  - func:
+      doc: |-
+        InitLog prepares a joining log on any LogStore: a random NodeID and a
+        joining stamp. Init does the same on the shipped data directory.
+      forward: svcconsensus.InitLog
+      in:
+      - name: log
+        type: LogStore
+      - name: cluster
+        type: ClusterID
+      - name: slot
+        type: string
+      name: InitLog
+      out:
+      - type: NodeID
+      - type: Incarnation
+      - type: error
+  - func:
+      doc: RedrawLog draws a new id on an empty joining log.
+      forward: svcconsensus.RedrawLog
+      in:
+      - name: log
+        type: LogStore
+      name: RedrawLog
+      out:
+      - type: NodeID
+      - type: error
+  - func:
+      doc: |-
+        ProposeAs types the Apply result. A result of another dynamic type is
+        RESULT_TYPE_MISMATCH carrying the committed token: the entry IS committed.
+      forward: svcconsensus.ProposeAs
+      in:
+      - name: ctx
+        type: context.Context
+      - name: r
+        type: Replicated
+      - name: data
+        type: '[]byte'
+      name: ProposeAs
+      out:
+      - type: Token
+      - type: R
+      - type: error
+      typeParams:
+      - constraint: any
+        name: R
+  - func:
+      doc: TimingDefaults are the default timings for the three-site RTT matrix.
+      forward: svcconsensus.TimingDefaults
+      name: TimingDefaults
+      out:
+      - type: TimingContract
+  - func:
+      doc: Latest opens the newest complete snapshot of a store.
+      forward: svcconsensus.Latest
+      in:
+      - name: s
+        type: SnapshotStore
+      name: Latest
+      out:
+      - type: SnapshotHandle
+      - type: error
+  - func:
+      doc: Lane reads the lane of an encoded frame from its frozen header alone.
+      forward: wire.Lane
+      in:
+      - name: frame
+        type: '[]byte'
+      name: Lane
+      out:
+      - type: FrameLane
+      - type: error
+  - func:
+      doc: NewMemoryLog returns the in-memory LogStore double.
+      forward: svcconsensus.NewMemoryLog
+      name: NewMemoryLog
+      out:
+      - type: '*MemoryLog'
+  - func:
+      doc: NewMemorySnapshots returns the in-memory SnapshotStore double.
+      forward: svcconsensus.NewMemorySnapshots
+      name: NewMemorySnapshots
+      out:
+      - type: '*MemorySnapshots'
+  - func:
+      doc: NewMemoryNetwork returns an in-memory network of transports.
+      forward: svcconsensus.NewMemoryNetwork
+      name: NewMemoryNetwork
+      out:
+      - type: '*MemoryNetwork'
+  - func:
+      doc: MemorySPKI is the key the memory transport authenticates a node with.
+      forward: svcconsensus.MemorySPKI
+      in:
+      - name: id
+        type: NodeID
+      name: MemorySPKI
+      out:
+      - type: '[32]byte'
+  - func:
+      doc: LeaderHint reads the known leader from a NOT_LEADER (R7-10).
+      forward: svcconsensus.LeaderHint
+      in:
+      - name: err
+        type: error
+      name: LeaderHint
+      out:
+      - type: NodeID
+      - type: bool
+  - func:
+      doc: TokenOf reads the committed token an error carries (R7-10).
+      forward: svcconsensus.TokenOf
+      in:
+      - name: err
+        type: error
+      name: TokenOf
+      out:
+      - type: Token
+      - type: bool
+  - func:
+      doc: AppendMessage appends m's frame to dst.
+      forward: wire.AppendMessage
+      in:
+      - name: dst
+        type: '[]byte'
+      - name: m
+        type: '*Message'
+      name: AppendMessage
+      out:
+      - type: '[]byte'
+  - func:
+      doc: 'ParseMessage decodes a frame: FRAME_INVALID, VERSION_UNSUPPORTED.'
+      forward: wire.ParseMessage
+      in:
+      - name: frame
+        type: '[]byte'
+      - name: m
+        type: '*Message'
+      name: ParseMessage
+      out:
+      - type: error
+  - func:
+      doc: AppendSnapshotMeta appends the encoding of m.
+      forward: wire.AppendSnapshotMeta
+      in:
+      - name: dst
+        type: '[]byte'
+      - name: m
+        type: '*SnapshotMeta'
+      name: AppendSnapshotMeta
+      out:
+      - type: '[]byte'
+  - func:
+      doc: ParseSnapshotMeta decodes a SnapshotMeta.
+      forward: wire.ParseSnapshotMeta
+      in:
+      - name: b
+        type: '[]byte'
+      - name: m
+        type: '*SnapshotMeta'
+      name: ParseSnapshotMeta
+      out:
+      - type: error
+  - func:
+      doc: AppendToken appends the 41-byte encoding of t.
+      forward: wire.AppendToken
+      in:
+      - name: dst
+        type: '[]byte'
+      - name: t
+        type: Token
+      name: AppendToken
+      out:
+      - type: '[]byte'
+  - func:
+      doc: ParseToken decodes a token.
+      forward: wire.ParseToken
+      in:
+      - name: b
+        type: '[]byte'
+      name: ParseToken
+      out:
+      - type: Token
+      - type: error
+  imports:
+    coreconsensus: github.com/kitsunium/sdk/internal/core/app/consensus
+    errs: github.com/kitsunium/sdk/internal/kernel/errs
+    svcconsensus: github.com/kitsunium/sdk/internal/service/app/consensus
+    wire: github.com/kitsunium/sdk/internal/service/app/consensus/wire
+  path: github.com/kitsunium/sdk/pkg/v1/app/consensus
