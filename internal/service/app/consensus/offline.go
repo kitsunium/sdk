@@ -851,30 +851,38 @@ func (d DataDir) reopenSilenced(maxTerm uint64) error {
 
 // silence reads the persisted silence condition, if any. An index of 0, a
 // crash before it was filled in, is the end of the log, written back now.
-// An unreadable condition is the safe side: silent past the end.
+// An unreadable condition is the safe side: silent past the end, with the
+// reason it could not be read in unreadable, for the node to report.
 //
 // The write-back is durable before the node starts, or the node does not
 // start (D4: a failed write stops it): a condition left at 0 would be filled
 // in again at the next start, from a log that may have grown since, and the
 // silence would end at another index than the one this start obeyed.
-func (l *FileLog) silence() (term, index uint64, err error) {
+func (l *FileLog) silence() (term, index uint64, unreadable, err error) {
 	b, err := os.ReadFile(filepath.Join(l.dir, fileSilent))
 	if os.IsNotExist(err) {
-		return 0, 0, nil
+		return 0, 0, nil, nil
 	}
 	_, last := l.Bounds()
-	if err != nil || len(b) != 16 {
-		return ^uint64(0) >> 1, last + 1, nil
+	if err == nil && len(b) != 16 {
+		err = errSilenceLength
+	}
+	if err != nil {
+		return ^uint64(0) >> 1, last + 1, err, nil
 	}
 	term, index = binary.LittleEndian.Uint64(b), binary.LittleEndian.Uint64(b[8:])
 	if index == 0 {
 		index = last + 1
 		if err := writeFileSync(filepath.Join(l.dir, fileSilent), silenceRecord(term, index)); err != nil {
-			return 0, 0, err
+			return 0, 0, nil, err
 		}
 	}
-	return term, index, nil
+	return term, index, nil, nil
 }
+
+// errSilenceLength is the cause of a silence condition of a length this
+// version never writes.
+const errSilenceLength cause = "silence condition of the wrong length"
 
 // endSilence removes the silence condition durably.
 func (l *FileLog) endSilence() error {

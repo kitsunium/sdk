@@ -74,6 +74,7 @@ go_test(
         "api_gen_test.go",
         "cluster_internal_test.go",
         "cut_internal_test.go",
+        "defects_internal_test.go",
         "disk_cluster_internal_test.go",
         "failclosed_internal_test.go",
         "failclosed_unix_internal_test.go",

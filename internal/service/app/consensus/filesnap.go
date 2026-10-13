@@ -105,7 +105,12 @@ func (k *fileSink) Write(p []byte) (int, error) { return k.f.Write(p) }
 func (k *fileSink) Commit(final coreconsensus.SnapshotMeta) error {
 	final.ID = k.id
 	size, err := k.f.Seek(0, io.SeekCurrent)
-	if err != nil || size != final.EncodedSize {
+	if err != nil {
+		// The size could not be read: the disk failed, the spool did not
+		// lie about its length.
+		return alsoFailed(storageFailed("snapshot size", err), "close", k.f.Close())
+	}
+	if size != final.EncodedSize {
 		return alsoFailed(snapshotCorrupt("encoded size"), "close", k.f.Close())
 	}
 	if err := k.f.Sync(); err != nil {

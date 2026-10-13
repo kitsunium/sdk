@@ -246,7 +246,7 @@ func newRaft(cfg Config) (*Node, error) {
 		return nil, err
 	}
 	n.canVote = stamp.State == coreconsensus.StampMember
-	silentTerm, silentIndex, err := silenceOf(cfg.Log)
+	silentTerm, silentIndex, err := silenceOf(cfg.Log, n.obs)
 	if err != nil {
 		return nil, err
 	}
@@ -335,12 +335,20 @@ func newNode(cfg *Config, stamp *coreconsensus.Stamp) *Node {
 // silenceOf reads the silence condition a recovered log persists, the term
 // and index raft stays silent until; a store that keeps none answers zeros,
 // which is no silence. A condition that cannot be read stops the start.
-func silenceOf(log coreconsensus.LogStore) (term, index uint64, err error) {
+//
+// A condition that exists but cannot be read keeps the node silent past the
+// end of its log, the safe side, and is reported: an operator otherwise
+// finds a node that never votes and no line saying why.
+func silenceOf(log coreconsensus.LogStore, o *obs) (term, index uint64, err error) {
 	if s, ok := log.(interface {
-		silence() (term, index uint64, err error)
+		silence() (term, index uint64, unreadable, err error)
 	}); ok {
-		if term, index, err = s.silence(); err != nil {
+		var unreadable error
+		if term, index, unreadable, err = s.silence(); err != nil {
 			return 0, 0, storageFailed("silence condition", err)
+		}
+		if unreadable != nil {
+			o.warn("consensus: silence condition unreadable, the node stays silent past the end of its log", lstr("error", unreadable.Error()))
 		}
 	}
 	return term, index, nil

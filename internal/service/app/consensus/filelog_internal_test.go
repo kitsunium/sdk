@@ -282,8 +282,8 @@ func TestDataDirLockAndStopMarkers(t *testing.T) {
 	// into: the suite points it at a directory of its own, so the second
 	// marker is asserted rather than silently absent.
 	l.runDir = filepath.Join(t.TempDir(), "run")
-	if !l.markStop(coreconsensus.CodeStorageFailed, "fdatasync: EIO") {
-		t.Fatal("no marker written")
+	if dirErr, runErr := l.markStopEach(coreconsensus.CodeStorageFailed, "fdatasync: EIO"); dirErr != nil || runErr != nil {
+		t.Fatalf("markers not written: %v, %v", dirErr, runErr)
 	}
 	inDir := filepath.Join(dir, markerStopPrefix+"STORAGE_FAILED")
 	for _, p := range []string{inDir, l.runtimeMarker("STORAGE_FAILED")} {
@@ -318,7 +318,10 @@ func TestDataDirLockAndStopMarkers(t *testing.T) {
 	if err := l.checkMarkers(); err != nil {
 		t.Fatalf("another boot: %v", err)
 	}
-	l.markStop(coreconsensus.CodeStateMachineFailed, "panic")
+	// A final stop writes no boot-scoped marker: runErr is nil by contract.
+	if dirErr, runErr := l.markStopEach(coreconsensus.CodeStateMachineFailed, "panic"); dirErr != nil || runErr != nil {
+		t.Fatal(dirErr, runErr)
+	}
 	if err := l.checkMarkers(); !errors.Is(err, coreconsensus.StopMarkerPresent) {
 		t.Fatalf("final stop marker: %v", err)
 	}

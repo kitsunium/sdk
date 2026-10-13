@@ -272,16 +272,10 @@ func (l *FileLog) runtimeMarker(reason string) string {
 	return filepath.Join(l.runDir, hex.EncodeToString(sum[:8])+"-"+reason)
 }
 
-// markStop writes the stop's marker: STORAGE_FAILED in TWO places, the data
-// directory and a boot-scoped path, each holding the boot id; the final
-// stops in the data directory only. It reports whether a marker was written.
-func (l *FileLog) markStop(code errs.Code, detail string) bool {
-	dirErr, runErr := l.markStopEach(code, detail)
-	return dirErr == nil || (code == coreconsensus.CodeStorageFailed && runErr == nil)
-}
-
-// markStopEach is markStop with the failure of each place: the data
-// directory's, and the boot-scoped one's (nil for a stop that writes no
+// markStopEach writes the stop's marker: STORAGE_FAILED in TWO places, the
+// data directory and a boot-scoped path, each holding the boot id; the final
+// stops in the data directory only. It returns the failure of each place:
+// the data directory's, and the boot-scoped one's (nil for a stop that writes no
 // boot-scoped marker). R9-05 lets a node stop with one marker of the two,
 // but not silently: the caller reports the place it could not write.
 func (l *FileLog) markStopEach(code errs.Code, detail string) (dirErr, runErr error) {
