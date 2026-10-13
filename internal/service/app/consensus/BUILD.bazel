@@ -29,6 +29,8 @@ go_library(
         "snapshot.go",
         "sync_linux.go",
         "sync_other.go",
+        "syncdir_other.go",
+        "syncdir_windows.go",
         "tcp.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/app/consensus",

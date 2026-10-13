@@ -615,14 +615,6 @@ func (l *FileLog) takePrepared(n uint64, size int64) *os.File {
 	return p.f
 }
 
-func syncDir(dir string) error {
-	d, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	return d.Sync()
-}
 
 func writeFileSync(path string, data []byte) error {
 	tmp := path + ".tmp"
