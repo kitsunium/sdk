@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"slices"
+	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -196,13 +197,54 @@ func Bootstrap(_ context.Context, cfg Config, members []coreconsensus.Member) er
 	return nil
 }
 
-// Health is a node's readiness, for the product's probes.
+// PeerHealth is the leader's view of one peer (D13).
+type PeerHealth struct {
+	// ID is the peer.
+	ID coreconsensus.NodeID
+	// Voter is false for a learner.
+	Voter bool
+	// Match is the highest index the peer holds durably, as acknowledged.
+	Match uint64
+	// Lag is how far Match is behind the leader's last index.
+	Lag uint64
+	// Inflight counts the appends in flight to it.
+	Inflight int
+	// LastContact is how long ago it last answered; negative when it never
+	// answered in this term.
+	LastContact time.Duration
+	// Unreachable is set when the transport failed to reach it since it
+	// last answered, or it has not answered within the minimum election
+	// timeout.
+	Unreachable bool
+	// Snapshot is set while a snapshot is being sent to it.
+	Snapshot bool
+}
+
+// Health is a node's verdict for an orchestrator's probe (D13).
 type Health struct {
 	// Status is the node's view after its last turn.
 	Status coreconsensus.Status
 	// Ready is true while a leader is known and the node applied what it
 	// knows committed.
 	Ready bool
+	// HasLeader is true while a leader is known in the current term.
+	HasLeader bool
+	// QuorumReachable is true on a leader a majority answered within the
+	// minimum election timeout; false elsewhere.
+	QuorumReachable bool
+	// FailureTolerance is how many voters can fail now with a majority
+	// left. Only the leader knows it: -1 elsewhere.
+	FailureTolerance int
+	// ApplyLagEntries is commit minus applied.
+	ApplyLagEntries uint64
+	// Peers is the leader's view of every peer, nil elsewhere.
+	Peers []PeerHealth
+	// ChainRefusals counts identical chain refusals of this follower at
+	// ChainRefusalIndex from ChainRefusalLeader; the node reports itself
+	// unready while it refuses (D4, R6-05).
+	ChainRefusals      int
+	ChainRefusalIndex  uint64
+	ChainRefusalLeader coreconsensus.NodeID
 	// Stopped is true once the node stopped, closed or not.
 	Stopped bool
 	// StopReason says why the node stopped itself.
@@ -212,13 +254,40 @@ type Health struct {
 	DroppedFrames int64
 }
 
-// Health returns the node's readiness.
+// Health returns the node's verdict, computed on the event loop.
 func (n *Node) Health() Health {
 	st := n.Status()
-	h := Health{Status: st, Stopped: n.stopped.Load(), DroppedFrames: n.droppedFrom.Load()}
+	h := Health{Status: st, Stopped: n.stopped.Load(), DroppedFrames: n.droppedFrom.Load(), FailureTolerance: -1}
 	if r, ok := n.StopReason(); ok {
 		h.StopReason = r
 	}
-	h.Ready = !h.Stopped && st.Leader != 0 && st.Applied >= st.Commit
+	if st.Commit > st.Applied {
+		h.ApplyLagEntries = st.Commit - st.Applied
+	}
+	h.HasLeader = st.Leader != 0 && !h.Stopped
+	if !h.Stopped {
+		n.exec(func() {
+			now := n.clk.Now()
+			h.QuorumReachable = n.r.QuorumActive(now)
+			h.FailureTolerance = n.r.FailureTolerance(now)
+			h.ChainRefusalLeader, h.ChainRefusalIndex, h.ChainRefusals = n.r.ChainRefusal()
+			last := n.r.Status().Last
+			window := n.r.Status().Timing.ElectionTimeoutMin
+			for _, p := range n.r.PeerStats() {
+				ph := PeerHealth{ID: p.ID, Voter: p.Voter, Match: p.Match, Inflight: p.Inflight, Snapshot: p.Snapshot, LastContact: -1}
+				if last > p.Match {
+					ph.Lag = last - p.Match
+				}
+				if p.Heard {
+					ph.LastContact = now.Sub(p.LastHeard)
+				}
+				u, reported := n.unreachableAt[p.ID]
+				ph.Unreachable = !p.Heard || ph.LastContact >= window || (reported && u.After(p.LastHeard))
+				h.Peers = append(h.Peers, ph)
+			}
+		})
+	}
+	h.Ready = !h.Stopped && h.HasLeader && st.Applied >= st.Commit &&
+		(h.ChainRefusals == 0 || h.ChainRefusalLeader != st.Leader)
 	return h
 }

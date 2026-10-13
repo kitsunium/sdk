@@ -519,3 +519,47 @@ func TestClusterTransferSubmittedOnAFollower(t *testing.T) {
 		}
 	}
 }
+
+func TestHealthReportsFailureToleranceAndPeers(t *testing.T) {
+	c := newCluster(t, 3, 0)
+	l := c.leader(5 * time.Second)
+	tok := propose(t, l.node, "a=1")
+	c.waitApplied(tok.Index, 5*time.Second)
+	waitFor := func(what string, ok func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for !ok() {
+			if time.Now().After(deadline) {
+				t.Fatalf("%s: %+v", what, l.node.Health())
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	waitFor("tolerance 1 with three voters", func() bool {
+		h := l.node.Health()
+		return h.FailureTolerance == 1 && h.QuorumReachable && len(h.Peers) == 2 &&
+			!h.Peers[0].Unreachable && !h.Peers[1].Unreachable && h.Peers[0].Lag == 0
+	})
+	var f *testNode
+	for _, tn := range c.nodes {
+		if tn != l {
+			f = tn
+			break
+		}
+	}
+	if h := f.node.Health(); h.FailureTolerance != -1 || h.Peers != nil || !h.HasLeader || !h.Ready {
+		t.Fatalf("follower health %+v", h)
+	}
+	c.net.Isolate(f.id, true)
+	propose(t, l.node, "b=2")
+	waitFor("the isolated peer is unreachable and lags", func() bool {
+		h := l.node.Health()
+		for _, p := range h.Peers {
+			if p.ID == f.id {
+				return h.FailureTolerance == 0 && p.Unreachable && p.Lag > 0
+			}
+		}
+		return false
+	})
+	c.net.Isolate(f.id, false)
+}

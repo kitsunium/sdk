@@ -57,12 +57,14 @@ type Node struct {
 	subEpoch  uint64
 	subCount  uint32
 	sending   map[coreconsensus.NodeID]bool
-	lastTerm  uint64
-	lastLead  coreconsensus.NodeID
-	lastRole  coreconsensus.Role
-	readSeq   uint64
-	canVote   bool
-	snapState snapState
+	// unreachableAt is when the transport last failed to reach a peer.
+	unreachableAt map[coreconsensus.NodeID]time.Time
+	lastTerm      uint64
+	lastLead      coreconsensus.NodeID
+	lastRole      coreconsensus.Role
+	readSeq       uint64
+	canVote       bool
+	snapState     snapState
 
 	watchMu  sync.Mutex
 	watchers map[chan coreconsensus.Status]struct{}
@@ -196,7 +198,7 @@ func newRaft(cfg Config) (*Node, error) {
 		propc: make(chan *proposal, 4096), execc: make(chan func(), 1024), storec: make(chan storeDone, 1024),
 		stopc: make(chan struct{}), sq: newFifo[storeReq](), aq: newFifo[applyItem](),
 		waiters: map[uint64]*proposal{}, results: map[uint64]applyResult{},
-		forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]bool{},
+		forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]bool{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
 		watchers: map[chan coreconsensus.Status]struct{}{}, subEpoch: newSubEpoch(), loopDone: make(chan struct{}),
 	}
 	n.acond = sync.NewCond(&n.am)
@@ -219,7 +221,10 @@ func newRaft(cfg Config) (*Node, error) {
 	if ur, ok := cfg.Transport.(coreconsensus.UnreachableReporter); ok {
 		ur.Unreachable(func(id coreconsensus.NodeID) {
 			select {
-			case n.execc <- func() { n.r.ReportUnreachable(id) }:
+			case n.execc <- func() {
+				n.unreachableAt[id] = n.clk.Now()
+				n.r.ReportUnreachable(id)
+			}:
 			default:
 			}
 		})

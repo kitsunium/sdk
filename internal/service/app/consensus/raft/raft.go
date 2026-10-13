@@ -660,3 +660,63 @@ func (r *Raft) commitTo(i uint64) {
 		r.rd.Membership = r.admitted()
 	}
 }
+
+// PeerStat is the leader's view of one peer, for Health (D13).
+type PeerStat struct {
+	ID        core.NodeID
+	Voter     bool
+	Match     uint64
+	Next      uint64
+	Inflight  int
+	LastHeard time.Time
+	Heard     bool
+	Probing   bool
+	Snapshot  bool
+}
+
+// PeerStats returns the leader's view of every peer, in configuration
+// order; nil off the leader.
+func (r *Raft) PeerStats() []PeerStat {
+	if r.role != core.RoleLeader {
+		return nil
+	}
+	var out []PeerStat
+	for _, id := range r.peers() {
+		pr := r.prs[id]
+		out = append(out, PeerStat{ID: id, Voter: r.isVoter(id), Match: pr.match, Next: pr.next, Inflight: len(pr.inflight),
+			LastHeard: pr.lastHeard, Heard: pr.heard, Probing: pr.state == stateProbe, Snapshot: pr.state == stateSnapshot})
+	}
+	return out
+}
+
+// FailureTolerance is how many voters can fail now with a majority left:
+// the voters heard within the minimum election timeout, less a quorum. Only
+// the leader knows it; elsewhere it is -1.
+func (r *Raft) FailureTolerance(now time.Time) int {
+	if r.role != core.RoleLeader {
+		return -1
+	}
+	n := 0
+	for _, id := range r.voters() {
+		if id == r.id {
+			n++
+			continue
+		}
+		if pr := r.prs[id]; pr != nil && pr.heard && now.Sub(pr.lastHeard) < r.timing.ElectionTimeoutMin {
+			n++
+		}
+	}
+	return max(n-r.quorum(), -1)
+}
+
+// QuorumActive reports whether a majority answered the leader within the
+// minimum election timeout.
+func (r *Raft) QuorumActive(now time.Time) bool {
+	return r.role == core.RoleLeader && r.quorumActive(now, r.timing.ElectionTimeoutMin)
+}
+
+// ChainRefusal names the leader and the index this follower refuses, and
+// how many times, while it lasts (D4, R6-05).
+func (r *Raft) ChainRefusal() (core.NodeID, uint64, int) {
+	return r.refusedFrom, r.refusedAt, r.refusals
+}

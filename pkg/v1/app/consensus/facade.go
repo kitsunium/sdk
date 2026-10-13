@@ -64,6 +64,7 @@ type (
 	LeadershipWatcher    = coreconsensus.LeadershipWatcher
 
 	Health          = svcconsensus.Health
+	PeerHealth      = svcconsensus.PeerHealth
 	ReadMode        = svcconsensus.ReadMode
 	Durability      = svcconsensus.Durability
 	Config          = svcconsensus.Config
