@@ -333,8 +333,18 @@ func (r *Raft) handleAppend(m core.Message) {
 		return
 	}
 	if m.Index < r.log.committed {
-		r.send(core.Message{Kind: core.MsgAppResp, To: m.From, Index: r.log.committed})
-		return
+		// The append starts below the commit. Its entries past the commit
+		// are still news: re-base it on the committed entry when it carries
+		// that entry with our term. A node that acknowledges nothing — a
+		// silent one — learns the rest of the log no other way.
+		k := int(r.log.committed - m.Index - 1)
+		t, ok := r.log.term(r.log.committed)
+		if k >= len(m.Entries) || !ok || m.Entries[k].Position.Term != t {
+			r.send(core.Message{Kind: core.MsgAppResp, To: m.From, Index: r.log.committed})
+			return
+		}
+		m.Entries = m.Entries[k+1:]
+		m.Index, m.LogTerm = r.log.committed, t
 	}
 	if !r.log.matchTerm(m.Index, m.LogTerm) {
 		hint := min(m.Index, r.log.lastIndex())

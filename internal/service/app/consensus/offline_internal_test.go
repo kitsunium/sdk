@@ -222,6 +222,15 @@ func TestTruncateAndStaySilentRejoins(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
+			for _, dn := range nodes {
+				if dn.node != nil {
+					var d string
+					dn.node.exec(func() {
+						d = dn.node.r.Debug() + func() string { a, b := dn.node.r.SilentDebug(); return fmt.Sprintf(" silent=%d/%d", a, b) }()
+					})
+					t.Logf("node %d: %s", dn.id, d)
+				}
+			}
 			t.Fatalf("the silent node never rejoined (status %+v, silent file %v)", victim.node.Status(), statErr)
 		}
 		time.Sleep(10 * time.Millisecond)

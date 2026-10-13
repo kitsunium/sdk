@@ -11,3 +11,6 @@ func (r *Raft) Debug() string {
 	}
 	return s
 }
+
+// SilentDebug returns the silence condition, for a failing test's log.
+func (r *Raft) SilentDebug() (uint64, uint64) { return r.cfg.SilentTerm, r.cfg.SilentIndex }
