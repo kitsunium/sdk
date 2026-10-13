@@ -878,17 +878,16 @@ func TestInstallResumesAfterACrashAtPublication(t *testing.T) {
 
 // staleSnapshot runs a cluster until a follower applied past the leader's
 // newest snapshot, and returns that snapshot's meta and encoded body.
-func staleSnapshot(t *testing.T) (*cluster, *testNode, *testNode, coreconsensus.SnapshotMeta, []byte, coreconsensus.Token) {
-	c := newCluster(t, 3, 20)
-	l := c.leader(5 * time.Second)
-	var f *testNode
+func staleSnapshot(t *testing.T) (c *cluster, l, f *testNode, meta coreconsensus.SnapshotMeta, body []byte, tok coreconsensus.Token) {
+	c = newCluster(t, 3, 20)
+	l = c.leader(5 * time.Second)
 	for _, tn := range c.nodes {
 		if tn != l {
 			f = tn
 			break
 		}
 	}
-	for i := 0; i < 60; i++ {
+	for i := range 60 {
 		propose(t, l.node, fmt.Sprintf("k%d=%d", i, i))
 	}
 	c.waitApplied(l.node.Status().Commit, 5*time.Second)
@@ -896,19 +895,18 @@ func staleSnapshot(t *testing.T) (*cluster, *testNode, *testNode, coreconsensus.
 	if err != nil || len(metas) == 0 {
 		t.Fatalf("no leader snapshot: %v", err)
 	}
-	meta := metas[0]
+	meta = metas[0]
 	h, err := l.snaps.Open(meta.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := make([]byte, meta.EncodedSize)
+	body = make([]byte, meta.EncodedSize)
 	if _, err := h.ReadAt(body, 0); err != nil && !errors.Is(err, io.EOF) {
 		t.Fatal(err)
 	}
 	h.Close()
 	// Entries past the snapshot that the receiver applies before the body
 	// arrives.
-	var tok coreconsensus.Token
 	for i := 60; i < 80; i++ {
 		tok = propose(t, l.node, fmt.Sprintf("k%d=%d", i, i))
 	}
@@ -925,7 +923,7 @@ func checkNothingLost(t *testing.T, c *cluster, l, f *testNode) {
 	t.Helper()
 	tok := propose(t, l.node, "last=1")
 	c.waitApplied(tok.Index, 5*time.Second)
-	for i := 0; i < 80; i++ {
+	for i := range 80 {
 		if v, _ := f.sm.get(fmt.Sprintf("k%d", i)); v != fmt.Sprint(i) {
 			t.Fatalf("receiver lost the committed k%d (%q) to a stale install", i, v)
 		}

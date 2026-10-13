@@ -363,7 +363,8 @@ func (s *sim) checkNode(n *simNode) {
 	n.checked = max(n.checked, st.Commit)
 }
 
-var simTrace = func(string, ...any) {}
+// simTrace logs the disk model's steps while a failing seed is studied.
+var simTrace func(string, ...any) = func(string, ...any) {}
 
 func (s *sim) storageDone(n *simNode) {
 	w := n.writes[0]

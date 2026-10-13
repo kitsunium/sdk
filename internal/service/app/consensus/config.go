@@ -14,6 +14,10 @@ import (
 	svctransform "github.com/kitsunium/sdk/internal/service/data/transform"
 )
 
+// batchFrameOverhead bounds what an append frame adds to the batch bytes
+// the leader counts: the message header and the first entry's fields.
+const batchFrameOverhead int = 1 << 10
+
 // ReadMode selects how Barrier confirms leadership (D9).
 type ReadMode uint8
 
@@ -224,10 +228,6 @@ func (c Config) MemoryBudget(peers int) int64 {
 func defaultCodec() coretransform.BoundedDecompressor {
 	return svctransform.FlateCompressor.(coretransform.BoundedDecompressor)
 }
-
-// batchFrameOverhead bounds what an append frame adds to the batch bytes
-// the leader counts: the message header and the first entry's fields.
-const batchFrameOverhead = 1 << 10
 
 // framesBelow reports whether the transport declares a frame limit below n.
 // A transport that declares none is not checked.

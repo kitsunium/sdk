@@ -10,6 +10,10 @@ import (
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
 
+// ProtocolMax is the highest protocol version this engine speaks: a cluster
+// version above it is refused, and stops a node that finds it committed.
+const ProtocolMax uint32 = 1
+
 // Config is what the step function needs from its driver. Every bound is
 // already clamped and validated by the engine.
 type Config struct {
@@ -61,10 +65,6 @@ type Config struct {
 	// mut is set by the package's own tests only.
 	mut mutation
 }
-
-// ProtocolMax is the highest protocol version this engine speaks: a cluster
-// version above it is refused, and stops a node that finds it committed.
-const ProtocolMax uint32 = 1
 
 // fwdEntry is one forwarded command a leader appended.
 type fwdEntry struct {

@@ -426,6 +426,8 @@ func (t *TCPTransport) dialAny(ctx context.Context, addr string, lane byte, pins
 	})
 }
 
+// dialVerified dials addr, runs the identity's verification then verify,
+// and writes the lane byte.
 func (t *TCPTransport) dialVerified(ctx context.Context, addr string, lane byte, verify tlsid.Verify) (*tls.Conn, error) {
 	d := net.Dialer{Timeout: t.cfg.HandshakeTimeout}
 	raw, err := d.DialContext(ctx, "tcp", addr)
@@ -915,45 +917,53 @@ func (t *TCPTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig) (
 	last := error(origin(coreconsensus.JoinRefused, errs.String("why", "no address answered")))
 	var refused error
 	for _, addr := range cfg.Addresses {
-		c, err := t.dialAny(ctx, addr, laneJoin, cfg.Pins)
-		if err != nil {
-			last = err
-			continue
-		}
-		peer, _ := tlsid.PeerOf(c.ConnectionState())
-		_ = c.SetDeadline(time.Now().Add(t.cfg.JoinTimeout))
-		if err := writeChunk(c, encodeJoin(req)); err != nil {
-			c.Close()
-			last = err
-			continue
-		}
-		b, err := readChunk(c, t.cfg.MaxControlFrameBytes)
-		c.Close()
-		if err != nil || len(b) < 20 {
-			last = origin(coreconsensus.FrameInvalid, errs.String("what", "join answer"))
-			continue
-		}
-		if code := errs.Code(binary.LittleEndian.Uint32(b)); code != 0 {
+		pos, answered, err := t.joinOne(ctx, addr, req, cfg.Pins)
+		switch {
+		case err == nil:
+			return pos, nil
+		case answered:
 			// A refusal beats an unreachable address: it says why.
-			refused = joinRefused(code, joinAnswerReason(b[20:]))
-			continue
-		}
-		m, err := wire.ParseMembership(b[20:])
-		if err != nil {
+			refused = err
+		default:
 			last = err
-			continue
 		}
-		if !joinAnswerListsPeer(m, peer.SPKI) {
-			last = peerRejected("the answer does not list its own sender")
-			continue
-		}
-		t.SetMembership(1, m.Members)
-		return coreconsensus.Position{Term: binary.LittleEndian.Uint64(b[4:]), Index: binary.LittleEndian.Uint64(b[12:])}, nil
 	}
 	if refused != nil {
 		return coreconsensus.Position{}, refused
 	}
 	return coreconsensus.Position{}, last
+}
+
+// joinOne sends the JOIN to one address, to a peer presenting one of pins,
+// and installs the membership it answers once that membership lists the
+// peer under its key. refused is set when the peer answered with a refusal.
+func (t *TCPTransport) joinOne(ctx context.Context, addr string, req coreconsensus.JoinRequest, pins [][32]byte) (pos coreconsensus.Position, refused bool, err error) {
+	c, derr := t.dialAny(ctx, addr, laneJoin, pins)
+	if derr != nil {
+		return coreconsensus.Position{}, false, derr
+	}
+	defer c.Close()
+	peer, _ := tlsid.PeerOf(c.ConnectionState())
+	_ = c.SetDeadline(time.Now().Add(t.cfg.JoinTimeout))
+	if err := writeChunk(c, encodeJoin(req)); err != nil {
+		return coreconsensus.Position{}, false, err
+	}
+	b, rerr := readChunk(c, t.cfg.MaxControlFrameBytes)
+	if rerr != nil || len(b) < 20 {
+		return coreconsensus.Position{}, false, origin(coreconsensus.FrameInvalid, errs.String("what", "join answer"))
+	}
+	if code := errs.Code(binary.LittleEndian.Uint32(b)); code != 0 {
+		return coreconsensus.Position{}, true, joinRefused(code, joinAnswerReason(b[20:]))
+	}
+	m, perr := wire.ParseMembership(b[20:])
+	if perr != nil {
+		return coreconsensus.Position{}, false, perr
+	}
+	if !joinAnswerListsPeer(m, peer.SPKI) {
+		return coreconsensus.Position{}, false, peerRejected("the answer does not list its own sender")
+	}
+	t.SetMembership(1, m.Members)
+	return coreconsensus.Position{Term: binary.LittleEndian.Uint64(b[4:]), Index: binary.LittleEndian.Uint64(b[12:])}, false, nil
 }
 
 // joinAnswerListsPeer reports whether a JOIN answer's membership lists the

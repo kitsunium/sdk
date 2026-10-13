@@ -592,9 +592,7 @@ func (r *Raft) admitForward(size int) errs.Code {
 	switch {
 	case r.cfg.MaxEntryBytes > 0 && size > r.cfg.MaxEntryBytes:
 		return core.CodeEntryTooLarge
-	case r.cfg.MaxForwardBytes > 0 && r.fwdBytes+int64(size) > r.cfg.MaxForwardBytes:
-		return core.CodeOverloaded
-	case r.overloaded:
+	case r.overloaded, r.cfg.MaxForwardBytes > 0 && r.fwdBytes+int64(size) > r.cfg.MaxForwardBytes:
 		return core.CodeOverloaded
 	}
 	return 0

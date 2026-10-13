@@ -239,31 +239,41 @@ func TestPeerOfNeverReturnsAnUnverifiedChain(t *testing.T) {
 // granularity as the refused first look, is still taken (review of PR #301,
 // L3).
 func TestIdentityRereadsARefusedRenewal(t *testing.T) {
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	c := newCA(t, "ca")
-	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	must(err)
 	f := files(t, c, "kitsunium-consensus://aa/slot/s", key)
 	id, err := tlsid.LoadReloadable(f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	first, _ := id.Leaf()
+	must(err)
+	first, err := id.Leaf()
+	must(err)
 	cp, kp := c.issue(t, "kitsunium-consensus://aa/slot/s", key)
-	other, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	ob, _ := x509.MarshalECPrivateKey(other)
+	other, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	must(err)
+	ob, err := x509.MarshalECPrivateKey(other)
+	must(err)
 	stamp := time.Now().Add(time.Second).Truncate(time.Second)
 	time.Sleep(20 * time.Millisecond)
 	// The certificate first, with a key file that does not match it yet.
-	_ = os.WriteFile(f.CertFile, cp, 0o600)
-	_ = os.WriteFile(f.KeyFile, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: ob}), 0o600)
-	_ = os.Chtimes(f.CertFile, stamp, stamp)
-	_ = os.Chtimes(f.KeyFile, stamp, stamp)
-	_, _ = id.Certificate()
+	must(os.WriteFile(f.CertFile, cp, 0o600))
+	must(os.WriteFile(f.KeyFile, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: ob}), 0o600))
+	must(os.Chtimes(f.CertFile, stamp, stamp))
+	must(os.Chtimes(f.KeyFile, stamp, stamp))
+	_, err = id.Certificate()
+	must(err)
 	// Then the key, within the same mtime.
 	time.Sleep(20 * time.Millisecond)
-	_ = os.WriteFile(f.KeyFile, kp, 0o600)
-	_ = os.Chtimes(f.KeyFile, stamp, stamp)
+	must(os.WriteFile(f.KeyFile, kp, 0o600))
+	must(os.Chtimes(f.KeyFile, stamp, stamp))
 	time.Sleep(20 * time.Millisecond)
-	renewed, _ := id.Leaf()
+	renewed, err := id.Leaf()
+	must(err)
 	if renewed.SerialNumber.Cmp(first.SerialNumber) == 0 {
 		t.Fatal("the renewal was never read again after a refused first look")
 	}
