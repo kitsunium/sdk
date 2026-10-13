@@ -1416,7 +1416,8 @@ packages:
         underlying: "[16]byte"
       - doc: |-
           ClusterID names one cluster: the founding, or a Recover or RestoreSnapshot
-          that started a new history. It is 16 bytes everywhere it is encoded.
+          that started a new history. It is 16 bytes everywhere it is encoded, the URI
+          SAN included, where it is spelt in hex (see String).
         methods:
           - doc: |-
               String renders the cluster id in lowercase hex, the form the certificate's
@@ -1493,7 +1494,8 @@ packages:
       - doc: |-
           Token is a lineage-scoped position: the cluster, the log epoch, the term and
           the index. It is comparable, and its encoding is fixed at 41 bytes: a version
-          byte, the 16-byte ClusterID, then epoch, term and index as big-endian uint64.
+          byte, the 16-byte ClusterID, then epoch, term and index as big-endian uint64
+          (see AppendToken in the service's wire package).
         methods:
           - doc: Position returns the token's position, without its lineage.
             name: Position
@@ -1829,7 +1831,10 @@ packages:
             - doc: Reserved is carried uninterpreted for ADR 0173.
               name: Reserved
               type: "[]byte"
-      - doc: InstallOffer is what a leader sends before streaming a snapshot.
+      - doc: |-
+          InstallOffer is what a leader sends before streaming a snapshot: the whole
+          metadata first, so the receiver refuses a snapshot too large, of another
+          version or already covered before a single byte of it is spooled (D7).
         name: InstallOffer
         struct:
           fields:
@@ -1842,7 +1847,10 @@ packages:
             - doc: Meta describes the snapshot.
               name: Meta
               type: SnapshotMeta
-      - doc: InstallAccept is the receiver's answer to an offer.
+      - doc: |-
+          InstallAccept is the receiver's answer to an offer. The RECEIVER chooses the
+          offset to resume from, from what it has durably spooled, so a resumed stream
+          never appends to bytes the receiver did not keep (D7, R8-21).
         name: InstallAccept
         struct:
           fields:
@@ -1862,7 +1870,10 @@ packages:
                 idempotent success.
               name: Held
               type: bool
-      - doc: InstallRequest is what the transport hands the engine once bytes flow.
+      - doc: |-
+          InstallRequest is what the transport hands the engine once bytes flow, after
+          the offer was accepted. Body ends with the connection: a stream cut short is a
+          short read, and the spool keeps its last whole chunk for the next offer.
         name: InstallRequest
         struct:
           fields:
@@ -1925,7 +1936,10 @@ packages:
             - doc: Address is where it listens.
               name: Address
               type: string
-      - doc: JoinConfig is what a joining node needs to send its JOIN.
+      - doc: |-
+          JoinConfig is what a joining node needs to send its JOIN: where to reach the
+          members, and the stamp Init wrote, whose id and incarnation the member it
+          reaches proposes as a learner.
         name: JoinConfig
         struct:
           fields:
@@ -1972,7 +1986,10 @@ packages:
             recv: value
         name: Role
         underlying: uint8
-      - doc: Status is a node's view of its group after one turn of its event loop.
+      - doc: |-
+          Status is a node's view of its group after one turn of its event loop. It is a
+          copy taken on the loop, never a live view, so every field in it describes the
+          same instant.
         methods:
           - doc: |-
               Precondition returns the precondition an operation clearing the current
@@ -2747,7 +2764,11 @@ packages:
             out:
               - type: error
             recv: pointer
-          - doc: Close implements LogStore; the DataDir closes it.
+          - doc: |-
+              Close implements LogStore; the DataDir closes it. Every segment is closed
+              whatever the one before it answered, and the first failure is reported: a
+              Close can be where a deferred write-back error surfaces, and a log that
+              swallowed it would report a clean shutdown of a disk that failed.
             name: Close
             out:
               - type: error

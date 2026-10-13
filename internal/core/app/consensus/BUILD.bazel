@@ -13,8 +13,11 @@ go_library(
         "identity.go",
         "membership.go",
         "message.go",
+        "position.go",
         "snapshot.go",
+        "stamp.go",
         "status.go",
+        "timing_contract.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/app/consensus",
     visibility = [

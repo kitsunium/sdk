@@ -2605,7 +2605,7 @@
       "name": "ClusterID",
       "spelled": "[16]byte",
       "canonical": "[16]byte",
-      "doc": "ClusterID names one cluster: the founding, or a Recover or RestoreSnapshot\nthat started a new history. It is 16 bytes everywhere it is encoded.\n",
+      "doc": "ClusterID names one cluster: the founding, or a Recover or RestoreSnapshot\nthat started a new history. It is 16 bytes everywhere it is encoded, the URI\nSAN included, where it is spelt in hex (see String).\n",
       "file": "core/app/consensus/identity.go",
       "layer": "core",
       "family": "app"
@@ -3701,7 +3701,7 @@
       "spelled": "uint64",
       "canonical": "uint64",
       "doc": "GroupID names a consensus group. v1 runs exactly one group, 1, and every\nframe carries it so that a later version can multiplex groups without\nchanging the wire.\n",
-      "file": "core/app/consensus/identity.go",
+      "file": "core/app/consensus/message.go",
       "layer": "core",
       "family": "app"
     },
@@ -3818,7 +3818,7 @@
           "doc": "Held reports that the receiver already holds the snapshot: an\nidempotent success.\n"
         }
       ],
-      "doc": "InstallAccept is the receiver's answer to an offer.\n",
+      "doc": "InstallAccept is the receiver's answer to an offer. The RECEIVER chooses the\noffset to resume from, from what it has durably spooled, so a resumed stream\nnever appends to bytes the receiver did not keep (D7, R8-21).\n",
       "file": "core/app/consensus/snapshot.go",
       "layer": "core",
       "family": "app"
@@ -3847,7 +3847,7 @@
           "doc": "Meta describes the snapshot.\n"
         }
       ],
-      "doc": "InstallOffer is what a leader sends before streaming a snapshot.\n",
+      "doc": "InstallOffer is what a leader sends before streaming a snapshot: the whole\nmetadata first, so the receiver refuses a snapshot too large, of another\nversion or already covered before a single byte of it is spooled (D7).\n",
       "file": "core/app/consensus/snapshot.go",
       "layer": "core",
       "family": "app"
@@ -3886,7 +3886,7 @@
           "doc": "Body is the encoded stream from Offset, ending with the connection.\n"
         }
       ],
-      "doc": "InstallRequest is what the transport hands the engine once bytes flow.\n",
+      "doc": "InstallRequest is what the transport hands the engine once bytes flow, after\nthe offer was accepted. Body ends with the connection: a stream cut short is a\nshort read, and the spool keeps its last whole chunk for the next offer.\n",
       "file": "core/app/consensus/snapshot.go",
       "layer": "core",
       "family": "app"
@@ -3945,8 +3945,8 @@
           "doc": "Pins are the SPKIs of the members the joiner trusts, from the\noperator. An answer counts only from a peer presenting one of them,\nand only when the membership it returns lists that peer under that\nkey; an empty list refuses the JOIN.\n"
         }
       ],
-      "doc": "JoinConfig is what a joining node needs to send its JOIN.\n",
-      "file": "core/app/consensus/snapshot.go",
+      "doc": "JoinConfig is what a joining node needs to send its JOIN: where to reach the\nmembers, and the stamp Init wrote, whose id and incarnation the member it\nreaches proposes as a learner.\n",
+      "file": "core/app/consensus/stamp.go",
       "layer": "core",
       "family": "app"
     },
@@ -5141,7 +5141,7 @@
         }
       ],
       "doc": "Position is an entry's place in the log: the term it was created in and its\nindex. The index is a fencing token: unique, strictly increasing over the\ngroup's life and identical on every node. The term says WHICH command, never\nwho may act on it now (ADR 0152 D10).\n",
-      "file": "core/app/consensus/identity.go",
+      "file": "core/app/consensus/position.go",
       "layer": "core",
       "family": "app"
     },
@@ -5725,7 +5725,7 @@
         }
       ],
       "doc": "Stamp binds a data directory to one node of one cluster: written by\nLogStore.WriteStamp, durable on return, and verified at every start. A\nmismatch is DATA_DIR_MISMATCH.\n",
-      "file": "core/app/consensus/entry.go",
+      "file": "core/app/consensus/stamp.go",
       "layer": "core",
       "family": "app"
     },
@@ -5738,7 +5738,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/app/consensus.StampState",
       "value": "2",
       "doc": "StampBootstrapPending is a founding in progress: Bootstrap wrote it\nbefore it wrote the founding configuration.\n",
-      "file": "core/app/consensus/entry.go",
+      "file": "core/app/consensus/stamp.go",
       "layer": "core",
       "family": "app"
     },
@@ -5751,7 +5751,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/app/consensus.StampState",
       "value": "1",
       "doc": "StampJoining is a directory Init prepared: it may join as an empty\nlearner, never vote or acknowledge until it is admitted.\n",
-      "file": "core/app/consensus/entry.go",
+      "file": "core/app/consensus/stamp.go",
       "layer": "core",
       "family": "app"
     },
@@ -5764,7 +5764,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/app/consensus.StampState",
       "value": "3",
       "doc": "StampMember is a directory that belongs to a cluster.\n",
-      "file": "core/app/consensus/entry.go",
+      "file": "core/app/consensus/stamp.go",
       "layer": "core",
       "family": "app"
     },
@@ -5776,7 +5776,7 @@
       "spelled": "uint8",
       "canonical": "uint8",
       "doc": "StampState says how far a data directory has come.\n",
-      "file": "core/app/consensus/entry.go",
+      "file": "core/app/consensus/stamp.go",
       "layer": "core",
       "family": "app"
     },
@@ -5907,7 +5907,7 @@
           "doc": "NoSpace is the raised no-space alarm, 0 when none.\n"
         }
       ],
-      "doc": "Status is a node's view of its group after one turn of its event loop.\n",
+      "doc": "Status is a node's view of its group after one turn of its event loop. It is a\ncopy taken on the loop, never a live view, so every field in it describes the\nsame instant.\n",
       "file": "core/app/consensus/status.go",
       "layer": "core",
       "family": "app"
@@ -6031,7 +6031,7 @@
         }
       ],
       "doc": "TimingContract is the set of timings every member must agree on for leases\nand vote refusals to be sound. The committed contract entry is its ONLY\nauthority; a node's own configuration is merely the proposal used at\nBootstrap.\n",
-      "file": "core/app/consensus/membership.go",
+      "file": "core/app/consensus/timing_contract.go",
       "layer": "core",
       "family": "app"
     },
@@ -6064,7 +6064,7 @@
           "doc": "Index is the entry's index.\n"
         }
       ],
-      "doc": "Token is a lineage-scoped position: the cluster, the log epoch, the term and\nthe index. It is comparable, and its encoding is fixed at 41 bytes: a version\nbyte, the 16-byte ClusterID, then epoch, term and index as big-endian uint64.\n",
+      "doc": "Token is a lineage-scoped position: the cluster, the log epoch, the term and\nthe index. It is comparable, and its encoding is fixed at 41 bytes: a version\nbyte, the 16-byte ClusterID, then epoch, term and index as big-endian uint64\n(see AppendToken in the service's wire package).\n",
       "file": "core/app/consensus/identity.go",
       "layer": "core",
       "family": "app"
@@ -6257,7 +6257,7 @@
         }
       ],
       "doc": "Versions are a node's capabilities: the protocol range it speaks, the\npayload versions its state machine supports, and the committed cluster\nversion.\n",
-      "file": "core/app/consensus/membership.go",
+      "file": "core/app/consensus/status.go",
       "layer": "core",
       "family": "app"
     },
@@ -44528,7 +44528,7 @@
       "recv": "FileLog",
       "spelled": "func() error",
       "canonical": "func() error",
-      "doc": "Close implements LogStore; the DataDir closes it.\n",
+      "doc": "Close implements LogStore; the DataDir closes it. Every segment is closed\nwhatever the one before it answered, and the first failure is reported: a\nClose can be where a deferred write-back error surfaces, and a log that\nswallowed it would report a clean shutdown of a disk that failed.\n",
       "file": "service/app/consensus/filelog.go",
       "layer": "service",
       "family": "app"

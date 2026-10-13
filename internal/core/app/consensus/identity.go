@@ -5,6 +5,18 @@ import (
 	"strconv"
 )
 
+// The Operator format: printable ASCII without the space, so an operator
+// reads back from the audit file and the log exactly as it was typed, and a
+// length bound that keeps it out of the way of the entry it is recorded in.
+const (
+	// operatorFirstByte is '!', the first printable ASCII byte after space.
+	operatorFirstByte byte = 0x21
+	// operatorLastByte is '~', the last printable ASCII byte.
+	operatorLastByte byte = 0x7E
+	// maxOperatorBytes bounds an operator's length.
+	maxOperatorBytes int = 128
+)
+
 // NodeID names one member of a group for its whole life. It is a random 64-bit
 // value drawn at Init, never 0 and never reused: a node whose disk was lost
 // rejoins under a NEW id, because one that rejoined under its old id could vote
@@ -26,7 +38,8 @@ func (i Incarnation) String() string { return hex.EncodeToString(i[:]) }
 func (i Incarnation) IsZero() bool { return i == Incarnation{} }
 
 // ClusterID names one cluster: the founding, or a Recover or RestoreSnapshot
-// that started a new history. It is 16 bytes everywhere it is encoded.
+// that started a new history. It is 16 bytes everywhere it is encoded, the URI
+// SAN included, where it is spelt in hex (see String).
 type ClusterID [16]byte
 
 // String renders the cluster id in lowercase hex, the form the certificate's
@@ -35,22 +48,6 @@ func (c ClusterID) String() string { return hex.EncodeToString(c[:]) }
 
 // IsZero reports whether the cluster id was never set.
 func (c ClusterID) IsZero() bool { return c == ClusterID{} }
-
-// GroupID names a consensus group. v1 runs exactly one group, 1, and every
-// frame carries it so that a later version can multiplex groups without
-// changing the wire.
-type GroupID uint64
-
-// Position is an entry's place in the log: the term it was created in and its
-// index. The index is a fencing token: unique, strictly increasing over the
-// group's life and identical on every node. The term says WHICH command, never
-// who may act on it now (ADR 0152 D10).
-type Position struct {
-	// Term is the leader term the entry was appended in.
-	Term uint64
-	// Index is the entry's place in the log, from 1.
-	Index uint64
-}
 
 // LogIdentity scopes positions: the ClusterID and a log epoch that Recover and
 // RestoreSnapshot bump, and the predecessor this history descends from with the
@@ -79,7 +76,8 @@ func (l LogIdentity) Same(o LogIdentity) bool {
 
 // Token is a lineage-scoped position: the cluster, the log epoch, the term and
 // the index. It is comparable, and its encoding is fixed at 41 bytes: a version
-// byte, the 16-byte ClusterID, then epoch, term and index as big-endian uint64.
+// byte, the 16-byte ClusterID, then epoch, term and index as big-endian uint64
+// (see AppendToken in the service's wire package).
 type Token struct {
 	// Cluster is the cluster of the log that committed the entry.
 	Cluster ClusterID
@@ -102,11 +100,11 @@ type Operator string
 
 // Valid reports whether the operator satisfies the format rules.
 func (o Operator) Valid() bool {
-	if len(o) == 0 || len(o) > 128 {
+	if len(o) == 0 || len(o) > maxOperatorBytes {
 		return false
 	}
-	for i := 0; i < len(o); i++ {
-		if o[i] < 0x21 || o[i] > 0x7E {
+	for i := range len(o) {
+		if o[i] < operatorFirstByte || o[i] > operatorLastByte {
 			return false
 		}
 	}

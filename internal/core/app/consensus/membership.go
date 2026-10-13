@@ -1,6 +1,6 @@
 package consensus
 
-import "time"
+import "slices"
 
 // Member is one node of the membership: its identity, the key it is pinned
 // to, where it listens, and whether it votes.
@@ -50,12 +50,7 @@ func (m Membership) Member(id NodeID) (Member, bool) {
 
 // IsRetired reports whether the id was removed.
 func (m Membership) IsRetired(id NodeID) bool {
-	for _, x := range m.Retired {
-		if x == id {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(m.Retired, id)
 }
 
 // Voters returns the ids of the voters, in membership order.
@@ -73,43 +68,11 @@ func (m Membership) Voters() []NodeID {
 // under the engine.
 func (m Membership) Clone() Membership {
 	return Membership{
-		Index:   m.Index,
-		Members: append([]Member(nil), m.Members...),
-		Retired: append([]NodeID(nil), m.Retired...),
+		Index: m.Index,
+		// append(s[:0:0], s...) is the copy slices.Clone makes, nil kept nil,
+		// written out because slices.Clone's own body would push the engine's
+		// ConfAt, which inlines this method, past the inliner's budget.
+		Members: append(m.Members[:0:0], m.Members...),
+		Retired: append(m.Retired[:0:0], m.Retired...),
 	}
-}
-
-// TimingContract is the set of timings every member must agree on for leases
-// and vote refusals to be sound. The committed contract entry is its ONLY
-// authority; a node's own configuration is merely the proposal used at
-// Bootstrap.
-type TimingContract struct {
-	// Generation counts the committed contracts, 1 at founding.
-	Generation uint64
-	// HeartbeatInterval is how often the leader confirms itself.
-	HeartbeatInterval time.Duration
-	// ElectionTimeoutMin is the lower bound of the randomized election
-	// timeout, and the vote-refusal window.
-	ElectionTimeoutMin time.Duration
-	// ElectionTimeoutMax is its upper bound, exclusive.
-	ElectionTimeoutMax time.Duration
-	// MaxClockDrift is the largest rate difference between two clocks, as a
-	// fraction in (0, 1). Zero refuses lease reads.
-	MaxClockDrift float64
-}
-
-// Versions are a node's capabilities: the protocol range it speaks, the
-// payload versions its state machine supports, and the committed cluster
-// version.
-type Versions struct {
-	// ProtocolMin is the lowest protocol version it speaks.
-	ProtocolMin uint32
-	// ProtocolMax is the highest.
-	ProtocolMax uint32
-	// PayloadMax is the highest payload version it applies.
-	PayloadMax uint32
-	// Cluster is the committed cluster version.
-	Cluster uint32
-	// ClusterGeneration counts cluster-version raises.
-	ClusterGeneration uint64
 }

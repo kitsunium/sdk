@@ -43,6 +43,26 @@ const (
 	MsgForwardResp MessageKind = 0x44
 )
 
+// MessageFlags are a message's boolean qualifiers.
+type MessageFlags uint8
+
+// The flags.
+const (
+	// FlagTransfer marks a vote request of a leadership transfer. It lifts the
+	// live-leader refusal for ONE campaign, never the election restriction.
+	FlagTransfer MessageFlags = 1 << iota
+	// FlagNeedSnapshot marks an append rejection from a node that holds no
+	// usable snapshot and asks for one.
+	FlagNeedSnapshot
+	// FlagNoLease marks a read the follower wants confirmed by a round, never
+	// by a lease.
+	FlagNoLease
+	// FlagTruncated marks an append rejection from a node that truncated
+	// acknowledged entries through TruncateAndStaySilent: the leader lowers
+	// its match to the node's log, the one exception to "match only grows".
+	FlagTruncated
+)
+
 // Lane returns the connection the kind belongs on.
 func (k MessageKind) Lane() FrameLane { return FrameLane(k >> 6) }
 
@@ -51,25 +71,10 @@ func (k MessageKind) Known() bool {
 	return (k >= MsgPreVote && k <= MsgForwardAdminResp) || (k >= MsgApp && k <= MsgForwardResp)
 }
 
-// MessageFlags are a message's boolean qualifiers.
-type MessageFlags uint8
-
-// The flags.
-const (
-	// FlagTransfer marks a vote request of a leadership transfer. It lifts the
-	// live-leader refusal for ONE campaign, never the election restriction.
-	FlagTransfer MessageFlags = 1 << 0
-	// FlagNeedSnapshot marks an append rejection from a node that holds no
-	// usable snapshot and asks for one.
-	FlagNeedSnapshot MessageFlags = 1 << 1
-	// FlagNoLease marks a read the follower wants confirmed by a round, never
-	// by a lease.
-	FlagNoLease MessageFlags = 1 << 2
-	// FlagTruncated marks an append rejection from a node that truncated
-	// acknowledged entries through TruncateAndStaySilent: the leader lowers
-	// its match to the node's log, the one exception to "match only grows".
-	FlagTruncated MessageFlags = 1 << 3
-)
+// GroupID names a consensus group. v1 runs exactly one group, 1, and every
+// frame carries it so that a later version can multiplex groups without
+// changing the wire.
+type GroupID uint64
 
 // Message is one protocol message: a plain value, encoded by the service's
 // AppendMessage and decoded by ParseMessage, never by a method. The engine

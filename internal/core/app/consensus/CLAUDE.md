@@ -20,6 +20,7 @@ storage and transport's), both declared here (ADR 0160).
 | `codes_gen.go` | the codes and sentinels of both ranges, written by kit |
 | `doc.go` | the package comment |
 | `entry.go`, `identity.go`, `membership.go`, `message.go`, `snapshot.go`, `status.go` | the values |
+| `position.go`, `stamp.go`, `timing_contract.go` | the values two or more of the files above hold as a field, one file named after each (KTN-STRUCT-COLOCATE) |
 | `errors.go` | the exit codes the sentinels carry (65, 69, 73, 74, 75, 76, 78) |
 
 ## Do NOT

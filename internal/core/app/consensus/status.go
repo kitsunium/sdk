@@ -8,15 +8,30 @@ type Role uint8
 // The roles.
 const (
 	// RoleFollower follows a leader, or waits for one.
-	RoleFollower Role = 1
+	RoleFollower Role = iota + 1
 	// RolePreCandidate asks whether it COULD win, without raising its term.
-	RolePreCandidate Role = 2
+	RolePreCandidate
 	// RoleCandidate campaigns at a raised term.
-	RoleCandidate Role = 3
+	RoleCandidate
 	// RoleLeader leads its term.
-	RoleLeader Role = 4
+	RoleLeader
 	// RoleLearner receives the log and votes when asked, but never campaigns.
-	RoleLearner Role = 5
+	RoleLearner
+)
+
+// FrameLane is the connection a frame belongs on: control, data or snapshot.
+// It is carried in the two high bits of the frame's type byte, so a transport
+// routes a frame of a type it does not parse.
+type FrameLane uint8
+
+// The lanes.
+const (
+	// LaneControl carries votes, heartbeats, their replies and TimeoutNow.
+	LaneControl FrameLane = iota
+	// LaneData carries entries, their acknowledgements and forwarded proposals.
+	LaneData
+	// LaneSnapshot carries snapshot streams.
+	LaneSnapshot
 )
 
 // String names the role.
@@ -36,7 +51,9 @@ func (r Role) String() string {
 	return "unknown"
 }
 
-// Status is a node's view of its group after one turn of its event loop.
+// Status is a node's view of its group after one turn of its event loop. It is a
+// copy taken on the loop, never a live view, so every field in it describes the
+// same instant.
 type Status struct {
 	// ID is this node.
 	ID NodeID
@@ -58,6 +75,22 @@ type Status struct {
 	Timing TimingContract
 	// NoSpace is the raised no-space alarm, 0 when none.
 	NoSpace AlarmID
+}
+
+// Versions are a node's capabilities: the protocol range it speaks, the
+// payload versions its state machine supports, and the committed cluster
+// version.
+type Versions struct {
+	// ProtocolMin is the lowest protocol version it speaks.
+	ProtocolMin uint32
+	// ProtocolMax is the highest.
+	ProtocolMax uint32
+	// PayloadMax is the highest payload version it applies.
+	PayloadMax uint32
+	// Cluster is the committed cluster version.
+	Cluster uint32
+	// ClusterGeneration counts cluster-version raises.
+	ClusterGeneration uint64
 }
 
 // Precondition returns the precondition an operation clearing the current
@@ -87,18 +120,3 @@ func (s StopReason) ExitCode() int {
 	}
 	return errs.ExitCodeOf(s.Err)
 }
-
-// FrameLane is the connection a frame belongs on: control, data or snapshot.
-// It is carried in the two high bits of the frame's type byte, so a transport
-// routes a frame of a type it does not parse.
-type FrameLane uint8
-
-// The lanes.
-const (
-	// LaneControl carries votes, heartbeats, their replies and TimeoutNow.
-	LaneControl FrameLane = 0
-	// LaneData carries entries, their acknowledgements and forwarded proposals.
-	LaneData FrameLane = 1
-	// LaneSnapshot carries snapshot streams.
-	LaneSnapshot FrameLane = 2
-)

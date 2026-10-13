@@ -46,7 +46,9 @@ type SnapshotMeta struct {
 	Reserved []byte
 }
 
-// InstallOffer is what a leader sends before streaming a snapshot.
+// InstallOffer is what a leader sends before streaming a snapshot: the whole
+// metadata first, so the receiver refuses a snapshot too large, of another
+// version or already covered before a single byte of it is spooled (D7).
 type InstallOffer struct {
 	// Term is the sender's term.
 	Term uint64
@@ -56,7 +58,9 @@ type InstallOffer struct {
 	Meta SnapshotMeta
 }
 
-// InstallAccept is the receiver's answer to an offer.
+// InstallAccept is the receiver's answer to an offer. The RECEIVER chooses the
+// offset to resume from, from what it has durably spooled, so a resumed stream
+// never appends to bytes the receiver did not keep (D7, R8-21).
 type InstallAccept struct {
 	// SnapshotID is the snapshot answered.
 	SnapshotID string
@@ -70,7 +74,9 @@ type InstallAccept struct {
 	Held bool
 }
 
-// InstallRequest is what the transport hands the engine once bytes flow.
+// InstallRequest is what the transport hands the engine once bytes flow, after
+// the offer was accepted. Body ends with the connection: a stream cut short is a
+// short read, and the spool keeps its last whole chunk for the next offer.
 type InstallRequest struct {
 	// Ctx ends with the connection.
 	Ctx context.Context
@@ -114,21 +120,6 @@ type JoinRequest struct {
 	SPKI [32]byte
 	// Address is where it listens.
 	Address string
-}
-
-// JoinConfig is what a joining node needs to send its JOIN.
-type JoinConfig struct {
-	// Addresses are the members to try, in order.
-	Addresses []string
-	// Stamp is the joiner's stamp, from Init.
-	Stamp Stamp
-	// Address is where the joiner listens.
-	Address string
-	// Pins are the SPKIs of the members the joiner trusts, from the
-	// operator. An answer counts only from a peer presenting one of them,
-	// and only when the membership it returns lists that peer under that
-	// key; an empty list refuses the JOIN.
-	Pins [][32]byte
 }
 
 // FencedAttestation is the operator's statement that an old voter was fenced
