@@ -74,17 +74,14 @@ func (s *FileSnapshots) Create(id string, meta coreconsensus.SnapshotMeta) (core
 	sink.f = f
 	prefix, err := io.ReadAll(f)
 	if err != nil {
-		f.Close()
-		return nil, 0, storageFailed("spool", err)
+		return nil, 0, alsoFailed(storageFailed("spool", err), "close", f.Close())
 	}
 	off := alignedOffset(prefix)
 	if err := f.Truncate(off); err != nil {
-		f.Close()
-		return nil, 0, storageFailed("spool", err)
+		return nil, 0, alsoFailed(storageFailed("spool", err), "close", f.Close())
 	}
 	if _, err := f.Seek(off, io.SeekStart); err != nil {
-		f.Close()
-		return nil, 0, storageFailed("spool", err)
+		return nil, 0, alsoFailed(storageFailed("spool", err), "close", f.Close())
 	}
 	return sink, off, nil
 }
@@ -95,12 +92,10 @@ func (k *fileSink) Commit(final coreconsensus.SnapshotMeta) error {
 	final.ID = k.id
 	size, err := k.f.Seek(0, io.SeekCurrent)
 	if err != nil || size != final.EncodedSize {
-		k.f.Close()
-		return snapshotCorrupt("encoded size")
+		return alsoFailed(snapshotCorrupt("encoded size"), "close", k.f.Close())
 	}
 	if err := k.f.Sync(); err != nil {
-		k.f.Close()
-		return storageFailed("sync snapshot", err)
+		return alsoFailed(storageFailed("sync snapshot", err), "close", k.f.Close())
 	}
 	if err := k.f.Close(); err != nil {
 		return storageFailed("close snapshot", err)
@@ -115,8 +110,42 @@ func (k *fileSink) Commit(final coreconsensus.SnapshotMeta) error {
 	return nil
 }
 
-// release closes the spool's handle and keeps the spool for a resume.
-func (k *fileSink) release() { k.f.Close() }
+// published reads the snapshot a directory entry named name publishes. ok
+// is false for anything that is not a complete snapshot: another file, a
+// .meta that does not parse or names another id, or one whose .snap is
+// missing. Such an entry is skipped: it is a publication a crash
+// interrupted, not a snapshot that failed. A .meta or a .snap that is there
+// but cannot be read is neither: it is an I/O failure, and it is reported,
+// so that a listing never reads a failing disk as "no snapshot".
+func (s *FileSnapshots) published(name string) (coreconsensus.SnapshotMeta, bool, error) {
+	var m coreconsensus.SnapshotMeta
+	if !strings.HasSuffix(name, ".meta") {
+		return m, false, nil
+	}
+	id := strings.TrimSuffix(name, ".meta")
+	b, err := os.ReadFile(filepath.Join(s.dir, name))
+	if errors.Is(err, os.ErrNotExist) {
+		return m, false, nil
+	}
+	if err != nil {
+		return m, false, storageFailed("read snapshot meta", err)
+	}
+	if wire.ParseSnapshotMeta(b, &m) != nil || m.ID != id {
+		return m, false, nil
+	}
+	if _, err := os.Stat(filepath.Join(s.dir, id+".snap")); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return m, false, nil
+		}
+		return m, false, storageFailed("stat snapshot", err)
+	}
+	return m, true, nil
+}
+
+// release closes the spool's handle and keeps the spool for a resume. A
+// failed Close is abandoned: the resume reads back only the chunks whose
+// checksums hold, so nothing it could say changes what is kept.
+func (k *fileSink) release() { abandon(k.f.Close()) }
 
 func (k *fileSink) Abort() error {
 	// The spool is being discarded: what its descriptor's Close could say
@@ -137,23 +166,13 @@ func (s *FileSnapshots) List() ([]coreconsensus.SnapshotMeta, error) {
 	}
 	var out []coreconsensus.SnapshotMeta
 	for _, e := range ents {
-		name := e.Name()
-		if !strings.HasSuffix(name, ".meta") {
-			continue
-		}
-		id := strings.TrimSuffix(name, ".meta")
-		b, err := os.ReadFile(filepath.Join(s.dir, name))
+		m, ok, err := s.published(e.Name())
 		if err != nil {
-			continue
+			return nil, err
 		}
-		var m coreconsensus.SnapshotMeta
-		if wire.ParseSnapshotMeta(b, &m) != nil || m.ID != id {
-			continue
+		if ok {
+			out = append(out, m)
 		}
-		if _, err := os.Stat(filepath.Join(s.dir, id+".snap")); err != nil {
-			continue
-		}
-		out = append(out, m)
 	}
 	slices.SortFunc(out, func(a, b coreconsensus.SnapshotMeta) int {
 		switch {

@@ -1004,10 +1004,11 @@ func (l *FileLog) dropSegmentsLocked() error {
 		if !ok || cp.prevIndex > l.compact {
 			break
 		}
-		for _, s := range l.slots {
-			if s.seg == l.segs[0].n {
-				return nil
-			}
+		if l.retainsEntryIn(l.segs[0].n) {
+			// Stop here, but through the sync below: a segment this pass
+			// already unlinked is published only once its directory is
+			// synced (D4 lifecycle step 6).
+			break
 		}
 		if err := l.segs[0].f.Close(); err != nil {
 			return storageFailed("close segment", err)
@@ -1022,6 +1023,17 @@ func (l *FileLog) dropSegmentsLocked() error {
 		return syncDir(l.logDir())
 	}
 	return nil
+}
+
+// retainsEntryIn reports whether a retained entry still lives in segment
+// seg.
+func (l *FileLog) retainsEntryIn(seg uint64) bool {
+	for _, s := range l.slots {
+		if s.seg == seg {
+			return true
+		}
+	}
+	return false
 }
 
 // HardState implements LogStore.

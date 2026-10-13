@@ -179,6 +179,12 @@ func Bootstrap(_ context.Context, cfg Config, members []coreconsensus.Member) er
 		if err := cfg.Log.WriteStamp(st); err != nil {
 			return storageFailed("stamp", err)
 		}
+	default:
+		// State 0 was refused above; any other value is one this version
+		// does not define, and a directory it cannot read the state of is
+		// never founded (a LogStore other than the shipped one may hand back
+		// any byte).
+		return origin(coreconsensus.DataDirMismatch, errs.String("why", "unknown stamp state"))
 	}
 	if first, last := cfg.Log.Bounds(); last < first {
 		conf := coreconsensus.Membership{Members: byID(members)}

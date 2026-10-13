@@ -900,12 +900,14 @@ func (n *Node) stop(err error, storage bool) {
 	}
 	reason := &coreconsensus.StopReason{Err: err}
 	if m, ok := n.cfg.Log.(interface {
-		markStop(code errs.Code, detail string) bool
+		markStopEach(code errs.Code, detail string) (dirErr, runErr error)
 	}); ok {
 		code, _ := errs.CodeOf(err)
-		if !m.markStop(code, err.Error()) && storage {
+		dirErr, runErr := m.markStopEach(code, err.Error())
+		if dirErr != nil && (runErr != nil || code != coreconsensus.CodeStorageFailed) && storage {
 			reason.Unmarked = true
 		}
+		n.reportUnwrittenMarkers(dirErr, runErr)
 	}
 	n.stopReason = reason
 	n.stopMu.Unlock()
@@ -915,6 +917,18 @@ func (n *Node) stop(err error, storage bool) {
 	n.stopped.Store(true)
 	n.hard.Store(true)
 	n.closeOnce.Do(func() { close(n.stopc) })
+}
+
+// reportUnwrittenMarkers logs each place a stop marker could not be written.
+// R9-05 accepts a stop that left one marker of the two; the line says which
+// one is missing, so an operator knows what protects the next start.
+func (n *Node) reportUnwrittenMarkers(dirErr, runErr error) {
+	if dirErr != nil {
+		n.obs.warn("consensus: stop marker not written in the data directory", lstr("error", dirErr.Error()))
+	}
+	if runErr != nil {
+		n.obs.warn("consensus: boot-scoped stop marker not written", lstr("error", runErr.Error()))
+	}
 }
 
 // StopReason returns why the node stopped itself, if it did.

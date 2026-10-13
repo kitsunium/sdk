@@ -66,20 +66,17 @@ func OpenDataDirWith(dir string, opts DataDirOptions) (DataDir, error) {
 	if err != nil {
 		// The lock could not be asked for: a storage failure, never read as
 		// another process holding the directory.
-		lf.Close()
-		return DataDir{}, storageFailed("lock", err)
+		return DataDir{}, alsoFailed(storageFailed("lock", err), "close", lf.Close())
 	}
 	if !held {
-		lf.Close()
-		return DataDir{}, origin(coreconsensus.DataDirLocked, errs.String("dir", dir))
+		return DataDir{}, alsoFailed(origin(coreconsensus.DataDirLocked, errs.String("dir", dir)), "close", lf.Close())
 	}
 	if err := d.open(); err != nil {
 		// Closing the descriptor releases the lock too; the explicit unlock
 		// is what makes the release immediate on Windows, and its failure
 		// travels with the cause rather than in its place.
 		err = alsoFailed(err, "unlock", flock.Unlock(lf))
-		lf.Close()
-		return DataDir{}, err
+		return DataDir{}, alsoFailed(err, "close", lf.Close())
 	}
 	return DataDir{d: d}, nil
 }
@@ -91,8 +88,7 @@ func (d *dataDir) open() error {
 	}
 	s, err := newFileSnapshots(filepath.Join(d.dir, "snap"))
 	if err != nil {
-		l.Close()
-		return err
+		return alsoFailed(err, "close log", l.Close())
 	}
 	d.log, d.snaps = l, s
 	return nil
@@ -219,6 +215,11 @@ func decodeStamp(b []byte) (coreconsensus.Stamp, bool) {
 	copy(s.Incarnation[:], body[p:])
 	p += 16
 	s.State = coreconsensus.StampState(body[p])
+	if s.State < coreconsensus.StampJoining || s.State > coreconsensus.StampMember {
+		// A state this version does not define is a corrupt or a newer
+		// stamp: unreadable, never a directory Bootstrap may found.
+		return coreconsensus.Stamp{}, false
+	}
 	p++
 	copy(s.Founding[:], body[p:])
 	p += 32
@@ -261,17 +262,25 @@ func (l *FileLog) runtimeMarker(reason string) string {
 // directory and a boot-scoped path, each holding the boot id; the final
 // stops in the data directory only. It reports whether a marker was written.
 func (l *FileLog) markStop(code errs.Code, detail string) bool {
+	dirErr, runErr := l.markStopEach(code, detail)
+	return dirErr == nil || (code == coreconsensus.CodeStorageFailed && runErr == nil)
+}
+
+// markStopEach is markStop with the failure of each place: the data
+// directory's, and the boot-scoped one's (nil for a stop that writes no
+// boot-scoped marker). R9-05 lets a node stop with one marker of the two,
+// but not silently: the caller reports the place it could not write.
+func (l *FileLog) markStopEach(code errs.Code, detail string) (dirErr, runErr error) {
 	reason := reasonOf(code)
 	body := []byte(fmt.Sprintf("boot=%s\n%s\n", bootID(), detail))
-	written := writeFileSync(filepath.Join(l.dir, markerStopPrefix+reason), body) == nil
-	if code == coreconsensus.CodeStorageFailed {
-		if err := os.MkdirAll(l.runDir, 0o700); err == nil {
-			if writeFileSync(l.runtimeMarker(reason), body) == nil {
-				written = true
-			}
-		}
+	dirErr = writeFileSync(filepath.Join(l.dir, markerStopPrefix+reason), body)
+	if code != coreconsensus.CodeStorageFailed {
+		return dirErr, nil
 	}
-	return written
+	if runErr = os.MkdirAll(l.runDir, 0o700); runErr == nil {
+		runErr = writeFileSync(l.runtimeMarker(reason), body)
+	}
+	return dirErr, runErr
 }
 
 func reasonOf(code errs.Code) string {
@@ -308,8 +317,15 @@ func (l *FileLog) checkMarkers() error {
 	}
 	for _, p := range paths {
 		b, err := os.ReadFile(p)
-		if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// No marker there: the boot-scoped one is absent on every start
+			// that followed no storage failure.
 			continue
+		}
+		if err != nil {
+			// A marker that is there but cannot be read is a stop whose
+			// reason is unknown, never an absent one: the start is refused.
+			return storageFailed("read stop marker", err)
 		}
 		if strings.HasSuffix(p, "STORAGE_FAILED") && !strings.HasPrefix(string(b), boot) {
 			// Another boot: the page cache that may have lied is gone.
