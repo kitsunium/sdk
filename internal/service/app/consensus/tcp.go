@@ -912,7 +912,8 @@ func (t *TCPTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig) (
 	if len(cfg.Pins) == 0 {
 		// The answer installs the peers the joiner admits: it is taken only
 		// from a key the operator vouched for (review M4).
-		return coreconsensus.Position{}, transportMisconfigured("JoinConfig.Pins", "empty")
+		return coreconsensus.Position{}, transportMisconfigured("JoinConfig.Pins",
+			"empty: pass the members' SPKIs, from the founding member list (id:inc:slot:spki:addr) or a running member's Membership()")
 	}
 	last := error(origin(coreconsensus.JoinRefused, errs.String("why", "no address answered")))
 	var refused error
