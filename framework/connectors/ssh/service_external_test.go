@@ -27,6 +27,24 @@ import (
 	svcent "github.com/kitsunium/sdk/framework/internal/service/entitlement"
 )
 
+// TestMain clears the runner's OIDC variables before any test of the package
+// runs. Verify takes the CI path whenever ACTIONS_ID_TOKEN_REQUEST_URL is set,
+// and a GitHub Actions job granted id-token sets it for every process — so on
+// such a job every device-path test below was sent down the CI path and failed
+// (thirteen of them, the first time the bazel job held the grant). The tests
+// that exercise the CI path set both with t.Setenv, which restores the cleared
+// state afterwards. Cleared here once rather than per test, so the device-path
+// tests stay parallel.
+func TestMain(m *testing.M) {
+	for _, name := range []string{"ACTIONS_ID_TOKEN_REQUEST_URL", "ACTIONS_ID_TOKEN_REQUEST_TOKEN"} {
+		//: Unsetenv fails only on a name the platform cannot hold.
+		if err := os.Unsetenv(name); err != nil {
+			panic(err)
+		}
+	}
+	os.Exit(m.Run())
+}
+
 // ciSeatKeyBits matches the smallest modulus the verifier accepts.
 const ciSeatKeyBits int = 2048
 

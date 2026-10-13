@@ -520,9 +520,13 @@ func signRoster(t *testing.T, priv ed25519.PrivateKey, roster entitlement.Roster
 // NEITHER list is what keeps this a test about rotation rather than about
 // accepting anything: widening who may sign is the mistake this shape could
 // plausibly have made.
+//
+// Sequential, because each row clears the runner's OIDC variables with
+// t.Setenv: on a CI job granted id-token, ACTIONS_ID_TOKEN_REQUEST_URL is set,
+// Verify takes the CI path, and the roster here lists no CI account — so both
+// accepting rows failed CI_NOT_ENTITLED the first time the job held the grant.
+// The internal suite clears the same two variables for the same reason.
 func TestNewWithAnchorsAcceptsEitherAnchorDuringARotation(t *testing.T) {
-	t.Parallel()
-
 	const subject string = "6ba7b810-9dad-41d1-80b4-00c04fd430c8"
 	const fingerprint string = "SHA256:rotation"
 
@@ -549,7 +553,10 @@ func TestNewWithAnchorsAcceptsEitherAnchorDuringARotation(t *testing.T) {
 	//: back into it.
 	runCase := func(t *testing.T, tt testCase) {
 		t.Helper()
-		t.Parallel()
+		//: Both variables cleared, so the ambient environment cannot send a
+		//: row down the CI path.
+		t.Setenv("ACTIONS_ID_TOKEN_REQUEST_URL", "")
+		t.Setenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "")
 
 		pubs := make([][]byte, 3)
 		privs := make([]ed25519.PrivateKey, 3)
