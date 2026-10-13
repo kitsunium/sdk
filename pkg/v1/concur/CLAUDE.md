@@ -6,7 +6,7 @@
 The concurrency family's public facades (ADR 0155 §1, ADR 0159 §4). This
 directory holds no Go code: it is a prefix, not a package, and there is no
 `github.com/kitsunium/sdk/pkg/v1/concur` to import. Each member is a package
-of the SDK module with its own `CLAUDE.md` and `README.md` (written by
+of the `pkg/v1/concur` Go module (ADR 0171, whose `go.mod` this directory holds) with its own `CLAUDE.md` and `README.md` (written by
 `tools/genindex` from `docs/api`, ADR 0167), imported by its full path —
 `github.com/kitsunium/sdk/pkg/v1/concur/group` — and linking what it imports
 and never this directory or its siblings (the measurement ADR 0155 records).

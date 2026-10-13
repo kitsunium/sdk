@@ -5,7 +5,6 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "self",
     srcs = [
-        "build.go",
         "cputime_other.go",
         "cputime_unix.go",
         "doc.go",
@@ -16,7 +15,6 @@ go_library(
         "//:__subpackages__",
         "//internal/service:service_consumers",
     ],
-    deps = ["//internal/kernel/semver"],
 )
 
 alias(
@@ -32,7 +30,6 @@ go_test(
     name = "self_test",
     srcs = [
         "api_gen_test.go",
-        "build_external_test.go",
         "stats_external_test.go",
         "stats_internal_test.go",
     ],

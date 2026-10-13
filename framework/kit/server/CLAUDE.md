@@ -4,15 +4,17 @@
 A subsystem of `framework/kit`, enabled by a blank import:
 `import _ "github.com/kitsunium/sdk/framework/kit/server"`. It makes an app
 in the server profile serve HTTP — endpoints, frontends, health probes — on
-the SDK's server engine (`ikit.EnableServer`). A daemon or a CLI does not
-import it and links none of the engine; a server without it is refused at
-the start, the refusal naming this import.
+the SDK's server engine (`ikit.EnableServer`), and gives the runtime graph a
+serving app answers its process sample (ADR 0172). A daemon or a CLI does not
+import it and links none of the engine, `runtime/metrics` or the SDK's process
+package; a server without it is refused at the start, the refusal naming this
+import.
 
 ## Contents
 
 | File | Holds |
 |---|---|
-| `server.go` | the package documentation and `enable`, which plugs the engine and the frontends' file server in (`serverkit.Enable`) and calls `ikit.EnableServer` |
+| `server.go` | the package documentation and `enable`, which plugs the engine, the frontends' file server and the process sampler in (`serverkit.Enable`) and calls `ikit.EnableServer` |
 | `README.md` | written by `tools/genindex` from `docs/api` (`make docs-readme`, ADR 0167) |
 
 ## Rules

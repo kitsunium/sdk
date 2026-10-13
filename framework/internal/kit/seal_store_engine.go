@@ -245,8 +245,8 @@ func (e *sealedEngine[T]) Delete(ctx context.Context, key string) error {
 				logger.String("store", e.s.id), logger.String("error", describeText(derr)))
 		}
 	}
-	if !hold(ctx, heldEffect{node: e.s.id, inside: true, release: func() error {
-		drop(withoutUnit(context.WithoutCancel(ctx)))
+	if !hold(ctx, heldEffect{node: e.s.id, inside: true, release: func(rctx context.Context) error {
+		drop(context.WithoutCancel(rctx))
 		return nil
 	}}) {
 		drop(ctx)

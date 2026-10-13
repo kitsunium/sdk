@@ -14,4 +14,6 @@ import _ "github.com/kitsunium/sdk/framework/kit/server"
 
 A daemon or a CLI does not, and links none of the engine. A server that does not import it is refused at the start, naming the import.
 
+It also plugs in the process sampler — the SDK's runtime metrics, which the runtime graph a serving app answers carries (ADR 0172). Without this package the graph has no process, and the program initialises neither runtime/metrics nor the SDK's process package.
+
 Generated from [docs/api](<https://github.com/kitsunium/sdk/blob/main/docs/api>) by tools/genindex.

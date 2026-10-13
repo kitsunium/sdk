@@ -13,8 +13,9 @@ import (
 	"testing/fstest"
 	"time"
 
+	coreconfig "github.com/kitsunium/sdk/internal/core/app/config"
 	corecodec "github.com/kitsunium/sdk/internal/core/data/codec"
-	"github.com/kitsunium/sdk/pkg/v1/app/config"
+	config "github.com/kitsunium/sdk/internal/service/app/config"
 	"github.com/kitsunium/sdk/pkg/v1/data/codec/bson"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
@@ -121,6 +122,9 @@ func TestRefusalsCarryTheCodes(t *testing.T) {
 
 // TestItReadsItsFormatThroughTheRegistry decodes a BSON document through
 // config.FSSource, and is refused a YAML one, which nothing registered.
+//
+// config is the engine pkg/v1/app/config forwards to: the app module sits
+// above this one (ADR 0171), and the registry it reads is the same.
 func TestItReadsItsFormatThroughTheRegistry(t *testing.T) {
 	t.Parallel()
 	doc, err := bson.Marshal(bson.D{{Key: "name", Value: "kit"}, {Key: "port", Value: int32(4000)}})
@@ -142,7 +146,7 @@ func TestItReadsItsFormatThroughTheRegistry(t *testing.T) {
 	}
 	_, err = config.FSSource(tree, "yaml", "app.yaml").Load()
 	//: a format no import registered is refused as such.
-	if !errors.Is(err, config.SourceFailed) {
+	if !errors.Is(err, coreconfig.ConfigSourceFailed) {
 		t.Fatalf("FSSource(yaml).Load() error = %v, want SourceFailed", err)
 	}
 }

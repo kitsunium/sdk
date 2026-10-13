@@ -156,7 +156,7 @@ The legacy byte-level `codec/baseenc` package — an `Encoding` enum over raw by
 
 ## Module
 
-A directory of the one SDK module, `github.com/kitsunium/sdk`, whose `go.mod` is at the repository root (ADR 0162): import paths are `github.com/kitsunium/sdk/pkg/v1/*`, and a consumer requires the SDK module. Until ADR 0162 the packages here were the bare module `…/pkg` (ADR 0017), tagged `pkg/vX.Y.Z`. Built and tested under Bazel via `//pkg/v1/...`; `cd pkg && GOWORK=off go test ./...` works for local iteration.
+Each family directory here is a Go module of its own (ADR 0171), `github.com/kitsunium/sdk/pkg/v1/<family>`, tagged `pkg/v1/<family>/vX.Y.Z`: import paths are `github.com/kitsunium/sdk/pkg/v1/*`, and a consumer requires the family modules it imports. A family requires `internal` and the families below it in `design/sdk.yaml`'s order (`errs`, `clock` < `collections`, `crypto`, `net`, `proc`, `concur` < `observe` < `data` < `security` < `app`), its tests included, never one above it. From ADR 0162 to ADR 0171 the packages here were directories of the root module; until ADR 0162 the bare module `…/pkg` (ADR 0017), tagged `pkg/vX.Y.Z`. Built and tested under Bazel via `//pkg/v1/...`; `go test ./pkg/v1/...` in the workspace, or `cd pkg/v1/<family> && GOWORK=off go test ./...`, for local iteration.
 
 ## Public surface contract
 
@@ -213,8 +213,8 @@ Superseded by ADR 0154 (the charter); ADR 0138 stays as the incident's record, a
 # Primary (Bazel)
 bazel test --config=race //pkg/v1/...
 
-# Fallback (go test; the go.mod is the SDK module's, at the repository root)
-GOWORK=off go test -race -cover ./pkg/v1/...
+# Fallback (go test; one go.mod per family)
+for m in pkg/v1/*/go.mod; do (cd "${m%/go.mod}" && GOWORK=off go test -race -cover ./...); done
 ```
 
 ## Subtree

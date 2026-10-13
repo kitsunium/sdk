@@ -7,11 +7,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kitsunium/sdk/framework/git"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/proc/process"
+	"github.com/kitsunium/sdk/pkg/v1/proc/buildinfo"
 )
 
 // sdkModule is the module a build's kit and SDK are read from, besides the
@@ -63,12 +64,12 @@ var (
 	})
 	// parsedBuild is readBuild as the SDK reads it, parsed once; nil when the
 	// binary carries no build information.
-	parsedBuild = sync.OnceValue(func() *process.BuildInfo {
+	parsedBuild = sync.OnceValue(func() *buildinfo.BuildInfo {
 		bi := readBuild()
 		if bi == nil {
 			return nil
 		}
-		return new(process.ParseBuild(bi))
+		return new(buildinfo.ParseBuild(bi))
 	})
 	// productionBuild is the build as a production run describes it — no
 	// question to git —, described once for the process; every app gets its
@@ -104,7 +105,7 @@ type gitAnswer struct {
 }
 
 // buildOf describes what the running binary was built from, as the SDK reads
-// it (process.ParseBuild): the product's own module with the VCS stamp Go
+// it (buildinfo.ParseBuild): the product's own module with the VCS stamp Go
 // records, and the version of the SDK module, which holds kit (ADR 0162) — so
 // Kit and SDK say the same module at the same version. A module built from a
 // local directory — a workspace, a replace — has no version; with git (dev
@@ -113,7 +114,7 @@ func buildOf(bi *debug.BuildInfo, head gitHead) *model.Build {
 	if bi == nil {
 		return nil
 	}
-	info := process.ParseBuild(bi)
+	info := buildinfo.ParseBuild(bi)
 	b := &model.Build{
 		Product: versionOf(&info.Main, nil),
 		Kit:     model.ModuleVersion{Module: sdkModule},
@@ -133,7 +134,7 @@ func buildOf(bi *debug.BuildInfo, head gitHead) *model.Build {
 // versionOf says one module as the model does: its release, or the commit it
 // came from — which git tells, when head is given, for a directory the
 // toolchain does not stamp.
-func versionOf(m *process.Module, head gitHead) model.ModuleVersion {
+func versionOf(m *buildinfo.Module, head gitHead) model.ModuleVersion {
 	v := model.ModuleVersion{Module: m.Path, Version: m.Version, Revision: m.Revision, Modified: m.Modified, Local: m.Local}
 	at := m.Time
 	if m.Local && head != nil && filepath.IsAbs(m.Dir) {
@@ -214,6 +215,61 @@ func describeBuild(dev bool, getenv func(string) string) (*model.Build, *model.D
 	}
 	return buildOf(readBuild(), cachedHeadAt), devBuildOf(getenv)
 }
+
+// buildDescription is an app's build, described once, at its first read
+// (#276): a run that never reads it — a CLI command, a daemon nobody asks —
+// never parses the binary's build information, which every redraw of a
+// status line would otherwise pay. In dev it is described at the start, so
+// asking git about the local modules stays the start's cost, where kit dev
+// measures it. A nil description describes nothing.
+type buildDescription struct {
+	once     sync.Once
+	done     atomic.Bool
+	isDev    bool
+	getenv   func(string) string
+	build    *model.Build
+	devBuild *model.DevBuild
+}
+
+// newBuildDescription is the build of an app in dev or not, described now in
+// dev and at the first read otherwise.
+func newBuildDescription(dev bool, getenv func(string) string) *buildDescription {
+	d := &buildDescription{isDev: dev, getenv: getenv}
+	if dev {
+		d.describe()
+	}
+	return d
+}
+
+// describe runs describeBuild once.
+func (d *buildDescription) describe() {
+	d.once.Do(func() {
+		d.build, d.devBuild = describeBuild(d.isDev, d.getenv)
+		d.done.Store(true)
+	})
+}
+
+// product is what the binary was built from; nil when it carries no build
+// information, or for a nil description.
+func (d *buildDescription) product() *model.Build {
+	if d == nil {
+		return nil
+	}
+	d.describe()
+	return d.build
+}
+
+// dev is what kit dev said about the build it launched; nil outside dev.
+func (d *buildDescription) dev() *model.DevBuild {
+	if d == nil {
+		return nil
+	}
+	d.describe()
+	return d.devBuild
+}
+
+// described reports whether the build was described yet.
+func (d *buildDescription) described() bool { return d != nil && d.done.Load() }
 
 // moduleBuild is the Go module that holds package pkg, as the build says
 // it: its release, or the commit it came from — git's answer, in dev, for a

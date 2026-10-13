@@ -278,10 +278,10 @@ Start spawns the process described by spec and returns a live Process handle. It
 BuildInfo is what the running binary was built from: the toolchain, the main package, the main module with its version-control stamp, and every dependency followed through its replacement. It is an alias of the service value.
 
 ```go
-type BuildInfo = svcself.BuildValue
+type BuildInfo = svcbuild.BuildValue
 ```
 
-BuildInfo is an alias of `github.com/kitsunium/sdk/internal/service/proc/self.BuildValue`, declared as:
+BuildInfo is an alias of `github.com/kitsunium/sdk/internal/service/proc/buildinfo.BuildValue`, declared as:
 
 ```go
 type BuildInfo struct {
@@ -299,7 +299,7 @@ type BuildInfo struct {
 ```
 
 <a name="BuildInfo.Module"></a>
-### func \(BuildInfo\) [Module](<https://github.com/kitsunium/sdk/blob/main/internal/service/proc/self/build.go>)
+### func \(BuildInfo\) [Module](<https://github.com/kitsunium/sdk/blob/main/internal/service/proc/buildinfo/build.go>)
 
 ```go
 func (*BuildInfo) Module(path string) (found ModuleValue, ok bool)
@@ -413,10 +413,10 @@ type Limit struct {
 Module is one module of the running binary, with its release, its commit and its local directory told apart. It is an alias of the service value.
 
 ```go
-type Module = svcself.ModuleValue
+type Module = svcbuild.ModuleValue
 ```
 
-Module is an alias of `github.com/kitsunium/sdk/internal/service/proc/self.ModuleValue`, declared as:
+Module is an alias of `github.com/kitsunium/sdk/internal/service/proc/buildinfo.ModuleValue`, declared as:
 
 ```go
 type Module struct {

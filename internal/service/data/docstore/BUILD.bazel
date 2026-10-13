@@ -65,6 +65,7 @@ go_test(
         "sql_version_external_test.go",
         "sqlfake_external_test.go",
         "store_external_test.go",
+        "table_internal_test.go",
         "version_external_test.go",
         "version_persist_external_test.go",
     ],

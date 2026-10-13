@@ -38,6 +38,19 @@ const failoverRuns int = 2000
 // blindness this file counts totals to avoid.
 const allocRuntimeWarmup int = 30000
 
+// allocRounds is how many rounds each arm is measured over, its fewest kept.
+//
+// The warm-up above did not close the comparison's fragility: on main at
+// 96dfb083 (issue #270) the DEPTH-1 BASELINE still caught one allocation and
+// every deeper arm caught none, so "depth 2 performed 0 allocations, want 1"
+// failed the run. Whatever the runtime allocates once lands in ONE window, so
+// the least of a few windows does not carry it; a cost of the chain is paid on
+// every write and lands in every window, 2 000 allocations each, so the least
+// still carries it whole. And the comparison is "at most the baseline": the
+// property is that depth adds nothing, and an arm cleaner than its reference
+// says nothing about the chain.
+const allocRounds int = 3
+
 // allocSink defeats dead-code elimination in the allocation probe.
 var allocSink int
 
@@ -55,7 +68,9 @@ var allocSink int
 // The assertion is DIFFERENTIAL, against a one-branch chain rather than a
 // hardcoded count, so it survives a legitimate change in the baseline write
 // cost and fails only on the forbidden thing — a chain depth visible in the
-// allocation profile of a write that never falls over. Verified to bite: with
+// allocation profile of a write that never falls over. Each arm is the fewest
+// of allocRounds windows, and a deeper arm may cost less than the baseline,
+// never more. Verified to bite: with
 // the pre-sized slate restored, depths 3, 4 and 8 report one allocation more
 // than depth 1 while depth 2 stays at the baseline, which is the three-branch
 // escape threshold showing through.
@@ -157,16 +172,29 @@ func TestChainDepthAddsNoAllocationOnTheHealthyPath(t *testing.T) {
 			allocSink = n
 		})
 	}
+	//: fewestAllocs is the least writeAllocs reports over allocRounds rounds,
+	//: each on a chain of its own: a stray allocation the runtime makes once
+	//: lands in one round, while a cost of the chain lands in every one.
+	fewestAllocs := func(t *testing.T, depth int) uint64 {
+		t.Helper()
+		fewest := writeAllocs(t, depth)
+		for range allocRounds - 1 {
+			fewest = min(fewest, writeAllocs(t, depth))
+		}
+		return fewest
+	}
 	//: before either arm, and never through a chain an arm measures.
 	warmRuntimeCaches(t, payload)
-	base := writeAllocs(t, 1)
+	base := fewestAllocs(t, 1)
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		got := writeAllocs(t, tc.depth)
-		//: strictly equal, never "at most base+k": an unused fallback must not
-		//: show up in the allocation profile at all.
-		if got != base {
-			t.Errorf("%s: %d writes at depth %d performed %d allocations, want %d (the depth-1 baseline) — an unexercised fallback must cost nothing", tc.name, failoverRuns, tc.depth, got, base)
+		got := fewestAllocs(t, tc.depth)
+		//: never "at most base+k": an unused fallback must not show up in the
+		//: allocation profile at all. And never "equal" either: a deeper
+		//: chain allocating LESS than the baseline is a stray the baseline
+		//: caught, not a regression (issue #270).
+		if got > base {
+			t.Errorf("%s: %d writes at depth %d performed %d allocations, want at most %d (the depth-1 baseline) — an unexercised fallback must cost nothing", tc.name, failoverRuns, tc.depth, got, base)
 		}
 	}
 	for _, tc := range tests {

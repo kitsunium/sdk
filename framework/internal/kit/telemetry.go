@@ -92,8 +92,8 @@ func (a *App) startTelemetry(ctx context.Context) error {
 	if a.binary != nil {
 		hello.Binary, hello.Role = model.BinaryID(a.binary.name), model.RoleID(a.binary.name, a.role)
 	}
-	if a.build != nil {
-		hello.Revision = a.build.Product.Revision
+	if b := a.build.product(); b != nil {
+		hello.Revision = b.Product.Revision
 	}
 	ex, err := telemetry.NewExporter(&telemetry.ExporterConfig{Path: path, AllowGIDs: gids, Hello: hello})
 	if err != nil {

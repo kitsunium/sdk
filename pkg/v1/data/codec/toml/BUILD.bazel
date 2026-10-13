@@ -32,10 +32,11 @@ go_test(
     ],
     deps = [
         ":toml",
+        "//internal/core/app/config",
         "//internal/core/data/codec",
         "//internal/kernel/errs",
+        "//internal/service/app/config",
         "//internal/service/data/codec/toml",
-        "//pkg/v1/app/config",
         "//pkg/v1/errs",
     ],
 )

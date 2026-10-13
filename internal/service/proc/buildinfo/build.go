@@ -1,4 +1,4 @@
-package self
+package buildinfo
 
 import (
 	"runtime/debug"

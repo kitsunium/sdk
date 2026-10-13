@@ -2,8 +2,9 @@
 # BATS tests for compute-bumps.sh. Each test stands up a disposable git repo so
 # the assertions are reproducible offline. No Bazel needed — when bazel is
 # absent the internal/* path falls back to a no-op (compute-bumps gracefully
-# skips the rdeps step). The SDK is one module at the root (ADR 0162), so the
-# script emits the single token "sdk" — never one per module family.
+# skips the rdeps step). The SDK module is at the root (ADR 0162), and the
+# script emits the directory of each module that changed (ADR 0171), `.` for
+# the SDK module.
 
 # Every commit here is --no-verify. The fixtures are throwaway repositories, but
 # `core.hooksPath` is inherited from the developer's own git config, so without
@@ -40,6 +41,9 @@ module github.com/kitsunium/sdk
 
 go 1.27
 EOF
+  # The modules a release may tag are go.work's (ADR 0171): here the SDK
+  # module alone, until a case adds another.
+  printf 'go 1.27\n\nuse .\n' >go.work
   : > pkg/v1/doc.go
   : > internal/kernel/errs/errs.go
   # A real layer directory carries Bazel targets, and compute-bumps uses their
@@ -73,39 +77,39 @@ release_tag() {
   [ -z "$output" ]
 }
 
-@test "change under pkg/v1 emits sdk" {
+@test "change under pkg/v1 emits the SDK module (.)" {
   echo "// patch" >> pkg/v1/doc.go
   g commit -aq --no-verify -m "feat(v1): tweak"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
-  [ "$output" = "sdk" ]
+  [ "$output" = "." ]
 }
 
 # The SDK module's go.mod is at the root since ADR 0162: its go line is every
 # consumer's floor, so a change to it is consumer-visible — what pkg/go.mod was.
-@test "a change to the SDK module's go.mod emits sdk" {
+@test "a change to the SDK module's go.mod emits the SDK module (.)" {
   printf '\n// bump\n' >> go.mod
   g commit -aq --no-verify -m "chore: module tweak"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
-  [ "$output" = "sdk" ]
+  [ "$output" = "." ]
 }
 
 # pkg.go.dev shows the module root's README and LICENSE: what a consumer reads.
-@test "the root README.md and LICENSE emit sdk (ADR 0162)" {
+@test "the root README.md and LICENSE emit the SDK module (.) (ADR 0162)" {
   printf '# kitsunium/sdk\n' > README.md
   g add -A
   g commit -q --no-verify -m "docs: the module page"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
-  [ "$output" = "sdk" ]
+  [ "$output" = "." ]
   release_tag v0.2.0
   printf 'MIT\n' > LICENSE
   g add -A
   g commit -q --no-verify -m "chore: licence"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
-  [ "$output" = "sdk" ]
+  [ "$output" = "." ]
 }
 
 # The rest of the root ships in the module zip and no consumer compiles or
@@ -132,13 +136,14 @@ release_tag() {
   g init -q -b main
   g config user.email "ci@example.invalid"
   g config user.name  "ci"
+  printf 'go 1.27\n\nuse .\n' >go.work
   mkdir -p pkg/v1
   : > pkg/v1/x.go
   g add -A
   g commit -q --no-verify -m "first"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
-  [ "$output" = "sdk" ]
+  [ "$output" = "." ]
 }
 
 @test "empty repo with no pkg dirs emits nothing" {
@@ -146,6 +151,7 @@ release_tag() {
   g init -q -b main
   g config user.email "ci@example.invalid"
   g config user.name  "ci"
+  printf 'go 1.27\n\nuse .\n' >go.work
   : > NOTES.md
   g add -A
   g commit -q --no-verify -m "first"
@@ -185,7 +191,7 @@ STUB
   PATH="$stub:$PATH" run "$SCRIPT"
   rm -rf "$stub"
   [ "$status" -eq 0 ]
-  [ "$output" = "sdk" ]
+  [ "$output" = "." ]
 }
 
 # --- #227: a failed query and an unreachable target used to be one silence ---
@@ -287,6 +293,7 @@ STUB
   g config user.email "ci@example.invalid"; g config user.name "ci"
   mkdir -p pkg/v1
   printf 'module github.com/kitsunium/sdk\n\ngo 1.27\n' > go.mod
+  printf 'go 1.27\n\nuse .\n' > go.work
   : > pkg/v1/doc.go
   g add -A; g commit -q --no-verify -m "init"
   release_tag pkg/v0.1.0
@@ -295,12 +302,13 @@ STUB
   [ -z "$output" ]
 }
 
-@test "detached release tag + a real pkg change after the base emits sdk" {
+@test "detached release tag + a real pkg change after the base emits the SDK module (.)" {
   cd "$(mktemp -d)"
   g init -q -b main
   g config user.email "ci@example.invalid"; g config user.name "ci"
   mkdir -p pkg/v1
   printf 'module github.com/kitsunium/sdk\n\ngo 1.27\n' > go.mod
+  printf 'go 1.27\n\nuse .\n' > go.work
   : > pkg/v1/doc.go
   g add -A; g commit -q --no-verify -m "init"
   release_tag pkg/v0.1.0
@@ -308,7 +316,7 @@ STUB
   g commit -aq --no-verify -m "feat(v1): real change after release"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
-  [ "$output" = "sdk" ]
+  [ "$output" = "." ]
 }
 
 # ADR 0162: once the SDK module has its first tag, that tag is the base — the
@@ -327,7 +335,7 @@ STUB
   g commit -aq --no-verify -m "feat(v1): next"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
-  [ "$output" = "sdk" ]
+  [ "$output" = "." ]
 }
 
 # --- #238: the exclusion was a two-name list under a comment describing a ------
@@ -376,7 +384,7 @@ STUB
   g commit -q --no-verify -m "docs(errs): regenerate README"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
-  [ "$output" = "sdk" ]
+  [ "$output" = "." ]
 }
 
 @test "a .go file under pkg/ still cuts a release (control)" {
@@ -384,7 +392,7 @@ STUB
   g commit -aq --no-verify -m "feat(v1): a public symbol"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
-  [ "$output" = "sdk" ]
+  [ "$output" = "." ]
 }
 
 # --- the half no list could have fixed: rule 2 -------------------------------
@@ -408,6 +416,7 @@ bazel_subtree_fixture() {
   g config user.email "ci@example.invalid"; g config user.name "ci"
   mkdir -p pkg/v1 internal/kernel/errs
   printf 'module github.com/kitsunium/sdk\n\ngo 1.27\n' > go.mod
+  printf 'go 1.27\n\nuse .\n' > go.work
   : > pkg/v1/doc.go
   : > internal/kernel/errs/errs.go
   printf 'go_library(name = "errs")\n' > internal/kernel/errs/BUILD.bazel
@@ -456,7 +465,7 @@ STUB
   query="$(cat "$calls")"
   rm -rf "$stub" "$calls"
   [ "$status" -eq 0 ]
-  [ "$output" = "sdk" ]
+  [ "$output" = "." ]
   [ "$ncalls" -eq 1 ]
   # The vendor modules import internal/ directly, so they are in the set a
   # change is asked about, beside the SDK's published packages (ADR 0162).
@@ -488,7 +497,7 @@ STUB
   run bash -c "'$SCRIPT' --explain 2>&1 >/dev/null"
   [ "$status" -eq 0 ]
   [[ "$output" == *"rule 1: pkg/v1/doc.go is an SDK-module change -> release"* ]]
-  [[ "$output" == *"verdict: RELEASE (token 'sdk')"* ]]
+  [[ "$output" == *"verdict: RELEASE (modules: .)"* ]]
 }
 
 # Rule 1 read its paths from `git diff --name-only … || true`, so a git that
@@ -524,7 +533,7 @@ STUB
   g commit -aq --no-verify -m "feat(v1): a public symbol"
   PATH="/usr/bin:/bin" run "$SCRIPT" --require-bazel
   [ "$status" -eq 0 ]
-  [ "$output" = "sdk" ]
+  [ "$output" = "." ]
 }
 
 # ── The framework (ADR 0147), a part of the SDK module (ADR 0162) ───────────
@@ -532,7 +541,7 @@ STUB
 # SDK; a connector under framework/connectors/ is a module of its own, which a
 # release also tags when it changed (cut-tags.sh). Either is the one token.
 
-@test "a change under framework/ emits sdk" {
+@test "a change under framework/ emits the SDK module (.)" {
   mkdir -p framework/kit
   echo "package kit" > framework/kit/kit.go
   g add -A
@@ -540,18 +549,37 @@ STUB
   run bash -c "'$SCRIPT' --explain 2>&1"
   [ "$status" -eq 0 ]
   [[ "$output" == *"rule 1: framework/kit/kit.go is an SDK-module change"* ]]
-  [[ "$output" == *$'\nsdk'* ]]
+  [[ "$output" == *$'\n.'* ]]
 }
 
-@test "a change to a connector module emits sdk, as a connector's" {
+# ADR 0171: a module go.work names is measured on its own, so a change to a
+# connector releases the connector and NOT the SDK module.
+@test "a change to a connector module emits the connector alone" {
   mkdir -p framework/connectors/postgres
   printf 'module github.com/kitsunium/sdk/framework/connectors/postgres\n\ngo 1.27\n' > framework/connectors/postgres/go.mod
+  printf 'go 1.27\n\nuse (\n\t.\n\t./framework/connectors/postgres\n)\n' > go.work
   g add -A
   g commit -q --no-verify -m "feat(framework): the postgres connector"
   run bash -c "'$SCRIPT' --explain 2>&1"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"rule 1c: framework/connectors/postgres/go.mod is a connector-module change"* ]]
-  [[ "$output" == *$'\nsdk'* ]]
+  [[ "$output" == *"module framework/connectors/postgres: never tagged"* ]]
+  [[ "$output" == *"rule 1m: framework/connectors/postgres/go.mod is a change of the module framework/connectors/postgres"* ]]
+  run "$SCRIPT"
+  [ "$output" = "framework/connectors/postgres" ]
+}
+
+# A connector directory go.work does not name is no module: its files are the
+# SDK module's, and they release it.
+@test "a connector directory go.work does not name releases the SDK module" {
+  mkdir -p framework/connectors/postgres
+  echo "package postgres" > framework/connectors/postgres/pg.go
+  g add -A
+  g commit -q --no-verify -m "feat(framework): a connector, not yet a module"
+  run bash -c "'$SCRIPT' --explain 2>&1"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"rule 1: framework/connectors/postgres/pg.go is a vendor-module path no module of go.work claims"* ]]
+  run "$SCRIPT"
+  [ "$output" = "." ]
 }
 
 @test "a framework CLAUDE.md alone releases nothing" {
@@ -575,32 +603,97 @@ STUB
   g commit -q --no-verify -m "feat: both packages"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
-  [ "$output" = "sdk" ]
+  [ "$output" = "." ]
 }
 
 # ── The vendor modules (ADR 0157) ───────────────────────────────────────────
 # A vendor module is a module of its own, released with the SDK: a change to
 # one releases the SDK, and cut-tags.sh tags the module because it changed.
 
-@test "a change under third-party/ emits sdk" {
+@test "a change under a vendor module emits that module alone (ADR 0171)" {
   mkdir -p third-party/aws/writer/s3
+  printf 'module github.com/kitsunium/sdk/third-party/aws\n\ngo 1.27\n' > third-party/aws/go.mod
+  printf 'go 1.27\n\nuse (\n\t.\n\t./third-party/aws\n)\n' > go.work
+  g add -A
+  g commit -q --no-verify -m "chore(aws): the module"
+  release_tag v0.1.0
+  g tag third-party/aws/v0.1.0 "$(g rev-parse v0.1.0)"
   echo "package s3" > third-party/aws/writer/s3/s3.go
   g add -A
   g commit -q --no-verify -m "feat(s3): a declaration"
   run bash -c "'$SCRIPT' --explain 2>&1"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"rule 1c: third-party/aws/writer/s3/s3.go is a vendor-module change"* ]]
-  [[ "$output" == *$'\nsdk'* ]]
+  [[ "$output" == *"rule 1m: third-party/aws/writer/s3/s3.go is a change of the module third-party/aws"* ]]
+  [[ "$output" == *"module .: changed paths: 0"* ]]
+  run "$SCRIPT"
+  [ "$output" = "third-party/aws" ]
 }
 
-@test "a change to a vendor module's go.mod emits sdk" {
+# #295: v0.19.0 tagged all thirteen vendor modules for a change of their
+# generated test pins alone. A test file and a fixture are no change a
+# consumer's build compiles, so they release nothing.
+@test "a vendor module whose only change is a test or a fixture releases nothing (#295)" {
+  mkdir -p third-party/aws/writer/s3/testdata
+  printf 'module github.com/kitsunium/sdk/third-party/aws\n\ngo 1.27\n' > third-party/aws/go.mod
+  echo "package s3" > third-party/aws/writer/s3/s3.go
+  printf 'go 1.27\n\nuse (\n\t.\n\t./third-party/aws\n)\n' > go.work
+  g add -A
+  g commit -q --no-verify -m "chore(aws): the module"
+  release_tag v0.1.0
+  g tag third-party/aws/v0.1.0 "$(g rev-parse v0.1.0)"
+  echo "package s3" > third-party/aws/writer/s3/api_gen_test.go
+  echo "{}" > third-party/aws/writer/s3/testdata/case.json
+  g add -A
+  g commit -q --no-verify -m "test(s3): the generated pins"
+  run bash -c "'$SCRIPT' --explain 2>&1"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"module third-party/aws: changed paths: 2 (0 could carry a consumer-visible change)"* ]]
+  [[ "$output" == *"verdict: NO RELEASE"* ]]
+  # The control: the same module's code still releases it.
+  echo "// x" >> third-party/aws/writer/s3/s3.go
+  g commit -aq --no-verify -m "fix(s3): behaviour"
+  run "$SCRIPT"
+  [ "$output" = "third-party/aws" ]
+}
+
+# ADR 0171: a pkg family and the shared internal module are modules of their
+# own; each releases on its own change, and the SDK module does not.
+@test "a family module and the internal module release on their own changes" {
+  mkdir -p pkg/v1/data internal/kernel/x
+  # Real Go files, at a go directive any toolchain reads: rule 1i asks the go
+  # command which module imports what internal changed.
+  printf 'module github.com/kitsunium/sdk\n\ngo 1.21\n' > go.mod
+  printf 'package v1\n' > pkg/v1/doc.go
+  printf 'package errs\n' > internal/kernel/errs/errs.go
+  printf 'module github.com/kitsunium/sdk/pkg/v1/data\n\ngo 1.21\n' > pkg/v1/data/go.mod
+  printf 'module github.com/kitsunium/sdk/internal\n\ngo 1.21\n' > internal/go.mod
+  echo "package data" > pkg/v1/data/data.go
+  printf 'go 1.27\n\nuse (\n\t.\n\t./internal\n\t./pkg/v1/data\n)\n' > go.work
+  g add -A
+  g commit -q --no-verify -m "refactor: the split"
+  release_tag v0.20.0
+  g tag internal/v0.1.0 "$(g rev-parse v0.20.0)"
+  g tag pkg/v1/data/v0.1.0 "$(g rev-parse v0.20.0)"
+  echo "// x" >> pkg/v1/data/data.go
+  g commit -aq --no-verify -m "fix(data): one"
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "pkg/v1/data" ]
+  echo "package x" > internal/kernel/x/x.go
+  g add -A
+  g commit -q --no-verify -m "fix(kernel): one"
+  run "$SCRIPT"
+  [ "$output" = "$(printf 'internal\npkg/v1/data')" ]
+}
+
+@test "a change to a vendor module's go.mod emits the SDK module (.)" {
   mkdir -p third-party/db/writer/mysql
   printf 'module github.com/kitsunium/sdk/third-party/db/writer/mysql\n\ngo 1.27\n' > third-party/db/writer/mysql/go.mod
   g add -A
   g commit -q --no-verify -m "chore(mysql): the module"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
-  [ "$output" = "sdk" ]
+  [ "$output" = "." ]
 }
 
 @test "a vendor CLAUDE.md or BUILD.bazel alone releases nothing" {
@@ -624,8 +717,8 @@ STUB
   g commit -q --no-verify -m "feat: three places"
   run "$SCRIPT" --explain
   [ "$status" -eq 0 ]
-  [[ "$output" == *"verdict: RELEASE (token 'sdk')"* ]]
+  [[ "$output" == *"verdict: RELEASE (modules: .)"* ]]
   run "$SCRIPT"
   [ "$status" -eq 0 ]
-  [ "$output" = "sdk" ]
+  [ "$output" = "." ]
 }

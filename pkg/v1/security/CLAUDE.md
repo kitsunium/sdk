@@ -6,7 +6,7 @@
 The security family's public facades (ADR 0155). This directory holds no Go
 code: it is a prefix, not a package, and there is no
 `github.com/kitsunium/sdk/pkg/v1/security` to import. Each member is a package
-of the SDK module with its own `CLAUDE.md`, `README.md` (written by
+of the `pkg/v1/security` Go module (ADR 0171, whose `go.mod` this directory holds) with its own `CLAUDE.md`, `README.md` (written by
 `tools/genindex` from `docs/api`, ADR 0167) and, where it measures something,
 `BENCH.md`. A member is imported by its full path —
 `github.com/kitsunium/sdk/pkg/v1/security/secret` — and links what it imports

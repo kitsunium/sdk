@@ -141,6 +141,45 @@ job_body() {
   [ "$output" != "0" ]
 }
 
+# push_block <workflow> — the lines of the `push:` trigger under `on:`, nothing
+# when the workflow has none. `push:` alone and `push:` with filters both print
+# the header, so a caller can tell "no push trigger" from "an unfiltered one".
+push_block() {
+  awk '
+    /^on:/                       { inon = 1; next }
+    inon && /^[^ #]/             { inon = 0 }
+    inon && /^  push:/           { grab = 1; print; next }
+    grab && /^  [A-Za-z_-]+:/    { grab = 0 }
+    grab                         { print }
+  ' "$1"
+}
+
+# #296: a `pin/*` tag is a marker on a commit, never a build. A workflow whose
+# `push` trigger reaches tags ran twice for the two pin tags pushed in W1. A push
+# trigger reaches tags when it has no ref filter at all, or a tags filter; it
+# must then ignore `pin/**`. And a `tags-ignore` with no `branches` filter would
+# stop every BRANCH push — GitHub runs a push event only for the ref kinds a
+# filter names once any is named — so the branches are spelled out beside it.
+# Red against e2e-cross.yml's bare `push:`.
+@test "lanes: no push trigger runs for a pin/* tag, and none stops running for branches" {
+  local wf block
+  for wf in "$REPO_ROOT"/.github/workflows/*.yml; do
+    block="$(push_block "$wf")"
+    [ -n "$block" ] || continue
+    if [[ "$block" != *"branches"* && "$block" != *"tags"* ]]; then
+      echo "$(basename "$wf"): its push trigger has no ref filter, so a pin/* tag runs it" >&2
+      return 1
+    fi
+    if [[ "$block" == *"tags-ignore"* ]]; then
+      [[ "$block" == *"'pin/**'"* ]] || { echo "$(basename "$wf"): tags-ignore leaves pin/** in" >&2; return 1; }
+      [[ "$block" == *"branches:"* ]] || { echo "$(basename "$wf"): tags-ignore without branches stops every branch push" >&2; return 1; }
+    elif [[ "$block" == *"tags:"* ]]; then
+      echo "$(basename "$wf"): a tags filter must exclude pin/** — use tags-ignore" >&2
+      return 1
+    fi
+  done
+}
+
 # ── platforms.sh ────────────────────────────────────────────────────────────
 
 # The cells are one table: the script prints it, genindex reads its
@@ -391,4 +430,90 @@ drop_line() {
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"MISSING GUARD: 'scripts/pre-commit/check-core-symmetry.sh'"* ]]
+}
+
+# ── ci-gates-check.sh: a gate must block the merge (#236) ───────────────────
+
+# shell-gates is not a required check. Its gates block only because the
+# required `bazel` job needs it, checks its result, and is not skipped when it
+# fails — `needs:` alone turns a red shell-gates into a SKIPPED bazel, which
+# GitHub counts as passing. Each test removes one of the three pieces.
+@test "gates: the gates of shell-gates block through the required bazel job" {
+  body="$(job_body "$REPO_ROOT/.github/workflows/bazel-ci.yml" bazel)"
+  [[ "$body" == *"    needs: shell-gates"* ]]
+  [[ "$body" == *'    if: ${{ !cancelled() }}'* ]]
+  [[ "$body" == *'needs.shell-gates.result'* ]]
+}
+
+@test "gates: a gate in a job the required job does not need is NOT BLOCKING" {
+  gates_fixture
+  drop_line .github/workflows/bazel-ci.yml "    needs: shell-gates"
+
+  run bash scripts/ci-gates-check.sh
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"NOT BLOCKING: 'ci-gates-check' runs only in job 'shell-gates'"* ]]
+  [[ "$output" == *"does not list it under needs:"* ]]
+}
+
+@test "gates: a needed job whose result the required job ignores is NOT BLOCKING" {
+  gates_fixture
+  drop_line .github/workflows/bazel-ci.yml 'needs.shell-gates.result'
+
+  run bash scripts/ci-gates-check.sh
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"NOT BLOCKING: 'release-scripts-check'"* ]]
+  [[ "$output" == *"never checks needs.shell-gates.result"* ]]
+}
+
+@test "gates: a result named only in a comment of the required job checks nothing" {
+  gates_fixture
+  sed -e 's/SHELL_GATES_RESULT: ${{ needs.shell-gates.result }}/SHELL_GATES_RESULT: success  # needs.shell-gates.result/' \
+    .github/workflows/bazel-ci.yml >wf.tmp
+  sed -e 's/^\( *\)SHELL_GATES_RESULT: success  # \(.*\)$/\1# \2\n\1SHELL_GATES_RESULT: success/' wf.tmp >.github/workflows/bazel-ci.yml
+
+  run bash scripts/ci-gates-check.sh
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"never checks needs.shell-gates.result"* ]]
+}
+
+@test "gates: a required job skipped when a needed job fails is NOT BLOCKING" {
+  gates_fixture
+  drop_line .github/workflows/bazel-ci.yml '    if: ${{ !cancelled() }}'
+
+  run bash scripts/ci-gates-check.sh
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"NOT BLOCKING: 'ci-gates-check'"* ]]
+  [[ "$output" == *"a skipped required check passes"* ]]
+}
+
+@test "gates: a guard moved out of the required job is NOT BLOCKING" {
+  gates_fixture
+  drop_line .github/workflows/bazel-ci.yml "run: bash scripts/pre-commit/check-core-symmetry.sh"
+  awk '{ print } /^  docs-site:/ { in_docs = 1 } in_docs && /^    steps:/ { print "      - run: bash scripts/pre-commit/check-core-symmetry.sh"; in_docs = 0 }' \
+    .github/workflows/bazel-ci.yml >wf.tmp
+  mv wf.tmp .github/workflows/bazel-ci.yml
+
+  run bash scripts/ci-gates-check.sh
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"NOT BLOCKING: 'scripts/pre-commit/check-core-symmetry.sh' runs only in job 'docs-site'"* ]]
+}
+
+@test "gates: an advisory gate is reported, not failed, and only when listed" {
+  gates_fixture
+
+  run bash scripts/ci-gates-check.sh
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"advisory: 'docs-check' runs in docs-site"* ]]
+
+  drop_line scripts/ci-gates-check.sh "  docs-check"
+  # Keep docs-check a gate, drop it from ADVISORY only.
+  sed -e 's/^  api-check$/  api-check\n  docs-check/' scripts/ci-gates-check.sh >s.tmp && mv s.tmp scripts/ci-gates-check.sh
+  run bash scripts/ci-gates-check.sh
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"NOT BLOCKING: 'docs-check' runs only in job 'docs-site'"* ]]
 }

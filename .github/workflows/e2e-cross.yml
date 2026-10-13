@@ -21,7 +21,13 @@ name: Cross-platform runtime tests (real kernels, no lab)
 # in one run, not stop at the first divergence.
 
 on:
+  # Every branch and every tag but `pin/**`: a pin tag marks a commit for a
+  # consumer of the design (#296) and builds nothing, and pushing two of them
+  # ran this lane twice for nothing. `branches` is spelled out because a push
+  # trigger that names a tag filter alone runs for no branch at all.
   push:
+    branches: ['**']
+    tags-ignore: ['pin/**']
   workflow_dispatch:
 
 permissions:
@@ -413,7 +419,7 @@ jobs:
   # kernels through libc), synced into the guest and executed there as root.
   # The two kernels are separate GOOS values (runtime.GOOS is "illumos" on the
   # first, "solaris" on the second) and diverge below libc, so each gets its own
-  # leg. pkg's ./v1/proc suite runs here too: it asserts the capability matrix
+  # leg. The pkg/v1/proc module's root suite runs here too: it asserts the capability matrix
   # for the GOOS it runs on, which is the claim this lane exists to back.
   #
   # 15 min rests on ONE green run per kernel: 3m17s on OmniOS, 3m01s on
@@ -467,7 +473,7 @@ jobs:
           compile internal/service $SERVICE_PKGS
           compile internal/service $SERVICE_FILE_PKGS
           compile framework        $FRAMEWORK_PKGS
-          compile pkg              ./v1/proc
+          compile pkg/v1/proc      ./
           (cd e2e && go build -o "$GITHUB_WORKSPACE/bins/conformance.run" .)
           # One copy of what the guest runs, for both guest steps below (a
           # `uses:` takes no expression, so each guest is its own step). POSIX

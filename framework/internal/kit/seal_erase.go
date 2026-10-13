@@ -24,8 +24,8 @@ import (
 // nothing: nothing of it is sealed.
 func (a *App) shredPeople(ctx context.Context, ids []string, refs map[string]bool) error {
 	keys := a.privacyKeyStore()
-	if keys == nil || hold(ctx, heldEffect{node: keys.id, inside: true, release: func() error {
-		return a.shredPeople(withoutUnit(context.WithoutCancel(ctx)), ids, refs)
+	if keys == nil || hold(ctx, heldEffect{node: keys.id, inside: true, release: func(rctx context.Context) error {
+		return a.shredPeople(context.WithoutCancel(rctx), ids, refs)
 	}}) {
 		return nil
 	}
@@ -63,8 +63,8 @@ func (a *App) shredPeople(ctx context.Context, ids []string, refs map[string]boo
 // meanwhile either stood before — and keeps it — or makes a new one after.
 func (a *App) shredIfLast(ctx context.Context, identity string) error {
 	keys := a.privacyKeyStore()
-	if identity == "" || keys == nil || hold(ctx, heldEffect{node: keys.id, inside: true, release: func() error {
-		return a.shredIfLast(withoutUnit(context.WithoutCancel(ctx)), identity)
+	if identity == "" || keys == nil || hold(ctx, heldEffect{node: keys.id, inside: true, release: func(rctx context.Context) error {
+		return a.shredIfLast(context.WithoutCancel(rctx), identity)
 	}}) {
 		return nil
 	}

@@ -1731,7 +1731,7 @@ func Test_versionNotice(t *testing.T) {
 	tests := []tc{
 		{"the count", "v0.1.9", []string{"v0.1.10", "v0.1.24"}, "2 patch releases behind"},
 		{"the latest", "v0.1.9", []string{"v0.1.24"}, "latest is v0.1.24"},
-		{"the upgrade command", "v0.1.9", []string{"v0.1.24"}, "go get " + sdkModule + "@v0.1.24"},
+		{"the upgrade command", "v0.1.9", []string{"v0.1.24"}, "go get " + sdkModule + "@latest && go mod tidy"},
 		{"the way to silence it", "v0.1.9", []string{"v0.1.24"}, "-version-check=off"},
 		{"the release policy", "v0.1.9", []string{"v0.1.24"}, "ADR 0007"},
 	}
@@ -2538,7 +2538,7 @@ func Test_checkVersion(t *testing.T) {
 			"below the first release nothing is a candidate, above it everything is",
 			"v0.0.0-20261003145325-1896ad230f09",
 			[]string{"v0.0.0", "v0.18.0"},
-			true, "go get " + sdkModule + "@v0.18.0",
+			true, "go get " + sdkModule + "@latest && go mod tidy",
 		},
 	}
 	runCase := func(t *testing.T, c tc) {
@@ -2679,7 +2679,7 @@ func Test_checkVersionMigration(t *testing.T) {
 				"replace " + sdkModule + "/internal/kernel => ../kernel\n",
 			map[string][]string{sdkModule: {"v0.18.0", "v0.18.1"}},
 			true,
-			[]string{"1 patch releases behind", "go get " + sdkModule + "@v0.18.1"},
+			[]string{"1 patch releases behind", "go get " + sdkModule + "@latest && go mod tidy"},
 		},
 		{
 			"no SDK module release and up to date: silent",
@@ -2698,7 +2698,7 @@ func Test_checkVersionMigration(t *testing.T) {
 			"module x\n\nrequire " + sdkModule + " v0.18.0\n",
 			map[string][]string{sdkModule: {"v0.18.0", "v0.19.0"}, legacyModule: {"v0.17.0"}},
 			true,
-			[]string{"crossing a minor version", "go get " + sdkModule + "@v0.19.0"},
+			[]string{"crossing a minor version", "go get " + sdkModule + "@latest && go mod tidy"},
 		},
 	}
 	runCase := func(t *testing.T, c tc) {

@@ -100,42 +100,56 @@ imported from `github.com/kitsunium/sdk/framework/…` (ADR 0158).
 
 ## Install
 
-The SDK is one Go module, `github.com/kitsunium/sdk` — `pkg/v1`, the framework
-and the internals they are built on — and it links the standard library and
-nothing else (ADR 0156, ADR 0162):
+Each family of `pkg/v1` is a Go module of its own — `github.com/kitsunium/sdk/pkg/v1/<family>`
+for `app`, `clock`, `collections`, `concur`, `crypto`, `data`, `errs`, `net`,
+`observe`, `proc` and `security` —, so you lock each family at its own version
+and a fix in one moves nothing else (ADR 0171). They are built on one shared
+module, `…/internal`, and the framework is the root module,
+`github.com/kitsunium/sdk`; none links anything but the standard library
+(ADR 0156):
 
 ```bash
-go get github.com/kitsunium/sdk@latest
+go get github.com/kitsunium/sdk/pkg/v1/data@latest github.com/kitsunium/sdk/pkg/v1/errs@latest
 ```
 
 then import the packages you use — `github.com/kitsunium/sdk/pkg/v1/data/codec`,
-`…/pkg/v1/errs`, `…/framework/kit`. Importing them first and running
-`go mod tidy` works as well: up to v0.17.0 they were the modules `…/pkg` and
-`…/framework`, and v0.18.0 gave each a last version that holds no package, so
-Go resolves the imports to `github.com/kitsunium/sdk` (ADR 0162). An
-integration that needs a vendor library is a module of its own, required by
-name, so you take that vendor and no other:
+`…/pkg/v1/errs` — or `github.com/kitsunium/sdk@latest` for `…/framework/kit`.
+Importing them first and running `go mod tidy` works as well: Go resolves an
+import to the module with the longest path that provides it, which is the
+family's. A go.mod pinned to a root between v0.18.0 and v0.19.7, which held
+`pkg/` and `internal/`, is lifted past them by the first family it adds: every
+family requires the root at the first version that holds neither, and the
+root's go.mod retracts the others, so `go list -m -u` says where the packages
+went. An integration that needs a vendor library is a module of its own,
+required by name, so you take that vendor and no other:
 `go get github.com/kitsunium/sdk/third-party/aws@latest`, or
 `…/framework/connectors/postgres`.
 
 ### Migrating from `…/pkg` and `…/framework` (v0.17.0 and before)
 
 Up to v0.17.0 the SDK was split into modules — `…/pkg`, `…/framework` and
-three `…/internal/*` ones your go.mod lists as `// indirect`. Since v0.18.0 it
-is one; the import paths did not change, the requirement does. One command
-moves a go.mod over, and it must drop every old module, or each package is
-found in two modules of the build and it fails with an ambiguous import:
+three `…/internal/*` ones your go.mod lists as `// indirect`. The import paths
+did not change, the requirement does. Since the module per family (ADR 0171),
+a go.mod still on `…/pkg` moves over by requiring the families it imports:
 
 ```bash
-go get github.com/kitsunium/sdk@v0.18.0 github.com/kitsunium/sdk/internal/kernel@none
+go get github.com/kitsunium/sdk/pkg/v1/<family>@latest   # each family you import
 go mod tidy
 ```
 
-Go names this command itself: v0.18.0 of `…/pkg` and `…/framework` deprecates
-them, so `go list -m -u` marks both `(deprecated)`, and `go get` prints, on one
-line, `go: module github.com/kitsunium/sdk/pkg is deprecated: moved into
-github.com/kitsunium/sdk at v0.18.0, import paths unchanged; migrate with:`
-and the command above.
+Every family requires `…/pkg` at v0.18.0, its last version, which holds no
+package, and the three `…/internal/*` modules at v0.18.0, which hold none
+either, so minimum version selection lifts all four off the packages the
+family provides — without that, two modules provide them and the build fails
+with `ambiguous import` (measured on a file proxy, ADR 0171 §7). Do not add
+`…/internal/kernel@none` to that command: the families require its v0.18.0,
+and `go get` refuses the removal.
+
+Before the split the same move went to the root module, and v0.18.0 of `…/pkg`
+and `…/framework` still deprecates them with that older command
+(`go get github.com/kitsunium/sdk@v0.18.0 …/internal/kernel@none`), which `go
+get` prints; it lands on a retracted root, from which adding the families is
+the step above. The paragraphs below describe that removal.
 
 The one removal is enough: every version of `…/pkg`, `…/framework`,
 `…/internal/core` and `…/internal/service` up to v0.17.0 requires
@@ -193,11 +207,11 @@ func main() {
   go run github.com/kitsunium/sdk/tools/sdkguard@latest -level=invariant ./...
   ```
   It catches the defects that never announce themselves — a second logging pipeline beside the SDK logger (two thresholds, two formats, half-stamped records), stdout used as a log destination under a stdio protocol, a `logger.Version` assigned at runtime. Rules target *constructs*, never imports, so `*slog.Logger` fields and `fmt.Fprintln(os.Stdout, …)` stay legitimate. It also warns — without failing your build — when your `go.mod` pins an SDK older than the latest release, which matters here because a patch is cut whenever an internal package changes, carrying fixes no public-API changelog would show. See ADR 0033 and `tools/sdkguard/CLAUDE.md`.
-- **One module, and a module per vendor** — the SDK is one module at the root (ADR 0162); `go.work` adds the thirteen modules that require a vendor library: the framework's four connectors (three database engines and entitlement's ssh identity) and nine vendor modules under `third-party/` — one per vendor, `codec/yaml` included (ADR 0157). Each can be built standalone with `GOWORK=off`, and `bash scripts/ci/go-modules.sh` lists them all. `e2e/`, `tools/genindex/` and `tools/sdkguard/` are auxiliary modules held deliberately outside it (adding them breaks Bazel's `go_deps`, which reads `go.work`) — build those with `GOWORK=off`.
+- **A module per family, and a module per vendor** — each `pkg/v1/<family>` is a module, `internal/` is one shared module and the root holds the framework (ADR 0171); `go.work` adds the thirteen modules that require a vendor library: the framework's four connectors (three database engines and entitlement's ssh identity) and nine vendor modules under `third-party/` — one per vendor, `codec/yaml` included (ADR 0157). Each can be built standalone with `GOWORK=off`, and `bash scripts/ci/go-modules.sh` lists them all. `e2e/`, `tools/genindex/` and `tools/sdkguard/` are auxiliary modules held deliberately outside it (adding them breaks Bazel's `go_deps`, which reads `go.work`) — build those with `GOWORK=off`.
 
 ## Releases
 
-Versioning follows [semver](https://semver.org/) and Go's sub-directory tag convention. A release is ONE tag, `vX.Y.Z`, on the SDK module `github.com/kitsunium/sdk`, and one GitHub release; a vendor or connector module is tagged at the same version — `third-party/<path>/vX.Y.Z`, `framework/connectors/<engine>/vX.Y.Z` — only by a release that changes it, and the release's notes list the ones it cut (ADR 0162). The releases up to v0.17.0 were cut as `pkg/vX.Y.Z` with every other module in lockstep (ADR 0017, ADR 0147, ADR 0157); those tags stay, and v0.18.0 cut `pkg/v0.18.0` and `framework/v0.18.0` once more, as tombstones — a go.mod that requires the SDK module, holds no package and deprecates its module with the migration command. A release is sized by the `release:*` label a maintainer sets on the pull request (ADR 0135). The full release workflow lives in ADR 0007 and the records that amend it (`docs/adr/`).
+Versioning follows [semver](https://semver.org/) and Go's sub-directory tag convention. Since ADR 0171 a release tags each module that changed, at its OWN version — `vX.Y.Z` for the root, `pkg/v1/<family>/vX.Y.Z`, `internal/vX.Y.Z`, `third-party/<path>/vX.Y.Z`, `framework/connectors/<engine>/vX.Y.Z` — in one atomic push, named by a `release-manifest.json` attached to ONE GitHub release. From v0.18.0 to v0.19.7 a release was one tag on the root, then holding `pkg/` and `internal/` (ADR 0162); v0.18.0 also cut `pkg/v0.18.0` and `framework/v0.18.0`, tombstones that hold no package. The releases up to v0.17.0 were cut as `pkg/vX.Y.Z` with every other module in lockstep (ADR 0017, ADR 0147, ADR 0157): their tags are no longer on this repository — removed before ADR 0171 —, the Go module proxy still serves every one of their versions, and `GOPROXY=direct` cannot resolve them. A release is sized by the `release:*` label a maintainer sets on the pull request (ADR 0135). The full release workflow lives in ADR 0007 and the records that amend it (`docs/adr/`).
 
 ## Documentation
 

@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
@@ -378,13 +379,16 @@ func (u *unit) claimLocal(ctx context.Context, a *App, store string) error {
 // Held effects ----------------------------------------------------------
 
 // heldEffect is what leaves the process at the commit: a publish, a mail, a
-// notice, a hook. release runs it, once the commit stood; drop, when set,
-// cleans up after one a rollback dropped.
+// notice, a hook. release runs it, once the commit stood, with the context
+// releasing gives it; drop, when set, cleans up after one a rollback dropped.
 type heldEffect struct {
 	// node is the node that made it, what a refusal is reported on.
 	node    string
-	release func() error
+	release func(ctx context.Context) error
 	drop    func()
+	// made is the context it was made in, which hold records: what its
+	// release keeps the values of.
+	made context.Context
 	// inside marks an effect that stays in the process — a store's write
 	// hook —: a transaction's span does not count it among what it held.
 	inside bool
@@ -403,6 +407,7 @@ func hold(ctx context.Context, e heldEffect) bool {
 	if t.done {
 		return false
 	}
+	e.made = ctx
 	t.held = append(t.held, e)
 	return true
 }
@@ -430,21 +435,55 @@ func atEnd(ctx context.Context, fn func()) bool {
 // stands.
 func (t *txn) let(held []heldEffect) {
 	for _, e := range held {
-		if err := letOne(e); err != nil && t.app != nil {
+		if err := letOne(t.releasing(e.made), e); err != nil && t.app != nil {
 			t.app.problem(e.node, say("transaction.effect", "node", e.node, "detail", describeText(err)))
 		}
 	}
 }
 
-// letOne releases one effect, a panic said as its failure.
-func letOne(e heldEffect) (err error) {
+// letOne releases one effect with ctx, a panic said as its failure.
+func letOne(ctx context.Context, e heldEffect) (err error) {
 	defer func() {
 		if p := recover(); p != nil {
 			err = Unavailable(fmt.Sprintf("an effect held until the commit panicked: %v", clip(fmt.Sprint(p))))
 		}
 	}()
-	return e.release()
+	return e.release(ctx)
 }
+
+// releasing is the context an effect made in made is released with: made's
+// values — its trace, its user, its node — outside the transaction, and the
+// life of the transaction's outermost level, whose commit releases it. Not
+// made's own life: a keyed command's run ends — its key given back, its
+// keepalive's context cancelled — before the transaction around it commits
+// (issue #275), and what it held would leave already cancelled. The level's
+// life is the one still running at the commit, and it ends only when the
+// caller of the whole transaction gives up. A lost lease still reaches the
+// keyed handler, through its own context, while it runs.
+func (t *txn) releasing(made context.Context) context.Context {
+	if made == nil {
+		made = t.base
+	}
+	return withoutUnit(releasedContext{Context: context.WithoutCancel(made), life: t.base})
+}
+
+// releasedContext is a held effect's context at its release: the values of
+// the context that made it — without its cancellation, which
+// context.WithoutCancel removes, so that context.Cause does not reach it
+// either — and the deadline, the end and the error of life.
+type releasedContext struct {
+	context.Context
+	life context.Context
+}
+
+// Deadline is life's.
+func (c releasedContext) Deadline() (time.Time, bool) { return c.life.Deadline() }
+
+// Done is life's.
+func (c releasedContext) Done() <-chan struct{} { return c.life.Done() }
+
+// Err is life's.
+func (c releasedContext) Err() error { return c.life.Err() }
 
 // retell keeps a function that announces a write on a database again when
 // the transaction ctx carries rolls it back.

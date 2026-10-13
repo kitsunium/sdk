@@ -720,7 +720,7 @@ func (w *WorkflowService[E, S]) definition(a *App) *statemachine.Definition[E, S
 	// A transition runs in a transaction: its hooks wait for the commit,
 	// kit's own — the Studio's events — as the product's.
 	def.OnTransition(func(ctx context.Context, c statemachine.Change[E, S]) error {
-		if !hold(ctx, heldEffect{node: w.id, release: func() error { w.transitioned(a, c); return nil }, inside: true}) {
+		if !hold(ctx, heldEffect{node: w.id, release: func(context.Context) error { w.transitioned(a, c); return nil }, inside: true}) {
 			w.transitioned(a, c)
 		}
 		return nil
@@ -735,7 +735,7 @@ func (w *WorkflowService[E, S]) definition(a *App) *statemachine.Definition[E, S
 // until the transition's transaction commits.
 func (w *WorkflowService[E, S]) heldHook(a *App, fn func(context.Context, ChangeEvent[E, S]) error) func(context.Context, statemachine.Change[E, S]) error {
 	return func(ctx context.Context, c statemachine.Change[E, S]) error {
-		if hold(ctx, heldEffect{node: w.id, release: func() error { w.afterCommit(ctx, a, fn, c); return nil }}) {
+		if hold(ctx, heldEffect{node: w.id, release: func(rctx context.Context) error { w.afterCommit(rctx, a, fn, c); return nil }}) {
 			return nil
 		}
 		return fn(ctx, changeOf(c))
@@ -743,10 +743,11 @@ func (w *WorkflowService[E, S]) heldHook(a *App, fn func(context.Context, Change
 }
 
 // afterCommit runs an OnTransition hook the transition's transaction held,
-// once it committed: its error, or its panic, is reported as the engine
-// reports a hook's, and the transition stands.
+// once it committed, with the context the release gives it — the
+// transition's values, the committing transaction's life: its error, or its
+// panic, is reported as the engine reports a hook's, and the transition
+// stands.
 func (w *WorkflowService[E, S]) afterCommit(ctx context.Context, a *App, fn func(context.Context, ChangeEvent[E, S]) error, c statemachine.Change[E, S]) {
-	ctx = withoutUnit(ctx)
 	fields := []errs.Field{errs.String("hook", "on-transition"), errs.String("event", c.Event), errs.String("key", c.Key)}
 	defer func() {
 		if p := recover(); p != nil {

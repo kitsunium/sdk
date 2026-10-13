@@ -4,7 +4,7 @@ go 1.27.2
 
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.48.0
-	github.com/kitsunium/sdk v0.0.0-00010101000000-000000000000
+	github.com/kitsunium/sdk/internal v0.0.0-00010101000000-000000000000
 )
 
 require (
@@ -24,4 +24,4 @@ require (
 	golang.org/x/sys v0.47.0 // indirect
 )
 
-replace github.com/kitsunium/sdk => ../../../..
+replace github.com/kitsunium/sdk/internal => ../../../../internal

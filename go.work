@@ -4,8 +4,20 @@ use (
 	.
 	./framework/connectors/mysql
 	./framework/connectors/postgres
-	./framework/connectors/ssh
 	./framework/connectors/sqlite
+	./framework/connectors/ssh
+	./internal
+	./pkg/v1/app
+	./pkg/v1/clock
+	./pkg/v1/collections
+	./pkg/v1/concur
+	./pkg/v1/crypto
+	./pkg/v1/data
+	./pkg/v1/errs
+	./pkg/v1/net
+	./pkg/v1/observe
+	./pkg/v1/proc
+	./pkg/v1/security
 	./third-party/aws
 	./third-party/codec/hcl
 	./third-party/codec/protobuf

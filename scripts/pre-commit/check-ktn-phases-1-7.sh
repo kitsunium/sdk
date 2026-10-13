@@ -34,22 +34,15 @@ installing the tool. Install it before committing:
 
   /ktn
 
-  # or manually. Two corrections on the command that used to be printed
-  # here, both measured: the release ships ktn-linter_<os>_<arch>.tar.gz
-  # (underscores, and an archive — not a bare ktn-linter-<os>-<arch>, which
-  # has never existed), and kodflow/ktn-linter is PRIVATE, so curl on a
-  # release URL answers 404 whether or not the asset is there — GitHub's
-  # signed redirect drops the Authorization header. \`gh release download\` is
-  # the only probe that tells "no such asset" from "not authorised".
-  #
-  # The version is pinned to the one .github/workflows/bazel-ci.yml installs,
-  # so a local verdict and the CI verdict are the same verdict. linux/darwin;
-  # the windows asset is a .zip.
-  asset="ktn-linter_\$(go env GOOS)_\$(go env GOARCH).tar.gz"
-  gh release download v1.11.2 --repo kodflow/ktn-linter \\
-      --pattern "\$asset" --dir /tmp \\
-    && tar -xzf "/tmp/\$asset" -C /tmp ktn-linter \\
-    && install -m 0755 /tmp/ktn-linter "\$(go env GOPATH)/bin/ktn-linter"
+  # or manually, FROM SOURCE at the commit the Makefile pins — the same
+  # build CI runs. Never from a release: a release binary carries the
+  # vendor's licence anchor and demands a licence on this machine, a source
+  # build leaves it empty. kodflow/ktn-linter is private, so the clone needs
+  # an account that can read it.
+  gh repo clone kodflow/ktn-linter /tmp/ktn-src \\
+    && git -C /tmp/ktn-src checkout --detach \\
+         "\$(awk -F' := ' '\$1 == "KTN_LINTER_COMMIT" { print \$2 }' Makefile)" \\
+    && make lint-ktn-install KTN_LINTER_SRC=/tmp/ktn-src
 
 ═══════════════════════════════════════════════════════════════
 EOF

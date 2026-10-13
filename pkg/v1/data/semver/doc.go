@@ -5,10 +5,10 @@
 // names and the same answers, and no module outside the standard library
 // (ADR 0156 §4, published by ADR 0159 §4).
 //
-//	semver.IsValid("v1.2.3-rc.1+build.5")             // true
+//	semver.IsValid("v1.2.3-rc.1+meta.5")              // true
 //	semver.Compare("v1.9.12", "v1.10.0")              // -1: numbers, not text
 //	semver.Compare("v1.0.0-beta.11", "v1.0.0-beta.2") // 1: 11 > 2
-//	semver.Prerelease("v1.0.0-rc.1+build")            // "-rc.1"
+//	semver.Prerelease("v1.0.0-rc.1+meta")             // "-rc.1"
 //	slices.SortFunc(tags, semver.Compare)             // unreadable strings first
 //
 // # The grammar

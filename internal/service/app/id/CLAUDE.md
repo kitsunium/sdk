@@ -30,6 +30,10 @@ and raises the core's.
 - **Registration via `var X = id.Register(...)`, never `init()`.**
 - Stateless singletons (uuidv4/v7/ulid/nanoid/ksuid) ; snowflake is per-instance
   stateful (mutex + sequence), with a default-node singleton + `NewSnowflake(node)`.
+  The singleton derives its node from the hostname and pid at its FIRST id,
+  under its lock, not at the package's initialisation: every program importing
+  the domain would otherwise read `/proc/sys/kernel/hostname` at start for an
+  id it may never mint (#276, `Test_theDefaultNodeIsDerivedAtTheFirstID`).
 - Random bytes come from `crypto/rand.Read`, called directly. Since Go 1.24 it
   never returns an error and always fills its buffer — a failing source crashes
   the program instead — so no generator fails for want of entropy and there is

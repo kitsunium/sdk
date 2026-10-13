@@ -103,7 +103,7 @@ func (a *App) runtimeOf(started time.Time) *model.Runtime {
 		Loops:      a.sortedLoops(),
 	}
 	a.describeRuntime(rt)
-	rt.Dev = a.devBuild
+	rt.Dev = a.build.dev()
 	return rt
 }
 
@@ -178,7 +178,7 @@ func listStatesIn(s *model.Schema, enums map[string][]string) {
 // appInfo identifies the product. The module root is only disclosed in dev:
 // it is what an editor link needs, and what a production graph must not leak.
 func (a *App) appInfo(started time.Time) model.App {
-	info := model.App{Name: a.name, Module: a.module, Env: a.cfg.env, Kit: kitVersion(), Go: goVersion(), Build: cloneBuild(a.build)}
+	info := model.App{Name: a.name, Module: a.module, Env: a.cfg.env, Kit: kitVersion(), Go: goVersion(), Build: cloneBuild(a.build.product())}
 	if a.cfg.env == EnvDev {
 		info.Root = a.root
 	}

@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
+	secret "github.com/kitsunium/sdk/internal/core/security/secret"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger/slogbridge"
-	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
 
 // newRecorder wires a Logger onto a MemorySink so a test can assert on the
@@ -616,7 +616,9 @@ func TestBridgedRecordsCarrySDKDecorations(t *testing.T) {
 // for encoding.TextMarshaler, its JSON handler for json.Marshaler, and this
 // bridge converts an Any payload with fmt — and the Value answers all three
 // with the placeholder. This test is where that claim is checked, because this
-// is the one package allowed to name slog.
+// is the one package allowed to name slog. It names the Value through its core
+// package, which pkg/v1/security/secret aliases: the security module sits above
+// this one (ADR 0171), and the type is the same either way.
 func TestASecretRendersItsPlaceholderThroughSlog(t *testing.T) {
 	t.Parallel()
 	const plain = "slog-secret-5e2c71"

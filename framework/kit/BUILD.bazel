@@ -86,6 +86,7 @@ go_test(
         "facade_generics_external_test.go",
         "facade_sync_external_test.go",
         "fresh_process_bench_test.go",
+        "initgraph_external_test.go",
     ],
     # facade_sync_external_test.go reads the facade's and the implementation's sources.
     data = glob(["*.go"]) + ["//framework/internal/kit:audit_srcs"],  # keep

@@ -308,6 +308,7 @@ func TestKillTerminatesSetsidDescendant(t *testing.T) {
 		if serr := cmd.Start(); serr != nil {
 			t.Fatalf("starting the helper tree: %v", serr)
 		}
+		leaderExited := waitInBackground(t, cmd)
 		//: attach the leader; its children inherit the cgroup membership.
 		if aerr := g.Add(cmd.Process.Pid); aerr != nil {
 			t.Fatalf("Add(leader): %v", aerr)
@@ -320,9 +321,12 @@ func TestKillTerminatesSetsidDescendant(t *testing.T) {
 		if kerr := g.Kill(); kerr != nil {
 			t.Fatalf("Kill on the populated tree: %v", kerr)
 		}
-		//: reap the leader so it does not linger as a zombie.
-		if _, werr := cmd.Process.Wait(); werr != nil {
-			t.Logf("leader wait after Kill: %v", werr)
+		//: the leader must be gone: a bounded wait, because an unbounded one
+		//: on a leader cgroup.kill missed waits on a loop that never ends.
+		select {
+		case <-leaderExited:
+		case <-time.After(killDrainDeadline):
+			t.Fatal("the leader survived cgroup.kill")
 		}
 		//: a successful Delete proves the group is EMPTY: any survivor would
 		//: hold it EBUSY.
@@ -334,6 +338,40 @@ func TestKillTerminatesSetsidDescendant(t *testing.T) {
 			runCase(t, c)
 		})
 	}
+}
+
+// waitInBackground reaps cmd on a goroutine and returns a channel closed once it
+// has exited, and registers a cleanup that kills it first.
+//
+// Goroutine lifecycle: one goroutine runs cmd.Wait and closes the channel. The
+// cleanup kills the leader on every exit path — a t.Fatal between Start and
+// Kill included — and waits for that goroutine, bounded by killDrainDeadline.
+// Without it, a test failing before cgroup.kill left `while :; do sleep 1 &
+// done` forking after the test binary exited, starving every suite run after it
+// on the same machine (#118).
+func waitInBackground(t *testing.T, cmd *exec.Cmd) <-chan struct{} {
+	t.Helper()
+	exited := make(chan struct{})
+	go func() {
+		//: a killed leader reports its signal; the close is the exit. The
+		//: cleanup below waits for it, so the log never outlives the test.
+		if werr := cmd.Wait(); werr != nil {
+			t.Logf("helper leader wait: %v", werr)
+		}
+		close(exited)
+	}()
+	t.Cleanup(func() {
+		//: an error means the leader already exited, which is the goal.
+		if kerr := cmd.Process.Kill(); kerr != nil {
+			t.Logf("cleanup Kill: %v (the leader had likely already exited)", kerr)
+		}
+		select {
+		case <-exited:
+		case <-time.After(killDrainDeadline):
+			t.Errorf("the helper leader %d did not exit after SIGKILL", cmd.Process.Pid)
+		}
+	})
+	return exited
 }
 
 // sanitise turns a case name into a single safe path element, since a control

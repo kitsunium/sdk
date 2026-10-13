@@ -188,9 +188,7 @@ func (s *Service) Loop(name string, run func(context.Context, WakeEvent) error, 
 		o.loopConfigure(&l.opts)
 	}
 	l.kind, l.name, l.decl = model.KindLoop, name, callerPos()
-	if p, _ := funcInfo(run); p.file() != "" {
-		l.body = &p
-	}
+	l.body = bodyOf(run)
 	if p, _ := funcInfo(l.opts.deadline); p.file() != "" {
 		l.deadlineAt = &p
 	}
@@ -552,9 +550,7 @@ func (t *TopicService[T]) wake() {
 func (s *Service) Go(name string, run func(context.Context) error) *Routine {
 	r := &Routine{run: run}
 	r.kind, r.name, r.decl = model.KindLoop, name, callerPos()
-	if p, _ := funcInfo(run); p.file() != "" {
-		r.body = &p
-	}
+	r.body = bodyOf(run)
 	s.add(r, true)
 	if run == nil {
 		s.problem(r.decl, r.id, "routine.nil", "name", name)

@@ -4,7 +4,9 @@
 ## Purpose
 
 `github.com/kitsunium/sdk/framework/...` (ADR 0147): the layer above `pkg/v1`,
-packages of the one SDK module `github.com/kitsunium/sdk` since ADR 0162 — it
+packages of the root module `github.com/kitsunium/sdk` — the SDK module of ADR
+0162, which since ADR 0171 holds the framework and nothing of `pkg/` or
+`internal/`, and requires the `pkg/v1` families and `internal` it imports. It
 was a module of its own, tagged `framework/vX.Y.Z` up to v0.17.0.
 A product imports the framework and nothing from `kitsunium/platform` (D2);
 the platform keeps the tools a product runs but does not link — the Studio,
@@ -54,8 +56,9 @@ the analyzer, the generator, `kit check`.
    the product: no mocks, no faults, no `jobs/run`, `workflows/fire`,
    `commands/dispatch`, `queries/ask`, `loops/wake`, `privacy/*`,
    `profile/cpu`. A person's rights are CLI commands of the product.
-5. **Release.** The framework is released with the SDK module, in its one
-   tag `vX.Y.Z` (ADR 0162). It requires no vendor: the entitlement and
+5. **Release.** The framework is released as the root module, tagged
+   `vX.Y.Z` by a release that changes it (ADR 0171) — a family's change
+   releases that family, not the framework. It requires no vendor: the entitlement and
    self-update engines compare versions with `pkg/v1/data/semver`, the SDK's
    standard-library semver (ADR 0156 §4, ADR 0158 §2), which replaced
    `golang.org/x/mod`; a connector carries its own vendor in its own module,
