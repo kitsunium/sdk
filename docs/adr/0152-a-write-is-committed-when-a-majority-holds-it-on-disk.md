@@ -575,6 +575,10 @@ vote or resurrecting an entry a later record truncated (`storage.js:35-37`,
 - The proposer computes only the checksum of the entry's body.
 - The LEADER computes the chain value at its serialized append point: the
   checksum of the previous entry's header, chained.
+- Both checksums are CRC-32C: they detect corruption, not an adversary. A
+  member that holds the cluster's key can forge an entry whose chain
+  matches; the chain protects against a damaged or misplaced entry, and
+  the transport's mTLS against an outsider (review of PR #301, L9).
 - Both are verified when the entry is appended and again before `Apply`. A
   mismatch at append refuses the acknowledgement, and the leader resends. A
   mismatch found before `Apply` re-fetches the entry from a peer, or stops
@@ -704,6 +708,14 @@ R7's rules contradicted each other.
        not an earlier chunk of the same batch, while reporting the sync, is
        outside the crash-only model. That case is quarantined, so it loses
        availability, never data.
+     - **A second residual, stated (review of PR #301, L7):** damage to
+       the END record of the highest batch AFTER its sync returned (bit
+       rot, a misdirected write) cannot be told from a batch that never
+       completed. That batch is truncated, and with it what it acknowledged,
+       a vote included. The log assumes a medium that does not corrupt
+       synced data silently: dm-crypt detects nothing, so detection after
+       the sync belongs to the device or to dm-integrity, and a node that
+       loses a synced batch this way relies on the other replicas.
      A crash test runs through dm-crypt, as the nodes do.
   4. A torn tail is truncated at the hole. Every other hole is quarantined:
      a valid record of a lower batch after it, a bad CRC that is not a tear
@@ -2598,6 +2610,12 @@ node, under the directory lock.
   - It writes a forced configuration and a NEW `ClusterID`, and bumps the log
     epoch (R2-09), so no node of the old cluster can talk to the recovered one
     by mistake.
+  - **It keeps the log up to the commit index the node persisted (review of
+    PR #301, L8).** The commit index is written lazily, so entries this node
+    saw committed but had not yet recorded as committed are dropped. That is
+    the price of a disaster recovery: the runbook picks the survivor with the
+    highest persisted commit (`Inspect`) and says that the last writes before
+    the loss may be gone.
   - **The probe cannot detect a partition, and the text says so (R4-04).** A
     seed cut off from this node still runs, and can still serve. So
     `Recover` requires an operator attestation,
