@@ -10,6 +10,7 @@ go_library(
         "leader.go",
         "log.go",
         "mutation.go",
+        "peerstat.go",
         "progress.go",
         "raft.go",
         "step.go",

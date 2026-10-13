@@ -47,9 +47,10 @@ func (r *Raft) becomeLeader() {
 	}
 	if pr := r.prs[r.id]; pr != nil {
 		pr.match = r.log.stable
-		pr.heard = true
+		pr.facts |= peerHeard
 	}
-	r.leaseDropped, r.leaseStart = false, time.Time{}
+	r.facts &^= raftLeaseDropped
+	r.leaseStart = time.Time{}
 	r.rounds, r.pendingReads, r.waitingReads = nil, nil, nil
 	r.transferTo = 0
 	// A new leader commits a no-op of its term before it serves a read or
@@ -181,7 +182,7 @@ func (r *Raft) sendAppend(to core.NodeID, sendIfEmpty bool) {
 	}
 	if pr.next <= r.log.evicted && pr.next <= r.log.lastIndex() {
 		// The payloads were evicted: the driver reads them off the loop.
-		pr.fetching = true
+		pr.facts |= peerFetching
 		r.rd.Fetch = append(r.rd.Fetch, FetchSpec{To: to, Lo: pr.next, Hi: min(r.log.evicted, r.log.lastIndex()) + 1})
 		return
 	}
@@ -197,10 +198,10 @@ func (r *Raft) sendAppend(to core.NodeID, sendIfEmpty bool) {
 // dropped, and a compacted read moves the peer to the snapshot path.
 func (r *Raft) Fetched(to core.NodeID, lo uint64, ents []core.EntryValue, compacted bool) {
 	pr := r.prs[to]
-	if pr == nil || !pr.fetching {
+	if pr == nil || pr.facts&peerFetching == 0 {
 		return
 	}
-	pr.fetching = false
+	pr.facts &^= peerFetching
 	if r.role != core.RoleLeader || pr.next != lo || pr.state == stateSnapshot {
 		r.sendAppend(to, false)
 		return
@@ -251,7 +252,7 @@ func (r *Raft) sendEntries(pr *progress, to core.NodeID, prev, prevTerm uint64, 
 			pr.add(last, size)
 		}
 	case stateProbe:
-		pr.probeSent = true
+		pr.facts |= peerProbeSent
 	default:
 		// stateSnapshot: a peer in a transfer is paused, so no append
 		// reaches it and there is no window to account.
@@ -307,7 +308,7 @@ func (r *Raft) stepLeader(now time.Time, m core.MessageValue) {
 		return
 	}
 	pr.lastHeard = now
-	pr.heard = true
+	pr.facts |= peerHeard
 	switch m.Kind {
 	case core.MsgAppResp:
 		r.handleAppResp(pr, m)
@@ -326,7 +327,7 @@ func (r *Raft) handleHeartbeatResp(pr *progress, m core.MessageValue) {
 	r.ackRounds(m.From, m.Context, m.Contract)
 	r.confirmRounds()
 	if pr.state == stateProbe {
-		pr.probeSent = false
+		pr.facts &^= peerProbeSent
 	}
 	if pr.state == stateReplicate && len(pr.inflight) > 0 && pr.match == pr.hbMatch {
 		// An append in the window was lost: the transport may drop,
@@ -407,9 +408,9 @@ func (r *Raft) handleAppReject(pr *progress, m core.MessageValue) {
 		pr.state = stateProbe
 		pr.freeAll()
 	}
-	pr.probeSent = false
+	pr.facts &^= peerProbeSent
 	r.sendAppend(m.From, false)
-	if !pr.probeSent {
+	if pr.facts&peerProbeSent == 0 {
 		r.sendAppend(m.From, true)
 	}
 }
@@ -527,7 +528,7 @@ func (r *Raft) checkTimingContract(admin *wire.AdminValue) errs.Code {
 	}
 	// From the moment a new contract is proposed, the lease is dropped
 	// (D9 d).
-	r.leaseDropped = true
+	r.facts |= raftLeaseDropped
 	return 0
 }
 
@@ -625,7 +626,7 @@ func (r *Raft) promote(cur *core.MembershipValue, target core.NodeID, idx int) e
 	pr := r.prs[target]
 	// Recent DURABLE progress within PromoteLag of the commit, heard
 	// within the last election timeout (D8).
-	if pr == nil || !pr.heard || pr.match+r.cfg.PromoteLag < r.log.committed ||
+	if pr == nil || pr.facts&peerHeard == 0 || pr.match+r.cfg.PromoteLag < r.log.committed ||
 		r.now.Sub(pr.lastHeard) >= r.timing.ElectionTimeoutMax {
 		return codeMembershipInvalid
 	}
@@ -689,7 +690,7 @@ func (r *Raft) activeMajority(m core.MembershipValue) bool {
 			n++
 			continue
 		}
-		if pr := r.prs[id]; pr != nil && pr.heard && r.now.Sub(pr.lastHeard) < r.voteWindow {
+		if pr := r.prs[id]; pr != nil && pr.facts&peerHeard != 0 && r.now.Sub(pr.lastHeard) < r.voteWindow {
 			n++
 		}
 	}
@@ -752,7 +753,7 @@ func (r *Raft) admitForward(size int) errs.Code {
 	switch {
 	case r.cfg.MaxEntryBytes > 0 && size > r.cfg.MaxEntryBytes:
 		return core.CodeEntryTooLarge
-	case r.overloaded, r.cfg.MaxForwardBytes > 0 && r.fwdBytes+int64(size) > r.cfg.MaxForwardBytes:
+	case r.facts&raftOverloaded != 0, r.cfg.MaxForwardBytes > 0 && r.fwdBytes+int64(size) > r.cfg.MaxForwardBytes:
 		return core.CodeOverloaded
 	}
 	return 0
@@ -884,7 +885,7 @@ func (r *Raft) roundAcks(rd *round) (int, time.Duration) {
 // the current one, shortened by the drift budget; a dropped lease stays
 // dropped for the term.
 func (r *Raft) extendLease(sentAt time.Time, leaseLen time.Duration) {
-	if r.leaseDropped || !sentAt.After(r.leaseStart) {
+	if r.facts&raftLeaseDropped != 0 || !sentAt.After(r.leaseStart) {
 		return
 	}
 	r.leaseStart = sentAt
@@ -953,10 +954,10 @@ func (r *Raft) startTransfer(to core.NodeID) {
 		return
 	}
 	r.transferTo = to
-	r.transferSent = false
+	r.facts &^= raftTransferSent
 	r.transferDeadline = r.now.Add(r.timing.ElectionTimeoutMax)
 	if !r.mutated(mutLeaseAfterTransfer) {
-		r.leaseDropped = true
+		r.facts |= raftLeaseDropped
 	}
 	if pr := r.prs[to]; pr != nil && pr.match < r.log.lastIndex() {
 		r.sendAppend(to, false)
@@ -967,7 +968,7 @@ func (r *Raft) startTransfer(to core.NodeID) {
 // maybeSendTimeoutNow sends TimeoutNow only once every proposed entry is
 // committed and the target holds them all (D8, from raft-sql-poc).
 func (r *Raft) maybeSendTimeoutNow() {
-	if r.transferTo == 0 || r.transferSent || r.role != core.RoleLeader {
+	if r.transferTo == 0 || r.facts&raftTransferSent != 0 || r.role != core.RoleLeader {
 		return
 	}
 	pr := r.prs[r.transferTo]
@@ -975,7 +976,7 @@ func (r *Raft) maybeSendTimeoutNow() {
 	if pr == nil || r.log.committed != last || pr.match != last {
 		return
 	}
-	r.transferSent = true
+	r.facts |= raftTransferSent
 	r.send(core.MessageValue{Kind: core.MsgTimeoutNow, To: r.transferTo})
 }
 

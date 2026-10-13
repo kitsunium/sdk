@@ -14,6 +14,33 @@ import (
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
 
+// The facts a PeerHealthValue carries.
+const (
+	// PeerVoter is set for a voter, clear for a learner.
+	PeerVoter PeerFlags = 1 << iota
+	// PeerUnreachable is set when the transport failed to reach the peer
+	// since it last answered, or it has not answered within the minimum
+	// election timeout.
+	PeerUnreachable
+	// PeerSnapshot is set while a snapshot is being sent to the peer.
+	PeerSnapshot
+)
+
+// The answers a HealthValue carries.
+const (
+	// HealthReady is the readiness answer: running, a leader known,
+	// everything known committed applied, and not refusing the current
+	// leader's chain (D4).
+	HealthReady HealthFlags = 1 << iota
+	// HealthHasLeader is set when a leader is known in the current term.
+	HealthHasLeader
+	// HealthQuorumReachable is set on a leader a majority answered within
+	// the minimum election timeout; never elsewhere.
+	HealthQuorumReachable
+	// HealthStopped is set once the node stopped itself or was closed.
+	HealthStopped
+)
+
 // maxSlotLen bounds a slot name, which the stamp stores behind a one-byte
 // length.
 const maxSlotLen int = 32
@@ -297,8 +324,9 @@ func writeFoundingEntry(cfg *Config, members []coreconsensus.MemberValue) error 
 type PeerHealthValue struct {
 	// ID is the peer.
 	ID coreconsensus.NodeID
-	// Voter is false for a learner.
-	Voter bool
+	// Flags are the peer's yes/no facts: PeerVoter, PeerUnreachable,
+	// PeerSnapshot.
+	Flags PeerFlags
 	// Match is the highest index the peer holds durably, as acknowledged.
 	Match uint64
 	// Lag is how far Match is behind the leader's last index.
@@ -308,26 +336,36 @@ type PeerHealthValue struct {
 	// LastContact is how long ago it last answered; negative when it never
 	// answered in this term.
 	LastContact time.Duration
-	// Unreachable is set when the transport failed to reach it since it
-	// last answered, or it has not answered within the minimum election
-	// timeout.
-	Unreachable bool
-	// Snapshot is set while a snapshot is being sent to it.
-	Snapshot bool
+}
+
+// PeerFlags are a peer's yes/no facts in a health verdict, one bit each,
+// read with Has.
+type PeerFlags uint8
+
+// Has reports whether every fact of x is set.
+func (f PeerFlags) Has(x PeerFlags) bool { return f&x == x }
+
+// HealthFlags are a verdict's yes/no answers, one bit each, read with Has.
+type HealthFlags uint8
+
+// Has reports whether every answer of x is set.
+func (f HealthFlags) Has(x HealthFlags) bool { return f&x == x }
+
+// set is f with x on or off.
+func (f HealthFlags) set(x HealthFlags, on bool) HealthFlags {
+	if on {
+		return f | x
+	}
+	return f &^ x
 }
 
 // HealthValue is a node's verdict for an orchestrator's probe (D13).
 type HealthValue struct {
 	// Status is the node's view after its last turn.
 	Status coreconsensus.StatusValue
-	// Ready is true while a leader is known and the node applied what it
-	// knows committed.
-	Ready bool
-	// HasLeader is true while a leader is known in the current term.
-	HasLeader bool
-	// QuorumReachable is true on a leader a majority answered within the
-	// minimum election timeout; false elsewhere.
-	QuorumReachable bool
+	// Flags are the verdict's yes/no answers: HealthReady, HealthHasLeader,
+	// HealthQuorumReachable, HealthStopped.
+	Flags HealthFlags
 	// FailureTolerance is how many voters can fail now with a majority
 	// left. Only the leader knows it: -1 elsewhere.
 	FailureTolerance int
@@ -341,8 +379,6 @@ type HealthValue struct {
 	ChainRefusals      int
 	ChainRefusalIndex  uint64
 	ChainRefusalLeader coreconsensus.NodeID
-	// Stopped is true once the node stopped, closed or not.
-	Stopped bool
 	// StopReason says why the node stopped itself.
 	StopReason coreconsensus.StopReasonValue
 	// DroppedFrames counts frames whose From differed from the
@@ -359,7 +395,7 @@ type HealthValue struct {
 func (n *Node) Health() HealthValue {
 	st := n.Status()
 	h := HealthValue{
-		Status: st, Stopped: n.stopped.Load(), DroppedFrames: n.droppedFrom.Load(), FailureTolerance: -1,
+		Status: st, Flags: HealthFlags(0).set(HealthStopped, n.stopped.Load()), DroppedFrames: n.droppedFrom.Load(), FailureTolerance: -1,
 		LongTurns: n.longTurns.Load(), JoinsRateLimited: n.joinRefused.Load(),
 	}
 	if r, ok := n.StopReason(); ok {
@@ -368,18 +404,19 @@ func (n *Node) Health() HealthValue {
 	if st.Commit > st.Applied {
 		h.ApplyLagEntries = st.Commit - st.Applied
 	}
-	h.HasLeader = st.Leader != 0 && !h.Stopped
-	if !h.Stopped {
+	stopped := h.Flags.Has(HealthStopped)
+	h.Flags = h.Flags.set(HealthHasLeader, st.Leader != 0 && !stopped)
+	if !stopped {
 		n.exec(func() { n.loopHealth(&h) })
 	}
-	h.Ready = isReady(&h, &st)
+	h.Flags = h.Flags.set(HealthReady, isReady(&h, &st))
 	return h
 }
 
 // isReady is the verdict's Ready: running, a leader known, everything known
 // committed applied, and not refusing the current leader's chain (D4).
 func isReady(h *HealthValue, st *coreconsensus.StatusValue) bool {
-	return !h.Stopped && h.HasLeader && st.Applied >= st.Commit &&
+	return !h.Flags.Has(HealthStopped) && h.Flags.Has(HealthHasLeader) && st.Applied >= st.Commit &&
 		(h.ChainRefusals == 0 || h.ChainRefusalLeader != st.Leader)
 }
 
@@ -388,7 +425,7 @@ func isReady(h *HealthValue, st *coreconsensus.StatusValue) bool {
 // peer's view. It runs on the loop, through exec.
 func (n *Node) loopHealth(h *HealthValue) {
 	now := n.clk.Now()
-	h.QuorumReachable = n.r.QuorumActive(now)
+	h.Flags = h.Flags.set(HealthQuorumReachable, n.r.QuorumActive(now))
 	h.FailureTolerance = n.r.FailureTolerance(now)
 	h.ChainRefusalLeader, h.ChainRefusalIndex, h.ChainRefusals = n.r.ChainRefusal()
 	last := n.r.Status().Last
@@ -402,16 +439,32 @@ func (n *Node) loopHealth(h *HealthValue) {
 // never answered this term, when its last answer is older than the minimum
 // election timeout, or when the transport reported it unreachable since.
 func (n *Node) peerHealth(p *raft.PeerStatValue, now time.Time, last uint64, window time.Duration) PeerHealthValue {
-	ph := PeerHealthValue{ID: p.ID, Voter: p.Voter, Match: p.Match, Inflight: p.Inflight, Snapshot: p.Snapshot, LastContact: -1}
+	ph := PeerHealthValue{ID: p.ID, Match: p.Match, Inflight: p.Inflight, LastContact: -1}
+	if p.Flags.Has(raft.StatVoter) {
+		ph.Flags |= PeerVoter
+	}
+	if p.Flags.Has(raft.StatSnapshot) {
+		ph.Flags |= PeerSnapshot
+	}
 	if last > p.Match {
 		ph.Lag = last - p.Match
 	}
-	if p.Heard {
+	heard := p.Flags.Has(raft.StatHeard)
+	if heard {
 		ph.LastContact = now.Sub(p.LastHeard)
 	}
-	u, reported := n.unreachableAt[p.ID]
-	ph.Unreachable = !p.Heard || ph.LastContact >= window || (reported && u.After(p.LastHeard))
+	if n.peerUnreachable(p, heard, ph.LastContact, window) {
+		ph.Flags |= PeerUnreachable
+	}
 	return ph
+}
+
+// peerUnreachable reports whether a peer counts as unreachable: it never
+// answered this term, its last answer is older than window, or the
+// transport reported it unreachable since.
+func (n *Node) peerUnreachable(p *raft.PeerStatValue, heard bool, lastContact, window time.Duration) bool {
+	u, reported := n.unreachableAt[p.ID]
+	return !heard || lastContact >= window || (reported && u.After(p.LastHeard))
 }
 
 // sharedKey reports whether two members are pinned to one key. The

@@ -216,9 +216,10 @@ func (r *Raft) becomeFollower(term uint64, lead core.NodeID) {
 		r.role = core.RoleLearner
 	}
 	r.votes = map[core.NodeID]bool{}
-	r.selfVoteSeq, r.selfVoteDurable = 0, false
+	r.selfVoteSeq = 0
+	r.facts &^= raftSelfVoteDurable
 	r.campaignIssuer, r.campaignTerm = 0, 0
-	r.leaseDropped = false
+	r.facts &^= raftLeaseDropped
 	r.leaseStart = time.Time{}
 	r.refusedLead = 0
 	if wasLeader {
@@ -235,7 +236,7 @@ func (r *Raft) abortLeadership() {
 	r.pendingReads, r.waitingReads, r.rounds = nil, nil, nil
 	if r.transferTo != 0 {
 		res := TransferResult{To: r.transferTo}
-		if !r.transferSent {
+		if r.facts&raftTransferSent == 0 {
 			res.Code = codeTransferFailed
 		}
 		r.rd.Transfers = append(r.rd.Transfers, res)
@@ -273,7 +274,7 @@ func (r *Raft) campaign(pre bool, issuer core.NodeID, issuerTerm uint64) {
 	r.lead = 0
 	r.role = core.RoleCandidate
 	r.votes = map[core.NodeID]bool{}
-	r.selfVoteDurable = false
+	r.facts &^= raftSelfVoteDurable
 	r.campaignIssuer, r.campaignTerm = issuer, issuerTerm
 	r.resetElection(r.now)
 	for _, id := range r.voters() {
@@ -339,7 +340,7 @@ func (r *Raft) stepCandidate(now time.Time, m core.MessageValue) {
 	case core.MsgVoteResp:
 		if r.role == core.RoleCandidate {
 			r.votes[m.From] = !m.Reject
-			if r.selfVoteDurable {
+			if r.facts&raftSelfVoteDurable != 0 {
 				r.tallyVotes()
 			}
 		}

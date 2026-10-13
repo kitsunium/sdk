@@ -615,8 +615,8 @@ func TestHealthReportsFailureToleranceAndPeers(t *testing.T) {
 	}
 	waitFor("tolerance 1 with three voters", func() bool {
 		h := l.node.Health()
-		return h.FailureTolerance == 1 && h.QuorumReachable && len(h.Peers) == 2 &&
-			!h.Peers[0].Unreachable && !h.Peers[1].Unreachable && h.Peers[0].Lag == 0
+		return h.FailureTolerance == 1 && h.Flags.Has(HealthQuorumReachable) && len(h.Peers) == 2 &&
+			!h.Peers[0].Flags.Has(PeerUnreachable) && !h.Peers[1].Flags.Has(PeerUnreachable) && h.Peers[0].Lag == 0
 	})
 	var f *testNode
 	for _, tn := range c.nodes {
@@ -625,7 +625,7 @@ func TestHealthReportsFailureToleranceAndPeers(t *testing.T) {
 			break
 		}
 	}
-	if h := f.node.Health(); h.FailureTolerance != -1 || h.Peers != nil || !h.HasLeader || !h.Ready {
+	if h := f.node.Health(); h.FailureTolerance != -1 || h.Peers != nil || !h.Flags.Has(HealthHasLeader) || !h.Flags.Has(HealthReady) {
 		t.Fatalf("follower health %+v", h)
 	}
 	c.net.Isolate(f.id, true)
@@ -634,7 +634,7 @@ func TestHealthReportsFailureToleranceAndPeers(t *testing.T) {
 		h := l.node.Health()
 		for _, p := range h.Peers {
 			if p.ID == f.id {
-				return h.FailureTolerance == 0 && p.Unreachable && p.Lag > 0
+				return h.FailureTolerance == 0 && p.Flags.Has(PeerUnreachable) && p.Lag > 0
 			}
 		}
 		return false

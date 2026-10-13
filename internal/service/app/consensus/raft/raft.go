@@ -10,6 +10,26 @@ import (
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
 
+// The facts a Raft holds, one bit each in raftFacts: set with |=, cleared
+// with &^= and read with &, plain operators that keep the step function's
+// small methods within the inliner's budget.
+const (
+	// raftSelfVoteDurable is set once the write that carries this
+	// candidate's own vote is durable: its vote counts from then on (D5b).
+	raftSelfVoteDurable raftFacts = 1 << iota
+	// raftTransferSent is set once TimeoutNow left for the transfer target.
+	raftTransferSent
+	// raftLeaseDropped is set when the lease must not be served until a new
+	// round confirms leadership (D9).
+	raftLeaseDropped
+	// raftOverloaded is the driver's apply backpressure, set each turn: a
+	// forwarded command is refused while it holds, as a local one is.
+	raftOverloaded
+)
+
+// raftFacts are the step function's own yes/no state, one bit each.
+type raftFacts uint8
+
 // ProtocolMax is the highest protocol version this engine speaks: a cluster
 // version above it is refused, and stops a node that finds it committed.
 const ProtocolMax uint32 = 1
@@ -74,7 +94,13 @@ type fwdEntry struct {
 
 // SetOverloaded tells the state machine whether the driver refuses new
 // commands for apply backpressure (D6): forwarded ones are refused too.
-func (r *Raft) SetOverloaded(on bool) { r.overloaded = on }
+func (r *Raft) SetOverloaded(on bool) {
+	if on {
+		r.facts |= raftOverloaded
+		return
+	}
+	r.facts &^= raftOverloaded
+}
 
 // StartState is the durable state the driver loaded.
 type StartState struct {
@@ -191,9 +217,10 @@ type Raft struct {
 	rng *rand.Rand
 	mut mutation
 
-	// overloaded is the driver's apply backpressure, set each turn: a
-	// forwarded command is refused while it holds, as a local one is.
-	overloaded bool
+	// facts are the step function's yes/no state (raftFacts): the vote
+	// counted once durable, the transfer sent, the lease dropped, and the
+	// driver's apply backpressure.
+	facts raftFacts
 	// fwd lists the forwarded commands appended in fwdTerm and not yet
 	// known committed, with fwdBytes their payload total.
 	fwd      []fwdEntry
@@ -221,16 +248,13 @@ type Raft struct {
 
 	// selfVoteSeq is the write that carries this candidate's own vote; its
 	// vote counts once that write is durable (D5b).
-	selfVoteSeq     uint64
-	selfVoteDurable bool
+	selfVoteSeq uint64
 
 	// termStart is the index of this leader's no-op.
 	termStart uint64
 
 	transferTo       core.NodeID
-	transferSent     bool
 	transferDeadline time.Time
-	leaseDropped     bool
 	leaseStart       time.Time
 	// leaseLen is the lease the last confirmed round grants: computed
 	// from the minimum timing contract over the acknowledging majority,
@@ -358,7 +382,7 @@ func (r *Raft) noteSelfVote(seq uint64) {
 	}
 	r.selfVoteSeq = 0
 	if r.role == core.RoleCandidate {
-		r.selfVoteDurable = true
+		r.facts |= raftSelfVoteDurable
 		r.votes[r.id] = true
 		r.tallyVotes()
 	}
@@ -387,7 +411,7 @@ func (r *Raft) SnapshotDone(to core.NodeID, ok bool) {
 		pr.pendingSnapshot = 0
 	}
 	pr.becomeProbe()
-	pr.probeSent = true
+	pr.facts |= peerProbeSent
 }
 
 // Compact forgets the entries through index, which a durable snapshot
@@ -478,7 +502,7 @@ func (r *Raft) Progress(id core.NodeID) (match uint64, lastHeard time.Time, ok b
 
 // LeaseValid reports whether the leader's lease holds at now (D9).
 func (r *Raft) LeaseValid(now time.Time) bool {
-	if !r.cfg.Lease || r.role != core.RoleLeader || r.leaseDropped || r.leaseStart.IsZero() || r.log.committed < r.termStart {
+	if !r.cfg.Lease || r.role != core.RoleLeader || r.facts&raftLeaseDropped != 0 || r.leaseStart.IsZero() || r.log.committed < r.termStart {
 		return false
 	}
 	return now.Sub(r.leaseStart) < r.leaseLen
@@ -486,7 +510,7 @@ func (r *Raft) LeaseValid(now time.Time) bool {
 
 // DropLease drops the lease for the rest of the term: a loop turn longer than
 // the drift budget (D9).
-func (r *Raft) DropLease() { r.leaseDropped = true }
+func (r *Raft) DropLease() { r.facts |= raftLeaseDropped }
 
 // HasReady reports whether a turn left work for the driver.
 func (r *Raft) HasReady() bool {
@@ -551,7 +575,7 @@ func (r *Raft) numberWrite(rd *ReadyValue, hsChanged bool) {
 	}
 	r.seq++
 	rd.Seq = r.seq
-	if hsChanged && r.role == core.RoleCandidate && !r.selfVoteDurable {
+	if hsChanged && r.role == core.RoleCandidate && r.facts&raftSelfVoteDurable == 0 {
 		r.selfVoteSeq = rd.Seq
 	}
 }
@@ -858,19 +882,6 @@ func (r *Raft) commitTo(i uint64) {
 	}
 }
 
-// PeerStatValue is the leader's view of one peer, for Health (D13).
-type PeerStatValue struct {
-	ID        core.NodeID
-	Voter     bool
-	Match     uint64
-	Next      uint64
-	Inflight  int
-	LastHeard time.Time
-	Heard     bool
-	Probing   bool
-	Snapshot  bool
-}
-
 // PeerStats returns the leader's view of every peer, in configuration
 // order; nil off the leader.
 func (r *Raft) PeerStats() []PeerStatValue {
@@ -881,8 +892,9 @@ func (r *Raft) PeerStats() []PeerStatValue {
 	for _, id := range r.peers() {
 		pr := r.prs[id]
 		out = append(out, PeerStatValue{
-			ID: id, Voter: r.isVoter(id), Match: pr.match, Next: pr.next, Inflight: len(pr.inflight),
-			LastHeard: pr.lastHeard, Heard: pr.heard, Probing: pr.state == stateProbe, Snapshot: pr.state == stateSnapshot,
+			ID: id, Match: pr.match, Next: pr.next, Inflight: len(pr.inflight), LastHeard: pr.lastHeard,
+			Flags: statFlag(StatVoter, r.isVoter(id)) | statFlag(StatHeard, pr.facts&peerHeard != 0) |
+				statFlag(StatProbing, pr.state == stateProbe) | statFlag(StatSnapshot, pr.state == stateSnapshot),
 		})
 	}
 	return out
@@ -901,7 +913,7 @@ func (r *Raft) FailureTolerance(now time.Time) int {
 			n++
 			continue
 		}
-		if pr := r.prs[id]; pr != nil && pr.heard && now.Sub(pr.lastHeard) < r.timing.ElectionTimeoutMin {
+		if pr := r.prs[id]; pr != nil && pr.facts&peerHeard != 0 && now.Sub(pr.lastHeard) < r.timing.ElectionTimeoutMin {
 			n++
 		}
 	}

@@ -134,9 +134,6 @@ type Node struct {
 	joinMu      sync.Mutex
 	lastJoin    map[string]time.Time
 	joinRefused atomic.Int64
-	// trustFrom is set by the package's own tests only: the engine then
-	// trusts a frame's From over the transport's peer (R7-05 mutation).
-	trustFrom bool
 	// crashAfterPublish is set by the package's own tests only.
 	crashAfterPublish atomic.Bool
 }
@@ -573,7 +570,7 @@ func (n *Node) deliver(from coreconsensus.AuthenticatedPeerValue, frame []byte) 
 	if err := wire.ParseMessage(bytes.Clone(frame), &m); err != nil {
 		return
 	}
-	if m.From != from.ID && !n.trustFrom {
+	if m.From != from.ID {
 		// The engine trusts the transport's authenticated peer, never the
 		// frame's From (R7-05).
 		n.droppedFrom.Add(1)

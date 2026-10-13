@@ -2060,6 +2060,49 @@ packages:
               name: MaxClockDrift
               type: float64
   - constants:
+      - blockDoc: The facts a PeerHealthValue carries.
+        doc: PeerVoter is set for a voter, clear for a learner.
+        name: PeerVoter
+        type: PeerFlags
+        value: "1"
+      - blockDoc: The facts a PeerHealthValue carries.
+        doc: |-
+          PeerUnreachable is set when the transport failed to reach the peer
+          since it last answered, or it has not answered within the minimum
+          election timeout.
+        name: PeerUnreachable
+        type: PeerFlags
+        value: "2"
+      - blockDoc: The facts a PeerHealthValue carries.
+        doc: PeerSnapshot is set while a snapshot is being sent to the peer.
+        name: PeerSnapshot
+        type: PeerFlags
+        value: "4"
+      - blockDoc: The answers a HealthValue carries.
+        doc: |-
+          HealthReady is the readiness answer: running, a leader known,
+          everything known committed applied, and not refusing the current
+          leader's chain (D4).
+        name: HealthReady
+        type: HealthFlags
+        value: "1"
+      - blockDoc: The answers a HealthValue carries.
+        doc: HealthHasLeader is set when a leader is known in the current term.
+        name: HealthHasLeader
+        type: HealthFlags
+        value: "2"
+      - blockDoc: The answers a HealthValue carries.
+        doc: |-
+          HealthQuorumReachable is set on a leader a majority answered within
+          the minimum election timeout; never elsewhere.
+        name: HealthQuorumReachable
+        type: HealthFlags
+        value: "4"
+      - blockDoc: The answers a HealthValue carries.
+        doc: HealthStopped is set once the node stopped itself or was closed.
+        name: HealthStopped
+        type: HealthFlags
+        value: "8"
       - doc: |-
           ReadIndex confirms every read by a heartbeat round started after it
           arrived. It is the zero value and the default.
@@ -2472,9 +2515,11 @@ packages:
             - doc: ID is the peer.
               name: ID
               type: coreconsensus.NodeID
-            - doc: Voter is false for a learner.
-              name: Voter
-              type: bool
+            - doc: |-
+                Flags are the peer's yes/no facts: PeerVoter, PeerUnreachable,
+                PeerSnapshot.
+              name: Flags
+              type: PeerFlags
             - doc: Match is the highest index the peer holds durably, as acknowledged.
               name: Match
               type: uint64
@@ -2489,15 +2534,32 @@ packages:
                 answered in this term.
               name: LastContact
               type: time.Duration
-            - doc: |-
-                Unreachable is set when the transport failed to reach it since it
-                last answered, or it has not answered within the minimum election
-                timeout.
-              name: Unreachable
-              type: bool
-            - doc: Snapshot is set while a snapshot is being sent to it.
-              name: Snapshot
-              type: bool
+      - doc: |-
+          PeerFlags are a peer's yes/no facts in a health verdict, one bit each,
+          read with Has.
+        methods:
+          - doc: Has reports whether every fact of x is set.
+            in:
+              - name: x
+                type: PeerFlags
+            name: Has
+            out:
+              - type: bool
+            recv: value
+        name: PeerFlags
+        underlying: uint8
+      - doc: HealthFlags are a verdict's yes/no answers, one bit each, read with Has.
+        methods:
+          - doc: Has reports whether every answer of x is set.
+            in:
+              - name: x
+                type: HealthFlags
+            name: Has
+            out:
+              - type: bool
+            recv: value
+        name: HealthFlags
+        underlying: uint8
       - doc: HealthValue is a node's verdict for an orchestrator's probe (D13).
         name: HealthValue
         struct:
@@ -2506,18 +2568,10 @@ packages:
               name: Status
               type: coreconsensus.StatusValue
             - doc: |-
-                Ready is true while a leader is known and the node applied what it
-                knows committed.
-              name: Ready
-              type: bool
-            - doc: HasLeader is true while a leader is known in the current term.
-              name: HasLeader
-              type: bool
-            - doc: |-
-                QuorumReachable is true on a leader a majority answered within the
-                minimum election timeout; false elsewhere.
-              name: QuorumReachable
-              type: bool
+                Flags are the verdict's yes/no answers: HealthReady, HealthHasLeader,
+                HealthQuorumReachable, HealthStopped.
+              name: Flags
+              type: HealthFlags
             - doc: |-
                 FailureTolerance is how many voters can fail now with a majority
                 left. Only the leader knows it: -1 elsewhere.
@@ -2539,9 +2593,6 @@ packages:
               type: uint64
             - name: ChainRefusalLeader
               type: coreconsensus.NodeID
-            - doc: Stopped is true once the node stopped, closed or not.
-              name: Stopped
-              type: bool
             - doc: StopReason says why the node stopped itself.
               name: StopReason
               type: coreconsensus.StopReasonValue
@@ -3455,6 +3506,28 @@ packages:
         struct:
           unexported: true
   - constants:
+      - blockDoc: The facts a PeerStatValue carries.
+        doc: StatVoter is set for a voter, clear for a learner.
+        name: StatVoter
+        type: PeerStatFlags
+        value: "1"
+      - blockDoc: The facts a PeerStatValue carries.
+        doc: |-
+          StatHeard is set once the peer answered in this term; LastHeard is
+          meaningful only then.
+        name: StatHeard
+        type: PeerStatFlags
+        value: "2"
+      - blockDoc: The facts a PeerStatValue carries.
+        doc: StatProbing is set while the leader probes for the peer's match.
+        name: StatProbing
+        type: PeerStatFlags
+        value: "4"
+      - blockDoc: The facts a PeerStatValue carries.
+        doc: StatSnapshot is set while a snapshot is being sent to the peer.
+        name: StatSnapshot
+        type: PeerStatFlags
+        value: "8"
       - doc: |-
           ProtocolMax is the highest protocol version this engine speaks: a cluster
           version above it is refused, and stops a node that finds it committed.
@@ -3494,6 +3567,36 @@ packages:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/service/app/consensus/raft
     types:
+      - doc: PeerStatValue is the leader's view of one peer, for Health (D13).
+        name: PeerStatValue
+        struct:
+          fields:
+            - name: ID
+              type: core.NodeID
+            - name: Flags
+              type: PeerStatFlags
+            - name: Match
+              type: uint64
+            - name: Next
+              type: uint64
+            - name: Inflight
+              type: int
+            - name: LastHeard
+              type: time.Time
+      - doc: |-
+          PeerStatFlags are a peer's yes/no facts in the leader's view, one bit
+          each, read with Has.
+        methods:
+          - doc: Has reports whether every fact of x is set.
+            in:
+              - name: x
+                type: PeerStatFlags
+            name: Has
+            out:
+              - type: bool
+            recv: value
+        name: PeerStatFlags
+        underlying: uint8
       - doc: |-
           Config is what the step function needs from its driver. Every bound is
           already clamped and validated by the engine.
@@ -4015,28 +4118,6 @@ packages:
               type: core.MembershipValue
             - name: Transfer
               type: core.NodeID
-      - doc: PeerStatValue is the leader's view of one peer, for Health (D13).
-        name: PeerStatValue
-        struct:
-          fields:
-            - name: ID
-              type: core.NodeID
-            - name: Voter
-              type: bool
-            - name: Match
-              type: uint64
-            - name: Next
-              type: uint64
-            - name: Inflight
-              type: int
-            - name: LastHeard
-              type: time.Time
-            - name: Heard
-              type: bool
-            - name: Probing
-              type: bool
-            - name: Snapshot
-              type: bool
   - constants:
       - blockDoc: The membership changes an EntryMembership records.
         doc: ChangeFounding is the founding configuration Bootstrap writes.

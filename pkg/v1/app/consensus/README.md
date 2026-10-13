@@ -1792,14 +1792,9 @@ HealthValue is an alias of `github.com/kitsunium/sdk/internal/service/app/consen
 type HealthValue struct {
 	// Status is the node's view after its last turn.
 	Status             coreconsensus.StatusValue
-	// Ready is true while a leader is known and the node applied what it
-	// knows committed.
-	Ready              bool
-	// HasLeader is true while a leader is known in the current term.
-	HasLeader          bool
-	// QuorumReachable is true on a leader a majority answered within the
-	// minimum election timeout; false elsewhere.
-	QuorumReachable    bool
+	// Flags are the verdict's yes/no answers: HealthReady, HealthHasLeader,
+	// HealthQuorumReachable, HealthStopped.
+	Flags              HealthFlags
 	// FailureTolerance is how many voters can fail now with a majority
 	// left. Only the leader knows it: -1 elsewhere.
 	FailureTolerance   int
@@ -1813,8 +1808,6 @@ type HealthValue struct {
 	ChainRefusals      int
 	ChainRefusalIndex  uint64
 	ChainRefusalLeader coreconsensus.NodeID
-	// Stopped is true once the node stopped, closed or not.
-	Stopped            bool
 	// StopReason says why the node stopped itself.
 	StopReason         coreconsensus.StopReasonValue
 	// DroppedFrames counts frames whose From differed from the
@@ -3068,8 +3061,9 @@ PeerHealthValue is an alias of `github.com/kitsunium/sdk/internal/service/app/co
 type PeerHealthValue struct {
 	// ID is the peer.
 	ID          coreconsensus.NodeID
-	// Voter is false for a learner.
-	Voter       bool
+	// Flags are the peer's yes/no facts: PeerVoter, PeerUnreachable,
+	// PeerSnapshot.
+	Flags       PeerFlags
 	// Match is the highest index the peer holds durably, as acknowledged.
 	Match       uint64
 	// Lag is how far Match is behind the leader's last index.
@@ -3079,12 +3073,6 @@ type PeerHealthValue struct {
 	// LastContact is how long ago it last answered; negative when it never
 	// answered in this term.
 	LastContact time.Duration
-	// Unreachable is set when the transport failed to reach it since it
-	// last answered, or it has not answered within the minimum election
-	// timeout.
-	Unreachable bool
-	// Snapshot is set while a snapshot is being sent to it.
-	Snapshot    bool
 }
 ```
 

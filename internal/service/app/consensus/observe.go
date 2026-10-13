@@ -13,6 +13,7 @@ import (
 	coreotel "github.com/kitsunium/sdk/internal/core/observe/otel"
 	coretrace "github.com/kitsunium/sdk/internal/core/observe/trace"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/service/app/consensus/raft"
 )
 
 // The metric names are part of the contract (D13): spelled as Prometheus
@@ -306,14 +307,14 @@ func (n *Node) observePeers() {
 		o.setGauge(mPeerMatchLag, float64(last-min(last, p.Match)), peer)
 		o.setGauge(mPeerInflight, float64(p.Inflight), peer)
 		u := 0.0
-		if !p.Heard || now.Sub(p.LastHeard) >= window {
+		if !p.Flags.Has(raft.StatHeard) || now.Sub(p.LastHeard) >= window {
 			u = 1
 		}
 		if at, ok := n.unreachableAt[p.ID]; ok && at.After(p.LastHeard) {
 			u = 1
 		}
 		o.setGauge(mPeerUnreachable, u, peer)
-		if p.Heard {
+		if p.Flags.Has(raft.StatHeard) {
 			o.setGauge(mPeerLastContact, now.Sub(p.LastHeard).Seconds(), peer)
 		}
 	}

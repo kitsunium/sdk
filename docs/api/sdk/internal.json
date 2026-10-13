@@ -44484,12 +44484,89 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.HealthFlags",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "HealthFlags",
+      "spelled": "uint8",
+      "canonical": "uint8",
+      "doc": "HealthFlags are a verdict's yes/no answers, one bit each, read with Has.\n",
+      "file": "service/app/consensus/bootstrap.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.HealthFlags.Has",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "Has",
+      "recv": "HealthFlags",
+      "spelled": "func(x HealthFlags) bool",
+      "canonical": "func(x github.com/kitsunium/sdk/internal/service/app/consensus.HealthFlags) bool",
+      "doc": "Has reports whether every answer of x is set.\n",
+      "file": "service/app/consensus/bootstrap.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.HealthHasLeader",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "HealthHasLeader",
+      "spelled": "HealthFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.HealthFlags",
+      "value": "2",
+      "doc": "HealthHasLeader is set when a leader is known in the current term.\n",
+      "file": "service/app/consensus/bootstrap.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.HealthQuorumReachable",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "HealthQuorumReachable",
+      "spelled": "HealthFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.HealthFlags",
+      "value": "4",
+      "doc": "HealthQuorumReachable is set on a leader a majority answered within\nthe minimum election timeout; never elsewhere.\n",
+      "file": "service/app/consensus/bootstrap.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.HealthReady",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "HealthReady",
+      "spelled": "HealthFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.HealthFlags",
+      "value": "1",
+      "doc": "HealthReady is the readiness answer: running, a leader known,\neverything known committed applied, and not refusing the current\nleader's chain (D4).\n",
+      "file": "service/app/consensus/bootstrap.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.HealthStopped",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "HealthStopped",
+      "spelled": "HealthFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.HealthFlags",
+      "value": "8",
+      "doc": "HealthStopped is set once the node stopped itself or was closed.\n",
+      "file": "service/app/consensus/bootstrap.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.HealthValue",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
       "name": "HealthValue",
-      "spelled": "struct{Status coreconsensus.StatusValue; Ready bool; HasLeader bool; QuorumReachable bool; FailureTolerance int; ApplyLagEntries uint64; Peers []PeerHealthValue; ChainRefusals int; ChainRefusalIndex uint64; ChainRefusalLeader coreconsensus.NodeID; Stopped bool; StopReason coreconsensus.StopReasonValue; DroppedFrames int64; LongTurns int64; JoinsRateLimited int64}",
-      "canonical": "struct{Status github.com/kitsunium/sdk/internal/core/app/consensus.StatusValue; Ready bool; HasLeader bool; QuorumReachable bool; FailureTolerance int; ApplyLagEntries uint64; Peers []github.com/kitsunium/sdk/internal/service/app/consensus.PeerHealthValue; ChainRefusals int; ChainRefusalIndex uint64; ChainRefusalLeader github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Stopped bool; StopReason github.com/kitsunium/sdk/internal/core/app/consensus.StopReasonValue; DroppedFrames int64; LongTurns int64; JoinsRateLimited int64}",
+      "spelled": "struct{Status coreconsensus.StatusValue; Flags HealthFlags; FailureTolerance int; ApplyLagEntries uint64; Peers []PeerHealthValue; ChainRefusals int; ChainRefusalIndex uint64; ChainRefusalLeader coreconsensus.NodeID; StopReason coreconsensus.StopReasonValue; DroppedFrames int64; LongTurns int64; JoinsRateLimited int64}",
+      "canonical": "struct{Status github.com/kitsunium/sdk/internal/core/app/consensus.StatusValue; Flags github.com/kitsunium/sdk/internal/service/app/consensus.HealthFlags; FailureTolerance int; ApplyLagEntries uint64; Peers []github.com/kitsunium/sdk/internal/service/app/consensus.PeerHealthValue; ChainRefusals int; ChainRefusalIndex uint64; ChainRefusalLeader github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; StopReason github.com/kitsunium/sdk/internal/core/app/consensus.StopReasonValue; DroppedFrames int64; LongTurns int64; JoinsRateLimited int64}",
       "fields": [
         {
           "name": "Status",
@@ -44497,19 +44574,9 @@
           "doc": "Status is the node's view after its last turn.\n"
         },
         {
-          "name": "Ready",
-          "type": "bool",
-          "doc": "Ready is true while a leader is known and the node applied what it\nknows committed.\n"
-        },
-        {
-          "name": "HasLeader",
-          "type": "bool",
-          "doc": "HasLeader is true while a leader is known in the current term.\n"
-        },
-        {
-          "name": "QuorumReachable",
-          "type": "bool",
-          "doc": "QuorumReachable is true on a leader a majority answered within the\nminimum election timeout; false elsewhere.\n"
+          "name": "Flags",
+          "type": "HealthFlags",
+          "doc": "Flags are the verdict's yes/no answers: HealthReady, HealthHasLeader,\nHealthQuorumReachable, HealthStopped.\n"
         },
         {
           "name": "FailureTolerance",
@@ -44538,11 +44605,6 @@
         {
           "name": "ChainRefusalLeader",
           "type": "coreconsensus.NodeID"
-        },
-        {
-          "name": "Stopped",
-          "type": "bool",
-          "doc": "Stopped is true once the node stopped, closed or not.\n"
         },
         {
           "name": "StopReason",
@@ -45498,12 +45560,37 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PeerFlags",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "PeerFlags",
+      "spelled": "uint8",
+      "canonical": "uint8",
+      "doc": "PeerFlags are a peer's yes/no facts in a health verdict, one bit each,\nread with Has.\n",
+      "file": "service/app/consensus/bootstrap.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PeerFlags.Has",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "Has",
+      "recv": "PeerFlags",
+      "spelled": "func(x PeerFlags) bool",
+      "canonical": "func(x github.com/kitsunium/sdk/internal/service/app/consensus.PeerFlags) bool",
+      "doc": "Has reports whether every fact of x is set.\n",
+      "file": "service/app/consensus/bootstrap.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PeerHealthValue",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
       "name": "PeerHealthValue",
-      "spelled": "struct{ID coreconsensus.NodeID; Voter bool; Match uint64; Lag uint64; Inflight int; LastContact time.Duration; Unreachable bool; Snapshot bool}",
-      "canonical": "struct{ID github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Voter bool; Match uint64; Lag uint64; Inflight int; LastContact time.Duration; Unreachable bool; Snapshot bool}",
+      "spelled": "struct{ID coreconsensus.NodeID; Flags PeerFlags; Match uint64; Lag uint64; Inflight int; LastContact time.Duration}",
+      "canonical": "struct{ID github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Flags github.com/kitsunium/sdk/internal/service/app/consensus.PeerFlags; Match uint64; Lag uint64; Inflight int; LastContact time.Duration}",
       "fields": [
         {
           "name": "ID",
@@ -45511,9 +45598,9 @@
           "doc": "ID is the peer.\n"
         },
         {
-          "name": "Voter",
-          "type": "bool",
-          "doc": "Voter is false for a learner.\n"
+          "name": "Flags",
+          "type": "PeerFlags",
+          "doc": "Flags are the peer's yes/no facts: PeerVoter, PeerUnreachable,\nPeerSnapshot.\n"
         },
         {
           "name": "Match",
@@ -45534,19 +45621,48 @@
           "name": "LastContact",
           "type": "time.Duration",
           "doc": "LastContact is how long ago it last answered; negative when it never\nanswered in this term.\n"
-        },
-        {
-          "name": "Unreachable",
-          "type": "bool",
-          "doc": "Unreachable is set when the transport failed to reach it since it\nlast answered, or it has not answered within the minimum election\ntimeout.\n"
-        },
-        {
-          "name": "Snapshot",
-          "type": "bool",
-          "doc": "Snapshot is set while a snapshot is being sent to it.\n"
         }
       ],
       "doc": "PeerHealthValue is the leader's view of one peer (D13).\n",
+      "file": "service/app/consensus/bootstrap.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PeerSnapshot",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "PeerSnapshot",
+      "spelled": "PeerFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.PeerFlags",
+      "value": "4",
+      "doc": "PeerSnapshot is set while a snapshot is being sent to the peer.\n",
+      "file": "service/app/consensus/bootstrap.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PeerUnreachable",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "PeerUnreachable",
+      "spelled": "PeerFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.PeerFlags",
+      "value": "2",
+      "doc": "PeerUnreachable is set when the transport failed to reach the peer\nsince it last answered, or it has not answered within the minimum\nelection timeout.\n",
+      "file": "service/app/consensus/bootstrap.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PeerVoter",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "PeerVoter",
+      "spelled": "PeerFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.PeerFlags",
+      "value": "1",
+      "doc": "PeerVoter is set for a voter, clear for a learner.\n",
       "file": "service/app/consensus/bootstrap.go",
       "layer": "service",
       "family": "app"
@@ -46297,20 +46413,45 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.PeerStatFlags",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "PeerStatFlags",
+      "spelled": "uint8",
+      "canonical": "uint8",
+      "doc": "PeerStatFlags are a peer's yes/no facts in the leader's view, one bit\neach, read with Has.\n",
+      "file": "service/app/consensus/raft/peerstat.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.PeerStatFlags.Has",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "Has",
+      "recv": "PeerStatFlags",
+      "spelled": "func(x PeerStatFlags) bool",
+      "canonical": "func(x github.com/kitsunium/sdk/internal/service/app/consensus/raft.PeerStatFlags) bool",
+      "doc": "Has reports whether every fact of x is set.\n",
+      "file": "service/app/consensus/raft/peerstat.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.PeerStatValue",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
       "name": "PeerStatValue",
-      "spelled": "struct{ID core.NodeID; Voter bool; Match uint64; Next uint64; Inflight int; LastHeard time.Time; Heard bool; Probing bool; Snapshot bool}",
-      "canonical": "struct{ID github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Voter bool; Match uint64; Next uint64; Inflight int; LastHeard time.Time; Heard bool; Probing bool; Snapshot bool}",
+      "spelled": "struct{ID core.NodeID; Flags PeerStatFlags; Match uint64; Next uint64; Inflight int; LastHeard time.Time}",
+      "canonical": "struct{ID github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Flags github.com/kitsunium/sdk/internal/service/app/consensus/raft.PeerStatFlags; Match uint64; Next uint64; Inflight int; LastHeard time.Time}",
       "fields": [
         {
           "name": "ID",
           "type": "core.NodeID"
         },
         {
-          "name": "Voter",
-          "type": "bool"
+          "name": "Flags",
+          "type": "PeerStatFlags"
         },
         {
           "name": "Match",
@@ -46327,22 +46468,10 @@
         {
           "name": "LastHeard",
           "type": "time.Time"
-        },
-        {
-          "name": "Heard",
-          "type": "bool"
-        },
-        {
-          "name": "Probing",
-          "type": "bool"
-        },
-        {
-          "name": "Snapshot",
-          "type": "bool"
         }
       ],
       "doc": "PeerStatValue is the leader's view of one peer, for Health (D13).\n",
-      "file": "service/app/consensus/raft/raft.go",
+      "file": "service/app/consensus/raft/peerstat.go",
       "layer": "service",
       "family": "app"
     },
@@ -46961,6 +47090,58 @@
       ],
       "doc": "StartState is the durable state the driver loaded.\n",
       "file": "service/app/consensus/raft/raft.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.StatHeard",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "StatHeard",
+      "spelled": "PeerStatFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus/raft.PeerStatFlags",
+      "value": "2",
+      "doc": "StatHeard is set once the peer answered in this term; LastHeard is\nmeaningful only then.\n",
+      "file": "service/app/consensus/raft/peerstat.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.StatProbing",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "StatProbing",
+      "spelled": "PeerStatFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus/raft.PeerStatFlags",
+      "value": "4",
+      "doc": "StatProbing is set while the leader probes for the peer's match.\n",
+      "file": "service/app/consensus/raft/peerstat.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.StatSnapshot",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "StatSnapshot",
+      "spelled": "PeerStatFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus/raft.PeerStatFlags",
+      "value": "8",
+      "doc": "StatSnapshot is set while a snapshot is being sent to the peer.\n",
+      "file": "service/app/consensus/raft/peerstat.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.StatVoter",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "StatVoter",
+      "spelled": "PeerStatFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus/raft.PeerStatFlags",
+      "value": "1",
+      "doc": "StatVoter is set for a voter, clear for a learner.\n",
+      "file": "service/app/consensus/raft/peerstat.go",
       "layer": "service",
       "family": "app"
     },
