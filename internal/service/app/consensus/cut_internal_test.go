@@ -14,7 +14,7 @@ import (
 // durable.
 type syncFailingSnapshots struct{ *MemorySnapshots }
 
-func (s syncFailingSnapshots) Create(id string, meta coreconsensus.SnapshotMeta) (coreconsensus.SnapshotSink, int64, error) {
+func (s syncFailingSnapshots) Create(id string, meta coreconsensus.SnapshotMetaValue) (coreconsensus.SnapshotSink, int64, error) {
 	sink, off, err := s.MemorySnapshots.Create(id, meta)
 	if err != nil {
 		return nil, 0, err
@@ -25,7 +25,7 @@ func (s syncFailingSnapshots) Create(id string, meta coreconsensus.SnapshotMeta)
 // syncFailingSink is a spool whose Commit reports STORAGE_FAILED.
 type syncFailingSink struct{ coreconsensus.SnapshotSink }
 
-func (syncFailingSink) Commit(coreconsensus.SnapshotMeta) error {
+func (syncFailingSink) Commit(coreconsensus.SnapshotMetaValue) error {
 	return storageFailed("sync snapshot", errImpossible)
 }
 
@@ -44,7 +44,7 @@ func TestACutWhoseSyncFailsStopsTheNode(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			members := []coreconsensus.Member{{ID: id, Incarnation: inc, Slot: "slot-0", SPKI: MemorySPKI(id), Voter: true}}
+			members := []coreconsensus.MemberValue{{ID: id, Incarnation: inc, Slot: "slot-0", SPKI: MemorySPKI(id), Voter: true}}
 			cfg := Config{
 				Cluster: cid, Machine: newKV(), Durability: DurabilityVolatile, Log: log,
 				Snapshots: syncFailingSnapshots{NewMemorySnapshots()}, Transport: net.Transport(id),

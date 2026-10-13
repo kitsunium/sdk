@@ -121,7 +121,7 @@ func outcomeUnknown(why string) error {
 
 // withToken is an error on sentinel carrying the committed token t in the
 // hex field TokenOf decodes.
-func withToken(sentinel *errs.Error, t coreconsensus.Token) error {
+func withToken(sentinel *errs.Error, t coreconsensus.TokenValue) error {
 	return origin(sentinel, errs.String("token", hex.EncodeToString(wire.AppendToken(nil, t))))
 }
 
@@ -148,18 +148,18 @@ func LeaderHint(err error) (coreconsensus.NodeID, bool) {
 }
 
 // TokenOf reads the committed token an error carries (R7-10).
-func TokenOf(err error) (coreconsensus.Token, bool) {
+func TokenOf(err error) (coreconsensus.TokenValue, bool) {
 	for _, f := range errs.FieldsOf(err) {
 		if f.Key() == "token" {
 			b, herr := hex.DecodeString(f.StringValue())
 			if herr != nil {
-				return coreconsensus.Token{}, false
+				return coreconsensus.TokenValue{}, false
 			}
 			t, perr := wire.ParseToken(b)
 			return t, perr == nil
 		}
 	}
-	return coreconsensus.Token{}, false
+	return coreconsensus.TokenValue{}, false
 }
 
 // joinReasonOf is what a joiner may read of an authorizer's refusal: an

@@ -68,11 +68,11 @@ func TestDMCryptBench(t *testing.T) {
 		var lat []time.Duration
 		start := time.Now()
 		for k := 0; k < shape.n; k++ {
-			es := make([]coreconsensus.Entry, shape.batch)
+			es := make([]coreconsensus.EntryValue, shape.batch)
 			for i := range es {
 				last++
-				es[i] = coreconsensus.Entry{
-					Position: coreconsensus.Position{Term: 1, Index: last},
+				es[i] = coreconsensus.EntryValue{
+					Position: coreconsensus.PositionValue{Term: 1, Index: last},
 					Kind:     coreconsensus.EntryCommand, BodySum: wire.BodySum(data), Data: data,
 				}
 			}
@@ -116,12 +116,12 @@ func TestDMCryptWriter(t *testing.T) {
 	ackFirst := os.Getenv("DMCRYPT_ACK_BEFORE_SYNC") == "1"
 	for {
 		n := 1 + rng.IntN(32)
-		es := make([]coreconsensus.Entry, n)
+		es := make([]coreconsensus.EntryValue, n)
 		for i := range es {
 			last++
 			p := payload(last)
-			es[i] = coreconsensus.Entry{
-				Position: coreconsensus.Position{Term: 1, Index: last},
+			es[i] = coreconsensus.EntryValue{
+				Position: coreconsensus.PositionValue{Term: 1, Index: last},
 				Kind:     coreconsensus.EntryCommand, BodySum: wire.BodySum(p), Data: p,
 			}
 		}

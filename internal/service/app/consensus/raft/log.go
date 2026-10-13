@@ -11,7 +11,7 @@ type memLog struct {
 	snapIndex uint64
 	snapTerm  uint64
 	snapChain uint32
-	ents      []core.Entry
+	ents      []core.EntryValue
 	committed uint64
 	stable    uint64
 	applied   uint64
@@ -56,7 +56,7 @@ func (l *memLog) chain(i uint64) uint32 {
 
 // at returns the entry at i in place. The caller guarantees
 // snapIndex < i <= lastIndex; anything else panics on the slice bound.
-func (l *memLog) at(i uint64) *core.Entry { return &l.ents[i-l.snapIndex-1] }
+func (l *memLog) at(i uint64) *core.EntryValue { return &l.ents[i-l.snapIndex-1] }
 
 // matchTerm reports whether the log holds index i at term t: false for an
 // index it does not hold, so a compacted or missing entry never matches.
@@ -66,7 +66,7 @@ func (l *memLog) matchTerm(i, t uint64) bool {
 }
 
 // slice returns the entries in [lo, hi), at least one, at most maxBytes.
-func (l *memLog) slice(lo, hi uint64, maxBytes int) []core.Entry {
+func (l *memLog) slice(lo, hi uint64, maxBytes int) []core.EntryValue {
 	if lo > hi || lo <= l.snapIndex {
 		return nil
 	}
@@ -135,7 +135,7 @@ func (l *memLog) compactTo(i, t uint64, chain uint32) {
 	l.window -= l.resident(l.snapIndex, min(i, l.lastIndex()))
 	if i < l.lastIndex() {
 		keep := l.ents[i-l.snapIndex:]
-		l.ents = append(make([]core.Entry, 0, len(keep)), keep...)
+		l.ents = append(make([]core.EntryValue, 0, len(keep)), keep...)
 	} else {
 		l.ents = nil
 	}

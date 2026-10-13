@@ -15,11 +15,11 @@ import (
 // its token and the value Apply returned. NOT_LEADER means certainly not
 // appended; OUTCOME_UNKNOWN means it may still commit: read the state through
 // Barrier before deciding, never retry blindly (D6, R1-04).
-func (n *Node) Propose(ctx context.Context, data []byte) (coreconsensus.Token, any, error) {
+func (n *Node) Propose(ctx context.Context, data []byte) (coreconsensus.TokenValue, any, error) {
 	if len(data) > n.cfg.MaxEntryBytes {
-		return coreconsensus.Token{}, nil, origin(coreconsensus.EntryTooLarge, errs.Int("bytes", len(data)))
+		return coreconsensus.TokenValue{}, nil, origin(coreconsensus.EntryTooLarge, errs.Int("bytes", len(data)))
 	}
-	e := coreconsensus.Entry{Kind: coreconsensus.EntryCommand, BodySum: wire.BodySum(data), Data: data}
+	e := coreconsensus.EntryValue{Kind: coreconsensus.EntryCommand, BodySum: wire.BodySum(data), Data: data}
 	return n.submit(ctx, e, false)
 }
 
@@ -28,12 +28,12 @@ func (n *Node) Propose(ctx context.Context, data []byte) (coreconsensus.Token, a
 // stop's reason; after it is appended, a cancelled ctx is OUTCOME_UNKNOWN,
 // because the entry may still commit. An admin entry bypasses the pending
 // and apply-lag budgets, so an operator can always reach a saturated node.
-func (n *Node) submit(ctx context.Context, e coreconsensus.Entry, admin bool) (coreconsensus.Token, any, error) {
+func (n *Node) submit(ctx context.Context, e coreconsensus.EntryValue, admin bool) (coreconsensus.TokenValue, any, error) {
 	if err := ctx.Err(); err != nil {
-		return coreconsensus.Token{}, nil, err
+		return coreconsensus.TokenValue{}, nil, err
 	}
 	if n.stopped.Load() {
-		return coreconsensus.Token{}, nil, n.stoppedErr()
+		return coreconsensus.TokenValue{}, nil, n.stoppedErr()
 	}
 	p := &proposal{entry: e, admin: admin, done: make(chan propResult, 1)}
 	start := n.clk.Now()
@@ -44,7 +44,7 @@ func (n *Node) submit(ctx context.Context, e coreconsensus.Entry, admin bool) (c
 		n.pendingProp.Add(-1)
 		n.obs.setGauge(mProposalsPending, float64(n.pendingProp.Load()))
 	}()
-	finish := func(r propResult) (coreconsensus.Token, any, error) {
+	finish := func(r propResult) (coreconsensus.TokenValue, any, error) {
 		if r.err != nil {
 			n.obs.inc(mProposalsFailed, codeAttr(r.err))
 		} else {
@@ -93,7 +93,7 @@ func (n *Node) handleProposals(ps []*proposal) {
 		return
 	}
 	var batch []*proposal
-	var ents []coreconsensus.Entry
+	var ents []coreconsensus.EntryValue
 	flush := func() {
 		n.proposeBatch(now, st.Lead, batch, ents)
 		batch, ents = batch[:0], ents[:0]
@@ -116,7 +116,7 @@ func (n *Node) handleProposals(ps []*proposal) {
 // proposeBatch appends a batch of ordinary proposals as one Propose and
 // registers each at its position, or answers every one with raft's refusal
 // when the batch as a whole is refused; an empty batch does nothing.
-func (n *Node) proposeBatch(now time.Time, lead coreconsensus.NodeID, batch []*proposal, ents []coreconsensus.Entry) {
+func (n *Node) proposeBatch(now time.Time, lead coreconsensus.NodeID, batch []*proposal, ents []coreconsensus.EntryValue) {
 	if len(batch) == 0 {
 		return
 	}
@@ -155,7 +155,7 @@ func (n *Node) refuseOverload(p *proposal) bool {
 // proposeAlone appends one proposal as its own entry, outside any batch, as
 // an administrative entry must be, and answers it at once on a refusal.
 func (n *Node) proposeAlone(now time.Time, p *proposal) {
-	pos, code := n.r.Propose(now, []coreconsensus.Entry{p.entry})
+	pos, code := n.r.Propose(now, []coreconsensus.EntryValue{p.entry})
 	if code != 0 {
 		p.done <- propResult{err: origin(sentinelOf(code))}
 		return
@@ -164,7 +164,7 @@ func (n *Node) proposeAlone(now time.Time, p *proposal) {
 }
 
 // appended registers a proposal's waiter at its position.
-func (n *Node) appended(p *proposal, pos coreconsensus.Position, local bool) {
+func (n *Node) appended(p *proposal, pos coreconsensus.PositionValue, local bool) {
 	p.pos, p.local = pos, local
 	p.stage.Store(stageAppended)
 	if local {
@@ -205,9 +205,9 @@ func (n *Node) forward(p *proposal, st raft.Status) {
 	if p.admin {
 		kind = coreconsensus.MsgForwardAdmin
 	}
-	m := coreconsensus.Message{
+	m := coreconsensus.MessageValue{
 		Version: 1, Group: n.cfg.Group, Kind: kind, From: n.stamp.ID, To: st.Lead,
-		Term: st.Term, Context: ctx, Entries: []coreconsensus.Entry{p.entry},
+		Term: st.Term, Context: ctx, Entries: []coreconsensus.EntryValue{p.entry},
 	}
 	n.forwards[ctx] = p
 	n.am.Lock()
@@ -218,7 +218,7 @@ func (n *Node) forward(p *proposal, st raft.Status) {
 }
 
 // forwardAnswered resolves a forwarded proposal from the leader's answer.
-func (n *Node) forwardAnswered(m coreconsensus.Message) {
+func (n *Node) forwardAnswered(m coreconsensus.MessageValue) {
 	p, ok := n.forwards[m.Context]
 	if !ok {
 		return
@@ -230,13 +230,13 @@ func (n *Node) forwardAnswered(m coreconsensus.Message) {
 		p.done <- propResult{err: origin(sentinelOf(m.Code), errs.String("leader", coreconsensus.NodeID(m.RejectHint).String()))}
 		return
 	}
-	n.appended(p, coreconsensus.Position{Term: m.LogTerm, Index: m.Index}, false)
+	n.appended(p, coreconsensus.PositionValue{Term: m.LogTerm, Index: m.Index}, false)
 }
 
 // ProposeAs types the Apply result. A result of another dynamic type is
 // RESULT_TYPE_MISMATCH carrying the committed token: the entry IS committed.
 // A nil result is the zero R.
-func ProposeAs[R any](ctx context.Context, r coreconsensus.Replicated, data []byte) (coreconsensus.Token, R, error) {
+func ProposeAs[R any](ctx context.Context, r coreconsensus.Replicated, data []byte) (coreconsensus.TokenValue, R, error) {
 	var zero R
 	tok, v, err := r.Propose(ctx, data)
 	if err != nil {
@@ -254,9 +254,9 @@ func ProposeAs[R any](ctx context.Context, r coreconsensus.Replicated, data []by
 
 // Barrier returns once the local state machine reflects every write
 // committed before the call (D9).
-func (n *Node) Barrier(ctx context.Context) (coreconsensus.Token, error) {
+func (n *Node) Barrier(ctx context.Context) (coreconsensus.TokenValue, error) {
 	if n.stopped.Load() {
-		return coreconsensus.Token{}, n.stoppedErr()
+		return coreconsensus.TokenValue{}, n.stoppedErr()
 	}
 	w := &readWait{done: make(chan readResult, 1)}
 	noLease := n.cfg.Reads != ReadLease
@@ -273,36 +273,36 @@ func (n *Node) Barrier(ctx context.Context) (coreconsensus.Token, error) {
 		n.r.ReadIndex(n.clk.Now(), ctx, noLease)
 		n.handleReady()
 	}) {
-		return coreconsensus.Token{}, n.stoppedErr()
+		return coreconsensus.TokenValue{}, n.stoppedErr()
 	}
 	var res readResult
 	select {
 	case res = <-w.done:
 	case <-ctx.Done():
-		return coreconsensus.Token{}, origin(coreconsensus.LeadershipUnconfirmed, errs.String("cause", ctx.Err().Error()))
+		return coreconsensus.TokenValue{}, origin(coreconsensus.LeadershipUnconfirmed, errs.String("cause", ctx.Err().Error()))
 	}
 	switch res.code {
 	case 0:
 	case coreconsensus.CodeNodeStopped:
-		return coreconsensus.Token{}, n.stoppedErr()
+		return coreconsensus.TokenValue{}, n.stoppedErr()
 	default:
-		return coreconsensus.Token{}, origin(sentinelOf(res.code), errs.String("leader", n.Status().Leader.String()))
+		return coreconsensus.TokenValue{}, origin(sentinelOf(res.code), errs.String("leader", n.Status().Leader.String()))
 	}
 	if !n.waitApplied(ctx.Done(), res.index) {
 		if ctx.Err() != nil {
-			return coreconsensus.Token{}, ctx.Err()
+			return coreconsensus.TokenValue{}, ctx.Err()
 		}
-		return coreconsensus.Token{}, n.stoppedErr()
+		return coreconsensus.TokenValue{}, n.stoppedErr()
 	}
 	n.am.Lock()
-	tok := n.token(coreconsensus.Position{Term: n.appliedTerm, Index: n.applied})
+	tok := n.token(coreconsensus.PositionValue{Term: n.appliedTerm, Index: n.applied})
 	n.am.Unlock()
 	return tok, nil
 }
 
 // WaitApplied returns once the local node has applied t. A token of another
 // lineage is LINEAGE_MISMATCH.
-func (n *Node) WaitApplied(ctx context.Context, t coreconsensus.Token) error {
+func (n *Node) WaitApplied(ctx context.Context, t coreconsensus.TokenValue) error {
 	want := n.token(t.Position())
 	if t.Cluster != want.Cluster || t.Epoch != want.Epoch {
 		return origin(coreconsensus.LineageMismatch)
@@ -327,7 +327,7 @@ func (n *Node) admin(ctx context.Context, kind coreconsensus.EntryKind, a wire.A
 		return origin(coreconsensus.MembershipInvalid, errs.String("why", "operator"))
 	}
 	data := wire.AppendAdmin(nil, &a)
-	_, _, err := n.submit(ctx, coreconsensus.Entry{Kind: kind, BodySum: wire.BodySum(data), Data: data}, true)
+	_, _, err := n.submit(ctx, coreconsensus.EntryValue{Kind: kind, BodySum: wire.BodySum(data), Data: data}, true)
 	// Every administrative operation is logged at Warn with its operator
 	// (D8, R3-14).
 	outcome := "ok"
@@ -340,10 +340,10 @@ func (n *Node) admin(ctx context.Context, kind coreconsensus.EntryKind, a wire.A
 }
 
 // AddLearner adds a non-voting member that receives the log (D8).
-func (n *Node) AddLearner(ctx context.Context, op coreconsensus.Operator, m coreconsensus.Member) error {
+func (n *Node) AddLearner(ctx context.Context, op coreconsensus.Operator, m coreconsensus.MemberValue) error {
 	return n.admin(ctx, coreconsensus.EntryMembership, wire.Admin{
 		Operator: string(op), Change: wire.ChangeAddLearner,
-		Target: m.ID, Membership: coreconsensus.Membership{Members: []coreconsensus.Member{m}},
+		Target: m.ID, Membership: coreconsensus.MembershipValue{Members: []coreconsensus.MemberValue{m}},
 	})
 }
 
@@ -363,10 +363,10 @@ func (n *Node) Remove(ctx context.Context, op coreconsensus.Operator, id corecon
 
 // UpdateAddress changes where a member listens.
 func (n *Node) UpdateAddress(ctx context.Context, op coreconsensus.Operator, id coreconsensus.NodeID, addr string) error {
-	members := []coreconsensus.Member{{ID: id, Address: addr}}
+	members := []coreconsensus.MemberValue{{ID: id, Address: addr}}
 	return n.admin(ctx, coreconsensus.EntryMembership, wire.Admin{
 		Operator: string(op), Change: wire.ChangeUpdateAddress,
-		Target: id, Membership: coreconsensus.Membership{Members: members},
+		Target: id, Membership: coreconsensus.MembershipValue{Members: members},
 	})
 }
 
@@ -376,17 +376,17 @@ func (n *Node) DenyPin(ctx context.Context, op coreconsensus.Operator, id coreco
 }
 
 // ProposeTimingContract proposes a new timing contract.
-func (n *Node) ProposeTimingContract(ctx context.Context, op coreconsensus.Operator, pre coreconsensus.Precondition, c coreconsensus.TimingContract) error {
+func (n *Node) ProposeTimingContract(ctx context.Context, op coreconsensus.Operator, pre coreconsensus.PreconditionSpec, c coreconsensus.TimingContractSpec) error {
 	return n.admin(ctx, coreconsensus.EntryTimingContract, wire.Admin{Operator: string(op), Pre: pre, Contract: c})
 }
 
 // RaiseClusterVersion raises the protocol version every member must speak.
-func (n *Node) RaiseClusterVersion(ctx context.Context, op coreconsensus.Operator, pre coreconsensus.Precondition, v uint32) error {
+func (n *Node) RaiseClusterVersion(ctx context.Context, op coreconsensus.Operator, pre coreconsensus.PreconditionSpec, v uint32) error {
 	return n.admin(ctx, coreconsensus.EntryClusterVersion, wire.Admin{Operator: string(op), Pre: pre, ClusterVersion: v})
 }
 
 // ClearNoSpace clears the no-space alarm the precondition names.
-func (n *Node) ClearNoSpace(ctx context.Context, op coreconsensus.Operator, pre coreconsensus.Precondition) error {
+func (n *Node) ClearNoSpace(ctx context.Context, op coreconsensus.Operator, pre coreconsensus.PreconditionSpec) error {
 	return n.admin(ctx, coreconsensus.EntryNoSpaceClear, wire.Admin{Operator: string(op), Pre: pre})
 }
 

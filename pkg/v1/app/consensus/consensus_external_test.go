@@ -17,7 +17,7 @@ type counter struct {
 	sum int
 }
 
-func (c *counter) Apply(e consensus.Entry) any {
+func (c *counter) Apply(e consensus.EntryValue) any {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.sum += len(e.Data)
@@ -38,7 +38,7 @@ func (c *counter) Snapshot() (consensus.Snapshot, error) {
 	return counterSnap{c.sum}, nil
 }
 
-func (c *counter) Restore(r io.Reader, _ consensus.SnapshotMeta) error {
+func (c *counter) Restore(r io.Reader, _ consensus.SnapshotMetaValue) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	_, err := fmt.Fscan(r, &c.sum)
@@ -73,7 +73,7 @@ func TestFacadeThreeNodesInMemory(t *testing.T) {
 		id    consensus.NodeID
 	}
 	var parts []nodeParts
-	var members []consensus.Member
+	var members []consensus.MemberValue
 	for i := range 3 {
 		p := nodeParts{log: consensus.NewMemoryLog(), snaps: consensus.NewMemorySnapshots()}
 		slot := fmt.Sprintf("s%d", i)
@@ -83,9 +83,9 @@ func TestFacadeThreeNodesInMemory(t *testing.T) {
 		}
 		p.id = id
 		parts = append(parts, p)
-		members = append(members, consensus.Member{ID: id, Incarnation: inc, Slot: slot, SPKI: consensus.MemorySPKI(id), Voter: true})
+		members = append(members, consensus.MemberValue{ID: id, Incarnation: inc, Slot: slot, SPKI: consensus.MemorySPKI(id), Voter: true})
 	}
-	timing := consensus.TimingContract{
+	timing := consensus.TimingContractSpec{
 		HeartbeatInterval:  10 * time.Millisecond,
 		ElectionTimeoutMin: 100 * time.Millisecond, ElectionTimeoutMax: 200 * time.Millisecond,
 	}

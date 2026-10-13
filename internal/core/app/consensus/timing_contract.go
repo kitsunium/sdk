@@ -2,11 +2,11 @@ package consensus
 
 import "time"
 
-// TimingContract is the set of timings every member must agree on for leases
+// TimingContractSpec is the set of timings every member must agree on for leases
 // and vote refusals to be sound. The committed contract entry is its ONLY
 // authority; a node's own configuration is merely the proposal used at
 // Bootstrap.
-type TimingContract struct {
+type TimingContractSpec struct {
 	// Generation counts the committed contracts, 1 at founding.
 	Generation uint64
 	// HeartbeatInterval is how often the leader confirms itself.

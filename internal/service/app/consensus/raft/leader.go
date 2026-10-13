@@ -54,8 +54,8 @@ func (r *Raft) becomeLeader() {
 	r.transferTo = 0
 	// A new leader commits a no-op of its term before it serves a read or
 	// accepts a membership change (D6).
-	noop := core.Entry{Kind: core.EntryNoOp, BodySum: wire.BodySum(nil)}
-	r.appendAsLeader([]core.Entry{noop})
+	noop := core.EntryValue{Kind: core.EntryNoOp, BodySum: wire.BodySum(nil)}
+	r.appendAsLeader([]core.EntryValue{noop})
 	r.termStart = r.log.lastIndex()
 	r.heartbeatDue = r.now
 	r.broadcastAppend(false)
@@ -63,13 +63,13 @@ func (r *Raft) becomeLeader() {
 
 // appendAsLeader assigns positions and chain values at the leader's
 // serialized append point (D4) and appends.
-func (r *Raft) appendAsLeader(es []core.Entry) []core.Position {
-	pos := make([]core.Position, len(es))
+func (r *Raft) appendAsLeader(es []core.EntryValue) []core.PositionValue {
+	pos := make([]core.PositionValue, len(es))
 	chain := r.log.chain(r.log.lastIndex())
 	idx := r.log.lastIndex()
 	for i := range es {
 		idx++
-		es[i].Position = core.Position{Term: r.term, Index: idx}
+		es[i].Position = core.PositionValue{Term: r.term, Index: idx}
 		es[i].ChainSum = wire.ChainSum(chain, &es[i])
 		chain = es[i].ChainSum
 		pos[i] = es[i].Position
@@ -129,12 +129,12 @@ func (r *Raft) broadcastHeartbeat(now time.Time) {
 		if r.mutated(mutHeartbeatUnclamped) {
 			commit = r.log.committed
 		}
-		r.send(core.Message{Kind: core.MsgHeartbeat, To: id, Commit: commit, Context: rd.id})
+		r.send(core.MessageValue{Kind: core.MsgHeartbeat, To: id, Commit: commit, Context: rd.id})
 		if pr.state == stateReplicate && pr.paused(r.cfg.MaxInflight, r.cfg.MaxInflightBytes) {
 			// A full window must not stall forever on a lost
 			// acknowledgement: an empty append at next (R2-07).
 			if t, ok := r.log.term(pr.next - 1); ok {
-				r.send(core.Message{Kind: core.MsgApp, To: id, Index: pr.next - 1, LogTerm: t, Commit: min(pr.match, r.log.committed)})
+				r.send(core.MessageValue{Kind: core.MsgApp, To: id, Index: pr.next - 1, LogTerm: t, Commit: min(pr.match, r.log.committed)})
 			}
 		}
 	}
@@ -195,7 +195,7 @@ func (r *Raft) sendAppend(to core.NodeID, sendIfEmpty bool) {
 // Fetched hands back entries read for a peer. Anything stale — another
 // role, another next, a term the log no longer has at that index — is
 // dropped, and a compacted read moves the peer to the snapshot path.
-func (r *Raft) Fetched(to core.NodeID, lo uint64, ents []core.Entry, compacted bool) {
+func (r *Raft) Fetched(to core.NodeID, lo uint64, ents []core.EntryValue, compacted bool) {
 	pr := r.prs[to]
 	if pr == nil || !pr.fetching {
 		return
@@ -225,7 +225,7 @@ func (r *Raft) Fetched(to core.NodeID, lo uint64, ents []core.Entry, compacted b
 // fetchedMatch reports whether ents are the entries from lo on, one per
 // index, at the terms the log still holds: a read that raced a truncation
 // is not sent.
-func (r *Raft) fetchedMatch(lo uint64, ents []core.Entry) bool {
+func (r *Raft) fetchedMatch(lo uint64, ents []core.EntryValue) bool {
 	for i := range ents {
 		if t, ok := r.log.term(ents[i].Position.Index); !ok || t != ents[i].Position.Term || ents[i].Position.Index != lo+uint64(i) {
 			return false
@@ -236,8 +236,8 @@ func (r *Raft) fetchedMatch(lo uint64, ents []core.Entry) bool {
 
 // sendEntries sends one append after prev and accounts for it: a replicating
 // peer's window grows by it, a probing peer pauses until it answers.
-func (r *Raft) sendEntries(pr *progress, to core.NodeID, prev, prevTerm uint64, ents []core.Entry) {
-	m := core.Message{Kind: core.MsgApp, To: to, Index: prev, LogTerm: prevTerm, Entries: ents, Commit: r.log.committed}
+func (r *Raft) sendEntries(pr *progress, to core.NodeID, prev, prevTerm uint64, ents []core.EntryValue) {
+	m := core.MessageValue{Kind: core.MsgApp, To: to, Index: prev, LogTerm: prevTerm, Entries: ents, Commit: r.log.committed}
 	r.send(m)
 	switch pr.state {
 	case stateReplicate:
@@ -291,7 +291,7 @@ func (r *Raft) maybeCommit() bool {
 
 // stepLeader handles a message of the leader's term. Any answer from a
 // member counts as contact for CheckQuorum, the lease and promotion.
-func (r *Raft) stepLeader(now time.Time, m core.Message) {
+func (r *Raft) stepLeader(now time.Time, m core.MessageValue) {
 	pr := r.prs[m.From]
 	switch m.Kind {
 	case core.MsgReadIndex:
@@ -322,7 +322,7 @@ func (r *Raft) stepLeader(now time.Time, m core.Message) {
 // handleHeartbeatResp acknowledges every round up to the one answered,
 // recording the contract generation the peer applied, and refills a window
 // that a lost append left stalled.
-func (r *Raft) handleHeartbeatResp(pr *progress, m core.Message) {
+func (r *Raft) handleHeartbeatResp(pr *progress, m core.MessageValue) {
 	r.ackRounds(m.From, m.Context, m.Contract)
 	r.confirmRounds()
 	if pr.state == stateProbe {
@@ -352,7 +352,7 @@ func (r *Raft) ackRounds(from core.NodeID, round, contract uint64) {
 
 // handleAppResp moves a peer's progress on an append's answer, commits what
 // a quorum now holds, and feeds the peer what it still lacks.
-func (r *Raft) handleAppResp(pr *progress, m core.Message) {
+func (r *Raft) handleAppResp(pr *progress, m core.MessageValue) {
 	if m.Reject {
 		r.handleAppReject(pr, m)
 		return
@@ -382,7 +382,7 @@ func (r *Raft) handleAppResp(pr *progress, m core.Message) {
 // asked for, to the truncation it reports, or to the hint of a rejection
 // that still answers an outstanding append; any other rejection is stale and
 // ignored.
-func (r *Raft) handleAppReject(pr *progress, m core.Message) {
+func (r *Raft) handleAppReject(pr *progress, m core.MessageValue) {
 	if m.Flags&core.FlagNeedSnapshot != 0 && pr.state != stateSnapshot {
 		pr.becomeSnapshot(r.log.snapIndex)
 		r.rd.SendSnapshot = append(r.rd.SendSnapshot, m.From)
@@ -419,7 +419,7 @@ func (r *Raft) handleAppReject(pr *progress, m core.Message) {
 // Propose appends entries at the leader. Kind, Version, BodySum and Data are
 // the proposer's; positions and chain values are assigned here. A refusal
 // appends nothing.
-func (r *Raft) Propose(now time.Time, es []core.Entry) ([]core.Position, errs.Code) {
+func (r *Raft) Propose(now time.Time, es []core.EntryValue) ([]core.PositionValue, errs.Code) {
 	r.now = now
 	if r.role != core.RoleLeader || r.transferTo != 0 {
 		return nil, codeNotLeader
@@ -446,7 +446,7 @@ func (r *Raft) Propose(now time.Time, es []core.Entry) ([]core.Position, errs.Co
 // command as it is, a no-op or an unknown kind never, an engine entry once
 // validateAdmin accepts and rewrites it. It returns the target of a
 // transfer the entry asks for.
-func (r *Raft) checkProposed(e *core.Entry, index uint64) (core.NodeID, errs.Code) {
+func (r *Raft) checkProposed(e *core.EntryValue, index uint64) (core.NodeID, errs.Code) {
 	switch {
 	case e.Kind == core.EntryCommand:
 		return 0, 0
@@ -459,7 +459,7 @@ func (r *Raft) checkProposed(e *core.Entry, index uint64) (core.NodeID, errs.Cod
 
 // validateAdmin re-validates an engine entry against the leader's own state
 // and rewrites a membership change into the whole configuration (D8).
-func (r *Raft) validateAdmin(e *core.Entry, index uint64) (core.NodeID, errs.Code) {
+func (r *Raft) validateAdmin(e *core.EntryValue, index uint64) (core.NodeID, errs.Code) {
 	admin, err := wire.ParseAdmin(e.Data)
 	if err != nil {
 		return 0, codeVersion
@@ -564,9 +564,9 @@ func (r *Raft) checkTransfer(admin *wire.Admin) (core.NodeID, errs.Code) {
 // nextConf computes the configuration a single-server change produces, and
 // refuses it on its merits (D8). On a refusal the configuration returned is
 // not to be used.
-func (r *Raft) nextConf(admin wire.Admin) (core.Membership, errs.Code) {
+func (r *Raft) nextConf(admin wire.Admin) (core.MembershipValue, errs.Code) {
 	cur := r.conf().Clone()
-	idx := slices.IndexFunc(cur.Members, func(m core.Member) bool { return m.ID == admin.Target })
+	idx := slices.IndexFunc(cur.Members, func(m core.MemberValue) bool { return m.ID == admin.Target })
 	var code errs.Code
 	switch admin.Change {
 	case wire.ChangeAddLearner:
@@ -588,7 +588,7 @@ func (r *Raft) nextConf(admin wire.Admin) (core.Membership, errs.Code) {
 // addLearner adds the one member admin carries as a learner: a new id with
 // a key no member holds, never retired, with a pin, and only while a quorum
 // answers so the change can commit.
-func (r *Raft) addLearner(cur *core.Membership, admin *wire.Admin) errs.Code {
+func (r *Raft) addLearner(cur *core.MembershipValue, admin *wire.Admin) errs.Code {
 	if len(admin.Membership.Members) != 1 {
 		return codeMembershipInvalid
 	}
@@ -602,7 +602,7 @@ func (r *Raft) addLearner(cur *core.Membership, admin *wire.Admin) errs.Code {
 	}
 	// One id, one member; and one key, one member, since the transport
 	// admits by key (review M5).
-	if _, ok := cur.Member(nm.ID); ok || slices.ContainsFunc(cur.Members, func(m core.Member) bool { return m.SPKI == nm.SPKI }) {
+	if _, ok := cur.Member(nm.ID); ok || slices.ContainsFunc(cur.Members, func(m core.MemberValue) bool { return m.SPKI == nm.SPKI }) {
 		return codeMembershipInvalid
 	}
 	if !r.quorumActive(r.now, r.voteWindow) {
@@ -615,7 +615,7 @@ func (r *Raft) addLearner(cur *core.Membership, admin *wire.Admin) errs.Code {
 
 // promote makes the learner at idx a voter, only once it caught up and was
 // heard recently, and only if the new voter set still answers by a majority.
-func (r *Raft) promote(cur *core.Membership, target core.NodeID, idx int) errs.Code {
+func (r *Raft) promote(cur *core.MembershipValue, target core.NodeID, idx int) errs.Code {
 	if cur.IsRetired(target) {
 		return codeRetired
 	}
@@ -640,7 +640,7 @@ func (r *Raft) promote(cur *core.Membership, target core.NodeID, idx int) errs.C
 // removeMember removes the member at idx, never this leader, and retires
 // its id; a voter's removal may not cross MinVoters nor leave a voter set
 // without an answering majority.
-func (r *Raft) removeMember(cur *core.Membership, target core.NodeID, idx int) errs.Code {
+func (r *Raft) removeMember(cur *core.MembershipValue, target core.NodeID, idx int) errs.Code {
 	if idx < 0 || target == r.id {
 		return codeMembershipInvalid
 	}
@@ -661,7 +661,7 @@ func (r *Raft) removeMember(cur *core.Membership, target core.NodeID, idx int) e
 
 // updateAddress changes the address of the member at idx to the one admin
 // carries, while a majority answers.
-func (r *Raft) updateAddress(cur *core.Membership, admin *wire.Admin, idx int) errs.Code {
+func (r *Raft) updateAddress(cur *core.MembershipValue, admin *wire.Admin, idx int) errs.Code {
 	if idx < 0 || len(admin.Membership.Members) != 1 || !r.activeMajority(*cur) {
 		return codeMembershipInvalid
 	}
@@ -671,7 +671,7 @@ func (r *Raft) updateAddress(cur *core.Membership, admin *wire.Admin, idx int) e
 
 // denyPin withdraws the pin of the member at idx: its connections are
 // refused from then on, while it stays a member.
-func denyPin(cur *core.Membership, idx int) errs.Code {
+func denyPin(cur *core.MembershipValue, idx int) errs.Code {
 	if idx < 0 {
 		return codeMembershipInvalid
 	}
@@ -681,7 +681,7 @@ func denyPin(cur *core.Membership, idx int) errs.Code {
 
 // activeMajority is etcd's strict reconfiguration check: the voters of m
 // that answer the leader NOW form a majority of m (R2-27).
-func (r *Raft) activeMajority(m core.Membership) bool {
+func (r *Raft) activeMajority(m core.MembershipValue) bool {
 	vs := m.Voters()
 	n := 0
 	for _, id := range vs {
@@ -699,41 +699,41 @@ func (r *Raft) activeMajority(m core.Membership) bool {
 // handleForward proposes the one entry a follower forwarded and answers
 // with its position or a refusal. The entry is copied out of the frame
 // first, and a body that does not match its checksum is never proposed.
-func (r *Raft) handleForward(m core.Message) {
+func (r *Raft) handleForward(m core.MessageValue) {
 	resp := core.MsgForwardResp
 	if m.Kind == core.MsgForwardAdmin {
 		resp = core.MsgForwardAdminResp
 	}
 	if r.role != core.RoleLeader || len(m.Entries) != 1 {
-		r.send(core.Message{Kind: resp, To: m.From, Context: m.Context, Reject: true, Code: codeNotLeader, RejectHint: uint64(r.lead)})
+		r.send(core.MessageValue{Kind: resp, To: m.From, Context: m.Context, Reject: true, Code: codeNotLeader, RejectHint: uint64(r.lead)})
 		return
 	}
 	e := m.Entries[0]
 	e.Data = ownCopy(e.Data)
 	if wire.BodySum(e.Data) != e.BodySum {
-		r.send(core.Message{Kind: resp, To: m.From, Context: m.Context, Reject: true, Code: core.CodeFrameInvalid})
+		r.send(core.MessageValue{Kind: resp, To: m.From, Context: m.Context, Reject: true, Code: core.CodeFrameInvalid})
 		return
 	}
 	if (m.Kind == core.MsgForward) != (e.Kind == core.EntryCommand) {
-		r.send(core.Message{Kind: resp, To: m.From, Context: m.Context, Reject: true, Code: codeVersion})
+		r.send(core.MessageValue{Kind: resp, To: m.From, Context: m.Context, Reject: true, Code: codeVersion})
 		return
 	}
 	if e.Kind == core.EntryCommand {
 		if code := r.admitForward(len(e.Data)); code != 0 {
-			r.send(core.Message{Kind: resp, To: m.From, Context: m.Context, Reject: true, Code: code})
+			r.send(core.MessageValue{Kind: resp, To: m.From, Context: m.Context, Reject: true, Code: code})
 			return
 		}
 	}
-	pos, code := r.Propose(r.now, []core.Entry{e})
+	pos, code := r.Propose(r.now, []core.EntryValue{e})
 	if code != 0 {
-		r.send(core.Message{Kind: resp, To: m.From, Context: m.Context, Reject: true, Code: code, RejectHint: uint64(r.lead)})
+		r.send(core.MessageValue{Kind: resp, To: m.From, Context: m.Context, Reject: true, Code: code, RejectHint: uint64(r.lead)})
 		return
 	}
 	if e.Kind == core.EntryCommand {
 		r.fwd = append(r.fwd, fwdEntry{index: pos[0].Index, size: int64(len(e.Data))})
 		r.fwdBytes += int64(len(e.Data))
 	}
-	r.send(core.Message{Kind: resp, To: m.From, Context: m.Context, Index: pos[0].Index, LogTerm: pos[0].Term})
+	r.send(core.MessageValue{Kind: resp, To: m.From, Context: m.Context, Index: pos[0].Index, LogTerm: pos[0].Term})
 }
 
 // admitForward applies to a forwarded command the bounds the driver applies
@@ -769,7 +769,7 @@ func (r *Raft) ReadIndex(now time.Time, ctx uint64, noLease bool) {
 		r.pendingReads = append(r.pendingReads, readReq{ctx: ctx})
 		r.serveLeaseRead(!noLease)
 	case r.lead != 0:
-		m := core.Message{Kind: core.MsgReadIndex, To: r.lead, Context: ctx}
+		m := core.MessageValue{Kind: core.MsgReadIndex, To: r.lead, Context: ctx}
 		if noLease {
 			m.Flags |= core.FlagNoLease
 		}
@@ -926,7 +926,7 @@ func (r *Raft) answerRead(q readReq, index uint64, code errs.Code) {
 		r.rd.ReadStates = append(r.rd.ReadStates, ReadState{Context: q.ctx, Index: index, Code: code})
 		return
 	}
-	r.send(core.Message{Kind: core.MsgReadIndexResp, To: q.from, Context: q.ctx, Index: index, Code: code})
+	r.send(core.MessageValue{Kind: core.MsgReadIndexResp, To: q.from, Context: q.ctx, Index: index, Code: code})
 }
 
 // ---- leadership transfer ----
@@ -976,7 +976,7 @@ func (r *Raft) maybeSendTimeoutNow() {
 		return
 	}
 	r.transferSent = true
-	r.send(core.Message{Kind: core.MsgTimeoutNow, To: r.transferTo})
+	r.send(core.MessageValue{Kind: core.MsgTimeoutNow, To: r.transferTo})
 }
 
 // ---- snapshots ----
@@ -984,7 +984,7 @@ func (r *Raft) maybeSendTimeoutNow() {
 // CheckOffer answers an install offer on the event loop, which alone knows
 // the term, the leader and the commit index (R8-21). needTable exempts a
 // node that holds no usable snapshot from the freshness rule (R7-18).
-func (r *Raft) CheckOffer(from core.NodeID, o core.InstallOffer, needTable bool) errs.Code {
+func (r *Raft) CheckOffer(from core.NodeID, o core.InstallOfferValue, needTable bool) errs.Code {
 	if o.Term != r.term || from != r.lead || r.role == core.RoleLeader {
 		return codeNotLeader
 	}
@@ -1003,7 +1003,7 @@ func (r *Raft) CheckOffer(from core.NodeID, o core.InstallOffer, needTable bool)
 // InstallSnapshot moves the log onto a snapshot the driver has published and
 // restored. The suffix after it is kept only when the boundary entry matches
 // (D7).
-func (r *Raft) InstallSnapshot(meta core.SnapshotMeta) {
+func (r *Raft) InstallSnapshot(meta core.SnapshotMetaValue) {
 	idx, t := meta.Position.Index, meta.Position.Term
 	if idx < r.log.snapIndex && !r.mutated(mutInstallBelowBase) {
 		return // CheckOffer refuses it: never move the base back
@@ -1036,7 +1036,7 @@ func (r *Raft) InstallSnapshot(meta core.SnapshotMeta) {
 		ack = r.log.lastIndex()
 	}
 	if r.lead != 0 {
-		r.send(core.Message{Kind: core.MsgAppResp, To: r.lead, Index: ack})
+		r.send(core.MessageValue{Kind: core.MsgAppResp, To: r.lead, Index: ack})
 	}
 }
 

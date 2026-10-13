@@ -18,28 +18,28 @@ import (
 
 var t0 = time.Unix(1_800_000_000, 0)
 
-func testTiming() core.TimingContract {
-	return core.TimingContract{
+func testTiming() core.TimingContractSpec {
+	return core.TimingContractSpec{
 		Generation: 1, HeartbeatInterval: 100 * time.Millisecond,
 		ElectionTimeoutMin: time.Second, ElectionTimeoutMax: 2 * time.Second, MaxClockDrift: 0.01,
 	}
 }
 
-func testConf(ids ...core.NodeID) core.Membership {
-	var m core.Membership
+func testConf(ids ...core.NodeID) core.MembershipValue {
+	var m core.MembershipValue
 	for _, id := range ids {
-		m.Members = append(m.Members, core.Member{ID: id, Voter: true, SPKI: [32]byte{byte(id)}})
+		m.Members = append(m.Members, core.MemberValue{ID: id, Voter: true, SPKI: [32]byte{byte(id)}})
 	}
 	return m
 }
 
 // chainEntries builds command entries at start.. with the given terms, chained
 // from prev.
-func chainEntries(prev uint32, start uint64, terms ...uint64) []core.Entry {
-	out := make([]core.Entry, len(terms))
+func chainEntries(prev uint32, start uint64, terms ...uint64) []core.EntryValue {
+	out := make([]core.EntryValue, len(terms))
 	for i, t := range terms {
 		d := fmt.Appendf(nil, "e%d-t%d", start+uint64(i), t)
-		e := core.Entry{Position: core.Position{Term: t, Index: start + uint64(i)}, Kind: core.EntryCommand, BodySum: wire.BodySum(d), Data: d}
+		e := core.EntryValue{Position: core.PositionValue{Term: t, Index: start + uint64(i)}, Kind: core.EntryCommand, BodySum: wire.BodySum(d), Data: d}
 		e.ChainSum = wire.ChainSum(prev, &e)
 		prev = e.ChainSum
 		out[i] = e
@@ -52,7 +52,7 @@ func chainEntries(prev uint32, start uint64, terms ...uint64) []core.Entry {
 type testState struct {
 	term   uint64
 	commit uint64
-	ents   []core.Entry
+	ents   []core.EntryValue
 }
 
 func newTest(id core.NodeID, st testState, mut mutation, lease bool) *Raft {
@@ -63,18 +63,18 @@ func newTest(id core.NodeID, st testState, mut mutation, lease bool) *Raft {
 	}
 	return New(cfg, Start{
 		HardState: core.HardState{Term: term, Commit: commit},
-		Snapshot:  core.SnapshotMeta{Membership: testConf(1, 2, 3)},
+		Snapshot:  core.SnapshotMetaValue{Membership: testConf(1, 2, 3)},
 		Entries:   ents,
 		Now:       t0,
 	})
 }
 
-func msg(kind core.MessageKind, from, to core.NodeID, term uint64) core.Message {
-	return core.Message{Version: 1, Group: 1, Kind: kind, From: from, To: to, Term: term}
+func msg(kind core.MessageKind, from, to core.NodeID, term uint64) core.MessageValue {
+	return core.MessageValue{Version: 1, Group: 1, Kind: kind, From: from, To: to, Term: term}
 }
 
 // leaderOf makes node 1 the leader of term over ents, its no-op durable.
-func leaderOf(term uint64, commit uint64, ents []core.Entry, mut mutation, lease bool) *Raft {
+func leaderOf(term uint64, commit uint64, ents []core.EntryValue, mut mutation, lease bool) *Raft {
 	r := newTest(1, testState{term: term - 1, commit: commit, ents: ents}, mut, lease)
 	r.now = t0.Add(5 * time.Second)
 	r.term, r.vote = term, 1
@@ -112,7 +112,7 @@ func checkVoteKeptOnSameTermStepDown(mut mutation) error {
 	r := newTest(3, testState{term: 1, commit: 0}, mut, false)
 	now := t0.Add(3 * time.Second)
 	r.Tick(now)
-	r.Step(now, core.Message{Version: 1, Group: 1, Kind: core.MsgPreVoteResp, From: 1, To: 3, Term: 2})
+	r.Step(now, core.MessageValue{Version: 1, Group: 1, Kind: core.MsgPreVoteResp, From: 1, To: 3, Term: 2})
 	if r.role != core.RoleCandidate {
 		return fmt.Errorf("setup: role %v", r.role)
 	}
@@ -171,14 +171,14 @@ func checkSnapshotAckIndex(mut mutation) error {
 	}
 	f := New(cfg, Start{
 		HardState: core.HardState{Term: 3},
-		Snapshot:  core.SnapshotMeta{Membership: testConf(1, 2, 3)},
+		Snapshot:  core.SnapshotMetaValue{Membership: testConf(1, 2, 3)},
 		Entries:   chainEntries(0, 1, 1, 1, 1, 2, 2),
 		Now:       t0,
 	})
 	f.lead = 1
 	l := leaderOf(3, 0, chainEntries(0, 1, 1, 1, 1, 3, 3), mut, false)
-	f.InstallSnapshot(core.SnapshotMeta{
-		Position: core.Position{Term: 1, Index: 3}, ChainTip: l.log.chain(3),
+	f.InstallSnapshot(core.SnapshotMetaValue{
+		Position: core.PositionValue{Term: 1, Index: 3}, ChainTip: l.log.chain(3),
 		Membership: testConf(1, 2, 3), Timing: testTiming(),
 	})
 	var ack uint64
@@ -212,7 +212,7 @@ func checkFigure8(mut mutation) error {
 	return nil
 }
 
-func voteFrom(kind core.MessageKind, from core.NodeID, term, lastTerm, lastIndex uint64) core.Message {
+func voteFrom(kind core.MessageKind, from core.NodeID, term, lastTerm, lastIndex uint64) core.MessageValue {
 	m := msg(kind, from, 2, term)
 	m.LogTerm, m.Index = lastTerm, lastIndex
 	return m
@@ -237,7 +237,7 @@ func checkPreVoteRestriction(mut mutation) error {
 }
 
 // followerOfOne is node 2 at term 2, having just heard from leader 1.
-func followerOfOne(mut mutation, ents []core.Entry) (*Raft, time.Time) {
+func followerOfOne(mut mutation, ents []core.EntryValue) (*Raft, time.Time) {
 	f := newTest(2, testState{term: 2, commit: 0, ents: ents}, mut, false)
 	now := t0.Add(5 * time.Second)
 	f.Step(now, msg(core.MsgHeartbeat, 1, 2, 2))
@@ -245,7 +245,7 @@ func followerOfOne(mut mutation, ents []core.Entry) (*Raft, time.Time) {
 	return f, now.Add(10 * time.Millisecond)
 }
 
-func transferVote(term, issuerTerm, lastTerm, lastIndex uint64) core.Message {
+func transferVote(term, issuerTerm, lastTerm, lastIndex uint64) core.MessageValue {
 	m := voteFrom(core.MsgVote, 3, term, lastTerm, lastIndex)
 	m.Flags = core.FlagTransfer
 	m.TransferIssuer, m.TransferTerm = 1, issuerTerm
@@ -388,9 +388,9 @@ func checkLeaseFromAckingMinimum(mut mutation) error {
 
 func checkMembershipAfterNoOp(mut mutation) error {
 	r := leaderOf(2, 0, nil, mut, false)
-	nm := core.Member{ID: 9, SPKI: [32]byte{9}}
-	data := wire.AppendAdmin(nil, &wire.Admin{Change: wire.ChangeAddLearner, Membership: core.Membership{Members: []core.Member{nm}}})
-	_, code := r.Propose(r.now, []core.Entry{{Kind: core.EntryMembership, BodySum: wire.BodySum(data), Data: data}})
+	nm := core.MemberValue{ID: 9, SPKI: [32]byte{9}}
+	data := wire.AppendAdmin(nil, &wire.Admin{Change: wire.ChangeAddLearner, Membership: core.MembershipValue{Members: []core.MemberValue{nm}}})
+	_, code := r.Propose(r.now, []core.EntryValue{{Kind: core.EntryMembership, BodySum: wire.BodySum(data), Data: data}})
 	if code == 0 {
 		return errors.New("a membership change was accepted before the term's no-op committed")
 	}
@@ -528,7 +528,7 @@ func TestSilentNodeStaysSilentUntilTheConditionHolds(t *testing.T) {
 		MaxBatchBytes: 1 << 16, MinVoters: 1, PromoteLag: 16, CanVote: true, SilentTerm: 3, SilentIndex: 2,
 	}
 	f := New(cfg, Start{
-		HardState: core.HardState{Term: 3}, Snapshot: core.SnapshotMeta{Membership: testConf(1, 2, 3)},
+		HardState: core.HardState{Term: 3}, Snapshot: core.SnapshotMetaValue{Membership: testConf(1, 2, 3)},
 		Entries: chainEntries(0, 1, 1), Now: t0,
 	})
 	f.Step(t0.Add(5*time.Second), voteFrom(core.MsgVote, 3, 4, 9, 9))
@@ -559,23 +559,23 @@ func TestSilentNodeStaysSilentUntilTheConditionHolds(t *testing.T) {
 }
 
 // forwardCmd is a MsgForward from node 2 carrying one command of size bytes.
-func forwardCmd(term uint64, ctx uint64, size int) core.Message {
+func forwardCmd(term uint64, ctx uint64, size int) core.MessageValue {
 	d := make([]byte, size)
 	m := msg(core.MsgForward, 2, 1, term)
 	m.Context = ctx
-	m.Entries = []core.Entry{{Kind: core.EntryCommand, BodySum: wire.BodySum(d), Data: d}}
+	m.Entries = []core.EntryValue{{Kind: core.EntryCommand, BodySum: wire.BodySum(d), Data: d}}
 	return m
 }
 
 // forwardAnswer is the leader's answer to the forward ctx.
-func forwardAnswer(r *Raft, ctx uint64) (core.Message, bool) {
+func forwardAnswer(r *Raft, ctx uint64) (core.MessageValue, bool) {
 	rd := r.Ready()
 	for _, m := range append(rd.Messages, rd.AfterSync...) {
 		if m.Kind == core.MsgForwardResp && m.Context == ctx {
 			return m, true
 		}
 	}
-	return core.Message{}, false
+	return core.MessageValue{}, false
 }
 
 // A forwarded command meets the bounds a local one meets: the entry size,
@@ -651,16 +651,16 @@ func TestUnknownEntryKindStopsTheFollower(t *testing.T) {
 // version 1 announces more (review M3).
 func TestClusterVersionAboveTheProtocolIsRefused(t *testing.T) {
 	r := leaderOf(2, 0, nil, 0, false)
-	data := wire.AppendAdmin(nil, &wire.Admin{Pre: core.Precondition{Log: r.cfg.Log}, ClusterVersion: ProtocolMax + 1})
-	if _, code := r.Propose(r.now, []core.Entry{{Kind: core.EntryClusterVersion, BodySum: wire.BodySum(data), Data: data}}); code != core.CodeVersionUnsupported {
+	data := wire.AppendAdmin(nil, &wire.Admin{Pre: core.PreconditionSpec{Log: r.cfg.Log}, ClusterVersion: ProtocolMax + 1})
+	if _, code := r.Propose(r.now, []core.EntryValue{{Kind: core.EntryClusterVersion, BodySum: wire.BodySum(data), Data: data}}); code != core.CodeVersionUnsupported {
 		t.Fatalf("raise above the protocol: %v", code)
 	}
 	f := newTest(2, testState{term: 1, commit: 0, ents: chainEntries(0, 1, 1)}, 0, false)
-	e := core.Entry{Position: core.Position{Term: 1, Index: 2}, Kind: core.EntryClusterVersion, Data: data}
+	e := core.EntryValue{Position: core.PositionValue{Term: 1, Index: 2}, Kind: core.EntryClusterVersion, Data: data}
 	e.BodySum = wire.BodySum(data)
 	e.ChainSum = wire.ChainSum(f.log.chain(1), &e)
 	m := msg(core.MsgApp, 1, 2, 1)
-	m.Index, m.LogTerm, m.Commit, m.Entries = 1, 1, 2, []core.Entry{e}
+	m.Index, m.LogTerm, m.Commit, m.Entries = 1, 1, 2, []core.EntryValue{e}
 	f.Step(t0, m)
 	if u := f.Ready().Unsupported; u.Index != 2 {
 		t.Fatalf("a committed raise above the protocol: %+v", u)
@@ -685,15 +685,15 @@ func TestAddLearnerRefusesAKeyAMemberHolds(t *testing.T) {
 	if r.log.committed != r.log.lastIndex() {
 		t.Fatalf("setup: no-op not committed (%d/%d)", r.log.committed, r.log.lastIndex())
 	}
-	add := func(nm core.Member) errs.Code {
-		data := wire.AppendAdmin(nil, &wire.Admin{Change: wire.ChangeAddLearner, Membership: core.Membership{Members: []core.Member{nm}}})
-		_, code := r.Propose(r.now, []core.Entry{{Kind: core.EntryMembership, BodySum: wire.BodySum(data), Data: data}})
+	add := func(nm core.MemberValue) errs.Code {
+		data := wire.AppendAdmin(nil, &wire.Admin{Change: wire.ChangeAddLearner, Membership: core.MembershipValue{Members: []core.MemberValue{nm}}})
+		_, code := r.Propose(r.now, []core.EntryValue{{Kind: core.EntryMembership, BodySum: wire.BodySum(data), Data: data}})
 		return code
 	}
-	if code := add(core.Member{ID: 9, SPKI: [32]byte{2}}); code != core.CodeMembershipInvalid {
+	if code := add(core.MemberValue{ID: 9, SPKI: [32]byte{2}}); code != core.CodeMembershipInvalid {
 		t.Fatalf("a learner under member 2's key: %v", code)
 	}
-	if code := add(core.Member{ID: 9, SPKI: [32]byte{9}}); code != 0 {
+	if code := add(core.MemberValue{ID: 9, SPKI: [32]byte{9}}); code != 0 {
 		t.Fatalf("a learner under its own key: %v", code)
 	}
 }
@@ -708,11 +708,11 @@ func checkNoTableBase(mut mutation) error {
 		MaxBatchBytes: 1 << 16, MinVoters: 1, PromoteLag: 16, CanVote: true, MaxChainRefusals: 3, NoTable: true, mut: mut,
 	}
 	all := chainEntries(0, 1, 1, 1, 1, 1, 1, 1)
-	base := core.SnapshotMeta{Position: core.Position{Term: 1, Index: 4}, ChainTip: all[3].ChainSum, Membership: testConf(1, 2, 3)}
+	base := core.SnapshotMetaValue{Position: core.PositionValue{Term: 1, Index: 4}, ChainTip: all[3].ChainSum, Membership: testConf(1, 2, 3)}
 	f := New(cfg, Start{HardState: core.HardState{Term: 1, Commit: 6}, Snapshot: base, Entries: all[4:], Applied: 4, Now: t0})
 	f.lead, f.term = 1, 1
-	old := core.SnapshotMeta{Position: core.Position{Term: 1, Index: 2}, ChainTip: all[1].ChainSum, Membership: testConf(1, 2, 3)}
-	if code := f.CheckOffer(1, core.InstallOffer{Term: 1, Meta: old}, true); code == 0 || code == core.CodeAdminPreconditionFailed {
+	old := core.SnapshotMetaValue{Position: core.PositionValue{Term: 1, Index: 2}, ChainTip: all[1].ChainSum, Membership: testConf(1, 2, 3)}
+	if code := f.CheckOffer(1, core.InstallOfferValue{Term: 1, Meta: old}, true); code == 0 || code == core.CodeAdminPreconditionFailed {
 		return fmt.Errorf("an offer below the log's base was accepted (%v)", code)
 	}
 	f.InstallSnapshot(old)

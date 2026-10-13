@@ -64,12 +64,12 @@ type fileSink struct {
 	s    *FileSnapshots
 	id   string
 	f    *os.File
-	meta coreconsensus.SnapshotMeta
+	meta coreconsensus.SnapshotMetaValue
 }
 
 // Create implements SnapshotStore: an existing spool of that id resumes from
 // its last whole, checksummed chunk (R8-21).
-func (s *FileSnapshots) Create(id string, meta coreconsensus.SnapshotMeta) (coreconsensus.SnapshotSink, int64, error) {
+func (s *FileSnapshots) Create(id string, meta coreconsensus.SnapshotMetaValue) (coreconsensus.SnapshotSink, int64, error) {
 	if !validID(id) {
 		return nil, 0, origin(coreconsensus.FrameInvalid, errs.String("snapshot_id", id))
 	}
@@ -102,7 +102,7 @@ func (k *fileSink) Write(p []byte) (int, error) { return k.f.Write(p) }
 // checked, the spool synced and closed, renamed to <id>.snap, and the
 // <id>.meta written atomically LAST, so a crash at any step leaves no
 // published snapshot without its bytes.
-func (k *fileSink) Commit(final coreconsensus.SnapshotMeta) error {
+func (k *fileSink) Commit(final coreconsensus.SnapshotMetaValue) error {
 	final.ID = k.id
 	size, err := k.f.Seek(0, io.SeekCurrent)
 	if err != nil {
@@ -136,8 +136,8 @@ func (k *fileSink) Commit(final coreconsensus.SnapshotMeta) error {
 // interrupted, not a snapshot that failed. A .meta or a .snap that is there
 // but cannot be read is neither: it is an I/O failure, and it is reported,
 // so that a listing never reads a failing disk as "no snapshot".
-func (s *FileSnapshots) published(name string) (coreconsensus.SnapshotMeta, bool, error) {
-	var m coreconsensus.SnapshotMeta
+func (s *FileSnapshots) published(name string) (coreconsensus.SnapshotMetaValue, bool, error) {
+	var m coreconsensus.SnapshotMetaValue
 	if !strings.HasSuffix(name, ".meta") {
 		return m, false, nil
 	}
@@ -180,12 +180,12 @@ func (k *fileSink) Abort() error {
 }
 
 // List implements SnapshotStore: complete snapshots, newest first.
-func (s *FileSnapshots) List() ([]coreconsensus.SnapshotMeta, error) {
+func (s *FileSnapshots) List() ([]coreconsensus.SnapshotMetaValue, error) {
 	ents, err := os.ReadDir(s.dir)
 	if err != nil {
 		return nil, storageFailed("list snapshots", err)
 	}
-	var out []coreconsensus.SnapshotMeta
+	var out []coreconsensus.SnapshotMetaValue
 	for _, e := range ents {
 		m, ok, err := s.published(e.Name())
 		if err != nil {
@@ -195,7 +195,7 @@ func (s *FileSnapshots) List() ([]coreconsensus.SnapshotMeta, error) {
 			out = append(out, m)
 		}
 	}
-	slices.SortFunc(out, func(a, b coreconsensus.SnapshotMeta) int {
+	slices.SortFunc(out, func(a, b coreconsensus.SnapshotMetaValue) int {
 		switch {
 		case a.Position.Index > b.Position.Index:
 			return -1
@@ -210,12 +210,12 @@ func (s *FileSnapshots) List() ([]coreconsensus.SnapshotMeta, error) {
 type fileHandle struct {
 	*os.File
 	s    *FileSnapshots
-	meta coreconsensus.SnapshotMeta
+	meta coreconsensus.SnapshotMetaValue
 	once sync.Once
 }
 
 // Meta returns the metadata read from the snapshot's .meta at Open.
-func (h *fileHandle) Meta() coreconsensus.SnapshotMeta { return h.meta }
+func (h *fileHandle) Meta() coreconsensus.SnapshotMetaValue { return h.meta }
 
 // Close unpins the snapshot and closes its file exactly once; a second
 // Close returns nil and releases nothing.
@@ -241,7 +241,7 @@ func (s *FileSnapshots) Open(id string) (coreconsensus.SnapshotHandle, error) {
 	if err != nil {
 		return nil, origin(coreconsensus.SnapshotCorrupt, errs.String("id", id), errs.String("why", "no meta"))
 	}
-	var m coreconsensus.SnapshotMeta
+	var m coreconsensus.SnapshotMetaValue
 	if err := wire.ParseSnapshotMeta(b, &m); err != nil {
 		return nil, err
 	}

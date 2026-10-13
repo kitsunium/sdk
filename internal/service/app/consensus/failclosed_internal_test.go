@@ -15,7 +15,7 @@ import (
 func TestAStampOfAnUnknownStateIsRefused(t *testing.T) {
 	dir := t.TempDir()
 	unknown := coreconsensus.StampMember + 1
-	if err := writeStamp(dir, coreconsensus.Stamp{ID: 1, State: unknown}); err != nil {
+	if err := writeStamp(dir, coreconsensus.StampValue{ID: 1, State: unknown}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := readStamp(dir); !errors.Is(err, coreconsensus.DataDirMismatch) {
@@ -46,7 +46,7 @@ func TestBootstrapRefusesAStampOfAnUnknownState(t *testing.T) {
 		Transport: NewMemoryNetwork().Transport(id), InitialTiming: testTimingFast(), MaxSnapshotBytes: 1 << 30,
 		SnapshotEveryBytes: 1 << 20, MaxLogBytes: 1 << 30, LogReserveBytes: 1 << 20, MinVoters: 1,
 	}
-	members := []coreconsensus.Member{{ID: id, Incarnation: inc, Slot: "s0", SPKI: MemorySPKI(id), Voter: true}}
+	members := []coreconsensus.MemberValue{{ID: id, Incarnation: inc, Slot: "s0", SPKI: MemorySPKI(id), Voter: true}}
 	if err := Bootstrap(context.Background(), cfg, members); !errors.Is(err, coreconsensus.DataDirMismatch) {
 		t.Fatalf("Bootstrap over an unknown stamp state: %v", err)
 	}

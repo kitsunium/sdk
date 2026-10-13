@@ -31,12 +31,12 @@ const (
 // Known reports whether the kind is one protocol version 1 defines.
 func (k EntryKind) Known() bool { return k >= EntryCommand && k <= EntryTransfer }
 
-// Entry is one record of the replicated log. Data is immutable once appended:
+// EntryValue is one record of the replicated log. Data is immutable once appended:
 // the store and the engine never write into it, and a caller that hands bytes
 // to Propose gives up their ownership.
-type Entry struct {
+type EntryValue struct {
 	// Position is the entry's term and index.
-	Position Position
+	Position PositionValue
 	// Kind says what Data carries.
 	Kind EntryKind
 	// Version is the payload version the proposer set; it selects the frozen
@@ -52,7 +52,7 @@ type Entry struct {
 	Data []byte
 	// Token is the entry's lineage-scoped command identity, set in memory by
 	// the engine before Apply and never encoded in the log.
-	Token Token
+	Token TokenValue
 }
 
 // HardState is what a node must never forget: its term, its vote in that term

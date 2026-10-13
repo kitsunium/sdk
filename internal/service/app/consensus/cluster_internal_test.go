@@ -44,7 +44,7 @@ type kv struct {
 
 func newKV() *kv { return &kv{m: map[string]string{}} }
 
-func (s *kv) Apply(e coreconsensus.Entry) any {
+func (s *kv) Apply(e coreconsensus.EntryValue) any {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	k, v, _ := bytes.Cut(e.Data, []byte("="))
@@ -84,7 +84,7 @@ func (s *kv) Snapshot() (coreconsensus.Snapshot, error) {
 	return kvSnap{data: b}, nil
 }
 
-func (s *kv) Restore(r io.Reader, _ coreconsensus.SnapshotMeta) error {
+func (s *kv) Restore(r io.Reader, _ coreconsensus.SnapshotMetaValue) error {
 	b, err := io.ReadAll(r)
 	if err != nil {
 		return err
@@ -119,14 +119,14 @@ type cluster struct {
 	net     *MemoryNetwork
 	cid     coreconsensus.ClusterID
 	nodes   []*testNode
-	members []coreconsensus.Member
+	members []coreconsensus.MemberValue
 	every   uint64
 	recent  int64
 	size    int
 }
 
-func testTimingFast() coreconsensus.TimingContract {
-	return coreconsensus.TimingContract{
+func testTimingFast() coreconsensus.TimingContractSpec {
+	return coreconsensus.TimingContractSpec{
 		Generation: 1, HeartbeatInterval: 10 * time.Millisecond,
 		ElectionTimeoutMin: 100 * time.Millisecond, ElectionTimeoutMax: 200 * time.Millisecond, MaxClockDrift: 0.05,
 	}
@@ -143,7 +143,7 @@ func (c *cluster) config(tn *testNode) Config {
 
 type allowJoin struct{}
 
-func (allowJoin) Authorize(_ context.Context, r coreconsensus.JoinRequest) (coreconsensus.Operator, error) {
+func (allowJoin) Authorize(_ context.Context, r coreconsensus.JoinRequestValue) (coreconsensus.Operator, error) {
 	return coreconsensus.Operator("automation:" + r.Slot), nil
 }
 
@@ -164,7 +164,7 @@ func newClusterWith(t *testing.T, c *cluster) *cluster {
 		}
 		tn.id = id
 		c.nodes = append(c.nodes, tn)
-		c.members = append(c.members, coreconsensus.Member{
+		c.members = append(c.members, coreconsensus.MemberValue{
 			ID: id, Incarnation: inc, Slot: fmt.Sprintf("slot-%d", i),
 			SPKI: MemorySPKI(id), Voter: true,
 		})
@@ -259,7 +259,7 @@ func (c *cluster) waitApplied(index uint64, timeout time.Duration) {
 	}
 }
 
-func propose(t *testing.T, n *Node, kv string) coreconsensus.Token {
+func propose(t *testing.T, n *Node, kv string) coreconsensus.TokenValue {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -355,7 +355,7 @@ func TestClusterSnapshotInstallsOnALaggingNode(t *testing.T) {
 		}
 	}
 	c.kill(lag)
-	var tok coreconsensus.Token
+	var tok coreconsensus.TokenValue
 	for i := range 200 {
 		tok = propose(t, l.node, fmt.Sprintf("k%d=%d", i, i))
 	}
@@ -427,7 +427,7 @@ func TestClusterMembershipThroughLearners(t *testing.T) {
 	if _, ok := m.Member(victim); ok || !m.IsRetired(victim) {
 		t.Fatalf("victim still a member: %+v", m)
 	}
-	vm := coreconsensus.Member{ID: victim, SPKI: [32]byte{1}}
+	vm := coreconsensus.MemberValue{ID: victim, SPKI: [32]byte{1}}
 	if err := l.node.AddLearner(ctx, "op:test", vm); !errors.Is(err, coreconsensus.NodeIDRetired) {
 		t.Fatalf("retired id re-added: %v", err)
 	}
@@ -508,7 +508,7 @@ func TestEngineDropsAFrameWhoseFromIsNotThePeer(t *testing.T) {
 		}
 	}
 	before := f.node.Health().DroppedFrames
-	m := &coreconsensus.Message{Version: 1, Group: 1, Kind: coreconsensus.MsgTimeoutNow, From: l.id, To: f.id, Term: l.node.Status().Term}
+	m := &coreconsensus.MessageValue{Version: 1, Group: 1, Kind: coreconsensus.MsgTimeoutNow, From: l.id, To: f.id, Term: l.node.Status().Term}
 	frame := appendFrame(m)
 	var liar coreconsensus.NodeID
 	for _, tn := range c.nodes {
@@ -516,7 +516,7 @@ func TestEngineDropsAFrameWhoseFromIsNotThePeer(t *testing.T) {
 			liar = tn.id
 		}
 	}
-	f.node.deliver(coreconsensus.AuthenticatedPeer{ID: liar}, frame)
+	f.node.deliver(coreconsensus.AuthenticatedPeerValue{ID: liar}, frame)
 	if got := f.node.Health().DroppedFrames; got != before+1 {
 		t.Fatalf("dropped %d, want %d", got, before+1)
 	}
@@ -526,7 +526,7 @@ func TestEngineDropsAFrameWhoseFromIsNotThePeer(t *testing.T) {
 	}
 }
 
-func appendFrame(m *coreconsensus.Message) []byte { return wire.AppendMessage(nil, m) }
+func appendFrame(m *coreconsensus.MessageValue) []byte { return wire.AppendMessage(nil, m) }
 
 // A transfer submitted on a follower succeeds, or fails with TRANSFER_FAILED
 // and the old leader resumes; never OUTCOME_UNKNOWN (D8). NOT_LEADER is the
@@ -647,7 +647,7 @@ func TestHealthReportsFailureToleranceAndPeers(t *testing.T) {
 func TestClusterNodeWithoutAValidSnapshotAsksForAnInstall(t *testing.T) {
 	c := newCluster(t, 3, 20)
 	l := c.leader(5 * time.Second)
-	var tok coreconsensus.Token
+	var tok coreconsensus.TokenValue
 	for i := range 120 {
 		tok = propose(t, l.node, fmt.Sprintf("k%d=%d", i, i))
 	}
@@ -706,7 +706,7 @@ func TestClusterLaggingFollowerFedFromTheStore(t *testing.T) {
 		}
 	}
 	c.kill(f)
-	var tok coreconsensus.Token
+	var tok coreconsensus.TokenValue
 	for i := range 300 {
 		tok = propose(t, l.node, fmt.Sprintf("key-%d=%0100d", i, i))
 	}
@@ -734,7 +734,7 @@ func TestLongLoopTurnDropsTheLease(t *testing.T) {
 		cfg.Reads = ReadLease
 		// A 50 ms budget (1 s × 0.05): ordinary turns under -race stay
 		// below it, the 200 ms pause below does not.
-		cfg.InitialTiming = coreconsensus.TimingContract{
+		cfg.InitialTiming = coreconsensus.TimingContractSpec{
 			Generation: 1, HeartbeatInterval: 50 * time.Millisecond,
 			ElectionTimeoutMin: time.Second, ElectionTimeoutMax: 2 * time.Second, MaxClockDrift: 0.05,
 		}
@@ -773,8 +773,8 @@ func TestJoinIsRateLimitedPerSlot(t *testing.T) {
 	l := c.leader(5 * time.Second)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	peer := coreconsensus.AuthenticatedPeer{Slot: "burst", SPKI: [32]byte{7}}
-	req := coreconsensus.JoinRequest{Cluster: c.cid, ID: 991, Slot: "burst"}
+	peer := coreconsensus.AuthenticatedPeerValue{Slot: "burst", SPKI: [32]byte{7}}
+	req := coreconsensus.JoinRequestValue{Cluster: c.cid, ID: 991, Slot: "burst"}
 	if _, code := l.node.join(ctx, peer, req); code != 0 {
 		t.Fatalf("first join: %v", code)
 	}
@@ -793,7 +793,7 @@ type gatedKV struct {
 	gate chan struct{}
 }
 
-func (g gatedKV) Apply(e coreconsensus.Entry) any {
+func (g gatedKV) Apply(e coreconsensus.EntryValue) any {
 	<-g.gate
 	return g.kv.Apply(e)
 }
@@ -878,7 +878,7 @@ func TestInstallResumesAfterACrashAtPublication(t *testing.T) {
 		}
 	}
 	c.kill(lag)
-	var tok coreconsensus.Token
+	var tok coreconsensus.TokenValue
 	for i := range 200 {
 		tok = propose(t, l.node, fmt.Sprintf("k%d=%d", i, i))
 	}
@@ -911,7 +911,7 @@ func TestInstallResumesAfterACrashAtPublication(t *testing.T) {
 
 // staleSnapshot runs a cluster until a follower applied past the leader's
 // newest snapshot, and returns that snapshot's meta and encoded body.
-func staleSnapshot(t *testing.T) (c *cluster, l, f *testNode, meta coreconsensus.SnapshotMeta, body []byte, tok coreconsensus.Token) {
+func staleSnapshot(t *testing.T) (c *cluster, l, f *testNode, meta coreconsensus.SnapshotMetaValue, body []byte, tok coreconsensus.TokenValue) {
 	c = newCluster(t, 3, 20)
 	l = c.leader(5 * time.Second)
 	for _, tn := range c.nodes {
@@ -980,10 +980,10 @@ func TestInstallAfterTheReceiverMovedPastTheSnapshot(t *testing.T) {
 	}
 	f.node.snapState.spools[meta.ID] = sink
 	f.node.snapState.mu.Unlock()
-	err = f.node.install(coreconsensus.InstallRequest{
+	err = f.node.install(coreconsensus.InstallParams{
 		Ctx:   context.Background(),
-		From:  coreconsensus.AuthenticatedPeer{ID: l.id},
-		Offer: coreconsensus.InstallOffer{Term: l.node.Status().Term, SnapshotID: meta.ID, Meta: meta},
+		From:  coreconsensus.AuthenticatedPeerValue{ID: l.id},
+		Offer: coreconsensus.InstallOfferValue{Term: l.node.Status().Term, SnapshotID: meta.ID, Meta: meta},
 		Body:  bytes.NewReader(body),
 	})
 	if !errors.Is(err, coreconsensus.AdminPreconditionFailed) {
@@ -1056,14 +1056,14 @@ func TestUnknownEntryKindInAnAppendStopsTheNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := coreconsensus.Entry{Position: coreconsensus.Position{Term: tok.Term, Index: tok.Index + 1}, Kind: 0x80, Data: []byte("x")}
+	e := coreconsensus.EntryValue{Position: coreconsensus.PositionValue{Term: tok.Term, Index: tok.Index + 1}, Kind: 0x80, Data: []byte("x")}
 	e.BodySum = wire.BodySum(e.Data)
 	e.ChainSum = wire.ChainSum(prev[0].ChainSum, &e)
-	m := coreconsensus.Message{
+	m := coreconsensus.MessageValue{
 		Version: 1, Group: 1, Kind: coreconsensus.MsgApp, From: l.id, To: f.id, Term: l.node.Status().Term,
-		Index: tok.Index, LogTerm: tok.Term, Entries: []coreconsensus.Entry{e},
+		Index: tok.Index, LogTerm: tok.Term, Entries: []coreconsensus.EntryValue{e},
 	}
-	f.node.deliver(coreconsensus.AuthenticatedPeer{ID: l.id}, appendFrame(&m))
+	f.node.deliver(coreconsensus.AuthenticatedPeerValue{ID: l.id}, appendFrame(&m))
 	deadline := time.Now().Add(5 * time.Second)
 	for !f.node.stopped.Load() {
 		if time.Now().After(deadline) {
@@ -1089,12 +1089,12 @@ func TestUnknownEntryKindInTheLogStopsTheNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := coreconsensus.Entry{Position: coreconsensus.Position{Term: tok.Term, Index: tok.Index + 1}, Kind: 0x80, Data: []byte("x")}
+	e := coreconsensus.EntryValue{Position: coreconsensus.PositionValue{Term: tok.Term, Index: tok.Index + 1}, Kind: 0x80, Data: []byte("x")}
 	e.BodySum = wire.BodySum(e.Data)
 	e.ChainSum = wire.ChainSum(prev[0].ChainSum, &e)
 	hs, _ := tn.log.HardState()
 	hs.Commit = e.Position.Index
-	if err := tn.log.Append([]coreconsensus.Entry{e}, &hs); err != nil {
+	if err := tn.log.Append([]coreconsensus.EntryValue{e}, &hs); err != nil {
 		t.Fatal(err)
 	}
 	if err := tn.log.Sync(); err != nil {
@@ -1125,7 +1125,7 @@ func TestTickFollowsTheCommittedContract(t *testing.T) {
 	next.HeartbeatInterval = 5 * time.Millisecond
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	pre := coreconsensus.Precondition{Log: l.node.ident, Generation: st.Timing.Generation}
+	pre := coreconsensus.PreconditionSpec{Log: l.node.ident, Generation: st.Timing.Generation}
 	if err := l.node.ProposeTimingContract(ctx, "op:test", pre, next); err != nil {
 		t.Fatal(err)
 	}

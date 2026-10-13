@@ -22,11 +22,11 @@ type Config struct {
 	// Group is the consensus group.
 	Group core.GroupID
 	// Log is the identity of the log, checked against an admin precondition.
-	Log core.LogIdentity
+	Log core.LogIdentityValue
 	// Seed draws the randomized election timeouts.
 	Seed uint64
 	// Timing is the committed timing contract at start.
-	Timing core.TimingContract
+	Timing core.TimingContractSpec
 	// MaxInflight bounds the appends in flight per peer.
 	MaxInflight int
 	// MaxInflightBytes bounds their bytes.
@@ -81,9 +81,9 @@ type Start struct {
 	// HardState is the last hard state on disk.
 	HardState core.HardState
 	// Snapshot is the base the log continues, zero for none.
-	Snapshot core.SnapshotMeta
+	Snapshot core.SnapshotMetaValue
 	// Entries are the durable entries after the snapshot.
-	Entries []core.Entry
+	Entries []core.EntryValue
 	// Applied is where the state machine resumes, at least the snapshot.
 	Applied uint64
 	// Now is the start instant: the restart vote-refusal window opens here.
@@ -116,19 +116,19 @@ type Ready struct {
 	// TruncateFrom removes every entry from that index on, before Entries.
 	TruncateFrom uint64
 	// Entries are appended after the truncation.
-	Entries []core.Entry
+	Entries []core.EntryValue
 	// Messages leave at once.
-	Messages []core.Message
+	Messages []core.MessageValue
 	// AfterSync leave once this write is durable.
-	AfterSync []core.Message
+	AfterSync []core.MessageValue
 	// Apply are committed, locally durable entries, in order.
-	Apply []core.Entry
+	Apply []core.EntryValue
 	// SendSnapshot names the peers that need a snapshot.
 	SendSnapshot []core.NodeID
 	// ReadStates answer reads.
 	ReadStates []ReadState
 	// Forwarded are answers to this node's forwarded proposals.
-	Forwarded []core.Message
+	Forwarded []core.MessageValue
 	// Transfers end transfers.
 	Transfers []TransferResult
 	// Compact drops the log's prefix through that index, which a durable
@@ -141,7 +141,7 @@ type Ready struct {
 	// holds, off the event loop, and hand them back with Fetched.
 	Fetch []FetchRequest
 	// Membership is set when the admitted set changed.
-	Membership []core.Member
+	Membership []core.MemberValue
 	// Unsupported names an entry whose kind this version does not know:
 	// the driver stops the node with VERSION_UNSUPPORTED.
 	Unsupported UnsupportedEntry
@@ -167,7 +167,7 @@ func (rd *Ready) NeedsWrite() bool {
 
 type confAt struct {
 	index uint64
-	m     core.Membership
+	m     core.MembershipValue
 }
 
 type readReq struct {
@@ -208,7 +208,7 @@ type Raft struct {
 
 	log memLog
 
-	base  core.Membership
+	base  core.MembershipValue
 	confs []confAt
 
 	prs   map[core.NodeID]*progress
@@ -236,7 +236,7 @@ type Raft struct {
 	// from the minimum timing contract over the acknowledging majority,
 	// never from the leader's newer view (D9 d).
 	leaseLen  time.Duration
-	contracts map[uint64]core.TimingContract
+	contracts map[uint64]core.TimingContractSpec
 	// campaignTransfer is the flag the current campaign carries.
 	campaignIssuer core.NodeID
 	campaignTerm   uint64
@@ -246,7 +246,7 @@ type Raft struct {
 	pendingReads []readReq
 	waitingReads []readReq
 
-	timing      core.TimingContract
+	timing      core.TimingContractSpec
 	voteWindow  time.Duration
 	clusterVer  uint32
 	clusterGen  uint64
@@ -284,7 +284,7 @@ func New(cfg Config, st Start) *Raft {
 	}
 	node.clusterVer, node.clusterGen, node.noSpace = sm.ClusterVersion, sm.ClusterGeneration, sm.NoSpace
 	node.voteWindow = node.timing.ElectionTimeoutMin
-	node.contracts = map[uint64]core.TimingContract{node.timing.Generation: node.timing}
+	node.contracts = map[uint64]core.TimingContractSpec{node.timing.Generation: node.timing}
 	for _, e := range st.Entries {
 		if e.Position.Index <= node.log.snapIndex {
 			continue
@@ -421,15 +421,15 @@ func (r *Raft) SetCanVote(v bool) { r.cfg.CanVote = v }
 func (r *Raft) SnapshotIndex() uint64 { return r.log.snapIndex }
 
 // Entry returns the entry at i, if the step function holds it.
-func (r *Raft) Entry(i uint64) (core.Entry, bool) {
+func (r *Raft) Entry(i uint64) (core.EntryValue, bool) {
 	if i <= r.log.snapIndex || i > r.log.lastIndex() || i <= r.log.evicted {
-		return core.Entry{}, false
+		return core.EntryValue{}, false
 	}
 	return *r.log.at(i), true
 }
 
 // ConfAt returns the membership valid at index i.
-func (r *Raft) ConfAt(i uint64) core.Membership { return r.confAt(i).Clone() }
+func (r *Raft) ConfAt(i uint64) core.MembershipValue { return r.confAt(i).Clone() }
 
 // ChainAt returns the chain value at i.
 func (r *Raft) ChainAt(i uint64) uint32 { return r.log.chain(i) }
@@ -447,12 +447,12 @@ type Status struct {
 	Commit    uint64
 	Last      uint64
 	Stable    uint64
-	Timing    core.TimingContract
+	Timing    core.TimingContractSpec
 	Cluster   uint32
 	ClusterG  uint64
 	NoSpace   core.AlarmID
-	Conf      core.Membership
-	Committed core.Membership
+	Conf      core.MembershipValue
+	Committed core.MembershipValue
 	Transfer  core.NodeID
 }
 
@@ -560,7 +560,7 @@ func (r *Raft) numberWrite(rd *Ready, hsChanged bool) {
 
 // conf is the latest appended configuration, which governs this node from
 // the moment it is appended (D8).
-func (r *Raft) conf() *core.Membership {
+func (r *Raft) conf() *core.MembershipValue {
 	if n := len(r.confs); n > 0 {
 		return &r.confs[n-1].m
 	}
@@ -569,7 +569,7 @@ func (r *Raft) conf() *core.Membership {
 
 // confAt is the configuration in force at index i: the latest appended at
 // or before it, else the snapshot base's.
-func (r *Raft) confAt(i uint64) *core.Membership {
+func (r *Raft) confAt(i uint64) *core.MembershipValue {
 	for k := len(r.confs) - 1; k >= 0; k-- {
 		if r.confs[k].index <= i {
 			return &r.confs[k].m
@@ -612,10 +612,10 @@ func (r *Raft) resetElection(now time.Time) { r.electionDeadline = now.Add(r.ran
 
 // admitted is the transport's admission set: the union of the latest
 // appended configuration and the latest committed one (D4).
-func (r *Raft) admitted() []core.Member {
+func (r *Raft) admitted() []core.MemberValue {
 	out := slices.Clone(r.conf().Members)
 	for _, m := range r.confAt(r.log.committed).Members {
-		if !slices.ContainsFunc(out, func(x core.Member) bool { return x.ID == m.ID }) {
+		if !slices.ContainsFunc(out, func(x core.MemberValue) bool { return x.ID == m.ID }) {
 			out = append(out, m)
 		}
 	}
@@ -625,7 +625,7 @@ func (r *Raft) admitted() []core.Member {
 // send stamps m with this node's identity and term and queues it. An
 // acknowledgement or a vote waits in AfterSync for the write it vouches for
 // (D5b), and a silent node sends no positive acknowledgement at all.
-func (r *Raft) send(m core.Message) {
+func (r *Raft) send(m core.MessageValue) {
 	m.Version = 1
 	m.Group = r.cfg.Group
 	m.From = r.id
@@ -655,7 +655,7 @@ func (r *Raft) waitsForSync(kind core.MessageKind) bool {
 // noteAppended records what an appended entry changes at append time: a
 // membership takes effect when appended (D8), and every contract present
 // widens the vote-refusal window (R3-07).
-func (r *Raft) noteAppended(e *core.Entry) {
+func (r *Raft) noteAppended(e *core.EntryValue) {
 	switch e.Kind {
 	case core.EntryMembership:
 		a, err := wire.ParseAdmin(e.Data)
@@ -744,7 +744,7 @@ func (r *Raft) truncateFrom(i uint64) {
 
 // appendEntries appends es to the log and to the Ready's write, noting what
 // each changes at append time.
-func (r *Raft) appendEntries(es []core.Entry) {
+func (r *Raft) appendEntries(es []core.EntryValue) {
 	for i := range es {
 		r.log.ents = append(r.log.ents, es[i])
 		r.log.window += int64(len(es[i].Data))
@@ -768,7 +768,7 @@ func (r *Raft) applyCommitEffects(lo, hi uint64) {
 // engine's own replicated state. An engine entry whose payload does not
 // parse changes nothing, whatever its kind. It reports whether the walk
 // must stop because the entry is one this version cannot apply.
-func (r *Raft) applyCommitEffect(i uint64, e *core.Entry) bool {
+func (r *Raft) applyCommitEffect(i uint64, e *core.EntryValue) bool {
 	if !actsAtCommit(e.Kind) {
 		return false
 	}

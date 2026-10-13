@@ -250,7 +250,7 @@ func codeAttr(err error) coreotel.AttrValue {
 
 // observeStatus publishes the gauges a status turn changes, and logs role
 // and term changes (D13).
-func (n *Node) observeStatus(old, cur *coreconsensus.Status) {
+func (n *Node) observeStatus(old, cur *coreconsensus.StatusValue) {
 	o := n.obs
 	o.setGauge(mRole, float64(cur.Role))
 	o.setGauge(mTerm, float64(cur.Term))
@@ -275,7 +275,7 @@ func (n *Node) observeStatus(old, cur *coreconsensus.Status) {
 // observeRoleChange counts a leader change and an election start, and logs
 // the new role and term; it runs only on a turn where one of them moved, so
 // a stable leader logs nothing.
-func (o *obs) observeRoleChange(old, cur *coreconsensus.Status) {
+func (o *obs) observeRoleChange(old, cur *coreconsensus.StatusValue) {
 	if old != nil && old.Leader != cur.Leader {
 		o.inc(mLeaderChanges)
 	}

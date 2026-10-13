@@ -42,7 +42,7 @@ func TestAStorageStopSaysWhichMarkerItCouldNotWrite(t *testing.T) {
 		Transport: NewMemoryNetwork().Transport(id), InitialTiming: testTimingFast(), MaxSnapshotBytes: 1 << 30,
 		SnapshotEveryBytes: 1 << 20, MaxLogBytes: 1 << 30, LogReserveBytes: 1 << 20, MinVoters: 1, Logger: lg,
 	}
-	members := []coreconsensus.Member{{ID: id, Incarnation: inc, Slot: "s0", SPKI: MemorySPKI(id), Voter: true}}
+	members := []coreconsensus.MemberValue{{ID: id, Incarnation: inc, Slot: "s0", SPKI: MemorySPKI(id), Voter: true}}
 	if err := Bootstrap(context.Background(), cfg, members); err != nil {
 		t.Fatal(err)
 	}

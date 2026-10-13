@@ -51,10 +51,10 @@ func (r Role) String() string {
 	return "unknown"
 }
 
-// Status is a node's view of its group after one turn of its event loop. It is a
+// StatusValue is a node's view of its group after one turn of its event loop. It is a
 // copy taken on the loop, never a live view, so every field in it describes the
 // same instant.
-type Status struct {
+type StatusValue struct {
 	// ID is this node.
 	ID NodeID
 	// Role is its role.
@@ -68,19 +68,19 @@ type Status struct {
 	// Applied is the highest index its state machine applied.
 	Applied uint64
 	// Log is the identity of its log.
-	Log LogIdentity
+	Log LogIdentityValue
 	// Versions are its capabilities and the committed cluster version.
-	Versions Versions
+	Versions VersionsValue
 	// Timing is the committed timing contract.
-	Timing TimingContract
+	Timing TimingContractSpec
 	// NoSpace is the raised no-space alarm, 0 when none.
 	NoSpace AlarmID
 }
 
-// Versions are a node's capabilities: the protocol range it speaks, the
+// VersionsValue are a node's capabilities: the protocol range it speaks, the
 // payload versions its state machine supports, and the committed cluster
 // version.
-type Versions struct {
+type VersionsValue struct {
 	// ProtocolMin is the lowest protocol version it speaks.
 	ProtocolMin uint32
 	// ProtocolMax is the highest.
@@ -95,13 +95,13 @@ type Versions struct {
 
 // Precondition returns the precondition an operation clearing the current
 // alarm, or replacing the current contract, would carry.
-func (s Status) Precondition() Precondition {
-	return Precondition{Log: s.Log, Alarm: s.NoSpace, Generation: s.Timing.Generation}
+func (s StatusValue) Precondition() PreconditionSpec {
+	return PreconditionSpec{Log: s.Log, Alarm: s.NoSpace, Generation: s.Timing.Generation}
 }
 
-// StopReason says why a node stopped itself. Err carries the sentinel of the
+// StopReasonValue says why a node stopped itself. Err carries the sentinel of the
 // stop; ExitCode is the process exit status the product should use.
-type StopReason struct {
+type StopReasonValue struct {
 	// Err is the stop's error, built on its sentinel.
 	Err error
 	// Unmarked is set when a STORAGE_FAILED stop could write its marker
@@ -111,7 +111,7 @@ type StopReason struct {
 
 // ExitCode returns errs.ExitCodeOf of the stop's error, or 73 for a storage
 // failure whose marker could not be written (ADR 0152 D4).
-func (s StopReason) ExitCode() int {
+func (s StopReasonValue) ExitCode() int {
 	if s.Unmarked {
 		return exitCantCreate
 	}

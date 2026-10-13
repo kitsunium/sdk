@@ -76,11 +76,11 @@ func (k MessageKind) Known() bool {
 // changing the wire.
 type GroupID uint64
 
-// Message is one protocol message: a plain value, encoded by the service's
+// MessageValue is one protocol message: a plain value, encoded by the service's
 // AppendMessage and decoded by ParseMessage, never by a method. The engine
 // trusts the transport's authenticated peer over From, and drops a message
 // whose From differs from it.
-type Message struct {
+type MessageValue struct {
 	// Version is the frame layout version, 1.
 	Version uint8
 	// Group is the consensus group, 1 in v1.
@@ -120,5 +120,5 @@ type Message struct {
 	Code errs.Code
 	// Entries are the entries an append carries, or the proposal a forward
 	// carries with a zero position.
-	Entries []Entry
+	Entries []EntryValue
 }

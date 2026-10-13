@@ -15,12 +15,12 @@ const (
 	StampMember
 )
 
-// Stamp binds a data directory to one node of one cluster: written by
+// StampValue binds a data directory to one node of one cluster: written by
 // LogStore.WriteStamp, durable on return, and verified at every start. A
 // mismatch is DATA_DIR_MISMATCH.
-type Stamp struct {
+type StampValue struct {
 	// Log is the log identity the directory belongs to.
-	Log LogIdentity
+	Log LogIdentityValue
 	// ID is the node.
 	ID NodeID
 	// Incarnation is drawn when the stamp is first written.
@@ -41,7 +41,7 @@ type JoinConfig struct {
 	// Addresses are the members to try, in order.
 	Addresses []string
 	// Stamp is the joiner's stamp, from Init.
-	Stamp Stamp
+	Stamp StampValue
 	// Address is where the joiner listens.
 	Address string
 	// Pins are the SPKIs of the members the joiner trusts, from the

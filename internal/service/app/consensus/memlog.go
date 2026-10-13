@@ -15,9 +15,9 @@ type MemoryLog struct {
 	mu        sync.RWMutex
 	first     uint64
 	prevTerm  uint64
-	ents      []coreconsensus.Entry
+	ents      []coreconsensus.EntryValue
 	hs        coreconsensus.HardState
-	stamp     coreconsensus.Stamp
+	stamp     coreconsensus.StampValue
 	stamped   bool
 	failSync  error
 	closed    bool
@@ -36,7 +36,7 @@ func compacted(index, first uint64) error {
 }
 
 // Entries implements LogReader.
-func (l *MemoryLog) Entries(lo, hi uint64, maxBytes int, dst []coreconsensus.Entry) ([]coreconsensus.Entry, error) {
+func (l *MemoryLog) Entries(lo, hi uint64, maxBytes int, dst []coreconsensus.EntryValue) ([]coreconsensus.EntryValue, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	if lo < l.first {
@@ -81,7 +81,7 @@ func (l *MemoryLog) Bounds() (first, last uint64) {
 }
 
 // Append implements LogStore.
-func (l *MemoryLog) Append(entries []coreconsensus.Entry, hs *coreconsensus.HardState) error {
+func (l *MemoryLog) Append(entries []coreconsensus.EntryValue, hs *coreconsensus.HardState) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for _, e := range entries {
@@ -157,14 +157,14 @@ func (l *MemoryLog) HardState() (coreconsensus.HardState, error) {
 }
 
 // Stamp implements LogStore.
-func (l *MemoryLog) Stamp() (coreconsensus.Stamp, error) {
+func (l *MemoryLog) Stamp() (coreconsensus.StampValue, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.stamp, nil
 }
 
 // WriteStamp implements LogStore.
-func (l *MemoryLog) WriteStamp(s coreconsensus.Stamp) error {
+func (l *MemoryLog) WriteStamp(s coreconsensus.StampValue) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.stamp, l.stamped = s, true

@@ -19,7 +19,7 @@ import (
 func threeOnDisk(t *testing.T, n int) (*cluster, []*diskNode) {
 	c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{5}}
 	var nodes []*diskNode
-	var members []coreconsensus.Member
+	var members []coreconsensus.MemberValue
 	for i := range 3 {
 		dn := &diskNode{dir: t.TempDir()}
 		dn.dd = openDir(t, dn.dir, 16<<10)
@@ -30,7 +30,7 @@ func threeOnDisk(t *testing.T, n int) (*cluster, []*diskNode) {
 		}
 		dn.id = id
 		nodes = append(nodes, dn)
-		members = append(members, coreconsensus.Member{ID: id, Incarnation: inc, Slot: slot, SPKI: MemorySPKI(id), Voter: true})
+		members = append(members, coreconsensus.MemberValue{ID: id, Incarnation: inc, Slot: slot, SPKI: MemorySPKI(id), Voter: true})
 	}
 	for _, dn := range nodes {
 		dn.sm = newKV()
@@ -91,25 +91,25 @@ func TestRecoverStartsANewHistoryFromOneNode(t *testing.T) {
 		t.Fatal(err)
 	}
 	next := coreconsensus.ClusterID{6}
-	self := coreconsensus.Member{ID: keep.id, Incarnation: st.Incarnation, Slot: st.Slot, SPKI: MemorySPKI(keep.id), Voter: true}
+	self := coreconsensus.MemberValue{ID: keep.id, Incarnation: st.Incarnation, Slot: st.Slot, SPKI: MemorySPKI(keep.id), Voter: true}
 	opt := RecoverOptions{Confirm: next.String(), Operator: "op:recover", WitnessKeys: []ed25519.PublicKey{pub}}
 	// Without a fence attestation for the two old voters, it fails closed.
-	if err := Recover(keep.dd, next, []coreconsensus.Member{self}, opt); !errors.Is(err, coreconsensus.RecoverRefused) {
+	if err := Recover(keep.dd, next, []coreconsensus.MemberValue{self}, opt); !errors.Is(err, coreconsensus.RecoverRefused) {
 		t.Fatalf("unattested recover: %v", err)
 	}
 	for _, dn := range nodes[1:] {
-		opt.Fenced = append(opt.Fenced, coreconsensus.FencedAttestation{
+		opt.Fenced = append(opt.Fenced, coreconsensus.FencedAttestationValue{
 			Voter: dn.id, Method: "powered-off",
 			Receipts: [][]byte{ed25519.Sign(priv, ReceiptMessage(c.cid, next, dn.id))},
 		})
 	}
 	// Two members under one key: the transport could not tell them apart
 	// (review M5).
-	twin := coreconsensus.Member{ID: 99, Slot: "twin", SPKI: self.SPKI}
-	if err := Recover(keep.dd, next, []coreconsensus.Member{self, twin}, opt); !errors.Is(err, coreconsensus.RecoverRefused) {
+	twin := coreconsensus.MemberValue{ID: 99, Slot: "twin", SPKI: self.SPKI}
+	if err := Recover(keep.dd, next, []coreconsensus.MemberValue{self, twin}, opt); !errors.Is(err, coreconsensus.RecoverRefused) {
 		t.Fatalf("recover with a shared key: %v", err)
 	}
-	if err := Recover(keep.dd, next, []coreconsensus.Member{self}, opt); err != nil {
+	if err := Recover(keep.dd, next, []coreconsensus.MemberValue{self}, opt); err != nil {
 		t.Fatal(err)
 	}
 	c.cid = next
@@ -177,15 +177,15 @@ func TestOfflineReadsFailClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	next := coreconsensus.ClusterID{7}
-	self := coreconsensus.Member{ID: keep.id, Incarnation: st.Incarnation, Slot: st.Slot, SPKI: MemorySPKI(keep.id), Voter: true}
+	self := coreconsensus.MemberValue{ID: keep.id, Incarnation: st.Incarnation, Slot: st.Slot, SPKI: MemorySPKI(keep.id), Voter: true}
 	opt := RecoverOptions{Confirm: next.String(), Operator: "op:recover", WitnessKeys: []ed25519.PublicKey{pub}}
 	for _, dn := range nodes[1:] {
-		opt.Fenced = append(opt.Fenced, coreconsensus.FencedAttestation{
+		opt.Fenced = append(opt.Fenced, coreconsensus.FencedAttestationValue{
 			Voter: dn.id, Method: "powered-off",
 			Receipts: [][]byte{ed25519.Sign(priv, ReceiptMessage(c.cid, next, dn.id))},
 		})
 	}
-	if err := Recover(keep.dd, next, []coreconsensus.Member{self}, opt); !errors.Is(err, coreconsensus.StorageFailed) {
+	if err := Recover(keep.dd, next, []coreconsensus.MemberValue{self}, opt); !errors.Is(err, coreconsensus.StorageFailed) {
 		t.Fatalf("Recover over an unreadable snapshot directory: %v", err)
 	}
 }
@@ -210,13 +210,13 @@ func TestRestoreSnapshotIntoAnEmptyDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	fresh.id = id
-	self := coreconsensus.Member{ID: id, Incarnation: inc, Slot: "fresh", SPKI: MemorySPKI(id), Voter: true}
-	twin := coreconsensus.Member{ID: 99, Slot: "twin", SPKI: self.SPKI}
-	if _, err := RestoreSnapshot(fresh.dd, bytes.NewReader(buf.Bytes()), next, []coreconsensus.Member{self, twin},
+	self := coreconsensus.MemberValue{ID: id, Incarnation: inc, Slot: "fresh", SPKI: MemorySPKI(id), Voter: true}
+	twin := coreconsensus.MemberValue{ID: 99, Slot: "twin", SPKI: self.SPKI}
+	if _, err := RestoreSnapshot(fresh.dd, bytes.NewReader(buf.Bytes()), next, []coreconsensus.MemberValue{self, twin},
 		RestoreOptions{Expected: meta, Confirm: next.String(), Operator: "op:restore", MaxEncoded: 1 << 30, MaxDecoded: 1 << 30}); !errors.Is(err, coreconsensus.RestoreRefused) {
 		t.Fatalf("restore with a shared key (review M5): %v", err)
 	}
-	if _, err := RestoreSnapshot(fresh.dd, bytes.NewReader(buf.Bytes()), next, []coreconsensus.Member{self},
+	if _, err := RestoreSnapshot(fresh.dd, bytes.NewReader(buf.Bytes()), next, []coreconsensus.MemberValue{self},
 		RestoreOptions{Expected: meta, Confirm: next.String(), Operator: "op:restore", MaxEncoded: 1 << 30, MaxDecoded: 1 << 30}); err != nil {
 		t.Fatal(err)
 	}
@@ -335,12 +335,12 @@ func TestBootstrapEntryOneIgnoresTheMemberOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m1 := coreconsensus.Member{ID: id1, Incarnation: inc1, Slot: "a", SPKI: [32]byte{1}, Voter: true}
-	m2 := coreconsensus.Member{ID: id2, Incarnation: inc2, Slot: "b", SPKI: [32]byte{2}, Voter: true}
-	if err := Bootstrap(context.Background(), Config{Log: d1.Log(), Cluster: cl, ID: id1}, []coreconsensus.Member{m1, m2}); err != nil {
+	m1 := coreconsensus.MemberValue{ID: id1, Incarnation: inc1, Slot: "a", SPKI: [32]byte{1}, Voter: true}
+	m2 := coreconsensus.MemberValue{ID: id2, Incarnation: inc2, Slot: "b", SPKI: [32]byte{2}, Voter: true}
+	if err := Bootstrap(context.Background(), Config{Log: d1.Log(), Cluster: cl, ID: id1}, []coreconsensus.MemberValue{m1, m2}); err != nil {
 		t.Fatal(err)
 	}
-	if err := Bootstrap(context.Background(), Config{Log: d2.Log(), Cluster: cl, ID: id2}, []coreconsensus.Member{m2, m1}); err != nil {
+	if err := Bootstrap(context.Background(), Config{Log: d2.Log(), Cluster: cl, ID: id2}, []coreconsensus.MemberValue{m2, m1}); err != nil {
 		t.Fatal(err)
 	}
 	e1, err := d1.Log().Entries(1, 2, 1<<20, nil)
@@ -366,9 +366,9 @@ func TestBootstrapRefusesASharedKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	self := coreconsensus.Member{ID: id, Incarnation: inc, Slot: "a", SPKI: [32]byte{1}, Voter: true}
-	twin := coreconsensus.Member{ID: id + 1, Incarnation: inc, Slot: "b", SPKI: self.SPKI, Voter: true}
-	if err := Bootstrap(context.Background(), Config{Log: d.Log(), Cluster: cl, ID: id}, []coreconsensus.Member{self, twin}); !errors.Is(err, coreconsensus.BootstrapRefused) {
+	self := coreconsensus.MemberValue{ID: id, Incarnation: inc, Slot: "a", SPKI: [32]byte{1}, Voter: true}
+	twin := coreconsensus.MemberValue{ID: id + 1, Incarnation: inc, Slot: "b", SPKI: self.SPKI, Voter: true}
+	if err := Bootstrap(context.Background(), Config{Log: d.Log(), Cluster: cl, ID: id}, []coreconsensus.MemberValue{self, twin}); !errors.Is(err, coreconsensus.BootstrapRefused) {
 		t.Fatalf("bootstrap with a shared key: %v", err)
 	}
 }

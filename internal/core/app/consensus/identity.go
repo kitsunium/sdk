@@ -49,11 +49,11 @@ func (c ClusterID) String() string { return hex.EncodeToString(c[:]) }
 // IsZero reports whether the cluster id was never set.
 func (c ClusterID) IsZero() bool { return c == ClusterID{} }
 
-// LogIdentity scopes positions: the ClusterID and a log epoch that Recover and
+// LogIdentityValue scopes positions: the ClusterID and a log epoch that Recover and
 // RestoreSnapshot bump, and the predecessor this history descends from with the
 // last index it kept. A position or a token from another identity is not
 // comparable with this log's.
-type LogIdentity struct {
+type LogIdentityValue struct {
 	// Cluster is the cluster the log belongs to.
 	Cluster ClusterID
 	// Epoch counts the histories of this cluster id: 1 at founding.
@@ -70,15 +70,15 @@ type LogIdentity struct {
 
 // Same reports whether two identities name the same history (cluster and
 // epoch), whatever lineage they record.
-func (l LogIdentity) Same(o LogIdentity) bool {
+func (l LogIdentityValue) Same(o LogIdentityValue) bool {
 	return l.Cluster == o.Cluster && l.Epoch == o.Epoch
 }
 
-// Token is a lineage-scoped position: the cluster, the log epoch, the term and
+// TokenValue is a lineage-scoped position: the cluster, the log epoch, the term and
 // the index. It is comparable, and its encoding is fixed at 41 bytes: a version
 // byte, the 16-byte ClusterID, then epoch, term and index as big-endian uint64
 // (see AppendToken in the service's wire package).
-type Token struct {
+type TokenValue struct {
 	// Cluster is the cluster of the log that committed the entry.
 	Cluster ClusterID
 	// Epoch is that log's epoch.
@@ -90,7 +90,7 @@ type Token struct {
 }
 
 // Position returns the token's position, without its lineage.
-func (t Token) Position() Position { return Position{Term: t.Term, Index: t.Index} }
+func (t TokenValue) Position() PositionValue { return PositionValue{Term: t.Term, Index: t.Index} }
 
 // Operator is the opaque identity an administrative operation is performed
 // under. The product vouches for it and the SDK records it in the entry,
@@ -115,13 +115,13 @@ func (o Operator) Valid() bool {
 // clearing operation names the alarm it means to clear.
 type AlarmID uint64
 
-// Precondition is what a clearing or raising operation expects to act on: the
+// PreconditionSpec is what a clearing or raising operation expects to act on: the
 // log identity it was read in, and the alarm or the contract or cluster-version
 // generation it expects to replace. Apply refuses a mismatch with
 // ADMIN_PRECONDITION_FAILED, so a stale page cannot clear an alarm raised since.
-type Precondition struct {
+type PreconditionSpec struct {
 	// Log is the identity the precondition was read in.
-	Log LogIdentity
+	Log LogIdentityValue
 	// Alarm is the alarm a clearing operation names.
 	Alarm AlarmID
 	// Generation is the contract or cluster-version generation an operation

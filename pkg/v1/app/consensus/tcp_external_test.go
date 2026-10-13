@@ -105,7 +105,7 @@ func TestFacadeThreeNodesOverPEMAndDataDirs(t *testing.T) {
 		cfg consensus.Config
 	}
 	var parts []*part
-	var members []consensus.Member
+	var members []consensus.MemberValue
 	for i := range 3 {
 		p := &part{dir: filepath.Join(root, fmt.Sprintf("n%d", i))}
 		if err := os.MkdirAll(p.dir, 0o700); err != nil {
@@ -128,7 +128,7 @@ func TestFacadeThreeNodesOverPEMAndDataDirs(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		members = append(members, consensus.Member{ID: id, Incarnation: inc, Slot: slot, SPKI: spki, Address: tr.Addr(), Voter: true})
+		members = append(members, consensus.MemberValue{ID: id, Incarnation: inc, Slot: slot, SPKI: spki, Address: tr.Addr(), Voter: true})
 		parts = append(parts, p)
 	}
 	var nodes []*consensus.Node
@@ -136,7 +136,7 @@ func TestFacadeThreeNodesOverPEMAndDataDirs(t *testing.T) {
 		p.cfg = consensus.Config{
 			Cluster: cluster, Machine: &counter{}, Durability: consensus.DurabilityVolatile,
 			Log: p.dd.Log(), Snapshots: p.dd.Snapshots(), Transport: p.tr,
-			InitialTiming: consensus.TimingContract{
+			InitialTiming: consensus.TimingContractSpec{
 				HeartbeatInterval:  20 * time.Millisecond,
 				ElectionTimeoutMin: 200 * time.Millisecond, ElectionTimeoutMax: 400 * time.Millisecond,
 			},

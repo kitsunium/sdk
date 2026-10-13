@@ -9,14 +9,14 @@ import (
 )
 
 type applyItem struct {
-	entries []coreconsensus.Entry
+	entries []coreconsensus.EntryValue
 	restore *restoreReq
 	save    *saveReq
 	cut     bool
 }
 
 type restoreReq struct {
-	meta coreconsensus.SnapshotMeta
+	meta coreconsensus.SnapshotMetaValue
 	done chan error
 }
 
@@ -26,18 +26,18 @@ type saveReq struct {
 }
 
 type saveRes struct {
-	meta coreconsensus.SnapshotMeta
+	meta coreconsensus.SnapshotMetaValue
 	err  error
 }
 
 // token builds an entry's lineage-scoped command identity: an entry kept by
 // Recover keeps its PREDECESSOR identity (D10, R7-09).
-func (n *Node) token(p coreconsensus.Position) coreconsensus.Token {
+func (n *Node) token(p coreconsensus.PositionValue) coreconsensus.TokenValue {
 	l := n.ident
 	if l.Predecessor != (coreconsensus.ClusterID{}) && p.Index <= l.KeptIndex {
-		return coreconsensus.Token{Cluster: l.Predecessor, Epoch: l.PredecessorEpoch, Term: p.Term, Index: p.Index}
+		return coreconsensus.TokenValue{Cluster: l.Predecessor, Epoch: l.PredecessorEpoch, Term: p.Term, Index: p.Index}
 	}
-	return coreconsensus.Token{Cluster: l.Cluster, Epoch: l.Epoch, Term: p.Term, Index: p.Index}
+	return coreconsensus.TokenValue{Cluster: l.Cluster, Epoch: l.Epoch, Term: p.Term, Index: p.Index}
 }
 
 // applyLoop is the apply goroutine: every committed command in log order,
@@ -102,7 +102,7 @@ func (n *Node) applyItems(items []applyItem) bool {
 // restored snapshot already covers and handing a run of commands to a
 // BatchingStateMachine in one call. It returns false once the state machine
 // failed and the node is stopping: nothing after that entry is applied.
-func (n *Node) applyEntries(es []coreconsensus.Entry) bool {
+func (n *Node) applyEntries(es []coreconsensus.EntryValue) bool {
 	batcher, batching := n.cfg.Machine.(coreconsensus.BatchingStateMachine)
 	for i := 0; i < len(es); {
 		e := &es[i]
@@ -137,7 +137,7 @@ func (n *Node) applyEntries(es []coreconsensus.Entry) bool {
 // every command that directly follows it, then answers their proposals. It
 // returns the index of the first entry it did not apply, and false when the
 // state machine failed and the node was stopped.
-func (n *Node) applyCommands(batcher coreconsensus.BatchingStateMachine, batching bool, es []coreconsensus.Entry, i int) (int, bool) {
+func (n *Node) applyCommands(batcher coreconsensus.BatchingStateMachine, batching bool, es []coreconsensus.EntryValue, i int) (int, bool) {
 	j := i + 1
 	if batching {
 		for j < len(es) && es[j].Kind == coreconsensus.EntryCommand {
@@ -183,7 +183,7 @@ func (n *Node) forceCut() {
 
 // safeApply calls the state machine; a panic stops the node with
 // STATE_MACHINE_FAILED, and the entry IS committed (D3).
-func (n *Node) safeApply(b coreconsensus.BatchingStateMachine, batching bool, es []coreconsensus.Entry, results []any) (err error) {
+func (n *Node) safeApply(b coreconsensus.BatchingStateMachine, batching bool, es []coreconsensus.EntryValue, results []any) (err error) {
 	defer func() {
 		if p := recover(); p != nil {
 			err = origin(coreconsensus.StateMachineFailed,
@@ -202,7 +202,7 @@ func (n *Node) safeApply(b coreconsensus.BatchingStateMachine, batching bool, es
 
 // applied1 records one applied entry and answers the Propose that created
 // it on this node.
-func (n *Node) applied1(e *coreconsensus.Entry, val any) {
+func (n *Node) applied1(e *coreconsensus.EntryValue, val any) {
 	n.am.Lock()
 	n.applied = e.Position.Index
 	n.appliedTerm = e.Position.Term

@@ -34,11 +34,11 @@ type Admin struct {
 	// Target is the node a change or a transfer names.
 	Target coreconsensus.NodeID
 	// Pre is the precondition of a clearing or raising operation.
-	Pre coreconsensus.Precondition
+	Pre coreconsensus.PreconditionSpec
 	// Membership is the whole configuration after a membership change.
-	Membership coreconsensus.Membership
+	Membership coreconsensus.MembershipValue
 	// Contract is the timing contract of an EntryTimingContract.
-	Contract coreconsensus.TimingContract
+	Contract coreconsensus.TimingContractSpec
 	// ClusterVersion is the version an EntryClusterVersion raises to.
 	ClusterVersion uint32
 }

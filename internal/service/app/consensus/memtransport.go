@@ -93,15 +93,15 @@ type MemoryTransport struct {
 	net     *MemoryNetwork
 	id      coreconsensus.NodeID
 	mu      sync.Mutex
-	deliver func(coreconsensus.AuthenticatedPeer, []byte)
-	offer   func(coreconsensus.AuthenticatedPeer, coreconsensus.InstallOffer) coreconsensus.InstallAccept
-	install func(coreconsensus.InstallRequest) error
-	join    func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code)
-	joinR   func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code, string)
+	deliver func(coreconsensus.AuthenticatedPeerValue, []byte)
+	offer   func(coreconsensus.AuthenticatedPeerValue, coreconsensus.InstallOfferValue) coreconsensus.InstallAcceptValue
+	install func(coreconsensus.InstallParams) error
+	join    func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code)
+	joinR   func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code, string)
 	ctrl    chan memFrame
 	data    chan memFrame
 	cur     *memRun
-	members []coreconsensus.Member
+	members []coreconsensus.MemberValue
 }
 
 // memRun is one delivery goroutine's life: Close closes stop, once, and
@@ -137,7 +137,7 @@ func (t *MemoryTransport) Send(to coreconsensus.NodeID, frame []byte) {
 
 // Stream implements Transport: offer, accept, then the stream from the
 // accepted offset.
-func (t *MemoryTransport) Stream(ctx context.Context, to coreconsensus.NodeID, offer coreconsensus.InstallOffer, open func(int64) (io.ReadCloser, error)) error {
+func (t *MemoryTransport) Stream(ctx context.Context, to coreconsensus.NodeID, offer coreconsensus.InstallOfferValue, open func(int64) (io.ReadCloser, error)) error {
 	dst := t.net.route(t.id, to)
 	if dst == nil {
 		return origin(coreconsensus.PeerRejected, errs.String("why", "unreachable"))
@@ -148,7 +148,7 @@ func (t *MemoryTransport) Stream(ctx context.Context, to coreconsensus.NodeID, o
 	if of == nil {
 		return origin(coreconsensus.PeerRejected, errs.String("why", "unbound"))
 	}
-	peer := coreconsensus.AuthenticatedPeer{ID: t.id}
+	peer := coreconsensus.AuthenticatedPeerValue{ID: t.id}
 	acc := of(peer, offer)
 	if acc.Held {
 		return nil
@@ -160,7 +160,7 @@ func (t *MemoryTransport) Stream(ctx context.Context, to coreconsensus.NodeID, o
 	if err != nil {
 		return err
 	}
-	ierr := in(coreconsensus.InstallRequest{Ctx: ctx, From: peer, Offer: offer, Offset: acc.Offset, Body: rc})
+	ierr := in(coreconsensus.InstallParams{Ctx: ctx, From: peer, Offer: offer, Offset: acc.Offset, Body: rc})
 	// The install's verdict wins; a Close failure of the stream it read is
 	// reported only when the install itself succeeded.
 	if cerr := rc.Close(); cerr != nil && ierr == nil {
@@ -171,10 +171,10 @@ func (t *MemoryTransport) Stream(ctx context.Context, to coreconsensus.NodeID, o
 
 // Bind implements Transport.
 func (t *MemoryTransport) Bind(group coreconsensus.GroupID,
-	deliver func(coreconsensus.AuthenticatedPeer, []byte),
-	offer func(coreconsensus.AuthenticatedPeer, coreconsensus.InstallOffer) coreconsensus.InstallAccept,
-	install func(coreconsensus.InstallRequest) error,
-	join func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code),
+	deliver func(coreconsensus.AuthenticatedPeerValue, []byte),
+	offer func(coreconsensus.AuthenticatedPeerValue, coreconsensus.InstallOfferValue) coreconsensus.InstallAcceptValue,
+	install func(coreconsensus.InstallParams) error,
+	join func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code),
 ) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -210,29 +210,29 @@ func (t *MemoryTransport) run(r *memRun) {
 		d := t.deliver
 		t.mu.Unlock()
 		if d != nil {
-			d(coreconsensus.AuthenticatedPeer{ID: f.from}, f.frame)
+			d(coreconsensus.AuthenticatedPeerValue{ID: f.from}, f.frame)
 		}
 	}
 }
 
 // BindJoinReason implements JoinReasonBinder.
-func (t *MemoryTransport) BindJoinReason(_ coreconsensus.GroupID, join func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code, string)) {
+func (t *MemoryTransport) BindJoinReason(_ coreconsensus.GroupID, join func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code, string)) {
 	t.mu.Lock()
 	t.joinR = join
 	t.mu.Unlock()
 }
 
 // SetMembership implements Transport.
-func (t *MemoryTransport) SetMembership(_ coreconsensus.GroupID, admitted []coreconsensus.Member) {
+func (t *MemoryTransport) SetMembership(_ coreconsensus.GroupID, admitted []coreconsensus.MemberValue) {
 	t.mu.Lock()
 	t.members = append(t.members[:0], admitted...)
 	t.mu.Unlock()
 }
 
 // Join implements Joiner over the network, as the TCP transport does.
-func (t *MemoryTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig) (coreconsensus.Position, error) {
+func (t *MemoryTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig) (coreconsensus.PositionValue, error) {
 	targets := t.net.othersThan(t.id)
-	req := coreconsensus.JoinRequest{
+	req := coreconsensus.JoinRequestValue{
 		Cluster: cfg.Stamp.Log.Cluster, ID: cfg.Stamp.ID, Incarnation: cfg.Stamp.Incarnation,
 		Slot: cfg.Stamp.Slot, Address: cfg.Address,
 	}
@@ -244,9 +244,9 @@ func (t *MemoryTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig
 		if (j == nil && jr == nil) || t.net.route(t.id, x.id) == nil {
 			continue
 		}
-		peer := coreconsensus.AuthenticatedPeer{Slot: cfg.Stamp.Slot, SPKI: memSPKI(t.id)}
+		peer := coreconsensus.AuthenticatedPeerValue{Slot: cfg.Stamp.Slot, SPKI: memSPKI(t.id)}
 		req.SPKI = peer.SPKI
-		var pos coreconsensus.Position
+		var pos coreconsensus.PositionValue
 		var code errs.Code
 		var reason string
 		if jr != nil {
@@ -259,7 +259,7 @@ func (t *MemoryTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig
 		}
 		last = joinRefused(code, reason)
 	}
-	return coreconsensus.Position{}, last
+	return coreconsensus.PositionValue{}, last
 }
 
 // othersThan is every transport of the network but self's, in map order.

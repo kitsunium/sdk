@@ -187,7 +187,7 @@ type slot struct {
 	seg  uint64
 	off  int64
 	term uint64
-	mem  *coreconsensus.Entry
+	mem  *coreconsensus.EntryValue
 }
 
 type segment struct {
@@ -214,7 +214,7 @@ type FileLog struct {
 	hs          coreconsensus.HardState
 	compact     uint64
 	compactTerm uint64
-	stamp       coreconsensus.Stamp
+	stamp       coreconsensus.StampValue
 	// dur is the state the synced records describe: a rotation's checkpoint
 	// is written from it, never from the pending batch it precedes.
 	dur checkpoint
@@ -923,7 +923,7 @@ func (l *FileLog) usable() error {
 // ---- LogReader ----
 
 // Entries implements LogReader.
-func (l *FileLog) Entries(lo, hi uint64, maxBytes int, dst []coreconsensus.Entry) ([]coreconsensus.Entry, error) {
+func (l *FileLog) Entries(lo, hi uint64, maxBytes int, dst []coreconsensus.EntryValue) ([]coreconsensus.EntryValue, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	if err := l.usable(); err != nil {
@@ -938,7 +938,7 @@ func (l *FileLog) Entries(lo, hi uint64, maxBytes int, dst []coreconsensus.Entry
 	size := 0
 	for i := lo; i < hi; i++ {
 		s := l.slots[i-l.first]
-		var e coreconsensus.Entry
+		var e coreconsensus.EntryValue
 		if s.mem != nil {
 			e = *s.mem
 		} else {
@@ -959,7 +959,7 @@ func (l *FileLog) Entries(lo, hi uint64, maxBytes int, dst []coreconsensus.Entry
 // readEntry reads the synced entry s locates from its segment. A record
 // that does not parse as an entry there is LOG_CORRUPT: the log disagrees
 // with what it recorded.
-func (l *FileLog) readEntry(s slot) (coreconsensus.Entry, error) {
+func (l *FileLog) readEntry(s slot) (coreconsensus.EntryValue, error) {
 	var seg *segment
 	for _, x := range l.segs {
 		if x.n == s.seg {
@@ -967,24 +967,24 @@ func (l *FileLog) readEntry(s slot) (coreconsensus.Entry, error) {
 		}
 	}
 	if seg == nil {
-		return coreconsensus.Entry{}, storageFailed("read", errImpossible)
+		return coreconsensus.EntryValue{}, storageFailed("read", errImpossible)
 	}
 	var h [recHeader]byte
 	if _, err := seg.f.ReadAt(h[:], s.off); err != nil {
-		return coreconsensus.Entry{}, storageFailed("read", err)
+		return coreconsensus.EntryValue{}, storageFailed("read", err)
 	}
 	n := int(binary.LittleEndian.Uint32(h[:]))
 	b := make([]byte, recHeader+n)
 	if _, err := seg.f.ReadAt(b, s.off); err != nil && !errors.Is(err, io.EOF) {
-		return coreconsensus.Entry{}, storageFailed("read", err)
+		return coreconsensus.EntryValue{}, storageFailed("read", err)
 	}
 	r, ok := parseRecord(b)
 	if !ok || r.kind != recEntry {
 		// A log that cannot be read cannot be trusted to agree with itself.
-		return coreconsensus.Entry{}, origin(coreconsensus.LogCorrupt, errs.String("segment", segName(s.seg)), errs.Int64("offset", s.off))
+		return coreconsensus.EntryValue{}, origin(coreconsensus.LogCorrupt, errs.String("segment", segName(s.seg)), errs.Int64("offset", s.off))
 	}
-	return coreconsensus.Entry{
-		Position: coreconsensus.Position{Term: r.term, Index: r.index},
+	return coreconsensus.EntryValue{
+		Position: coreconsensus.PositionValue{Term: r.term, Index: r.index},
 		Kind:     coreconsensus.EntryKind(r.ekind), Version: r.ever, BodySum: r.body, ChainSum: r.chain, Data: r.data,
 	}, nil
 }
@@ -1024,7 +1024,7 @@ func (l *FileLog) add(r *record) {
 }
 
 // Append implements LogStore: entries and the hard state in ONE batch.
-func (l *FileLog) Append(entries []coreconsensus.Entry, hs *coreconsensus.HardState) error {
+func (l *FileLog) Append(entries []coreconsensus.EntryValue, hs *coreconsensus.HardState) error {
 	l.wmu.Lock()
 	defer l.wmu.Unlock()
 	l.mu.Lock()
@@ -1275,14 +1275,14 @@ func (l *FileLog) HardState() (coreconsensus.HardState, error) {
 }
 
 // Stamp implements LogStore.
-func (l *FileLog) Stamp() (coreconsensus.Stamp, error) {
+func (l *FileLog) Stamp() (coreconsensus.StampValue, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.stamp, nil
 }
 
 // WriteStamp implements LogStore: durable on return.
-func (l *FileLog) WriteStamp(s coreconsensus.Stamp) error {
+func (l *FileLog) WriteStamp(s coreconsensus.StampValue) error {
 	l.wmu.Lock()
 	defer l.wmu.Unlock()
 	l.mu.Lock()

@@ -178,7 +178,7 @@ func (l *FileLog) release() {
 
 // encodeStamp is the stamp's on-disk form: the fixed fields, the slot
 // prefixed by its length, and a CRC-32C of everything before it.
-func encodeStamp(s coreconsensus.Stamp) []byte {
+func encodeStamp(s coreconsensus.StampValue) []byte {
 	b := []byte{stampVersion}
 	b = append(b, s.Log.Cluster[:]...)
 	b = binary.LittleEndian.AppendUint64(b, s.Log.Epoch)
@@ -197,8 +197,8 @@ func encodeStamp(s coreconsensus.Stamp) []byte {
 // decodeStamp parses encodeStamp's form; ok is false for another version, a
 // short stamp, a CRC that fails, a state this version does not define, or a
 // slot length that disagrees with the bytes left.
-func decodeStamp(b []byte) (coreconsensus.Stamp, bool) {
-	var s coreconsensus.Stamp
+func decodeStamp(b []byte) (coreconsensus.StampValue, bool) {
+	var s coreconsensus.StampValue
 	if len(b) < stampFixed+4 || b[0] != stampVersion {
 		return s, false
 	}
@@ -225,7 +225,7 @@ func decodeStamp(b []byte) (coreconsensus.Stamp, bool) {
 	if s.State < coreconsensus.StampJoining || s.State > coreconsensus.StampMember {
 		// A state this version does not define is a corrupt or a newer
 		// stamp: unreadable, never a directory Bootstrap may found.
-		return coreconsensus.Stamp{}, false
+		return coreconsensus.StampValue{}, false
 	}
 	p++
 	copy(s.Founding[:], body[p:])
@@ -242,23 +242,23 @@ func decodeStamp(b []byte) (coreconsensus.Stamp, bool) {
 // readStamp reads the stamp of dir: none yet is the zero stamp, a read that
 // fails is a STORAGE_FAILED, and a stamp that cannot be decoded is
 // DATA_DIR_MISMATCH, since nothing in it can be trusted to name this node.
-func readStamp(dir string) (coreconsensus.Stamp, error) {
+func readStamp(dir string) (coreconsensus.StampValue, error) {
 	b, err := os.ReadFile(filepath.Join(dir, fileStamp))
 	if errors.Is(err, os.ErrNotExist) {
-		return coreconsensus.Stamp{}, nil
+		return coreconsensus.StampValue{}, nil
 	}
 	if err != nil {
-		return coreconsensus.Stamp{}, storageFailed("stamp", err)
+		return coreconsensus.StampValue{}, storageFailed("stamp", err)
 	}
 	s, ok := decodeStamp(b)
 	if !ok {
-		return coreconsensus.Stamp{}, origin(coreconsensus.DataDirMismatch, errs.String("why", "unreadable stamp"))
+		return coreconsensus.StampValue{}, origin(coreconsensus.DataDirMismatch, errs.String("why", "unreadable stamp"))
 	}
 	return s, nil
 }
 
 // writeStamp replaces the stamp of dir atomically and durably.
-func writeStamp(dir string, s coreconsensus.Stamp) error {
+func writeStamp(dir string, s coreconsensus.StampValue) error {
 	return writeFileSync(filepath.Join(dir, fileStamp), encodeStamp(s))
 }
 

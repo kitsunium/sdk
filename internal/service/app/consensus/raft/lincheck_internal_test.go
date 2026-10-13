@@ -180,7 +180,7 @@ type pendingWrite struct {
 	op   int
 	node core.NodeID
 	life int
-	pos  core.Position
+	pos  core.PositionValue
 }
 
 type pendingRead struct {
@@ -217,7 +217,7 @@ func (w *kvWorld) restart(n *simNode) {
 	}
 }
 
-func (w *kvWorld) applied(s *sim, n *simNode, e *core.Entry) {
+func (w *kvWorld) applied(s *sim, n *simNode, e *core.EntryValue) {
 	st := w.state[n.id]
 	if st == nil {
 		st = map[string]string{}
@@ -273,8 +273,8 @@ func (w *kvWorld) finishReads(s *sim, n *simNode) {
 
 func (w *kvWorld) write(s *sim, n *simNode, key, val string) {
 	data := []byte(key + "=" + val)
-	e := core.Entry{Kind: core.EntryCommand, BodySum: wire.BodySum(data), Data: data}
-	pos, code := n.r.Propose(s.clock(n), []core.Entry{e})
+	e := core.EntryValue{Kind: core.EntryCommand, BodySum: wire.BodySum(data), Data: data}
+	pos, code := n.r.Propose(s.clock(n), []core.EntryValue{e})
 	if code != 0 {
 		return // refused before append: not part of the history
 	}

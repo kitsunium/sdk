@@ -2,9 +2,9 @@ package consensus
 
 import "slices"
 
-// Member is one node of the membership: its identity, the key it is pinned
+// MemberValue is one node of the membership: its identity, the key it is pinned
 // to, where it listens, and whether it votes.
-type Member struct {
+type MemberValue struct {
 	// ID is the node.
 	ID NodeID
 	// Incarnation is the node's data-directory incarnation.
@@ -27,34 +27,34 @@ type Member struct {
 	MaxSnapshotBytes int64
 }
 
-// Membership is the configuration at a position: its members and the set of
+// MembershipValue is the configuration at a position: its members and the set of
 // retired IDs, which is never reused.
-type Membership struct {
+type MembershipValue struct {
 	// Index is the index of the entry that produced it, 0 at founding.
 	Index uint64
 	// Members lists every voter and learner.
-	Members []Member
+	Members []MemberValue
 	// Retired lists every removed NodeID.
 	Retired []NodeID
 }
 
 // Member returns the member with that id.
-func (m Membership) Member(id NodeID) (Member, bool) {
+func (m MembershipValue) Member(id NodeID) (MemberValue, bool) {
 	for _, x := range m.Members {
 		if x.ID == id {
 			return x, true
 		}
 	}
-	return Member{}, false
+	return MemberValue{}, false
 }
 
 // IsRetired reports whether the id was removed.
-func (m Membership) IsRetired(id NodeID) bool {
+func (m MembershipValue) IsRetired(id NodeID) bool {
 	return slices.Contains(m.Retired, id)
 }
 
 // Voters returns the ids of the voters, in membership order.
-func (m Membership) Voters() []NodeID {
+func (m MembershipValue) Voters() []NodeID {
 	out := make([]NodeID, 0, len(m.Members))
 	for _, x := range m.Members {
 		if x.Voter {
@@ -66,8 +66,8 @@ func (m Membership) Voters() []NodeID {
 
 // Clone returns a deep copy, so that a membership handed out cannot be changed
 // under the engine.
-func (m Membership) Clone() Membership {
-	return Membership{
+func (m MembershipValue) Clone() MembershipValue {
+	return MembershipValue{
 		Index: m.Index,
 		// append(s[:0:0], s...) is the copy slices.Clone makes, nil kept nil,
 		// written out because slices.Clone's own body would push the engine's

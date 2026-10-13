@@ -65,7 +65,7 @@ type Config struct {
 	Clock clock.Timed
 	// InitialTiming is proposed at Bootstrap only; the committed contract
 	// rules.
-	InitialTiming coreconsensus.TimingContract
+	InitialTiming coreconsensus.TimingContractSpec
 
 	MaxBatchBytes, MaxInflight, MaxInflightBytes, MaxEntryBytes int
 	MaxPendingBytes, MaxApplyLagBytes, RecentEntriesBytes       int64
@@ -99,8 +99,8 @@ type Config struct {
 }
 
 // TimingDefaults are D5's defaults for the RTT matrix of the three sites.
-func TimingDefaults() coreconsensus.TimingContract {
-	return coreconsensus.TimingContract{
+func TimingDefaults() coreconsensus.TimingContractSpec {
+	return coreconsensus.TimingContractSpec{
 		Generation: 1, HeartbeatInterval: 100 * time.Millisecond,
 		ElectionTimeoutMin: time.Second, ElectionTimeoutMax: 2 * time.Second,
 	}
@@ -181,7 +181,7 @@ func clampDefaults(c *Config) {
 // clampTiming fills the unset fields of the proposed timing contract from
 // D5's defaults; an unset maximum is at least twice the minimum, so a
 // caller who raised only the minimum still gets a valid window.
-func clampTiming(timing *coreconsensus.TimingContract) {
+func clampTiming(timing *coreconsensus.TimingContractSpec) {
 	def := TimingDefaults()
 	if timing.Generation == 0 {
 		timing.Generation = 1

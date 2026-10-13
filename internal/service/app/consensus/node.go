@@ -63,11 +63,11 @@ type Node struct {
 	cfg   Config
 	clk   clock.Timed
 	r     *raft.Raft
-	ident coreconsensus.LogIdentity
-	stamp coreconsensus.Stamp
+	ident coreconsensus.LogIdentityValue
+	stamp coreconsensus.StampValue
 
-	inCtrl chan coreconsensus.Message
-	inData chan coreconsensus.Message
+	inCtrl chan coreconsensus.MessageValue
+	inData chan coreconsensus.MessageValue
 	propc  chan *proposal
 	execc  chan func()
 	storec chan storeDone
@@ -79,7 +79,7 @@ type Node struct {
 	sq *fifo[storeReq]
 	aq *fifo[applyItem]
 
-	status atomic.Pointer[coreconsensus.Status]
+	status atomic.Pointer[coreconsensus.StatusValue]
 
 	am          sync.Mutex
 	acond       *sync.Cond
@@ -115,10 +115,10 @@ type Node struct {
 	snapState     snapState
 
 	watchMu  sync.Mutex
-	watchers map[chan coreconsensus.Status]struct{}
+	watchers map[chan coreconsensus.StatusValue]struct{}
 
 	stopMu      sync.Mutex
-	stopReason  *coreconsensus.StopReason
+	stopReason  *coreconsensus.StopReasonValue
 	stopped     atomic.Bool
 	closeOnce   sync.Once
 	releaseOnce sync.Once
@@ -155,10 +155,10 @@ type applyResult struct {
 }
 
 type proposal struct {
-	entry coreconsensus.Entry
+	entry coreconsensus.EntryValue
 	admin bool
 	stage atomic.Int32 // 0 unsent, 1 possibly accepted, 2 appended at pos
-	pos   coreconsensus.Position
+	pos   coreconsensus.PositionValue
 	local bool
 	done  chan propResult
 	// changedAt is when leadership changed while it was unresolved; only
@@ -167,7 +167,7 @@ type proposal struct {
 }
 
 type propResult struct {
-	tok coreconsensus.Token
+	tok coreconsensus.TokenValue
 	val any
 	err error
 }
@@ -278,10 +278,10 @@ func newRaft(cfg Config) (*Node, error) {
 // with a stop marker, one never stamped, one whose bootstrap is pending,
 // one of another cluster or node, and a transport whose certificate names
 // another cluster (R3-24).
-func startStamp(cfg *Config) (coreconsensus.Stamp, error) {
+func startStamp(cfg *Config) (coreconsensus.StampValue, error) {
 	if mc, ok := cfg.Log.(interface{ checkMarkers() error }); ok {
 		if err := mc.checkMarkers(); err != nil {
-			return coreconsensus.Stamp{}, err
+			return coreconsensus.StampValue{}, err
 		}
 	}
 	stamp, err := cfg.Log.Stamp()
@@ -303,7 +303,7 @@ func startStamp(cfg *Config) (coreconsensus.Stamp, error) {
 // refuseStamp is the stamp half of startStamp: a node starts only on a
 // founded or joining directory of its own cluster and, when cfg names one,
 // its own id.
-func refuseStamp(cfg *Config, stamp *coreconsensus.Stamp) error {
+func refuseStamp(cfg *Config, stamp *coreconsensus.StampValue) error {
 	switch {
 	case stamp.State == 0:
 		return origin(coreconsensus.DataDirMismatch, errs.String("why", "unstamped: Init or Bootstrap first"))
@@ -318,15 +318,15 @@ func refuseStamp(cfg *Config, stamp *coreconsensus.Stamp) error {
 }
 
 // newNode allocates a node's queues and maps; it starts nothing.
-func newNode(cfg *Config, stamp *coreconsensus.Stamp) *Node {
+func newNode(cfg *Config, stamp *coreconsensus.StampValue) *Node {
 	n := &Node{
 		cfg: *cfg, clk: cfg.Clock, ident: stamp.Log, stamp: *stamp,
-		inCtrl: make(chan coreconsensus.Message, inboxDepth), inData: make(chan coreconsensus.Message, inboxDepth),
+		inCtrl: make(chan coreconsensus.MessageValue, inboxDepth), inData: make(chan coreconsensus.MessageValue, inboxDepth),
 		propc: make(chan *proposal, inboxDepth), execc: make(chan func(), loopBacklog), storec: make(chan storeDone, loopBacklog),
 		stopc: make(chan struct{}), sq: newFifo[storeReq](), fetchq: newFifo[raft.FetchRequest](), fetchc: make(chan fetchDone, fetchBacklog), aq: newFifo[applyItem](),
 		waiters: map[uint64]*proposal{}, results: map[uint64]applyResult{},
 		forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]bool{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
-		watchers: map[chan coreconsensus.Status]struct{}{}, subEpoch: newSubEpoch(), loopDone: make(chan struct{}),
+		watchers: map[chan coreconsensus.StatusValue]struct{}{}, subEpoch: newSubEpoch(), loopDone: make(chan struct{}),
 	}
 	n.acond = sync.NewCond(&n.am)
 	return n
@@ -433,19 +433,19 @@ func (n *Node) durableIndex() (uint64, error) {
 // restoreLatest restores from the newest snapshot that verifies, falling
 // back to the older one when it does not (D7); none restores is the zero
 // base.
-func (n *Node) restoreLatest(metas []coreconsensus.SnapshotMeta, durIdx uint64) coreconsensus.SnapshotMeta {
+func (n *Node) restoreLatest(metas []coreconsensus.SnapshotMetaValue, durIdx uint64) coreconsensus.SnapshotMetaValue {
 	for _, m := range metas {
 		if err := n.restoreFrom(m, durIdx); err != nil {
 			continue // fall back to the older one (D7)
 		}
 		return m
 	}
-	return coreconsensus.SnapshotMeta{}
+	return coreconsensus.SnapshotMetaValue{}
 }
 
 // baseOrNoTable keeps a restored base, or starts the node with no table
 // when a snapshot was needed and none restored.
-func (n *Node) baseOrNoTable(base coreconsensus.SnapshotMeta, metas []coreconsensus.SnapshotMeta, first uint64) (coreconsensus.SnapshotMeta, error) {
+func (n *Node) baseOrNoTable(base coreconsensus.SnapshotMetaValue, metas []coreconsensus.SnapshotMetaValue, first uint64) (coreconsensus.SnapshotMetaValue, error) {
 	if base.Position.Index != 0 || (len(metas) == 0 && first <= 1) {
 		return base, nil
 	}
@@ -465,7 +465,7 @@ func (n *Node) baseOrNoTable(base coreconsensus.SnapshotMeta, metas []coreconsen
 // finishInstall refuses a log that starts past the base, then completes an
 // install interrupted after its snapshot was published, and returns the
 // log's bounds as they now stand.
-func (n *Node) finishInstall(base *coreconsensus.SnapshotMeta, first, last uint64) (newFirst, newLast uint64, err error) {
+func (n *Node) finishInstall(base *coreconsensus.SnapshotMetaValue, first, last uint64) (newFirst, newLast uint64, err error) {
 	snapIdx := base.Position.Index
 	if first > snapIdx+1 {
 		return first, last, origin(coreconsensus.LogCorrupt, errs.String("why", "gap after the snapshot"))
@@ -503,7 +503,7 @@ func (n *Node) finishInstall(base *coreconsensus.SnapshotMeta, first, last uint6
 
 // readTail reads the log after the base into memory, each entry's payload
 // copied so the step function never holds a store's buffer.
-func (n *Node) readTail(first, last, snapIdx uint64) ([]coreconsensus.Entry, error) {
+func (n *Node) readTail(first, last, snapIdx uint64) ([]coreconsensus.EntryValue, error) {
 	if last <= snapIdx || last < first {
 		return nil, nil
 	}
@@ -520,7 +520,7 @@ func (n *Node) readTail(first, last, snapIdx uint64) ([]coreconsensus.Entry, err
 // startApplied sets where apply resumes: past the base, or past what a
 // durable machine already holds. It returns the applied index raft starts
 // from; a node with no table records nothing applied until an install.
-func (n *Node) startApplied(base *coreconsensus.SnapshotMeta, durIdx uint64) uint64 {
+func (n *Node) startApplied(base *coreconsensus.SnapshotMetaValue, durIdx uint64) uint64 {
 	snapIdx := base.Position.Index
 	applied := max(snapIdx, durIdx)
 	n.applied = applied
@@ -540,8 +540,8 @@ func (n *Node) startApplied(base *coreconsensus.SnapshotMeta, durIdx uint64) uin
 // The term at first-1 is the log's own compaction term, which every LogStore
 // answers; a store that cannot is one whose base this node must not guess,
 // since a wrong term there is a log-matching check answered falsely.
-func noTableBase(log coreconsensus.LogStore, metas []coreconsensus.SnapshotMeta, first uint64) (coreconsensus.SnapshotMeta, error) {
-	var b coreconsensus.SnapshotMeta
+func noTableBase(log coreconsensus.LogStore, metas []coreconsensus.SnapshotMetaValue, first uint64) (coreconsensus.SnapshotMetaValue, error) {
+	var b coreconsensus.SnapshotMetaValue
 	if len(metas) > 0 {
 		b = metas[0]
 		for _, m := range metas {
@@ -553,7 +553,7 @@ func noTableBase(log coreconsensus.LogStore, metas []coreconsensus.SnapshotMeta,
 	b.Position.Index = first - 1
 	term, err := log.Term(first - 1)
 	if err != nil {
-		return coreconsensus.SnapshotMeta{}, err
+		return coreconsensus.SnapshotMetaValue{}, err
 	}
 	b.Position.Term = term
 	return b, nil
@@ -565,11 +565,11 @@ func noTableBase(log coreconsensus.LogStore, metas []coreconsensus.SnapshotMeta,
 // when its From is not the authenticated peer (R7-05), and queues it on its
 // lane without ever blocking the transport; a full lane drops the frame,
 // which raft's retransmission absorbs.
-func (n *Node) deliver(from coreconsensus.AuthenticatedPeer, frame []byte) {
+func (n *Node) deliver(from coreconsensus.AuthenticatedPeerValue, frame []byte) {
 	if n.stopped.Load() {
 		return
 	}
-	var m coreconsensus.Message
+	var m coreconsensus.MessageValue
 	if err := wire.ParseMessage(bytes.Clone(frame), &m); err != nil {
 		return
 	}
@@ -680,7 +680,7 @@ func (n *Node) onTick(tick clock.Ticker, ok bool) (time.Time, bool) {
 
 // onMessage steps one inbound message, of either lane, after telling raft
 // whether the apply backlog is over MaxApplyLagBytes.
-func (n *Node) onMessage(m *coreconsensus.Message, ok bool) (time.Time, bool) {
+func (n *Node) onMessage(m *coreconsensus.MessageValue, ok bool) (time.Time, bool) {
 	if !ok {
 		return time.Time{}, false
 	}
@@ -780,12 +780,12 @@ func (n *Node) drainControl() {
 
 // queuedControl takes a control message already queued, without waiting.
 // The lane is never closed, so a closed one reads as empty.
-func (n *Node) queuedControl() (coreconsensus.Message, bool) {
+func (n *Node) queuedControl() (coreconsensus.MessageValue, bool) {
 	select {
 	case m, ok := <-n.inCtrl:
 		return m, ok
 	default:
-		return coreconsensus.Message{}, false
+		return coreconsensus.MessageValue{}, false
 	}
 }
 
@@ -927,7 +927,7 @@ func (n *Node) endSilence() {
 
 // queueApply hands committed entries to the apply goroutine, counting
 // their payload into the apply lag first.
-func (n *Node) queueApply(entries []coreconsensus.Entry) {
+func (n *Node) queueApply(entries []coreconsensus.EntryValue) {
 	if len(entries) == 0 {
 		return
 	}
@@ -1041,10 +1041,10 @@ func (n *Node) publish() {
 	n.am.Lock()
 	applied := n.applied
 	n.am.Unlock()
-	s := &coreconsensus.Status{
+	s := &coreconsensus.StatusValue{
 		ID: n.stamp.ID, Role: st.Role, Term: st.Term, Leader: st.Lead, Commit: st.Commit, Applied: applied,
 		Log: n.ident, Timing: st.Timing, NoSpace: st.NoSpace,
-		Versions: coreconsensus.Versions{ProtocolMin: 1, ProtocolMax: raft.ProtocolMax, Cluster: st.Cluster, ClusterGeneration: st.ClusterG},
+		Versions: coreconsensus.VersionsValue{ProtocolMin: 1, ProtocolMax: raft.ProtocolMax, Cluster: st.Cluster, ClusterGeneration: st.ClusterG},
 	}
 	old := n.status.Load()
 	if old != nil && *old == *s {
@@ -1068,7 +1068,7 @@ func (n *Node) publish() {
 
 type fetchDone struct {
 	req       raft.FetchRequest
-	ents      []coreconsensus.Entry
+	ents      []coreconsensus.EntryValue
 	compacted bool
 }
 
@@ -1315,7 +1315,7 @@ func (n *Node) stop(err error, storage bool) {
 		n.stopMu.Unlock()
 		return
 	}
-	reason := &coreconsensus.StopReason{Err: err}
+	reason := &coreconsensus.StopReasonValue{Err: err}
 	if m, ok := n.cfg.Log.(interface {
 		markStopEach(code errs.Code, detail string) (dirErr, runErr error)
 	}); ok {
@@ -1349,11 +1349,11 @@ func (n *Node) reportUnwrittenMarkers(dirErr, runErr error) {
 }
 
 // StopReason returns why the node stopped itself, if it did.
-func (n *Node) StopReason() (coreconsensus.StopReason, bool) {
+func (n *Node) StopReason() (coreconsensus.StopReasonValue, bool) {
 	n.stopMu.Lock()
 	defer n.stopMu.Unlock()
 	if n.stopReason == nil {
-		return coreconsensus.StopReason{}, false
+		return coreconsensus.StopReasonValue{}, false
 	}
 	return *n.stopReason, true
 }
@@ -1481,16 +1481,16 @@ func (n *Node) HardClose() error {
 }
 
 // Status returns the node's view after its last turn.
-func (n *Node) Status() coreconsensus.Status {
+func (n *Node) Status() coreconsensus.StatusValue {
 	if s := n.status.Load(); s != nil {
 		return *s
 	}
-	return coreconsensus.Status{}
+	return coreconsensus.StatusValue{}
 }
 
 // Watch implements LeadershipWatcher.
-func (n *Node) Watch(ctx context.Context) <-chan coreconsensus.Status {
-	ch := make(chan coreconsensus.Status, 1)
+func (n *Node) Watch(ctx context.Context) <-chan coreconsensus.StatusValue {
+	ch := make(chan coreconsensus.StatusValue, 1)
 	ch <- n.Status()
 	n.watchMu.Lock()
 	n.watchers[ch] = struct{}{}
@@ -1509,10 +1509,10 @@ func (n *Node) Watch(ctx context.Context) <-chan coreconsensus.Status {
 }
 
 // Membership returns the configuration the node last appended.
-func (n *Node) Membership() coreconsensus.Membership {
-	var m coreconsensus.Membership
+func (n *Node) Membership() coreconsensus.MembershipValue {
+	var m coreconsensus.MembershipValue
 	if !n.exec(func() { m = n.r.Status().Conf }) {
-		return coreconsensus.Membership{}
+		return coreconsensus.MembershipValue{}
 	}
 	return m
 }

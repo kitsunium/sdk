@@ -148,7 +148,7 @@ func newTCPCluster(t *testing.T) (*testCA, coreconsensus.ClusterID, []*tcpNode) 
 	ca := newTestCA(t)
 	cid := coreconsensus.ClusterID{0xc0, 0xff, 0xee}
 	var ns []*tcpNode
-	var members []coreconsensus.Member
+	var members []coreconsensus.MemberValue
 	for i := range 3 {
 		tn := &tcpNode{slot: fmt.Sprintf("site-%d", i), log: NewMemoryLog(), snaps: NewMemorySnapshots()}
 		tn.cert, tn.spki = ca.issue(t, SAN(cid, tn.slot), nil)
@@ -159,7 +159,7 @@ func newTCPCluster(t *testing.T) (*testCA, coreconsensus.ClusterID, []*tcpNode) 
 		}
 		tn.id, tn.inc = id, inc
 		ns = append(ns, tn)
-		members = append(members, coreconsensus.Member{ID: id, Incarnation: inc, Slot: tn.slot, SPKI: tn.spki, Address: tn.addr, Voter: true})
+		members = append(members, coreconsensus.MemberValue{ID: id, Incarnation: inc, Slot: tn.slot, SPKI: tn.spki, Address: tn.addr, Voter: true})
 	}
 	for _, tn := range ns {
 		tn.sm = newKV()
@@ -230,8 +230,8 @@ func TestTCPRefusesAnUnpinnedKeyAndAnotherCluster(t *testing.T) {
 	}
 	// Frames from the impostor's key are never delivered.
 	before := target.node.Status().Term
-	impostor.tr.SetMembership(1, []coreconsensus.Member{{ID: target.id, SPKI: target.spki, Address: target.addr}})
-	m := coreconsensus.Message{Version: 1, Group: 1, Kind: coreconsensus.MsgVote, From: ns[1].id, To: target.id, Term: before + 10, LogTerm: 99, Index: 99}
+	impostor.tr.SetMembership(1, []coreconsensus.MemberValue{{ID: target.id, SPKI: target.spki, Address: target.addr}})
+	m := coreconsensus.MessageValue{Version: 1, Group: 1, Kind: coreconsensus.MsgVote, From: ns[1].id, To: target.id, Term: before + 10, LogTerm: 99, Index: 99}
 	for range 5 {
 		impostor.tr.Send(target.id, appendFrame(&m))
 	}
@@ -359,7 +359,7 @@ func TestTCPCapsUnauthenticatedConnectionsPerAddress(t *testing.T) {
 	}
 	closeAll(cs)
 	time.Sleep(1200 * time.Millisecond) // the handshake timeout frees the slots
-	tr.SetMembership(1, []coreconsensus.Member{{ID: 1, SPKI: [32]byte{1}, Address: tr.Addr()}})
+	tr.SetMembership(1, []coreconsensus.MemberValue{{ID: 1, SPKI: [32]byte{1}, Address: tr.Addr()}})
 	before := tr.RefusedBeforeHandshake()
 	cs = open(4)
 	defer closeAll(cs)
@@ -386,7 +386,7 @@ func (r authorizerReason) Error() string { return string(r) }
 // denyJoin refuses every JOIN with its error.
 type denyJoin struct{ err error }
 
-func (d denyJoin) Authorize(context.Context, coreconsensus.JoinRequest) (coreconsensus.Operator, error) {
+func (d denyJoin) Authorize(context.Context, coreconsensus.JoinRequestValue) (coreconsensus.Operator, error) {
 	return "", d.err
 }
 
@@ -467,7 +467,7 @@ func TestTCPAdmitsNoKeyTwoMembersShare(t *testing.T) {
 	tn.listen(t, ca)
 	defer tn.tr.Close()
 	shared := [32]byte{7}
-	tn.tr.SetMembership(1, []coreconsensus.Member{{ID: 1, SPKI: shared}, {ID: 2, SPKI: shared}, {ID: 3, SPKI: [32]byte{3}}})
+	tn.tr.SetMembership(1, []coreconsensus.MemberValue{{ID: 1, SPKI: shared}, {ID: 2, SPKI: shared}, {ID: 3, SPKI: [32]byte{3}}})
 	tn.tr.mu.Lock()
 	_, admitted := tn.tr.bySPKI[shared]
 	_, other := tn.tr.bySPKI[[32]byte{3}]
@@ -489,10 +489,10 @@ func pinsOf(ns []*tcpNode) [][32]byte {
 // An answer whose membership does not list the responder under its key is
 // a forged one: the joiner does not install it (review M4).
 func TestJoinAnswerMustListTheResponder(t *testing.T) {
-	if joinAnswerListsPeer(coreconsensus.Membership{Members: []coreconsensus.Member{{ID: 1, SPKI: [32]byte{1}}}}, [32]byte{2}) {
+	if joinAnswerListsPeer(coreconsensus.MembershipValue{Members: []coreconsensus.MemberValue{{ID: 1, SPKI: [32]byte{1}}}}, [32]byte{2}) {
 		t.Fatal("a membership without the responder's key was accepted")
 	}
-	if !joinAnswerListsPeer(coreconsensus.Membership{Members: []coreconsensus.Member{{ID: 1, SPKI: [32]byte{1}}}}, [32]byte{1}) {
+	if !joinAnswerListsPeer(coreconsensus.MembershipValue{Members: []coreconsensus.MemberValue{{ID: 1, SPKI: [32]byte{1}}}}, [32]byte{1}) {
 		t.Fatal("a membership listing the responder was refused")
 	}
 }

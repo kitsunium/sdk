@@ -98,11 +98,11 @@ func Redraw(d DataDir) (coreconsensus.NodeID, error) {
 
 // Report is what Inspect reads, read-only.
 type Report struct {
-	Stamp      coreconsensus.Stamp
+	Stamp      coreconsensus.StampValue
 	HardState  coreconsensus.HardState
 	First      uint64
 	Last       uint64
-	Snapshots  []coreconsensus.SnapshotMeta
+	Snapshots  []coreconsensus.SnapshotMetaValue
 	Quarantine string
 	Markers    []string
 }
@@ -260,7 +260,7 @@ type RecoverOptions struct {
 	// Operator is recorded in the audit file.
 	Operator coreconsensus.Operator
 	// Fenced attests every old voter left out of the new members.
-	Fenced []coreconsensus.FencedAttestation
+	Fenced []coreconsensus.FencedAttestationValue
 	// WitnessKeys verify the receipts: one per witness, each must sign.
 	WitnessKeys []ed25519.PublicKey
 }
@@ -281,7 +281,7 @@ func ReceiptMessage(old, next coreconsensus.ClusterID, voter coreconsensus.NodeI
 // cluster id that records its predecessor and the last index it kept, and a
 // forced configuration. Every old voter left out must be attested fenced by
 // every witness; without witness keys it fails closed.
-func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsensus.Member, opt RecoverOptions) error {
+func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt RecoverOptions) error {
 	if err := d.offline(); err != nil {
 		return err
 	}
@@ -315,7 +315,7 @@ func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsen
 	if err := d.appendForced(&hard, members, &old, opt.Operator); err != nil {
 		return err
 	}
-	stamp.Log = coreconsensus.LogIdentity{
+	stamp.Log = coreconsensus.LogIdentityValue{
 		Cluster: newCluster, Epoch: 1, Predecessor: stamp.Log.Cluster,
 		PredecessorEpoch: stamp.Log.Epoch, KeptIndex: hard.Commit,
 	}
@@ -336,7 +336,7 @@ func isZeroDigest(d [32]byte) bool {
 
 // checkRecover refuses a Recover whose preconditions fail, in a fixed order
 // so the reason given is always the first that applies.
-func checkRecover(stamp *coreconsensus.Stamp, newCluster coreconsensus.ClusterID, opt *RecoverOptions) error {
+func checkRecover(stamp *coreconsensus.StampValue, newCluster coreconsensus.ClusterID, opt *RecoverOptions) error {
 	switch {
 	case !opt.Operator.Valid():
 		return recoverRefused("operator")
@@ -354,7 +354,7 @@ func checkRecover(stamp *coreconsensus.Stamp, newCluster coreconsensus.ClusterID
 
 // checkRecoverMembers refuses new members that are not all pinned, or
 // among which this node, at its incarnation, is not a voter.
-func checkRecoverMembers(stamp *coreconsensus.Stamp, members []coreconsensus.Member) error {
+func checkRecoverMembers(stamp *coreconsensus.StampValue, members []coreconsensus.MemberValue) error {
 	self := false
 	for _, m := range members {
 		if isZeroDigest(m.SPKI) || m.ID == 0 {
@@ -375,12 +375,12 @@ func checkRecoverMembers(stamp *coreconsensus.Stamp, members []coreconsensus.Mem
 
 // checkFenced refuses a Recover that leaves out an old voter without a
 // fence receipt from EVERY witness for it.
-func checkFenced(voters []coreconsensus.NodeID, members []coreconsensus.Member, opt *RecoverOptions, oldCluster, newCluster coreconsensus.ClusterID) error {
+func checkFenced(voters []coreconsensus.NodeID, members []coreconsensus.MemberValue, opt *RecoverOptions, oldCluster, newCluster coreconsensus.ClusterID) error {
 	for _, v := range voters {
-		if slices.ContainsFunc(members, func(m coreconsensus.Member) bool { return m.ID == v }) {
+		if slices.ContainsFunc(members, func(m coreconsensus.MemberValue) bool { return m.ID == v }) {
 			continue
 		}
-		i := slices.IndexFunc(opt.Fenced, func(a coreconsensus.FencedAttestation) bool { return a.Voter == v })
+		i := slices.IndexFunc(opt.Fenced, func(a coreconsensus.FencedAttestationValue) bool { return a.Voter == v })
 		if i < 0 {
 			return recoverRefused("an old voter is not attested fenced")
 		}
@@ -405,7 +405,7 @@ func signedByEvery(keys []ed25519.PublicKey, receipts [][]byte, msg []byte) bool
 // appendForced cuts the log back to its commit and appends, synced, the
 // forced configuration entry of the new history, chained to the entry it
 // follows and one term past any the log knew.
-func (d DataDir) appendForced(hard *coreconsensus.HardState, members []coreconsensus.Member, old *coreconsensus.Membership, operator coreconsensus.Operator) error {
+func (d DataDir) appendForced(hard *coreconsensus.HardState, members []coreconsensus.MemberValue, old *coreconsensus.MembershipValue, operator coreconsensus.Operator) error {
 	flog := d.d.log
 	commit := hard.Commit
 	first, last := flog.Bounds()
@@ -419,14 +419,14 @@ func (d DataDir) appendForced(hard *coreconsensus.HardState, members []coreconse
 		return err
 	}
 	term := max(hard.Term, termAt) + 1
-	conf := coreconsensus.Membership{Members: byID(members), Retired: old.Retired}
+	conf := coreconsensus.MembershipValue{Members: byID(members), Retired: old.Retired}
 	data := wire.AppendAdmin(nil, &wire.Admin{Operator: string(operator), Change: wire.ChangeForced, Membership: conf})
-	e := coreconsensus.Entry{
-		Position: coreconsensus.Position{Term: term, Index: commit + 1}, Kind: coreconsensus.EntryMembership,
+	e := coreconsensus.EntryValue{
+		Position: coreconsensus.PositionValue{Term: term, Index: commit + 1}, Kind: coreconsensus.EntryMembership,
 		BodySum: wire.BodySum(data), Data: data,
 	}
 	e.ChainSum = wire.ChainSum(chain, &e)
-	if err := flog.Append([]coreconsensus.Entry{e}, &coreconsensus.HardState{Term: term, Commit: commit + 1}); err != nil {
+	if err := flog.Append([]coreconsensus.EntryValue{e}, &coreconsensus.HardState{Term: term, Commit: commit + 1}); err != nil {
 		return err
 	}
 	return flog.Sync()
@@ -457,8 +457,8 @@ func (d DataDir) chainAt(commit, first uint64) (uint32, uint64, error) {
 // the latest snapshot. A store that cannot answer fails it: a configuration
 // read from half the sources is an older one, and Recover would ask for the
 // fence of the wrong voters.
-func lastMembership(l *FileLog, snaps *FileSnapshots, index uint64) (coreconsensus.Membership, error) {
-	var m coreconsensus.Membership
+func lastMembership(l *FileLog, snaps *FileSnapshots, index uint64) (coreconsensus.MembershipValue, error) {
+	var m coreconsensus.MembershipValue
 	metas, err := snaps.List()
 	if err != nil {
 		return m, err
@@ -470,7 +470,7 @@ func lastMembership(l *FileLog, snaps *FileSnapshots, index uint64) (coreconsens
 	if last >= first {
 		es, err := l.Entries(first, min(last, index)+1, int(^uint(0)>>1), nil)
 		if err != nil {
-			return coreconsensus.Membership{}, err
+			return coreconsensus.MembershipValue{}, err
 		}
 		for _, e := range es {
 			if e.Kind == coreconsensus.EntryMembership {
@@ -486,7 +486,7 @@ func lastMembership(l *FileLog, snaps *FileSnapshots, index uint64) (coreconsens
 // RestoreOptions are RestoreSnapshot's preconditions (R3-15).
 type RestoreOptions struct {
 	// Expected is the snapshot's metadata, from SaveSnapshot: non-zero.
-	Expected coreconsensus.SnapshotMeta
+	Expected coreconsensus.SnapshotMetaValue
 	// Confirm must equal the new cluster id in hex.
 	Confirm string
 	// Operator is recorded in the audit file.
@@ -499,32 +499,32 @@ type RestoreOptions struct {
 
 // RestoreSnapshot starts a new history from a saved snapshot on an empty,
 // joining directory, without a Node (R3-15).
-func RestoreSnapshot(d DataDir, r io.Reader, newCluster coreconsensus.ClusterID, members []coreconsensus.Member, opt RestoreOptions) (coreconsensus.SnapshotMeta, error) {
+func RestoreSnapshot(d DataDir, r io.Reader, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt RestoreOptions) (coreconsensus.SnapshotMetaValue, error) {
 	if err := d.offline(); err != nil {
-		return coreconsensus.SnapshotMeta{}, err
+		return coreconsensus.SnapshotMetaValue{}, err
 	}
 	flog := d.d.log
 	stamp := flog.stamp
 	if err := checkRestore(flog, &stamp, newCluster, members, &opt); err != nil {
-		return coreconsensus.SnapshotMeta{}, err
+		return coreconsensus.SnapshotMetaValue{}, err
 	}
 	codec := restoreCodec(&opt)
 	if err := d.audit(opt.Operator, "restore-snapshot "+newCluster.String()); err != nil {
-		return coreconsensus.SnapshotMeta{}, err
+		return coreconsensus.SnapshotMetaValue{}, err
 	}
 	meta := restoredMeta(&opt.Expected, newCluster, members)
 	if err := d.spoolRestored(r, &meta); err != nil {
-		return coreconsensus.SnapshotMeta{}, err
+		return coreconsensus.SnapshotMetaValue{}, err
 	}
 	if err := d.verifyRestored(&meta, codec, opt.MaxDecoded); err != nil {
-		return coreconsensus.SnapshotMeta{}, err
+		return coreconsensus.SnapshotMetaValue{}, err
 	}
 	if err := flog.restartAt(&meta); err != nil {
-		return coreconsensus.SnapshotMeta{}, err
+		return coreconsensus.SnapshotMetaValue{}, err
 	}
 	stamp.Log, stamp.State = meta.Log, coreconsensus.StampMember
 	if err := flog.WriteStamp(stamp); err != nil {
-		return coreconsensus.SnapshotMeta{}, err
+		return coreconsensus.SnapshotMetaValue{}, err
 	}
 	return meta, nil
 }
@@ -537,7 +537,7 @@ func restoreRefused(why string) error {
 // checkRestore refuses a RestoreSnapshot whose preconditions fail, in a
 // fixed order so the reason given is always the first that applies: the
 // target, then the bounds, then the members.
-func checkRestore(flog *FileLog, stamp *coreconsensus.Stamp, newCluster coreconsensus.ClusterID, members []coreconsensus.Member, opt *RestoreOptions) error {
+func checkRestore(flog *FileLog, stamp *coreconsensus.StampValue, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RestoreOptions) error {
 	if err := checkRestoreTarget(flog, newCluster, opt); err != nil {
 		return err
 	}
@@ -577,7 +577,7 @@ func checkRestoreTarget(flog *FileLog, newCluster coreconsensus.ClusterID, opt *
 // checkRestoreBounds is the second half of RestoreSnapshot's preconditions:
 // an empty joining directory, and a snapshot within the bounds the caller
 // set, both of which must be set.
-func checkRestoreBounds(flog *FileLog, stamp *coreconsensus.Stamp, opt *RestoreOptions) error {
+func checkRestoreBounds(flog *FileLog, stamp *coreconsensus.StampValue, opt *RestoreOptions) error {
 	exp := &opt.Expected
 	first, last := flog.Bounds()
 	switch {
@@ -591,8 +591,8 @@ func checkRestoreBounds(flog *FileLog, stamp *coreconsensus.Stamp, opt *RestoreO
 
 // checkRestoreMembers refuses new members among which this node, at its
 // incarnation, is not a voter, or of which one is not pinned.
-func checkRestoreMembers(stamp *coreconsensus.Stamp, members []coreconsensus.Member) error {
-	if !slices.ContainsFunc(members, func(m coreconsensus.Member) bool {
+func checkRestoreMembers(stamp *coreconsensus.StampValue, members []coreconsensus.MemberValue) error {
+	if !slices.ContainsFunc(members, func(m coreconsensus.MemberValue) bool {
 		return m.ID == stamp.ID && m.Voter && m.Incarnation == stamp.Incarnation
 	}) {
 		return restoreRefused("this node is not a voter of the new members")
@@ -612,20 +612,20 @@ func checkRestoreMembers(stamp *coreconsensus.Stamp, members []coreconsensus.Mem
 // the expected one, in a new history that records the old cluster as its
 // predecessor and the snapshot's index as the last it kept, with the new
 // members.
-func restoredMeta(exp *coreconsensus.SnapshotMeta, newCluster coreconsensus.ClusterID, members []coreconsensus.Member) coreconsensus.SnapshotMeta {
+func restoredMeta(exp *coreconsensus.SnapshotMetaValue, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue) coreconsensus.SnapshotMetaValue {
 	meta := *exp
-	meta.Log = coreconsensus.LogIdentity{
+	meta.Log = coreconsensus.LogIdentityValue{
 		Cluster: newCluster, Epoch: 1, Predecessor: exp.Log.Cluster,
 		PredecessorEpoch: exp.Log.Epoch, KeptIndex: exp.Position.Index,
 	}
-	meta.Membership = coreconsensus.Membership{Index: exp.Position.Index, Members: slices.Clone(members), Retired: exp.Membership.Retired}
+	meta.Membership = coreconsensus.MembershipValue{Index: exp.Position.Index, Members: slices.Clone(members), Retired: exp.Membership.Retired}
 	return meta
 }
 
 // spoolRestored copies exactly meta.EncodedSize bytes of r into a fresh
 // spool and commits it. A stream of any other length is refused and its
 // spool aborted, the abort's failure kept beside the refusal.
-func (d DataDir) spoolRestored(r io.Reader, meta *coreconsensus.SnapshotMeta) error {
+func (d DataDir) spoolRestored(r io.Reader, meta *coreconsensus.SnapshotMetaValue) error {
 	sink, off, err := d.d.snaps.Create(meta.ID, *meta)
 	if err != nil {
 		return err
@@ -650,7 +650,7 @@ func (d DataDir) spoolRestored(r io.Reader, meta *coreconsensus.SnapshotMeta) er
 // verifyRestored decodes the published copy and checks it against meta. A
 // copy that fails is unpublished, or the failure to do so is reported with
 // it; the handle's Close failure is reported only when the copy passed.
-func (d DataDir) verifyRestored(meta *coreconsensus.SnapshotMeta, codec coretransform.BoundedDecompressor, maxDecoded int64) error {
+func (d DataDir) verifyRestored(meta *coreconsensus.SnapshotMetaValue, codec coretransform.BoundedDecompressor, maxDecoded int64) error {
 	h, err := d.d.snaps.Open(meta.ID)
 	if err != nil {
 		return err
@@ -665,7 +665,7 @@ func (d DataDir) verifyRestored(meta *coreconsensus.SnapshotMeta, codec coretran
 
 // restartAt makes the empty log start after the restored snapshot, with a
 // hard state one term past it, durably.
-func (l *FileLog) restartAt(meta *coreconsensus.SnapshotMeta) error {
+func (l *FileLog) restartAt(meta *coreconsensus.SnapshotMetaValue) error {
 	if err := l.resetTo(meta.Position.Index, meta.Position.Term); err != nil {
 		return err
 	}

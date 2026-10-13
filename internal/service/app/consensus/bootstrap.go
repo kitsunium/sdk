@@ -55,8 +55,8 @@ func InitLog(log coreconsensus.LogStore, cluster coreconsensus.ClusterID, slot s
 	if !validSlot(slot) {
 		return 0, coreconsensus.Incarnation{}, misconfigured("slot", "not [a-z0-9-]{1,32}")
 	}
-	st = coreconsensus.Stamp{
-		Log: coreconsensus.LogIdentity{Cluster: cluster, Epoch: 1}, ID: drawID(),
+	st = coreconsensus.StampValue{
+		Log: coreconsensus.LogIdentityValue{Cluster: cluster, Epoch: 1}, ID: drawID(),
 		Incarnation: drawIncarnation(), Slot: slot, State: coreconsensus.StampJoining,
 	}
 	if err := log.WriteStamp(st); err != nil {
@@ -100,16 +100,16 @@ func validSlot(s string) bool {
 
 // foundingDigest is the digest of the founding member list, so that a rerun
 // with another list is refused.
-func foundingDigest(members []coreconsensus.Member) [32]byte {
-	return sha256.Sum256(wire.AppendMembership(nil, &coreconsensus.Membership{Members: byID(members)}))
+func foundingDigest(members []coreconsensus.MemberValue) [32]byte {
+	return sha256.Sum256(wire.AppendMembership(nil, &coreconsensus.MembershipValue{Members: byID(members)}))
 }
 
 // byID is the founding list in ID order: the digest AND entry 1 are built
 // from it, so founders given the same members in any order write the same
 // entry (review M1).
-func byID(members []coreconsensus.Member) []coreconsensus.Member {
+func byID(members []coreconsensus.MemberValue) []coreconsensus.MemberValue {
 	ms := slices.Clone(members)
-	slices.SortFunc(ms, func(a, b coreconsensus.Member) int {
+	slices.SortFunc(ms, func(a, b coreconsensus.MemberValue) int {
 		switch {
 		case a.ID < b.ID:
 			return -1
@@ -126,7 +126,7 @@ func byID(members []coreconsensus.Member) []coreconsensus.Member {
 // founding configuration as entry 1, then the member stamp. Every founder
 // runs it with the IDENTICAL list (D8, R2-24, R3-02, R9-04). It never runs
 // inside NewRaft.
-func Bootstrap(_ context.Context, cfg Config, members []coreconsensus.Member) error {
+func Bootstrap(_ context.Context, cfg Config, members []coreconsensus.MemberValue) error {
 	if cfg.Log == nil {
 		return misconfigured("Log", "nil")
 	}
@@ -158,7 +158,7 @@ func Bootstrap(_ context.Context, cfg Config, members []coreconsensus.Member) er
 // with a zero or repeated id, with a member that carries no SPKI pin, with
 // two members pinned to one key, or with fewer voters than MinVoters. It reads nothing from disk, so a bad
 // list is refused before the stamp is touched.
-func checkFounders(members []coreconsensus.Member, minVoters int) error {
+func checkFounders(members []coreconsensus.MemberValue, minVoters int) error {
 	if len(members) == 0 {
 		return origin(coreconsensus.BootstrapRefused, errs.String("why", "no member"))
 	}
@@ -185,7 +185,7 @@ func checkFounders(members []coreconsensus.Member, minVoters int) error {
 }
 
 // countVoters is how many members of a list vote.
-func countVoters(members []coreconsensus.Member) int {
+func countVoters(members []coreconsensus.MemberValue) int {
 	voters := 0
 	for _, m := range members {
 		if m.Voter {
@@ -197,7 +197,7 @@ func countVoters(members []coreconsensus.Member) int {
 
 // founderStamp reads the stamp Bootstrap advances, refusing a log that was
 // never initialised or that belongs to another cluster or node.
-func founderStamp(cfg *Config) (coreconsensus.Stamp, error) {
+func founderStamp(cfg *Config) (coreconsensus.StampValue, error) {
 	stamp, err := cfg.Log.Stamp()
 	if err != nil {
 		return stamp, storageFailed("stamp", err)
@@ -214,8 +214,8 @@ func founderStamp(cfg *Config) (coreconsensus.Stamp, error) {
 // checkSelfListed refuses a founding list that does not name this node with
 // the incarnation and slot it was stamped with: every founder must run
 // Bootstrap with the same list, and that list must include itself.
-func checkSelfListed(members []coreconsensus.Member, stamp *coreconsensus.Stamp) error {
-	self := slices.IndexFunc(members, func(m coreconsensus.Member) bool { return m.ID == stamp.ID })
+func checkSelfListed(members []coreconsensus.MemberValue, stamp *coreconsensus.StampValue) error {
+	self := slices.IndexFunc(members, func(m coreconsensus.MemberValue) bool { return m.ID == stamp.ID })
 	if self < 0 || members[self].Incarnation != stamp.Incarnation || members[self].Slot != stamp.Slot {
 		return origin(coreconsensus.BootstrapRefused, errs.String("why", "this node is not in the list as stamped"))
 	}
@@ -227,7 +227,7 @@ func checkSelfListed(members []coreconsensus.Member, stamp *coreconsensus.Stamp)
 // differs from the one already recorded, and moves an empty joining log to
 // bootstrap-pending with the list's digest. A stamp state it does not
 // define is refused, never founded.
-func advanceFounding(log coreconsensus.LogStore, stamp *coreconsensus.Stamp, digest [32]byte) (bool, error) {
+func advanceFounding(log coreconsensus.LogStore, stamp *coreconsensus.StampValue, digest [32]byte) (bool, error) {
 	switch stamp.State {
 	case coreconsensus.StampMember:
 		if stamp.Founding == digest {
@@ -259,11 +259,11 @@ func advanceFounding(log coreconsensus.LogStore, stamp *coreconsensus.Stamp, dig
 // writeFoundingEntry writes the founding configuration as entry 1, at term
 // 1 and committed, then syncs it; a log that already holds an entry is left
 // alone, which is what makes a rerun idempotent.
-func writeFoundingEntry(cfg *Config, members []coreconsensus.Member) error {
+func writeFoundingEntry(cfg *Config, members []coreconsensus.MemberValue) error {
 	if first, last := cfg.Log.Bounds(); last >= first {
 		return nil
 	}
-	conf := coreconsensus.Membership{Members: byID(members)}
+	conf := coreconsensus.MembershipValue{Members: byID(members)}
 	for i := range conf.Members {
 		conf.Members[i].Joining = false
 	}
@@ -273,13 +273,13 @@ func writeFoundingEntry(cfg *Config, members []coreconsensus.Member) error {
 	}
 	timing.Generation = 1
 	data := wire.AppendAdmin(nil, &wire.Admin{Operator: "bootstrap", Change: wire.ChangeFounding, Membership: conf, Contract: timing})
-	e := coreconsensus.Entry{
-		Position: coreconsensus.Position{Term: 1, Index: 1}, Kind: coreconsensus.EntryMembership,
+	e := coreconsensus.EntryValue{
+		Position: coreconsensus.PositionValue{Term: 1, Index: 1}, Kind: coreconsensus.EntryMembership,
 		BodySum: wire.BodySum(data), Data: data,
 	}
 	e.ChainSum = wire.ChainSum(0, &e)
 	hs := new(coreconsensus.HardState{Term: 1, Commit: 1})
-	if err := cfg.Log.Append([]coreconsensus.Entry{e}, hs); err != nil {
+	if err := cfg.Log.Append([]coreconsensus.EntryValue{e}, hs); err != nil {
 		return storageFailed("append", err)
 	}
 	if err := cfg.Log.Sync(); err != nil {
@@ -314,7 +314,7 @@ type PeerHealth struct {
 // Health is a node's verdict for an orchestrator's probe (D13).
 type Health struct {
 	// Status is the node's view after its last turn.
-	Status coreconsensus.Status
+	Status coreconsensus.StatusValue
 	// Ready is true while a leader is known and the node applied what it
 	// knows committed.
 	Ready bool
@@ -339,7 +339,7 @@ type Health struct {
 	// Stopped is true once the node stopped, closed or not.
 	Stopped bool
 	// StopReason says why the node stopped itself.
-	StopReason coreconsensus.StopReason
+	StopReason coreconsensus.StopReasonValue
 	// DroppedFrames counts frames whose From differed from the
 	// authenticated peer (R7-05).
 	DroppedFrames int64
@@ -373,7 +373,7 @@ func (n *Node) Health() Health {
 
 // isReady is the verdict's Ready: running, a leader known, everything known
 // committed applied, and not refusing the current leader's chain (D4).
-func isReady(h *Health, st *coreconsensus.Status) bool {
+func isReady(h *Health, st *coreconsensus.StatusValue) bool {
 	return !h.Stopped && h.HasLeader && st.Applied >= st.Commit &&
 		(h.ChainRefusals == 0 || h.ChainRefusalLeader != st.Leader)
 }
@@ -412,7 +412,7 @@ func (n *Node) peerHealth(p *raft.PeerStat, now time.Time, last uint64, window t
 // sharedKey reports whether two members are pinned to one key. The
 // transport admits a connection by its key: two members under one key
 // could speak as each other (review M5).
-func sharedKey(members []coreconsensus.Member) bool {
+func sharedKey(members []coreconsensus.MemberValue) bool {
 	var noPin [32]byte
 	seen := make(map[[32]byte]bool, len(members))
 	for _, m := range members {

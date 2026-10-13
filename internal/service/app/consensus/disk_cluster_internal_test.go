@@ -62,7 +62,7 @@ func (dn *diskNode) crash(t *testing.T, c *cluster) {
 func TestDiskClusterSurvivesFullRestart(t *testing.T) {
 	c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{7}}
 	var nodes []*diskNode
-	var members []coreconsensus.Member
+	var members []coreconsensus.MemberValue
 	for i := range 3 {
 		dn := &diskNode{dir: t.TempDir()}
 		dn.dd = openDir(t, dn.dir, 16<<10)
@@ -73,7 +73,7 @@ func TestDiskClusterSurvivesFullRestart(t *testing.T) {
 		}
 		dn.id = id
 		nodes = append(nodes, dn)
-		members = append(members, coreconsensus.Member{ID: id, Incarnation: inc, Slot: slot, SPKI: MemorySPKI(id), Voter: true})
+		members = append(members, coreconsensus.MemberValue{ID: id, Incarnation: inc, Slot: slot, SPKI: MemorySPKI(id), Voter: true})
 	}
 	for _, dn := range nodes {
 		dn.sm = newKV()
@@ -105,7 +105,7 @@ func TestDiskClusterSurvivesFullRestart(t *testing.T) {
 		t.Fatal("no leader")
 		return nil
 	}
-	var tok coreconsensus.Token
+	var tok coreconsensus.TokenValue
 	for i := range 300 {
 		tok = propose(t, leader().node, fmt.Sprintf("k%d=v%d", i, i))
 	}
@@ -148,8 +148,8 @@ func TestDiskClusterSurvivesFullRestart(t *testing.T) {
 // testTimingDisk is slower than the memory clusters' timing: a real fsync,
 // FlushFileBuffers on Windows above all, can take longer than a 10 ms
 // heartbeat, and elections would churn under it.
-func testTimingDisk() coreconsensus.TimingContract {
-	return coreconsensus.TimingContract{
+func testTimingDisk() coreconsensus.TimingContractSpec {
+	return coreconsensus.TimingContractSpec{
 		Generation: 1, HeartbeatInterval: 50 * time.Millisecond,
 		ElectionTimeoutMin: 500 * time.Millisecond, ElectionTimeoutMax: time.Second, MaxClockDrift: 0.05,
 	}

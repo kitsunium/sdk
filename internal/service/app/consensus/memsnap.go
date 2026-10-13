@@ -17,7 +17,7 @@ type MemorySnapshots struct {
 }
 
 type memSnap struct {
-	meta coreconsensus.SnapshotMeta
+	meta coreconsensus.SnapshotMetaValue
 	data []byte
 	pins int
 }
@@ -30,13 +30,13 @@ func NewMemorySnapshots() *MemorySnapshots {
 type memSink struct {
 	s    *MemorySnapshots
 	id   string
-	meta coreconsensus.SnapshotMeta
+	meta coreconsensus.SnapshotMetaValue
 	buf  bytes.Buffer
 }
 
 // Create implements SnapshotStore: an existing spool resumes from its last
 // whole chunk.
-func (s *MemorySnapshots) Create(id string, meta coreconsensus.SnapshotMeta) (coreconsensus.SnapshotSink, int64, error) {
+func (s *MemorySnapshots) Create(id string, meta coreconsensus.SnapshotMetaValue) (coreconsensus.SnapshotSink, int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if sp, ok := s.spools[id]; ok {
@@ -60,7 +60,7 @@ func (k *memSink) Write(p []byte) (int, error) {
 // Commit publishes the spool as snapshot k.id, refusing it as
 // SNAPSHOT_CORRUPT when its length is not final.EncodedSize. The bytes are
 // copied, so a later write to a resumed spool of that id cannot reach them.
-func (k *memSink) Commit(final coreconsensus.SnapshotMeta) error {
+func (k *memSink) Commit(final coreconsensus.SnapshotMetaValue) error {
 	k.s.mu.Lock()
 	defer k.s.mu.Unlock()
 	if int64(k.buf.Len()) != final.EncodedSize {
@@ -82,14 +82,14 @@ func (k *memSink) Abort() error {
 }
 
 // List implements SnapshotStore.
-func (s *MemorySnapshots) List() ([]coreconsensus.SnapshotMeta, error) {
+func (s *MemorySnapshots) List() ([]coreconsensus.SnapshotMetaValue, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]coreconsensus.SnapshotMeta, 0, len(s.done))
+	out := make([]coreconsensus.SnapshotMetaValue, 0, len(s.done))
 	for _, x := range s.done {
 		out = append(out, x.meta)
 	}
-	slices.SortFunc(out, func(a, b coreconsensus.SnapshotMeta) int {
+	slices.SortFunc(out, func(a, b coreconsensus.SnapshotMetaValue) int {
 		switch {
 		case a.Position.Index > b.Position.Index:
 			return -1
@@ -109,7 +109,7 @@ type memHandle struct {
 }
 
 // Meta returns the metadata the snapshot was committed with.
-func (h *memHandle) Meta() coreconsensus.SnapshotMeta { return h.snap.meta }
+func (h *memHandle) Meta() coreconsensus.SnapshotMetaValue { return h.snap.meta }
 
 // Close unpins the snapshot once, however often it is called, so a second
 // Close cannot release another handle's pin.

@@ -177,9 +177,9 @@ type TCPTransport struct {
 	ln      net.Listener
 
 	mu          sync.Mutex
-	members     map[coreconsensus.GroupID][]coreconsensus.Member
-	byID        map[coreconsensus.NodeID]coreconsensus.Member
-	bySPKI      map[[32]byte]coreconsensus.Member
+	members     map[coreconsensus.GroupID][]coreconsensus.MemberValue
+	byID        map[coreconsensus.NodeID]coreconsensus.MemberValue
+	bySPKI      map[[32]byte]coreconsensus.MemberValue
 	out         map[outKey]*peerConn
 	in          map[net.Conn][32]byte
 	raw         map[net.Conn]struct{}
@@ -187,11 +187,11 @@ type TCPTransport struct {
 	resvMu      sync.Mutex
 	resvSeq     atomic.Uint64
 	peerExpiry  map[coreconsensus.NodeID]time.Time
-	deliver     func(coreconsensus.AuthenticatedPeer, []byte)
-	offer       func(coreconsensus.AuthenticatedPeer, coreconsensus.InstallOffer) coreconsensus.InstallAccept
-	install     func(coreconsensus.InstallRequest) error
-	join        func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code)
-	joinR       func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code, string)
+	deliver     func(coreconsensus.AuthenticatedPeerValue, []byte)
+	offer       func(coreconsensus.AuthenticatedPeerValue, coreconsensus.InstallOfferValue) coreconsensus.InstallAcceptValue
+	install     func(coreconsensus.InstallParams) error
+	join        func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code)
+	joinR       func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code, string)
 	unreachable func(coreconsensus.NodeID)
 	closed      bool
 	wg          sync.WaitGroup
@@ -274,8 +274,8 @@ func newTCPTransport(cfg TransportConfig, id *tlsid.Identity) (*TCPTransport, er
 	}
 	t := &TCPTransport{
 		cfg: cfg, id: id, cluster: cid, slot: slot,
-		members: map[coreconsensus.GroupID][]coreconsensus.Member{}, byID: map[coreconsensus.NodeID]coreconsensus.Member{},
-		bySPKI: map[[32]byte]coreconsensus.Member{}, out: map[outKey]*peerConn{}, in: map[net.Conn][32]byte{}, raw: map[net.Conn]struct{}{}, admission: server.NewAdmission(server.AdmissionConfig{PerAddress: cfg.MaxUnauthenticatedPerIP, Reserved: cfg.ReservedMemberSlots}), peerExpiry: map[coreconsensus.NodeID]time.Time{},
+		members: map[coreconsensus.GroupID][]coreconsensus.MemberValue{}, byID: map[coreconsensus.NodeID]coreconsensus.MemberValue{},
+		bySPKI: map[[32]byte]coreconsensus.MemberValue{}, out: map[outKey]*peerConn{}, in: map[net.Conn][32]byte{}, raw: map[net.Conn]struct{}{}, admission: server.NewAdmission(server.AdmissionConfig{PerAddress: cfg.MaxUnauthenticatedPerIP, Reserved: cfg.ReservedMemberSlots}), peerExpiry: map[coreconsensus.NodeID]time.Time{},
 		done: make(chan struct{}),
 	}
 	ln, err := net.Listen("tcp", cfg.ListenAddress)
@@ -424,7 +424,7 @@ func (t *TCPTransport) serveAuthenticated(conn *tls.Conn, pid *tlsid.PeerIdentit
 		t.mu.Unlock()
 	}()
 	if lane == laneJoin {
-		t.serveJoin(conn, coreconsensus.AuthenticatedPeer{Slot: slot, SPKI: spki})
+		t.serveJoin(conn, coreconsensus.AuthenticatedPeerValue{Slot: slot, SPKI: spki})
 		return
 	}
 	if !member || m.Slot != slot {
@@ -432,13 +432,13 @@ func (t *TCPTransport) serveAuthenticated(conn *tls.Conn, pid *tlsid.PeerIdentit
 		// (R8-07): a valid certificate with another key is refused.
 		return
 	}
-	peer := coreconsensus.AuthenticatedPeer{ID: m.ID, Incarnation: m.Incarnation, Slot: slot, SPKI: spki}
+	peer := coreconsensus.AuthenticatedPeerValue{ID: m.ID, Incarnation: m.Incarnation, Slot: slot, SPKI: spki}
 	t.serveMember(conn, peer, pid.Leaf, lane)
 }
 
 // serveMember serves a member's lane until its certificate expires, its
 // connection reaches MaxConnectionAge, or it leaves the membership.
-func (t *TCPTransport) serveMember(conn *tls.Conn, peer coreconsensus.AuthenticatedPeer, leaf *x509.Certificate, lane byte) {
+func (t *TCPTransport) serveMember(conn *tls.Conn, peer coreconsensus.AuthenticatedPeerValue, leaf *x509.Certificate, lane byte) {
 	t.mu.Lock()
 	t.peerExpiry[peer.ID] = leaf.NotAfter
 	t.mu.Unlock()
@@ -470,7 +470,7 @@ func (t *TCPTransport) serveMember(conn *tls.Conn, peer coreconsensus.Authentica
 // limit before anything is allocated, and stops at the first malformed
 // frame, read error, or once the peer is no longer a member. One buffer is
 // reused for the connection's life: deliver copies what it keeps.
-func (t *TCPTransport) readFrames(c net.Conn, peer coreconsensus.AuthenticatedPeer, limit int) {
+func (t *TCPTransport) readFrames(c net.Conn, peer coreconsensus.AuthenticatedPeerValue, limit int) {
 	r := bufio.NewReaderSize(c, connBufferBytes)
 	var buf []byte
 	for {
@@ -515,7 +515,7 @@ func readFrame(r io.Reader, buf []byte, limit int) ([]byte, bool) {
 
 // deliverTo is the bound deliver callback and whether the key is still a
 // member's: a reader whose peer left stops at its next frame.
-func (t *TCPTransport) deliverTo(spki [32]byte) (func(coreconsensus.AuthenticatedPeer, []byte), bool) {
+func (t *TCPTransport) deliverTo(spki [32]byte) (func(coreconsensus.AuthenticatedPeerValue, []byte), bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	_, still := t.bySPKI[spki]
@@ -782,10 +782,10 @@ func (t *TCPTransport) Unreachable(f func(coreconsensus.NodeID)) {
 
 // Bind implements Transport.
 func (t *TCPTransport) Bind(_ coreconsensus.GroupID,
-	deliver func(coreconsensus.AuthenticatedPeer, []byte),
-	offer func(coreconsensus.AuthenticatedPeer, coreconsensus.InstallOffer) coreconsensus.InstallAccept,
-	install func(coreconsensus.InstallRequest) error,
-	join func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code),
+	deliver func(coreconsensus.AuthenticatedPeerValue, []byte),
+	offer func(coreconsensus.AuthenticatedPeerValue, coreconsensus.InstallOfferValue) coreconsensus.InstallAcceptValue,
+	install func(coreconsensus.InstallParams) error,
+	join func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code),
 ) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -796,7 +796,7 @@ func (t *TCPTransport) Bind(_ coreconsensus.GroupID,
 // SetMembership implements Transport: the admitted set is the union over
 // the groups; a member that left has its connections cut and its
 // handshakes refused from then on (D4).
-func (t *TCPTransport) SetMembership(group coreconsensus.GroupID, admitted []coreconsensus.Member) {
+func (t *TCPTransport) SetMembership(group coreconsensus.GroupID, admitted []coreconsensus.MemberValue) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.members[group] = slices.Clone(admitted)
@@ -816,10 +816,10 @@ func (t *TCPTransport) SetMembership(group coreconsensus.GroupID, admitted []cor
 // by pinned key; a member without a pin is reachable by id only, so it can
 // be dialled for nothing and admitted on nothing, and a key two members
 // share admits neither.
-func indexMembers(groups map[coreconsensus.GroupID][]coreconsensus.Member) (map[coreconsensus.NodeID]coreconsensus.Member, map[[32]byte]coreconsensus.Member) {
+func indexMembers(groups map[coreconsensus.GroupID][]coreconsensus.MemberValue) (map[coreconsensus.NodeID]coreconsensus.MemberValue, map[[32]byte]coreconsensus.MemberValue) {
 	var noPin [32]byte
-	byID := map[coreconsensus.NodeID]coreconsensus.Member{}
-	bySPKI := map[[32]byte]coreconsensus.Member{}
+	byID := map[coreconsensus.NodeID]coreconsensus.MemberValue{}
+	bySPKI := map[[32]byte]coreconsensus.MemberValue{}
 	shared := map[[32]byte]bool{}
 	for _, ms := range groups {
 		for _, m := range ms {
@@ -846,7 +846,7 @@ func indexMembers(groups map[coreconsensus.GroupID][]coreconsensus.Member) (map[
 // block, and SetMembership runs on the engine's event loop, so it runs on a
 // background goroutine counted in t.wg, which ends once its set is applied
 // or found stale: only the newest set lands. The caller holds t.mu.
-func (t *TCPTransport) reserveAddresses(byID map[coreconsensus.NodeID]coreconsensus.Member) {
+func (t *TCPTransport) reserveAddresses(byID map[coreconsensus.NodeID]coreconsensus.MemberValue) {
 	addrs := make([]string, 0, len(byID))
 	for _, m := range byID {
 		if m.Address != "" {
@@ -917,18 +917,18 @@ func readChunk(r io.Reader, limit int) ([]byte, error) {
 
 // encodeOffer is the wire form of a snapshot offer: its term, then the
 // metadata.
-func encodeOffer(o coreconsensus.InstallOffer) []byte {
+func encodeOffer(o coreconsensus.InstallOfferValue) []byte {
 	b := binary.LittleEndian.AppendUint64(nil, o.Term)
 	return wire.AppendSnapshotMeta(b, &o.Meta)
 }
 
 // decodeOffer parses an offer; its snapshot id is the metadata's, never a
 // second field that could disagree with it.
-func decodeOffer(b []byte) (coreconsensus.InstallOffer, error) {
+func decodeOffer(b []byte) (coreconsensus.InstallOfferValue, error) {
 	if len(b) < 8 {
-		return coreconsensus.InstallOffer{}, origin(coreconsensus.FrameInvalid)
+		return coreconsensus.InstallOfferValue{}, origin(coreconsensus.FrameInvalid)
 	}
-	o := coreconsensus.InstallOffer{Term: binary.LittleEndian.Uint64(b)}
+	o := coreconsensus.InstallOfferValue{Term: binary.LittleEndian.Uint64(b)}
 	if err := wire.ParseSnapshotMeta(b[8:], &o.Meta); err != nil {
 		return o, err
 	}
@@ -937,7 +937,7 @@ func decodeOffer(b []byte) (coreconsensus.InstallOffer, error) {
 }
 
 // Stream implements Transport.
-func (t *TCPTransport) Stream(ctx context.Context, to coreconsensus.NodeID, offer coreconsensus.InstallOffer, open func(int64) (io.ReadCloser, error)) error {
+func (t *TCPTransport) Stream(ctx context.Context, to coreconsensus.NodeID, offer coreconsensus.InstallOfferValue, open func(int64) (io.ReadCloser, error)) error {
 	addr, pin, ok := t.address(to)
 	if !ok {
 		return peerRejected("no address")
@@ -1014,7 +1014,7 @@ func installResult(c *tls.Conn) error {
 // serveSnapshot is the receiving end of a snapshot stream: it reads the
 // offer, answers with the engine's acceptance, and when accepted hands the
 // stream to install, then writes back the install's verdict.
-func (t *TCPTransport) serveSnapshot(c *tls.Conn, peer coreconsensus.AuthenticatedPeer) {
+func (t *TCPTransport) serveSnapshot(c *tls.Conn, peer coreconsensus.AuthenticatedPeerValue) {
 	b, err := readChunk(c, t.cfg.MaxControlFrameBytes)
 	if err != nil {
 		return
@@ -1038,7 +1038,7 @@ func (t *TCPTransport) serveSnapshot(c *tls.Conn, peer coreconsensus.Authenticat
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	ierr := in(coreconsensus.InstallRequest{
+	ierr := in(coreconsensus.InstallParams{
 		Ctx: ctx, From: peer, Offer: o, Offset: acc.Offset,
 		Body: io.LimitReader(c, o.Meta.EncodedSize-acc.Offset),
 	})
@@ -1058,7 +1058,7 @@ func (t *TCPTransport) serveSnapshot(c *tls.Conn, peer coreconsensus.Authenticat
 
 // encodeJoin is the wire form of a JOIN: cluster, id, incarnation, the
 // slot with its one-byte length, then the address to the end.
-func encodeJoin(r coreconsensus.JoinRequest) []byte {
+func encodeJoin(r coreconsensus.JoinRequestValue) []byte {
 	b := slices.Clone(r.Cluster[:])
 	b = binary.LittleEndian.AppendUint64(b, uint64(r.ID))
 	b = append(b, r.Incarnation[:]...)
@@ -1069,8 +1069,8 @@ func encodeJoin(r coreconsensus.JoinRequest) []byte {
 
 // decodeJoin parses a JOIN, refusing one too short for its fixed part or
 // whose slot overruns it.
-func decodeJoin(b []byte) (coreconsensus.JoinRequest, bool) {
-	var r coreconsensus.JoinRequest
+func decodeJoin(b []byte) (coreconsensus.JoinRequestValue, bool) {
+	var r coreconsensus.JoinRequestValue
 	if len(b) < 16+8+16+1 {
 		return r, false
 	}
@@ -1089,7 +1089,7 @@ func decodeJoin(b []byte) (coreconsensus.JoinRequest, bool) {
 // serveJoin answers the one frame a non-member may send. The slot comes
 // from the certificate, the SPKI from the handshake; join runs off the event
 // loop under a deadline (R9-06).
-func (t *TCPTransport) serveJoin(c net.Conn, peer coreconsensus.AuthenticatedPeer) {
+func (t *TCPTransport) serveJoin(c net.Conn, peer coreconsensus.AuthenticatedPeerValue) {
 	// A JOIN is answered under its deadline or not at all (R9-06).
 	if err := c.SetDeadline(time.Now().Add(t.cfg.JoinTimeout)); err != nil {
 		return
@@ -1099,7 +1099,7 @@ func (t *TCPTransport) serveJoin(c net.Conn, peer coreconsensus.AuthenticatedPee
 		return
 	}
 	req, ok := decodeJoin(b)
-	reply := func(code errs.Code, pos coreconsensus.Position, reason string) {
+	reply := func(code errs.Code, pos coreconsensus.PositionValue, reason string) {
 		out := binary.LittleEndian.AppendUint32(nil, uint32(code))
 		out = binary.LittleEndian.AppendUint64(out, pos.Term)
 		out = binary.LittleEndian.AppendUint64(out, pos.Index)
@@ -1114,7 +1114,7 @@ func (t *TCPTransport) serveJoin(c net.Conn, peer coreconsensus.AuthenticatedPee
 			// The admitted members, so the joiner's transport admits the
 			// leader that will feed it before its own log names anyone.
 			t.mu.Lock()
-			m := coreconsensus.Membership{Members: slices.Collect(maps.Values(t.byID))}
+			m := coreconsensus.MembershipValue{Members: slices.Collect(maps.Values(t.byID))}
 			t.mu.Unlock()
 			out = wire.AppendMembership(out, &m)
 		}
@@ -1124,11 +1124,11 @@ func (t *TCPTransport) serveJoin(c net.Conn, peer coreconsensus.AuthenticatedPee
 		abandon(writeChunk(c, out))
 	}
 	if !ok {
-		reply(coreconsensus.CodeJoinRefused, coreconsensus.Position{}, "malformed JOIN")
+		reply(coreconsensus.CodeJoinRefused, coreconsensus.PositionValue{}, "malformed JOIN")
 		return
 	}
 	if req.Slot != peer.Slot {
-		reply(coreconsensus.CodeJoinRefused, coreconsensus.Position{}, "the slot differs from the certificate's")
+		reply(coreconsensus.CodeJoinRefused, coreconsensus.PositionValue{}, "the slot differs from the certificate's")
 		return
 	}
 	req.SPKI = peer.SPKI
@@ -1145,24 +1145,24 @@ func (t *TCPTransport) serveJoin(c net.Conn, peer coreconsensus.AuthenticatedPee
 		pos, code := j(ctx, peer, req)
 		reply(code, pos, "")
 	default:
-		reply(coreconsensus.CodeJoinRefused, coreconsensus.Position{}, "")
+		reply(coreconsensus.CodeJoinRefused, coreconsensus.PositionValue{}, "")
 	}
 }
 
 // Join implements Joiner: the JOIN goes to each address in turn until one
 // member answers JOIN_ACK with the position its AddLearner was appended at.
-func (t *TCPTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig) (coreconsensus.Position, error) {
-	req := coreconsensus.JoinRequest{
+func (t *TCPTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig) (coreconsensus.PositionValue, error) {
+	req := coreconsensus.JoinRequestValue{
 		Cluster: cfg.Stamp.Log.Cluster, ID: cfg.Stamp.ID, Incarnation: cfg.Stamp.Incarnation,
 		Slot: t.slot, Address: cfg.Address,
 	}
 	if req.Cluster != t.cluster {
-		return coreconsensus.Position{}, origin(coreconsensus.ClusterMismatch)
+		return coreconsensus.PositionValue{}, origin(coreconsensus.ClusterMismatch)
 	}
 	if len(cfg.Pins) == 0 {
 		// The answer installs the peers the joiner admits: it is taken only
 		// from a key the operator vouched for (review M4).
-		return coreconsensus.Position{}, transportMisconfigured("JoinConfig.Pins",
+		return coreconsensus.PositionValue{}, transportMisconfigured("JoinConfig.Pins",
 			"empty: pass the members' SPKIs, from the founding member list (id:inc:slot:spki:addr) or a running member's Membership()")
 	}
 	last := origin(coreconsensus.JoinRefused, errs.String("why", "no address answered"))
@@ -1180,55 +1180,55 @@ func (t *TCPTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig) (
 		}
 	}
 	if refused != nil {
-		return coreconsensus.Position{}, refused
+		return coreconsensus.PositionValue{}, refused
 	}
-	return coreconsensus.Position{}, last
+	return coreconsensus.PositionValue{}, last
 }
 
 // joinOne sends the JOIN to one address, to a peer presenting one of pins,
 // and installs the membership it answers once that membership lists the
 // peer under its key. refused is set when the peer answered with a refusal.
-func (t *TCPTransport) joinOne(ctx context.Context, addr string, req coreconsensus.JoinRequest, pins [][32]byte) (pos coreconsensus.Position, refused bool, err error) {
+func (t *TCPTransport) joinOne(ctx context.Context, addr string, req coreconsensus.JoinRequestValue, pins [][32]byte) (pos coreconsensus.PositionValue, refused bool, err error) {
 	c, derr := t.dialAny(ctx, addr, laneJoin, pins)
 	if derr != nil {
-		return coreconsensus.Position{}, false, derr
+		return coreconsensus.PositionValue{}, false, derr
 	}
 	// The answer is read, or its failure is: the socket has served.
 	defer func() { abandon(c.Close()) }()
 	peer, verified := tlsid.PeerOf(c.ConnectionState())
 	if !verified {
-		return coreconsensus.Position{}, false, peerRejected("no verified peer")
+		return coreconsensus.PositionValue{}, false, peerRejected("no verified peer")
 	}
 	// A JOIN is answered under its deadline or not at all (R9-06).
 	if err := c.SetDeadline(time.Now().Add(t.cfg.JoinTimeout)); err != nil {
-		return coreconsensus.Position{}, false, err
+		return coreconsensus.PositionValue{}, false, err
 	}
 	if err := writeChunk(c, encodeJoin(req)); err != nil {
-		return coreconsensus.Position{}, false, err
+		return coreconsensus.PositionValue{}, false, err
 	}
 	b, rerr := readChunk(c, t.cfg.MaxControlFrameBytes)
 	if rerr != nil || len(b) < 20 {
-		return coreconsensus.Position{}, false, origin(coreconsensus.FrameInvalid, errs.String("what", "join answer"))
+		return coreconsensus.PositionValue{}, false, origin(coreconsensus.FrameInvalid, errs.String("what", "join answer"))
 	}
 	if code := errs.Code(binary.LittleEndian.Uint32(b)); code != 0 {
-		return coreconsensus.Position{}, true, joinRefused(code, joinAnswerReason(b[20:]))
+		return coreconsensus.PositionValue{}, true, joinRefused(code, joinAnswerReason(b[20:]))
 	}
 	m, perr := wire.ParseMembership(b[20:])
 	if perr != nil {
-		return coreconsensus.Position{}, false, perr
+		return coreconsensus.PositionValue{}, false, perr
 	}
 	if !joinAnswerListsPeer(m, peer.SPKI) {
-		return coreconsensus.Position{}, false, peerRejected("the answer does not list its own sender")
+		return coreconsensus.PositionValue{}, false, peerRejected("the answer does not list its own sender")
 	}
 	t.SetMembership(1, m.Members)
-	return coreconsensus.Position{Term: binary.LittleEndian.Uint64(b[4:]), Index: binary.LittleEndian.Uint64(b[12:])}, false, nil
+	return coreconsensus.PositionValue{Term: binary.LittleEndian.Uint64(b[4:]), Index: binary.LittleEndian.Uint64(b[12:])}, false, nil
 }
 
 // joinAnswerListsPeer reports whether a JOIN answer's membership lists the
 // peer that sent it under the key it presented: an answer that does not is
 // not the cluster's (review M4).
-func joinAnswerListsPeer(m coreconsensus.Membership, spki [32]byte) bool {
-	return slices.ContainsFunc(m.Members, func(x coreconsensus.Member) bool { return x.SPKI == spki })
+func joinAnswerListsPeer(m coreconsensus.MembershipValue, spki [32]byte) bool {
+	return slices.ContainsFunc(m.Members, func(x coreconsensus.MemberValue) bool { return x.SPKI == spki })
 }
 
 // joinAnswerReason reads the reason after a JOIN_REFUSED's fixed part;
@@ -1246,7 +1246,7 @@ func joinAnswerReason(b []byte) string {
 
 // BindJoinReason implements JoinReasonBinder: the JOIN callback that also
 // says why it refused.
-func (t *TCPTransport) BindJoinReason(_ coreconsensus.GroupID, join func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code, string)) {
+func (t *TCPTransport) BindJoinReason(_ coreconsensus.GroupID, join func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code, string)) {
 	t.mu.Lock()
 	t.joinR = join
 	t.mu.Unlock()

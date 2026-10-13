@@ -181,7 +181,7 @@ func (c *chunkReader) next() error {
 }
 
 // verifySnapshot decodes a whole snapshot and checks its sizes and digest.
-func verifySnapshot(r io.Reader, meta coreconsensus.SnapshotMeta, codec coretransform.BoundedDecompressor, limit int64) error {
+func verifySnapshot(r io.Reader, meta coreconsensus.SnapshotMetaValue, codec coretransform.BoundedDecompressor, limit int64) error {
 	cr := newChunkReader(r, codec, max(meta.ChunkSize, 1), limit)
 	if _, err := io.Copy(io.Discard, cr); err != nil {
 		return err

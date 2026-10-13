@@ -289,25 +289,6 @@ packages:
         name: EntryTransfer
         type: EntryKind
         value: "8"
-      - blockDoc: The states of a stamp.
-        doc: |-
-          StampJoining is a directory Init prepared: it may join as an empty
-          learner, never vote or acknowledge until it is admitted.
-        name: StampJoining
-        type: StampState
-        value: "1"
-      - blockDoc: The states of a stamp.
-        doc: |-
-          StampBootstrapPending is a founding in progress: Bootstrap wrote it
-          before it wrote the founding configuration.
-        name: StampBootstrapPending
-        type: StampState
-        value: "2"
-      - blockDoc: The states of a stamp.
-        doc: StampMember is a directory that belongs to a cluster.
-        name: StampMember
-        type: StampState
-        value: "3"
       - blockDoc: The message kinds of protocol version 1.
         doc: |-
           MsgPreVote asks whether the sender COULD win at Term, without raising
@@ -395,21 +376,21 @@ packages:
           live-leader refusal for ONE campaign, never the election restriction.
         name: FlagTransfer
         type: MessageFlags
-        value: 1 << 0
+        value: "1"
       - blockDoc: The flags.
         doc: |-
           FlagNeedSnapshot marks an append rejection from a node that holds no
           usable snapshot and asks for one.
         name: FlagNeedSnapshot
         type: MessageFlags
-        value: 1 << 1
+        value: "2"
       - blockDoc: The flags.
         doc: |-
           FlagNoLease marks a read the follower wants confirmed by a round, never
           by a lease.
         name: FlagNoLease
         type: MessageFlags
-        value: 1 << 2
+        value: "4"
       - blockDoc: The flags.
         doc: |-
           FlagTruncated marks an append rejection from a node that truncated
@@ -417,7 +398,26 @@ packages:
           its match to the node's log, the one exception to "match only grows".
         name: FlagTruncated
         type: MessageFlags
-        value: 1 << 3
+        value: "8"
+      - blockDoc: The states of a stamp.
+        doc: |-
+          StampJoining is a directory Init prepared: it may join as an empty
+          learner, never vote or acknowledge until it is admitted.
+        name: StampJoining
+        type: StampState
+        value: "1"
+      - blockDoc: The states of a stamp.
+        doc: |-
+          StampBootstrapPending is a founding in progress: Bootstrap wrote it
+          before it wrote the founding configuration.
+        name: StampBootstrapPending
+        type: StampState
+        value: "2"
+      - blockDoc: The states of a stamp.
+        doc: StampMember is a directory that belongs to a cluster.
+        name: StampMember
+        type: StampState
+        value: "3"
       - blockDoc: The roles.
         doc: RoleFollower follows a leader, or waits for one.
         name: RoleFollower
@@ -509,7 +509,7 @@ packages:
                 type: "[]byte"
             name: Propose
             out:
-              - type: Token
+              - type: TokenValue
               - type: any
               - type: error
           - doc: |-
@@ -520,7 +520,7 @@ packages:
                 type: context.Context
             name: Barrier
             out:
-              - type: Token
+              - type: TokenValue
               - type: error
           - doc: |-
               WaitApplied returns once the local node has applied t. A token of
@@ -529,14 +529,14 @@ packages:
               - name: ctx
                 type: context.Context
               - name: t
-                type: Token
+                type: TokenValue
             name: WaitApplied
             out:
               - type: error
           - doc: Status returns the node's view after its last turn.
             name: Status
             out:
-              - type: Status
+              - type: StatusValue
         name: Replicated
       - doc: |-
           StateMachine is the caller's replicated program. Apply is a PURE transition
@@ -552,7 +552,7 @@ packages:
               to the Propose that created it on the node that created it.
             in:
               - name: e
-                type: Entry
+                type: EntryValue
             name: Apply
             out:
               - type: any
@@ -570,7 +570,7 @@ packages:
               - name: r
                 type: io.Reader
               - name: meta
-                type: SnapshotMeta
+                type: SnapshotMetaValue
             name: Restore
             out:
               - type: error
@@ -602,8 +602,8 @@ packages:
               entry whose effects are durable.
             name: AppliedPosition
             out:
-              - type: LogIdentity
-              - type: Position
+              - type: LogIdentityValue
+              - type: PositionValue
               - type: error
         name: DurableStateMachine
       - doc: |-
@@ -615,7 +615,7 @@ packages:
           - doc: ApplyBatch applies es in order and writes each result into results.
             in:
               - name: es
-                type: "[]Entry"
+                type: "[]EntryValue"
               - name: results
                 type: "[]any"
             name: ApplyBatch
@@ -635,10 +635,10 @@ packages:
               - name: maxBytes
                 type: int
               - name: dst
-                type: "[]Entry"
+                type: "[]EntryValue"
             name: Entries
             out:
-              - type: "[]Entry"
+              - type: "[]EntryValue"
               - type: error
           - doc: Term answers for first-1 too, from the term kept at compaction.
             in:
@@ -669,7 +669,7 @@ packages:
               record batch.
             in:
               - name: entries
-                type: "[]Entry"
+                type: "[]EntryValue"
               - name: hs
                 type: "*HardState"
             name: Append
@@ -703,11 +703,11 @@ packages:
           - doc: Stamp returns the directory's stamp.
             name: Stamp
             out:
-              - type: Stamp
+              - type: StampValue
               - type: error
           - doc: WriteStamp writes the stamp, durable on return.
             in:
-              - type: Stamp
+              - type: StampValue
             name: WriteStamp
             out:
               - type: error
@@ -727,7 +727,7 @@ packages:
               computed over the DECODED stream.
             in:
               - name: final
-                type: SnapshotMeta
+                type: SnapshotMetaValue
             name: Commit
             out:
               - type: error
@@ -743,7 +743,7 @@ packages:
           - doc: Meta describes the snapshot.
             name: Meta
             out:
-              - type: SnapshotMeta
+              - type: SnapshotMetaValue
           - doc: Close unpins it.
             name: Close
             out:
@@ -758,7 +758,7 @@ packages:
               - name: id
                 type: string
               - name: meta
-                type: SnapshotMeta
+                type: SnapshotMetaValue
             name: Create
             out:
               - name: sink
@@ -770,7 +770,7 @@ packages:
           - doc: List returns the complete snapshots, newest first.
             name: List
             out:
-              - type: "[]SnapshotMeta"
+              - type: "[]SnapshotMetaValue"
               - type: error
           - doc: Open pins a snapshot until the handle is closed.
             in:
@@ -811,7 +811,7 @@ packages:
               - name: to
                 type: NodeID
               - name: offer
-                type: InstallOffer
+                type: InstallOfferValue
               - name: open
                 type: func(offset int64) (io.ReadCloser, error)
             name: Stream
@@ -825,13 +825,13 @@ packages:
               - name: group
                 type: GroupID
               - name: deliver
-                type: func(from AuthenticatedPeer, frame []byte)
+                type: func(from AuthenticatedPeerValue, frame []byte)
               - name: offer
-                type: func(from AuthenticatedPeer, o InstallOffer) InstallAccept
+                type: func(from AuthenticatedPeerValue, o InstallOfferValue) InstallAcceptValue
               - name: install
-                type: func(InstallRequest) error
+                type: func(InstallParams) error
               - name: join
-                type: func(ctx context.Context, from AuthenticatedPeer, r JoinRequest) (Position, errs.Code)
+                type: func(ctx context.Context, from AuthenticatedPeerValue, r JoinRequestValue) (PositionValue, errs.Code)
             name: Bind
             out:
               - type: error
@@ -842,7 +842,7 @@ packages:
               - name: group
                 type: GroupID
               - name: admitted
-                type: "[]Member"
+                type: "[]MemberValue"
             name: SetMembership
         name: Transport
       - doc: |-
@@ -866,7 +866,7 @@ packages:
                 type: JoinConfig
             name: Join
             out:
-              - type: Position
+              - type: PositionValue
               - type: error
         name: Joiner
       - doc: |-
@@ -879,7 +879,7 @@ packages:
               - name: ctx
                 type: context.Context
               - name: r
-                type: JoinRequest
+                type: JoinRequestValue
             name: Authorize
             out:
               - type: Operator
@@ -895,7 +895,7 @@ packages:
                 type: context.Context
             name: Watch
             out:
-              - type: <-chan Status
+              - type: <-chan StatusValue
         name: LeadershipWatcher
       - doc: |-
           JoinReasonBinder is the sibling of a transport that carries the reason of
@@ -910,7 +910,7 @@ packages:
               - name: group
                 type: GroupID
               - name: join
-                type: func(ctx context.Context, from AuthenticatedPeer, r JoinRequest) (Position, errs.Code, string)
+                type: func(ctx context.Context, from AuthenticatedPeerValue, r JoinRequestValue) (PositionValue, errs.Code, string)
             name: BindJoinReason
         name: JoinReasonBinder
     sentinels:
@@ -1302,15 +1302,15 @@ packages:
         name: EntryKind
         underlying: uint8
       - doc: |-
-          Entry is one record of the replicated log. Data is immutable once appended:
+          EntryValue is one record of the replicated log. Data is immutable once appended:
           the store and the engine never write into it, and a caller that hands bytes
           to Propose gives up their ownership.
-        name: Entry
+        name: EntryValue
         struct:
           fields:
             - doc: Position is the entry's term and index.
               name: Position
-              type: Position
+              type: PositionValue
             - doc: Kind says what Data carries.
               name: Kind
               type: EntryKind
@@ -1336,7 +1336,7 @@ packages:
                 Token is the entry's lineage-scoped command identity, set in memory by
                 the engine before Apply and never encoded in the log.
               name: Token
-              type: Token
+              type: TokenValue
       - doc: |-
           HardState is what a node must never forget: its term, its vote in that term
           and the commit index it knows of. Term and vote are durable before any reply
@@ -1354,36 +1354,6 @@ packages:
             - doc: Commit is the highest index known committed.
               name: Commit
               type: uint64
-      - doc: StampState says how far a data directory has come.
-        name: StampState
-        underlying: uint8
-      - doc: |-
-          Stamp binds a data directory to one node of one cluster: written by
-          LogStore.WriteStamp, durable on return, and verified at every start. A
-          mismatch is DATA_DIR_MISMATCH.
-        name: Stamp
-        struct:
-          fields:
-            - doc: Log is the log identity the directory belongs to.
-              name: Log
-              type: LogIdentity
-            - doc: ID is the node.
-              name: ID
-              type: NodeID
-            - doc: Incarnation is drawn when the stamp is first written.
-              name: Incarnation
-              type: Incarnation
-            - doc: Slot is the placement slot the node's certificate names.
-              name: Slot
-              type: string
-            - doc: State is how far the directory has come.
-              name: State
-              type: StampState
-            - doc: |-
-                Founding is the digest of the founding member list while a bootstrap
-                is pending, so that a rerun with another list is refused.
-              name: Founding
-              type: "[32]byte"
       - doc: |-
           NodeID names one member of a group for its whole life. It is a random 64-bit
           value drawn at Init, never 0 and never reused: a node whose disk was lost
@@ -1434,27 +1404,7 @@ packages:
         name: ClusterID
         underlying: "[16]byte"
       - doc: |-
-          GroupID names a consensus group. v1 runs exactly one group, 1, and every
-          frame carries it so that a later version can multiplex groups without
-          changing the wire.
-        name: GroupID
-        underlying: uint64
-      - doc: |-
-          Position is an entry's place in the log: the term it was created in and its
-          index. The index is a fencing token: unique, strictly increasing over the
-          group's life and identical on every node. The term says WHICH command, never
-          who may act on it now (ADR 0152 D10).
-        name: Position
-        struct:
-          fields:
-            - doc: Term is the leader term the entry was appended in.
-              name: Term
-              type: uint64
-            - doc: Index is the entry's place in the log, from 1.
-              name: Index
-              type: uint64
-      - doc: |-
-          LogIdentity scopes positions: the ClusterID and a log epoch that Recover and
+          LogIdentityValue scopes positions: the ClusterID and a log epoch that Recover and
           RestoreSnapshot bump, and the predecessor this history descends from with the
           last index it kept. A position or a token from another identity is not
           comparable with this log's.
@@ -1464,12 +1414,12 @@ packages:
               epoch), whatever lineage they record.
             in:
               - name: o
-                type: LogIdentity
+                type: LogIdentityValue
             name: Same
             out:
               - type: bool
             recv: value
-        name: LogIdentity
+        name: LogIdentityValue
         struct:
           fields:
             - doc: Cluster is the cluster the log belongs to.
@@ -1492,7 +1442,7 @@ packages:
               name: KeptIndex
               type: uint64
       - doc: |-
-          Token is a lineage-scoped position: the cluster, the log epoch, the term and
+          TokenValue is a lineage-scoped position: the cluster, the log epoch, the term and
           the index. It is comparable, and its encoding is fixed at 41 bytes: a version
           byte, the 16-byte ClusterID, then epoch, term and index as big-endian uint64
           (see AppendToken in the service's wire package).
@@ -1500,9 +1450,9 @@ packages:
           - doc: Position returns the token's position, without its lineage.
             name: Position
             out:
-              - type: Position
+              - type: PositionValue
             recv: value
-        name: Token
+        name: TokenValue
         struct:
           fields:
             - doc: Cluster is the cluster of the log that committed the entry.
@@ -1536,16 +1486,16 @@ packages:
         name: AlarmID
         underlying: uint64
       - doc: |-
-          Precondition is what a clearing or raising operation expects to act on: the
+          PreconditionSpec is what a clearing or raising operation expects to act on: the
           log identity it was read in, and the alarm or the contract or cluster-version
           generation it expects to replace. Apply refuses a mismatch with
           ADMIN_PRECONDITION_FAILED, so a stale page cannot clear an alarm raised since.
-        name: Precondition
+        name: PreconditionSpec
         struct:
           fields:
             - doc: Log is the identity the precondition was read in.
               name: Log
-              type: LogIdentity
+              type: LogIdentityValue
             - doc: Alarm is the alarm a clearing operation names.
               name: Alarm
               type: AlarmID
@@ -1555,9 +1505,9 @@ packages:
               name: Generation
               type: uint64
       - doc: |-
-          Member is one node of the membership: its identity, the key it is pinned
+          MemberValue is one node of the membership: its identity, the key it is pinned
           to, where it listens, and whether it votes.
-        name: Member
+        name: MemberValue
         struct:
           fields:
             - doc: ID is the node.
@@ -1592,7 +1542,7 @@ packages:
               name: MaxSnapshotBytes
               type: int64
       - doc: |-
-          Membership is the configuration at a position: its members and the set of
+          MembershipValue is the configuration at a position: its members and the set of
           retired IDs, which is never reused.
         methods:
           - doc: Member returns the member with that id.
@@ -1601,7 +1551,7 @@ packages:
                 type: NodeID
             name: Member
             out:
-              - type: Member
+              - type: MemberValue
               - type: bool
             recv: value
           - doc: IsRetired reports whether the id was removed.
@@ -1622,9 +1572,9 @@ packages:
               under the engine.
             name: Clone
             out:
-              - type: Membership
+              - type: MembershipValue
             recv: value
-        name: Membership
+        name: MembershipValue
         struct:
           fields:
             - doc: Index is the index of the entry that produced it, 0 at founding.
@@ -1632,59 +1582,10 @@ packages:
               type: uint64
             - doc: Members lists every voter and learner.
               name: Members
-              type: "[]Member"
+              type: "[]MemberValue"
             - doc: Retired lists every removed NodeID.
               name: Retired
               type: "[]NodeID"
-      - doc: |-
-          TimingContract is the set of timings every member must agree on for leases
-          and vote refusals to be sound. The committed contract entry is its ONLY
-          authority; a node's own configuration is merely the proposal used at
-          Bootstrap.
-        name: TimingContract
-        struct:
-          fields:
-            - doc: Generation counts the committed contracts, 1 at founding.
-              name: Generation
-              type: uint64
-            - doc: HeartbeatInterval is how often the leader confirms itself.
-              name: HeartbeatInterval
-              type: time.Duration
-            - doc: |-
-                ElectionTimeoutMin is the lower bound of the randomized election
-                timeout, and the vote-refusal window.
-              name: ElectionTimeoutMin
-              type: time.Duration
-            - doc: ElectionTimeoutMax is its upper bound, exclusive.
-              name: ElectionTimeoutMax
-              type: time.Duration
-            - doc: |-
-                MaxClockDrift is the largest rate difference between two clocks, as a
-                fraction in (0, 1). Zero refuses lease reads.
-              name: MaxClockDrift
-              type: float64
-      - doc: |-
-          Versions are a node's capabilities: the protocol range it speaks, the
-          payload versions its state machine supports, and the committed cluster
-          version.
-        name: Versions
-        struct:
-          fields:
-            - doc: ProtocolMin is the lowest protocol version it speaks.
-              name: ProtocolMin
-              type: uint32
-            - doc: ProtocolMax is the highest.
-              name: ProtocolMax
-              type: uint32
-            - doc: PayloadMax is the highest payload version it applies.
-              name: PayloadMax
-              type: uint32
-            - doc: Cluster is the committed cluster version.
-              name: Cluster
-              type: uint32
-            - doc: ClusterGeneration counts cluster-version raises.
-              name: ClusterGeneration
-              type: uint64
       - doc: |-
           MessageKind says what a Message is. The two high bits are its lane, so that
           the frame header alone routes it (ADR 0152 D18).
@@ -1705,11 +1606,17 @@ packages:
         name: MessageFlags
         underlying: uint8
       - doc: |-
-          Message is one protocol message: a plain value, encoded by the service's
+          GroupID names a consensus group. v1 runs exactly one group, 1, and every
+          frame carries it so that a later version can multiplex groups without
+          changing the wire.
+        name: GroupID
+        underlying: uint64
+      - doc: |-
+          MessageValue is one protocol message: a plain value, encoded by the service's
           AppendMessage and decoded by ParseMessage, never by a method. The engine
           trusts the transport's authenticated peer over From, and drops a message
           whose From differs from it.
-        name: Message
+        name: MessageValue
         struct:
           fields:
             - doc: Version is the frame layout version, 1.
@@ -1773,12 +1680,26 @@ packages:
                 Entries are the entries an append carries, or the proposal a forward
                 carries with a zero position.
               name: Entries
-              type: "[]Entry"
+              type: "[]EntryValue"
       - doc: |-
-          SnapshotMeta describes one snapshot: where it cuts the log, the engine state
+          PositionValue is an entry's place in the log: the term it was created in and its
+          index. The index is a fencing token: unique, strictly increasing over the
+          group's life and identical on every node. The term says WHICH command, never
+          who may act on it now (ADR 0152 D10).
+        name: PositionValue
+        struct:
+          fields:
+            - doc: Term is the leader term the entry was appended in.
+              name: Term
+              type: uint64
+            - doc: Index is the entry's place in the log, from 1.
+              name: Index
+              type: uint64
+      - doc: |-
+          SnapshotMetaValue describes one snapshot: where it cuts the log, the engine state
           it carries, and what its bytes must hash to. It is versioned; a version a
           node does not know is refused cleanly.
-        name: SnapshotMeta
+        name: SnapshotMetaValue
         struct:
           fields:
             - doc: ID names the snapshot, the same in a spool, an offer and a handle.
@@ -1789,13 +1710,13 @@ packages:
               type: uint8
             - doc: Position is the last entry the snapshot covers.
               name: Position
-              type: Position
+              type: PositionValue
             - doc: Log is the identity of the log the snapshot was cut from.
               name: Log
-              type: LogIdentity
+              type: LogIdentityValue
             - doc: Membership is the configuration valid at Position, never a later one.
               name: Membership
-              type: Membership
+              type: MembershipValue
             - doc: |-
                 ChainTip is the authenticated chain value at Position: the chain is
                 carried across the boundary, never reseeded.
@@ -1818,7 +1739,7 @@ packages:
               type: "[32]byte"
             - doc: Timing is the committed timing contract at Position.
               name: Timing
-              type: TimingContract
+              type: TimingContractSpec
             - doc: ClusterVersion is the committed cluster version at Position.
               name: ClusterVersion
               type: uint32
@@ -1832,10 +1753,10 @@ packages:
               name: Reserved
               type: "[]byte"
       - doc: |-
-          InstallOffer is what a leader sends before streaming a snapshot: the whole
+          InstallOfferValue is what a leader sends before streaming a snapshot: the whole
           metadata first, so the receiver refuses a snapshot too large, of another
           version or already covered before a single byte of it is spooled (D7).
-        name: InstallOffer
+        name: InstallOfferValue
         struct:
           fields:
             - doc: Term is the sender's term.
@@ -1846,12 +1767,12 @@ packages:
               type: string
             - doc: Meta describes the snapshot.
               name: Meta
-              type: SnapshotMeta
+              type: SnapshotMetaValue
       - doc: |-
-          InstallAccept is the receiver's answer to an offer. The RECEIVER chooses the
+          InstallAcceptValue is the receiver's answer to an offer. The RECEIVER chooses the
           offset to resume from, from what it has durably spooled, so a resumed stream
           never appends to bytes the receiver did not keep (D7, R8-21).
-        name: InstallAccept
+        name: InstallAcceptValue
         struct:
           fields:
             - doc: SnapshotID is the snapshot answered.
@@ -1871,10 +1792,10 @@ packages:
               name: Held
               type: bool
       - doc: |-
-          InstallRequest is what the transport hands the engine once bytes flow, after
+          InstallParams is what the transport hands the engine once bytes flow, after
           the offer was accepted. Body ends with the connection: a stream cut short is a
           short read, and the spool keeps its last whole chunk for the next offer.
-        name: InstallRequest
+        name: InstallParams
         struct:
           fields:
             - doc: Ctx ends with the connection.
@@ -1882,10 +1803,10 @@ packages:
               type: context.Context
             - doc: From is the peer TLS authenticated.
               name: From
-              type: AuthenticatedPeer
+              type: AuthenticatedPeerValue
             - doc: Offer is the accepted offer.
               name: Offer
-              type: InstallOffer
+              type: InstallOfferValue
             - doc: Offset is the accepted offset.
               name: Offset
               type: int64
@@ -1893,11 +1814,11 @@ packages:
               name: Body
               type: io.Reader
       - doc: |-
-          AuthenticatedPeer is what the TLS handshake proved, never what a frame
+          AuthenticatedPeerValue is what the TLS handshake proved, never what a frame
           claims. The certificate proves the slot and the key; the ID and the
           incarnation are the member the transport admitted on that key. A peer that is
           not yet a member, during a JOIN, has ID 0 and only Slot and SPKI set.
-        name: AuthenticatedPeer
+        name: AuthenticatedPeerValue
         struct:
           fields:
             - doc: ID is the admitted member, 0 for a joiner.
@@ -1913,9 +1834,9 @@ packages:
               name: SPKI
               type: "[32]byte"
       - doc: |-
-          JoinRequest is a pre-admission JOIN as a member received it: the slot and
+          JoinRequestValue is a pre-admission JOIN as a member received it: the slot and
           the key from TLS, the new node's id and incarnation from its frame.
-        name: JoinRequest
+        name: JoinRequestValue
         struct:
           fields:
             - doc: Cluster is the cluster the joiner claims.
@@ -1937,33 +1858,10 @@ packages:
               name: Address
               type: string
       - doc: |-
-          JoinConfig is what a joining node needs to send its JOIN: where to reach the
-          members, and the stamp Init wrote, whose id and incarnation the member it
-          reaches proposes as a learner.
-        name: JoinConfig
-        struct:
-          fields:
-            - doc: Addresses are the members to try, in order.
-              name: Addresses
-              type: "[]string"
-            - doc: Stamp is the joiner's stamp, from Init.
-              name: Stamp
-              type: Stamp
-            - doc: Address is where the joiner listens.
-              name: Address
-              type: string
-            - doc: |-
-                Pins are the SPKIs of the members the joiner trusts, from the
-                operator. An answer counts only from a peer presenting one of them,
-                and only when the membership it returns lists that peer under that
-                key; an empty list refuses the JOIN.
-              name: Pins
-              type: "[][32]byte"
-      - doc: |-
-          FencedAttestation is the operator's statement that an old voter was fenced
+          FencedAttestationValue is the operator's statement that an old voter was fenced
           before a Recover: the voter, the method that fenced it, and one signed
           receipt per witness (one per NAS).
-        name: FencedAttestation
+        name: FencedAttestationValue
         struct:
           fields:
             - doc: Voter is the old voter.
@@ -1977,6 +1875,59 @@ packages:
                 cluster id, the new cluster id and the voter.
               name: Receipts
               type: "[][]byte"
+      - doc: StampState says how far a data directory has come.
+        name: StampState
+        underlying: uint8
+      - doc: |-
+          StampValue binds a data directory to one node of one cluster: written by
+          LogStore.WriteStamp, durable on return, and verified at every start. A
+          mismatch is DATA_DIR_MISMATCH.
+        name: StampValue
+        struct:
+          fields:
+            - doc: Log is the log identity the directory belongs to.
+              name: Log
+              type: LogIdentityValue
+            - doc: ID is the node.
+              name: ID
+              type: NodeID
+            - doc: Incarnation is drawn when the stamp is first written.
+              name: Incarnation
+              type: Incarnation
+            - doc: Slot is the placement slot the node's certificate names.
+              name: Slot
+              type: string
+            - doc: State is how far the directory has come.
+              name: State
+              type: StampState
+            - doc: |-
+                Founding is the digest of the founding member list while a bootstrap
+                is pending, so that a rerun with another list is refused.
+              name: Founding
+              type: "[32]byte"
+      - doc: |-
+          JoinConfig is what a joining node needs to send its JOIN: where to reach the
+          members, and the stamp Init wrote, whose id and incarnation the member it
+          reaches proposes as a learner.
+        name: JoinConfig
+        struct:
+          fields:
+            - doc: Addresses are the members to try, in order.
+              name: Addresses
+              type: "[]string"
+            - doc: Stamp is the joiner's stamp, from Init.
+              name: Stamp
+              type: StampValue
+            - doc: Address is where the joiner listens.
+              name: Address
+              type: string
+            - doc: |-
+                Pins are the SPKIs of the members the joiner trusts, from the
+                operator. An answer counts only from a peer presenting one of them,
+                and only when the membership it returns lists that peer under that
+                key; an empty list refuses the JOIN.
+              name: Pins
+              type: "[][32]byte"
       - doc: Role is a node's part in its group.
         methods:
           - doc: String names the role.
@@ -1987,7 +1938,13 @@ packages:
         name: Role
         underlying: uint8
       - doc: |-
-          Status is a node's view of its group after one turn of its event loop. It is a
+          FrameLane is the connection a frame belongs on: control, data or snapshot.
+          It is carried in the two high bits of the frame's type byte, so a transport
+          routes a frame of a type it does not parse.
+        name: FrameLane
+        underlying: uint8
+      - doc: |-
+          StatusValue is a node's view of its group after one turn of its event loop. It is a
           copy taken on the loop, never a live view, so every field in it describes the
           same instant.
         methods:
@@ -1996,9 +1953,9 @@ packages:
               alarm, or replacing the current contract, would carry.
             name: Precondition
             out:
-              - type: Precondition
+              - type: PreconditionSpec
             recv: value
-        name: Status
+        name: StatusValue
         struct:
           fields:
             - doc: ID is this node.
@@ -2021,18 +1978,40 @@ packages:
               type: uint64
             - doc: Log is the identity of its log.
               name: Log
-              type: LogIdentity
+              type: LogIdentityValue
             - doc: Versions are its capabilities and the committed cluster version.
               name: Versions
-              type: Versions
+              type: VersionsValue
             - doc: Timing is the committed timing contract.
               name: Timing
-              type: TimingContract
+              type: TimingContractSpec
             - doc: NoSpace is the raised no-space alarm, 0 when none.
               name: NoSpace
               type: AlarmID
       - doc: |-
-          StopReason says why a node stopped itself. Err carries the sentinel of the
+          VersionsValue are a node's capabilities: the protocol range it speaks, the
+          payload versions its state machine supports, and the committed cluster
+          version.
+        name: VersionsValue
+        struct:
+          fields:
+            - doc: ProtocolMin is the lowest protocol version it speaks.
+              name: ProtocolMin
+              type: uint32
+            - doc: ProtocolMax is the highest.
+              name: ProtocolMax
+              type: uint32
+            - doc: PayloadMax is the highest payload version it applies.
+              name: PayloadMax
+              type: uint32
+            - doc: Cluster is the committed cluster version.
+              name: Cluster
+              type: uint32
+            - doc: ClusterGeneration counts cluster-version raises.
+              name: ClusterGeneration
+              type: uint64
+      - doc: |-
+          StopReasonValue says why a node stopped itself. Err carries the sentinel of the
           stop; ExitCode is the process exit status the product should use.
         methods:
           - doc: |-
@@ -2042,7 +2021,7 @@ packages:
             out:
               - type: int
             recv: value
-        name: StopReason
+        name: StopReasonValue
         struct:
           fields:
             - doc: Err is the stop's error, built on its sentinel.
@@ -2054,11 +2033,32 @@ packages:
               name: Unmarked
               type: bool
       - doc: |-
-          FrameLane is the connection a frame belongs on: control, data or snapshot.
-          It is carried in the two high bits of the frame's type byte, so a transport
-          routes a frame of a type it does not parse.
-        name: FrameLane
-        underlying: uint8
+          TimingContractSpec is the set of timings every member must agree on for leases
+          and vote refusals to be sound. The committed contract entry is its ONLY
+          authority; a node's own configuration is merely the proposal used at
+          Bootstrap.
+        name: TimingContractSpec
+        struct:
+          fields:
+            - doc: Generation counts the committed contracts, 1 at founding.
+              name: Generation
+              type: uint64
+            - doc: HeartbeatInterval is how often the leader confirms itself.
+              name: HeartbeatInterval
+              type: time.Duration
+            - doc: |-
+                ElectionTimeoutMin is the lower bound of the randomized election
+                timeout, and the vote-refusal window.
+              name: ElectionTimeoutMin
+              type: time.Duration
+            - doc: ElectionTimeoutMax is its upper bound, exclusive.
+              name: ElectionTimeoutMax
+              type: time.Duration
+            - doc: |-
+                MaxClockDrift is the largest rate difference between two clocks, as a
+                fraction in (0, 1). Zero refuses lease reads.
+              name: MaxClockDrift
+              type: float64
   - constants:
       - doc: |-
           ReadIndex confirms every read by a heartbeat round started after it
@@ -2177,14 +2177,14 @@ packages:
           - name: cfg
             type: Config
           - name: members
-            type: "[]coreconsensus.Member"
+            type: "[]coreconsensus.MemberValue"
         name: Bootstrap
         out:
           - type: error
       - doc: TimingDefaults are D5's defaults for the RTT matrix of the three sites.
         name: TimingDefaults
         out:
-          - type: coreconsensus.TimingContract
+          - type: coreconsensus.TimingContractSpec
       - doc: |-
           OpenDataDir takes the directory lock FIRST, then reads, scans and repairs
           (D11). A second process fails at once with DATA_DIR_LOCKED.
@@ -2219,7 +2219,7 @@ packages:
             type: error
         name: TokenOf
         out:
-          - type: coreconsensus.Token
+          - type: coreconsensus.TokenValue
           - type: bool
       - doc: |-
           JoinRefusalReason reads the reason a refused JOIN carried back to the
@@ -2330,7 +2330,7 @@ packages:
           - name: newCluster
             type: coreconsensus.ClusterID
           - name: members
-            type: "[]coreconsensus.Member"
+            type: "[]coreconsensus.MemberValue"
           - name: opt
             type: RecoverOptions
         name: Recover
@@ -2347,12 +2347,12 @@ packages:
           - name: newCluster
             type: coreconsensus.ClusterID
           - name: members
-            type: "[]coreconsensus.Member"
+            type: "[]coreconsensus.MemberValue"
           - name: opt
             type: RestoreOptions
         name: RestoreSnapshot
         out:
-          - type: coreconsensus.SnapshotMeta
+          - type: coreconsensus.SnapshotMetaValue
           - type: error
       - doc: |-
           ProposeAs types the Apply result. A result of another dynamic type is
@@ -2367,7 +2367,7 @@ packages:
             type: "[]byte"
         name: ProposeAs
         out:
-          - type: coreconsensus.Token
+          - type: coreconsensus.TokenValue
           - type: R
           - type: error
         typeParams:
@@ -2489,7 +2489,7 @@ packages:
           fields:
             - doc: Status is the node's view after its last turn.
               name: Status
-              type: coreconsensus.Status
+              type: coreconsensus.StatusValue
             - doc: |-
                 Ready is true while a leader is known and the node applied what it
                 knows committed.
@@ -2529,7 +2529,7 @@ packages:
               type: bool
             - doc: StopReason says why the node stopped itself.
               name: StopReason
-              type: coreconsensus.StopReason
+              type: coreconsensus.StopReasonValue
             - doc: |-
                 DroppedFrames counts frames whose From differed from the
                 authenticated peer (R7-05).
@@ -2595,7 +2595,7 @@ packages:
                 InitialTiming is proposed at Bootstrap only; the committed contract
                 rules.
               name: InitialTiming
-              type: coreconsensus.TimingContract
+              type: coreconsensus.TimingContractSpec
             - name: MaxBatchBytes
             - name: MaxInflight
             - name: MaxInflightBytes
@@ -2700,10 +2700,10 @@ packages:
               - name: maxBytes
                 type: int
               - name: dst
-                type: "[]coreconsensus.Entry"
+                type: "[]coreconsensus.EntryValue"
             name: Entries
             out:
-              - type: "[]coreconsensus.Entry"
+              - type: "[]coreconsensus.EntryValue"
               - type: error
             recv: pointer
           - doc: Term implements LogReader.
@@ -2725,7 +2725,7 @@ packages:
           - doc: "Append implements LogStore: entries and the hard state in ONE batch."
             in:
               - name: entries
-                type: "[]coreconsensus.Entry"
+                type: "[]coreconsensus.EntryValue"
               - name: hs
                 type: "*coreconsensus.HardState"
             name: Append
@@ -2770,13 +2770,13 @@ packages:
           - doc: Stamp implements LogStore.
             name: Stamp
             out:
-              - type: coreconsensus.Stamp
+              - type: coreconsensus.StampValue
               - type: error
             recv: pointer
           - doc: "WriteStamp implements LogStore: durable on return."
             in:
               - name: s
-                type: coreconsensus.Stamp
+                type: coreconsensus.StampValue
             name: WriteStamp
             out:
               - type: error
@@ -2806,7 +2806,7 @@ packages:
               - name: id
                 type: string
               - name: meta
-                type: coreconsensus.SnapshotMeta
+                type: coreconsensus.SnapshotMetaValue
             name: Create
             out:
               - type: coreconsensus.SnapshotSink
@@ -2816,7 +2816,7 @@ packages:
           - doc: "List implements SnapshotStore: complete snapshots, newest first."
             name: List
             out:
-              - type: "[]coreconsensus.SnapshotMeta"
+              - type: "[]coreconsensus.SnapshotMetaValue"
               - type: error
             recv: pointer
           - doc: "Open implements SnapshotStore: pinned until Close."
@@ -2854,10 +2854,10 @@ packages:
               - name: maxBytes
                 type: int
               - name: dst
-                type: "[]coreconsensus.Entry"
+                type: "[]coreconsensus.EntryValue"
             name: Entries
             out:
-              - type: "[]coreconsensus.Entry"
+              - type: "[]coreconsensus.EntryValue"
               - type: error
             recv: pointer
           - doc: Term implements LogReader.
@@ -2879,7 +2879,7 @@ packages:
           - doc: Append implements LogStore.
             in:
               - name: entries
-                type: "[]coreconsensus.Entry"
+                type: "[]coreconsensus.EntryValue"
               - name: hs
                 type: "*coreconsensus.HardState"
             name: Append
@@ -2924,13 +2924,13 @@ packages:
           - doc: Stamp implements LogStore.
             name: Stamp
             out:
-              - type: coreconsensus.Stamp
+              - type: coreconsensus.StampValue
               - type: error
             recv: pointer
           - doc: WriteStamp implements LogStore.
             in:
               - name: s
-                type: coreconsensus.Stamp
+                type: coreconsensus.StampValue
             name: WriteStamp
             out:
               - type: error
@@ -2952,7 +2952,7 @@ packages:
               - name: id
                 type: string
               - name: meta
-                type: coreconsensus.SnapshotMeta
+                type: coreconsensus.SnapshotMetaValue
             name: Create
             out:
               - type: coreconsensus.SnapshotSink
@@ -2962,7 +2962,7 @@ packages:
           - doc: List implements SnapshotStore.
             name: List
             out:
-              - type: "[]coreconsensus.SnapshotMeta"
+              - type: "[]coreconsensus.SnapshotMetaValue"
               - type: error
             recv: pointer
           - doc: Open implements SnapshotStore.
@@ -3039,7 +3039,7 @@ packages:
               - name: to
                 type: coreconsensus.NodeID
               - name: offer
-                type: coreconsensus.InstallOffer
+                type: coreconsensus.InstallOfferValue
               - name: open
                 type: func(int64) (io.ReadCloser, error)
             name: Stream
@@ -3051,13 +3051,13 @@ packages:
               - name: group
                 type: coreconsensus.GroupID
               - name: deliver
-                type: func(coreconsensus.AuthenticatedPeer, []byte)
+                type: func(coreconsensus.AuthenticatedPeerValue, []byte)
               - name: offer
-                type: func(coreconsensus.AuthenticatedPeer, coreconsensus.InstallOffer) coreconsensus.InstallAccept
+                type: func(coreconsensus.AuthenticatedPeerValue, coreconsensus.InstallOfferValue) coreconsensus.InstallAcceptValue
               - name: install
-                type: func(coreconsensus.InstallRequest) error
+                type: func(coreconsensus.InstallParams) error
               - name: join
-                type: func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code)
+                type: func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code)
             name: Bind
             out:
               - type: error
@@ -3067,7 +3067,7 @@ packages:
               - name: _
                 type: coreconsensus.GroupID
               - name: join
-                type: func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code, string)
+                type: func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code, string)
             name: BindJoinReason
             recv: pointer
           - doc: SetMembership implements Transport.
@@ -3075,7 +3075,7 @@ packages:
               - name: _
                 type: coreconsensus.GroupID
               - name: admitted
-                type: "[]coreconsensus.Member"
+                type: "[]coreconsensus.MemberValue"
             name: SetMembership
             recv: pointer
           - doc: Join implements Joiner over the network, as the TCP transport does.
@@ -3086,7 +3086,7 @@ packages:
                 type: coreconsensus.JoinConfig
             name: Join
             out:
-              - type: coreconsensus.Position
+              - type: coreconsensus.PositionValue
               - type: error
             recv: pointer
           - doc: |-
@@ -3112,7 +3112,7 @@ packages:
           - doc: StopReason returns why the node stopped itself, if it did.
             name: StopReason
             out:
-              - type: coreconsensus.StopReason
+              - type: coreconsensus.StopReasonValue
               - type: bool
             recv: pointer
           - doc: |-
@@ -3135,7 +3135,7 @@ packages:
           - doc: Status returns the node's view after its last turn.
             name: Status
             out:
-              - type: coreconsensus.Status
+              - type: coreconsensus.StatusValue
             recv: pointer
           - doc: Watch implements LeadershipWatcher.
             in:
@@ -3143,12 +3143,12 @@ packages:
                 type: context.Context
             name: Watch
             out:
-              - type: <-chan coreconsensus.Status
+              - type: <-chan coreconsensus.StatusValue
             recv: pointer
           - doc: Membership returns the configuration the node last appended.
             name: Membership
             out:
-              - type: coreconsensus.Membership
+              - type: coreconsensus.MembershipValue
             recv: pointer
           - doc: |-
               Propose replicates data and returns, once the entry is applied locally,
@@ -3162,7 +3162,7 @@ packages:
                 type: "[]byte"
             name: Propose
             out:
-              - type: coreconsensus.Token
+              - type: coreconsensus.TokenValue
               - type: any
               - type: error
             recv: pointer
@@ -3174,7 +3174,7 @@ packages:
                 type: context.Context
             name: Barrier
             out:
-              - type: coreconsensus.Token
+              - type: coreconsensus.TokenValue
               - type: error
             recv: pointer
           - doc: |-
@@ -3184,7 +3184,7 @@ packages:
               - name: ctx
                 type: context.Context
               - name: t
-                type: coreconsensus.Token
+                type: coreconsensus.TokenValue
             name: WaitApplied
             out:
               - type: error
@@ -3196,7 +3196,7 @@ packages:
               - name: op
                 type: coreconsensus.Operator
               - name: m
-                type: coreconsensus.Member
+                type: coreconsensus.MemberValue
             name: AddLearner
             out:
               - type: error
@@ -3260,9 +3260,9 @@ packages:
               - name: op
                 type: coreconsensus.Operator
               - name: pre
-                type: coreconsensus.Precondition
+                type: coreconsensus.PreconditionSpec
               - name: c
-                type: coreconsensus.TimingContract
+                type: coreconsensus.TimingContractSpec
             name: ProposeTimingContract
             out:
               - type: error
@@ -3274,7 +3274,7 @@ packages:
               - name: op
                 type: coreconsensus.Operator
               - name: pre
-                type: coreconsensus.Precondition
+                type: coreconsensus.PreconditionSpec
               - name: v
                 type: uint32
             name: RaiseClusterVersion
@@ -3288,7 +3288,7 @@ packages:
               - name: op
                 type: coreconsensus.Operator
               - name: pre
-                type: coreconsensus.Precondition
+                type: coreconsensus.PreconditionSpec
             name: ClearNoSpace
             out:
               - type: error
@@ -3318,7 +3318,7 @@ packages:
                 type: io.Writer
             name: SaveSnapshot
             out:
-              - type: coreconsensus.SnapshotMeta
+              - type: coreconsensus.SnapshotMetaValue
               - type: error
             recv: pointer
         name: Node
@@ -3329,7 +3329,7 @@ packages:
         struct:
           fields:
             - name: Stamp
-              type: coreconsensus.Stamp
+              type: coreconsensus.StampValue
             - name: HardState
               type: coreconsensus.HardState
             - name: First
@@ -3337,7 +3337,7 @@ packages:
             - name: Last
               type: uint64
             - name: Snapshots
-              type: "[]coreconsensus.SnapshotMeta"
+              type: "[]coreconsensus.SnapshotMetaValue"
             - name: Quarantine
               type: string
             - name: Markers
@@ -3357,7 +3357,7 @@ packages:
               type: coreconsensus.Operator
             - doc: Fenced attests every old voter left out of the new members.
               name: Fenced
-              type: "[]coreconsensus.FencedAttestation"
+              type: "[]coreconsensus.FencedAttestationValue"
             - doc: "WitnessKeys verify the receipts: one per witness, each must sign."
               name: WitnessKeys
               type: "[]ed25519.PublicKey"
@@ -3367,7 +3367,7 @@ packages:
           fields:
             - doc: "Expected is the snapshot's metadata, from SaveSnapshot: non-zero."
               name: Expected
-              type: coreconsensus.SnapshotMeta
+              type: coreconsensus.SnapshotMetaValue
             - doc: Confirm must equal the new cluster id in hex.
               name: Confirm
               type: string
@@ -3502,13 +3502,13 @@ packages:
               - name: _
                 type: coreconsensus.GroupID
               - name: deliver
-                type: func(coreconsensus.AuthenticatedPeer, []byte)
+                type: func(coreconsensus.AuthenticatedPeerValue, []byte)
               - name: offer
-                type: func(coreconsensus.AuthenticatedPeer, coreconsensus.InstallOffer) coreconsensus.InstallAccept
+                type: func(coreconsensus.AuthenticatedPeerValue, coreconsensus.InstallOfferValue) coreconsensus.InstallAcceptValue
               - name: install
-                type: func(coreconsensus.InstallRequest) error
+                type: func(coreconsensus.InstallParams) error
               - name: join
-                type: func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code)
+                type: func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code)
             name: Bind
             out:
               - type: error
@@ -3521,7 +3521,7 @@ packages:
               - name: group
                 type: coreconsensus.GroupID
               - name: admitted
-                type: "[]coreconsensus.Member"
+                type: "[]coreconsensus.MemberValue"
             name: SetMembership
             recv: pointer
           - doc: Close stops the transport and joins its goroutines.
@@ -3536,7 +3536,7 @@ packages:
               - name: to
                 type: coreconsensus.NodeID
               - name: offer
-                type: coreconsensus.InstallOffer
+                type: coreconsensus.InstallOfferValue
               - name: open
                 type: func(int64) (io.ReadCloser, error)
             name: Stream
@@ -3553,7 +3553,7 @@ packages:
                 type: coreconsensus.JoinConfig
             name: Join
             out:
-              - type: coreconsensus.Position
+              - type: coreconsensus.PositionValue
               - type: error
             recv: pointer
           - doc: |-
@@ -3563,7 +3563,7 @@ packages:
               - name: _
                 type: coreconsensus.GroupID
               - name: join
-                type: func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code, string)
+                type: func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code, string)
             name: BindJoinReason
             recv: pointer
           - doc: |-
@@ -3647,13 +3647,13 @@ packages:
               type: core.GroupID
             - doc: Log is the identity of the log, checked against an admin precondition.
               name: Log
-              type: core.LogIdentity
+              type: core.LogIdentityValue
             - doc: Seed draws the randomized election timeouts.
               name: Seed
               type: uint64
             - doc: Timing is the committed timing contract at start.
               name: Timing
-              type: core.TimingContract
+              type: core.TimingContractSpec
             - doc: MaxInflight bounds the appends in flight per peer.
               name: MaxInflight
               type: int
@@ -3725,10 +3725,10 @@ packages:
               type: core.HardState
             - doc: Snapshot is the base the log continues, zero for none.
               name: Snapshot
-              type: core.SnapshotMeta
+              type: core.SnapshotMetaValue
             - doc: Entries are the durable entries after the snapshot.
               name: Entries
-              type: "[]core.Entry"
+              type: "[]core.EntryValue"
             - doc: Applied is where the state machine resumes, at least the snapshot.
               name: Applied
               type: uint64
@@ -3781,16 +3781,16 @@ packages:
               type: uint64
             - doc: Entries are appended after the truncation.
               name: Entries
-              type: "[]core.Entry"
+              type: "[]core.EntryValue"
             - doc: Messages leave at once.
               name: Messages
-              type: "[]core.Message"
+              type: "[]core.MessageValue"
             - doc: AfterSync leave once this write is durable.
               name: AfterSync
-              type: "[]core.Message"
+              type: "[]core.MessageValue"
             - doc: Apply are committed, locally durable entries, in order.
               name: Apply
-              type: "[]core.Entry"
+              type: "[]core.EntryValue"
             - doc: SendSnapshot names the peers that need a snapshot.
               name: SendSnapshot
               type: "[]core.NodeID"
@@ -3799,7 +3799,7 @@ packages:
               type: "[]ReadState"
             - doc: Forwarded are answers to this node's forwarded proposals.
               name: Forwarded
-              type: "[]core.Message"
+              type: "[]core.MessageValue"
             - doc: Transfers end transfers.
               name: Transfers
               type: "[]TransferResult"
@@ -3820,7 +3820,7 @@ packages:
               type: "[]FetchRequest"
             - doc: Membership is set when the admitted set changed.
               name: Membership
-              type: "[]core.Member"
+              type: "[]core.MemberValue"
             - doc: |-
                 Unsupported names an entry whose kind this version does not know:
                 the driver stops the node with VERSION_UNSUPPORTED.
@@ -3864,7 +3864,7 @@ packages:
               - name: lo
                 type: uint64
               - name: ents
-                type: "[]core.Entry"
+                type: "[]core.EntryValue"
               - name: compacted
                 type: bool
             name: Fetched
@@ -3877,10 +3877,10 @@ packages:
               - name: now
                 type: time.Time
               - name: es
-                type: "[]core.Entry"
+                type: "[]core.EntryValue"
             name: Propose
             out:
-              - type: "[]core.Position"
+              - type: "[]core.PositionValue"
               - type: errs.Code
             recv: pointer
           - doc: |-
@@ -3915,7 +3915,7 @@ packages:
               - name: from
                 type: core.NodeID
               - name: o
-                type: core.InstallOffer
+                type: core.InstallOfferValue
               - name: needTable
                 type: bool
             name: CheckOffer
@@ -3928,8 +3928,16 @@ packages:
               (D7).
             in:
               - name: meta
-                type: core.SnapshotMeta
+                type: core.SnapshotMetaValue
             name: InstallSnapshot
+            recv: pointer
+          - doc: |-
+              SetOverloaded tells the state machine whether the driver refuses new
+              commands for apply backpressure (D6): forwarded ones are refused too.
+            in:
+              - name: "on"
+                type: bool
+            name: SetOverloaded
             recv: pointer
           - doc: Tick advances the timers to now.
             in:
@@ -3986,14 +3994,6 @@ packages:
                 type: bool
             name: SetCanVote
             recv: pointer
-          - doc: |-
-              SetOverloaded tells the state machine whether the driver refuses new
-              commands for apply backpressure (D6): forwarded ones are refused too.
-            in:
-              - name: "on"
-                type: bool
-            name: SetOverloaded
-            recv: pointer
           - doc: SnapshotIndex returns the base of the in-memory log.
             name: SnapshotIndex
             out:
@@ -4005,7 +4005,7 @@ packages:
                 type: uint64
             name: Entry
             out:
-              - type: core.Entry
+              - type: core.EntryValue
               - type: bool
             recv: pointer
           - doc: ConfAt returns the membership valid at index i.
@@ -4014,7 +4014,7 @@ packages:
                 type: uint64
             name: ConfAt
             out:
-              - type: core.Membership
+              - type: core.MembershipValue
             recv: pointer
           - doc: ChainAt returns the chain value at i.
             in:
@@ -4118,7 +4118,7 @@ packages:
               - name: now
                 type: time.Time
               - name: m
-                type: core.Message
+                type: core.MessageValue
             name: Step
             recv: pointer
         name: Raft
@@ -4141,7 +4141,7 @@ packages:
             - name: Stable
               type: uint64
             - name: Timing
-              type: core.TimingContract
+              type: core.TimingContractSpec
             - name: Cluster
               type: uint32
             - name: ClusterG
@@ -4149,9 +4149,9 @@ packages:
             - name: NoSpace
               type: core.AlarmID
             - name: Conf
-              type: core.Membership
+              type: core.MembershipValue
             - name: Committed
-              type: core.Membership
+              type: core.MembershipValue
             - name: Transfer
               type: core.NodeID
       - doc: PeerStat is the leader's view of one peer, for Health (D13).
@@ -4254,7 +4254,7 @@ packages:
           - name: prev
             type: uint32
           - name: e
-            type: "*coreconsensus.Entry"
+            type: "*coreconsensus.EntryValue"
         name: ChainSum
         out:
           - type: uint32
@@ -4273,7 +4273,7 @@ packages:
           - name: dst
             type: "[]byte"
           - name: m
-            type: "*coreconsensus.Message"
+            type: "*coreconsensus.MessageValue"
         name: AppendMessage
         out:
           - type: "[]byte"
@@ -4286,7 +4286,7 @@ packages:
           - name: frame
             type: "[]byte"
           - name: m
-            type: "*coreconsensus.Message"
+            type: "*coreconsensus.MessageValue"
         name: ParseMessage
         out:
           - type: error
@@ -4297,7 +4297,7 @@ packages:
           - name: dst
             type: "[]byte"
           - name: t
-            type: coreconsensus.Token
+            type: coreconsensus.TokenValue
         name: AppendToken
         out:
           - type: "[]byte"
@@ -4307,14 +4307,14 @@ packages:
             type: "[]byte"
         name: ParseToken
         out:
-          - type: coreconsensus.Token
+          - type: coreconsensus.TokenValue
           - type: error
       - doc: AppendSnapshotMeta appends the versioned encoding of m.
         in:
           - name: dst
             type: "[]byte"
           - name: m
-            type: "*coreconsensus.SnapshotMeta"
+            type: "*coreconsensus.SnapshotMetaValue"
         name: AppendSnapshotMeta
         out:
           - type: "[]byte"
@@ -4323,7 +4323,7 @@ packages:
           - name: b
             type: "[]byte"
           - name: m
-            type: "*coreconsensus.SnapshotMeta"
+            type: "*coreconsensus.SnapshotMetaValue"
         name: ParseSnapshotMeta
         out:
           - type: error
@@ -4334,7 +4334,7 @@ packages:
           - name: dst
             type: "[]byte"
           - name: m
-            type: "*coreconsensus.Membership"
+            type: "*coreconsensus.MembershipValue"
         name: AppendMembership
         out:
           - type: "[]byte"
@@ -4344,14 +4344,14 @@ packages:
             type: "[]byte"
         name: ParseMembership
         out:
-          - type: coreconsensus.Membership
+          - type: coreconsensus.MembershipValue
           - type: error
       - doc: AppendTimingContract appends the encoding of a timing contract.
         in:
           - name: dst
             type: "[]byte"
           - name: c
-            type: coreconsensus.TimingContract
+            type: coreconsensus.TimingContractSpec
         name: AppendTimingContract
         out:
           - type: "[]byte"
@@ -4361,7 +4361,7 @@ packages:
             type: "[]byte"
         name: ParseTimingContract
         out:
-          - type: coreconsensus.TimingContract
+          - type: coreconsensus.TimingContractSpec
           - type: error
     imports:
       coreconsensus: github.com/kitsunium/sdk/internal/core/app/consensus
@@ -4384,13 +4384,13 @@ packages:
               type: coreconsensus.NodeID
             - doc: Pre is the precondition of a clearing or raising operation.
               name: Pre
-              type: coreconsensus.Precondition
+              type: coreconsensus.PreconditionSpec
             - doc: Membership is the whole configuration after a membership change.
               name: Membership
-              type: coreconsensus.Membership
+              type: coreconsensus.MembershipValue
             - doc: Contract is the timing contract of an EntryTimingContract.
               name: Contract
-              type: coreconsensus.TimingContract
+              type: coreconsensus.TimingContractSpec
             - doc: ClusterVersion is the version an EntryClusterVersion raises to.
               name: ClusterVersion
               type: uint32
@@ -4434,74 +4434,74 @@ packages:
             target: coreconsensus.Incarnation
           - name: ClusterID
             target: coreconsensus.ClusterID
-          - name: LogIdentity
-            target: coreconsensus.LogIdentity
+          - name: LogIdentityValue
+            target: coreconsensus.LogIdentityValue
           - name: GroupID
             target: coreconsensus.GroupID
-          - name: Position
-            target: coreconsensus.Position
-          - name: Entry
-            target: coreconsensus.Entry
-          - name: Token
-            target: coreconsensus.Token
+          - name: PositionValue
+            target: coreconsensus.PositionValue
+          - name: EntryValue
+            target: coreconsensus.EntryValue
+          - name: TokenValue
+            target: coreconsensus.TokenValue
           - name: EntryKind
             target: coreconsensus.EntryKind
           - name: HardState
             target: coreconsensus.HardState
-          - name: Stamp
-            target: coreconsensus.Stamp
+          - name: StampValue
+            target: coreconsensus.StampValue
           - name: StampState
             target: coreconsensus.StampState
-          - name: Message
-            target: coreconsensus.Message
+          - name: MessageValue
+            target: coreconsensus.MessageValue
           - name: MessageKind
             target: coreconsensus.MessageKind
           - name: FrameLane
             target: coreconsensus.FrameLane
-          - name: AuthenticatedPeer
-            target: coreconsensus.AuthenticatedPeer
-          - name: InstallOffer
-            target: coreconsensus.InstallOffer
-          - name: InstallAccept
-            target: coreconsensus.InstallAccept
-          - name: InstallRequest
-            target: coreconsensus.InstallRequest
-          - name: StopReason
-            target: coreconsensus.StopReason
+          - name: AuthenticatedPeerValue
+            target: coreconsensus.AuthenticatedPeerValue
+          - name: InstallOfferValue
+            target: coreconsensus.InstallOfferValue
+          - name: InstallAcceptValue
+            target: coreconsensus.InstallAcceptValue
+          - name: InstallParams
+            target: coreconsensus.InstallParams
+          - name: StopReasonValue
+            target: coreconsensus.StopReasonValue
           - name: JoinConfig
             target: coreconsensus.JoinConfig
-          - name: JoinRequest
-            target: coreconsensus.JoinRequest
+          - name: JoinRequestValue
+            target: coreconsensus.JoinRequestValue
           - name: Joiner
             target: coreconsensus.Joiner
           - name: JoinAuthorizer
             target: coreconsensus.JoinAuthorizer
-          - name: FencedAttestation
-            target: coreconsensus.FencedAttestation
-          - name: SnapshotMeta
-            target: coreconsensus.SnapshotMeta
+          - name: FencedAttestationValue
+            target: coreconsensus.FencedAttestationValue
+          - name: SnapshotMetaValue
+            target: coreconsensus.SnapshotMetaValue
           - name: SnapshotSink
             target: coreconsensus.SnapshotSink
           - name: SnapshotHandle
             target: coreconsensus.SnapshotHandle
-          - name: TimingContract
-            target: coreconsensus.TimingContract
-          - name: Versions
-            target: coreconsensus.Versions
-          - name: Member
-            target: coreconsensus.Member
-          - name: Membership
-            target: coreconsensus.Membership
+          - name: TimingContractSpec
+            target: coreconsensus.TimingContractSpec
+          - name: VersionsValue
+            target: coreconsensus.VersionsValue
+          - name: MemberValue
+            target: coreconsensus.MemberValue
+          - name: MembershipValue
+            target: coreconsensus.MembershipValue
           - name: Operator
             target: coreconsensus.Operator
-          - name: Status
-            target: coreconsensus.Status
+          - name: StatusValue
+            target: coreconsensus.StatusValue
           - name: Role
             target: coreconsensus.Role
           - name: AlarmID
             target: coreconsensus.AlarmID
-          - name: Precondition
-            target: coreconsensus.Precondition
+          - name: PreconditionSpec
+            target: coreconsensus.PreconditionSpec
           - blank: true
             name: Replicated
             target: coreconsensus.Replicated
@@ -4659,7 +4659,7 @@ packages:
             - name: newCluster
               type: ClusterID
             - name: members
-              type: "[]Member"
+              type: "[]MemberValue"
             - name: opt
               type: RecoverOptions
           name: Recover
@@ -4688,12 +4688,12 @@ packages:
             - name: newCluster
               type: ClusterID
             - name: members
-              type: "[]Member"
+              type: "[]MemberValue"
             - name: opt
               type: RestoreOptions
           name: RestoreSnapshot
           out:
-            - type: SnapshotMeta
+            - type: SnapshotMetaValue
             - type: error
       - func:
           doc: NewTCPTransport builds the shipped mTLS transport; it is also a Joiner.
@@ -4824,19 +4824,19 @@ packages:
           - name: FlagTransfer
             reexport: coreconsensus.FlagTransfer
             type: coreconsensus.MessageFlags
-            value: 1 << 0
+            value: "1"
           - name: FlagNoLease
             reexport: coreconsensus.FlagNoLease
             type: coreconsensus.MessageFlags
-            value: 1 << 2
+            value: "4"
           - name: FlagNeedSnapshot
             reexport: coreconsensus.FlagNeedSnapshot
             type: coreconsensus.MessageFlags
-            value: 1 << 1
+            value: "2"
           - name: FlagTruncated
             reexport: coreconsensus.FlagTruncated
             type: coreconsensus.MessageFlags
-            value: 1 << 3
+            value: "8"
           - name: MsgForward
             reexport: coreconsensus.MsgForward
             type: coreconsensus.MessageKind
@@ -4921,7 +4921,7 @@ packages:
             - name: cfg
               type: Config
             - name: members
-              type: "[]Member"
+              type: "[]MemberValue"
           name: Bootstrap
           out:
             - type: error
@@ -4966,7 +4966,7 @@ packages:
               type: "[]byte"
           name: ProposeAs
           out:
-            - type: Token
+            - type: TokenValue
             - type: R
             - type: error
           typeParams:
@@ -4977,7 +4977,7 @@ packages:
           forward: svcconsensus.TimingDefaults
           name: TimingDefaults
           out:
-            - type: TimingContract
+            - type: TimingContractSpec
       - func:
           doc: Latest opens the newest complete snapshot of a store.
           forward: svcconsensus.Latest
@@ -5043,7 +5043,7 @@ packages:
               type: error
           name: TokenOf
           out:
-            - type: Token
+            - type: TokenValue
             - type: bool
       - func:
           doc: AppendMessage appends m's frame to dst.
@@ -5052,7 +5052,7 @@ packages:
             - name: dst
               type: "[]byte"
             - name: m
-              type: "*Message"
+              type: "*MessageValue"
           name: AppendMessage
           out:
             - type: "[]byte"
@@ -5064,7 +5064,7 @@ packages:
             - name: frame
               type: "[]byte"
             - name: m
-              type: "*Message"
+              type: "*MessageValue"
           name: ParseMessage
           out:
             - type: error
@@ -5075,7 +5075,7 @@ packages:
             - name: dst
               type: "[]byte"
             - name: m
-              type: "*SnapshotMeta"
+              type: "*SnapshotMetaValue"
           name: AppendSnapshotMeta
           out:
             - type: "[]byte"
@@ -5086,7 +5086,7 @@ packages:
             - name: b
               type: "[]byte"
             - name: m
-              type: "*SnapshotMeta"
+              type: "*SnapshotMetaValue"
           name: ParseSnapshotMeta
           out:
             - type: error
@@ -5097,7 +5097,7 @@ packages:
             - name: dst
               type: "[]byte"
             - name: t
-              type: Token
+              type: TokenValue
           name: AppendToken
           out:
             - type: "[]byte"
@@ -5109,7 +5109,7 @@ packages:
               type: "[]byte"
           name: ParseToken
           out:
-            - type: Token
+            - type: TokenValue
             - type: error
       - doc: The sentinels a caller matches with errors.Is or errs.HasCode.
         var:

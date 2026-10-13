@@ -13,12 +13,12 @@ import (
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
 
-func ents(from, to, term uint64) []coreconsensus.Entry {
-	var out []coreconsensus.Entry
+func ents(from, to, term uint64) []coreconsensus.EntryValue {
+	var out []coreconsensus.EntryValue
 	for i := from; i <= to; i++ {
 		d := []byte(fmt.Sprintf("entry-%d-%d", i, term))
-		out = append(out, coreconsensus.Entry{
-			Position: coreconsensus.Position{Term: term, Index: i},
+		out = append(out, coreconsensus.EntryValue{
+			Position: coreconsensus.PositionValue{Term: term, Index: i},
 			Kind:     coreconsensus.EntryCommand, BodySum: wire.BodySum(d), Data: d,
 		})
 	}
