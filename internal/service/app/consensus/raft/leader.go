@@ -783,7 +783,13 @@ func (r *Raft) InstallSnapshot(meta core.SnapshotMeta) {
 	r.clusterVer, r.clusterGen, r.noSpace = meta.ClusterVersion, meta.ClusterGeneration, meta.NoSpace
 	r.cfg.NoTable = false
 	r.confChanged()
+	// The install proves the prefix up to idx only: a kept suffix may be
+	// another term's, and the next append verifies it (review H1).
+	ack := idx
+	if r.mutated(mutSnapshotAckLastIndex) {
+		ack = r.log.lastIndex()
+	}
 	if r.lead != 0 {
-		r.send(core.Message{Kind: core.MsgAppResp, To: r.lead, Index: r.log.lastIndex()})
+		r.send(core.Message{Kind: core.MsgAppResp, To: r.lead, Index: ack})
 	}
 }

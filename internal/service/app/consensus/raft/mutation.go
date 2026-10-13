@@ -50,6 +50,9 @@ const (
 	// mutReadNoRound answers a ReadIndex at once, with no confirmation
 	// round: the read a deposed leader serves stale.
 	mutReadNoRound
+	// mutSnapshotAckLastIndex acknowledges a snapshot install at lastIndex,
+	// over a kept suffix nothing verified.
+	mutSnapshotAckLastIndex
 	// mutChainSkip appends an entry whose chain value does not match.
 	mutChainSkip
 )

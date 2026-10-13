@@ -1343,7 +1343,9 @@ written.
     the new one, never a mix;
   - the log suffix after the snapshot's index is kept only if the entry at
     the boundary has the snapshot's term and index. Otherwise the whole log is
-    replaced.
+    replaced. The install acknowledges the snapshot's index, never the end of
+    a kept suffix: nothing has verified that suffix against the leader's log,
+    and the next append does (review of PR #301, H1).
   - **Resumption, exactly (R3-16).**
     - The leader streams from a `SnapshotHandle` that `Open` pins, with
       random access, until the transfer completes, so compaction cannot delete

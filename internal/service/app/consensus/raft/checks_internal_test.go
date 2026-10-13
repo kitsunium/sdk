@@ -150,6 +150,47 @@ func checkAckVerifiedPrefix(mut mutation) error {
 	return nil
 }
 
+// checkSnapshotAckIndex installs a snapshot on a node whose log matches the
+// boundary but carries a stale suffix of another term: the install proves
+// the prefix up to the snapshot only, so the leader must not count the
+// suffix (review H1, the InstallSnapshot twin of checkAckVerifiedPrefix).
+func checkSnapshotAckIndex(mut mutation) error {
+	cfg := Config{
+		ID: 2, Group: 1, Seed: 1, Timing: testTiming(), MaxInflight: 8, MaxInflightBytes: 1 << 20,
+		MaxBatchBytes: 1 << 16, MinVoters: 1, PromoteLag: 16, CanVote: true, MaxChainRefusals: 3, NoTable: true, mut: mut,
+	}
+	f := New(cfg, Start{
+		HardState: core.HardState{Term: 3},
+		Snapshot:  core.SnapshotMeta{Membership: testConf(1, 2, 3)},
+		Entries:   chainEntries(0, 1, 1, 1, 1, 2, 2),
+		Now:       t0,
+	})
+	f.lead = 1
+	l := leaderOf(3, 0, chainEntries(0, 1, 1, 1, 1, 3, 3), mut, false)
+	f.InstallSnapshot(core.SnapshotMeta{
+		Position: core.Position{Term: 1, Index: 3}, ChainTip: l.log.chain(3),
+		Membership: testConf(1, 2, 3), Timing: testTiming(),
+	})
+	var ack uint64
+	rd := f.Ready()
+	for _, x := range append(rd.AfterSync, rd.Messages...) {
+		if x.Kind == core.MsgAppResp {
+			ack = x.Index
+		}
+	}
+	if ack != 3 {
+		return fmt.Errorf("the install acknowledged %d instead of the snapshot index 3", ack)
+	}
+	l.prs[2].becomeSnapshot(3)
+	m := msg(core.MsgAppResp, 2, 1, l.term)
+	m.Index = ack
+	l.Step(l.now, m)
+	if l.log.committed > 3 {
+		return fmt.Errorf("the leader committed %d over a follower that holds other entries", l.log.committed)
+	}
+	return nil
+}
+
 func checkFigure8(mut mutation) error {
 	r := leaderOf(3, 0, chainEntries(0, 1, 1, 2), mut, false)
 	m := msg(core.MsgAppResp, 2, 1, 3)
@@ -381,6 +422,7 @@ var checks = map[string]func(mutation) error{
 	"vote kept on same-term down":   checkVoteKeptOnSameTermStepDown,
 	"commit within verified prefix": checkCommitVerifiedPrefix,
 	"ack the verified prefix":       checkAckVerifiedPrefix,
+	"snapshot ack index":            checkSnapshotAckIndex,
 	"figure 8":                      checkFigure8,
 	"vote restriction":              checkVoteRestriction,
 	"prevote restriction":           checkPreVoteRestriction,
@@ -417,6 +459,7 @@ func TestMutationsAreCaught(t *testing.T) {
 		"same-term vote clearing":         mutSameTermVoteClear,
 		"commit beyond verified prefix":   mutCommitBeyondVerified,
 		"acknowledging lastIndex":         mutAckLastIndex,
+		"snapshot ack at lastIndex":       mutSnapshotAckLastIndex,
 		"older term committed by count":   mutCommitOldTermByCount,
 		"restriction dropped (vote)":      mutNoRestrictionVote,
 		"restriction dropped (prevote)":   mutNoRestrictionPreVote,
