@@ -615,7 +615,6 @@ func (l *FileLog) takePrepared(n uint64, size int64) *os.File {
 	return p.f
 }
 
-
 func writeFileSync(path string, data []byte) error {
 	tmp := path + ".tmp"
 	f, err := os.OpenFile(tmp, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
