@@ -180,6 +180,10 @@ func newRaft(cfg Config) (*Node, error) {
 	case cfg.ID != 0 && st.ID != cfg.ID:
 		return nil, origin(coreconsensus.DataDirMismatch, errs.String("why", "node id"))
 	}
+	if t, ok := cfg.Transport.(interface{ Cluster() coreconsensus.ClusterID }); ok && t.Cluster() != cfg.Cluster {
+		// The transport took its cluster from its certificate's SAN (R3-24).
+		return nil, misconfigured("Cluster", "differs from the certificate's URI SAN")
+	}
 	cfg.ID = st.ID
 	n := &Node{
 		cfg: cfg, clk: cfg.Clock, ident: st.Log, stamp: st,
@@ -207,6 +211,14 @@ func newRaft(cfg Config) (*Node, error) {
 		CanVote: n.canVote, MaxChainRefusals: 3,
 	}, start)
 	n.publish()
+	if ur, ok := cfg.Transport.(coreconsensus.UnreachableReporter); ok {
+		ur.Unreachable(func(id coreconsensus.NodeID) {
+			select {
+			case n.execc <- func() { n.r.ReportUnreachable(id) }:
+			default:
+			}
+		})
+	}
 	if err := cfg.Transport.Bind(cfg.Group, n.deliver, n.offer, n.install, n.join); err != nil {
 		return nil, err
 	}
