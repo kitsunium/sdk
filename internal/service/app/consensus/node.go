@@ -543,6 +543,10 @@ func (n *Node) tickInterval() time.Duration {
 func (n *Node) handleReady() {
 	for n.r.HasReady() {
 		rd := n.r.Ready()
+		if u := rd.Unsupported; u.Index != 0 {
+			n.stop(unsupportedKind(u.Kind, u.Index), false)
+			return
+		}
 		for _, m := range rd.Messages {
 			n.cfg.Transport.Send(m.To, wire.AppendMessage(nil, &m))
 		}
@@ -679,7 +683,7 @@ func (n *Node) publish() {
 	s := &coreconsensus.Status{
 		ID: n.stamp.ID, Role: st.Role, Term: st.Term, Leader: st.Lead, Commit: st.Commit, Applied: applied,
 		Log: n.ident, Timing: st.Timing, NoSpace: st.NoSpace,
-		Versions: coreconsensus.Versions{ProtocolMin: 1, ProtocolMax: 1, Cluster: st.Cluster, ClusterGeneration: st.ClusterG},
+		Versions: coreconsensus.Versions{ProtocolMin: 1, ProtocolMax: raft.ProtocolMax, Cluster: st.Cluster, ClusterGeneration: st.ClusterG},
 	}
 	old := n.status.Load()
 	if old != nil && *old == *s {

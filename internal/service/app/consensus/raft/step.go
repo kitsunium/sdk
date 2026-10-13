@@ -351,6 +351,16 @@ func (r *Raft) handleAppend(m core.Message) {
 		r.send(core.Message{Kind: core.MsgAppResp, To: m.From, Index: m.Index, Reject: true, RejectHint: hint})
 		return
 	}
+	for k := range m.Entries {
+		if e := &m.Entries[k]; !e.Kind.Known() {
+			// A kind this version does not know is never appended, acked or
+			// skipped: the entries before it are, and the driver stops the
+			// node with VERSION_UNSUPPORTED (review M3).
+			r.rd.Unsupported = UnsupportedEntry{Index: e.Position.Index, Kind: e.Kind}
+			m.Entries = m.Entries[:k]
+			break
+		}
+	}
 	lastNew := m.Index + uint64(len(m.Entries))
 	prevChain := r.log.chain(m.Index)
 	start := -1

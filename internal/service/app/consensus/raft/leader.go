@@ -416,6 +416,10 @@ func (r *Raft) validateAdmin(e *core.Entry, index uint64) (core.NodeID, errs.Cod
 		// (D9 d).
 		r.leaseDropped = true
 	case core.EntryClusterVersion:
+		if a.ClusterVersion > ProtocolMax {
+			// No member of this version announces more (D18, review M3).
+			return 0, codeVersion
+		}
 		if !a.Pre.Log.Same(r.cfg.Log) || a.Pre.Generation != r.clusterGen || a.ClusterVersion <= r.clusterVer {
 			return 0, codePrecondition
 		}

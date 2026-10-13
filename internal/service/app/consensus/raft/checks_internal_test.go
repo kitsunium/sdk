@@ -605,3 +605,55 @@ func TestForwardedCommandsAreBounded(t *testing.T) {
 		t.Fatalf("forward under apply backpressure: %+v", a)
 	}
 }
+
+// An entry kind this version does not know is never appended, acknowledged
+// or skipped: the follower appends the entries before it and asks the
+// driver to stop with VERSION_UNSUPPORTED (review M3).
+func TestUnknownEntryKindStopsTheFollower(t *testing.T) {
+	f := newTest(2, 1, 0, chainEntries(0, 1, 1), 0, false)
+	es := chainEntries(f.log.chain(1), 2, 1, 1)
+	es[1].Kind = 0x80
+	es[1].ChainSum = wire.ChainSum(es[0].ChainSum, &es[1])
+	m := msg(core.MsgApp, 1, 2, 1)
+	m.Index, m.LogTerm, m.Commit, m.Entries = 1, 1, 3, es
+	f.Step(t0, m)
+	rd := f.Ready()
+	if rd.Unsupported.Index != 3 || rd.Unsupported.Kind != 0x80 {
+		t.Fatalf("unsupported: %+v", rd.Unsupported)
+	}
+	if f.log.lastIndex() != 2 {
+		t.Fatalf("last %d, want 2: the unknown entry was appended", f.log.lastIndex())
+	}
+	for _, x := range append(rd.AfterSync, rd.Messages...) {
+		if x.Kind == core.MsgAppResp && x.Index > 2 {
+			t.Fatalf("acknowledged %d past the known entries", x.Index)
+		}
+	}
+	if f.log.committed > 2 {
+		t.Fatalf("committed %d past the known entries", f.log.committed)
+	}
+}
+
+// A cluster version above what this version speaks is refused at the
+// leader, and stops a node that finds it committed: no member of protocol
+// version 1 announces more (review M3).
+func TestClusterVersionAboveTheProtocolIsRefused(t *testing.T) {
+	r := leaderOf(2, 0, nil, 0, false)
+	data := wire.AppendAdmin(nil, &wire.Admin{Pre: core.Precondition{Log: r.cfg.Log}, ClusterVersion: ProtocolMax + 1})
+	if _, code := r.Propose(r.now, []core.Entry{{Kind: core.EntryClusterVersion, BodySum: wire.BodySum(data), Data: data}}); code != core.CodeVersionUnsupported {
+		t.Fatalf("raise above the protocol: %v", code)
+	}
+	f := newTest(2, 1, 0, chainEntries(0, 1, 1), 0, false)
+	e := core.Entry{Position: core.Position{Term: 1, Index: 2}, Kind: core.EntryClusterVersion, Data: data}
+	e.BodySum = wire.BodySum(data)
+	e.ChainSum = wire.ChainSum(f.log.chain(1), &e)
+	m := msg(core.MsgApp, 1, 2, 1)
+	m.Index, m.LogTerm, m.Commit, m.Entries = 1, 1, 2, []core.Entry{e}
+	f.Step(t0, m)
+	if u := f.Ready().Unsupported; u.Index != 2 {
+		t.Fatalf("a committed raise above the protocol: %+v", u)
+	}
+	if f.clusterVer > ProtocolMax {
+		t.Fatalf("cluster version raised to %d", f.clusterVer)
+	}
+}

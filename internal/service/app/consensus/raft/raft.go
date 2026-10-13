@@ -62,6 +62,10 @@ type Config struct {
 	mut mutation
 }
 
+// ProtocolMax is the highest protocol version this engine speaks: a cluster
+// version above it is refused, and stops a node that finds it committed.
+const ProtocolMax uint32 = 1
+
 // fwdEntry is one forwarded command a leader appended.
 type fwdEntry struct {
 	index uint64
@@ -138,6 +142,16 @@ type Ready struct {
 	Fetch []FetchRequest
 	// Membership is set when the admitted set changed.
 	Membership []core.Member
+	// Unsupported names an entry whose kind this version does not know:
+	// the driver stops the node with VERSION_UNSUPPORTED.
+	Unsupported UnsupportedEntry
+}
+
+// UnsupportedEntry is an entry a leader sent that this version cannot
+// apply; Index is 0 when there is none.
+type UnsupportedEntry struct {
+	Index uint64
+	Kind  core.EntryKind
 }
 
 // FetchRequest asks for the entries [Lo, Hi) of the store for a peer.
@@ -482,7 +496,8 @@ func (r *Raft) HasReady() bool {
 	}
 	return rd.TruncateFrom != 0 || rd.Compact != 0 || len(rd.Entries) != 0 || len(rd.Messages) != 0 || len(rd.AfterSync) != 0 ||
 		len(rd.SendSnapshot) != 0 || len(rd.ReadStates) != 0 || len(rd.Forwarded) != 0 ||
-		len(rd.Transfers) != 0 || rd.Membership != nil || len(rd.Fetch) != 0 || rd.SilenceEnded
+		len(rd.Transfers) != 0 || rd.Membership != nil || len(rd.Fetch) != 0 || rd.SilenceEnded ||
+		rd.Unsupported.Index != 0
 }
 
 // Ready returns the work of the turns since the last call and resets it.
@@ -707,6 +722,11 @@ func (r *Raft) applyCommitEffects(lo, hi uint64) {
 				}
 			}
 		case core.EntryClusterVersion:
+			if a.ClusterVersion > ProtocolMax {
+				// Unknown means stop (D18, review M3).
+				r.rd.Unsupported = UnsupportedEntry{Index: i, Kind: e.Kind}
+				return
+			}
 			if a.Pre.Generation == r.clusterGen && a.ClusterVersion > r.clusterVer {
 				r.clusterVer, r.clusterGen = a.ClusterVersion, r.clusterGen+1
 			}

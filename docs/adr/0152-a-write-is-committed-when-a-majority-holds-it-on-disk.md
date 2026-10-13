@@ -2896,12 +2896,19 @@ The rules:
   `RaiseClusterVersion`, never automatic (R2-16).** The point of no return is
   the operator's decision, through the product's administration, not
   something the leader does on its own because every voter happens to support
-  it. The operation is refused while any member does not.
+  it. The operation is refused while any member does not. Protocol version
+  1 has no member announcing more than 1, so the engine refuses any raise
+  above its own `ProtocolMax`, and a node that finds such a raise committed
+  stops (review of PR #301, M3). Members announce their range in the
+  version that first raises it.
 - **Timing contract.** It has its own committed entry and its own version (D9,
   R2-14).
 - **Unknown means stop.** An entry kind, record version, frame version or
   snapshot version a node does not know stops that node with
   `VERSION_UNSUPPORTED`. It is never skipped: skipping an entry is a fork.
+  A follower appends and acknowledges the entries before an unknown kind,
+  never the unknown one, and stops; an unknown kind already in the log
+  stops the node when it reaches apply (review of PR #301, M3).
 - **Apply version gate.** An entry whose `Version` is above what the local
   state machine supports stops the node the same way, before `Apply` is
   called. The entry's version SELECTS the frozen code path that applies it.

@@ -1006,3 +1006,78 @@ func TestBatchLargerThanAFrameIsRefused(t *testing.T) {
 		t.Fatalf("a batch above the frame limit: %v", err)
 	}
 }
+
+// An append that carries an entry kind this version does not know stops
+// the follower with VERSION_UNSUPPORTED (review M3).
+func TestUnknownEntryKindInAnAppendStopsTheNode(t *testing.T) {
+	c := newCluster(t, 3, 0)
+	l := c.leader(5 * time.Second)
+	tok := propose(t, l.node, "a=1")
+	c.waitApplied(tok.Index, 5*time.Second)
+	var f *testNode
+	for _, tn := range c.nodes {
+		if tn != l {
+			f = tn
+			break
+		}
+	}
+	prev, err := f.log.Entries(tok.Index, tok.Index+1, 1<<20, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := coreconsensus.Entry{Position: coreconsensus.Position{Term: tok.Term, Index: tok.Index + 1}, Kind: 0x80, Data: []byte("x")}
+	e.BodySum = wire.BodySum(e.Data)
+	e.ChainSum = wire.ChainSum(prev[0].ChainSum, &e)
+	m := coreconsensus.Message{
+		Version: 1, Group: 1, Kind: coreconsensus.MsgApp, From: l.id, To: f.id, Term: l.node.Status().Term,
+		Index: tok.Index, LogTerm: tok.Term, Entries: []coreconsensus.Entry{e},
+	}
+	f.node.deliver(coreconsensus.AuthenticatedPeer{ID: l.id}, appendFrame(&m))
+	deadline := time.Now().Add(5 * time.Second)
+	for !f.node.stopped.Load() {
+		if time.Now().After(deadline) {
+			t.Fatal("the node kept running after an unknown entry kind")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if r, ok := f.node.StopReason(); !ok || !errors.Is(r.Err, coreconsensus.VersionUnsupported) {
+		t.Fatalf("stop reason: %+v", r)
+	}
+}
+
+// An unknown kind already in the log, from a newer binary, stops the node
+// when it reaches apply: it is never applied as a no-op (review M3).
+func TestUnknownEntryKindInTheLogStopsTheNode(t *testing.T) {
+	c := newCluster(t, 1, 0)
+	tn := c.nodes[0]
+	c.waitApplied(1, 5*time.Second)
+	tok := propose(t, tn.node, "a=1")
+	c.waitApplied(tok.Index, 5*time.Second)
+	c.kill(tn)
+	prev, err := tn.log.Entries(tok.Index, tok.Index+1, 1<<20, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := coreconsensus.Entry{Position: coreconsensus.Position{Term: tok.Term, Index: tok.Index + 1}, Kind: 0x80, Data: []byte("x")}
+	e.BodySum = wire.BodySum(e.Data)
+	e.ChainSum = wire.ChainSum(prev[0].ChainSum, &e)
+	hs, _ := tn.log.HardState()
+	hs.Commit = e.Position.Index
+	if err := tn.log.Append([]coreconsensus.Entry{e}, &hs); err != nil {
+		t.Fatal(err)
+	}
+	if err := tn.log.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	c.start(tn)
+	deadline := time.Now().Add(5 * time.Second)
+	for !tn.node.stopped.Load() {
+		if time.Now().After(deadline) {
+			t.Fatalf("applied %d: the unknown entry was skipped", tn.node.Status().Applied)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if r, ok := tn.node.StopReason(); !ok || !errors.Is(r.Err, coreconsensus.VersionUnsupported) {
+		t.Fatalf("stop reason: %+v", r)
+	}
+}
