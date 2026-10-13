@@ -241,7 +241,7 @@ func (c *cluster) waitApplied(index uint64, timeout time.Duration) {
 
 func propose(t *testing.T, n *Node, kv string) coreconsensus.Token {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	for {
 		tok, _, err := n.Propose(ctx, []byte(kv))

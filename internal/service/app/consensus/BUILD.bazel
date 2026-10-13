@@ -16,6 +16,7 @@ go_library(
         "filesnap.go",
         "fsfree_other.go",
         "fsfree_unix.go",
+        "fsfree_windows.go",
         "memlog.go",
         "memsnap.go",
         "memtransport.go",

@@ -21,7 +21,7 @@ type diskNode struct {
 func diskConfig(c *cluster, dn *diskNode) Config {
 	return Config{
 		Cluster: c.cid, Machine: dn.sm, Durability: DurabilityVolatile, Log: dn.dd.Log(), Snapshots: dn.dd.Snapshots(),
-		Transport: c.net.Transport(dn.id), InitialTiming: testTimingFast(), MaxSnapshotBytes: 1 << 30,
+		Transport: c.net.Transport(dn.id), InitialTiming: testTimingDisk(), MaxSnapshotBytes: 1 << 30,
 		SnapshotEveryBytes: 1 << 20, MaxLogBytes: 1 << 30, LogReserveBytes: 1 << 20, MinVoters: 3,
 		SnapshotEvery: 50, SnapshotTrailing: 10,
 	}
@@ -129,5 +129,15 @@ func TestDiskClusterSurvivesFullRestart(t *testing.T) {
 		if f, _ := dn.dd.Log().Bounds(); f < 100 {
 			t.Fatalf("node %d log not compacted: first %d", dn.id, f)
 		}
+	}
+}
+
+// testTimingDisk is slower than the memory clusters' timing: a real fsync,
+// FlushFileBuffers on Windows above all, can take longer than a 10 ms
+// heartbeat, and elections would churn under it.
+func testTimingDisk() coreconsensus.TimingContract {
+	return coreconsensus.TimingContract{
+		Generation: 1, HeartbeatInterval: 50 * time.Millisecond,
+		ElectionTimeoutMin: 500 * time.Millisecond, ElectionTimeoutMax: time.Second, MaxClockDrift: 0.05,
 	}
 }
