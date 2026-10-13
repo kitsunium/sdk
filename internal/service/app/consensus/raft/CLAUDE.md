@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-13T12:00:00Z -->
+<!-- updated: 2026-10-13T20:00:00Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -19,3 +19,9 @@ control (`lincheck_internal_test.go`).
 
 - Iterate a map where the order reaches a message: a run must stay a pure
   function of its seed.
+- Acknowledge a snapshot install past its index (review H1,
+  `mutSnapshotAckLastIndex`).
+- Append, acknowledge or skip an entry kind `Known` refuses: report it in
+  `Ready.Unsupported` (review M3).
+- Admit a forwarded command without the bounds of a local one
+  (`admitForward`, review M2).

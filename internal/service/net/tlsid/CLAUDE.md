@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T19:57:47Z -->
+<!-- updated: 2026-10-13T20:00:00Z -->
 # internal/service/net/tlsid/
 
 ## Purpose
@@ -23,6 +23,17 @@ Declaring the on-disk half here would have put one domain concept on both sides
 of the layer boundary and left the two free to drift.
 
 Public façade: `pkg/v1/net/tlsid`.
+
+`identity.go` adds ADR 0174's `Identity` (`NewIdentity`, `LoadReloadable`,
+`PeerOf`, `Deadline`, `SPKI`): the chain and roots verified on every
+handshake before the caller's check, and a file identity reloaded in place.
+
+- `PeerOf` sets `Chain` only from `VerifiedChains`; under the identity's own
+  `VerifyConnection` that is empty, never the presented certificates
+  (review of PR #301, L1).
+- The roots only grow until the process restarts (ADR 0174 D1, L2).
+- A refused pair is read again at every look, even under the same mtime, and
+  counted once per mtime (L3).
 
 ## Why-this-shape
 

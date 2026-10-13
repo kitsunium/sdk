@@ -45338,6 +45338,7 @@
       "name": "NewTCPTransport",
       "spelled": "func(cfg TransportConfig) (*TCPTransport, error)",
       "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/app/consensus.TransportConfig) (*github.com/kitsunium/sdk/internal/service/app/consensus.TCPTransport, error)",
+      "doc": "NewTCPTransport validates the configuration, reads the cluster and slot\nfrom the certificate, and listens (D4, R3-24).\n",
       "file": "service/app/consensus/tcp.go",
       "layer": "service",
       "family": "app"
@@ -57292,7 +57293,7 @@
         {
           "name": "Chain",
           "type": "[]*x509.Certificate",
-          "doc": "Chain is the verified chain, leaf first.\n"
+          "doc": "Chain is the verified chain, leaf first; empty when nothing verified\nit (see PeerOf).\n"
         },
         {
           "name": "SPKI",
@@ -57322,7 +57323,7 @@
       "name": "PeerOf",
       "spelled": "func(cs tls.ConnectionState) (PeerIdentity, bool)",
       "canonical": "func(cs crypto/tls.ConnectionState) (github.com/kitsunium/sdk/internal/service/net/tlsid.PeerIdentity, bool)",
-      "doc": "PeerOf returns the verified peer of a completed handshake, false before\none or without a peer certificate.\n",
+      "doc": "PeerOf returns the peer of a completed handshake, false before one or\nwithout a peer certificate. Its Chain is set only when the standard\nverifier ran; the identity's own check sees the chain it verified.\n",
       "file": "service/net/tlsid/identity.go",
       "layer": "service",
       "family": "net"

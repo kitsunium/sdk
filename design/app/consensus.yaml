@@ -2392,7 +2392,10 @@ packages:
         name: SPKIOf
         out:
           - type: "[32]byte"
-      - in:
+      - doc: |-
+          NewTCPTransport validates the configuration, reads the cluster and slot
+          from the certificate, and listens (D4, R3-24).
+        in:
           - name: cfg
             type: TransportConfig
         name: NewTCPTransport
