@@ -128,3 +128,16 @@ floor() {
   [ "$status" -eq 3 ]
   [[ "$output" == *"nothing of ADR 0171's shape to rehearse"* ]]
 }
+
+# I5 (d): the rehearsal forces GOTOOLCHAIN=local, so a go older than the
+# modules' go directive would fail every consumer obscurely; it says so first.
+@test "the rehearsal refuses a go older than the repository's go directive, naming both" {
+  if ! command -v jq >/dev/null 2>&1; then skip "jq absent"; fi
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  printf '#!/bin/sh\nif [ "$1 $2" = "env GOVERSION" ]; then echo go1.21.0; exit 0; fi\nexit 1\n' >"$BATS_TEST_TMPDIR/bin/go"
+  chmod +x "$BATS_TEST_TMPDIR/bin/go"
+  printf '{"root_floor":"v0.20.0","modules":[{"dir":"pkg/v1/data","module":"github.com/kitsunium/sdk/pkg/v1/data","version":"v0.1.0"}]}' >"$BATS_TEST_TMPDIR/m.json"
+  run env PATH="$BATS_TEST_TMPDIR/bin:$PATH" bash "$REHEARSAL" --manifest="$BATS_TEST_TMPDIR/m.json" --ref=HEAD
+  [ "$status" -eq 64 ]
+  [[ "$output" == *"go 1.21.0 is older than go "*"put go "*"or newer on PATH"* ]]
+}

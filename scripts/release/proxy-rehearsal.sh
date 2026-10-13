@@ -23,26 +23,41 @@
 #                        family module NOT requiring the new root fails with
 #                        `ambiguous import`: a rehearsal that cannot see the
 #                        failure it exists for proves nothing.
-#   --manifest=<file> --ref=<commit>
+#   --manifest=<file> --ref=<commit> [--offline]
 #                        the real candidate release: every module the manifest
 #                        names, its zip built from <ref> (the release commit
-#                        cut-tags.sh made), beside the root's published v0.19.7
-#                        fetched from $REHEARSAL_UPSTREAM (default
-#                        https://proxy.golang.org); then, for each family module
-#                        of the manifest, a consumer pinned to v0.19.7 that
-#                        imports one of its packages and `go get`s it: it must
-#                        build, the root lifted from v0.19.7 to the manifest's
-#                        root_floor, the tidied go.mod naming no monolithic
-#                        root; and, as the control, the first family
-#                        re-published without the floor must fail with an
-#                        ambiguous import. Exit 3
-#                        when the manifest names no family module: until the
-#                        split of ADR 0171 lands there is nothing of that shape
-#                        to rehearse, and an empty rehearsal is no pass.
+#                        cut-tags.sh made), its tombstones from their tags, the
+#                        modules it keeps and the root floor from their last
+#                        tags here, beside what $REHEARSAL_UPSTREAM (default
+#                        https://proxy.golang.org) already serves of the old
+#                        modules — the root v0.19.7, …/pkg v0.17.0 and v0.18.0,
+#                        the three internal modules v0.17.0. Then, each on a
+#                        consumer of its own:
+#                          - every family of the manifest added to a go.mod
+#                            pinned to the root v0.19.7: it builds, the root
+#                            lifted to the manifest's root_floor, the tidied
+#                            go.mod naming no monolithic root;
+#                          - `go get -u ./...` from v0.19.7: the build ends on
+#                            the internal module, no retired one selected;
+#                          - a go.mod on …/pkg v0.17.0 adding a family (errs
+#                            when cut) with one `go get`;
+#                          - every vendor and connector module of the manifest
+#                            added to a go.mod on v0.19.7 — its vendors from the
+#                            upstream, so skipped (and said) with --offline or
+#                            an upstream that does not answer;
+#                          - every family the manifest keeps, at its last tag,
+#                            built against the manifest's internal and families;
+#                          - the control: the first family re-published without
+#                            the floor fails with an ambiguous import.
+#                        The consumers' GOPROXY is the file proxy, then the
+#                        upstream (`,`: only what the file proxy does not hold),
+#                        the checksum database off. Exit 3 when the manifest
+#                        names no family module or no floor.
 #
 # Exit 0: rehearsed and green. 1: a consumer did not build (or the control
-# built). 3: nothing to rehearse. 64: bad usage. Needs go (GOTOOLCHAIN=local is
-# forced: a toolchain download is network). `KEEP=1` keeps the work directory.
+# built). 3: nothing to rehearse. 64: bad usage, or a go older than the go
+# directive of the modules the manifest names (GOTOOLCHAIN=local is forced: a
+# toolchain download is network). `KEEP=1` keeps the work directory.
 
 set -euo pipefail
 
@@ -52,13 +67,15 @@ MODE=fixture
 MANIFEST=""
 REF=""
 UPSTREAM="${REHEARSAL_UPSTREAM:-https://proxy.golang.org}"
+OFFLINE=0
 for arg in "$@"; do
   case "$arg" in
     --fixture) MODE=fixture ;;
     --manifest=*) MODE=manifest; MANIFEST="${arg#--manifest=}" ;;
     --ref=*) REF="${arg#--ref=}" ;;
+    --offline) OFFLINE=1 ;;
     -h | --help)
-      sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,60p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -73,6 +90,29 @@ if ! command -v go >/dev/null 2>&1; then
   exit 64
 fi
 
+
+# go_new_enough — 0 when the go on PATH is at least the go directive of the
+# repository's go.mod. The manifest's modules declare it, and every go command
+# here runs with GOTOOLCHAIN=local — a toolchain download is network and would
+# rehearse with a go nobody chose —, so an older go fails every consumer with
+# "go.mod requires go >= …"; said once, up front.
+go_new_enough() {
+  local need have
+  need="$(awk '$1 == "go" { print $2; exit }' "$here/../../go.mod")"
+  have="$(GOTOOLCHAIN=local go env GOVERSION 2>/dev/null | sed 's/^go//; s/[^0-9.].*$//')"
+  if [ -n "$need" ] && [ "$(printf '%s\n%s\n' "$need" "$have" | sort -t. -k1,1n -k2,2n -k3,3n | head -n1)" != "$need" ]; then
+    echo "proxy-rehearsal: go $have is older than go $need, the go directive of the modules it rehearses — put go $need or newer on PATH (GOTOOLCHAIN=local is forced)" >&2
+    return 1
+  fi
+}
+
+# Checked before anything is built, for a manifest that has something to
+# rehearse: one with no family is exit 3 whatever the go.
+if [ "$MODE" = manifest ] && [ -r "$MANIFEST" ] &&
+  jq -e '.modules[]? | select(.dir | startswith("pkg/v1/"))' "$MANIFEST" >/dev/null 2>&1; then
+  go_new_enough || exit 64
+fi
+
 WORK="$(mktemp -d)"
 if [ "${KEEP:-0}" != 1 ]; then
   trap 'chmod -R u+w "$WORK" 2>/dev/null; rm -rf "$WORK"' EXIT
@@ -80,6 +120,11 @@ else
   echo "proxy-rehearsal: work directory kept at $WORK" >&2
 fi
 PROXY="$WORK/proxy"
+# The consumers' GOPROXY: the file proxy alone for the fixture, which must run
+# with no network; in manifest mode the file proxy, then $UPSTREAM for what it
+# does not hold — the vendor and connector modules' own dependencies —, unless
+# --offline or the upstream does not answer (manifest() decides).
+CONSUMER_PROXY="file://$PROXY"
 mkdir -p "$PROXY" "$WORK/tool" "$WORK/gopath" "$WORK/gocache"
 
 # The zip writer: Go's module zip format (module@version/ prefix, nested
@@ -205,7 +250,7 @@ consume() {
   printf 'package main\n\nimport _ "%s"\n\nfunc main() {}\n' "$imp" >"$c/main.go"
   (
     cd "$c"
-    export GOWORK=off GOFLAGS=-mod=mod GOTOOLCHAIN=local GOPROXY="file://$PROXY" \
+    export GOWORK=off GOFLAGS=-mod=mod GOTOOLCHAIN=local GOPROXY="$CONSUMER_PROXY" \
       GONOSUMDB='*' GONOSUMCHECK=1 GOSUMDB=off GOPATH="$WORK/gopath" GOMODCACHE="$WORK/gopath/pkg/mod" \
       GOCACHE="$WORK/gocache"
     go get "$@" && go mod tidy && go build ./...
@@ -224,7 +269,7 @@ upgrade_all() {
   printf 'package main\n\nimport _ "%s"\n\nfunc main() {}\n' "$imp" >"$c/main.go"
   (
     cd "$c"
-    export GOWORK=off GOFLAGS=-mod=mod GOTOOLCHAIN=local GOPROXY="file://$PROXY" \
+    export GOWORK=off GOFLAGS=-mod=mod GOTOOLCHAIN=local GOPROXY="$CONSUMER_PROXY" \
       GONOSUMDB='*' GONOSUMCHECK=1 GOSUMDB=off GOPATH="$WORK/gopath" GOMODCACHE="$WORK/gopath/pkg/mod" \
       GOCACHE="$WORK/gocache"
     go mod tidy && go build ./... && go get -u ./... && go mod tidy && go build ./... &&
@@ -246,11 +291,34 @@ legacy_pkg() {
   printf 'package main\n\nimport _ "%s"\n\nfunc main() {}\n' "$imp" >"$c/main.go"
   (
     cd "$c"
-    export GOWORK=off GOFLAGS=-mod=mod GOTOOLCHAIN=local GOPROXY="file://$PROXY" \
+    export GOWORK=off GOFLAGS=-mod=mod GOTOOLCHAIN=local GOPROXY="$CONSUMER_PROXY" \
       GONOSUMDB='*' GONOSUMCHECK=1 GOSUMDB=off GOPATH="$WORK/gopath" GOMODCACHE="$WORK/gopath/pkg/mod" \
       GOCACHE="$WORK/gocache"
     go build ./... && go get "$@" && go mod tidy && go build ./... && go list -m all >"$WORK/$name.mods"
   ) >"$WORK/$name.log" 2>&1
+}
+
+# vendor_consumers — for each third-party/ or framework/connectors/ module of
+# the manifest, a consumer pinned to the root v0.19.7 importing one of its
+# packages and `go get`ting it, which must build. Offline: skipped, said.
+vendor_consumers() {
+  local dir module version pkg n=0
+  if [ "$CONSUMER_PROXY" = "file://$PROXY" ]; then
+    echo "note: offline — the vendor and connector modules' consumers are not rehearsed (their vendors are on no file proxy); test-modules.bats covers their floor and pins"
+    return 0
+  fi
+  while IFS=$'\t' read -r dir module version; do
+    case "$dir" in third-party/* | framework/connectors/*) ;; *) continue ;; esac
+    pkg="$(git -C "$here/../.." ls-tree -r --name-only "$REF" -- "$dir" | awk -F/ '/\.go$/ && !/_test\.go$/ { sub(/\/[^\/]*$/, ""); print; exit }')"
+    [ -n "$pkg" ] || continue
+    n=$((n + 1))
+    if ! consume "vendor$n" v0.19.7 "github.com/kitsunium/sdk/$pkg" "$module@$version"; then
+      echo "proxy-rehearsal: pinned to v0.19.7, adding $dir@$version did not build:" >&2
+      sed 's/^/  /' "$WORK/vendor$n.log" >&2
+      return 1
+    fi
+    echo "ok: pinned to v0.19.7, adding $dir@$version builds (its vendors through the module cache or $UPSTREAM)"
+  done < <(jq -r '.modules[] | [.dir, .module, .version] | @tsv' "$MANIFEST")
 }
 
 # publish_kept — every module go.work names that the manifest does not, at its
@@ -327,7 +395,7 @@ kept_families() {
     printf 'module example.com/kept%s\n\ngo 1.21\n\nrequire github.com/kitsunium/sdk/%s %s\n' "$n" "$dir" "$version" >"$c/go.mod"
     if ! (
       cd "$c"
-      export GOWORK=off GOFLAGS=-mod=mod GOTOOLCHAIN=local GOPROXY="file://$PROXY" \
+      export GOWORK=off GOFLAGS=-mod=mod GOTOOLCHAIN=local GOPROXY="$CONSUMER_PROXY" \
         GONOSUMDB='*' GONOSUMCHECK=1 GOSUMDB=off GOPATH="$WORK/gopath" GOMODCACHE="$WORK/gopath/pkg/mod" \
         GOCACHE="$WORK/gocache"
       go get "${get[@]}" && go build "github.com/kitsunium/sdk/$dir/..."
@@ -401,7 +469,7 @@ fixture() {
 }
 
 manifest() {
-  local families dir module version src pkg floor n=0
+  local families dir module version src pkg floor cache n=0
   if [ ! -r "$MANIFEST" ] || [ -z "$REF" ]; then
     echo "proxy-rehearsal: --manifest needs a readable file and --ref=<release commit>" >&2
     return 64
@@ -417,6 +485,17 @@ manifest() {
     return 3
   fi
   proxy_fetch github.com/kitsunium/sdk v0.19.7
+  # The upstream behind the file proxy, for the dependencies of the vendor and
+  # connector modules the file proxy does not hold.
+  if [ "$OFFLINE" -eq 0 ] && curl -fsSL --max-time 20 -o /dev/null "$UPSTREAM/github.com/kitsunium/sdk/@v/list" 2>/dev/null; then
+    CONSUMER_PROXY="file://$PROXY,$UPSTREAM"
+    # This machine's module cache first, when it has one: it is GOPROXY's own
+    # layout, holds what the workspace already builds with, and spares the
+    # upstream a request (a caching proxy in front of it has served a stale
+    # redirect for a zip — measured).
+    cache="$(GOTOOLCHAIN=local go env GOMODCACHE 2>/dev/null)/cache/download"
+    if [ -d "$cache" ]; then CONSUMER_PROXY="file://$PROXY,file://$cache,$UPSTREAM"; fi
+  fi
   while IFS=$'\t' read -r dir module version; do
     src="$WORK/src/$(tr '/' '_' <<<"$dir")"
     mkdir -p "$src"
@@ -493,6 +572,12 @@ manifest() {
     return 1
   fi
   echo "ok: pinned to v0.19.7, 'go get -u ./...' builds on the internal module — no retired internal module selected"
+
+  # The vendor and connector modules the release cuts, each added to a
+  # consumer pinned to the monolithic root: their own vendors come from the
+  # upstream, so offline they are left to test-modules.bats (the floor and the
+  # pins on their go.mods), and said so.
+  vendor_consumers || return 1
 
   # I4: every family the release does NOT cut keeps its last tag, whose go.mod
   # pinned the internal module and the families of ITS release; a consumer that
