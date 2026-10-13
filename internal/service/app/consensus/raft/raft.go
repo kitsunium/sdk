@@ -388,12 +388,6 @@ func (r *Raft) noteSelfVote(seq uint64) {
 	}
 }
 
-// Applied reports how far the state machine applied.
-func (r *Raft) Applied(index uint64) {
-	// Nothing to record: the driver keeps applied, and the step function
-	// hands entries out through log.applied.
-}
-
 // ReportUnreachable moves a peer the transport could not reach to probe.
 func (r *Raft) ReportUnreachable(id core.NodeID) {
 	if pr := r.prs[id]; r.role == core.RoleLeader && pr != nil && pr.state == stateReplicate {

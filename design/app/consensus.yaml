@@ -2133,6 +2133,7 @@ packages:
         value: "2"
       - doc: MaxJoinReasonBytes bounds the reason a JOIN refusal carries to the joiner.
         name: MaxJoinReasonBytes
+        type: int
         value: "256"
       - blockDoc: |-
           The shipped log (D4) is a directory of fixed-size, zero-filled segment
@@ -2150,6 +2151,7 @@ packages:
           (R7-12, R8-01 to R8-04).
         doc: DefaultSegmentBytes is a segment's fixed size (provisional).
         name: DefaultSegmentBytes
+        type: int64
         value: 64 << 20
       - doc: |-
           WipeAndRejoin wipes the directory; the operator then Removes the old
@@ -3917,12 +3919,6 @@ packages:
                 type: uint64
             name: StorageDone
             recv: pointer
-          - doc: Applied reports how far the state machine applied.
-            in:
-              - name: index
-                type: uint64
-            name: Applied
-            recv: pointer
           - doc: ReportUnreachable moves a peer the transport could not reach to probe.
             in:
               - name: id
@@ -5193,6 +5189,7 @@ packages:
           - doc: MaxJoinReasonBytes bounds the reason a JOIN refusal carries.
             name: MaxJoinReasonBytes
             reexport: svcconsensus.MaxJoinReasonBytes
+            type: int
             value: "256"
       - func:
           doc: |-

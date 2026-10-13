@@ -56,7 +56,7 @@ const (
 	sealReserve int64 = 64
 
 	// DefaultSegmentBytes is a segment's fixed size (provisional).
-	DefaultSegmentBytes = 64 << 20
+	DefaultSegmentBytes int64 = 64 << 20
 )
 
 // align8 rounds n up to the next record boundary.

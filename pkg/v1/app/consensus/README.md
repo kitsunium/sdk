@@ -355,7 +355,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.LaneSnaps
 
 <a name="MaxJoinReasonBytes"></a>
 ```go
-const MaxJoinReasonBytes = 256
+const MaxJoinReasonBytes int = 256
 ```
 
 MaxJoinReasonBytes bounds the reason a JOIN refusal carries.

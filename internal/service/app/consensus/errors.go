@@ -21,7 +21,7 @@ const (
 	errPinned cause = "snapshot pinned by an open handle"
 
 	// MaxJoinReasonBytes bounds the reason a JOIN refusal carries to the joiner.
-	MaxJoinReasonBytes = 256
+	MaxJoinReasonBytes int = 256
 )
 
 // sentinelByCode maps every code the step function may answer to the

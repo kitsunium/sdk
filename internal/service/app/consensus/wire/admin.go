@@ -9,19 +9,19 @@ import (
 // The membership changes an EntryMembership records.
 const (
 	// ChangeFounding is the founding configuration Bootstrap writes.
-	ChangeFounding uint8 = 1
+	ChangeFounding uint8 = iota + 1
 	// ChangeAddLearner adds a learner.
-	ChangeAddLearner uint8 = 2
+	ChangeAddLearner
 	// ChangePromote makes a learner a voter.
-	ChangePromote uint8 = 3
+	ChangePromote
 	// ChangeRemove removes a member and retires its id.
-	ChangeRemove uint8 = 4
+	ChangeRemove
 	// ChangeUpdateAddress changes a member's address.
-	ChangeUpdateAddress uint8 = 5
+	ChangeUpdateAddress
 	// ChangeDenyPin withdraws a member's SPKI pin.
-	ChangeDenyPin uint8 = 6
+	ChangeDenyPin
 	// ChangeForced is the configuration Recover or RestoreSnapshot forces.
-	ChangeForced uint8 = 7
+	ChangeForced
 )
 
 // AdminValue is the payload of every engine entry kind: who asked, what it expects
