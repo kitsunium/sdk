@@ -128,21 +128,28 @@ required by name, so you take that vendor and no other:
 ### Migrating from `…/pkg` and `…/framework` (v0.17.0 and before)
 
 Up to v0.17.0 the SDK was split into modules — `…/pkg`, `…/framework` and
-three `…/internal/*` ones your go.mod lists as `// indirect`. Since v0.18.0 it
-is one; the import paths did not change, the requirement does. One command
-moves a go.mod over, and it must drop every old module, or each package is
-found in two modules of the build and it fails with an ambiguous import:
+three `…/internal/*` ones your go.mod lists as `// indirect`. The import paths
+did not change, the requirement does. Since the module per family (ADR 0171),
+a go.mod still on `…/pkg` moves over by requiring the families it imports:
 
 ```bash
-go get github.com/kitsunium/sdk@v0.18.0 github.com/kitsunium/sdk/internal/kernel@none
+go get github.com/kitsunium/sdk/pkg/v1/<family>@latest   # each family you import
 go mod tidy
 ```
 
-Go names this command itself: v0.18.0 of `…/pkg` and `…/framework` deprecates
-them, so `go list -m -u` marks both `(deprecated)`, and `go get` prints, on one
-line, `go: module github.com/kitsunium/sdk/pkg is deprecated: moved into
-github.com/kitsunium/sdk at v0.18.0, import paths unchanged; migrate with:`
-and the command above.
+Every family requires `…/pkg` at v0.18.0, its last version, which holds no
+package, and the three `…/internal/*` modules at v0.18.0, which hold none
+either, so minimum version selection lifts all four off the packages the
+family provides — without that, two modules provide them and the build fails
+with `ambiguous import` (measured on a file proxy, ADR 0171 §7). Do not add
+`…/internal/kernel@none` to that command: the families require its v0.18.0,
+and `go get` refuses the removal.
+
+Before the split the same move went to the root module, and v0.18.0 of `…/pkg`
+and `…/framework` still deprecates them with that older command
+(`go get github.com/kitsunium/sdk@v0.18.0 …/internal/kernel@none`), which `go
+get` prints; it lands on a retracted root, from which adding the families is
+the step above. The paragraphs below describe that removal.
 
 The one removal is enough: every version of `…/pkg`, `…/framework`,
 `…/internal/core` and `…/internal/service` up to v0.17.0 requires

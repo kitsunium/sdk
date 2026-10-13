@@ -533,7 +533,21 @@ rewrite_publishable() {
   # tombstones, which hold no package, the moment it requires the internal
   # module. A cycle of modules, which Go accepts: each tombstone requires this
   # module back.
-  if [ "$self" = internal ] && [ -n "${SPLIT_FLOOR:-}" ]; then
+  # …/pkg's tombstone, required by every family (ADR 0171 §7): a build still on
+  # …/pkg v0.17.0, which holds pkg/v1/*, adds a family with one `go get` and
+  # is lifted to the tombstone, which holds no package — without it, two
+  # modules provide the family's packages (`ambiguous import`, measured).
+  case "$self" in
+    pkg/v1/*)
+      if [ -n "${PKG_FLOOR:-}" ]; then edits+=(-require="$SDK_MODULE/pkg@$PKG_FLOOR"); fi
+      ;;
+  esac
+  # So does every module that requires the internal module: graph pruning
+  # reads a dependency's requirements one level down, and a consumer that
+  # requires a family alone, its go.mod still listing
+  # …/internal/kernel@v0.17.0, kept that module as the provider of
+  # internal/kernel/errs and built against it, silently (measured).
+  if [ -n "${SPLIT_FLOOR:-}" ] && { [ "$self" = internal ] || sdk_requires_of "$gomod" | awk -v m="$SDK_MODULE/internal" '$0 == m { f = 1 } END { exit !f }'; }; then
     for dep in "${SPLIT_TOMBSTONES[@]}"; do edits+=(-require="$SDK_MODULE/$dep@$SPLIT_FLOOR"); done
   fi
   if [ "${#edits[@]}" -gt 0 ]; then
@@ -663,7 +677,7 @@ tombstone_deprecation() {
   local dir="$1"
   case "$dir" in
     internal/*)
-      printf 'moved into %s/internal (ADR 0171), which no consumer imports; update with: go get %s@latest && go mod tidy' \
+      printf 'moved into %s/internal (ADR 0171), which no consumer imports; update with: go get %s/pkg/v1/<family>@latest for each family you import && go mod tidy' \
         "$SDK_MODULE" "$SDK_MODULE"
       ;;
     *)
@@ -1131,9 +1145,24 @@ fi
 # The version internal requires the split's tombstones at: this release's,
 # or the tag a release before it cut.
 SPLIT_FLOOR=""
-if [ "$split" -eq 1 ] || git rev-parse -q --verify "refs/tags/${SPLIT_TOMBSTONES[0]}/$SPLIT_TOMBSTONE_VERSION" >/dev/null; then
+if [ "$split" -eq 1 ]; then
   SPLIT_FLOOR="$SPLIT_TOMBSTONE_VERSION"
+else
+  SPLIT_FLOOR="$SPLIT_TOMBSTONE_VERSION"
+  for d in "${SPLIT_TOMBSTONES[@]}"; do
+    git rev-parse -q --verify "refs/tags/$d/$SPLIT_TOMBSTONE_VERSION" >/dev/null || SPLIT_FLOOR=""
+  done
 fi
+
+# The version every family requires …/pkg at: its tombstone (ADR 0162), the
+# highest pkg/ tag whose pkg/ holds a go.mod alone; none in a repository that
+# never cut one.
+PKG_FLOOR=""
+while IFS= read -r t; do
+  [ -z "$t" ] && continue
+  if is_pkg_tombstone "$t"; then PKG_FLOOR="v$(version_from_tag "$t")"; fi
+done < <(stable_tags 'pkg/v*' is_valid_pkg_tag | version_sort)
+if [ "$tombstone" -eq 1 ]; then PKG_FLOOR="$root_sem"; fi
 
 tombstone_list=()
 for d in ${TOMB_DIRS[@]+"${TOMB_DIRS[@]}"}; do tombstone_list+=("$d/${TOMB_SEM[$d]}"); done

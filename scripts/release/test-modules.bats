@@ -344,11 +344,33 @@ monolith() {
     g show "internal/$m/v0.18.0:internal/$m/go.mod" >"$BATS_TEST_TMPDIR/t.mod"
     [ "$(go mod edit -json "$BATS_TEST_TMPDIR/t.mod" | jq -c '[.Module.Path, (.Require | map(.Path + "@" + .Version))]')" = \
       "[\"github.com/kitsunium/sdk/internal/$m\",[\"github.com/kitsunium/sdk/internal@v0.1.0\"]]" ]
-    [[ "$(go mod edit -json "$BATS_TEST_TMPDIR/t.mod" | jq -r .Module.Deprecated)" == *"go get github.com/kitsunium/sdk@latest && go mod tidy"* ]]
+    [[ "$(go mod edit -json "$BATS_TEST_TMPDIR/t.mod" | jq -r .Module.Deprecated)" == *"go get github.com/kitsunium/sdk/pkg/v1/<family>@latest for each family you import && go mod tidy"* ]]
     [ "$(g rev-parse "internal/$m/v0.18.0^{commit}^1")" = "$(g rev-parse 'v0.20.0^{commit}')" ]
     # and the internal module requires each tombstone back, so a build that
     # still lists the retired module is lifted to it (a cycle Go accepts).
     [[ "$(g show 'internal/v0.1.0:internal/go.mod')" == *"github.com/kitsunium/sdk/internal/$m v0.18.0"* ]]
+  done
+}
+
+# I1: a consumer still on …/pkg v0.17.0 could not add a family — two modules
+# provided its packages. Every family requires …/pkg at its tombstone, and
+# every module that requires internal the split's tombstones, so one `go get`
+# of the family lifts both off the old modules (measured on a file proxy).
+@test "a family requires …/pkg at its tombstone and the split's tombstones once they exist" {
+  need_toolchain
+  released
+  blob="$(printf 'module github.com/kitsunium/sdk/pkg\n' | g hash-object -w --stdin)"
+  sub="$(printf '100644 blob %s\tgo.mod\n' "$blob" | g mktree)"
+  root="$(printf '040000 tree %s\tpkg\n' "$sub" | g mktree)"
+  g tag pkg/v0.18.0 "$(g commit-tree "$root" -m "pkg tombstone")"
+  for m in kernel core service; do g tag "internal/$m/v0.18.0" "$(g commit-tree "$root" -m "$m tombstone")"; done
+  change pkg/v1/data/data.go "fix(data): one"
+  run bash -c "printf 'pkg/v1/data\n' | '$CT' --dry-run --bump=patch"
+  [ "$status" -eq 0 ]
+  block="$(awk '/--- pkg\/v1\/data\/go.mod ---/ { on = 1; next } /--- / { on = 0 } on' <<<"$output")"
+  [[ "$block" == *"github.com/kitsunium/sdk/pkg v0.18.0"* ]]
+  for m in kernel core service; do
+    [[ "$block" == *"github.com/kitsunium/sdk/internal/$m v0.18.0"* ]]
   done
 }
 

@@ -15,7 +15,7 @@ Each family of `pkg/v1` is a Go module of its own, `github.com/kitsunium/sdk/pkg
 go get github.com/kitsunium/sdk/pkg/v1/data@latest github.com/kitsunium/sdk/pkg/v1/errs@latest github.com/kitsunium/sdk/pkg/v1/observe@latest
 ```
 
-Writing the imports below first and running `go mod tidy` works as well: Go resolves an import nothing in your go.mod provides to the module with the LONGEST path that provides it, which is the family's. A go.mod on a root between v0.18.0 and v0.19.7 — which held `pkg/` and `internal/` — is lifted past them by the first family it adds; one that still requires `…/pkg` migrates with the one command in the root `README.md` (ADR 0162) first.
+Writing the imports below first and running `go mod tidy` works as well: Go resolves an import nothing in your go.mod provides to the module with the LONGEST path that provides it, which is the family's. A go.mod on a root between v0.18.0 and v0.19.7 — which held `pkg/` and `internal/` — is lifted past them by the first family it adds, and so is one that still requires `…/pkg` v0.17.0 or older: every family requires `…/pkg` and the three old `…/internal/*` modules at their v0.18.0, which hold no package, so `go get github.com/kitsunium/sdk/pkg/v1/<family>@latest && go mod tidy` is the whole migration (root `README.md`).
 
 ## Hello, codec
 

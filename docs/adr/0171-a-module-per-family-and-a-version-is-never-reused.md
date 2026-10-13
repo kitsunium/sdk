@@ -334,8 +334,13 @@ Go took the longest path whose latest version still provided it —
 `…/internal/kernel@v0.17.0` —, building silently against the old internals
 (found by an independent review, reproduced on the file proxy, green with the
 tombstones). The internal module's published go.mod requires the three
-tombstones back, a cycle of modules Go accepts, so a build that still lists one
-at v0.17.0 is lifted to its empty tombstone.
+tombstones back, a cycle of modules Go accepts, and so does every module that
+requires `…/internal`: a consumer of one family whose go.mod still listed
+`…/internal/kernel@v0.17.0` kept it as the provider of an internal package,
+since pruning reads a dependency's requirements one level down. Every family
+also requires `…/pkg` at its v0.18.0 tombstone, so a go.mod still on `…/pkg`
+v0.17.0 adds a family with one `go get …/pkg/v1/<family>@latest` instead of
+meeting `ambiguous import` (both measured on the file proxy).
 
 **The root keeps the framework and is not deprecated.** A deprecation is the
 whole module path's, read from its latest go.mod, and the root still holds

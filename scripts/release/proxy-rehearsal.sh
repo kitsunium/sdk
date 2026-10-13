@@ -233,6 +233,26 @@ upgrade_all() {
   ) >"$WORK/$name.log" 2>&1
 }
 
+# legacy_pkg <name> <import> <get…> — a consumer on …/pkg v0.17.0 and its
+# three internal modules, importing <import>, built there first, then
+# `go get <get…>`, `go mod tidy`, `go build`; $WORK/<name>.mods lists the
+# build's modules.
+legacy_pkg() {
+  local name="$1" imp="$2" c
+  shift 2
+  c="$WORK/$name"
+  mkdir -p "$c"
+  printf 'module example.com/%s\n\ngo 1.21\n\nrequire github.com/kitsunium/sdk/pkg v0.17.0\n\nrequire (\n\tgithub.com/kitsunium/sdk/internal/core v0.17.0 // indirect\n\tgithub.com/kitsunium/sdk/internal/kernel v0.17.0 // indirect\n\tgithub.com/kitsunium/sdk/internal/service v0.17.0 // indirect\n)\n' "$name" >"$c/go.mod"
+  printf 'package main\n\nimport _ "%s"\n\nfunc main() {}\n' "$imp" >"$c/main.go"
+  (
+    cd "$c"
+    export GOWORK=off GOFLAGS=-mod=mod GOTOOLCHAIN=local GOPROXY="file://$PROXY" \
+      GONOSUMDB='*' GONOSUMCHECK=1 GOSUMDB=off GOPATH="$WORK/gopath" GOMODCACHE="$WORK/gopath/pkg/mod" \
+      GOCACHE="$WORK/gocache"
+    go build ./... && go get "$@" && go mod tidy && go build ./... && go list -m all >"$WORK/$name.mods"
+  ) >"$WORK/$name.log" 2>&1
+}
+
 module_src() {
   mkdir -p "$1"
   printf '%s' "$2" >"$1/go.mod"
@@ -328,9 +348,13 @@ manifest() {
   done < <(jq -r '.tombstones[]?' "$MANIFEST")
   # What the proxy already serves of the modules ADR 0162 retired: the build a
   # consumer of a monolithic root resolves an internal package against.
-  for dir in internal/kernel internal/core internal/service; do
+  for dir in internal/kernel internal/core internal/service pkg; do
     proxy_fetch "github.com/kitsunium/sdk/$dir" v0.17.0
   done
+  # …/pkg's tombstone, and the root it requires: what the I1 consumer is lifted
+  # to.
+  proxy_fetch github.com/kitsunium/sdk/pkg v0.18.0
+  proxy_fetch github.com/kitsunium/sdk v0.18.0
   while IFS= read -r dir; do
     [ -z "$dir" ] && continue
     version="$(jq -r --arg d "$dir" '.modules[] | select(.dir == $d) | .version' "$MANIFEST")"
@@ -379,6 +403,23 @@ manifest() {
     return 1
   fi
   echo "ok: pinned to v0.19.7, 'go get -u ./...' builds on the internal module — no retired internal module selected"
+
+  # I1: a consumer still on …/pkg v0.17.0 — the module before ADR 0162, with
+  # its three internal modules listed indirect — adds one family by naming it
+  # alone. Two modules provided pkg/v1/errs there (`ambiguous import`) until
+  # every family required …/pkg at its tombstone.
+  version="$(jq -r '.modules[] | select(.dir == "pkg/v1/errs") | .version' "$MANIFEST")"
+  if ! legacy_pkg legacy github.com/kitsunium/sdk/pkg/v1/errs "github.com/kitsunium/sdk/pkg/v1/errs@$version"; then
+    echo "proxy-rehearsal: on …/pkg v0.17.0, 'go get …/pkg/v1/errs@$version' did not build:" >&2
+    sed 's/^/  /' "$WORK/legacy.log" >&2
+    return 1
+  fi
+  if grep -E 'kitsunium/sdk/(pkg|internal/(kernel|core|service)) v0\.(1[0-7]|[0-9])\.' "$WORK/legacy.mods" >/dev/null; then
+    echo "proxy-rehearsal: after adding pkg/v1/errs the build still selects a module ADR 0162 retired, below its tombstone:" >&2
+    sed 's/^/  /' "$WORK/legacy.mods" >&2
+    return 1
+  fi
+  echo "ok: on …/pkg v0.17.0, 'go get …/pkg/v1/errs@$version' alone builds — …/pkg lifted to its tombstone, no retired internal module selected"
 
   # The control, on the real modules: the first family re-published without
   # the floor must meet the ambiguous import the floor exists to prevent.
