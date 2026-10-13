@@ -90,6 +90,7 @@ type MemoryTransport struct {
 	offer   func(coreconsensus.AuthenticatedPeer, coreconsensus.InstallOffer) coreconsensus.InstallAccept
 	install func(coreconsensus.InstallRequest) error
 	join    func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code)
+	joinR   func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code, string)
 	ctrl    chan memFrame
 	data    chan memFrame
 	stop    chan struct{}
@@ -187,6 +188,13 @@ func (t *MemoryTransport) run(stop chan struct{}) {
 	}
 }
 
+// BindJoinReason implements JoinReasonBinder.
+func (t *MemoryTransport) BindJoinReason(_ coreconsensus.GroupID, join func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code, string)) {
+	t.mu.Lock()
+	t.joinR = join
+	t.mu.Unlock()
+}
+
 // SetMembership implements Transport.
 func (t *MemoryTransport) SetMembership(_ coreconsensus.GroupID, admitted []coreconsensus.Member) {
 	t.mu.Lock()
@@ -211,18 +219,25 @@ func (t *MemoryTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig
 	var last error = origin(coreconsensus.JoinRefused, errs.String("why", "no member"))
 	for _, x := range targets {
 		x.mu.Lock()
-		j := x.join
+		j, jr := x.join, x.joinR
 		x.mu.Unlock()
-		if j == nil || t.net.route(t.id, x.id) == nil {
+		if (j == nil && jr == nil) || t.net.route(t.id, x.id) == nil {
 			continue
 		}
 		peer := coreconsensus.AuthenticatedPeer{Slot: cfg.Stamp.Slot, SPKI: memSPKI(t.id)}
 		req.SPKI = peer.SPKI
-		pos, code := j(ctx, peer, req)
+		var pos coreconsensus.Position
+		var code errs.Code
+		var reason string
+		if jr != nil {
+			pos, code, reason = jr(ctx, peer, req)
+		} else {
+			pos, code = j(ctx, peer, req)
+		}
 		if code == 0 {
 			return pos, nil
 		}
-		last = origin(sentinelOf(code))
+		last = joinRefused(code, reason)
 	}
 	return coreconsensus.Position{}, last
 }
@@ -250,7 +265,7 @@ func (t *MemoryTransport) Close() error {
 	}
 	t.bound = false
 	close(t.stop)
-	t.deliver, t.offer, t.install, t.join = nil, nil, nil, nil
+	t.deliver, t.offer, t.install, t.join, t.joinR = nil, nil, nil, nil, nil
 	t.mu.Unlock()
 	t.wg.Wait()
 	t.mu.Lock()

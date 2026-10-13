@@ -897,6 +897,22 @@ packages:
             out:
               - type: <-chan Status
         name: LeadershipWatcher
+      - doc: |-
+          JoinReasonBinder is the sibling of a transport that carries the reason of
+          a refused JOIN back to the joiner. A node that finds it binds this join
+          callback in place of Bind's: the reason is what the JoinAuthorizer chose
+          to say, sanitized and bounded, or the engine's own refusal, never more.
+        methods:
+          - doc: |-
+              BindJoinReason registers the group's JOIN callback that also returns
+              the refusal's reason, empty for none.
+            in:
+              - name: group
+                type: GroupID
+              - name: join
+                type: func(ctx context.Context, from AuthenticatedPeer, r JoinRequest) (Position, errs.Code, string)
+            name: BindJoinReason
+        name: JoinReasonBinder
     sentinels:
       - var:
           - code: CodeConsensusMisconfigured
@@ -2048,6 +2064,9 @@ packages:
         name: DurabilityDurable
         type: Durability
         value: "2"
+      - doc: MaxJoinReasonBytes bounds the reason a JOIN refusal carries to the joiner.
+        name: MaxJoinReasonBytes
+        value: "256"
       - blockDoc: |-
           The shipped log (D4) is a directory of fixed-size, zero-filled segment
           files. Every record is 8-byte aligned:
@@ -2160,6 +2179,17 @@ packages:
         name: TokenOf
         out:
           - type: coreconsensus.Token
+          - type: bool
+      - doc: |-
+          JoinRefusalReason reads the reason a refused JOIN carried back to the
+          joiner: what the member's JoinAuthorizer chose to say, or the engine's
+          rule. false when the refusal carried none.
+        in:
+          - name: err
+            type: error
+        name: JoinRefusalReason
+        out:
+          - type: string
           - type: bool
       - doc: NewMemoryLog returns an empty in-memory log.
         name: NewMemoryLog
@@ -2984,6 +3014,14 @@ packages:
             out:
               - type: error
             recv: pointer
+          - doc: BindJoinReason implements JoinReasonBinder.
+            in:
+              - name: _
+                type: coreconsensus.GroupID
+              - name: join
+                type: func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code, string)
+            name: BindJoinReason
+            recv: pointer
           - doc: SetMembership implements Transport.
             in:
               - name: _
@@ -3469,6 +3507,16 @@ packages:
             out:
               - type: coreconsensus.Position
               - type: error
+            recv: pointer
+          - doc: |-
+              BindJoinReason implements JoinReasonBinder: the JOIN callback that also
+              says why it refused.
+            in:
+              - name: _
+                type: coreconsensus.GroupID
+              - name: join
+                type: func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code, string)
+            name: BindJoinReason
             recv: pointer
           - doc: |-
               RefusedBeforeHandshake counts the connections refused by the
@@ -5091,6 +5139,30 @@ packages:
           - name: StopMarkerPresent
             reexport: coreconsensus.StopMarkerPresent
             type: "*errs.Error"
+      - alias:
+          - doc: |-
+              JoinReasonBinder is the sibling of a transport that carries a refused
+              JOIN's reason back to the joiner.
+            name: JoinReasonBinder
+            target: coreconsensus.JoinReasonBinder
+      - const:
+          - doc: MaxJoinReasonBytes bounds the reason a JOIN refusal carries.
+            name: MaxJoinReasonBytes
+            reexport: svcconsensus.MaxJoinReasonBytes
+            value: "256"
+      - func:
+          doc: |-
+            JoinRefusalReason reads the reason a refused JOIN carried back to the
+            joiner: what the member's JoinAuthorizer chose to say, sanitized and at
+            most MaxJoinReasonBytes, or the engine's rule. false when there is none.
+          forward: svcconsensus.JoinRefusalReason
+          in:
+            - name: err
+              type: error
+          name: JoinRefusalReason
+          out:
+            - type: string
+            - type: bool
     imports:
       coreconsensus: github.com/kitsunium/sdk/internal/core/app/consensus
       errs: github.com/kitsunium/sdk/internal/kernel/errs

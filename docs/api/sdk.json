@@ -33714,6 +33714,31 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/consensus.JoinReasonBinder",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
+      "name": "JoinReasonBinder",
+      "spelled": "interface{BindJoinReason(group GroupID, join func(ctx context.Context, from AuthenticatedPeer, r JoinRequest) (Position, errs.Code, string))}",
+      "canonical": "interface{BindJoinReason(group github.com/kitsunium/sdk/internal/core/app/consensus.GroupID, join func(ctx context.Context, from github.com/kitsunium/sdk/internal/core/app/consensus.AuthenticatedPeer, r github.com/kitsunium/sdk/internal/core/app/consensus.JoinRequest) (github.com/kitsunium/sdk/internal/core/app/consensus.Position, github.com/kitsunium/sdk/internal/kernel/errs.Code, string))}",
+      "doc": "JoinReasonBinder is the sibling of a transport that carries the reason of\na refused JOIN back to the joiner. A node that finds it binds this join\ncallback in place of Bind's: the reason is what the JoinAuthorizer chose\nto say, sanitized and bounded, or the engine's own refusal, never more.\n",
+      "file": "internal/core/app/consensus/design_gen.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/consensus.JoinReasonBinder.BindJoinReason",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
+      "name": "BindJoinReason",
+      "recv": "JoinReasonBinder",
+      "spelled": "func(group GroupID, join func(ctx context.Context, from AuthenticatedPeer, r JoinRequest) (Position, errs.Code, string))",
+      "canonical": "func(group github.com/kitsunium/sdk/internal/core/app/consensus.GroupID, join func(ctx context.Context, from github.com/kitsunium/sdk/internal/core/app/consensus.AuthenticatedPeer, r github.com/kitsunium/sdk/internal/core/app/consensus.JoinRequest) (github.com/kitsunium/sdk/internal/core/app/consensus.Position, github.com/kitsunium/sdk/internal/kernel/errs.Code, string))",
+      "doc": "BindJoinReason registers the group's JOIN callback that also returns\nthe refusal's reason, empty for none.\n",
+      "file": "internal/core/app/consensus/design_gen.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/app/consensus.JoinRefused",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
@@ -74563,6 +74588,18 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.JoinRefusalReason",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "JoinRefusalReason",
+      "spelled": "func(err error) (string, bool)",
+      "canonical": "func(err error) (string, bool)",
+      "doc": "JoinRefusalReason reads the reason a refused JOIN carried back to the\njoiner: what the member's JoinAuthorizer chose to say, or the engine's\nrule. false when the refusal carried none.\n",
+      "file": "internal/service/app/consensus/errors.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.Latest",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
@@ -74595,6 +74632,19 @@
       "canonical": "func(certFile string, keyFile string, caFile string) (*github.com/kitsunium/sdk/internal/service/app/consensus.PEMIdentity, *crypto/x509.CertPool, error)",
       "doc": "LoadPEMIdentity reads the files once and returns the identity and the CA\npool to pass as TransportConfig.Roots.\n",
       "file": "internal/service/app/consensus/pem.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.MaxJoinReasonBytes",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "MaxJoinReasonBytes",
+      "spelled": "untyped int",
+      "canonical": "untyped int",
+      "value": "256",
+      "doc": "MaxJoinReasonBytes bounds the reason a JOIN refusal carries to the joiner.\n",
+      "file": "internal/service/app/consensus/errors.go",
       "layer": "service",
       "family": "app"
     },
@@ -74914,6 +74964,19 @@
       "spelled": "func(group coreconsensus.GroupID, deliver func(coreconsensus.AuthenticatedPeer, []byte), offer func(coreconsensus.AuthenticatedPeer, coreconsensus.InstallOffer) coreconsensus.InstallAccept, install func(coreconsensus.InstallRequest) error, join func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code)) error",
       "canonical": "func(group github.com/kitsunium/sdk/internal/core/app/consensus.GroupID, deliver func(github.com/kitsunium/sdk/internal/core/app/consensus.AuthenticatedPeer, []byte), offer func(github.com/kitsunium/sdk/internal/core/app/consensus.AuthenticatedPeer, github.com/kitsunium/sdk/internal/core/app/consensus.InstallOffer) github.com/kitsunium/sdk/internal/core/app/consensus.InstallAccept, install func(github.com/kitsunium/sdk/internal/core/app/consensus.InstallRequest) error, join func(context.Context, github.com/kitsunium/sdk/internal/core/app/consensus.AuthenticatedPeer, github.com/kitsunium/sdk/internal/core/app/consensus.JoinRequest) (github.com/kitsunium/sdk/internal/core/app/consensus.Position, github.com/kitsunium/sdk/internal/kernel/errs.Code)) error",
       "doc": "Bind implements Transport.\n",
+      "file": "internal/service/app/consensus/memtransport.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.(*MemoryTransport).BindJoinReason",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "BindJoinReason",
+      "recv": "MemoryTransport",
+      "spelled": "func(_ coreconsensus.GroupID, join func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code, string))",
+      "canonical": "func(_ github.com/kitsunium/sdk/internal/core/app/consensus.GroupID, join func(context.Context, github.com/kitsunium/sdk/internal/core/app/consensus.AuthenticatedPeer, github.com/kitsunium/sdk/internal/core/app/consensus.JoinRequest) (github.com/kitsunium/sdk/internal/core/app/consensus.Position, github.com/kitsunium/sdk/internal/kernel/errs.Code, string))",
+      "doc": "BindJoinReason implements JoinReasonBinder.\n",
       "file": "internal/service/app/consensus/memtransport.go",
       "layer": "service",
       "family": "app"
@@ -75756,6 +75819,19 @@
       "spelled": "func(_ coreconsensus.GroupID, deliver func(coreconsensus.AuthenticatedPeer, []byte), offer func(coreconsensus.AuthenticatedPeer, coreconsensus.InstallOffer) coreconsensus.InstallAccept, install func(coreconsensus.InstallRequest) error, join func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code)) error",
       "canonical": "func(_ github.com/kitsunium/sdk/internal/core/app/consensus.GroupID, deliver func(github.com/kitsunium/sdk/internal/core/app/consensus.AuthenticatedPeer, []byte), offer func(github.com/kitsunium/sdk/internal/core/app/consensus.AuthenticatedPeer, github.com/kitsunium/sdk/internal/core/app/consensus.InstallOffer) github.com/kitsunium/sdk/internal/core/app/consensus.InstallAccept, install func(github.com/kitsunium/sdk/internal/core/app/consensus.InstallRequest) error, join func(context.Context, github.com/kitsunium/sdk/internal/core/app/consensus.AuthenticatedPeer, github.com/kitsunium/sdk/internal/core/app/consensus.JoinRequest) (github.com/kitsunium/sdk/internal/core/app/consensus.Position, github.com/kitsunium/sdk/internal/kernel/errs.Code)) error",
       "doc": "Bind implements Transport.\n",
+      "file": "internal/service/app/consensus/tcp.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.(*TCPTransport).BindJoinReason",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "BindJoinReason",
+      "recv": "TCPTransport",
+      "spelled": "func(_ coreconsensus.GroupID, join func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code, string))",
+      "canonical": "func(_ github.com/kitsunium/sdk/internal/core/app/consensus.GroupID, join func(context.Context, github.com/kitsunium/sdk/internal/core/app/consensus.AuthenticatedPeer, github.com/kitsunium/sdk/internal/core/app/consensus.JoinRequest) (github.com/kitsunium/sdk/internal/core/app/consensus.Position, github.com/kitsunium/sdk/internal/kernel/errs.Code, string))",
+      "doc": "BindJoinReason implements JoinReasonBinder: the JOIN callback that also\nsays why it refused.\n",
       "file": "internal/service/app/consensus/tcp.go",
       "layer": "service",
       "family": "app"
@@ -94864,6 +94940,31 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.JoinReasonBinder",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "JoinReasonBinder",
+      "spelled": "coreconsensus.JoinReasonBinder",
+      "canonical": "github.com/kitsunium/sdk/internal/core/app/consensus.JoinReasonBinder",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/app/consensus.JoinReasonBinder",
+      "doc": "JoinReasonBinder is the sibling of a transport that carries a refused\nJOIN's reason back to the joiner.\n",
+      "file": "pkg/v1/app/consensus/facade_gen.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.JoinRefusalReason",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "JoinRefusalReason",
+      "spelled": "func(err error) (string, bool)",
+      "canonical": "func(err error) (string, bool)",
+      "doc": "JoinRefusalReason reads the reason a refused JOIN carried back to the\njoiner: what the member's JoinAuthorizer chose to say, sanitized and at\nmost MaxJoinReasonBytes, or the engine's rule. false when there is none.\n",
+      "file": "pkg/v1/app/consensus/facade_gen.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.JoinRefused",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
@@ -95117,6 +95218,20 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/app/consensus.LogStore",
       "owner": "go:github.com/kitsunium/sdk/internal/core/app/consensus.LogStore",
       "doc": "Every type needed to implement a published port is aliased here (R2-32).\n",
+      "file": "pkg/v1/app/consensus/facade_gen.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.MaxJoinReasonBytes",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "MaxJoinReasonBytes",
+      "spelled": "untyped int",
+      "canonical": "untyped int",
+      "value": "256",
+      "init": "go:github.com/kitsunium/sdk/internal/service/app/consensus.MaxJoinReasonBytes",
+      "doc": "MaxJoinReasonBytes bounds the reason a JOIN refusal carries.\n",
       "file": "pkg/v1/app/consensus/facade_gen.go",
       "layer": "public",
       "family": "app"

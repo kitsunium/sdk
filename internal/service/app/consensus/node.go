@@ -253,6 +253,9 @@ func newRaft(cfg Config) (*Node, error) {
 	if err := cfg.Transport.Bind(cfg.Group, n.deliver, n.offer, n.install, n.join); err != nil {
 		return nil, err
 	}
+	if jb, ok := cfg.Transport.(coreconsensus.JoinReasonBinder); ok {
+		jb.BindJoinReason(cfg.Group, n.joinReason)
+	}
 	n.wg.Add(4)
 	go n.reader()
 	go n.storageActor()

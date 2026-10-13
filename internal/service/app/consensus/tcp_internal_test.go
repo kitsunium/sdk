@@ -13,10 +13,13 @@ import (
 	"math/big"
 	"net"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 type testCA struct {
@@ -63,6 +66,7 @@ func (ca *testCA) issue(t *testing.T, san *url.URL, key *ecdsa.PrivateKey) (*tls
 }
 
 type tcpNode struct {
+	auth  coreconsensus.JoinAuthorizer
 	id    coreconsensus.NodeID
 	inc   coreconsensus.Incarnation
 	slot  string
@@ -80,7 +84,7 @@ func tcpConfig(cid coreconsensus.ClusterID, tn *tcpNode) Config {
 	return Config{
 		Cluster: cid, Machine: tn.sm, Durability: DurabilityVolatile, Log: tn.log, Snapshots: tn.snaps,
 		Transport: tn.tr, InitialTiming: testTimingFast(), MaxSnapshotBytes: 1 << 30, MaxLogBytes: 1 << 30,
-		MinVoters: 3, JoinAuthorizer: allowJoin{},
+		MinVoters: 3, JoinAuthorizer: tn.authorizer(),
 	}
 }
 
@@ -341,5 +345,84 @@ func TestTCPCapsUnauthenticatedConnectionsPerAddress(t *testing.T) {
 	defer closeAll(cs)
 	if got := tr.RefusedBeforeHandshake() - before; got != 0 {
 		t.Fatalf("a member's address lost %d of its reserved slots", got)
+	}
+}
+
+func (tn *tcpNode) authorizer() coreconsensus.JoinAuthorizer {
+	if tn.auth != nil {
+		return tn.auth
+	}
+	return allowJoin{}
+}
+
+// denyJoin refuses every JOIN with its error.
+type denyJoin struct{ err error }
+
+func (d denyJoin) Authorize(context.Context, coreconsensus.JoinRequest) (coreconsensus.Operator, error) {
+	return "", d.err
+}
+
+// joinWith restarts every member under auth, then has a new node of a new
+// slot JOIN them over TCP, and returns the joiner's error.
+func joinWith(t *testing.T, auth coreconsensus.JoinAuthorizer) error {
+	t.Helper()
+	ca, cid, ns := newTCPCluster(t)
+	for _, tn := range ns {
+		_ = tn.node.HardClose()
+		tn.auth = auth
+		tn.start(t, cid)
+	}
+	tcpLeader(t, ns)
+	j := &tcpNode{slot: "site-new", log: NewMemoryLog(), snaps: NewMemorySnapshots()}
+	j.cert, j.spki = ca.issue(t, SAN(cid, j.slot), nil)
+	j.listen(t, ca)
+	defer j.tr.Close()
+	if _, _, err := InitLog(j.log, cid, j.slot); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := j.log.Stamp()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, err := j.tr.Join(ctx, coreconsensus.JoinConfig{Addresses: []string{ns[0].addr}, Stamp: st, Address: j.addr})
+	return err
+}
+
+// The authorizer's reason reaches the joiner over the wire, sanitized and
+// bounded; an authorizer that says nothing leaves no reason.
+func TestJoinRefusalCarriesTheAuthorizersReason(t *testing.T) {
+	err := joinWith(t, denyJoin{errors.New("Nomad node wkld-3 is draining")})
+	if !errors.Is(err, coreconsensus.JoinRefused) {
+		t.Fatalf("refusal: %v", err)
+	}
+	if r, ok := JoinRefusalReason(err); !ok || r != "Nomad node wkld-3 is draining" {
+		t.Fatalf("reason %q %v", r, ok)
+	}
+
+	long := "a\x00b\x1b[31m" + strings.Repeat("é", 300) // control bytes, then 600 bytes
+	err = joinWith(t, denyJoin{errors.New(long)})
+	r, ok := JoinRefusalReason(err)
+	if !ok || len(r) > MaxJoinReasonBytes || !utf8.ValidString(r) || strings.ContainsAny(r, "\x00\x1b") || !strings.HasPrefix(r, "ab[31m") {
+		t.Fatalf("long reason not bounded and sanitized: %d bytes %q", len(r), r)
+	}
+
+	err = joinWith(t, denyJoin{errors.New("")})
+	if !errors.Is(err, coreconsensus.JoinRefused) {
+		t.Fatalf("silent refusal: %v", err)
+	}
+	if r, ok := JoinRefusalReason(err); ok {
+		t.Fatalf("an authorizer that said nothing produced a reason %q", r)
+	}
+}
+
+// An SDK error from the authorizer gives its PUBLIC message only: its
+// private text and its fields stay on the member.
+func TestJoinReasonOfAnSDKErrorIsItsPublicMessage(t *testing.T) {
+	err := errs.Wrap(coreconsensus.JoinRefused, errs.WrapParams{}, errs.String("internal", "10.10.0.21:4646"))
+	got := joinReasonOf(err)
+	if got != errs.PublicOf(err) || strings.Contains(got, "10.10.0.21") {
+		t.Fatalf("reason %q", got)
+	}
+	if joinReasonOf(errors.New(" \t ")) != "" {
+		t.Fatal("blank text made a reason")
 	}
 }

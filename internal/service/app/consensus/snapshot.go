@@ -425,8 +425,26 @@ func (n *Node) install(req coreconsensus.InstallRequest) error {
 // ---- pre-admission JOIN (D4, R8-09) ----
 
 func (n *Node) join(ctx context.Context, from coreconsensus.AuthenticatedPeer, r coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code) {
-	if n.cfg.JoinAuthorizer == nil || r.Cluster != n.ident.Cluster || r.Slot != from.Slot || from.SPKI == ([32]byte{}) {
-		return coreconsensus.Position{}, coreconsensus.CodeJoinRefused
+	pos, code, _ := n.joinReason(ctx, from, r)
+	return pos, code
+}
+
+// joinReason answers a JOIN and, when it refuses, says why: the
+// authorizer's own words, sanitized and bounded, or the engine's rule. An
+// authorizer that says nothing leaves the reason empty.
+func (n *Node) joinReason(ctx context.Context, from coreconsensus.AuthenticatedPeer, r coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code, string) {
+	refuse := func(why string) (coreconsensus.Position, errs.Code, string) {
+		return coreconsensus.Position{}, coreconsensus.CodeJoinRefused, why
+	}
+	switch {
+	case n.cfg.JoinAuthorizer == nil:
+		return refuse("this cluster admits no JOIN")
+	case r.Cluster != n.ident.Cluster:
+		return refuse("another cluster")
+	case r.Slot != from.Slot:
+		return refuse("the slot differs from the certificate's")
+	case from.SPKI == ([32]byte{}):
+		return refuse("no key")
 	}
 	r.SPKI = from.SPKI
 	// One JOIN per slot per election timeout (R7-42).
@@ -439,19 +457,23 @@ func (n *Node) join(ctx context.Context, from coreconsensus.AuthenticatedPeer, r
 		n.joinMu.Unlock()
 		n.joinRefused.Add(1)
 		n.obs.inc(mJoinsRateLimited)
-		return coreconsensus.Position{}, coreconsensus.CodeJoinRefused
+		return refuse("one JOIN per slot per election timeout")
 	}
 	n.lastJoin[r.Slot] = now
 	n.joinMu.Unlock()
 	for _, m := range n.Membership().Members {
 		if m.Slot == r.Slot {
 			// A slot that still has a live member is refused (R8-11).
-			return coreconsensus.Position{}, coreconsensus.CodeJoinRefused
+			return refuse("the slot still has a member")
 		}
 	}
 	op, err := n.cfg.JoinAuthorizer.Authorize(ctx, r)
-	if err != nil || !op.Valid() {
-		return coreconsensus.Position{}, coreconsensus.CodeJoinRefused
+	if err != nil {
+		n.obs.warn("consensus: JOIN refused by the authorizer", lstr("slot", r.Slot), lstr("error", err.Error()))
+		return refuse(joinReasonOf(err))
+	}
+	if !op.Valid() {
+		return refuse("the authorizer returned an invalid operator")
 	}
 	m := coreconsensus.Member{ID: r.ID, Incarnation: r.Incarnation, Slot: r.Slot, SPKI: r.SPKI, Address: r.Address, Joining: true}
 	a := wire.Admin{
@@ -461,10 +483,12 @@ func (n *Node) join(ctx context.Context, from coreconsensus.AuthenticatedPeer, r
 	data := wire.AppendAdmin(nil, &a)
 	tok, _, err := n.submit(ctx, coreconsensus.Entry{Kind: coreconsensus.EntryMembership, BodySum: wire.BodySum(data), Data: data}, true)
 	if err != nil {
-		if c, ok := errs.CodeOf(err); ok {
-			return coreconsensus.Position{}, c
+		c, ok := errs.CodeOf(err)
+		if !ok {
+			c = coreconsensus.CodeJoinRefused
 		}
-		return coreconsensus.Position{}, coreconsensus.CodeJoinRefused
+		reason, _ := errs.ReasonOf(err)
+		return coreconsensus.Position{}, c, reason
 	}
-	return tok.Position(), 0
+	return tok.Position(), 0, ""
 }

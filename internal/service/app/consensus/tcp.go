@@ -143,6 +143,7 @@ type TCPTransport struct {
 	offer       func(coreconsensus.AuthenticatedPeer, coreconsensus.InstallOffer) coreconsensus.InstallAccept
 	install     func(coreconsensus.InstallRequest) error
 	join        func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code)
+	joinR       func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code, string)
 	unreachable func(coreconsensus.NodeID)
 	closed      bool
 	wg          sync.WaitGroup
@@ -819,10 +820,17 @@ func (t *TCPTransport) serveJoin(c *tls.Conn, peer coreconsensus.AuthenticatedPe
 		return
 	}
 	req, ok := decodeJoin(b)
-	reply := func(code errs.Code, pos coreconsensus.Position) {
+	reply := func(code errs.Code, pos coreconsensus.Position, reason string) {
 		out := binary.LittleEndian.AppendUint32(nil, uint32(code))
 		out = binary.LittleEndian.AppendUint64(out, pos.Term)
 		out = binary.LittleEndian.AppendUint64(out, pos.Index)
+		if code != 0 {
+			// JOIN_REFUSED carries its reason, sanitized and bounded here
+			// too, whatever the callback returned.
+			r := sanitizeReason(reason)
+			out = binary.LittleEndian.AppendUint16(out, uint16(len(r)))
+			out = append(out, r...)
+		}
 		if code == 0 {
 			// The admitted members, so the joiner's transport admits the
 			// leader that will feed it before its own log names anyone.
@@ -836,22 +844,30 @@ func (t *TCPTransport) serveJoin(c *tls.Conn, peer coreconsensus.AuthenticatedPe
 		}
 		_ = writeChunk(c, out)
 	}
-	if !ok || req.Slot != peer.Slot {
-		reply(coreconsensus.CodeJoinRefused, coreconsensus.Position{})
+	if !ok {
+		reply(coreconsensus.CodeJoinRefused, coreconsensus.Position{}, "malformed JOIN")
+		return
+	}
+	if req.Slot != peer.Slot {
+		reply(coreconsensus.CodeJoinRefused, coreconsensus.Position{}, "the slot differs from the certificate's")
 		return
 	}
 	req.SPKI = peer.SPKI
 	t.mu.Lock()
-	j := t.join
+	j, jr := t.join, t.joinR
 	t.mu.Unlock()
-	if j == nil {
-		reply(coreconsensus.CodeJoinRefused, coreconsensus.Position{})
-		return
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), t.cfg.JoinTimeout)
 	defer cancel()
-	pos, code := j(ctx, peer, req)
-	reply(code, pos)
+	switch {
+	case jr != nil:
+		pos, code, reason := jr(ctx, peer, req)
+		reply(code, pos, reason)
+	case j != nil:
+		pos, code := j(ctx, peer, req)
+		reply(code, pos, "")
+	default:
+		reply(coreconsensus.CodeJoinRefused, coreconsensus.Position{}, "")
+	}
 }
 
 // Join implements Joiner: the JOIN goes to each address in turn until one
@@ -865,6 +881,7 @@ func (t *TCPTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig) (
 		return coreconsensus.Position{}, origin(coreconsensus.ClusterMismatch)
 	}
 	last := error(origin(coreconsensus.JoinRefused, errs.String("why", "no address answered")))
+	var refused error
 	for _, addr := range cfg.Addresses {
 		c, err := t.dial(ctx, addr, laneJoin, nil)
 		if err != nil {
@@ -884,7 +901,8 @@ func (t *TCPTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig) (
 			continue
 		}
 		if code := errs.Code(binary.LittleEndian.Uint32(b)); code != 0 {
-			last = origin(sentinelOf(code))
+			// A refusal beats an unreachable address: it says why.
+			refused = joinRefused(code, joinAnswerReason(b[20:]))
 			continue
 		}
 		m, err := wire.ParseMembership(b[20:])
@@ -895,7 +913,31 @@ func (t *TCPTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig) (
 		t.SetMembership(1, m.Members)
 		return coreconsensus.Position{Term: binary.LittleEndian.Uint64(b[4:]), Index: binary.LittleEndian.Uint64(b[12:])}, nil
 	}
+	if refused != nil {
+		return coreconsensus.Position{}, refused
+	}
 	return coreconsensus.Position{}, last
+}
+
+// joinAnswerReason reads the reason after a JOIN_REFUSED's fixed part;
+// an answer of an older member carries none.
+func joinAnswerReason(b []byte) string {
+	if len(b) < 2 {
+		return ""
+	}
+	n := int(binary.LittleEndian.Uint16(b))
+	if 2+n > len(b) {
+		return ""
+	}
+	return string(b[2 : 2+n])
+}
+
+// BindJoinReason implements JoinReasonBinder: the JOIN callback that also
+// says why it refused.
+func (t *TCPTransport) BindJoinReason(_ coreconsensus.GroupID, join func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code, string)) {
+	t.mu.Lock()
+	t.joinR = join
+	t.mu.Unlock()
 }
 
 // RefusedBeforeHandshake counts the connections refused by the

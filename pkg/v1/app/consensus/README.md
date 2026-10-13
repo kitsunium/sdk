@@ -39,6 +39,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 - [func Init\(d DataDir, cluster ClusterID, slot string\) \(NodeID, Incarnation, error\)](<#Init>)
 - [func InitLog\(log LogStore, cluster ClusterID, slot string\) \(NodeID, Incarnation, error\)](<#InitLog>)
 - [func Inspect\(d DataDir\) \(Report, error\)](<#Inspect>)
+- [func JoinRefusalReason\(err error\) \(string, bool\)](<#JoinRefusalReason>)
 - [func Lane\(frame \[\]byte\) \(FrameLane, error\)](<#Lane>)
 - [func Latest\(s SnapshotStore\) \(SnapshotHandle, error\)](<#Latest>)
 - [func LeaderHint\(err error\) \(NodeID, bool\)](<#LeaderHint>)
@@ -100,6 +101,8 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 - [type JoinAuthorizer](<#JoinAuthorizer>)
   - [func \(JoinAuthorizer\) Authorize\(ctx context.Context, r JoinRequest\) \(Operator, error\)](<#JoinAuthorizer.Authorize>)
 - [type JoinConfig](<#JoinConfig>)
+- [type JoinReasonBinder](<#JoinReasonBinder>)
+  - [func \(JoinReasonBinder\) BindJoinReason\(group GroupID, join func\(ctx context.Context, from AuthenticatedPeer, r JoinRequest\) \(Position, errs.Code, string\)\)](<#JoinReasonBinder.BindJoinReason>)
 - [type JoinRequest](<#JoinRequest>)
 - [type Joiner](<#Joiner>)
   - [func \(Joiner\) Join\(ctx context.Context, cfg JoinConfig\) \(Position, error\)](<#Joiner.Join>)
@@ -150,6 +153,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
   - [func \(\*MemorySnapshots\) Remove\(id string\) error](<#MemorySnapshots.Remove>)
 - [type MemoryTransport](<#MemoryTransport>)
   - [func \(\*MemoryTransport\) Bind\(group coreconsensus.GroupID, deliver func\(coreconsensus.AuthenticatedPeer, \[\]byte\), offer func\(coreconsensus.AuthenticatedPeer, coreconsensus.InstallOffer\) coreconsensus.InstallAccept, install func\(coreconsensus.InstallRequest\) error, join func\(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest\) \(coreconsensus.Position, errs.Code\)\) error](<#MemoryTransport.Bind>)
+  - [func \(\*MemoryTransport\) BindJoinReason\(\_ coreconsensus.GroupID, join func\(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest\) \(coreconsensus.Position, errs.Code, string\)\)](<#MemoryTransport.BindJoinReason>)
   - [func \(\*MemoryTransport\) Close\(\) error](<#MemoryTransport.Close>)
   - [func \(\*MemoryTransport\) Join\(ctx context.Context, cfg coreconsensus.JoinConfig\) \(coreconsensus.Position, error\)](<#MemoryTransport.Join>)
   - [func \(\*MemoryTransport\) Send\(to coreconsensus.NodeID, frame \[\]byte\)](<#MemoryTransport.Send>)
@@ -230,6 +234,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 - [type TCPTransport](<#TCPTransport>)
   - [func \(\*TCPTransport\) Addr\(\) string](<#TCPTransport.Addr>)
   - [func \(\*TCPTransport\) Bind\(\_ coreconsensus.GroupID, deliver func\(coreconsensus.AuthenticatedPeer, \[\]byte\), offer func\(coreconsensus.AuthenticatedPeer, coreconsensus.InstallOffer\) coreconsensus.InstallAccept, install func\(coreconsensus.InstallRequest\) error, join func\(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest\) \(coreconsensus.Position, errs.Code\)\) error](<#TCPTransport.Bind>)
+  - [func \(\*TCPTransport\) BindJoinReason\(\_ coreconsensus.GroupID, join func\(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest\) \(coreconsensus.Position, errs.Code, string\)\)](<#TCPTransport.BindJoinReason>)
   - [func \(\*TCPTransport\) CertExpiry\(\) time.Time](<#TCPTransport.CertExpiry>)
   - [func \(\*TCPTransport\) Close\(\) error](<#TCPTransport.Close>)
   - [func \(\*TCPTransport\) Cluster\(\) coreconsensus.ClusterID](<#TCPTransport.Cluster>)
@@ -346,6 +351,15 @@ const LaneSnapshot coreconsensus.FrameLane = 2
 The read modes and durabilities.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.LaneSnapshot`.
+
+<a name="MaxJoinReasonBytes"></a>
+```go
+const MaxJoinReasonBytes = 256
+```
+
+MaxJoinReasonBytes bounds the reason a JOIN refusal carries.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.MaxJoinReasonBytes`.
 
 <a name="MsgApp"></a>
 ```go
@@ -1081,6 +1095,15 @@ func Inspect(d DataDir) (Report, error)
 ```
 
 Inspect reads a stopped node's directory without changing it.
+
+<a name="JoinRefusalReason"></a>
+## func [JoinRefusalReason](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+
+```go
+func JoinRefusalReason(err error) (string, bool)
+```
+
+JoinRefusalReason reads the reason a refused JOIN carried back to the joiner: what the member's JoinAuthorizer chose to say, sanitized and at most MaxJoinReasonBytes, or the engine's rule. false when there is none.
 
 <a name="Lane"></a>
 ## func [Lane](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
@@ -1951,6 +1974,34 @@ type JoinConfig struct {
 }
 ```
 
+<a name="JoinReasonBinder"></a>
+## type [JoinReasonBinder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+
+JoinReasonBinder is the sibling of a transport that carries a refused JOIN's reason back to the joiner.
+
+```go
+type JoinReasonBinder = coreconsensus.JoinReasonBinder
+```
+
+JoinReasonBinder is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.JoinReasonBinder`, declared as:
+
+```go
+type JoinReasonBinder interface {
+	// BindJoinReason registers the group's JOIN callback that also returns
+	// the refusal's reason, empty for none.
+	BindJoinReason(group GroupID, join func(ctx context.Context, from AuthenticatedPeer, r JoinRequest) (Position, errs.Code, string))
+}
+```
+
+<a name="JoinReasonBinder.BindJoinReason"></a>
+### func \(JoinReasonBinder\) [BindJoinReason](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+
+```go
+func (JoinReasonBinder) BindJoinReason(group GroupID, join func(ctx context.Context, from AuthenticatedPeer, r JoinRequest) (Position, errs.Code, string))
+```
+
+BindJoinReason registers the group's JOIN callback that also returns the refusal's reason, empty for none.
+
 <a name="JoinRequest"></a>
 ## type [JoinRequest](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
@@ -2563,6 +2614,15 @@ func (*MemoryTransport) Bind(group coreconsensus.GroupID, deliver func(coreconse
 ```
 
 Bind implements Transport.
+
+<a name="MemoryTransport.BindJoinReason"></a>
+### func \(MemoryTransport\) [BindJoinReason](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/memtransport.go>)
+
+```go
+func (*MemoryTransport) BindJoinReason(_ coreconsensus.GroupID, join func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code, string))
+```
+
+BindJoinReason implements JoinReasonBinder.
 
 <a name="MemoryTransport.Close"></a>
 ### func \(MemoryTransport\) [Close](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/memtransport.go>)
@@ -3680,6 +3740,15 @@ func (*TCPTransport) Bind(_ coreconsensus.GroupID, deliver func(coreconsensus.Au
 ```
 
 Bind implements Transport.
+
+<a name="TCPTransport.BindJoinReason"></a>
+### func \(TCPTransport\) [BindJoinReason](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/tcp.go>)
+
+```go
+func (*TCPTransport) BindJoinReason(_ coreconsensus.GroupID, join func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code, string))
+```
+
+BindJoinReason implements JoinReasonBinder: the JOIN callback that also says why it refused.
 
 <a name="TCPTransport.CertExpiry"></a>
 ### func \(TCPTransport\) [CertExpiry](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/tcp.go>)
