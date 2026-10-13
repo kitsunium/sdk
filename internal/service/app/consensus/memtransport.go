@@ -3,13 +3,21 @@ package consensus
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"io"
+	"maps"
+	"slices"
 	"sync"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
+
+// memQueueFrames is the depth of each per-lane queue of the memory double:
+// deep enough that a test's burst is not dropped by accident, finite so a
+// stalled receiver still loses frames the way a real lane does (D2).
+const memQueueFrames int = 4096
 
 // MemoryNetwork connects in-memory transports, the double of D2: frames are
 // copied, delivered on per-lane queues that drop when full, and links can be
@@ -34,7 +42,7 @@ func (n *MemoryNetwork) Transport(id coreconsensus.NodeID) *MemoryTransport {
 	}
 	t := &MemoryTransport{
 		net: n, id: id,
-		ctrl: make(chan memFrame, 4096), data: make(chan memFrame, 4096),
+		ctrl: make(chan memFrame, memQueueFrames), data: make(chan memFrame, memQueueFrames),
 	}
 	n.nodes[id] = t
 	return t
@@ -54,10 +62,7 @@ func (n *MemoryNetwork) Cut(a, b coreconsensus.NodeID, cut bool) {
 // Isolate cuts, or restores, every link of id in both directions.
 func (n *MemoryNetwork) Isolate(id coreconsensus.NodeID, cut bool) {
 	n.mu.Lock()
-	ids := make([]coreconsensus.NodeID, 0, len(n.nodes))
-	for x := range n.nodes {
-		ids = append(ids, x)
-	}
+	ids := slices.Collect(maps.Keys(n.nodes))
 	n.mu.Unlock()
 	for _, x := range ids {
 		if x != id {
@@ -67,6 +72,8 @@ func (n *MemoryNetwork) Isolate(id coreconsensus.NodeID, cut bool) {
 	}
 }
 
+// route is the transport a frame from one node to another reaches, or nil
+// when that direction of the link is cut or the destination never joined.
 func (n *MemoryNetwork) route(from, to coreconsensus.NodeID) *MemoryTransport {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -102,9 +109,10 @@ type MemoryTransport struct {
 // Close starts a run of its own, so a Close never waits on — or stops — a
 // run a later Bind started.
 type memRun struct {
-	stop chan struct{}
-	done chan struct{}
-	once sync.Once
+	stop     chan struct{}
+	done     chan struct{}
+	once     sync.Once
+	doneOnce sync.Once
 }
 
 // end stops the run; a second call is a no-op.
@@ -182,7 +190,7 @@ func (t *MemoryTransport) Bind(group coreconsensus.GroupID,
 // control lane over the data lane, as the TCP transport does, and ends when
 // the stop channel of its run is closed by Close.
 func (t *MemoryTransport) run(r *memRun) {
-	defer close(r.done)
+	defer r.doneOnce.Do(func() { close(r.done) })
 	stop := r.stop
 	for {
 		var f memFrame
@@ -223,19 +231,12 @@ func (t *MemoryTransport) SetMembership(_ coreconsensus.GroupID, admitted []core
 
 // Join implements Joiner over the network, as the TCP transport does.
 func (t *MemoryTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig) (coreconsensus.Position, error) {
-	t.net.mu.Lock()
-	var targets []*MemoryTransport
-	for id, x := range t.net.nodes {
-		if id != t.id {
-			targets = append(targets, x)
-		}
-	}
-	t.net.mu.Unlock()
+	targets := t.net.othersThan(t.id)
 	req := coreconsensus.JoinRequest{
 		Cluster: cfg.Stamp.Log.Cluster, ID: cfg.Stamp.ID, Incarnation: cfg.Stamp.Incarnation,
 		Slot: cfg.Stamp.Slot, Address: cfg.Address,
 	}
-	var last error = origin(coreconsensus.JoinRefused, errs.String("why", "no member"))
+	last := origin(coreconsensus.JoinRefused, errs.String("why", "no member"))
 	for _, x := range targets {
 		x.mu.Lock()
 		j, jr := x.join, x.joinR
@@ -261,12 +262,23 @@ func (t *MemoryTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig
 	return coreconsensus.Position{}, last
 }
 
+// othersThan is every transport of the network but self's, in map order.
+func (n *MemoryNetwork) othersThan(self coreconsensus.NodeID) []*MemoryTransport {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	var targets []*MemoryTransport
+	for id, x := range n.nodes {
+		if id != self {
+			targets = append(targets, x)
+		}
+	}
+	return targets
+}
+
 // memSPKI is the stand-in key the memory transport reports for a node.
 func memSPKI(id coreconsensus.NodeID) [32]byte {
 	var k [32]byte
-	for i := 0; i < 8; i++ {
-		k[i] = byte(uint64(id) >> (8 * i))
-	}
+	binary.LittleEndian.PutUint64(k[:], uint64(id))
 	k[31] = 1
 	return k
 }

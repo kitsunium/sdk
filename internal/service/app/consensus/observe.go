@@ -2,6 +2,7 @@ package consensus
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -57,6 +58,9 @@ const (
 	mReloadFailures   = "consensus_tls_reload_failures_total"
 )
 
+// latencyBuckets are the histogram bounds, in seconds, of every latency
+// D13 records: half a millisecond to five seconds, dense below 100 ms where
+// a healthy commit lands, so a regression is visible before it is an outage.
 var latencyBuckets = []float64{0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5}
 
 // obs holds a node's instruments. Every method is safe on a nil Meter,
@@ -79,7 +83,9 @@ type obs struct {
 	seenTails, seenReloads int64
 }
 
-func newObs(cfg Config) *obs {
+// newObs binds a node's instruments to its configured Meter, Tracer and
+// Logger; every series carries the group, so two groups never share one.
+func newObs(cfg *Config) *obs {
 	return &obs{
 		meter: cfg.Meter, tracer: cfg.Tracer, log: cfg.Logger,
 		group: coreotel.Int64("group", int64(cfg.Group)),
@@ -87,14 +93,26 @@ func newObs(cfg Config) *obs {
 	}
 }
 
+// key is the cache key of one series: the name and its attributes in call
+// order. A bare name is its own key, so the unlabelled series, the common
+// case, costs no allocation.
 func key(name string, attrs []coreotel.AttrValue) string {
-	k := name
-	for _, a := range attrs {
-		k += "|" + a.Key + "=" + a.Str()
+	if len(attrs) == 0 {
+		return name
 	}
-	return k
+	var k strings.Builder
+	k.WriteString(name)
+	for _, a := range attrs {
+		k.WriteString("|")
+		k.WriteString(a.Key)
+		k.WriteString("=")
+		k.WriteString(a.Str())
+	}
+	return k.String()
 }
 
+// setGauge sets a gauge series, creating it on first use; a nil Meter makes
+// it a no-op.
 func (o *obs) setGauge(name string, v float64, attrs ...coreotel.AttrValue) {
 	if o.meter == nil {
 		return
@@ -110,6 +128,8 @@ func (o *obs) setGauge(name string, v float64, attrs ...coreotel.AttrValue) {
 	g.Set(v)
 }
 
+// inc adds one to a counter series, creating it on first use; a nil Meter
+// makes it a no-op.
 func (o *obs) inc(name string, attrs ...coreotel.AttrValue) {
 	if o.meter == nil {
 		return
@@ -142,6 +162,9 @@ func (o *obs) addTo(name string, seen *int64, total int64) {
 	*seen = total
 }
 
+// record adds one observation to a histogram series, creating it on first
+// use with byte-scale buckets for the size metrics and latency buckets for
+// the rest; a nil Meter makes it a no-op.
 func (o *obs) record(name string, v float64, attrs ...coreotel.AttrValue) {
 	if o.meter == nil {
 		return
@@ -161,22 +184,26 @@ func (o *obs) record(name string, v float64, attrs ...coreotel.AttrValue) {
 	h.Record(v)
 }
 
+// info logs at Info, without building the record when the level is off.
 func (o *obs) info(msg string, attrs ...corelogger.AttrValue) {
 	if o.log != nil && o.log.Enabled(context.Background(), level.Info) {
 		o.log.Log(context.Background(), level.Info, msg, attrs...)
 	}
 }
 
+// warn logs at Warn, without building the record when the level is off.
 func (o *obs) warn(msg string, attrs ...corelogger.AttrValue) {
 	if o.log != nil && o.log.Enabled(context.Background(), level.Warn) {
 		o.log.Log(context.Background(), level.Warn, msg, attrs...)
 	}
 }
 
+// lattr is an unsigned log attribute.
 func lattr(k string, v uint64) corelogger.AttrValue {
 	return corelogger.AttrValue{Key: k, Value: corelogger.Uint64Value(v)}
 }
 
+// lstr is a string log attribute.
 func lstr(k, v string) corelogger.AttrValue {
 	return corelogger.AttrValue{Key: k, Value: corelogger.StringValue(v)}
 }
@@ -191,12 +218,14 @@ func (o *obs) span(ctx context.Context, name string) coretrace.Span {
 	return s
 }
 
+// spanEvent records an event on a span that may be nil (no Tracer).
 func spanEvent(s coretrace.Span, name string, attrs ...coreotel.AttrValue) {
 	if s != nil {
 		s.AddEvent(name, attrs...)
 	}
 }
 
+// spanEnd ends a span that may be nil, marking it failed when err is set.
 func spanEnd(s coretrace.Span, err error) {
 	if s == nil {
 		return
@@ -207,6 +236,9 @@ func spanEnd(s coretrace.Span, err error) {
 	s.End()
 }
 
+// codeAttr is the attribute a failure is counted under: the error's reason,
+// or its dotted-quad code when it has none, so the series stays bounded by
+// the code space rather than by the messages.
 func codeAttr(err error) coreotel.AttrValue {
 	c, _ := errs.CodeOf(err)
 	r, _ := errs.ReasonOf(err)
@@ -236,15 +268,22 @@ func (n *Node) observeStatus(old, cur *coreconsensus.Status) {
 	o.setGauge(mClusterVersion, float64(cur.Versions.Cluster))
 	o.setGauge(mProtocolVersion, float64(cur.Versions.ProtocolMax))
 	if old == nil || old.Leader != cur.Leader || old.Term != cur.Term || old.Role != cur.Role {
-		if old != nil && old.Leader != cur.Leader {
-			o.inc(mLeaderChanges)
-		}
-		if cur.Role == coreconsensus.RolePreCandidate || cur.Role == coreconsensus.RoleCandidate {
-			o.inc(mElectionsStarted)
-		}
-		o.info("consensus: role or term changed", lstr("role", cur.Role.String()), lattr("term", cur.Term),
-			lattr("leader", uint64(cur.Leader)))
+		o.observeRoleChange(old, cur)
 	}
+}
+
+// observeRoleChange counts a leader change and an election start, and logs
+// the new role and term; it runs only on a turn where one of them moved, so
+// a stable leader logs nothing.
+func (o *obs) observeRoleChange(old, cur *coreconsensus.Status) {
+	if old != nil && old.Leader != cur.Leader {
+		o.inc(mLeaderChanges)
+	}
+	if cur.Role == coreconsensus.RolePreCandidate || cur.Role == coreconsensus.RoleCandidate {
+		o.inc(mElectionsStarted)
+	}
+	o.info("consensus: role or term changed", lstr("role", cur.Role.String()), lattr("term", cur.Term),
+		lattr("leader", uint64(cur.Leader)))
 }
 
 // observePeers publishes the leader's per-peer gauges and the failure
@@ -294,7 +333,9 @@ func (n *Node) observeResources() {
 	}
 	o.lastRes = now
 	o.setGauge(mLogQuota, float64(n.cfg.MaxLogBytes))
-	if ls, ok := n.cfg.Log.(interface{ logStats() (int64, int64, int64) }); ok {
+	if ls, ok := n.cfg.Log.(interface {
+		logStats() (bytes, free, tails int64)
+	}); ok {
 		b, free, tails := ls.logStats()
 		o.setGauge(mLogBytes, float64(b))
 		if free >= 0 {

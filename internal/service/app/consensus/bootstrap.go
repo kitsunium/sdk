@@ -10,8 +10,13 @@ import (
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/service/app/consensus/raft"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
+
+// maxSlotLen bounds a slot name, which the stamp stores behind a one-byte
+// length.
+const maxSlotLen int = 32
 
 // drawID draws a random NodeID, never 0.
 func drawID() coreconsensus.NodeID {
@@ -24,6 +29,9 @@ func drawID() coreconsensus.NodeID {
 	}
 }
 
+// drawIncarnation draws a random incarnation, which tells two lifetimes of
+// one slot apart. crypto/rand.Read never returns an error on this toolchain
+// (it aborts the process instead), so the discarded result hides nothing.
 func drawIncarnation() coreconsensus.Incarnation {
 	var inc coreconsensus.Incarnation
 	_, _ = rand.Read(inc[:])
@@ -74,11 +82,14 @@ func RedrawLog(log coreconsensus.LogStore) (coreconsensus.NodeID, error) {
 	return st.ID, nil
 }
 
+// validSlot admits a slot name of 1 to maxSlotLen bytes of [a-z0-9-]: it
+// is written in the stamp and in a certificate's URI SAN, so nothing a
+// filesystem, a URL or a log line could misread gets in.
 func validSlot(s string) bool {
-	if len(s) == 0 || len(s) > 32 {
+	if len(s) == 0 || len(s) > maxSlotLen {
 		return false
 	}
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		c := s[i]
 		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
 			return false
@@ -119,15 +130,45 @@ func Bootstrap(_ context.Context, cfg Config, members []coreconsensus.Member) er
 	if cfg.Log == nil {
 		return misconfigured("Log", "nil")
 	}
+	if err := checkFounders(members, cfg.MinVoters); err != nil {
+		return err
+	}
+	stamp, err := founderStamp(&cfg)
+	if err != nil {
+		return err
+	}
+	if err := checkSelfListed(members, &stamp); err != nil {
+		return err
+	}
+	digest := foundingDigest(members)
+	if done, err := advanceFounding(cfg.Log, &stamp, digest); done || err != nil {
+		return err
+	}
+	if err := writeFoundingEntry(&cfg, members); err != nil {
+		return err
+	}
+	stamp.State = coreconsensus.StampMember
+	if err := cfg.Log.WriteStamp(stamp); err != nil {
+		return storageFailed("stamp", err)
+	}
+	return nil
+}
+
+// checkFounders refuses a founding list no cluster may start from: empty,
+// with a zero or repeated id, with a member that carries no SPKI pin, with
+// two members pinned to one key, or with fewer voters than MinVoters. It reads nothing from disk, so a bad
+// list is refused before the stamp is touched.
+func checkFounders(members []coreconsensus.Member, minVoters int) error {
 	if len(members) == 0 {
 		return origin(coreconsensus.BootstrapRefused, errs.String("why", "no member"))
 	}
+	var noPin [32]byte
 	seen := map[coreconsensus.NodeID]bool{}
 	for _, m := range members {
 		if m.ID == 0 || seen[m.ID] {
 			return origin(coreconsensus.BootstrapRefused, errs.String("why", "a zero or repeated id"))
 		}
-		if m.SPKI == ([32]byte{}) {
+		if m.SPKI == noPin {
 			// An empty pin is refused: no member is admitted on its slot
 			// alone (R9-04).
 			return origin(coreconsensus.BootstrapRefused, errs.String("why", "a member without an SPKI pin"))
@@ -137,82 +178,112 @@ func Bootstrap(_ context.Context, cfg Config, members []coreconsensus.Member) er
 	if sharedKey(members) {
 		return origin(coreconsensus.BootstrapRefused, errs.String("why", "two members under one key"))
 	}
+	if minVoters > countVoters(members) {
+		return misconfigured("MinVoters", "above the founding voter count")
+	}
+	return nil
+}
+
+// countVoters is how many members of a list vote.
+func countVoters(members []coreconsensus.Member) int {
 	voters := 0
 	for _, m := range members {
 		if m.Voter {
 			voters++
 		}
 	}
-	if cfg.MinVoters > voters {
-		return misconfigured("MinVoters", "above the founding voter count")
-	}
-	st, err := cfg.Log.Stamp()
+	return voters
+}
+
+// founderStamp reads the stamp Bootstrap advances, refusing a log that was
+// never initialised or that belongs to another cluster or node.
+func founderStamp(cfg *Config) (coreconsensus.Stamp, error) {
+	stamp, err := cfg.Log.Stamp()
 	if err != nil {
-		return storageFailed("stamp", err)
+		return stamp, storageFailed("stamp", err)
 	}
-	if st.State == 0 {
-		return origin(coreconsensus.BootstrapRefused, errs.String("why", "unstamped: Init first"))
+	if stamp.State == 0 {
+		return stamp, origin(coreconsensus.BootstrapRefused, errs.String("why", "unstamped: Init first"))
 	}
-	if st.Log.Cluster != cfg.Cluster || (cfg.ID != 0 && cfg.ID != st.ID) {
-		return origin(coreconsensus.DataDirMismatch, errs.String("why", "cluster or node id"))
+	if stamp.Log.Cluster != cfg.Cluster || (cfg.ID != 0 && cfg.ID != stamp.ID) {
+		return stamp, origin(coreconsensus.DataDirMismatch, errs.String("why", "cluster or node id"))
 	}
-	self := slices.IndexFunc(members, func(m coreconsensus.Member) bool { return m.ID == st.ID })
-	if self < 0 || members[self].Incarnation != st.Incarnation || members[self].Slot != st.Slot {
+	return stamp, nil
+}
+
+// checkSelfListed refuses a founding list that does not name this node with
+// the incarnation and slot it was stamped with: every founder must run
+// Bootstrap with the same list, and that list must include itself.
+func checkSelfListed(members []coreconsensus.Member, stamp *coreconsensus.Stamp) error {
+	self := slices.IndexFunc(members, func(m coreconsensus.Member) bool { return m.ID == stamp.ID })
+	if self < 0 || members[self].Incarnation != stamp.Incarnation || members[self].Slot != stamp.Slot {
 		return origin(coreconsensus.BootstrapRefused, errs.String("why", "this node is not in the list as stamped"))
 	}
-	digest := foundingDigest(members)
-	switch st.State {
+	return nil
+}
+
+// advanceFounding runs the stamp phase of Bootstrap. It reports done when
+// the node is already a member founded with this list, refuses a list that
+// differs from the one already recorded, and moves an empty joining log to
+// bootstrap-pending with the list's digest. A stamp state it does not
+// define is refused, never founded.
+func advanceFounding(log coreconsensus.LogStore, stamp *coreconsensus.Stamp, digest [32]byte) (bool, error) {
+	switch stamp.State {
 	case coreconsensus.StampMember:
-		if st.Founding == digest {
-			return nil // already founded with this list
+		if stamp.Founding == digest {
+			return true, nil // already founded with this list
 		}
-		return origin(coreconsensus.BootstrapRefused, errs.String("why", "already founded with another list"))
+		return false, origin(coreconsensus.BootstrapRefused, errs.String("why", "already founded with another list"))
 	case coreconsensus.StampBootstrapPending:
-		if st.Founding != digest {
-			return origin(coreconsensus.BootstrapRefused, errs.String("why", "bootstrap pending with another list"))
+		if stamp.Founding != digest {
+			return false, origin(coreconsensus.BootstrapRefused, errs.String("why", "bootstrap pending with another list"))
 		}
 	case coreconsensus.StampJoining:
-		if first, last := cfg.Log.Bounds(); last >= first {
-			return origin(coreconsensus.BootstrapRefused, errs.String("why", "the log already holds entries"))
+		if first, last := log.Bounds(); last >= first {
+			return false, origin(coreconsensus.BootstrapRefused, errs.String("why", "the log already holds entries"))
 		}
-		st.State, st.Founding = coreconsensus.StampBootstrapPending, digest
-		if err := cfg.Log.WriteStamp(st); err != nil {
-			return storageFailed("stamp", err)
+		stamp.State, stamp.Founding = coreconsensus.StampBootstrapPending, digest
+		if err := log.WriteStamp(*stamp); err != nil {
+			return false, storageFailed("stamp", err)
 		}
 	default:
-		// State 0 was refused above; any other value is one this version
-		// does not define, and a directory it cannot read the state of is
-		// never founded (a LogStore other than the shipped one may hand back
-		// any byte).
-		return origin(coreconsensus.DataDirMismatch, errs.String("why", "unknown stamp state"))
+		// State 0 was refused by founderStamp; any other value is one this
+		// version does not define, and a directory it cannot read the state
+		// of is never founded (a LogStore other than the shipped one may
+		// hand back any byte).
+		return false, origin(coreconsensus.DataDirMismatch, errs.String("why", "unknown stamp state"))
 	}
-	if first, last := cfg.Log.Bounds(); last < first {
-		conf := coreconsensus.Membership{Members: byID(members)}
-		for i := range conf.Members {
-			conf.Members[i].Joining = false
-		}
-		timing := cfg.InitialTiming
-		if timing.HeartbeatInterval == 0 {
-			timing = TimingDefaults()
-		}
-		timing.Generation = 1
-		data := wire.AppendAdmin(nil, &wire.Admin{Operator: "bootstrap", Change: wire.ChangeFounding, Membership: conf, Contract: timing})
-		e := coreconsensus.Entry{
-			Position: coreconsensus.Position{Term: 1, Index: 1}, Kind: coreconsensus.EntryMembership,
-			BodySum: wire.BodySum(data), Data: data,
-		}
-		e.ChainSum = wire.ChainSum(0, &e)
-		hs := coreconsensus.HardState{Term: 1, Commit: 1}
-		if err := cfg.Log.Append([]coreconsensus.Entry{e}, &hs); err != nil {
-			return storageFailed("append", err)
-		}
-		if err := cfg.Log.Sync(); err != nil {
-			return storageFailed("sync", err)
-		}
+	return false, nil
+}
+
+// writeFoundingEntry writes the founding configuration as entry 1, at term
+// 1 and committed, then syncs it; a log that already holds an entry is left
+// alone, which is what makes a rerun idempotent.
+func writeFoundingEntry(cfg *Config, members []coreconsensus.Member) error {
+	if first, last := cfg.Log.Bounds(); last >= first {
+		return nil
 	}
-	st.State = coreconsensus.StampMember
-	if err := cfg.Log.WriteStamp(st); err != nil {
-		return storageFailed("stamp", err)
+	conf := coreconsensus.Membership{Members: byID(members)}
+	for i := range conf.Members {
+		conf.Members[i].Joining = false
+	}
+	timing := cfg.InitialTiming
+	if timing.HeartbeatInterval == 0 {
+		timing = TimingDefaults()
+	}
+	timing.Generation = 1
+	data := wire.AppendAdmin(nil, &wire.Admin{Operator: "bootstrap", Change: wire.ChangeFounding, Membership: conf, Contract: timing})
+	e := coreconsensus.Entry{
+		Position: coreconsensus.Position{Term: 1, Index: 1}, Kind: coreconsensus.EntryMembership,
+		BodySum: wire.BodySum(data), Data: data,
+	}
+	e.ChainSum = wire.ChainSum(0, &e)
+	hs := new(coreconsensus.HardState{Term: 1, Commit: 1})
+	if err := cfg.Log.Append([]coreconsensus.Entry{e}, hs); err != nil {
+		return storageFailed("append", err)
+	}
+	if err := cfg.Log.Sync(); err != nil {
+		return storageFailed("sync", err)
 	}
 	return nil
 }
@@ -294,39 +365,58 @@ func (n *Node) Health() Health {
 	}
 	h.HasLeader = st.Leader != 0 && !h.Stopped
 	if !h.Stopped {
-		n.exec(func() {
-			now := n.clk.Now()
-			h.QuorumReachable = n.r.QuorumActive(now)
-			h.FailureTolerance = n.r.FailureTolerance(now)
-			h.ChainRefusalLeader, h.ChainRefusalIndex, h.ChainRefusals = n.r.ChainRefusal()
-			last := n.r.Status().Last
-			window := n.r.Status().Timing.ElectionTimeoutMin
-			for _, p := range n.r.PeerStats() {
-				ph := PeerHealth{ID: p.ID, Voter: p.Voter, Match: p.Match, Inflight: p.Inflight, Snapshot: p.Snapshot, LastContact: -1}
-				if last > p.Match {
-					ph.Lag = last - p.Match
-				}
-				if p.Heard {
-					ph.LastContact = now.Sub(p.LastHeard)
-				}
-				u, reported := n.unreachableAt[p.ID]
-				ph.Unreachable = !p.Heard || ph.LastContact >= window || (reported && u.After(p.LastHeard))
-				h.Peers = append(h.Peers, ph)
-			}
-		})
+		n.exec(func() { n.loopHealth(&h) })
 	}
-	h.Ready = !h.Stopped && h.HasLeader && st.Applied >= st.Commit &&
-		(h.ChainRefusals == 0 || h.ChainRefusalLeader != st.Leader)
+	h.Ready = isReady(&h, &st)
 	return h
+}
+
+// isReady is the verdict's Ready: running, a leader known, everything known
+// committed applied, and not refusing the current leader's chain (D4).
+func isReady(h *Health, st *coreconsensus.Status) bool {
+	return !h.Stopped && h.HasLeader && st.Applied >= st.Commit &&
+		(h.ChainRefusals == 0 || h.ChainRefusalLeader != st.Leader)
+}
+
+// loopHealth fills the part of a verdict only the event loop can read: the
+// quorum, the failure tolerance, the chain refusal and, on a leader, every
+// peer's view. It runs on the loop, through exec.
+func (n *Node) loopHealth(h *Health) {
+	now := n.clk.Now()
+	h.QuorumReachable = n.r.QuorumActive(now)
+	h.FailureTolerance = n.r.FailureTolerance(now)
+	h.ChainRefusalLeader, h.ChainRefusalIndex, h.ChainRefusals = n.r.ChainRefusal()
+	last := n.r.Status().Last
+	window := n.r.Status().Timing.ElectionTimeoutMin
+	for _, p := range n.r.PeerStats() {
+		h.Peers = append(h.Peers, n.peerHealth(&p, now, last, window))
+	}
+}
+
+// peerHealth is one peer's line of a verdict. A peer is unreachable when it
+// never answered this term, when its last answer is older than the minimum
+// election timeout, or when the transport reported it unreachable since.
+func (n *Node) peerHealth(p *raft.PeerStat, now time.Time, last uint64, window time.Duration) PeerHealth {
+	ph := PeerHealth{ID: p.ID, Voter: p.Voter, Match: p.Match, Inflight: p.Inflight, Snapshot: p.Snapshot, LastContact: -1}
+	if last > p.Match {
+		ph.Lag = last - p.Match
+	}
+	if p.Heard {
+		ph.LastContact = now.Sub(p.LastHeard)
+	}
+	u, reported := n.unreachableAt[p.ID]
+	ph.Unreachable = !p.Heard || ph.LastContact >= window || (reported && u.After(p.LastHeard))
+	return ph
 }
 
 // sharedKey reports whether two members are pinned to one key. The
 // transport admits a connection by its key: two members under one key
 // could speak as each other (review M5).
 func sharedKey(members []coreconsensus.Member) bool {
+	var noPin [32]byte
 	seen := make(map[[32]byte]bool, len(members))
 	for _, m := range members {
-		if m.SPKI == ([32]byte{}) {
+		if m.SPKI == noPin {
 			continue
 		}
 		if seen[m.SPKI] {

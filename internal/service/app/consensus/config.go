@@ -106,23 +106,29 @@ func TimingDefaults() coreconsensus.TimingContract {
 	}
 }
 
+// misconfigured is the refusal of a Config the node cannot run on: it names
+// the field and the reason, never the value the caller supplied.
 func misconfigured(field, why string) error {
 	return errs.Wrap(coreconsensus.ConsensusMisconfigured, errs.WrapParams{},
 		errs.String("field", field), errs.String("why", why))
 }
 
+// clampInt replaces a non-positive bound with its default: a zero bound is
+// "unset", never "unlimited" (ADR 0031, clamp half).
 func clampInt(v *int, d int) {
 	if *v <= 0 {
 		*v = d
 	}
 }
 
+// clampInt64 is clampInt for the byte budgets held as int64.
 func clampInt64(v *int64, d int64) {
 	if *v <= 0 {
 		*v = d
 	}
 }
 
+// clampU64 is clampInt for the unsigned counts, where only zero is unset.
 func clampU64(v *uint64, d uint64) {
 	if *v == 0 {
 		*v = d
@@ -130,28 +136,27 @@ func clampU64(v *uint64, d uint64) {
 }
 
 // withDefaults applies the clamp half of ADR 0031, then the cross-field
-// refusals (R2-14).
-func (c Config) withDefaults() (Config, error) {
+// refusals (R2-14), to a copy of cfg: the caller's Config is never changed.
+func withDefaults(cfg *Config) (Config, error) {
+	c := *cfg
+	clampDefaults(&c)
+	if err := refuseIncoherent(&c); err != nil {
+		return c, err
+	}
+	return c, refuseDurability(&c)
+}
+
+// clampDefaults fills every unset field with its default; it refuses
+// nothing, so the refusals that follow judge the configuration the node
+// would actually run on.
+func clampDefaults(c *Config) {
 	if c.Group == 0 {
 		c.Group = 1
 	}
 	if c.Clock == nil {
 		c.Clock = clock.System
 	}
-	t := &c.InitialTiming
-	def := TimingDefaults()
-	if t.Generation == 0 {
-		t.Generation = 1
-	}
-	if t.HeartbeatInterval <= 0 {
-		t.HeartbeatInterval = def.HeartbeatInterval
-	}
-	if t.ElectionTimeoutMin <= 0 {
-		t.ElectionTimeoutMin = def.ElectionTimeoutMin
-	}
-	if t.ElectionTimeoutMax <= 0 {
-		t.ElectionTimeoutMax = max(def.ElectionTimeoutMax, 2*t.ElectionTimeoutMin)
-	}
+	clampTiming(&c.InitialTiming)
 	clampInt(&c.MaxBatchBytes, 1<<20)
 	clampInt(&c.MaxInflight, 64)
 	clampInt(&c.MaxInflightBytes, 8<<20)
@@ -171,52 +176,114 @@ func (c Config) withDefaults() (Config, error) {
 	if c.SnapshotCodec == nil {
 		c.SnapshotCodec = defaultCodec()
 	}
+}
+
+// clampTiming fills the unset fields of the proposed timing contract from
+// D5's defaults; an unset maximum is at least twice the minimum, so a
+// caller who raised only the minimum still gets a valid window.
+func clampTiming(timing *coreconsensus.TimingContract) {
+	def := TimingDefaults()
+	if timing.Generation == 0 {
+		timing.Generation = 1
+	}
+	if timing.HeartbeatInterval <= 0 {
+		timing.HeartbeatInterval = def.HeartbeatInterval
+	}
+	if timing.ElectionTimeoutMin <= 0 {
+		timing.ElectionTimeoutMin = def.ElectionTimeoutMin
+	}
+	if timing.ElectionTimeoutMax <= 0 {
+		timing.ElectionTimeoutMax = max(def.ElectionTimeoutMax, 2*timing.ElectionTimeoutMin)
+	}
+}
+
+// refuseIncoherent returns the first cross-field refusal (R2-14), always in
+// the same order (the ports, then the timing, then the byte bounds), so a
+// caller fixing one at a time sees a stable sequence.
+func refuseIncoherent(c *Config) error {
+	if err := refuseNilPorts(c); err != nil {
+		return err
+	}
+	if err := refuseTiming(c); err != nil {
+		return err
+	}
+	return refuseBounds(c)
+}
+
+// refuseNilPorts refuses a node missing one of the four ports it cannot
+// run without.
+func refuseNilPorts(c *Config) error {
 	switch {
 	case c.Machine == nil:
-		return c, misconfigured("Machine", "nil")
+		return misconfigured("Machine", "nil")
 	case c.Log == nil:
-		return c, misconfigured("Log", "nil")
+		return misconfigured("Log", "nil")
 	case c.Snapshots == nil:
-		return c, misconfigured("Snapshots", "nil")
+		return misconfigured("Snapshots", "nil")
 	case c.Transport == nil:
-		return c, misconfigured("Transport", "nil")
-	case t.HeartbeatInterval*5 > t.ElectionTimeoutMin:
-		return c, misconfigured("InitialTiming.HeartbeatInterval", "not below a fifth of ElectionTimeoutMin")
-	case t.ElectionTimeoutMax <= t.ElectionTimeoutMin:
-		return c, misconfigured("InitialTiming.ElectionTimeoutMax", "not above ElectionTimeoutMin")
-	case c.Reads == ReadLease && (math.IsNaN(t.MaxClockDrift) || t.MaxClockDrift <= 0 || t.MaxClockDrift >= 1):
-		return c, misconfigured("InitialTiming.MaxClockDrift", "ReadLease needs 0 < drift < 1")
+		return misconfigured("Transport", "nil")
+	}
+	return nil
+}
+
+// refuseTiming refuses a timing contract under which elections would fire
+// between heartbeats, and a lease read without a bounded clock drift (D9).
+func refuseTiming(c *Config) error {
+	timing := &c.InitialTiming
+	switch {
+	case timing.HeartbeatInterval*5 > timing.ElectionTimeoutMin:
+		return misconfigured("InitialTiming.HeartbeatInterval", "not below a fifth of ElectionTimeoutMin")
+	case timing.ElectionTimeoutMax <= timing.ElectionTimeoutMin:
+		return misconfigured("InitialTiming.ElectionTimeoutMax", "not above ElectionTimeoutMin")
+	case c.Reads == ReadLease && (math.IsNaN(timing.MaxClockDrift) || timing.MaxClockDrift <= 0 || timing.MaxClockDrift >= 1):
+		return misconfigured("InitialTiming.MaxClockDrift", "ReadLease needs 0 < drift < 1")
+	}
+	return nil
+}
+
+// refuseBounds refuses byte bounds that contradict each other, a batch the
+// transport cannot carry, and the two ceilings that have no safe default
+// (D14).
+func refuseBounds(c *Config) error {
+	switch {
 	case c.MaxInflightBytes < c.MaxBatchBytes:
-		return c, misconfigured("MaxInflightBytes", "below MaxBatchBytes")
+		return misconfigured("MaxInflightBytes", "below MaxBatchBytes")
 	case c.MaxEntryBytes > c.MaxBatchBytes:
-		return c, misconfigured("MaxEntryBytes", "above MaxBatchBytes")
+		return misconfigured("MaxEntryBytes", "above MaxBatchBytes")
 	case framesBelow(c.Transport, c.MaxBatchBytes+batchFrameOverhead):
 		// A batch the transport cannot carry stalls every follower it is
 		// sent to (review M2).
-		return c, misconfigured("MaxBatchBytes", "above the transport's MaxFrameBytes")
+		return misconfigured("MaxBatchBytes", "above the transport's MaxFrameBytes")
 	case c.MaxSnapshotBytes <= 0:
-		return c, misconfigured("MaxSnapshotBytes", "zero")
+		return misconfigured("MaxSnapshotBytes", "zero")
 	case c.MaxSnapshotBytes < c.SnapshotEveryBytes:
-		return c, misconfigured("MaxSnapshotBytes", "below SnapshotEveryBytes")
+		return misconfigured("MaxSnapshotBytes", "below SnapshotEveryBytes")
 	case c.MaxLogBytes <= 0:
-		return c, misconfigured("MaxLogBytes", "zero")
+		return misconfigured("MaxLogBytes", "zero")
 	case c.LogReserveBytes >= c.MaxLogBytes:
-		return c, misconfigured("LogReserveBytes", "not below MaxLogBytes")
+		return misconfigured("LogReserveBytes", "not below MaxLogBytes")
 	}
+	return nil
+}
+
+// refuseDurability refuses a Durability that disagrees with the machine's
+// siblings, and the unset zero (D3): guessing it would either lose state at
+// restart or replay entries a durable machine already applied.
+func refuseDurability(c *Config) error {
 	_, durable := c.Machine.(coreconsensus.DurableStateMachine)
 	switch c.Durability {
 	case DurabilityVolatile:
 		if durable {
-			return c, misconfigured("Durability", "volatile, but the machine is a DurableStateMachine")
+			return misconfigured("Durability", "volatile, but the machine is a DurableStateMachine")
 		}
 	case DurabilityDurable:
 		if !durable {
-			return c, misconfigured("Durability", "durable, but the machine has no AppliedPosition")
+			return misconfigured("Durability", "durable, but the machine has no AppliedPosition")
 		}
 	default:
-		return c, misconfigured("Durability", "unset")
+		return misconfigured("Durability", "unset")
 	}
-	return c, nil
+	return nil
 }
 
 // MemoryBudget is the node's memory budget with two peers, the sum of its
@@ -225,6 +292,8 @@ func (c Config) MemoryBudget(peers int) int64 {
 	return c.MaxPendingBytes + c.MaxApplyLagBytes + c.RecentEntriesBytes + int64(peers)*int64(c.MaxInflightBytes)
 }
 
+// defaultCodec is flate, whose registered singleton is known to bound its
+// decompression, so the assertion cannot fail.
 func defaultCodec() coretransform.BoundedDecompressor {
 	return svctransform.FlateCompressor.(coretransform.BoundedDecompressor)
 }

@@ -2,6 +2,7 @@ package consensus
 
 import (
 	"context"
+	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
 	coreotel "github.com/kitsunium/sdk/internal/core/observe/otel"
@@ -22,6 +23,11 @@ func (n *Node) Propose(ctx context.Context, data []byte) (coreconsensus.Token, a
 	return n.submit(ctx, e, false)
 }
 
+// submit hands an entry to the event loop and waits for its outcome. Before
+// the loop has it, a cancelled ctx or a stop answers with ctx.Err() or the
+// stop's reason; after it is appended, a cancelled ctx is OUTCOME_UNKNOWN,
+// because the entry may still commit. An admin entry bypasses the pending
+// and apply-lag budgets, so an operator can always reach a saturated node.
 func (n *Node) submit(ctx context.Context, e coreconsensus.Entry, admin bool) (coreconsensus.Token, any, error) {
 	if err := ctx.Err(); err != nil {
 		return coreconsensus.Token{}, nil, err
@@ -55,16 +61,23 @@ func (n *Node) submit(ctx context.Context, e coreconsensus.Entry, admin bool) (c
 	case <-n.stopc:
 		return finish(propResult{err: n.stoppedErr()})
 	}
+	return finish(awaitProposal(ctx, p))
+}
+
+// awaitProposal waits for the loop's answer to a proposal it already holds.
+// A ctx that ends first is ctx.Err() only while the proposal is provably
+// unsent; once it may have been appended the answer is OUTCOME_UNKNOWN.
+func awaitProposal(ctx context.Context, p *proposal) propResult {
 	select {
 	case r := <-p.done:
-		return finish(r)
+		return r
 	case <-ctx.Done():
 		if p.stage.Load() == stageUnsent {
 			// Ended before the append: ctx.Err(), as everywhere in the SDK.
-			return finish(propResult{err: ctx.Err()})
+			return propResult{err: ctx.Err()}
 		}
-		return finish(propResult{err: origin(coreconsensus.OutcomeUnknown,
-			errs.String("why", "context ended after the append"), errs.String("cause", ctx.Err().Error()))})
+		return propResult{err: origin(coreconsensus.OutcomeUnknown,
+			errs.String("why", "context ended after the append"), errs.String("cause", ctx.Err().Error()))}
 	}
 }
 
@@ -82,45 +95,72 @@ func (n *Node) handleProposals(ps []*proposal) {
 	var batch []*proposal
 	var ents []coreconsensus.Entry
 	flush := func() {
-		if len(batch) == 0 {
-			return
-		}
-		pos, code := n.r.Propose(now, ents)
-		for i, p := range batch {
-			if code != 0 {
-				p.done <- propResult{err: origin(sentinelOf(code), errs.String("leader", st.Lead.String()))}
-				continue
-			}
-			n.appended(p, pos[i], true)
-		}
+		n.proposeBatch(now, st.Lead, batch, ents)
 		batch, ents = batch[:0], ents[:0]
 	}
 	for _, p := range ps {
-		if !p.admin && n.pendingBytes.Load()+int64(len(p.entry.Data)) > n.cfg.MaxPendingBytes {
-			// Refused before anything is appended (D6, from IWFS).
-			p.done <- propResult{err: origin(coreconsensus.Overloaded, errs.String("why", "pending bytes"))}
-			continue
-		}
-		if !p.admin && n.applyLag.Load() >= n.cfg.MaxApplyLagBytes {
-			// Apply backpressure: no new proposal until apply catches up
-			// (D6, R1-14).
-			p.done <- propResult{err: origin(coreconsensus.Overloaded, errs.String("why", "apply lag"))}
+		if n.refuseOverload(p) {
 			continue
 		}
 		if p.admin {
 			flush()
-			pos, code := n.r.Propose(now, []coreconsensus.Entry{p.entry})
-			if code != 0 {
-				p.done <- propResult{err: origin(sentinelOf(code))}
-				continue
-			}
-			n.appended(p, pos[0], true)
+			n.proposeAlone(now, p)
 			continue
 		}
 		batch = append(batch, p)
 		ents = append(ents, p.entry)
 	}
 	flush()
+}
+
+// proposeBatch appends a batch of ordinary proposals as one Propose and
+// registers each at its position, or answers every one with raft's refusal
+// when the batch as a whole is refused; an empty batch does nothing.
+func (n *Node) proposeBatch(now time.Time, lead coreconsensus.NodeID, batch []*proposal, ents []coreconsensus.Entry) {
+	if len(batch) == 0 {
+		return
+	}
+	pos, code := n.r.Propose(now, ents)
+	for i, p := range batch {
+		if code != 0 {
+			p.done <- propResult{err: origin(sentinelOf(code), errs.String("leader", lead.String()))}
+			continue
+		}
+		n.appended(p, pos[i], true)
+	}
+}
+
+// refuseOverload answers an ordinary proposal with OVERLOADED, before
+// anything is appended, when the pending bytes or the apply lag are over
+// budget, and reports whether it did. An admin proposal is never refused
+// here, so the operator can still act on an overloaded node.
+func (n *Node) refuseOverload(p *proposal) bool {
+	if p.admin {
+		return false
+	}
+	if n.pendingBytes.Load()+int64(len(p.entry.Data)) > n.cfg.MaxPendingBytes {
+		// Refused before anything is appended (D6, from IWFS).
+		p.done <- propResult{err: origin(coreconsensus.Overloaded, errs.String("why", "pending bytes"))}
+		return true
+	}
+	if n.applyLag.Load() >= n.cfg.MaxApplyLagBytes {
+		// Apply backpressure: no new proposal until apply catches up
+		// (D6, R1-14).
+		p.done <- propResult{err: origin(coreconsensus.Overloaded, errs.String("why", "apply lag"))}
+		return true
+	}
+	return false
+}
+
+// proposeAlone appends one proposal as its own entry, outside any batch, as
+// an administrative entry must be, and answers it at once on a refusal.
+func (n *Node) proposeAlone(now time.Time, p *proposal) {
+	pos, code := n.r.Propose(now, []coreconsensus.Entry{p.entry})
+	if code != 0 {
+		p.done <- propResult{err: origin(sentinelOf(code))}
+		return
+	}
+	n.appended(p, pos[0], true)
 }
 
 // appended registers a proposal's waiter at its position.
@@ -279,6 +319,9 @@ func (n *Node) WaitApplied(ctx context.Context, t coreconsensus.Token) error {
 // ---- administration (D17): every operation takes its operator, can be
 // called on any node and writes an entry ----
 
+// admin validates the operator, then submits an administrative entry and
+// logs it at Warn with its outcome whatever that outcome is, so every
+// operator action leaves a trace (D8, D17).
 func (n *Node) admin(ctx context.Context, kind coreconsensus.EntryKind, a wire.Admin) error {
 	if !coreconsensus.Operator(a.Operator).Valid() {
 		return origin(coreconsensus.MembershipInvalid, errs.String("why", "operator"))
@@ -320,9 +363,10 @@ func (n *Node) Remove(ctx context.Context, op coreconsensus.Operator, id corecon
 
 // UpdateAddress changes where a member listens.
 func (n *Node) UpdateAddress(ctx context.Context, op coreconsensus.Operator, id coreconsensus.NodeID, addr string) error {
+	members := []coreconsensus.Member{{ID: id, Address: addr}}
 	return n.admin(ctx, coreconsensus.EntryMembership, wire.Admin{
 		Operator: string(op), Change: wire.ChangeUpdateAddress,
-		Target: id, Membership: coreconsensus.Membership{Members: []coreconsensus.Member{{ID: id, Address: addr}}},
+		Target: id, Membership: coreconsensus.Membership{Members: members},
 	})
 }
 
@@ -362,6 +406,10 @@ func (n *Node) TransferLeadership(ctx context.Context, op coreconsensus.Operator
 	return err
 }
 
+// transferLocal starts a leadership transfer on this node's own raft
+// instance, without writing an entry, and waits for the target to lead: the
+// hand-off Close and a leader's self-Remove use, where no operator entry is
+// owed and the node may be about to leave.
 func (n *Node) transferLocal(ctx context.Context, to coreconsensus.NodeID) error {
 	var code errs.Code
 	if !n.exec(func() {
@@ -376,6 +424,9 @@ func (n *Node) transferLocal(ctx context.Context, to coreconsensus.NodeID) error
 	return n.awaitLeader(ctx, to)
 }
 
+// awaitLeader waits until to is the leader the node observes. It fails with
+// TRANSFER_FAILED after twice the maximum election timeout, or when ctx
+// ends, and with the stop's reason when the node stops first.
 func (n *Node) awaitLeader(ctx context.Context, to coreconsensus.NodeID) error {
 	wctx, cancel := context.WithCancel(ctx)
 	defer cancel()
