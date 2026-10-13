@@ -1,11 +1,13 @@
 package tlsid
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -78,6 +80,8 @@ type Files struct {
 	Every time.Duration
 }
 
+// materialInvalid is the one refusal of unusable TLS material: it names the
+// field at fault and why, and never the material itself.
 func materialInvalid(field, why string) error {
 	return errs.Wrap(corenet.TLSMaterialInvalid, errs.WrapParams{}, errs.String("field", field), errs.String("why", why))
 }
@@ -132,17 +136,23 @@ func LoadReloadable(f Files) (*Identity, error) {
 	return id, nil
 }
 
+// sanOf flattens a certificate's URI and DNS SANs into one comparable
+// string, so a reload can refuse a renewal that names anything else.
 func sanOf(c *x509.Certificate) string {
-	s := ""
+	var b strings.Builder
 	for _, u := range c.URIs {
-		s += u.String() + " "
+		b.WriteString(u.String())
+		b.WriteByte(' ')
 	}
 	for _, d := range c.DNSNames {
-		s += d + " "
+		b.WriteString(d)
+		b.WriteByte(' ')
 	}
-	return s
+	return b.String()
 }
 
+// modTime is the newest modification time among files; a file that cannot
+// be stated does not count, so a transient absence never triggers a reload.
 func modTime(files ...string) time.Time {
 	var t time.Time
 	for _, f := range files {
@@ -153,6 +163,8 @@ func modTime(files ...string) time.Time {
 	return t
 }
 
+// readPair loads a certificate and its key and parses the leaf, refusing a
+// pair that does not match.
 func readPair(certFile, keyFile string) (*tls.Certificate, *x509.Certificate, error) {
 	c, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
@@ -211,9 +223,11 @@ func (id *Identity) reload() (*tls.Certificate, error) {
 	return id.cur, nil
 }
 
+// seen reports whether a roots file's bytes were already merged, so the
+// same file read again does not grow the pool.
 func seen(all [][]byte, b []byte) bool {
 	for _, x := range all {
-		if string(x) == string(b) {
+		if bytes.Equal(x, b) {
 			return true
 		}
 	}
@@ -275,6 +289,9 @@ func (id *Identity) verifyPeer(cs tls.ConnectionState, usage x509.ExtKeyUsage, c
 	return check(PeerIdentity{Leaf: leaf, Chain: chains[0], SPKI: SPKI(leaf), URIs: leaf.URIs, NotAfter: leaf.NotAfter})
 }
 
+// base is the configuration both ends share: TLS 1.3 only, no session
+// resumption, and the certificate asked of the identity at every handshake
+// so a reload is picked up without rebuilding the config.
 func (id *Identity) base() *tls.Config {
 	return &tls.Config{
 		MinVersion: tls.VersionTLS13,

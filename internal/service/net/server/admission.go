@@ -7,6 +7,16 @@ import (
 	"sync/atomic"
 )
 
+const (
+	// defaultPerAddress is the pre-handshake budget of one address (ADR
+	// 0174): a handful of concurrent handshakes, small enough that one
+	// address cannot occupy the listener with connections that never finish.
+	defaultPerAddress int = 4
+	// defaultReserved is twice the ordinary budget, so a declared address
+	// keeps headroom while a flood from elsewhere spends its own.
+	defaultReserved int = 8
+)
+
 // AdmissionConfig parameterises [NewAdmission]. A zero budget is clamped to
 // its default, never read as "unlimited" (ADR 0031, clamp half).
 type AdmissionConfig struct {
@@ -35,10 +45,10 @@ type Admission struct {
 // NewAdmission returns an admission with no reserved address.
 func NewAdmission(cfg AdmissionConfig) *Admission {
 	if cfg.PerAddress <= 0 {
-		cfg.PerAddress = 4
+		cfg.PerAddress = defaultPerAddress
 	}
 	if cfg.Reserved <= 0 {
-		cfg.Reserved = 8
+		cfg.Reserved = defaultReserved
 	}
 	return &Admission{cfg: cfg, pending: map[string]int{}, reserved: map[string]bool{}}
 }
@@ -58,6 +68,10 @@ func admissionKey(a stdnet.Addr) string {
 	return admissionKeyOf(ip)
 }
 
+// admissionKeyOf folds an IP to its budget key: an IPv4 address stands for
+// itself, while an IPv6 address is widened to its /64 because one host is
+// routinely handed the whole prefix and could otherwise rotate past the
+// per-address budget.
 func admissionKeyOf(ip stdnet.IP) string {
 	if v4 := ip.To4(); v4 != nil {
 		return v4.String()
