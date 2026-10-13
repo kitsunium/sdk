@@ -47,7 +47,16 @@ func chainEntries(prev uint32, start uint64, terms ...uint64) []core.Entry {
 	return out
 }
 
-func newTest(id core.NodeID, term uint64, commit uint64, ents []core.Entry, mut mutation, lease bool) *Raft {
+// testState is the durable state a test node starts from: the hard state's
+// term and commit, and the log it already holds.
+type testState struct {
+	term   uint64
+	commit uint64
+	ents   []core.Entry
+}
+
+func newTest(id core.NodeID, st testState, mut mutation, lease bool) *Raft {
+	term, commit, ents := st.term, st.commit, st.ents
 	cfg := Config{
 		ID: id, Group: 1, Seed: 1, Timing: testTiming(), MaxInflight: 8, MaxInflightBytes: 1 << 20,
 		MaxBatchBytes: 1 << 16, MinVoters: 1, PromoteLag: 16, Lease: lease, CanVote: true, MaxChainRefusals: 3, mut: mut,
@@ -66,7 +75,7 @@ func msg(kind core.MessageKind, from, to core.NodeID, term uint64) core.Message 
 
 // leaderOf makes node 1 the leader of term over ents, its no-op durable.
 func leaderOf(term uint64, commit uint64, ents []core.Entry, mut mutation, lease bool) *Raft {
-	r := newTest(1, term-1, commit, ents, mut, lease)
+	r := newTest(1, testState{term: term - 1, commit: commit, ents: ents}, mut, lease)
 	r.now = t0.Add(5 * time.Second)
 	r.term, r.vote = term, 1
 	r.becomeLeader()
@@ -86,7 +95,7 @@ func granted(rd Ready, kind core.MessageKind) bool {
 }
 
 func checkAckWaitsForSync(mut mutation) error {
-	f := newTest(2, 1, 0, nil, mut, false)
+	f := newTest(2, testState{term: 1, commit: 0}, mut, false)
 	m := msg(core.MsgApp, 1, 2, 1)
 	m.Entries = chainEntries(0, 1, 1)
 	f.Step(t0, m)
@@ -100,7 +109,7 @@ func checkAckWaitsForSync(mut mutation) error {
 }
 
 func checkVoteKeptOnSameTermStepDown(mut mutation) error {
-	r := newTest(3, 1, 0, nil, mut, false)
+	r := newTest(3, testState{term: 1, commit: 0}, mut, false)
 	now := t0.Add(3 * time.Second)
 	r.Tick(now)
 	r.Step(now, core.Message{Version: 1, Group: 1, Kind: core.MsgPreVoteResp, From: 1, To: 3, Term: 2})
@@ -124,7 +133,7 @@ func checkVoteKeptOnSameTermStepDown(mut mutation) error {
 }
 
 func staleFollower(mut mutation) *Raft {
-	return newTest(2, 1, 0, chainEntries(0, 1, 1, 1, 1), mut, false)
+	return newTest(2, testState{term: 1, commit: 0, ents: chainEntries(0, 1, 1, 1, 1)}, mut, false)
 }
 
 func checkCommitVerifiedPrefix(mut mutation) error {
@@ -210,7 +219,7 @@ func voteFrom(kind core.MessageKind, from core.NodeID, term, lastTerm, lastIndex
 }
 
 func checkVoteRestriction(mut mutation) error {
-	f := newTest(2, 2, 0, chainEntries(0, 1, 1, 2, 2), mut, false)
+	f := newTest(2, testState{term: 2, commit: 0, ents: chainEntries(0, 1, 1, 2, 2)}, mut, false)
 	f.Step(t0.Add(5*time.Second), voteFrom(core.MsgVote, 3, 3, 1, 10))
 	if granted(f.Ready(), core.MsgVoteResp) {
 		return errors.New("RequestVote granted to a candidate with a stale log")
@@ -219,7 +228,7 @@ func checkVoteRestriction(mut mutation) error {
 }
 
 func checkPreVoteRestriction(mut mutation) error {
-	f := newTest(2, 2, 0, chainEntries(0, 1, 1, 2, 2), mut, false)
+	f := newTest(2, testState{term: 2, commit: 0, ents: chainEntries(0, 1, 1, 2, 2)}, mut, false)
 	f.Step(t0.Add(5*time.Second), voteFrom(core.MsgPreVote, 3, 3, 1, 10))
 	if granted(f.Ready(), core.MsgPreVoteResp) {
 		return errors.New("PreVote granted to a candidate with a stale log")
@@ -229,7 +238,7 @@ func checkPreVoteRestriction(mut mutation) error {
 
 // followerOfOne is node 2 at term 2, having just heard from leader 1.
 func followerOfOne(mut mutation, ents []core.Entry) (*Raft, time.Time) {
-	f := newTest(2, 2, 0, ents, mut, false)
+	f := newTest(2, testState{term: 2, commit: 0, ents: ents}, mut, false)
 	now := t0.Add(5 * time.Second)
 	f.Step(now, msg(core.MsgHeartbeat, 1, 2, 2))
 	f.Ready()
@@ -293,7 +302,7 @@ func checkHeartbeatClamped(mut mutation) error {
 }
 
 func checkRestartRefusal(mut mutation) error {
-	f := newTest(2, 2, 0, nil, mut, false)
+	f := newTest(2, testState{term: 2, commit: 0}, mut, false)
 	f.Step(t0.Add(100*time.Millisecond), voteFrom(core.MsgVote, 3, 3, 0, 0))
 	if granted(f.Ready(), core.MsgVoteResp) {
 		return errors.New("a node voted inside its restart window")
@@ -312,7 +321,7 @@ func checkTimeoutNowTerm(mut mutation) error {
 }
 
 func checkStaleCompletion(mut mutation) error {
-	f := newTest(2, 1, 0, nil, mut, false)
+	f := newTest(2, testState{term: 1, commit: 0}, mut, false)
 	m := msg(core.MsgApp, 1, 2, 1)
 	m.Entries = chainEntries(0, 1, 1, 1, 1)
 	f.Step(t0, m)
@@ -389,7 +398,7 @@ func checkMembershipAfterNoOp(mut mutation) error {
 }
 
 func checkChainVerified(mut mutation) error {
-	f := newTest(2, 1, 0, nil, mut, false)
+	f := newTest(2, testState{term: 1, commit: 0}, mut, false)
 	m := msg(core.MsgApp, 1, 2, 1)
 	m.Entries = chainEntries(0, 1, 1)
 	m.Entries[0].ChainSum ^= 1

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"os"
@@ -21,7 +20,7 @@ func threeOnDisk(t *testing.T, n int) (*cluster, []*diskNode) {
 	c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{5}}
 	var nodes []*diskNode
 	var members []coreconsensus.Member
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		dn := &diskNode{dir: t.TempDir()}
 		dn.dd = openDir(t, dn.dir, 16<<10)
 		slot := fmt.Sprintf("r%d", i)
@@ -38,7 +37,9 @@ func threeOnDisk(t *testing.T, n int) (*cluster, []*diskNode) {
 		if err := Bootstrap(context.Background(), diskConfig(c, dn), members); err != nil {
 			t.Fatal(err)
 		}
-		_ = dn.dd.Close()
+		if err := dn.dd.Close(); err != nil {
+			t.Fatal(err)
+		}
 		dn.open(t, c)
 	}
 	var l *diskNode
@@ -54,7 +55,7 @@ func threeOnDisk(t *testing.T, n int) (*cluster, []*diskNode) {
 	if l == nil {
 		t.Fatal("no leader")
 	}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		propose(t, l.node, fmt.Sprintf("k%d=v%d", i, i))
 	}
 	c.waitAppliedDisk(nodes)
@@ -77,12 +78,18 @@ func (c *cluster) waitAppliedDisk(nodes []*diskNode) {
 func TestRecoverStartsANewHistoryFromOneNode(t *testing.T) {
 	c, nodes := threeOnDisk(t, 30)
 	for _, dn := range nodes {
-		dn.crash(c)
+		dn.crash(t, c)
 	}
 	keep := nodes[0]
 	keep.dd = openDir(t, keep.dir, 16<<10)
-	st, _ := keep.dd.Log().Stamp()
-	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	st, err := keep.dd.Log().Stamp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	next := coreconsensus.ClusterID{6}
 	self := coreconsensus.Member{ID: keep.id, Incarnation: st.Incarnation, Slot: st.Slot, SPKI: MemorySPKI(keep.id), Voter: true}
 	opt := RecoverOptions{Confirm: next.String(), Operator: "op:recover", WitnessKeys: []ed25519.PublicKey{pub}}
@@ -114,7 +121,7 @@ func TestRecoverStartsANewHistoryFromOneNode(t *testing.T) {
 		t.Fatal(err)
 	}
 	keep.node = n
-	defer keep.crash(c)
+	defer keep.crash(t, c)
 	tok := propose(t, n, "after=recover")
 	if tok.Cluster != next {
 		t.Fatalf("new history token %v", tok)
@@ -140,7 +147,7 @@ func TestRecoverStartsANewHistoryFromOneNode(t *testing.T) {
 func TestOfflineReadsFailClosed(t *testing.T) {
 	c, nodes := threeOnDisk(t, 10)
 	for _, dn := range nodes {
-		dn.crash(c)
+		dn.crash(t, c)
 	}
 	keep := nodes[0]
 	keep.dd = openDir(t, keep.dir, 16<<10)
@@ -165,7 +172,7 @@ func TestOfflineReadsFailClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	pub, priv, err := ed25519.GenerateKey(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +200,7 @@ func TestRestoreSnapshotIntoAnEmptyDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, dn := range nodes {
-		dn.crash(c)
+		dn.crash(t, c)
 	}
 	fresh := &diskNode{dir: t.TempDir()}
 	fresh.dd = openDir(t, fresh.dir, 16<<10)
@@ -222,7 +229,7 @@ func TestRestoreSnapshotIntoAnEmptyDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	fresh.node = n
-	defer fresh.crash(c)
+	defer fresh.crash(t, c)
 	if v, _ := fresh.sm.get("k19"); v != "v19" {
 		t.Fatalf("restored state: k19=%q", v)
 	}
@@ -235,8 +242,11 @@ func TestRestoreSnapshotIntoAnEmptyDirectory(t *testing.T) {
 func TestTruncateAndStaySilentRejoins(t *testing.T) {
 	c, nodes := threeOnDisk(t, 40)
 	victim := nodes[2]
-	victim.crash(c)
-	segs, _ := filepath.Glob(filepath.Join(victim.dir, "log", "seg-????????????????"))
+	victim.crash(t, c)
+	segs := must(filepath.Glob(filepath.Join(victim.dir, "log", "seg-????????????????")))(t)
+	if len(segs) == 0 {
+		t.Fatal("setup: the victim has no published segment")
+	}
 	last := segs[len(segs)-1]
 	b, err := os.ReadFile(last)
 	if err != nil {
@@ -244,10 +254,14 @@ func TestTruncateAndStaySilentRejoins(t *testing.T) {
 	}
 	// Flip a payload byte of the second record: synced data, a complete
 	// batch, valid records after it.
-	r0, _ := parseRecord(b)
-	r1, _ := parseRecord(b[r0.length:])
+	r0, ok := parseRecord(b)
+	if !ok {
+		t.Fatal("setup: the segment's first record does not parse")
+	}
+	if _, ok := parseRecord(b[r0.length:]); !ok {
+		t.Fatal("setup: no complete second record to damage")
+	}
 	b[r0.length+recHeader+recFixed] ^= 0xff
-	_ = r1
 	if err := os.WriteFile(last, b, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +290,7 @@ func TestTruncateAndStaySilentRejoins(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	tok := propose(t, l.node, "after=silence")
+	propose(t, l.node, "after=silence")
 	deadline := time.Now().Add(30 * time.Second)
 	for {
 		_, statErr := os.Stat(filepath.Join(victim.dir, fileSilent))
@@ -297,10 +311,9 @@ func TestTruncateAndStaySilentRejoins(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	_ = tok
 	for _, dn := range nodes {
 		if dn.node != nil {
-			dn.crash(c)
+			dn.crash(t, c)
 		}
 	}
 }

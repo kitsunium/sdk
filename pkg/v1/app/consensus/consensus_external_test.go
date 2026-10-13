@@ -45,6 +45,24 @@ func (c *counter) Restore(r io.Reader, _ consensus.SnapshotMeta) error {
 	return err
 }
 
+// closer is the one capability teardown needs from a node: a graceful
+// Close bounded by its context.
+type closer interface {
+	Close(ctx context.Context) error
+}
+
+// closeAtCleanup stops n when the test ends and reports a Close that failed:
+// a node that cannot shut down cleanly is a defect the test should surface,
+// not one its teardown should hide.
+func closeAtCleanup(t *testing.T, n closer) {
+	t.Helper()
+	t.Cleanup(func() {
+		if err := n.Close(context.Background()); err != nil {
+			t.Errorf("close node: %v", err)
+		}
+	})
+}
+
 // TestFacadeThreeNodesInMemory runs three nodes through the facade alone.
 func TestFacadeThreeNodesInMemory(t *testing.T) {
 	net := consensus.NewMemoryNetwork()
@@ -56,7 +74,7 @@ func TestFacadeThreeNodesInMemory(t *testing.T) {
 	}
 	var parts []nodeParts
 	var members []consensus.Member
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		p := nodeParts{log: consensus.NewMemoryLog(), snaps: consensus.NewMemorySnapshots()}
 		slot := fmt.Sprintf("s%d", i)
 		id, inc, err := consensus.InitLog(p.log, cluster, slot)
@@ -85,7 +103,7 @@ func TestFacadeThreeNodesInMemory(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() { _ = n.Close(context.Background()) })
+		closeAtCleanup(t, n)
 		nodes = append(nodes, n)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

@@ -38,10 +38,21 @@ func (dn *diskNode) open(t *testing.T, c *cluster) {
 	dn.node = n
 }
 
-func (dn *diskNode) crash(c *cluster) {
-	_ = dn.node.HardClose()
-	_ = c.net.Transport(dn.id).Close()
-	_ = dn.dd.Close()
+// crash cuts the node the way a power loss would, then releases what it
+// held. Each step is reported rather than ignored: a directory still in use
+// after HardClose is exactly the leak R7-11 bounds, and the restart that
+// follows would then test the wrong thing.
+func (dn *diskNode) crash(t *testing.T, c *cluster) {
+	t.Helper()
+	if err := dn.node.HardClose(); err != nil {
+		t.Errorf("hard close %d: %v", dn.id, err)
+	}
+	if err := c.net.Transport(dn.id).Close(); err != nil {
+		t.Errorf("close transport %d: %v", dn.id, err)
+	}
+	if err := dn.dd.Close(); err != nil {
+		t.Errorf("close data directory %d: %v", dn.id, err)
+	}
 	dn.node = nil
 }
 
@@ -52,7 +63,7 @@ func TestDiskClusterSurvivesFullRestart(t *testing.T) {
 	c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{7}}
 	var nodes []*diskNode
 	var members []coreconsensus.Member
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		dn := &diskNode{dir: t.TempDir()}
 		dn.dd = openDir(t, dn.dir, 16<<10)
 		slot := fmt.Sprintf("d%d", i)
@@ -69,13 +80,15 @@ func TestDiskClusterSurvivesFullRestart(t *testing.T) {
 		if err := Bootstrap(context.Background(), diskConfig(c, dn), members); err != nil {
 			t.Fatal(err)
 		}
-		_ = dn.dd.Close()
+		if err := dn.dd.Close(); err != nil {
+			t.Fatal(err)
+		}
 		dn.open(t, c)
 	}
 	t.Cleanup(func() {
 		for _, dn := range nodes {
 			if dn.node != nil {
-				dn.crash(c)
+				dn.crash(t, c)
 			}
 		}
 	})
@@ -93,7 +106,7 @@ func TestDiskClusterSurvivesFullRestart(t *testing.T) {
 		return nil
 	}
 	var tok coreconsensus.Token
-	for i := 0; i < 300; i++ {
+	for i := range 300 {
 		tok = propose(t, leader().node, fmt.Sprintf("k%d=v%d", i, i))
 	}
 	// A data directory a live node holds refuses offline work.
@@ -101,7 +114,7 @@ func TestDiskClusterSurvivesFullRestart(t *testing.T) {
 		t.Fatal("Inspect on a live directory")
 	}
 	for _, dn := range nodes {
-		dn.crash(c)
+		dn.crash(t, c)
 	}
 	for _, dn := range nodes {
 		dn.open(t, c)
@@ -123,7 +136,7 @@ func TestDiskClusterSurvivesFullRestart(t *testing.T) {
 		t.Fatalf("index went back: %d then %d", tok.Index, tok2.Index)
 	}
 	for _, dn := range nodes {
-		if metas, _ := dn.dd.Snapshots().List(); len(metas) == 0 || len(metas) > 2 {
+		if metas := must(dn.dd.Snapshots().List())(t); len(metas) == 0 || len(metas) > 2 {
 			t.Fatalf("node %d keeps %d snapshots", dn.id, len(metas))
 		}
 		if f, _ := dn.dd.Log().Bounds(); f < 100 {

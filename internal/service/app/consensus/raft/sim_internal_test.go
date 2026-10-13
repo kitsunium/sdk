@@ -43,15 +43,16 @@ type event struct {
 
 type eventQueue []*event
 
-func (q eventQueue) Len() int { return len(q) }
-func (q eventQueue) Less(i, j int) bool {
-	if !q[i].at.Equal(q[j].at) {
-		return q[i].at.Before(q[j].at)
+func (q *eventQueue) Len() int { return len(*q) }
+func (q *eventQueue) Less(i, j int) bool {
+	a, b := (*q)[i], (*q)[j]
+	if !a.at.Equal(b.at) {
+		return a.at.Before(b.at)
 	}
-	return q[i].ord < q[j].ord
+	return a.ord < b.ord
 }
-func (q eventQueue) Swap(i, j int) { q[i], q[j] = q[j], q[i] }
-func (q *eventQueue) Push(x any)   { *q = append(*q, x.(*event)) }
+func (q *eventQueue) Swap(i, j int) { (*q)[i], (*q)[j] = (*q)[j], (*q)[i] }
+func (q *eventQueue) Push(x any)    { *q = append(*q, x.(*event)) }
 func (q *eventQueue) Pop() any {
 	old := *q
 	x := old[len(old)-1]

@@ -3,6 +3,7 @@ package raft
 import (
 	"bytes"
 	"fmt"
+	"maps"
 	"math"
 	"slices"
 	"strings"
@@ -37,11 +38,7 @@ func linearizable(ops []kvOp) (bool, string) {
 	for _, o := range ops {
 		byKey[o.key] = append(byKey[o.key], o)
 	}
-	keys := make([]string, 0, len(byKey))
-	for k := range byKey {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
+	keys := slices.Sorted(maps.Keys(byKey))
 	for _, k := range keys {
 		if !linearizableKey(byKey[k]) {
 			return false, k
@@ -127,7 +124,7 @@ func linearizableKey(ops []kvOp) bool {
 }
 
 func TestLinearizabilityCheckerOnKnownHistories(t *testing.T) {
-	const unknown = math.MaxInt64
+	const unknown int64 = math.MaxInt64
 	cases := []struct {
 		name string
 		ops  []kvOp
@@ -435,7 +432,7 @@ func TestLeaseReadsUnderClockSkewAreCaught(t *testing.T) {
 		s.run(s.after(300*time.Millisecond), false)
 		// The client co-located with the old leader reads under its lease.
 		stale := 0
-		for i := 0; i < 5; i++ {
+		for range 5 {
 			s.kv.read(s, l, "x")
 			s.run(s.after(10*time.Millisecond), false)
 		}
@@ -496,7 +493,7 @@ func checkDeposedLeaderRead(mut mutation) error {
 	}
 	s.kv.write(s, nl, "x", "2")
 	s.run(s.after(100*time.Millisecond), false)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		s.kv.read(s, l, "x")
 		s.run(s.after(5*time.Millisecond), false)
 	}

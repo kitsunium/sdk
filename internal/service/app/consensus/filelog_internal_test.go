@@ -86,10 +86,10 @@ func TestFileLogPersistsAcrossReopen(t *testing.T) {
 	}
 	checkEntries(t, l, 1, 30, 3)
 	checkEntries(t, l, 31, 60, 4)
-	if got, _ := l.HardState(); got != hs {
+	if got := must(l.HardState())(t); got != hs {
 		t.Fatalf("hard state %+v", got)
 	}
-	segs, _ := filepath.Glob(filepath.Join(dir, "log", "seg-????????????????"))
+	segs := must(filepath.Glob(filepath.Join(dir, "log", "seg-????????????????")))(t)
 	if len(segs) < 2 {
 		t.Fatalf("no rotation with 4 KiB segments: %d segment(s)", len(segs))
 	}
@@ -109,7 +109,7 @@ func TestFileLogPersistsAcrossReopen(t *testing.T) {
 		t.Fatalf("compacted read: %v", err)
 	}
 	// Published segments only: the next one is being prepared as a .tmp.
-	after, _ := filepath.Glob(filepath.Join(dir, "log", "seg-????????????????"))
+	after := must(filepath.Glob(filepath.Join(dir, "log", "seg-????????????????")))(t)
 	if len(after) >= len(segs) {
 		t.Fatalf("no segment dropped: %d then %d", len(segs), len(after))
 	}
@@ -149,7 +149,9 @@ func rec(kind uint8, batch, index uint64, end bool) []byte {
 func reopenExpect(t *testing.T, dir string, d DataDir, quarantine bool) DataDir {
 	t.Helper()
 	d.d.log.Close()
-	_ = d.Close()
+	if err := d.Close(); err != nil {
+		t.Fatalf("close before reopening: %v", err)
+	}
 	nd := openDir(t, dir, 1<<16)
 	err := nd.d.log.checkMarkers()
 	if quarantine != errs.HasCode(err, coreconsensus.CodeLogQuarantined) {
@@ -240,7 +242,7 @@ func TestRecoveryQuarantinesDamageInACompletedBatch(t *testing.T) {
 	if f, la := nd.Log().Bounds(); la >= f {
 		t.Fatal("wipe left entries")
 	}
-	if st, _ := nd.Log().Stamp(); st.State != 0 {
+	if st := must(nd.Log().Stamp())(t); st.State != 0 {
 		t.Fatal("wipe left the stamp")
 	}
 	nd.Close()
@@ -342,7 +344,7 @@ func TestPreparedSegmentIsNeverPublishedEarly(t *testing.T) {
 		t.Fatal("no segment being prepared")
 	}
 	<-p.done
-	tmps, _ := filepath.Glob(filepath.Join(dir, "log", "*.tmp"))
+	tmps := must(filepath.Glob(filepath.Join(dir, "log", "*.tmp")))(t)
 	if len(tmps) != 1 {
 		t.Fatalf("prepared files: %v", tmps)
 	}
@@ -351,12 +353,14 @@ func TestPreparedSegmentIsNeverPublishedEarly(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustSync(t, l)
-	_ = d.Close()
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
 	d = openDir(t, dir, 4096)
 	defer d.Close()
 	checkEntries(t, d.Log(), 1, 5, 1)
 	checkEntries(t, d.Log(), 6, 60, 3)
-	if hs, _ := d.Log().HardState(); hs.Term != 3 || hs.Vote != 1 {
+	if hs := must(d.Log().HardState())(t); hs.Term != 3 || hs.Vote != 1 {
 		t.Fatalf("hard state %+v", hs)
 	}
 }

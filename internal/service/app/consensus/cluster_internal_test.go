@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -17,6 +18,21 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
+
+// must curries a fallible test step: must(step())(t) yields the step's value,
+// or stops the test when the step failed. Every value it guards is one the
+// test goes on to rely on, so continuing would assert on garbage. The curried
+// shape exists because Go spreads a multi-value call only when it is the sole
+// argument.
+func must[T any](v T, err error) func(testing.TB) T {
+	return func(t testing.TB) T {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+}
 
 // kv is a key-value state machine held in memory: Apply sets "k=v" and
 // returns the previous value.
@@ -32,8 +48,9 @@ func (s *kv) Apply(e coreconsensus.Entry) any {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	k, v, _ := bytes.Cut(e.Data, []byte("="))
-	prev := s.m[string(k)]
-	s.m[string(k)] = string(v)
+	key := string(k)
+	prev := s.m[key]
+	s.m[key] = string(v)
 	s.last = e.Position.Index
 	return prev
 }
@@ -57,11 +74,7 @@ func (s *kv) Snapshot() (coreconsensus.Snapshot, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var b []byte
-	keys := make([]string, 0, len(s.m))
-	for k := range s.m {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
+	keys := slices.Sorted(maps.Keys(s.m))
 	for _, k := range keys {
 		b = binary.AppendUvarint(b, uint64(len(k)))
 		b = append(b, k...)
@@ -143,7 +156,7 @@ func newClusterWith(t *testing.T, c *cluster) *cluster {
 	if size == 0 {
 		size = 3
 	}
-	for i := 0; i < size; i++ {
+	for i := range size {
 		tn := &testNode{log: NewMemoryLog(), snaps: NewMemorySnapshots(), sm: newKV()}
 		id, inc, err := InitLog(tn.log, c.cid, fmt.Sprintf("slot-%d", i))
 		if err != nil {
@@ -171,7 +184,9 @@ func newClusterWith(t *testing.T, c *cluster) *cluster {
 	t.Cleanup(func() {
 		for _, tn := range c.nodes {
 			if tn.node != nil {
-				_ = tn.node.HardClose()
+				if err := tn.node.HardClose(); err != nil {
+					t.Errorf("hard close %d: %v", tn.id, err)
+				}
 			}
 		}
 	})
@@ -188,8 +203,13 @@ func (c *cluster) start(tn *testNode) {
 }
 
 func (c *cluster) kill(tn *testNode) {
-	_ = tn.node.HardClose()
-	_ = c.net.Transport(tn.id).Close()
+	c.t.Helper()
+	if err := tn.node.HardClose(); err != nil {
+		c.t.Fatalf("hard close %d: %v", tn.id, err)
+	}
+	if err := c.net.Transport(tn.id).Close(); err != nil {
+		c.t.Fatalf("close transport %d: %v", tn.id, err)
+	}
 	tn.node = nil
 }
 
@@ -336,7 +356,7 @@ func TestClusterSnapshotInstallsOnALaggingNode(t *testing.T) {
 	}
 	c.kill(lag)
 	var tok coreconsensus.Token
-	for i := 0; i < 200; i++ {
+	for i := range 200 {
 		tok = propose(t, l.node, fmt.Sprintf("k%d=%d", i, i))
 	}
 	// Wait for compaction past what the lagging node holds.
@@ -356,7 +376,7 @@ func TestClusterSnapshotInstallsOnALaggingNode(t *testing.T) {
 	if v, _ := lag.sm.get("k199"); v != "199" {
 		t.Fatalf("lagging node: k199=%q", v)
 	}
-	if metas, _ := lag.snaps.List(); len(metas) == 0 {
+	if metas := must(lag.snaps.List())(t); len(metas) == 0 {
 		t.Fatal("the lagging node caught up without a snapshot")
 	}
 }
@@ -377,7 +397,7 @@ func TestClusterMembershipThroughLearners(t *testing.T) {
 	tn.id = id
 	c.nodes = append(c.nodes, tn)
 	c.start(tn)
-	st, _ := tn.log.Stamp()
+	st := must(tn.log.Stamp())(t)
 	if _, err := c.net.Transport(id).Join(ctx, coreconsensus.JoinConfig{Stamp: st, Address: "mem"}); err != nil {
 		t.Fatalf("join: %v", err)
 	}
@@ -448,7 +468,12 @@ func TestStorageFailureStopsTheNode(t *testing.T) {
 	l.log.FailSync(errors.New("injected fdatasync failure"))
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	_, _, _ = l.node.Propose(ctx, []byte("a=1"))
+	// This proposal only provokes the sync; whether it is refused or
+	// acknowledged by the followers' majority is not what the test pins —
+	// the stop below is — so its outcome is recorded rather than asserted.
+	if _, _, err := l.node.Propose(ctx, []byte("a=1")); err != nil {
+		t.Logf("proposal under a failing sync: %v", err)
+	}
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		if r, ok := l.node.StopReason(); ok {
@@ -483,8 +508,8 @@ func TestEngineDropsAFrameWhoseFromIsNotThePeer(t *testing.T) {
 		}
 	}
 	before := f.node.Health().DroppedFrames
-	m := coreconsensus.Message{Version: 1, Group: 1, Kind: coreconsensus.MsgTimeoutNow, From: l.id, To: f.id, Term: l.node.Status().Term}
-	frame := appendFrame(&m)
+	m := &coreconsensus.Message{Version: 1, Group: 1, Kind: coreconsensus.MsgTimeoutNow, From: l.id, To: f.id, Term: l.node.Status().Term}
+	frame := appendFrame(m)
 	var liar coreconsensus.NodeID
 	for _, tn := range c.nodes {
 		if tn != l && tn != f {
@@ -511,7 +536,7 @@ func appendFrame(m *coreconsensus.Message) []byte { return wire.AppendMessage(ni
 // leadership on its target, within a bounded time.
 func TestClusterTransferSubmittedOnAFollower(t *testing.T) {
 	c := newCluster(t, 3, 0)
-	for round := 0; round < 10; round++ {
+	for round := range 10 {
 		// A follower that has not yet heard from a just-elected leader
 		// answers NOT_LEADER at once, so the bound is a deadline with a
 		// pause between attempts, not a count.
@@ -623,7 +648,7 @@ func TestClusterNodeWithoutAValidSnapshotAsksForAnInstall(t *testing.T) {
 	c := newCluster(t, 3, 20)
 	l := c.leader(5 * time.Second)
 	var tok coreconsensus.Token
-	for i := 0; i < 120; i++ {
+	for i := range 120 {
 		tok = propose(t, l.node, fmt.Sprintf("k%d=%d", i, i))
 	}
 	c.waitApplied(tok.Index, 5*time.Second)
@@ -637,7 +662,7 @@ func TestClusterNodeWithoutAValidSnapshotAsksForAnInstall(t *testing.T) {
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		first, _ := f.log.Bounds()
-		metas, _ := f.snaps.List()
+		metas := must(f.snaps.List())(t)
 		if first > 1 && len(metas) > 0 {
 			break
 		}
@@ -682,7 +707,7 @@ func TestClusterLaggingFollowerFedFromTheStore(t *testing.T) {
 	}
 	c.kill(f)
 	var tok coreconsensus.Token
-	for i := 0; i < 300; i++ {
+	for i := range 300 {
 		tok = propose(t, l.node, fmt.Sprintf("key-%d=%0100d", i, i))
 	}
 	c.start(f)
@@ -696,10 +721,14 @@ func TestClusterLaggingFollowerFedFromTheStore(t *testing.T) {
 func TestLongLoopTurnDropsTheLease(t *testing.T) {
 	c := newCluster(t, 3, 0)
 	for _, tn := range c.nodes {
-		_ = tn.node.HardClose()
+		if err := tn.node.HardClose(); err != nil {
+			t.Fatalf("hard close %d: %v", tn.id, err)
+		}
 	}
 	for _, tn := range c.nodes {
-		_ = c.net.Transport(tn.id).Close()
+		if err := c.net.Transport(tn.id).Close(); err != nil {
+			t.Fatalf("close transport %d: %v", tn.id, err)
+		}
 		tn.sm = newKV()
 		cfg := c.config(tn)
 		cfg.Reads = ReadLease
@@ -776,8 +805,12 @@ func TestApplyLagBackpressure(t *testing.T) {
 	c := newCluster(t, 3, 0)
 	gate := make(chan struct{})
 	for _, tn := range c.nodes {
-		_ = tn.node.HardClose()
-		_ = c.net.Transport(tn.id).Close()
+		if err := tn.node.HardClose(); err != nil {
+			t.Fatalf("hard close %d: %v", tn.id, err)
+		}
+		if err := c.net.Transport(tn.id).Close(); err != nil {
+			t.Fatalf("close transport %d: %v", tn.id, err)
+		}
 	}
 	for _, tn := range c.nodes {
 		tn.sm = newKV()
@@ -846,7 +879,7 @@ func TestInstallResumesAfterACrashAtPublication(t *testing.T) {
 	}
 	c.kill(lag)
 	var tok coreconsensus.Token
-	for i := 0; i < 200; i++ {
+	for i := range 200 {
 		tok = propose(t, l.node, fmt.Sprintf("k%d=%d", i, i))
 	}
 	deadline := time.Now().Add(5 * time.Second)
@@ -865,7 +898,7 @@ func TestInstallResumesAfterACrashAtPublication(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	if metas, _ := lag.snaps.List(); len(metas) == 0 {
+	if metas := must(lag.snaps.List())(t); len(metas) == 0 {
 		t.Fatal("nothing was published before the crash")
 	}
 	c.kill(lag)
