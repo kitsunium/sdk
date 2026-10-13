@@ -25,6 +25,8 @@
 #                                                                     rdeps reach //pkg/...,
 #                                                                     //framework/... or
 #                                                                     //third-party/... (rule 2)
+#   any module that imports, tests left out, a package of internal
+#     that this release of internal changed                       -> <dir> (rule 1i)
 #   nothing that counts                                            -> emit nothing (exit 0)
 #
 # Maintainer-only metadata — every *.md but README.md, every BUILD.bazel, and
@@ -193,6 +195,7 @@ root_releases() {
 release_list=""
 total_changed=0
 total_counting=0
+internal_counting=""
 while IFS= read -r dir; do
   [ -z "$dir" ] && continue
   range=""
@@ -236,8 +239,29 @@ while IFS= read -r dir; do
   elif release_scope_any <<<"$counting_raw"; then
     explain "rule 1m: $(awk 'NF { print; exit }' <<<"$counting_raw") is a change of the module $dir -> release"
     release_list="${release_list}${dir}"$'\n'
+    if [ "$dir" = internal ]; then internal_counting="$counting_raw"; fi
   fi
 done <<<"$modules"
+
+# Rule 1i (ADR 0171 §7): a module that imports a package internal changed is
+# released with it, so its go.mod pins the fixed internal — a module pins
+# internal at the version its own release gave it, and a fix that reaches no
+# family's release reaches no consumer of one.
+if [ -n "$internal_counting" ]; then
+  dependents=""
+  dep_rc=0
+  dependents="$(internal_dependents "$internal_counting" "$modules")" || dep_rc=$?
+  if [ "$dep_rc" -ne 0 ]; then
+    echo "compute-bumps.sh: refusing to report the release without knowing which modules import the internal packages it changed" >&2
+    exit 1
+  fi
+  while IFS= read -r dep; do
+    [ -z "$dep" ] && continue
+    if awk -v d="$dep" '$0 == d { f = 1 } END { exit !f }' <<<"$release_list"; then continue; fi
+    explain "rule 1i: $dep imports a package internal changed -> release, pinning the new internal"
+    release_list="${release_list}${dep}"$'\n'
+  done <<<"$dependents"
+fi
 
 explain "changed paths: ${total_changed} (${total_counting} could carry a consumer-visible change)"
 if [ "$total_changed" -gt 0 ] && [ "$total_counting" -eq 0 ]; then

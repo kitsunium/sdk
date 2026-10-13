@@ -253,6 +253,94 @@ legacy_pkg() {
   ) >"$WORK/$name.log" 2>&1
 }
 
+# publish_kept — every module go.work names that the manifest does not, at its
+# last tag here, and every tombstone tag here the manifest does not name,
+# zipped from its tag onto the file proxy: what the manifest's modules require
+# at their last tags, as the real proxy already serves it.
+publish_kept() {
+  local root dir tag version src floor
+  root="$here/../.."
+  # shellcheck source=lib/tag-format.sh
+  . "$here/lib/tag-format.sh"
+  while IFS= read -r dir; do
+    [ -z "$dir" ] && continue
+    jq -e --arg d "$dir" '.modules[] | select(.dir == $d)' "$MANIFEST" >/dev/null && continue
+    tag="$(cd "$root" && latest_module_tag "$dir")" || return 1
+    [ -n "$tag" ] || continue
+    version="v$(version_from_tag "$tag")"
+    src="$WORK/src/kept_$(tr '/.' '__' <<<"$dir")"
+    mkdir -p "$src"
+    if [ "$dir" = . ]; then
+      git -C "$root" archive "$tag" | tar -x -C "$src"
+      proxy_add github.com/kitsunium/sdk "$version" "$src"
+    else
+      git -C "$root" archive "$tag" "$dir" | tar -x -C "$src"
+      proxy_add "github.com/kitsunium/sdk/$dir" "$version" "$src/$dir"
+    fi
+  done < <(cd "$root" && sed -n '/use (/,/)/p' go.work | awk '/^[[:space:]]*\./{ sub(/^\.\//, "", $1); print $1 }')
+  # The root at the floor every family requires, when this release is not it.
+  floor="$(jq -r '.root_floor // ""' "$MANIFEST")"
+  if [ -n "$floor" ] && ! jq -e --arg v "$floor" '.modules[] | select(.dir == "." and .version == $v)' "$MANIFEST" >/dev/null &&
+    git -C "$root" rev-parse -q --verify "refs/tags/$floor" >/dev/null; then
+    src="$WORK/src/kept_root_floor"
+    mkdir -p "$src"
+    git -C "$root" archive "$floor" | tar -x -C "$src"
+    proxy_add github.com/kitsunium/sdk "$floor" "$src"
+  fi
+  while IFS= read -r tag; do
+    [ -z "$tag" ] && continue
+    jq -e --arg t "$tag" '.tombstones[]? | select(. == $t)' "$MANIFEST" >/dev/null && continue
+    dir="${tag%/v*}"
+    src="$WORK/src/kepttomb_$(tr '/' '_' <<<"$dir")"
+    mkdir -p "$src"
+    git -C "$root" archive "$tag" "$dir" | tar -x -C "$src"
+    proxy_add "github.com/kitsunium/sdk/$dir" "${tag##*/}" "$src/$dir"
+  done < <(cd "$root" && git tag -l 'internal/*/v*' | while IFS= read -r t; do is_valid_tombstone_tag "$t" && echo "$t"; done)
+}
+
+# kept_families — for every pkg family go.work names that the manifest does
+# not, at its last tag here: zipped from that tag onto the file proxy, then a
+# consumer requiring it there, `go get` of the manifest's internal and family
+# versions, and `go build` of every package of the family. Returns 1 on the
+# first that does not build.
+kept_families() {
+  local root dir tag version n=0 c get
+  root="$here/../.."
+  # shellcheck source=lib/tag-format.sh
+  . "$here/lib/tag-format.sh"
+  get=()
+  while IFS=$'\t' read -r dir module version; do
+    case "$dir" in internal | pkg/v1/*) get+=("$module@$version") ;; esac
+  done < <(jq -r '.modules[] | [.dir, .module, .version] | @tsv' "$MANIFEST")
+  while IFS= read -r dir; do
+    case "$dir" in pkg/v1/*) ;; *) continue ;; esac
+    jq -e --arg d "$dir" '.modules[] | select(.dir == $d)' "$MANIFEST" >/dev/null && continue
+    tag="$(cd "$root" && latest_module_tag "$dir")" || return 1
+    if [ -z "$tag" ]; then
+      echo "note: $dir is kept and has no tag yet — nothing to build at a last tag"
+      continue
+    fi
+    version="v$(version_from_tag "$tag")"
+    n=$((n + 1))
+    c="$WORK/kept$n"
+    mkdir -p "$c"
+    printf 'module example.com/kept%s\n\ngo 1.21\n\nrequire github.com/kitsunium/sdk/%s %s\n' "$n" "$dir" "$version" >"$c/go.mod"
+    if ! (
+      cd "$c"
+      export GOWORK=off GOFLAGS=-mod=mod GOTOOLCHAIN=local GOPROXY="file://$PROXY" \
+        GONOSUMDB='*' GONOSUMCHECK=1 GOSUMDB=off GOPATH="$WORK/gopath" GOMODCACHE="$WORK/gopath/pkg/mod" \
+        GOCACHE="$WORK/gocache"
+      go get "${get[@]}" && go build "github.com/kitsunium/sdk/$dir/..."
+    ) >"$WORK/kept$n.log" 2>&1; then
+      echo "proxy-rehearsal: $dir at its last tag $tag does not build against this release's internal and families:" >&2
+      sed 's/^/  /' "$WORK/kept$n.log" >&2
+      return 1
+    fi
+    echo "ok: $dir kept at $tag builds against this release's internal and families"
+  done < <(cd "$root" && sed -n '/use (/,/)/p' go.work | awk '/\.\//{ sub(/^\.\//, "", $1); print $1 }')
+  return 0
+}
+
 module_src() {
   mkdir -p "$1"
   printf '%s' "$2" >"$1/go.mod"
@@ -346,6 +434,8 @@ manifest() {
     git -C "$here/../.." archive "$tag" "$dir" | tar -x -C "$src"
     proxy_add "github.com/kitsunium/sdk/$dir" "${tag##*/}" "$src/$dir"
   done < <(jq -r '.tombstones[]?' "$MANIFEST")
+  # The modules this release does not cut, at their last tags here.
+  publish_kept || return 1
   # What the proxy already serves of the modules ADR 0162 retired: the build a
   # consumer of a monolithic root resolves an internal package against.
   for dir in internal/kernel internal/core internal/service pkg; do
@@ -404,22 +494,36 @@ manifest() {
   fi
   echo "ok: pinned to v0.19.7, 'go get -u ./...' builds on the internal module — no retired internal module selected"
 
+  # I4: every family the release does NOT cut keeps its last tag, whose go.mod
+  # pinned the internal module and the families of ITS release; a consumer that
+  # takes this release's internal and families beside it must still build that
+  # family. Each kept family is zipped from its own tag and built against the
+  # manifest's versions.
+  kept_families
+  local kept_rc=$?
+  [ "$kept_rc" -eq 0 ] || return "$kept_rc"
+
   # I1: a consumer still on …/pkg v0.17.0 — the module before ADR 0162, with
   # its three internal modules listed indirect — adds one family by naming it
   # alone. Two modules provided pkg/v1/errs there (`ambiguous import`) until
   # every family required …/pkg at its tombstone.
-  version="$(jq -r '.modules[] | select(.dir == "pkg/v1/errs") | .version' "$MANIFEST")"
-  if ! legacy_pkg legacy github.com/kitsunium/sdk/pkg/v1/errs "github.com/kitsunium/sdk/pkg/v1/errs@$version"; then
-    echo "proxy-rehearsal: on …/pkg v0.17.0, 'go get …/pkg/v1/errs@$version' did not build:" >&2
+  # pkg/v1/errs when the release cuts it: the one package …/pkg v0.17.0 held
+  # at the same path, so the ambiguity is real; else the first family.
+  dir="$(head -n1 <<<"$families")"
+  if awk '$0 == "pkg/v1/errs" { f = 1 } END { exit !f }' <<<"$families"; then dir=pkg/v1/errs; fi
+  version="$(jq -r --arg d "$dir" '.modules[] | select(.dir == $d) | .version' "$MANIFEST")"
+  pkg="$(git -C "$here/../.." ls-tree -r --name-only "$REF" -- "$dir" | awk -F/ '/\.go$/ && !/_test\.go$/ { sub(/\/[^\/]*$/, ""); print; exit }')"
+  if ! legacy_pkg legacy "github.com/kitsunium/sdk/$pkg" "github.com/kitsunium/sdk/$dir@$version"; then
+    echo "proxy-rehearsal: on …/pkg v0.17.0, 'go get …/$dir@$version' did not build:" >&2
     sed 's/^/  /' "$WORK/legacy.log" >&2
     return 1
   fi
   if grep -E 'kitsunium/sdk/(pkg|internal/(kernel|core|service)) v0\.(1[0-7]|[0-9])\.' "$WORK/legacy.mods" >/dev/null; then
-    echo "proxy-rehearsal: after adding pkg/v1/errs the build still selects a module ADR 0162 retired, below its tombstone:" >&2
+    echo "proxy-rehearsal: after adding $dir the build still selects a module ADR 0162 retired, below its tombstone:" >&2
     sed 's/^/  /' "$WORK/legacy.mods" >&2
     return 1
   fi
-  echo "ok: on …/pkg v0.17.0, 'go get …/pkg/v1/errs@$version' alone builds — …/pkg lifted to its tombstone, no retired internal module selected"
+  echo "ok: on …/pkg v0.17.0, 'go get …/$dir@$version' alone builds — …/pkg lifted to its tombstone, no retired internal module selected"
 
   # The control, on the real modules: the first family re-published without
   # the floor must meet the ambiguous import the floor exists to prevent.

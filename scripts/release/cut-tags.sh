@@ -1061,6 +1061,28 @@ for d in "${modules[@]}"; do
   esac
 done
 
+# Rule 1i, as compute-bumps.sh applies it (ADR 0171 §7): with `sdk`, a module
+# that imports a package internal changed is released with internal, so its
+# go.mod pins the fixed internal. selected keeps go.work's order.
+if [ "$AUTO" -eq 1 ] && in_list internal ${selected[@]+"${selected[@]}"}; then
+  irange="$(module_range internal "$RANGE")" || exit 1
+  ipaths="$(module_paths internal "$irange" "$module_list")" || exit 1
+  icounting="$(printf '%s\n' "$ipaths" | release_scope_filter)" || exit 1
+  idependents="$(internal_dependents "$icounting" "$module_list")" || exit 1
+  if [ -n "$idependents" ]; then
+    ordered=()
+    for d in "${modules[@]}"; do
+      if in_list "$d" "${selected[@]}"; then
+        ordered+=("$d")
+      elif awk -v d="$d" '$0 == d { f = 1 } END { exit !f }' <<<"$idependents"; then
+        echo "cut-tags: $d imports a package internal changed — tagged, pinning the new internal" >&2
+        ordered+=("$d")
+      fi
+    done
+    selected=("${ordered[@]}")
+  fi
+fi
+
 # Each module's version: the next after its own last tag, sized from the merges
 # that touched IT (range_size), or --bump for every module, or v0.1.0 for a
 # module never tagged — a path no release has published, which is the only path

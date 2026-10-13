@@ -112,6 +112,31 @@ remote_tags() {
   [ "$output" = "pkg/v1/data" ]
 }
 
+# Rule 1i (ADR 0171 §7): a family pins internal at the version its own release
+# gave it, so a fix in internal reaches a consumer of the family only through a
+# release of the family. A module whose packages import a package internal
+# changed is released with it; one that does not keeps its tag.
+@test "a module importing a package internal changed is released with it, and only it (rule 1i)" {
+  need_toolchain
+  printf 'package data\n\nimport _ "github.com/kitsunium/sdk/internal/kernel/x"\n' >pkg/v1/data/data.go
+  for m in go.mod internal/go.mod pkg/v1/data/go.mod pkg/v1/net/go.mod third-party/aws/go.mod; do
+    sed -i.bak 's/^go 1.27$/go 1.21/' "$m" && rm -f "$m.bak"
+  done
+  g commit -aq --no-verify -m "data imports internal/kernel/x"
+  released
+  change internal/kernel/x/x.go "fix(x): one"
+  run bash -c "'$CB' 2>/dev/null"
+  [ "$status" -eq 0 ]
+  [ "$(paste -sd' ' - <<<"$output")" = "internal pkg/v1/data" ]
+  run "$CB" --explain
+  [[ "$output" == *"rule 1i: pkg/v1/data imports a package internal changed"* ]]
+  run bash -c "echo sdk | '$CT' --dry-run --bump=patch"
+  [ "$status" -eq 0 ]
+  [ "$(would_tag)" = "v0.19.8 internal/v0.1.1 pkg/v1/data/v0.1.1" ]
+  block="$(awk '/--- pkg\/v1\/data\/go.mod ---/ { on = 1; next } /--- / { on = 0 } on' <<<"$output")"
+  [[ "$block" == *"github.com/kitsunium/sdk/internal v0.1.1"* ]]
+}
+
 # ── how big, per module ─────────────────────────────────────────────────────
 
 # The defect a module per family exists to end: one label moving everything.

@@ -291,6 +291,46 @@ jobs:
         if: steps.compute.outputs.majors != ''
         run: bash scripts/release/check-version-floor.sh
 
+      - name: Rehearse the release on a file proxy
+        # The release guard (ADR 0171 §7): the same cut, made first in a
+        # throwaway clone with --no-push, then rehearsed on a GOPROXY=file://
+        # directory by proxy-rehearsal.sh — every family it cuts added to a
+        # consumer of the monolithic root, `go get -u ./...` from that root, a
+        # consumer on …/pkg v0.17.0, and every family it does NOT cut built at
+        # its last tag against this release's internal and families. Nothing it
+        # tags leaves the clone. A held bootstrap (3) and a refused size (65)
+        # are the cut step's to report; any other failure stops the release.
+        # Runs in a dry run too.
+        if: steps.compute.outputs.majors != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MAJORS: ${{ steps.compute.outputs.majors }}
+          BUMP: ${{ inputs.bump }}
+        run: |
+          set -uo pipefail
+          args=()
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            args+=(--allow-bootstrap)
+          fi
+          case "${BUMP:-}" in
+            "") ;;
+            patch | minor | major) args+=("--bump=$BUMP") ;;
+            *)
+              echo "::error::the bump input must be patch, minor or major (or empty); got '$BUMP'"
+              exit 64
+              ;;
+          esac
+          rc=0
+          printf '%s\n' "$MAJORS" | bash scripts/release/rehearse-release.sh ${args[@]+"${args[@]}"} || rc=$?
+          case "$rc" in
+            0) ;;
+            3 | 65) echo "::notice::the rehearsal stopped where the cut will (exit $rc); the next step reports it" ;;
+            *)
+              echo "::error::the release rehearsal on a file proxy failed (exit $rc) — nothing was cut"
+              exit "$rc"
+              ;;
+          esac
+
       - name: Cut and push tags
         id: cut
         if: steps.compute.outputs.majors != ''

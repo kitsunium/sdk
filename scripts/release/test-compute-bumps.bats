@@ -660,8 +660,13 @@ STUB
 # own; each releases on its own change, and the SDK module does not.
 @test "a family module and the internal module release on their own changes" {
   mkdir -p pkg/v1/data internal/kernel/x
-  printf 'module github.com/kitsunium/sdk/pkg/v1/data\n\ngo 1.27\n' > pkg/v1/data/go.mod
-  printf 'module github.com/kitsunium/sdk/internal\n\ngo 1.27\n' > internal/go.mod
+  # Real Go files, at a go directive any toolchain reads: rule 1i asks the go
+  # command which module imports what internal changed.
+  printf 'module github.com/kitsunium/sdk\n\ngo 1.21\n' > go.mod
+  printf 'package v1\n' > pkg/v1/doc.go
+  printf 'package errs\n' > internal/kernel/errs/errs.go
+  printf 'module github.com/kitsunium/sdk/pkg/v1/data\n\ngo 1.21\n' > pkg/v1/data/go.mod
+  printf 'module github.com/kitsunium/sdk/internal\n\ngo 1.21\n' > internal/go.mod
   echo "package data" > pkg/v1/data/data.go
   printf 'go 1.27\n\nuse (\n\t.\n\t./internal\n\t./pkg/v1/data\n)\n' > go.work
   g add -A

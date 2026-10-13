@@ -342,6 +342,20 @@ also requires `…/pkg` at its v0.18.0 tombstone, so a go.mod still on `…/pkg`
 v0.17.0 adds a family with one `go get …/pkg/v1/<family>@latest` instead of
 meeting `ambiguous import` (both measured on the file proxy).
 
+**A change of `internal` releases what imports it** (rule 1i). A module pins
+`internal` at the version its own release gave it, so a fix in `internal`
+reaches a consumer of a family only through a release of that family.
+`compute-bumps.sh` — and `cut-tags.sh` for `sdk` — releases with `internal`
+every module whose packages, tests left out, import a package `internal`
+changed (`go list -deps` per module), and that release pins the new
+`internal`. A family it does not reach keeps its tag, and the release guard
+(`rehearse-release.sh`, before every cut, dry run included) builds each such
+family at its last tag against the new `internal` and families on a file
+proxy: a change that broke a family nobody re-tagged stops the release.
+Rehearsed on a second cut after the first: a fix in
+`internal/service/data/codec/toml` released `internal`, the root and
+`pkg/v1/data` only, and the ten other families built at v0.1.0 against it.
+
 **The split's release is held like a bootstrap** (ADR 0009): an automatic run
 exits 3 on it and only a maintainer's dispatch, which passes
 `--allow-bootstrap`, cuts it; a patch is refused for it (exit 65), since it

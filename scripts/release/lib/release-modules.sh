@@ -189,3 +189,36 @@ commit_touches_module() {
   fi
   release_scope_any <<<"$out"
 }
+
+# internal_dependents <counting-paths> <module-list> — every module of
+# <module-list> other than `internal` whose packages import, directly or not,
+# a package of the internal module that <counting-paths> changed, one per line,
+# in <module-list>'s order (ADR 0171 §7). Exit 2, with the reason on stderr,
+# when the go command cannot answer for a module — never read as "nobody
+# imports it".
+#
+# Why: a module pins `internal` at the version its own release gave it, so a
+# fix in internal reaches a consumer of a family only through a release of
+# that family that pins the fixed internal. Each module is asked with
+# GOWORK=off from its directory, so `./...` is its own packages and its
+# go.mod's replaces resolve the repository's other modules; tests are left
+# out, since no consumer's build compiles them.
+internal_dependents() {
+  local paths="$1" list="$2" pkgs="" m="" deps="" rc=0
+  pkgs="$(awk '/^internal\/.*\.go$/ { sub(/\/[^\/]*$/, ""); print "github.com/kitsunium/sdk/" $0 }' <<<"$paths" | LC_ALL=C sort -u)"
+  [ -n "$pkgs" ] || return 0
+  while IFS= read -r m; do
+    [ -z "$m" ] && continue
+    [ "$m" = internal ] && continue
+    rc=0
+    deps="$(cd "$m" && GOWORK=off go list -deps ./... 2>&1)" || rc=$?
+    if [ "$rc" -ne 0 ]; then
+      echo "internal_dependents: go list -deps in $m failed (exit $rc) — refusing to guess whether it imports the changed internal packages:" >&2
+      printf '%s\n' "$deps" | sed 's/^/  /' >&2
+      return 2
+    fi
+    if awk 'NR == FNR { want[$0] = 1; next } ($0 in want) { hit = 1 } END { exit !hit }' <(printf '%s\n' "$pkgs") <(printf '%s\n' "$deps"); then
+      echo "$m"
+    fi
+  done <<<"$list"
+}
