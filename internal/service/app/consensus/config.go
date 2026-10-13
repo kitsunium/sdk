@@ -186,6 +186,10 @@ func (c Config) withDefaults() (Config, error) {
 		return c, misconfigured("MaxInflightBytes", "below MaxBatchBytes")
 	case c.MaxEntryBytes > c.MaxBatchBytes:
 		return c, misconfigured("MaxEntryBytes", "above MaxBatchBytes")
+	case framesBelow(c.Transport, c.MaxBatchBytes+batchFrameOverhead):
+		// A batch the transport cannot carry stalls every follower it is
+		// sent to (review M2).
+		return c, misconfigured("MaxBatchBytes", "above the transport's MaxFrameBytes")
 	case c.MaxSnapshotBytes <= 0:
 		return c, misconfigured("MaxSnapshotBytes", "zero")
 	case c.MaxSnapshotBytes < c.SnapshotEveryBytes:
@@ -219,4 +223,15 @@ func (c Config) MemoryBudget(peers int) int64 {
 
 func defaultCodec() coretransform.BoundedDecompressor {
 	return svctransform.FlateCompressor.(coretransform.BoundedDecompressor)
+}
+
+// batchFrameOverhead bounds what an append frame adds to the batch bytes
+// the leader counts: the message header and the first entry's fields.
+const batchFrameOverhead = 1 << 10
+
+// framesBelow reports whether the transport declares a frame limit below n.
+// A transport that declares none is not checked.
+func framesBelow(t coreconsensus.Transport, n int) bool {
+	f, ok := t.(interface{ maxFrameBytes() int })
+	return ok && f.maxFrameBytes() < n
 }

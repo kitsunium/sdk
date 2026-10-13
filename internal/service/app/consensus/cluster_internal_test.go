@@ -804,6 +804,20 @@ func TestApplyLagBackpressure(t *testing.T) {
 	if !overloaded {
 		t.Fatal("no OVERLOADED while apply was blocked")
 	}
+	// A command forwarded by a follower meets the same backpressure
+	// (review M2).
+	for _, tn := range c.nodes {
+		if tn == l {
+			continue
+		}
+		fctx, fcancel := context.WithTimeout(ctx, 2*time.Second)
+		_, _, err := tn.node.Propose(fctx, []byte("forwarded=1"))
+		fcancel()
+		if !errors.Is(err, coreconsensus.Overloaded) {
+			t.Fatalf("forwarded under backpressure: %v", err)
+		}
+		break
+	}
 	close(gate)
 	for {
 		_, _, err := l.node.Propose(ctx, []byte("after=1"))
@@ -973,4 +987,22 @@ func TestRestoreNeverRollsTheMachineBack(t *testing.T) {
 		t.Fatalf("the restore moved applied back to %d from %d", got, tok.Index)
 	}
 	checkNothingLost(t, c, l, f)
+}
+
+// smallFrames is a transport whose frames are smaller than a batch.
+type smallFrames struct{ coreconsensus.Transport }
+
+func (smallFrames) maxFrameBytes() int { return 64 << 10 }
+
+// A batch the transport cannot carry would stall every follower it is sent
+// to: the engine refuses that configuration at construction (review M2).
+func TestBatchLargerThanAFrameIsRefused(t *testing.T) {
+	c := newCluster(t, 1, 0)
+	tn := c.nodes[0]
+	c.kill(tn)
+	cfg := c.config(tn)
+	cfg.Transport = smallFrames{cfg.Transport}
+	if _, err := NewRaft(cfg); !errors.Is(err, coreconsensus.ConsensusMisconfigured) {
+		t.Fatalf("a batch above the frame limit: %v", err)
+	}
 }

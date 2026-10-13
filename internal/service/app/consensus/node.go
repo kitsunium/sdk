@@ -237,6 +237,7 @@ func newRaft(cfg Config) (*Node, error) {
 		MinVoters: cfg.MinVoters, PromoteLag: cfg.PromoteLag, Lease: cfg.Reads == ReadLease,
 		CanVote: n.canVote, MaxChainRefusals: 3, NoTable: n.noTable, RecentEntriesBytes: cfg.RecentEntriesBytes,
 		SilentTerm: silentTerm, SilentIndex: silentIndex,
+		MaxEntryBytes: cfg.MaxEntryBytes, MaxForwardBytes: cfg.MaxPendingBytes,
 	}, start)
 	n.publish()
 	if ur, ok := cfg.Transport.(coreconsensus.UnreachableReporter); ok {
@@ -438,9 +439,11 @@ func (n *Node) loop() {
 			n.observeResources()
 		case m := <-n.inCtrl:
 			turn = n.clk.Now()
+			n.r.SetOverloaded(n.applyLag.Load() >= n.cfg.MaxApplyLagBytes)
 			n.r.Step(n.clk.Now(), m)
 		case m := <-n.inData:
 			turn = n.clk.Now()
+			n.r.SetOverloaded(n.applyLag.Load() >= n.cfg.MaxApplyLagBytes)
 			n.r.Step(n.clk.Now(), m)
 		case d := <-n.storec:
 			turn = n.clk.Now()

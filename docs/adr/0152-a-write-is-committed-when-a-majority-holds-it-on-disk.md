@@ -1272,6 +1272,13 @@ recent entries in memory, bounded by `RecentEntriesBytes` (D14, R2-40), so
 the apply goroutine and slow followers do not read the disk for what was just
 written.
 
+**Forwarded commands meet the same bounds (review of PR #301, M2).** A
+command a follower forwards is checked by the leader before it is appended,
+as a local one is: above the leader's `MaxEntryBytes` it is refused with
+`ENTRY_TOO_LARGE`; while the forwarded commands appended in this term and
+not committed reach `MaxPendingBytes`, or while apply backpressure holds, it
+is refused with `OVERLOADED`. Nothing is appended in either case.
+
 ### D7 — Snapshots and compaction ship in v1
 
 - **Trigger:** after `SnapshotEvery` applied entries (default 16 384) or
@@ -2145,7 +2152,7 @@ transport. The cross-field rules are checked after defaults are applied
 | `InitialTiming.ElectionTimeoutMin`, `…Max` | engine | 1 s, 2 s | clamp; refuse if Max ≤ Min |
 | `InitialTiming.MaxClockDrift` | engine | none | with `ReadLease`: refuse unless finite and `0 < d < 1` (R2-14) |
 | `Durability` | engine | none | refuse if it disagrees with the state machine's siblings (R2-09) |
-| `MaxBatchBytes` | engine | 1 MiB | clamp; refuse if > `MaxFrameBytes` |
+| `MaxBatchBytes` | engine | 1 MiB | clamp; refuse if it plus 1 KiB of framing is above the shipped transport's `MaxFrameBytes` (review M2) |
 | `MaxInflight`, `MaxInflightBytes` | engine | 64, 8 MiB | clamp; refuse if `MaxInflightBytes` < `MaxBatchBytes` |
 | `MaxEntryBytes` | engine | 1 MiB | clamp; refuse if > `MaxBatchBytes` |
 | `MaxPendingBytes` | engine | 64 MiB | clamp |

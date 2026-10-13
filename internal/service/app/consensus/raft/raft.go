@@ -52,9 +52,25 @@ type Config struct {
 	// RecentEntriesBytes bounds the payloads held in memory; 0 holds them
 	// all. Older ones are fetched from the store when a peer needs them.
 	RecentEntriesBytes int64
+	// MaxEntryBytes bounds a forwarded command's payload as the driver
+	// bounds a local one; 0 does not bound it.
+	MaxEntryBytes int
+	// MaxForwardBytes bounds the payload bytes of forwarded commands this
+	// leader appended and has not committed yet; 0 does not bound them.
+	MaxForwardBytes int64
 	// mut is set by the package's own tests only.
 	mut mutation
 }
+
+// fwdEntry is one forwarded command a leader appended.
+type fwdEntry struct {
+	index uint64
+	size  int64
+}
+
+// SetOverloaded tells the state machine whether the driver refuses new
+// commands for apply backpressure (D6): forwarded ones are refused too.
+func (r *Raft) SetOverloaded(on bool) { r.overloaded = on }
 
 // Start is the durable state the driver loaded.
 type Start struct {
@@ -160,6 +176,15 @@ type Raft struct {
 	cfg Config
 	rng *rand.Rand
 	mut mutation
+
+	// overloaded is the driver's apply backpressure, set each turn: a
+	// forwarded command is refused while it holds, as a local one is.
+	overloaded bool
+	// fwd lists the forwarded commands appended in fwdTerm and not yet
+	// known committed, with fwdBytes their payload total.
+	fwd      []fwdEntry
+	fwdBytes int64
+	fwdTerm  uint64
 
 	id   core.NodeID
 	term uint64

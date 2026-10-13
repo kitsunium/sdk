@@ -967,3 +967,7 @@ func (t *TCPTransport) PeerCertExpiry() map[coreconsensus.NodeID]time.Time {
 
 // ReloadFailures counts the refused reloads of a PEM identity, 0 without one.
 func (t *TCPTransport) ReloadFailures() int { return int(t.id.ReloadFailures()) }
+
+// maxFrameBytes is the largest frame this transport reads: the engine
+// refuses a batch bound above it.
+func (t *TCPTransport) maxFrameBytes() int { return t.cfg.MaxFrameBytes }

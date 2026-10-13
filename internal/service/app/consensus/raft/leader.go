@@ -550,12 +550,46 @@ func (r *Raft) handleForward(m core.Message) {
 		r.send(core.Message{Kind: resp, To: m.From, Context: m.Context, Reject: true, Code: codeVersion})
 		return
 	}
+	if e.Kind == core.EntryCommand {
+		if code := r.admitForward(len(e.Data)); code != 0 {
+			r.send(core.Message{Kind: resp, To: m.From, Context: m.Context, Reject: true, Code: code})
+			return
+		}
+	}
 	pos, code := r.Propose(r.now, []core.Entry{e})
 	if code != 0 {
 		r.send(core.Message{Kind: resp, To: m.From, Context: m.Context, Reject: true, Code: code, RejectHint: uint64(r.lead)})
 		return
 	}
+	if e.Kind == core.EntryCommand {
+		r.fwd = append(r.fwd, fwdEntry{index: pos[0].Index, size: int64(len(e.Data))})
+		r.fwdBytes += int64(len(e.Data))
+	}
 	r.send(core.Message{Kind: resp, To: m.From, Context: m.Context, Index: pos[0].Index, LogTerm: pos[0].Term})
+}
+
+// admitForward applies to a forwarded command the bounds the driver applies
+// to a local one before anything is appended: the entry size, the bytes
+// appended and not committed, the apply backpressure (D6, review M2).
+func (r *Raft) admitForward(size int) errs.Code {
+	if r.fwdTerm != r.term {
+		r.fwd, r.fwdBytes, r.fwdTerm = r.fwd[:0], 0, r.term
+	}
+	k := 0
+	for k < len(r.fwd) && r.fwd[k].index <= r.log.committed {
+		r.fwdBytes -= r.fwd[k].size
+		k++
+	}
+	r.fwd = r.fwd[k:]
+	switch {
+	case r.cfg.MaxEntryBytes > 0 && size > r.cfg.MaxEntryBytes:
+		return core.CodeEntryTooLarge
+	case r.cfg.MaxForwardBytes > 0 && r.fwdBytes+int64(size) > r.cfg.MaxForwardBytes:
+		return core.CodeOverloaded
+	case r.overloaded:
+		return core.CodeOverloaded
+	}
+	return 0
 }
 
 // ---- reads ----

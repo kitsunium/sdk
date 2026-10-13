@@ -545,3 +545,63 @@ func TestSilentNodeStaysSilentUntilTheConditionHolds(t *testing.T) {
 		t.Fatal("no acknowledgement once silence ended")
 	}
 }
+
+// forwardCmd is a MsgForward from node 2 carrying one command of size bytes.
+func forwardCmd(term uint64, ctx uint64, size int) core.Message {
+	d := make([]byte, size)
+	m := msg(core.MsgForward, 2, 1, term)
+	m.Context = ctx
+	m.Entries = []core.Entry{{Kind: core.EntryCommand, BodySum: wire.BodySum(d), Data: d}}
+	return m
+}
+
+// forwardAnswer is the leader's answer to the forward ctx.
+func forwardAnswer(r *Raft, ctx uint64) (core.Message, bool) {
+	rd := r.Ready()
+	for _, m := range append(rd.Messages, rd.AfterSync...) {
+		if m.Kind == core.MsgForwardResp && m.Context == ctx {
+			return m, true
+		}
+	}
+	return core.Message{}, false
+}
+
+// A forwarded command meets the bounds a local one meets: the entry size,
+// the uncommitted bytes and the apply backpressure (review M2).
+func TestForwardedCommandsAreBounded(t *testing.T) {
+	r := leaderOf(2, 0, nil, 0, false)
+	r.cfg.MaxEntryBytes, r.cfg.MaxForwardBytes = 100, 250
+	last := r.log.lastIndex()
+	r.Step(r.now, forwardCmd(2, 1, 101))
+	if a, ok := forwardAnswer(r, 1); !ok || !a.Reject || a.Code != core.CodeEntryTooLarge {
+		t.Fatalf("oversized forward: %+v", a)
+	}
+	if r.log.lastIndex() != last {
+		t.Fatal("an oversized forwarded entry was appended")
+	}
+	for ctx := uint64(2); ctx <= 3; ctx++ {
+		r.Step(r.now, forwardCmd(2, ctx, 100))
+		if a, ok := forwardAnswer(r, ctx); !ok || a.Reject {
+			t.Fatalf("forward %d: %+v", ctx, a)
+		}
+	}
+	r.Step(r.now, forwardCmd(2, 4, 100))
+	if a, ok := forwardAnswer(r, 4); !ok || !a.Reject || a.Code != core.CodeOverloaded {
+		t.Fatalf("forward past the uncommitted bound: %+v", a)
+	}
+	// Once they commit, the bound frees.
+	rd := r.Ready()
+	r.StorageDone(rd.Seq, r.log.lastIndex(), r.term)
+	ack := msg(core.MsgAppResp, 2, 1, r.term)
+	ack.Index = r.log.lastIndex()
+	r.Step(r.now, ack)
+	r.Step(r.now, forwardCmd(2, 5, 100))
+	if a, ok := forwardAnswer(r, 5); !ok || a.Reject {
+		t.Fatalf("forward after the commit: %+v", a)
+	}
+	r.SetOverloaded(true)
+	r.Step(r.now, forwardCmd(2, 6, 10))
+	if a, ok := forwardAnswer(r, 6); !ok || !a.Reject || a.Code != core.CodeOverloaded {
+		t.Fatalf("forward under apply backpressure: %+v", a)
+	}
+}
