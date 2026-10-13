@@ -96,7 +96,9 @@ func Redraw(d DataDir) (coreconsensus.NodeID, error) {
 	return RedrawLog(d.Log())
 }
 
-// ReportValue is what Inspect reads, read-only.
+// ReportValue is what Inspect reads, read-only: the stamp, the hard state
+// and bounds of the log, the complete snapshots, and the markers that would
+// refuse a start.
 type ReportValue struct {
 	Stamp      coreconsensus.StampValue
 	HardState  coreconsensus.HardState
@@ -254,6 +256,9 @@ func (d DataDir) removeStampAndMarkers() error {
 }
 
 // RecoverOptions are Recover's preconditions (R2-25, R3-02, R4-04, R9-08).
+// Recover refuses, before it writes anything, an invalid operator, a
+// confirmation that does not name the new cluster, no witness key, and an
+// old voter left out without a receipt from every witness.
 type RecoverOptions struct {
 	// Confirm must equal the new cluster id in hex: a typed confirmation.
 	Confirm string
@@ -483,7 +488,9 @@ func lastMembership(l *fileLog, snaps *fileSnapshots, index uint64) (coreconsens
 	return m, nil
 }
 
-// RestoreOptions are RestoreSnapshot's preconditions (R3-15).
+// RestoreOptions are RestoreSnapshot's preconditions (R3-15). Expected and
+// both bounds are required; the stream is refused when its size or digest
+// differs from Expected.
 type RestoreOptions struct {
 	// Expected is the snapshot's metadata, from SaveSnapshot: non-zero.
 	Expected coreconsensus.SnapshotMetaValue

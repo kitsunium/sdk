@@ -2510,7 +2510,10 @@ packages:
       x509: crypto/x509
     path: github.com/kitsunium/sdk/internal/service/app/consensus
     types:
-      - doc: PeerHealthValue is the leader's view of one peer (D13).
+      - doc: |-
+          PeerHealthValue is the leader's view of one peer (D13), one line of
+          HealthValue.Peers. It is taken on the event loop and stale at the next
+          turn.
         name: PeerHealthValue
         struct:
           fields:
@@ -2562,7 +2565,10 @@ packages:
             recv: value
         name: HealthFlags
         underlying: uint8
-      - doc: HealthValue is a node's verdict for an orchestrator's probe (D13).
+      - doc: |-
+          HealthValue is a node's verdict for an orchestrator's probe (D13).
+          HealthReady in Flags is the readiness answer; the other fields say why, and
+          Peers is filled only on the leader.
         name: HealthValue
         struct:
           fields:
@@ -2617,7 +2623,10 @@ packages:
       - doc: Durability says where the state machine's state lives (D3).
         name: Durability
         underlying: uint8
-      - doc: Config builds a Node. Every bound has a default and a validation (D14).
+      - doc: |-
+          Config builds a Node. Every bound has a default and a validation (D14): a
+          zero bound is clamped to its default, and a combination that contradicts
+          itself is refused with CONSENSUS_MISCONFIGURED.
         methods:
           - doc: |-
               MemoryBudget is the node's memory budget with two peers, the sum of its
@@ -2858,7 +2867,10 @@ packages:
         name: MemoryLog
         struct:
           unexported: true
-      - doc: MemorySnapshots is the in-memory SnapshotStore double.
+      - doc: |-
+          MemorySnapshots is the in-memory SnapshotStore double. It keeps the
+          shipped store's contract — a resumable spool, publication at Commit, a
+          Remove refused while a handle is open — and none of its durability.
         methods:
           - doc: |-
               Create implements SnapshotStore: an existing spool resumes from its last
@@ -2925,7 +2937,10 @@ packages:
         name: MemoryNetwork
         struct:
           unexported: true
-      - doc: MemoryTransport is one node's end of a MemoryNetwork.
+      - doc: |-
+          MemoryTransport is one node's end of a MemoryNetwork, the in-memory
+          double of D2. NewMemoryTransport returns it; Close stops its delivery
+          until the next Bind.
         methods:
           - doc: |-
               Send implements Transport: it never blocks and drops when the queue is
@@ -2953,7 +2968,10 @@ packages:
             out:
               - type: error
             recv: pointer
-          - doc: Bind implements Transport.
+          - doc: |-
+              Bind implements Transport. The first Bind after construction or Close
+              launches the background delivery goroutine of its own run, which ends
+              when Close stops that run; a later Bind launches a new one.
             in:
               - name: group
                 type: coreconsensus.GroupID
@@ -3034,7 +3052,9 @@ packages:
             recv: pointer
           - doc: |-
               HardClose stops now: no transfer, no final sync, bounded by
-              HardCloseTimeout (R7-11).
+              HardCloseTimeout (R7-11). It launches one goroutine that waits for the
+              node's goroutines; when the timeout fires first, that waiter is abandoned
+              with them and the data directory stays held until the process exits.
             name: HardClose
             out:
               - type: error
@@ -3044,7 +3064,10 @@ packages:
             out:
               - type: coreconsensus.StatusValue
             recv: pointer
-          - doc: Watch implements LeadershipWatcher.
+          - doc: |-
+              Watch implements LeadershipWatcher. Each call launches one goroutine that
+              closes the returned channel and ends when ctx ends or the node's event
+              loop stops.
             in:
               - name: ctx
                 type: context.Context
@@ -3202,8 +3225,8 @@ packages:
             recv: pointer
           - doc: |-
               TransferLeadership moves leadership to a voter (D8). It records the
-              operator in an entry, then waits until the target leads or one election
-              timeout passes.
+              operator in an entry, then waits until the target leads or twice the
+              maximum election timeout passes.
             in:
               - name: ctx
                 type: context.Context
@@ -3231,7 +3254,10 @@ packages:
         name: Node
         struct:
           unexported: true
-      - doc: ReportValue is what Inspect reads, read-only.
+      - doc: |-
+          ReportValue is what Inspect reads, read-only: the stamp, the hard state
+          and bounds of the log, the complete snapshots, and the markers that would
+          refuse a start.
         name: ReportValue
         struct:
           fields:
@@ -3252,7 +3278,11 @@ packages:
       - doc: QuarantineExit is one of the two exits ClearQuarantine allows (R3-09).
         name: QuarantineExit
         underlying: uint8
-      - doc: RecoverOptions are Recover's preconditions (R2-25, R3-02, R4-04, R9-08).
+      - doc: |-
+          RecoverOptions are Recover's preconditions (R2-25, R3-02, R4-04, R9-08).
+          Recover refuses, before it writes anything, an invalid operator, a
+          confirmation that does not name the new cluster, no witness key, and an
+          old voter left out without a receipt from every witness.
         name: RecoverOptions
         struct:
           fields:
@@ -3268,7 +3298,10 @@ packages:
             - doc: "WitnessKeys verify the receipts: one per witness, each must sign."
               name: WitnessKeys
               type: "[]ed25519.PublicKey"
-      - doc: RestoreOptions are RestoreSnapshot's preconditions (R3-15).
+      - doc: |-
+          RestoreOptions are RestoreSnapshot's preconditions (R3-15). Expected and
+          both bounds are required; the stream is refused when its size or digest
+          differs from Expected.
         name: RestoreOptions
         struct:
           fields:
@@ -3326,7 +3359,11 @@ packages:
             - name: CAFile
               type: string
           unexported: true
-      - doc: TransportConfig builds the shipped mTLS transport (D4, D14).
+      - doc: |-
+          TransportConfig builds the shipped mTLS transport (D4, D14). A zero bound
+          is clamped to its default; nil Roots, no certificate, a HandshakeTimeout
+          above one second, or a control frame bound not below the data bound is
+          refused.
         name: TransportConfig
         struct:
           fields:
@@ -3397,7 +3434,8 @@ packages:
             recv: pointer
           - doc: |-
               Send implements Transport: it never blocks, and drops when the peer's
-              queue is full (D4).
+              queue is full (D4). The first frame to a peer and lane launches that
+              lane's background sender goroutine, which ends when Close is called.
             in:
               - name: to
                 type: coreconsensus.NodeID
@@ -3569,7 +3607,10 @@ packages:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/service/app/consensus/raft
     types:
-      - doc: PeerStatValue is the leader's view of one peer, for Health (D13).
+      - doc: |-
+          PeerStatValue is the leader's view of one peer, for Health (D13). Flags
+          say whether it votes, answered in this term, is probed or is being sent a
+          snapshot; LastHeard is meaningful only once StatHeard is set.
         name: PeerStatValue
         struct:
           fields:
@@ -3682,7 +3723,10 @@ packages:
               name: MaxForwardBytes
               type: int64
           unexported: true
-      - doc: StartState is the durable state the driver loaded.
+      - doc: |-
+          StartState is the durable state the driver loaded from its store at
+          boot. NewRaft rebuilds the step function from it alone, so a restart
+          depends on nothing held in memory.
         name: StartState
         struct:
           fields:
@@ -3713,7 +3757,10 @@ packages:
               type: uint64
             - name: Code
               type: errs.Code
-      - doc: TransferResult ends a leadership transfer this node started.
+      - doc: |-
+          TransferResult ends a leadership transfer this node started. A zero Code
+          means TimeoutNow was sent to To; TRANSFER_FAILED means it was not, before
+          the deadline or before leadership was lost.
         name: TransferResult
         struct:
           fields:
@@ -3721,7 +3768,10 @@ packages:
               type: core.NodeID
             - name: Code
               type: errs.Code
-      - doc: ReadyValue is what the driver must do after a turn.
+      - doc: |-
+          ReadyValue is what the driver must do after a turn: write, then send.
+          Nothing in AfterSync leaves before the write numbered Seq is durable
+          (D5b).
         methods:
           - doc: NeedsWrite reports whether the Ready asks the storage actor for anything.
             name: NeedsWrite
@@ -3802,7 +3852,10 @@ packages:
               type: uint64
             - name: Kind
               type: core.EntryKind
-      - doc: FetchSpec asks for the entries [Lo, Hi) of the store for a peer.
+      - doc: |-
+          FetchSpec asks for the entries [Lo, Hi) of the store for a peer, whose
+          payloads the step function evicted. The driver reads them off the event
+          loop and hands them back with Fetched.
         name: FetchSpec
         struct:
           fields:
@@ -4084,7 +4137,9 @@ packages:
         name: Raft
         struct:
           unexported: true
-      - doc: StatusValue is the step function's part of a node's status.
+      - doc: |-
+          StatusValue is the step function's part of a node's status. It is a copy:
+          its memberships are cloned, so the caller may keep it.
         name: StatusValue
         struct:
           fields:

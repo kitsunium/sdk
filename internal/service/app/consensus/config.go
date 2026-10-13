@@ -44,7 +44,9 @@ const (
 	DurabilityDurable
 )
 
-// Config builds a Node. Every bound has a default and a validation (D14).
+// Config builds a Node. Every bound has a default and a validation (D14): a
+// zero bound is clamped to its default, and a combination that contradicts
+// itself is refused with CONSENSUS_MISCONFIGURED.
 type Config struct {
 	// Cluster is the cluster the node belongs to; it must match the stamp.
 	Cluster coreconsensus.ClusterID

@@ -1455,7 +1455,9 @@ func (n *Node) handOff(ctx context.Context) {
 }
 
 // HardClose stops now: no transfer, no final sync, bounded by
-// HardCloseTimeout (R7-11).
+// HardCloseTimeout (R7-11). It launches one goroutine that waits for the
+// node's goroutines; when the timeout fires first, that waiter is abandoned
+// with them and the data directory stays held until the process exits.
 func (n *Node) HardClose() error {
 	n.hard.Store(true)
 	n.stopped.Store(true)
@@ -1485,7 +1487,9 @@ func (n *Node) Status() coreconsensus.StatusValue {
 	return coreconsensus.StatusValue{}
 }
 
-// Watch implements LeadershipWatcher.
+// Watch implements LeadershipWatcher. Each call launches one goroutine that
+// closes the returned channel and ends when ctx ends or the node's event
+// loop stops.
 func (n *Node) Watch(ctx context.Context) <-chan coreconsensus.StatusValue {
 	ch := make(chan coreconsensus.StatusValue, 1)
 	ch <- n.Status()

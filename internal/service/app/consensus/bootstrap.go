@@ -320,7 +320,9 @@ func writeFoundingEntry(cfg *Config, members []coreconsensus.MemberValue) error 
 	return nil
 }
 
-// PeerHealthValue is the leader's view of one peer (D13).
+// PeerHealthValue is the leader's view of one peer (D13), one line of
+// HealthValue.Peers. It is taken on the event loop and stale at the next
+// turn.
 type PeerHealthValue struct {
 	// ID is the peer.
 	ID coreconsensus.NodeID
@@ -360,6 +362,8 @@ func (f HealthFlags) set(x HealthFlags, on bool) HealthFlags {
 }
 
 // HealthValue is a node's verdict for an orchestrator's probe (D13).
+// HealthReady in Flags is the readiness answer; the other fields say why, and
+// Peers is filled only on the leader.
 type HealthValue struct {
 	// Status is the node's view after its last turn.
 	Status coreconsensus.StatusValue

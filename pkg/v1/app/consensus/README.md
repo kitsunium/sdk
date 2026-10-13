@@ -2612,7 +2612,7 @@ type MemoryTransport struct{}
 func (*MemoryTransport) Bind(group coreconsensus.GroupID, deliver func(coreconsensus.AuthenticatedPeerValue, []byte), offer func(coreconsensus.AuthenticatedPeerValue, coreconsensus.InstallOfferValue) coreconsensus.InstallAcceptValue, install func(coreconsensus.InstallParams) error, join func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code)) error
 ```
 
-Bind implements Transport.
+Bind implements Transport. The first Bind after construction or Close launches the background delivery goroutine of its own run, which ends when Close stops that run; a later Bind launches a new one.
 
 <a name="MemoryTransport.BindJoinReason"></a>
 ### func \(MemoryTransport\) [BindJoinReason](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/memtransport.go>)
@@ -2824,7 +2824,7 @@ DenyPin withdraws a member's SPKI pin (R9-18).
 func (*Node) HardClose() error
 ```
 
-HardClose stops now: no transfer, no final sync, bounded by HardCloseTimeout (R7-11).
+HardClose stops now: no transfer, no final sync, bounded by HardCloseTimeout (R7-11). It launches one goroutine that waits for the node's goroutines; when the timeout fires first, that waiter is abandoned with them and the data directory stays held until the process exits.
 
 <a name="Node.Health"></a>
 ### func \(Node\) [Health](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/bootstrap.go>)
@@ -2923,7 +2923,7 @@ StopReason returns why the node stopped itself, if it did.
 func (*Node) TransferLeadership(ctx context.Context, op coreconsensus.Operator, to coreconsensus.NodeID) error
 ```
 
-TransferLeadership moves leadership to a voter (D8). It records the operator in an entry, then waits until the target leads or one election timeout passes.
+TransferLeadership moves leadership to a voter (D8). It records the operator in an entry, then waits until the target leads or twice the maximum election timeout passes.
 
 <a name="Node.UpdateAddress"></a>
 ### func \(Node\) [UpdateAddress](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/ops.go>)
@@ -2950,7 +2950,7 @@ WaitApplied returns once the local node has applied t. A token of another lineag
 func (*Node) Watch(ctx context.Context) <-chan coreconsensus.StatusValue
 ```
 
-Watch implements LeadershipWatcher.
+Watch implements LeadershipWatcher. Each call launches one goroutine that closes the returned channel and ends when ctx ends or the node's event loop stops.
 
 <a name="NodeID"></a>
 ## type [NodeID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
@@ -3823,7 +3823,7 @@ ReloadFailures counts the refused reloads of a PEM identity, 0 without one.
 func (*TCPTransport) Send(to coreconsensus.NodeID, frame []byte)
 ```
 
-Send implements Transport: it never blocks, and drops when the peer's queue is full (D4).
+Send implements Transport: it never blocks, and drops when the peer's queue is full (D4). The first frame to a peer and lane launches that lane's background sender goroutine, which ends when Close is called.
 
 <a name="TCPTransport.SetMembership"></a>
 ### func \(TCPTransport\) [SetMembership](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/tcp.go>)

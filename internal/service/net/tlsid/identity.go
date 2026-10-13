@@ -68,7 +68,9 @@ type Identity struct {
 	rootsSeen [][]byte
 }
 
-// FilesConfig names the PEM files of a reloadable identity.
+// FilesConfig names the PEM files of a reloadable identity. They are looked
+// at no more often than Every, and a renewal is swapped in only when it keeps
+// the key and the URI SAN.
 type FilesConfig struct {
 	// CertFile holds the certificate, its chain may follow it.
 	CertFile string

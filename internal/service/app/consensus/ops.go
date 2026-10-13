@@ -391,8 +391,8 @@ func (n *Node) ClearNoSpace(ctx context.Context, op coreconsensus.Operator, pre 
 }
 
 // TransferLeadership moves leadership to a voter (D8). It records the
-// operator in an entry, then waits until the target leads or one election
-// timeout passes.
+// operator in an entry, then waits until the target leads or twice the
+// maximum election timeout passes.
 func (n *Node) TransferLeadership(ctx context.Context, op coreconsensus.Operator, to coreconsensus.NodeID) error {
 	err := n.admin(ctx, coreconsensus.EntryTransfer, wire.AdminValue{Operator: string(op), Target: to})
 	switch {

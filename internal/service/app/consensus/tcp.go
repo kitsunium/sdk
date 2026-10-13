@@ -66,7 +66,10 @@ const (
 	connBufferBytes int = 64 << 10
 )
 
-// TransportConfig builds the shipped mTLS transport (D4, D14).
+// TransportConfig builds the shipped mTLS transport (D4, D14). A zero bound
+// is clamped to its default; nil Roots, no certificate, a HandshakeTimeout
+// above one second, or a control frame bound not below the data bound is
+// refused.
 type TransportConfig struct {
 	// Certificate is the node's certificate and key. It carries exactly one
 	// URI SAN, kitsunium-consensus://<cluster>/slot/<slot>, and both
@@ -599,7 +602,8 @@ func (t *TCPTransport) address(to coreconsensus.NodeID) (string, [32]byte, bool)
 }
 
 // Send implements Transport: it never blocks, and drops when the peer's
-// queue is full (D4).
+// queue is full (D4). The first frame to a peer and lane launches that
+// lane's background sender goroutine, which ends when Close is called.
 func (t *TCPTransport) Send(to coreconsensus.NodeID, frame []byte) {
 	lane := laneData
 	if l, err := wire.Lane(frame); err == nil && l == coreconsensus.LaneControl {

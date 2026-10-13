@@ -9,7 +9,9 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// MemorySnapshots is the in-memory SnapshotStore double.
+// MemorySnapshots is the in-memory SnapshotStore double. It keeps the
+// shipped store's contract — a resumable spool, publication at Commit, a
+// Remove refused while a handle is open — and none of its durability.
 type MemorySnapshots struct {
 	mu     sync.Mutex
 	done   map[string]*memSnap

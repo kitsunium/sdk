@@ -102,7 +102,9 @@ func (r *Raft) SetOverloaded(on bool) {
 	r.facts &^= raftOverloaded
 }
 
-// StartState is the durable state the driver loaded.
+// StartState is the durable state the driver loaded from its store at
+// boot. NewRaft rebuilds the step function from it alone, so a restart
+// depends on nothing held in memory.
 type StartState struct {
 	// HardState is the last hard state on disk.
 	HardState core.HardState
@@ -124,13 +126,17 @@ type ReadState struct {
 	Code    errs.Code
 }
 
-// TransferResult ends a leadership transfer this node started.
+// TransferResult ends a leadership transfer this node started. A zero Code
+// means TimeoutNow was sent to To; TRANSFER_FAILED means it was not, before
+// the deadline or before leadership was lost.
 type TransferResult struct {
 	To   core.NodeID
 	Code errs.Code
 }
 
-// ReadyValue is what the driver must do after a turn.
+// ReadyValue is what the driver must do after a turn: write, then send.
+// Nothing in AfterSync leaves before the write numbered Seq is durable
+// (D5b).
 type ReadyValue struct {
 	// Seq names the write when there is one; completions carry it.
 	Seq uint64
@@ -180,7 +186,9 @@ type UnsupportedEntryValue struct {
 	Kind  core.EntryKind
 }
 
-// FetchSpec asks for the entries [Lo, Hi) of the store for a peer.
+// FetchSpec asks for the entries [Lo, Hi) of the store for a peer, whose
+// payloads the step function evicted. The driver reads them off the event
+// loop and hands them back with Fetched.
 type FetchSpec struct {
 	To     core.NodeID
 	Lo, Hi uint64
@@ -457,7 +465,8 @@ func (r *Raft) TermAt(i uint64) (uint64, bool) { return r.log.term(i) }
 
 // ---- status ----
 
-// StatusValue is the step function's part of a node's status.
+// StatusValue is the step function's part of a node's status. It is a copy:
+// its memberships are cloned, so the caller may keep it.
 type StatusValue struct {
 	Role      core.Role
 	Term      uint64

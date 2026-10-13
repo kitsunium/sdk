@@ -19,7 +19,9 @@ const (
 	StatSnapshot
 )
 
-// PeerStatValue is the leader's view of one peer, for Health (D13).
+// PeerStatValue is the leader's view of one peer, for Health (D13). Flags
+// say whether it votes, answered in this term, is probed or is being sent a
+// snapshot; LastHeard is meaningful only once StatHeard is set.
 type PeerStatValue struct {
 	ID        core.NodeID
 	Flags     PeerStatFlags

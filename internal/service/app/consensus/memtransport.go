@@ -90,7 +90,9 @@ type memFrame struct {
 	frame []byte
 }
 
-// MemoryTransport is one node's end of a MemoryNetwork.
+// MemoryTransport is one node's end of a MemoryNetwork, the in-memory
+// double of D2. NewMemoryTransport returns it; Close stops its delivery
+// until the next Bind.
 type MemoryTransport struct {
 	net     *MemoryNetwork
 	id      coreconsensus.NodeID
@@ -171,7 +173,9 @@ func (t *MemoryTransport) Stream(ctx context.Context, to coreconsensus.NodeID, o
 	return ierr
 }
 
-// Bind implements Transport.
+// Bind implements Transport. The first Bind after construction or Close
+// launches the background delivery goroutine of its own run, which ends
+// when Close stops that run; a later Bind launches a new one.
 func (t *MemoryTransport) Bind(group coreconsensus.GroupID,
 	deliver func(coreconsensus.AuthenticatedPeerValue, []byte),
 	offer func(coreconsensus.AuthenticatedPeerValue, coreconsensus.InstallOfferValue) coreconsensus.InstallAcceptValue,
