@@ -530,8 +530,20 @@ func TestClusterTransferSubmittedOnAFollower(t *testing.T) {
 		if err != nil {
 			t.Fatalf("round %d: transfer from a follower: %v", round, err)
 		}
-		if nl := c.leader(5 * time.Second); nl != to {
-			t.Fatalf("round %d: leader is %d, want %d", round, nl.id, to.id)
+		// The transfer returned once f SAW `to` lead; each node's Status is
+		// its view after its own last turn, so the old leader may still
+		// publish its old term's leadership for a turn after `to` won. The
+		// new leader must be `to` once the views settle, never another node.
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			nl := c.leader(5 * time.Second)
+			if nl == to {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("round %d: leader is %d, want %d", round, nl.id, to.id)
+			}
+			time.Sleep(5 * time.Millisecond)
 		}
 	}
 }
