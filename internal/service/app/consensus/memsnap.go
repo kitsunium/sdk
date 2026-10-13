@@ -49,12 +49,17 @@ func (s *MemorySnapshots) Create(id string, meta coreconsensus.SnapshotMeta) (co
 	return sp, 0, nil
 }
 
+// Write appends p to the spool under the store's lock; a bytes.Buffer
+// write never fails, so the error is always nil.
 func (k *memSink) Write(p []byte) (int, error) {
 	k.s.mu.Lock()
 	defer k.s.mu.Unlock()
 	return k.buf.Write(p)
 }
 
+// Commit publishes the spool as snapshot k.id, refusing it as
+// SNAPSHOT_CORRUPT when its length is not final.EncodedSize. The bytes are
+// copied, so a later write to a resumed spool of that id cannot reach them.
 func (k *memSink) Commit(final coreconsensus.SnapshotMeta) error {
 	k.s.mu.Lock()
 	defer k.s.mu.Unlock()
@@ -67,6 +72,8 @@ func (k *memSink) Commit(final coreconsensus.SnapshotMeta) error {
 	return nil
 }
 
+// Abort discards the spool; with nothing on a disk to remove, it cannot
+// fail.
 func (k *memSink) Abort() error {
 	k.s.mu.Lock()
 	defer k.s.mu.Unlock()
@@ -101,8 +108,11 @@ type memHandle struct {
 	once sync.Once
 }
 
+// Meta returns the metadata the snapshot was committed with.
 func (h *memHandle) Meta() coreconsensus.SnapshotMeta { return h.snap.meta }
 
+// Close unpins the snapshot once, however often it is called, so a second
+// Close cannot release another handle's pin.
 func (h *memHandle) Close() error {
 	h.once.Do(func() {
 		h.s.mu.Lock()

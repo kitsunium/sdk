@@ -1,6 +1,7 @@
 package consensus
 
 import (
+	"slices"
 	"sync"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
@@ -26,6 +27,9 @@ type MemoryLog struct {
 // NewMemoryLog returns an empty in-memory log.
 func NewMemoryLog() *MemoryLog { return &MemoryLog{first: 1} }
 
+// compacted is the COMPACTED a reader gets for an index below the log's
+// first: the entry is in a snapshot now, and both bounds travel as fields
+// so the caller knows where the log resumes.
 func compacted(index, first uint64) error {
 	return errs.Wrap(coreconsensus.Compacted, errs.WrapParams{},
 		errs.String("index", u64s(index)), errs.String("first", u64s(first)))
@@ -140,7 +144,7 @@ func (l *MemoryLog) CompactPrefix(through uint64) error {
 		return nil
 	}
 	l.prevTerm = l.ents[through-l.first].Position.Term
-	l.ents = append([]coreconsensus.Entry(nil), l.ents[through-l.first+1:]...)
+	l.ents = slices.Clone(l.ents[through-l.first+1:])
 	l.first = through + 1
 	return nil
 }

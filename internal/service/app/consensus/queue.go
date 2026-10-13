@@ -12,8 +12,12 @@ type fifo[T any] struct {
 	signal chan struct{}
 }
 
+// newFifo returns an empty queue whose signal holds at most one pending
+// wake-up: a consumer that drains with take after each wake-up misses none.
 func newFifo[T any]() *fifo[T] { return &fifo[T]{signal: make(chan struct{}, 1)} }
 
+// push appends x and never blocks: when a wake-up is already pending the
+// signal is left as it is, since the consumer's next take collects x too.
 func (q *fifo[T]) push(x T) {
 	q.mu.Lock()
 	q.items = append(q.items, x)

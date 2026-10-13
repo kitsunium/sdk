@@ -24,6 +24,11 @@ type FileSnapshots struct {
 	pins map[string]int
 }
 
+// newFileSnapshots opens the snapshot directory dir, creating it private
+// to the owner, and removes every .snap that has no .meta: a crash between
+// a snapshot's rename and its .meta leaves one, and it is neither a snapshot
+// nor resumable. A directory that cannot be created, listed or cleaned is a
+// STORAGE_FAILED, so a store never opens over a state it could not read.
 func newFileSnapshots(dir string) (*FileSnapshots, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, storageFailed("mkdir", err)
@@ -48,6 +53,9 @@ func newFileSnapshots(dir string) (*FileSnapshots, error) {
 	return &FileSnapshots{dir: dir, pins: map[string]int{}}, nil
 }
 
+// validID reports whether id may name a snapshot's files: non-empty,
+// bounded, and with no separator or dot, so an id a peer sent can never
+// reach outside the directory or collide with another file's suffix.
 func validID(id string) bool {
 	return id != "" && len(id) <= 128 && !strings.ContainsAny(id, "/\\.") && filepath.Base(id) == id
 }
@@ -86,8 +94,14 @@ func (s *FileSnapshots) Create(id string, meta coreconsensus.SnapshotMeta) (core
 	return sink, off, nil
 }
 
+// Write appends p to the spool file; nothing is durable until Commit syncs
+// it.
 func (k *fileSink) Write(p []byte) (int, error) { return k.f.Write(p) }
 
+// Commit publishes the spool in ADR 0056's order: the encoded size is
+// checked, the spool synced and closed, renamed to <id>.snap, and the
+// <id>.meta written atomically LAST, so a crash at any step leaves no
+// published snapshot without its bytes.
 func (k *fileSink) Commit(final coreconsensus.SnapshotMeta) error {
 	final.ID = k.id
 	size, err := k.f.Seek(0, io.SeekCurrent)
@@ -147,6 +161,8 @@ func (s *FileSnapshots) published(name string) (coreconsensus.SnapshotMeta, bool
 // checksums hold, so nothing it could say changes what is kept.
 func (k *fileSink) release() { abandon(k.f.Close()) }
 
+// Abort closes and deletes the spool; a spool already gone is not a
+// failure, any other removal failure is a STORAGE_FAILED.
 func (k *fileSink) Abort() error {
 	// The spool is being discarded: what its descriptor's Close could say
 	// about bytes no one will read changes nothing. The removal is what
@@ -193,8 +209,11 @@ type fileHandle struct {
 	once sync.Once
 }
 
+// Meta returns the metadata read from the snapshot's .meta at Open.
 func (h *fileHandle) Meta() coreconsensus.SnapshotMeta { return h.meta }
 
+// Close unpins the snapshot and closes its file exactly once; a second
+// Close returns nil and releases nothing.
 func (h *fileHandle) Close() error {
 	var err error
 	h.once.Do(func() {
