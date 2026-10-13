@@ -26,6 +26,26 @@ func seeds(t *testing.T, n int) []uint64 {
 	return out
 }
 
+// seedQuarter is the q-th of four equal slices (q = 0..3) of seeds(t, n):
+// the four together are exactly seeds(t, n), each seed once. A suite whose
+// seeds are its strength is split into four top-level tests rather than
+// trimmed, because Bazel shards a target by TOP-LEVEL test (rules_go deals
+// them out by index modulo shard_count), so one test of 60 parallel seeds is
+// one shard's whole CPU while the shards run side by side, and under race
+// and coverage that one shard alone overran .bazelrc's 60 s per target.
+// Under CONSENSUS_SIM_SEED the single seed belongs to the quarter n's slice
+// would have put it in, so it still runs exactly once.
+func seedQuarter(t *testing.T, n, q int) []uint64 {
+	all := seeds(t, n)
+	if len(all) == 1 && n > 1 {
+		if int((all[0]-1)%uint64(n))*4/n != q {
+			return nil
+		}
+		return all
+	}
+	return all[q*n/4 : (q+1)*n/4]
+}
+
 func TestSimElectsAndReplicates(t *testing.T) {
 	for _, seed := range seeds(t, 20) {
 		s := newSim(simOptions{seed: seed})
@@ -49,12 +69,18 @@ func TestSimElectsAndReplicates(t *testing.T) {
 	}
 }
 
-func TestSimSafetyUnderFaults(t *testing.T) {
+// The 60 seeds of the safety suite, in four top-level tests (seedQuarter).
+func TestSimSafetyUnderFaultsQ1(t *testing.T) { simSafetyUnderFaults(t, seedQuarter(t, 60, 0)) }
+func TestSimSafetyUnderFaultsQ2(t *testing.T) { simSafetyUnderFaults(t, seedQuarter(t, 60, 1)) }
+func TestSimSafetyUnderFaultsQ3(t *testing.T) { simSafetyUnderFaults(t, seedQuarter(t, 60, 2)) }
+func TestSimSafetyUnderFaultsQ4(t *testing.T) { simSafetyUnderFaults(t, seedQuarter(t, 60, 3)) }
+
+func simSafetyUnderFaults(t *testing.T, seeds []uint64) {
 	// Each seed is its own simulation with no shared state, so the seeds run
 	// in parallel: the 60 of them are the test's strength and are all kept,
 	// while the wall time fits the 60 s per-target budget .bazelrc imposes,
 	// coverage instrumentation included.
-	for _, seed := range seeds(t, 60) {
+	for _, seed := range seeds {
 		t.Run("seed="+strconv.FormatUint(seed, 10), func(t *testing.T) {
 			t.Parallel()
 			s := newSim(simOptions{seed: seed, drop: 0.05, dup: 0.02, crashRate: 0.5, diskMax: 20 * time.Millisecond})
@@ -326,8 +352,18 @@ func snapSim(seed uint64, mut mutation) *sim {
 	return s
 }
 
-func TestSimSnapshotsUnderFaults(t *testing.T) {
-	for _, seed := range seeds(t, 60) {
+// The 60 seeds of the snapshot schedule, in four top-level tests
+// (seedQuarter).
+func TestSimSnapshotsUnderFaultsQ1(t *testing.T) { simSnapshotsUnderFaults(t, seedQuarter(t, 60, 0)) }
+
+func TestSimSnapshotsUnderFaultsQ2(t *testing.T) { simSnapshotsUnderFaults(t, seedQuarter(t, 60, 1)) }
+
+func TestSimSnapshotsUnderFaultsQ3(t *testing.T) { simSnapshotsUnderFaults(t, seedQuarter(t, 60, 2)) }
+
+func TestSimSnapshotsUnderFaultsQ4(t *testing.T) { simSnapshotsUnderFaults(t, seedQuarter(t, 60, 3)) }
+
+func simSnapshotsUnderFaults(t *testing.T, seeds []uint64) {
+	for _, seed := range seeds {
 		t.Run("seed="+strconv.FormatUint(seed, 10), func(t *testing.T) {
 			t.Parallel()
 			s := snapSim(seed, 0)
